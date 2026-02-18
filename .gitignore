@@ -1,0 +1,18 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.js.map
+*.d.ts.map
+
+# CDK
+packages/infra/cdk.out/
+
+# TypeScript build output
+packages/*/dist/
+# Keep the stub dist for CDK synth; real build output is not tracked
+!packages/website/dist/index.html
+
+# OS
+.DS_Store

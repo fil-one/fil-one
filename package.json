@@ -1,0 +1,15 @@
+{
+  "name": "hyperspace",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/shared && npm run build -w packages/backend && npm run build -w packages/website && npm run build -w packages/infra",
+    "deploy": "npm run build && npm run deploy -w packages/infra",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
