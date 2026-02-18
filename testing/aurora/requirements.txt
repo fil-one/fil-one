@@ -1,0 +1,6 @@
+boto3>=1.34.0
+python-dotenv>=1.0.0
+
+# compatibility_test.py dependencies
+pytest>=7.0.0
+pytest-json-report>=1.5.0

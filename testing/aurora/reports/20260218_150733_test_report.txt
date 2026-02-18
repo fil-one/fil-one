@@ -1,0 +1,26 @@
+======================================================================
+  Test Report
+  Script : test
+  Run    : 20260218_150733
+======================================================================
+
+SUMMARY
+  Total  : 4
+  OK     : 3
+  Failed : 1
+
+BY OPERATION
+  head_object                        1 ok     0 failed  (   1 total)  avg 0.120s  stddev 0.000s  min 0.120s  max 0.120s
+  upload                             2 ok     1 failed  (   3 total)  avg 0.717s  stddev 0.494s  min 0.050s  max 1.230s
+
+SUCCESSES
+  {"ts": "2026-02-18T23:07:33.517510+00:00", "op": "upload", "status": "ok", "key": "foo", "elapsed_s": 1.23}
+  {"ts": "2026-02-18T23:07:33.517762+00:00", "op": "upload", "status": "ok", "key": "bar", "elapsed_s": 0.87}
+  {"ts": "2026-02-18T23:07:33.517805+00:00", "op": "head_object", "status": "ok", "key": "foo", "elapsed_s": 0.12}
+
+ERRORS
+  {"ts": "2026-02-18T23:07:33.517847+00:00", "op": "upload", "status": "err", "key": "baz", "elapsed_s": 0.05, "status_code": 503, "error_code": "SlowDown", "error_message": "Rate exceeded", "request_id": "abc", "host_id": null, "response_body": {"ResponseMetadata": {"HTTPStatusCode": 503, "RequestId": "abc"}, "Error": {"Code": "SlowDown", "Message": "Rate exceeded"}}}
+
+Log files:
+  Success : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260218_150733_test_success.jsonl
+  Errors  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260218_150733_test_errors.jsonl
