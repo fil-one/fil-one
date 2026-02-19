@@ -1,0 +1,16 @@
+======================================================================
+  Upload
+  Script : upload
+  Run    : 20260219_142230
+======================================================================
+
+SUMMARY
+  Total  : 0
+  OK     : 0
+  Failed : 0
+
+BY OPERATION
+
+Log files:
+  Success : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260219_142230_upload_success.jsonl
+  Errors  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260219_142230_upload_errors.jsonl

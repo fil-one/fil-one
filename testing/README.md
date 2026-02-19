@@ -13,20 +13,20 @@ All scripts share a unified report format: timestamped files in `aurora/logs/` a
 
 **Install dependencies:**
 ```bash
-cd aurora
+cd testing
 pip install -r requirements.txt
-pip install -r ../s3-tests/requirements.txt   # needed for compatibility_test.py
+pip install -r s3-tests/requirements.txt   # needed for compatibility_test.py
 ```
 
 **Configure credentials:**
 ```bash
 cp aurora/.env.example aurora/.env
-# Edit aurora/.env — at minimum set AURORA_ACCESS_KEY_ID, AURORA_SECRET_ACCESS_KEY, AURORA_BUCKET
+# Edit aurora/.env — at minimum set S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET
 ```
 
-All scripts must be run from inside the `aurora/` directory:
+All scripts must be run from the `testing/` directory:
 ```bash
-cd aurora
+cd testing
 ```
 
 ---
@@ -39,21 +39,21 @@ Streams files directly from source.coop → Aurora without local download. State
 
 ```bash
 # Upload 5 files up to 200 MB each (defaults)
-python upload.py
+python upload.py --provider aurora
 
 # Upload 10 files, skip anything over 50 MB
-python upload.py --count 10 --max-size-mb 50
+python upload.py --provider aurora --count 10 --max-size-mb 50
 
 # Different source prefix
-python upload.py --prefix gov-data/collections/
+python upload.py --provider aurora --prefix gov-data/collections/
 ```
 
 **Resume after failure:** re-run the same command. Done entries in `manifest.json` are skipped.
 
 **Force re-upload** (ignore manifest, re-upload everything):
 ```bash
-python upload.py --force
-python upload.py --force --count 10
+python upload.py --provider aurora --force
+python upload.py --provider aurora --force --count 10
 ```
 
 State files: `aurora/manifest.json`
@@ -64,27 +64,27 @@ Runs `HeadObject`, `GetObject` (first 1 KB preview), and `ListObjectVersions` on
 
 ```bash
 # Fetch all keys from manifest.json
-python fetch.py
+python fetch.py --provider aurora
 
 # Fetch a specific key
-python fetch.py --key gov-data/README.md
+python fetch.py --provider aurora --key gov-data/README.md
 
 # Fetch a specific version
-python fetch.py --key gov-data/README.md --version-id <version-id>
+python fetch.py --provider aurora --key gov-data/README.md --version-id <version-id>
 ```
 
 ### Delete
 
 ```bash
 # Preview what would be deleted (no changes made)
-python delete.py --dry-run
+python delete.py --provider aurora --dry-run
 
 # Delete all done entries in manifest.json
-python delete.py
+python delete.py --provider aurora
 
 # Delete a specific key or version
-python delete.py --key gov-data/README.md
-python delete.py --key gov-data/README.md --version-id <version-id>
+python delete.py --provider aurora --key gov-data/README.md
+python delete.py --provider aurora --key gov-data/README.md --version-id <version-id>
 ```
 
 ---
@@ -95,18 +95,18 @@ Concurrent uploads tracked in `load_test_state.db` (SQLite). Any interrupted run
 
 ```bash
 # Upload 50 files with 8 concurrent threads (defaults)
-python load_test.py
+python load_test.py --provider aurora
 
 # Upload 200 files with 16 threads
-python load_test.py --count 200 --workers 16
+python load_test.py --provider aurora --count 200 --workers 16
 
 # Resume after failure (retries pending/failed/interrupted entries)
-python load_test.py --resume
-python load_test.py --resume --workers 4
+python load_test.py --provider aurora --resume
+python load_test.py --provider aurora --resume --workers 4
 
 # Force re-run from scratch (deletes load_test_state.db and re-queues everything)
-python load_test.py --force
-python load_test.py --force --count 200 --workers 16
+python load_test.py --provider aurora --force
+python load_test.py --provider aurora --force --count 200 --workers 16
 ```
 
 State files: `aurora/load_test_state.db`
@@ -127,21 +127,23 @@ Runs the full [ceph/s3-tests](https://github.com/ceph/s3-tests) suite against Au
 
 ```bash
 # Run core S3 tests, excluding tests known to fail on real AWS
-python compatibility_test.py
+python compatibility_test.py --provider aurora
 
 # Custom mark expression
-python compatibility_test.py --marks 'not fails_on_aws'
-python compatibility_test.py --marks 'versioning and not fails_on_aws'
-python compatibility_test.py --marks 'encryption'
+python compatibility_test.py --provider aurora --marks 'not fails_on_aws'
+python compatibility_test.py --provider aurora --marks 'versioning and not fails_on_aws'
+python compatibility_test.py --provider aurora --marks 'encryption'
 
 # Run a single test
-python compatibility_test.py --test-file 's3tests/functional/test_s3.py::test_bucket_list_empty'
+python compatibility_test.py --provider aurora --test-file 's3tests/functional/test_s3.py::test_bucket_list_empty'
 
 # Run IAM tests
-python compatibility_test.py --test-file s3tests/functional/test_iam.py
+python compatibility_test.py --provider aurora --test-file s3tests/functional/test_iam.py
 ```
 
-**Cross-user tests:** Tests in the `[s3 alt]` category require a second Aurora credential pair. Add `AURORA_ALT_*` to `.env` — without them, cross-user tests will fail (single-user tests are unaffected).
+**`not fails_on_aws` (default marks):** The s3-tests suite tags some tests `fails_on_aws` — these are tests for Ceph-specific behavior that even real AWS S3 fails. Excluding them gives a cleaner compatibility signal.
+
+**Cross-user tests:** Tests in the `[s3 alt]` category require a genuinely separate Aurora account (different user identity, not just a second API key on the same account). Add `S3_ALT_ACCESS_KEY_ID` and `S3_ALT_SECRET_ACCESS_KEY` to `aurora/.env`. Without a separate account, cross-user ACL tests will fail — single-user tests are unaffected.
 
 **Report:** The BY CATEGORY section breaks results down by S3 feature (versioning, lifecycle, encryption, etc.) with pass/fail counts and timing stats per category. Only failures are shown in detail — passing test names are omitted to keep the report readable.
 
@@ -188,7 +190,7 @@ git clone https://github.com/ceph/s3-tests
 pip install -r s3-tests/requirements.txt
 
 # Our reporting wrapper (only needed for compatibility_test.py)
-pip install -r aurora/requirements.txt
+pip install -r requirements.txt
 ```
 
 **6. STS / IAM tests require additional Aurora configuration**
@@ -220,40 +222,40 @@ bucket prefix = aurora-s3test-{random}-
 display_name = Your Name
 user_id      = your-user-id
 email        = you@example.com
-access_key   = <AURORA_ACCESS_KEY_ID>
-secret_key   = <AURORA_SECRET_ACCESS_KEY>
+access_key   = <S3_ACCESS_KEY_ID>
+secret_key   = <S3_SECRET_ACCESS_KEY>
 
 [s3 alt]
 display_name = Alt User
 user_id      = your-alt-user-id
 email        = alt@example.com
-access_key   = <AURORA_ALT_ACCESS_KEY_ID>   # use main key if no alt account
-secret_key   = <AURORA_ALT_SECRET_ACCESS_KEY>
+access_key   = <S3_ALT_ACCESS_KEY_ID>   # must be a separate Aurora account for cross-user tests
+secret_key   = <S3_ALT_SECRET_ACCESS_KEY>
 
 [s3 tenant]
 display_name = Tenant User
 user_id      = aurora-tenant-user
 email        = tenant@aurora.test
-access_key   = <AURORA_ALT_ACCESS_KEY_ID>
-secret_key   = <AURORA_ALT_SECRET_ACCESS_KEY>
+access_key   = <S3_ALT_ACCESS_KEY_ID>
+secret_key   = <S3_ALT_SECRET_ACCESS_KEY>
 tenant       = aurora-tenant
 
 [iam]
 display_name = IAM User
 user_id      = aurora-iam-user
 email        = iam@aurora.test
-access_key   = <AURORA_ACCESS_KEY_ID>
-secret_key   = <AURORA_SECRET_ACCESS_KEY>
+access_key   = <S3_ACCESS_KEY_ID>
+secret_key   = <S3_SECRET_ACCESS_KEY>
 
 [iam root]
-access_key = <AURORA_ACCESS_KEY_ID>
-secret_key = <AURORA_SECRET_ACCESS_KEY>
+access_key = <S3_ACCESS_KEY_ID>
+secret_key = <S3_SECRET_ACCESS_KEY>
 user_id    = aurora-main-user
 email      = you@example.com
 
 [iam alt root]
-access_key = <AURORA_ALT_ACCESS_KEY_ID>
-secret_key = <AURORA_ALT_SECRET_ACCESS_KEY>
+access_key = <S3_ALT_ACCESS_KEY_ID>
+secret_key = <S3_ALT_SECRET_ACCESS_KEY>
 user_id    = aurora-alt-user
 email      = alt@example.com
 ```

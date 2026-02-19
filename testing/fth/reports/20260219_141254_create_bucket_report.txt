@@ -1,0 +1,24 @@
+======================================================================
+  Create Bucket
+  Script : create_bucket
+  Run    : 20260219_141254
+======================================================================
+
+SUMMARY
+  Total  : 3
+  OK     : 3
+  Failed : 0
+
+BY OPERATION
+  create_bucket                      1 ok     0 failed  (   1 total)  avg 0.289s  stddev 0.000s  min 0.289s  max 0.289s
+  put_bucket_encryption              1 ok     0 failed  (   1 total)  avg 0.072s  stddev 0.000s  min 0.072s  max 0.072s
+  put_object_lock_configuration      1 ok     0 failed  (   1 total)  avg 0.079s  stddev 0.000s  min 0.079s  max 0.079s
+
+SUCCESSES
+  {"ts": "2026-02-19T22:12:54.491484+00:00", "op": "create_bucket", "status": "ok", "bucket": "filecoin-foundation-bucket", "location": "", "object_lock_enabled": true, "elapsed_s": 0.289}
+  {"ts": "2026-02-19T22:12:54.570624+00:00", "op": "put_object_lock_configuration", "status": "ok", "bucket": "filecoin-foundation-bucket", "retention_mode": "GOVERNANCE", "retention_days": 30, "elapsed_s": 0.079}
+  {"ts": "2026-02-19T22:12:54.643646+00:00", "op": "put_bucket_encryption", "status": "ok", "bucket": "filecoin-foundation-bucket", "algorithm": "AES256", "elapsed_s": 0.072}
+
+Log files:
+  Success : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/fth/logs/20260219_141254_create_bucket_success.jsonl
+  Errors  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/fth/logs/20260219_141254_create_bucket_errors.jsonl

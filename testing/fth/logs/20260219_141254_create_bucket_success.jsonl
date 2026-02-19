@@ -1,0 +1,3 @@
+{"ts": "2026-02-19T22:12:54.491484+00:00", "op": "create_bucket", "status": "ok", "bucket": "filecoin-foundation-bucket", "location": "", "object_lock_enabled": true, "elapsed_s": 0.289}
+{"ts": "2026-02-19T22:12:54.570624+00:00", "op": "put_object_lock_configuration", "status": "ok", "bucket": "filecoin-foundation-bucket", "retention_mode": "GOVERNANCE", "retention_days": 30, "elapsed_s": 0.079}
+{"ts": "2026-02-19T22:12:54.643646+00:00", "op": "put_bucket_encryption", "status": "ok", "bucket": "filecoin-foundation-bucket", "algorithm": "AES256", "elapsed_s": 0.072}

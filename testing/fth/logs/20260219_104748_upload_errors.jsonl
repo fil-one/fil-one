@@ -1,1 +1,0 @@
-{"ts": "2026-02-19T18:47:58.116605+00:00", "op": "upload", "status": "err", "key": "gov-data/README.md", "size": 5555, "elapsed_s": 8.935, "source_bucket": "harvard-lil", "target_bucket": "your-bucket-name", "error_type": "EndpointConnectionError", "error": "Could not connect to the endpoint URL: \"https://your-fth-endpoint.example.com/your-bucket-name/gov-data/README.md\""}

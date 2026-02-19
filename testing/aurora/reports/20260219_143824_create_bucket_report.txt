@@ -1,0 +1,20 @@
+======================================================================
+  Create Bucket
+  Script : create_bucket
+  Run    : 20260219_143824
+======================================================================
+
+SUMMARY
+  Total  : 1
+  OK     : 0
+  Failed : 1
+
+BY OPERATION
+  create_bucket                      0 ok     1 failed  (   1 total)  avg 0.545s  stddev 0.000s  min 0.545s  max 0.545s
+
+ERRORS
+  {"ts": "2026-02-19T22:38:25.534189+00:00", "op": "create_bucket", "status": "err", "bucket": "joe-test-no-lock", "elapsed_s": 0.545, "status_code": 403, "error_code": "AccessDenied", "error_message": "Access Denied.", "request_id": "1895C6E2B53270BF", "host_id": "925d39e0f2f1f47dd23fbae89d86279d4d849fa2f53a2f83a92e768a244a5188", "response_body": {"Error": {"Code": "AccessDenied", "Message": "Access Denied.", "BucketName": "joe-test-no-lock", "Resource": "/joe-test-no-lock"}, "ResponseMetadata": {"RequestId": "1895C6E2B53270BF", "HostId": "925d39e0f2f1f47dd23fbae89d86279d4d849fa2f53a2f83a92e768a244a5188", "HTTPStatusCode": 403, "HTTPHeaders": {"server": "nginx/1.24.0 (Ubuntu)", "date": "Thu, 19 Feb 2026 22:38:25 GMT", "content-type": "application/xml", "content-length": "311", "connection": "keep-alive", "accept-ranges": "bytes", "strict-transport-security": "max-age=31536000; includeSubDomains", "vary": "Origin, Accept-Encoding", "x-amz-id-2": "925d39e0f2f1f47dd23fbae89d86279d4d849fa2f53a2f83a92e768a244a5188", "x-amz-request-id": "1895C6E2B53270BF", "x-content-type-options": "nosniff", "x-ratelimit-limit": "4760", "x-ratelimit-remaining": "4760", "x-xss-protection": "1; mode=block"}, "RetryAttempts": 0}}}
+
+Log files:
+  Success : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260219_143824_create_bucket_success.jsonl
+  Errors  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260219_143824_create_bucket_errors.jsonl
