@@ -1,7 +1,7 @@
 """
-Phase 2: Load test Aurora with concurrent uploads from source.coop.
+Load test Aurora with concurrent uploads from source.coop.
 
-State is stored in phase2_state.db (SQLite) so the run can be resumed
+State is stored in load_test_state.db (SQLite) so the run can be resumed
 after any failure — network drop, process kill, rate limit, etc.
 
 Failure scenarios handled:
@@ -11,9 +11,10 @@ Failure scenarios handled:
   - Source file unavailable        → logged as source_error; skipped on resume by default
 
 Usage:
-  python phase2_load_test.py --count 50 --workers 8
-  python phase2_load_test.py --resume              # retry failed/interrupted entries
-  python phase2_load_test.py --resume --workers 4  # resume with different concurrency
+  python load_test.py --count 50 --workers 8
+  python load_test.py --resume              # retry failed/interrupted entries
+  python load_test.py --resume --workers 4  # resume with different concurrency
+  python load_test.py --force               # delete DB and start from scratch
 """
 import argparse
 import os
@@ -31,7 +32,7 @@ load_dotenv()
 from client import get_aurora_client, get_source_client
 from logger import Logger
 
-DB_FILE = Path(__file__).parent / "phase2_state.db"
+DB_FILE = Path(__file__).parent / "load_test_state.db"
 
 MULTIPART_THRESHOLD = 50 * 1024 * 1024
 PART_SIZE = 50 * 1024 * 1024
@@ -192,7 +193,7 @@ def upload_worker(task: tuple, source_bucket: str, target_bucket: str) -> tuple:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Phase 2: Load test Aurora with concurrent uploads")
+    parser = argparse.ArgumentParser(description="Load test Aurora with concurrent uploads")
     parser.add_argument("--count", type=int, default=50,
                         help="Number of files to queue (default: 50, ignored on --resume)")
     parser.add_argument("--workers", type=int, default=8,
@@ -204,7 +205,7 @@ def main():
     parser.add_argument("--resume", action="store_true",
                         help="Resume — retry failed/interrupted entries from existing DB")
     parser.add_argument("--force", action="store_true",
-                        help="Ignore DB state and re-run from scratch (deletes phase2_state.db)")
+                        help="Ignore DB state and re-run from scratch (deletes load_test_state.db)")
     args = parser.parse_args()
 
     if args.force and args.resume:
@@ -215,7 +216,7 @@ def main():
         DB_FILE.unlink()
         print(f"--force: deleted {DB_FILE}, starting fresh\n")
 
-    log = Logger("phase2_load_test")
+    log = Logger("load_test")
     conn = sqlite3.connect(DB_FILE)
     init_db(conn)
 
@@ -240,7 +241,7 @@ def main():
                     break
         except Exception as e:
             log.error("list_source_files", e, bucket=source_bucket, prefix=args.prefix)
-            log.write_report("Phase 2: Load Test")
+            log.write_report("Load Test")
             conn.close()
             sys.exit(1)
         print(f"Queued {inserted} file(s).\n")
@@ -296,9 +297,9 @@ def main():
         f"  Workers           : {args.workers}",
         f"  State DB          : {DB_FILE}",
         "",
-        "To retry failures:  python phase2_load_test.py --resume",
+        "To retry failures:  python load_test.py --resume",
     ]
-    log.write_report("Phase 2: Load Test", extra_lines=extra)
+    log.write_report("Load Test", extra_lines=extra)
 
 
 if __name__ == "__main__":

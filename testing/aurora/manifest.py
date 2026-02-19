@@ -1,5 +1,5 @@
 """
-Persistent manifest tracking upload state for Phase 1.
+Persistent manifest tracking upload state for upload.py.
 
 Schema (manifest.json):
   {

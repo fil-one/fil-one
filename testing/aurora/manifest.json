@@ -69,6 +69,20 @@
       "target_bucket": "joe-test-all",
       "etag": "cc748535cc6cf1876742aaceba714c10",
       "version_id": "fb484433-3b5f-4e4b-9bb4-99c71c281adc"
+    },
+    "gov-data/collections/data_gov/0-3-meter-backscatter-jpeg-image-with-world-file-of-the-nearshore-seafloor-off-of-avalon-b/v1.zip": {
+      "status": "done",
+      "size": 21086222,
+      "target_bucket": "joe-test-all",
+      "etag": "d8e3a59b62bc60dd8a2513fc5ace322c",
+      "version_id": "133b708c-8fb6-438c-a0e3-66b0e7a578d4"
+    },
+    "gov-data/collections/data_gov/0-3-meter-backscatter-jpeg-image-with-world-file-of-the-nearshore-seafloor-off-of-duck-nc-/v1.zip": {
+      "status": "done",
+      "size": 21041442,
+      "target_bucket": "joe-test-all",
+      "etag": "39ebf458e83534b88ad5511bd3ef71ed",
+      "version_id": "bf0a3d3e-0ea4-453f-ba5d-77a93347dc13"
     }
   }
 }

@@ -1,13 +1,13 @@
 """
-Phase 1: Fetch objects from Aurora — metadata, content preview, and version listing.
+Fetch objects from Aurora — metadata, content preview, and version listing.
 
 By default operates on all keys in manifest.json with status=done.
 Pass --key to target a specific key, optionally with --version-id.
 
 Usage:
-  python phase1_fetch.py
-  python phase1_fetch.py --key gov-data/somefile.csv
-  python phase1_fetch.py --key gov-data/somefile.csv --version-id <vid>
+  python fetch.py
+  python fetch.py --key gov-data/somefile.csv
+  python fetch.py --key gov-data/somefile.csv --version-id <vid>
 """
 import argparse
 import os
@@ -83,8 +83,7 @@ def fetch_key(aurora, log: Logger, bucket: str, key: str, version_id: str = None
     t0 = time.monotonic()
     try:
         meta = head_object(aurora, bucket, key, version_id)
-        log.success("head_object", key=key, version_id=version_id,
-                    elapsed_s=round(time.monotonic() - t0, 3), **meta)
+        log.success("head_object", key=key, elapsed_s=round(time.monotonic() - t0, 3), **meta)
     except Exception as e:
         log.error("head_object", e, key=key, version_id=version_id, bucket=bucket,
                   elapsed_s=round(time.monotonic() - t0, 3))
@@ -93,8 +92,7 @@ def fetch_key(aurora, log: Logger, bucket: str, key: str, version_id: str = None
     t0 = time.monotonic()
     try:
         preview = get_object_preview(aurora, bucket, key, version_id)
-        log.success("get_object_preview", key=key, version_id=version_id,
-                    elapsed_s=round(time.monotonic() - t0, 3), **preview)
+        log.success("get_object_preview", key=key, elapsed_s=round(time.monotonic() - t0, 3), **preview)
     except Exception as e:
         log.error("get_object_preview", e, key=key, version_id=version_id, bucket=bucket,
                   elapsed_s=round(time.monotonic() - t0, 3))
@@ -111,12 +109,12 @@ def fetch_key(aurora, log: Logger, bucket: str, key: str, version_id: str = None
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Phase 1: Fetch objects from Aurora")
+    parser = argparse.ArgumentParser(description="Fetch objects from Aurora")
     parser.add_argument("--key", help="Specific key to fetch (skips manifest)")
     parser.add_argument("--version-id", help="Version ID for --key")
     args = parser.parse_args()
 
-    log = Logger("phase1_fetch")
+    log = Logger("fetch")
     aurora = get_aurora_client()
     bucket = os.environ["AURORA_BUCKET"]
 
@@ -126,14 +124,14 @@ def main():
         manifest = mf.load()
         done_keys = [k for k, v in manifest["files"].items() if v.get("status") == "done"]
         if not done_keys:
-            print("No done entries in manifest.json. Run phase1_upload.py first.")
+            print("No done entries in manifest.json. Run upload.py first.")
             sys.exit(1)
         print(f"Fetching {len(done_keys)} key(s) from manifest...")
         for key in done_keys:
             version_id = manifest["files"][key].get("version_id")
             fetch_key(aurora, log, bucket, key, version_id)
 
-    log.write_report("Phase 1: Fetch")
+    log.write_report("Fetch")
 
 
 if __name__ == "__main__":

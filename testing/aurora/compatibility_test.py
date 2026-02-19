@@ -3,7 +3,7 @@ S3 Compatibility Test: runs the ceph/s3-tests suite against Aurora.
 
 Generates s3tests.conf from .env, runs pytest with --json-report,
 parses the results, and writes a unified report in the same format
-as the phase1/phase2 scripts.
+as the other test scripts.
 
 Prerequisites:
   pip install pytest pytest-json-report

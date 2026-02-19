@@ -1,14 +1,14 @@
 """
-Phase 1: Delete objects from Aurora.
+Delete objects from Aurora.
 
 By default deletes all keys in manifest.json with status=done.
 Updates the manifest entry to status=deleted on success.
 
 Usage:
-  python phase1_delete.py                        # delete all manifest done entries
-  python phase1_delete.py --key gov-data/f.csv   # delete a specific key
-  python phase1_delete.py --key gov-data/f.csv --version-id <vid>
-  python phase1_delete.py --dry-run              # print what would be deleted
+  python delete.py                        # delete all manifest done entries
+  python delete.py --key gov-data/f.csv   # delete a specific key
+  python delete.py --key gov-data/f.csv --version-id <vid>
+  python delete.py --dry-run              # print what would be deleted
 """
 import argparse
 import os
@@ -36,14 +36,14 @@ def delete_object(aurora, bucket: str, key: str, version_id: str = None) -> dict
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Phase 1: Delete objects from Aurora")
+    parser = argparse.ArgumentParser(description="Delete objects from Aurora")
     parser.add_argument("--key", help="Specific key to delete")
     parser.add_argument("--version-id", help="Specific version ID to delete")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would be deleted without actually deleting")
     args = parser.parse_args()
 
-    log = Logger("phase1_delete")
+    log = Logger("delete")
     aurora = get_aurora_client()
     bucket = os.environ["AURORA_BUCKET"]
     manifest = mf.load()
@@ -87,7 +87,7 @@ def main():
                       elapsed_s=round(time.monotonic() - t0, 3))
 
     if not args.dry_run:
-        log.write_report("Phase 1: Delete")
+        log.write_report("Delete")
 
 
 if __name__ == "__main__":

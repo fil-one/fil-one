@@ -2,7 +2,7 @@
 
 Two test suites against the Aurora S3-compatible API:
 
-1. **Phase 1 / Phase 2** — targeted upload, fetch, delete, and load tests using the `harvard-lil/gov-data` dataset on source.coop. Files are streamed directly (source → Aurora) without writing to disk.
+1. **Upload, fetch, delete, and load tests** — targeted upload, fetch, delete, and load tests using the `harvard-lil/gov-data` dataset on source.coop. Files are streamed directly (source → Aurora) without writing to disk.
 2. **Compatibility Test** — runs the [ceph/s3-tests](https://github.com/ceph/s3-tests) suite (~750 tests) against Aurora to measure full S3 API compatibility.
 
 All scripts share a unified report format: timestamped files in `aurora/logs/` and `aurora/reports/`.
@@ -31,7 +31,7 @@ cd aurora
 
 ---
 
-## Phase 1 — Basic Operations
+## Basic Operations
 
 ### Upload
 
@@ -39,21 +39,21 @@ Streams files directly from source.coop → Aurora without local download. State
 
 ```bash
 # Upload 5 files up to 200 MB each (defaults)
-python phase1_upload.py
+python upload.py
 
 # Upload 10 files, skip anything over 50 MB
-python phase1_upload.py --count 10 --max-size-mb 50
+python upload.py --count 10 --max-size-mb 50
 
 # Different source prefix
-python phase1_upload.py --prefix gov-data/collections/
+python upload.py --prefix gov-data/collections/
 ```
 
 **Resume after failure:** re-run the same command. Done entries in `manifest.json` are skipped.
 
 **Force re-upload** (ignore manifest, re-upload everything):
 ```bash
-python phase1_upload.py --force
-python phase1_upload.py --force --count 10
+python upload.py --force
+python upload.py --force --count 10
 ```
 
 State files: `aurora/manifest.json`
@@ -64,52 +64,52 @@ Runs `HeadObject`, `GetObject` (first 1 KB preview), and `ListObjectVersions` on
 
 ```bash
 # Fetch all keys from manifest.json
-python phase1_fetch.py
+python fetch.py
 
 # Fetch a specific key
-python phase1_fetch.py --key gov-data/README.md
+python fetch.py --key gov-data/README.md
 
 # Fetch a specific version
-python phase1_fetch.py --key gov-data/README.md --version-id <version-id>
+python fetch.py --key gov-data/README.md --version-id <version-id>
 ```
 
 ### Delete
 
 ```bash
 # Preview what would be deleted (no changes made)
-python phase1_delete.py --dry-run
+python delete.py --dry-run
 
 # Delete all done entries in manifest.json
-python phase1_delete.py
+python delete.py
 
 # Delete a specific key or version
-python phase1_delete.py --key gov-data/README.md
-python phase1_delete.py --key gov-data/README.md --version-id <version-id>
+python delete.py --key gov-data/README.md
+python delete.py --key gov-data/README.md --version-id <version-id>
 ```
 
 ---
 
-## Phase 2 — Load Test
+## Load Test
 
-Concurrent uploads tracked in `phase2_state.db` (SQLite). Any interrupted run can be resumed exactly where it left off.
+Concurrent uploads tracked in `load_test_state.db` (SQLite). Any interrupted run can be resumed exactly where it left off.
 
 ```bash
 # Upload 50 files with 8 concurrent threads (defaults)
-python phase2_load_test.py
+python load_test.py
 
 # Upload 200 files with 16 threads
-python phase2_load_test.py --count 200 --workers 16
+python load_test.py --count 200 --workers 16
 
 # Resume after failure (retries pending/failed/interrupted entries)
-python phase2_load_test.py --resume
-python phase2_load_test.py --resume --workers 4
+python load_test.py --resume
+python load_test.py --resume --workers 4
 
-# Force re-run from scratch (deletes phase2_state.db and re-queues everything)
-python phase2_load_test.py --force
-python phase2_load_test.py --force --count 200 --workers 16
+# Force re-run from scratch (deletes load_test_state.db and re-queues everything)
+python load_test.py --force
+python load_test.py --force --count 200 --workers 16
 ```
 
-State files: `aurora/phase2_state.db`
+State files: `aurora/load_test_state.db`
 
 **Failure handling:**
 | Scenario | Behavior |
@@ -363,11 +363,11 @@ Every run produces timestamped files — nothing is overwritten.
 ```
 aurora/
   logs/
-    20260218_142301_phase1_upload_success.jsonl
-    20260218_142301_phase1_upload_errors.jsonl
+    20260218_142301_upload_success.jsonl
+    20260218_142301_upload_errors.jsonl
     20260218_142301_compatibility_pytest_raw.json   ← full pytest output
   reports/
-    20260218_142301_phase1_upload_report.txt
+    20260218_142301_upload_report.txt
     20260218_142301_compatibility_report.txt
 ```
 
@@ -404,11 +404,11 @@ ERRORS
 | `client.py` | boto3 client factory for Aurora and source.coop |
 | `report.py` | Shared report formatting used by all scripts |
 | `logger.py` | Per-operation JSONL logging + report generation for phase scripts |
-| `manifest.py` | Phase 1 resume state (`manifest.json`) |
-| `phase1_upload.py` | Upload files from source.coop to Aurora |
-| `phase1_fetch.py` | Head, get preview, and list versions |
-| `phase1_delete.py` | Delete objects by key or version |
-| `phase2_load_test.py` | Concurrent load test with SQLite-backed resume |
+| `manifest.py` | Upload resume state (`manifest.json`) |
+| `upload.py` | Upload files from source.coop to Aurora |
+| `fetch.py` | Head, get preview, and list versions |
+| `delete.py` | Delete objects by key or version |
+| `load_test.py` | Concurrent load test with SQLite-backed resume |
 | `compatibility_test.py` | Full S3 compatibility test via ceph/s3-tests |
-| `manifest.json` | Created at runtime — Phase 1 upload state |
-| `phase2_state.db` | Created at runtime — Phase 2 upload state |
+| `manifest.json` | Created at runtime — upload state |
+| `load_test_state.db` | Created at runtime — load test state |

@@ -1,12 +1,13 @@
 """
-Phase 1: Upload a small number of files from source.coop → Aurora.
+Upload a small number of files from source.coop → Aurora.
 
 Streams each file directly (source → Aurora) without writing to disk.
 Uses multipart upload for files over MULTIPART_THRESHOLD.
 Tracks state in manifest.json — re-running skips already-done keys.
 
 Usage:
-  python phase1_upload.py [--count N] [--max-size-mb M] [--prefix PREFIX]
+  python upload.py [--count N] [--max-size-mb M] [--prefix PREFIX]
+  python upload.py --force   # ignore manifest, re-upload everything
 
 Resume:
   Just re-run the same command. Done entries in manifest.json are skipped.
@@ -104,7 +105,7 @@ def upload_multipart(aurora, source, source_bucket: str, source_key: str,
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Phase 1: Upload files from source.coop to Aurora")
+    parser = argparse.ArgumentParser(description="Upload files from source.coop to Aurora")
     parser.add_argument("--count", type=int, default=5,
                         help="Number of files to upload (default: 5)")
     parser.add_argument("--max-size-mb", type=float, default=200.0,
@@ -115,7 +116,7 @@ def main():
                         help="Ignore manifest state and re-upload all files")
     args = parser.parse_args()
 
-    log = Logger("phase1_upload")
+    log = Logger("upload")
     manifest = mf.load()
     if args.force:
         manifest["files"] = {}
@@ -134,7 +135,7 @@ def main():
         objects = list_source_files(source, source_bucket, args.prefix, args.count, max_size_bytes)
     except Exception as e:
         log.error("list_source_files", e, bucket=source_bucket, prefix=args.prefix)
-        log.write_report("Phase 1: Upload")
+        log.write_report("Upload")
         sys.exit(1)
 
     if not objects:
@@ -172,7 +173,7 @@ def main():
             log.error("upload", e, key=key, size=size, elapsed_s=elapsed,
                       source_bucket=source_bucket, target_bucket=target_bucket)
 
-    log.write_report("Phase 1: Upload")
+    log.write_report("Upload")
 
 
 if __name__ == "__main__":
