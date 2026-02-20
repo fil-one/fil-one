@@ -13,7 +13,7 @@ const env: cdk.Environment = {
   region: "us-east-2",
 };
 
-// const domainStack = new DomainStack(app, 'HyperspaceDomainStack', { env });
+const domainStack = new DomainStack(app, 'HyperspaceDomainStack', { env });
 
 const databaseStack = new DatabaseStack(app, 'HyperspaceDatabaseStack', { env });
 

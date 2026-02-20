@@ -14,7 +14,7 @@ export class DomainStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    const domainName = 'hyperspace.filecoin.dev';
+    const domainName = 'console.filhyperspace.com';
 
     this.hostedZone = new route53.HostedZone(this, 'HyperspaceHostedZone', {
       zoneName: domainName,
@@ -31,12 +31,12 @@ export class DomainStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'HyperspaceDelegationNameServers', {
       value: cdk.Fn.join(', ', this.hostedZone.hostedZoneNameServers!),
       description:
-        'NS values — create a NS record for hyperspace.filecoin.dev in the filecoin.dev Route53 hosted zone pointing to these nameservers',
+        'NS values — create a NS record for console.filhyperspace.com in the filhyperspace.com Route53 hosted zone pointing to these nameservers',
     });
 
     new cdk.CfnOutput(this, 'HyperspaceHostedZoneId', {
       value: this.hostedZone.hostedZoneId,
-      description: 'Route53 hosted zone ID for hyperspace.filecoin.dev',
+      description: 'Route53 hosted zone ID for console.filhyperspace.com',
     });
   }
 }
