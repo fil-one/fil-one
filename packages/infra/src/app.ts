@@ -13,17 +13,17 @@ const env: cdk.Environment = {
   region: "us-east-2",
 };
 
-const domainStack = new DomainStack(app, 'HyperspaceDomainStack', { env });
+// const domainStack = new DomainStack(app, 'HyperspaceDomainStack', { env });
 
 const databaseStack = new DatabaseStack(app, 'HyperspaceDatabaseStack', { env });
 
 // WebsiteStack created first so its CloudFront domain can be passed to ApiStack for CORS.
 const websiteStack = new WebsiteStack(app, 'HyperspaceWebsiteStack', {
   env,
-  hostedZone: domainStack.hostedZone,
+  // hostedZone: domainStack.hostedZone,
   // certificate: domainStack.certificate, // re-enable once DNS delegation is in place
 });
-websiteStack.addDependency(domainStack);
+// websiteStack.addDependency(domainStack);
 
 const apiStack = new ApiStack(app, 'HyperspaceApiStack', {
   env,

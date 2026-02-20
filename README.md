@@ -42,6 +42,8 @@ When prompted:
 
 **2. Log in at the start of each session**
 
+*MUST do this before you can deploy.*
+
 ```bash
 aws sso login --profile hyperspace
 ```
@@ -85,7 +87,7 @@ aws cloudfront create-invalidation \
 
 | Stack | Resources |
 |---|---|
-| `HyperspaceDomainStack` | Route53 hosted zone for `hyperspace.filecoin.dev` |
+| `HyperspaceDomainStack` | Route53 hosted zone for `*.filhyperspace.com` |
 | `HyperspaceDatabaseStack` | DynamoDB table `hyperspace-uploads` |
 | `HyperspaceApiStack` | API Gateway HTTP API + Lambda upload handler |
 | `HyperspaceWebsiteStack` | S3 + CloudFront distribution + Route53 alias |
@@ -125,4 +127,4 @@ The full fork at `joemocode-business/filecoin-foundation` tracks the upstream `F
 
 > **Note**: Several components in `packages/ui` use Next.js-specific APIs (`next/navigation`, `next/image`) or `nuqs` and are not usable as-is in this Vite app. These include `Navigation/*`, `Network/*`, and `Search/Search`. They will be adapted for React Router as needed.
 
-## Stacks — after deploying `HyperspaceDomainStack`, add the `HyperspaceDelegationNameServers` output as an NS record for `hyperspace.filecoin.dev` in the `filecoin.dev` hosted zone. Once live, re-enable the ACM certificate in `domain-stack.ts`.
+## Stacks — after deploying `HyperspaceDomainStack`, add the `HyperspaceDelegationNameServers` output as an NS record for `console.filhyperspace.com` in the `filhyperspace.com` hosted zone. Once live, re-enable the ACM certificate in `domain-stack.ts`.

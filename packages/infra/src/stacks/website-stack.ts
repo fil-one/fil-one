@@ -9,7 +9,7 @@ import * as path from 'path';
 import { Construct } from 'constructs';
 
 interface WebsiteStackProps extends cdk.StackProps {
-  hostedZone: route53.IHostedZone;
+  // hostedZone: route53.IHostedZone;
   // certificate: acm.ICertificate; // re-enable once DNS delegation is in place
 }
 
@@ -56,13 +56,13 @@ export class WebsiteStack extends cdk.Stack {
 
     this.distributionDomainName = distribution.distributionDomainName;
 
-    // Route53 alias — points hyperspace.filecoin.dev → CloudFront distribution.
-    new route53.ARecord(this, 'HyperspaceAliasRecord', {
-      zone: props.hostedZone,
-      target: route53.RecordTarget.fromAlias(
-        new route53Targets.CloudFrontTarget(distribution),
-      ),
-    });
+    // Route53 alias — points hyperspace.filhyperspace.com → CloudFront distribution.
+    // new route53.ARecord(this, 'HyperspaceAliasRecord', {
+    //   zone: props.hostedZone,
+    //   target: route53.RecordTarget.fromAlias(
+    //     new route53Targets.CloudFrontTarget(distribution),
+    //   ),
+    // });
 
     new s3deploy.BucketDeployment(this, 'HyperspaceDeployment', {
       sources: [
@@ -75,10 +75,10 @@ export class WebsiteStack extends cdk.Stack {
       distributionPaths: ['/*'],
     });
 
-    new cdk.CfnOutput(this, 'HyperspaceSiteUrl', {
-      value: `https://${props.hostedZone.zoneName}`,
-      description: 'Website URL (resolves once DNS delegation is complete)',
-    });
+    // new cdk.CfnOutput(this, 'HyperspaceSiteUrl', {
+    //   value: `https://${props.hostedZone.zoneName}`,
+    //   description: 'Website URL (resolves once DNS delegation is complete)',
+    // });
 
     new cdk.CfnOutput(this, 'HyperspaceCloudFrontDomain', {
       value: distribution.distributionDomainName,
