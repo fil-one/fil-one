@@ -10,6 +10,8 @@ async function baseHandler(
   _event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> {
   const websiteUrl = getEnv('WEBSITE_URL');
+  // TODO [Option D]: AUTH0_DOMAIN env var will change to custom domain
+  // (e.g. auth.filhyperspace.com). Logout endpoint uses the same domain.
   const domain = getEnv('AUTH0_DOMAIN');
   const secrets = await getAuthSecrets();
 

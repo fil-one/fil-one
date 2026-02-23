@@ -32,7 +32,9 @@ export class PlatformStack extends cdk.Stack {
     // ── Shared Lambda config ───────────────────────────────────────────
     const auth0Env = {
       AUTH_SECRET_NAME: authSecret.secretName,
-      AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',//TODO Update to our own DNS
+      // TODO [Option D]: Replace with custom domain (e.g. auth.filhyperspace.com)
+      // once Auth0 paid plan + DNS CNAME is configured.
+      AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
       AUTH0_AUDIENCE: 'console.filhyperspace.com',
     };
 

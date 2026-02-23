@@ -102,6 +102,8 @@ export function authMiddleware(
     const idToken = cookies[COOKIE_NAMES.ID_TOKEN];
     const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
 
+    // TODO [Option D]: AUTH0_DOMAIN env var will change to custom domain
+    // (e.g. auth.filhyperspace.com). JWKS, issuer, and token endpoints use the same domain.
     const domain = getEnv('AUTH0_DOMAIN');
     const audience = getEnv('AUTH0_AUDIENCE');
     const issuer = `https://${domain}/`;

@@ -91,6 +91,24 @@ aws cloudfront create-invalidation \
 | Tenant domain | `dev-oar2nhqh58xf5pwf.us.auth0.com` |
 | Dashboard | https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ/settings |
 
+The backend reads Auth0 credentials from an AWS Secrets Manager secret named `AuthenticationSecrets`. The secret value must be JSON with this shape:
+
+```json
+{
+  "AUTH0_CLIENT_ID": "<your-auth0-client-id>",
+  "AUTH0_CLIENT_SECRET": "<your-auth0-client-secret>"
+}
+```
+
+You can set it via the CLI:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id AuthenticationSecrets \
+  --secret-string '{"AUTH0_CLIENT_ID":"...","AUTH0_CLIENT_SECRET":"..."}' \
+  --profile hyperspace
+```
+
 After deploying, add to the Auth0 application settings:
 - **Allowed Callback URLs**: `{API_URL}/auth/callback`
 - **Allowed Logout URLs**: `{WEBSITE_URL}/sign-in`

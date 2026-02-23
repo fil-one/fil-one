@@ -7,7 +7,6 @@ import { redirectToLogin } from '../../lib/api.js';
 
 export function SignUpPage() {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -30,22 +29,22 @@ export function SignUpPage() {
         <p className="text-sm text-zinc-500">Start storing objects on Filecoin</p>
       </div>
 
-      {/* Social buttons */}
+      {/* Social buttons — redirect to Auth0 Universal Login with connection hint */}
+      {/* TODO [Option D]: Social connections configured in Auth0 dashboard. When on a
+         custom domain these will use first-party cookies automatically. */}
       <div className="flex flex-col gap-3">
         <button
           type="button"
-          disabled
-          title="Coming soon"
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 opacity-50 cursor-not-allowed"
+          onClick={() => redirectToLogin({ screenHint: 'signup', connection: 'google-oauth2' })}
+          className="flex w-full items-center justify-center gap-2 rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
         >
           <span className="font-bold text-[#4285F4]">G</span>
           Continue with Google
         </button>
         <button
           type="button"
-          disabled
-          title="Coming soon"
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 opacity-50 cursor-not-allowed"
+          onClick={() => redirectToLogin({ screenHint: 'signup', connection: 'github' })}
+          className="flex w-full items-center justify-center gap-2 rounded-md border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
         >
           <GitHubIcon />
           Continue with GitHub
@@ -54,9 +53,8 @@ export function SignUpPage() {
 
       <DividerWithLabel label="or continue with email" />
 
-      {/* Form */}
+      {/* Form — collects email only; Auth0 Universal Login handles credentials */}
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        {/* Email field */}
         <div className="flex flex-col gap-1.5">
           <label htmlFor="sign-up-email" className="text-sm font-medium text-zinc-700">
             Email
@@ -72,25 +70,8 @@ export function SignUpPage() {
           />
         </div>
 
-        {/* Password field */}
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="sign-up-password" className="text-sm font-medium text-zinc-700">
-            Password
-          </label>
-          <Input
-            id="sign-up-password"
-            type="password"
-            placeholder="Create a password"
-            value={password}
-            onChange={setPassword}
-            required
-            autoComplete="new-password"
-          />
-          <p className="text-xs text-zinc-500">Minimum 8 characters</p>
-        </div>
-
         <Button variant="filled" type="submit" className="w-full justify-center">
-          Create account
+          Continue
         </Button>
       </form>
 
