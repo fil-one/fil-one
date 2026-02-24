@@ -1,9 +1,12 @@
 import * as cdk from 'aws-cdk-lib';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as cloudfrontOrigins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambdaNodejs from 'aws-cdk-lib/aws-lambda-nodejs';
+import * as route53 from 'aws-cdk-lib/aws-route53';
+import * as route53Targets from 'aws-cdk-lib/aws-route53-targets';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
@@ -13,6 +16,9 @@ import { AccessLevel, ApiFunction } from '../constructs/api-function';
 
 interface PlatformStackProps extends cdk.StackProps {
   uploadsTable: dynamodb.ITable;
+  certificate: acm.ICertificate;
+  hostedZone: route53.IHostedZone;
+  domainName: string;
 }
 
 export class PlatformStack extends cdk.Stack {
@@ -67,6 +73,8 @@ export class PlatformStack extends cdk.Stack {
     });
 
     const distribution = new cloudfront.Distribution(this, 'HyperspaceDistribution', {
+      domainNames: [props.domainName],
+      certificate: props.certificate,
       defaultBehavior: {
         origin: cloudfrontOrigins.S3BucketOrigin.withOriginAccessControl(assetsBucket),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -98,8 +106,19 @@ export class PlatformStack extends cdk.Stack {
 
     this.distributionDomainName = distribution.distributionDomainName;
 
-    // ── Lambda env vars (need CloudFront domain) ───────────────────────
-    const cfDomain = `https://${distribution.distributionDomainName}`;
+    // ── Route53 alias records → CloudFront ───────────────────────────
+    new route53.ARecord(this, 'CloudFrontAlias', {
+      zone: props.hostedZone,
+      target: route53.RecordTarget.fromAlias(new route53Targets.CloudFrontTarget(distribution)),
+    });
+
+    new route53.AaaaRecord(this, 'CloudFrontAliasIPv6', {
+      zone: props.hostedZone,
+      target: route53.RecordTarget.fromAlias(new route53Targets.CloudFrontTarget(distribution)),
+    });
+
+    // ── Lambda env vars (need domain for auth redirects) ─────────────
+    const cfDomain = `https://${props.domainName}`;
 
     const apiDefaults = { httpApi, authSecret, auth0Env, sharedBundling };
 
@@ -168,6 +187,18 @@ export class PlatformStack extends cdk.Stack {
       tableAccess: AccessLevel.READ_WRITE,
       s3Bucket: userFilesBucket,
       s3Access: AccessLevel.WRITE,
+    });
+
+    new ApiFunction(this, 'DownloadObject', {
+      ...apiDefaults,
+      handlerFile: 'download-object.ts',
+      routePath: '/api/buckets/{name}/objects/download',
+      methods: [apigwv2.HttpMethod.GET],
+      environment: fileEnv,
+      table: props.uploadsTable,
+      tableAccess: AccessLevel.READ,
+      s3Bucket: userFilesBucket,
+      s3Access: AccessLevel.READ,
     });
 
     new ApiFunction(this, 'DeleteObject', {

@@ -283,9 +283,16 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
     }
   }
 
-  // UNKNOWN: download is not implemented (no presigned URL API) — placeholder
-  function handleDownloadObject(key: string) {
-    toast.info(`Download for "${objectDisplayName(key)}" is not yet implemented`)
+  async function handleDownloadObject(key: string) {
+    try {
+      const data = await apiRequest<{ url: string }>(
+        `/buckets/${encodeURIComponent(bucketName)}/objects/download?key=${encodeURIComponent(key)}`,
+      )
+      // Open the presigned S3 URL — triggers browser download
+      window.open(data.url, '_blank')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to get download URL')
+    }
   }
 
   if (loading) {

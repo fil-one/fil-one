@@ -10,6 +10,7 @@
     "@aws-sdk/client-dynamodb": "^3.0.0",
     "@aws-sdk/client-s3": "^3.996.0",
     "@aws-sdk/client-secrets-manager": "^3.0.0",
+    "@aws-sdk/s3-request-presigner": "^3.997.0",
     "@aws-sdk/util-dynamodb": "^3.0.0",
     "@hyperspace/shared": "*",
     "@middy/core": "^5.0.0",
