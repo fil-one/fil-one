@@ -44,6 +44,13 @@ export class PlatformStack extends cdk.Stack {
       sourceMap: true,
     };
 
+    // ── S3 bucket for user file storage (temporary — swap for Filecoin later)
+    const userFilesBucket = new s3.Bucket(this, 'UserFilesTemp', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+    });
+
     // ── S3 bucket for the SPA ──────────────────────────────────────────
     const assetsBucket = new s3.Bucket(this, 'HyperspaceAssetsBucket', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -96,14 +103,83 @@ export class PlatformStack extends cdk.Stack {
 
     const apiDefaults = { httpApi, authSecret, auth0Env, sharedBundling };
 
+    const tableEnv = { UPLOADS_TABLE_NAME: props.uploadsTable.tableName };
+    const fileEnv = { ...tableEnv, USER_FILES_BUCKET_NAME: userFilesBucket.bucketName };
+
     new ApiFunction(this, 'Upload', {
       ...apiDefaults,
       handlerFile: 'upload.ts',
       routePath: '/api/upload',
       methods: [apigwv2.HttpMethod.POST],
-      environment: { UPLOADS_TABLE_NAME: props.uploadsTable.tableName },
+      environment: tableEnv,
       table: props.uploadsTable,
       tableAccess: 'write',
+    });
+
+    // ── Bucket CRUD ─────────────────────────────────────────────────────
+    new ApiFunction(this, 'ListBuckets', {
+      ...apiDefaults,
+      handlerFile: 'list-buckets.ts',
+      routePath: '/api/buckets',
+      methods: [apigwv2.HttpMethod.GET],
+      environment: tableEnv,
+      table: props.uploadsTable,
+      tableAccess: 'read',
+    });
+
+    new ApiFunction(this, 'CreateBucket', {
+      ...apiDefaults,
+      handlerFile: 'create-bucket.ts',
+      routePath: '/api/buckets',
+      methods: [apigwv2.HttpMethod.POST],
+      environment: tableEnv,
+      table: props.uploadsTable,
+      tableAccess: 'write',
+    });
+
+    new ApiFunction(this, 'DeleteBucket', {
+      ...apiDefaults,
+      handlerFile: 'delete-bucket.ts',
+      routePath: '/api/buckets/{name}',
+      methods: [apigwv2.HttpMethod.DELETE],
+      environment: tableEnv,
+      table: props.uploadsTable,
+      tableAccess: 'readWrite',
+    });
+
+    // ── Object CRUD ─────────────────────────────────────────────────────
+    new ApiFunction(this, 'ListObjects', {
+      ...apiDefaults,
+      handlerFile: 'list-objects.ts',
+      routePath: '/api/buckets/{name}/objects',
+      methods: [apigwv2.HttpMethod.GET],
+      environment: tableEnv,
+      table: props.uploadsTable,
+      tableAccess: 'read',
+    });
+
+    new ApiFunction(this, 'UploadObject', {
+      ...apiDefaults,
+      handlerFile: 'upload-object.ts',
+      routePath: '/api/buckets/{name}/objects/upload',
+      methods: [apigwv2.HttpMethod.POST],
+      environment: fileEnv,
+      table: props.uploadsTable,
+      tableAccess: 'readWrite',
+      s3Bucket: userFilesBucket,
+      s3Access: 'write',
+    });
+
+    new ApiFunction(this, 'DeleteObject', {
+      ...apiDefaults,
+      handlerFile: 'delete-object.ts',
+      routePath: '/api/buckets/{name}/objects',
+      methods: [apigwv2.HttpMethod.DELETE],
+      environment: fileEnv,
+      table: props.uploadsTable,
+      tableAccess: 'readWrite',
+      s3Bucket: userFilesBucket,
+      s3Access: 'readWrite',
     });
 
     new ApiFunction(this, 'AuthCallback', {

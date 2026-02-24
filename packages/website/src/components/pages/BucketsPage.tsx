@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import {
   PlusIcon,
@@ -10,40 +10,16 @@ import { Button } from '@hyperspace/ui/Button'
 import { Input } from '@hyperspace/ui/Input'
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '@hyperspace/ui/Modal'
 import { CodeBlock } from '@hyperspace/ui/CodeBlock'
+import { Spinner } from '@hyperspace/ui/Spinner'
 import { useToast } from '@hyperspace/ui/Toast'
 
-import type { Bucket } from '@hyperspace/shared'
-
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const INITIAL_BUCKETS: Bucket[] = [
-  {
-    name: 'my-media-files',
-    region: 'us-east-1',
-    createdAt: '2024-01-15T10:00:00Z',
-    objectCount: 247,
-    sizeBytes: 5368709120,
-    isPublic: false,
-  },
-  {
-    name: 'backups-prod',
-    region: 'us-east-1',
-    createdAt: '2024-01-20T14:30:00Z',
-    objectCount: 12,
-    sizeBytes: 1073741824,
-    isPublic: false,
-  },
-  {
-    name: 'public-assets',
-    region: 'us-west-2',
-    createdAt: '2024-02-01T09:00:00Z',
-    objectCount: 83,
-    sizeBytes: 524288000,
-    isPublic: true,
-  },
-]
+import type {
+  Bucket,
+  CreateBucketRequest,
+  CreateBucketResponse,
+  ListBucketsResponse,
+} from '@hyperspace/shared'
+import { apiRequest } from '../../lib/api.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,42 +40,93 @@ function formatBytes(bytes: number): string {
 export function BucketsPage() {
   const { toast } = useToast()
 
-  const [buckets, setBuckets] = useState<Bucket[]>(INITIAL_BUCKETS)
+  const [buckets, setBuckets] = useState<Bucket[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   // Create bucket modal state
   const [createOpen, setCreateOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
   const [region, setRegion] = useState('us-east-1')
 
   // Save credentials modal state
   const [credsOpen, setCredsOpen] = useState(false)
 
-  // Tracks which bucket was just created (for delete confirmation)
-  // UNKNOWN: delete confirmation modal is not specified — using optimistic delete for now
   const deleteBucket = useRef<string | null>(null)
 
-  function handleCreate() {
-    if (!name.trim()) return
-    const newBucket: Bucket = {
-      name: name.trim(),
-      region,
-      createdAt: new Date().toISOString(),
-      objectCount: 0,
-      sizeBytes: 0,
-      isPublic: false,
+  // Fetch buckets on mount
+  useEffect(() => {
+    let cancelled = false
+    async function fetchBuckets() {
+      try {
+        const data = await apiRequest<ListBucketsResponse>('/buckets')
+        if (!cancelled) {
+          setBuckets(data.buckets)
+          setLoading(false)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load buckets')
+          setLoading(false)
+        }
+      }
     }
-    setBuckets((prev) => [newBucket, ...prev])
-    setCreateOpen(false)
-    setName('')
-    setRegion('us-east-1')
-    toast.success('Bucket created successfully')
-    setCredsOpen(true)
+    fetchBuckets()
+    return () => { cancelled = true }
+  }, [])
+
+  async function handleCreate() {
+    if (!name.trim()) return
+    setCreating(true)
+    try {
+      const body: CreateBucketRequest = { name: name.trim(), region }
+      const data = await apiRequest<CreateBucketResponse>('/buckets', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
+      setBuckets((prev) => [data.bucket, ...prev])
+      setCreateOpen(false)
+      setName('')
+      setRegion('us-east-1')
+      toast.success('Bucket created successfully')
+      setCredsOpen(true)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create bucket')
+    } finally {
+      setCreating(false)
+    }
   }
 
-  function handleDeleteBucket(bucketName: string) {
+  async function handleDeleteBucket(bucketName: string) {
     deleteBucket.current = bucketName
-    setBuckets((prev) => prev.filter((b) => b.name !== bucketName))
-    toast.success(`Bucket "${bucketName}" deleted`)
+    try {
+      await apiRequest(`/buckets/${encodeURIComponent(bucketName)}`, {
+        method: 'DELETE',
+      })
+      setBuckets((prev) => prev.filter((b) => b.name !== bucketName))
+      toast.success(`Bucket "${bucketName}" deleted`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete bucket')
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-16">
+        <Spinner ariaLabel="Loading buckets" size={32} />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {error}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -268,8 +295,8 @@ export function BucketsPage() {
             <Button variant="ghost" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
-            <Button variant="filled" onClick={handleCreate}>
-              Create bucket
+            <Button variant="filled" onClick={handleCreate} disabled={creating}>
+              {creating ? 'Creating...' : 'Create bucket'}
             </Button>
           </div>
         </ModalFooter>

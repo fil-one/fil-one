@@ -5,7 +5,8 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context,
 } from 'aws-lambda';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
+import type { UserInfo } from '../lib/user-context.js';
 import type { ErrorResponse } from '@hyperspace/shared';
 import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader, ResponseBuilder } from '../lib/response-builder.js';
 import { getEnv } from '../lib/env.js';
@@ -102,7 +103,11 @@ export function authMiddleware(): MiddlewareObj<APIGatewayProxyEventV2, APIGatew
     // Step 1: Validate existing access token
     if (accessToken) {
       try {
-        await jwtVerify(accessToken, jwks, { audience, issuer });
+        const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
+        (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
+          sub: payload.sub!,
+          email: payload.email as string | undefined,
+        };
         return; // Valid — continue to handler
       } catch (err) {
         // Expired or invalid — fall through to refresh
@@ -137,6 +142,11 @@ export function authMiddleware(): MiddlewareObj<APIGatewayProxyEventV2, APIGatew
             // Use the rotated token if Auth0 returned one, otherwise reuse the old one
             refresh_token: tokens.refresh_token ?? refreshToken,
           } satisfies NewTokens;
+          const refreshedPayload = decodeJwt(tokens.access_token);
+          (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
+            sub: refreshedPayload.sub!,
+            email: refreshedPayload.email as string | undefined,
+          };
           console.warn('[auth] Token refresh succeeded');
           return; // Continue to handler
         }

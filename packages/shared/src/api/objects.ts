@@ -5,6 +5,7 @@ export interface S3Object {
   etag: string
   contentType: string
   cid?: string
+  description?: string
 }
 
 export interface ListObjectsRequest {
@@ -25,8 +26,11 @@ export interface ListObjectsResponse {
 export interface UploadObjectRequest {
   bucketName: string
   key: string
+  fileBase64: string
+  fileName: string
   contentType: string
   sizeBytes: number
+  description?: string
 }
 
 export interface UploadObjectResponse {

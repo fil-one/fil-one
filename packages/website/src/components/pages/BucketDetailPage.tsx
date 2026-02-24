@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ArrowUpIcon,
   CloudArrowUpIcon,
@@ -11,6 +11,7 @@ import {
 } from '@phosphor-icons/react/dist/ssr'
 
 import { Button } from '@hyperspace/ui/Button'
+import { Input } from '@hyperspace/ui/Input'
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '@hyperspace/ui/Modal'
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from '@hyperspace/ui/Tabs'
 import { Breadcrumb } from '@hyperspace/ui/Breadcrumb'
@@ -18,38 +19,18 @@ import { Spinner } from '@hyperspace/ui/Spinner'
 import { ProgressBar } from '@hyperspace/ui/ProgressBar'
 import { useToast } from '@hyperspace/ui/Toast'
 
-import type { S3Object, AccessKey } from '@hyperspace/shared'
+import type {
+  S3Object,
+  AccessKey,
+  ListObjectsResponse,
+  UploadObjectRequest,
+  UploadObjectResponse,
+} from '@hyperspace/shared'
+import { apiRequest } from '../../lib/api.js'
 
 // ---------------------------------------------------------------------------
-// Mock data
+// Mock data (access keys — placeholder, out of scope)
 // ---------------------------------------------------------------------------
-
-const MOCK_OBJECTS: S3Object[] = [
-  {
-    key: 'videos/intro.mp4',
-    sizeBytes: 104857600,
-    lastModified: '2024-02-10T14:00:00Z',
-    etag: '"abc123"',
-    contentType: 'video/mp4',
-    cid: 'bafybeigdyr...',
-  },
-  {
-    key: 'images/hero.png',
-    sizeBytes: 2097152,
-    lastModified: '2024-02-09T10:00:00Z',
-    etag: '"def456"',
-    contentType: 'image/png',
-    cid: 'bafybeiczsz...',
-  },
-  {
-    key: 'docs/readme.txt',
-    sizeBytes: 4096,
-    lastModified: '2024-02-08T08:00:00Z',
-    etag: '"ghi789"',
-    contentType: 'text/plain',
-    cid: undefined,
-  },
-]
 
 const MOCK_ACCESS_KEYS: AccessKey[] = [
   {
@@ -86,6 +67,19 @@ function maskAccessKeyId(id: string): string {
   return `${id.slice(0, 4)}...XXXX`
 }
 
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      const base64 = result.split(',')[1] ?? ''
+      resolve(base64)
+    }
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Upload step type
 // ---------------------------------------------------------------------------
@@ -104,28 +98,58 @@ export function BucketDetailPage({ bucketName }: BucketDetailPageProps) {
   const { toast } = useToast()
 
   // Objects state
-  const [objects, setObjects] = useState<S3Object[]>(MOCK_OBJECTS)
+  const [objects, setObjects] = useState<S3Object[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   // Access keys state
-  // UNKNOWN: access keys are per-bucket in this UI but the spec does not clarify
-  // whether they are truly scoped to a bucket or global — using mock data as-is
   const [accessKeys] = useState<AccessKey[]>(MOCK_ACCESS_KEYS)
 
   // Upload modal state
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadStep, setUploadStep] = useState<UploadStep>('select')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [objectName, setObjectName] = useState('')
+  const [objectDescription, setObjectDescription] = useState('')
   const [uploadProgress, setUploadProgress] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Track whether the user has manually edited the object name
+  const userEditedName = useRef(false)
 
-  // Upload simulation timer ref (for cleanup)
+  // Upload timer ref (for cleanup)
   const uploadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Fetch objects on mount
+  useEffect(() => {
+    let cancelled = false
+    async function fetchObjects() {
+      try {
+        const data = await apiRequest<ListObjectsResponse>(
+          `/buckets/${encodeURIComponent(bucketName)}/objects`,
+        )
+        if (!cancelled) {
+          setObjects(data.objects)
+          setLoading(false)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load objects')
+          setLoading(false)
+        }
+      }
+    }
+    fetchObjects()
+    return () => { cancelled = true }
+  }, [bucketName])
 
   function handleCloseUploadModal() {
     setUploadOpen(false)
     setUploadStep('select')
     setSelectedFile(null)
+    setObjectName('')
+    setObjectDescription('')
     setUploadProgress(0)
+    userEditedName.current = false
     if (uploadTimerRef.current) {
       clearInterval(uploadTimerRef.current)
       uploadTimerRef.current = null
@@ -134,50 +158,105 @@ export function BucketDetailPage({ bucketName }: BucketDetailPageProps) {
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    if (file) setSelectedFile(file)
+    if (file) {
+      setSelectedFile(file)
+      // Auto-fill object name from filename if user hasn't manually set it
+      if (!userEditedName.current) {
+        setObjectName(file.name)
+      }
+    }
   }
 
-  function handleUpload() {
-    if (!selectedFile) return
+  async function handleUpload() {
+    if (!selectedFile || !objectName.trim()) return
     setUploadStep('uploading')
     setUploadProgress(0)
 
-    // Simulate upload progress over ~2s (20 intervals × 100ms)
+    // Simulate progress while uploading
     let progress = 0
     uploadTimerRef.current = setInterval(() => {
-      progress += 5
+      progress = Math.min(progress + 5, 90)
       setUploadProgress(progress)
-      if (progress >= 100) {
-        if (uploadTimerRef.current) {
-          clearInterval(uploadTimerRef.current)
-          uploadTimerRef.current = null
-        }
-        setUploadStep('done')
-        // Add mock object to local list
-        if (selectedFile) {
-          const newObject: S3Object = {
-            key: selectedFile.name,
-            sizeBytes: selectedFile.size,
-            lastModified: new Date().toISOString(),
-            etag: `"${Math.random().toString(36).slice(2, 10)}"`,
-            contentType: selectedFile.type || 'application/octet-stream',
-            cid: undefined,
-          }
-          setObjects((prev) => [newObject, ...prev])
-          toast.success(`${selectedFile.name} uploaded successfully`)
-        }
-      }
     }, 100)
+
+    try {
+      const fileBase64 = await readFileAsBase64(selectedFile)
+      const body: UploadObjectRequest = {
+        bucketName,
+        key: objectName.trim(),
+        fileBase64,
+        fileName: selectedFile.name,
+        contentType: selectedFile.type || 'application/octet-stream',
+        sizeBytes: selectedFile.size,
+        ...(objectDescription.trim() && { description: objectDescription.trim() }),
+      }
+
+      const data = await apiRequest<UploadObjectResponse>(
+        `/buckets/${encodeURIComponent(bucketName)}/objects/upload`,
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        },
+      )
+
+      if (uploadTimerRef.current) {
+        clearInterval(uploadTimerRef.current)
+        uploadTimerRef.current = null
+      }
+      setUploadProgress(100)
+      setUploadStep('done')
+      setObjects((prev) => [data.object, ...prev])
+      toast.success(`${selectedFile.name} uploaded successfully`)
+    } catch (err) {
+      if (uploadTimerRef.current) {
+        clearInterval(uploadTimerRef.current)
+        uploadTimerRef.current = null
+      }
+      handleCloseUploadModal()
+      toast.error(err instanceof Error ? err.message : 'Upload failed')
+    }
   }
 
-  function handleDeleteObject(key: string) {
-    setObjects((prev) => prev.filter((o) => o.key !== key))
-    toast.success(`Object deleted`)
+  async function handleDeleteObject(key: string) {
+    try {
+      await apiRequest(
+        `/buckets/${encodeURIComponent(bucketName)}/objects?key=${encodeURIComponent(key)}`,
+        { method: 'DELETE' },
+      )
+      setObjects((prev) => prev.filter((o) => o.key !== key))
+      toast.success('Object deleted')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete object')
+    }
   }
 
-  // UNKNOWN: download is not implemented (no presigned URL API) — linking to # as placeholder
+  // UNKNOWN: download is not implemented (no presigned URL API) — placeholder
   function handleDownloadObject(key: string) {
     toast.info(`Download for "${objectDisplayName(key)}" is not yet implemented`)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-16">
+        <Spinner ariaLabel="Loading objects" size={32} />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <Breadcrumb
+          items={[
+            { label: 'Buckets', href: '/buckets' },
+            { label: bucketName },
+          ]}
+        />
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {error}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -495,6 +574,47 @@ export function BucketDetailPage({ bucketName }: BucketDetailPageProps) {
                   </span>
                 </div>
               )}
+
+              {/* Object name (required) */}
+              <div className="mt-4 flex flex-col gap-1.5">
+                <label
+                  htmlFor="object-name"
+                  className="text-sm font-medium text-zinc-700"
+                >
+                  Object name
+                </label>
+                <Input
+                  id="object-name"
+                  value={objectName}
+                  onChange={(value) => {
+                    userEditedName.current = true
+                    setObjectName(value)
+                  }}
+                  placeholder="path/to/my-file.txt"
+                  autoComplete="off"
+                />
+                <p className="text-xs text-zinc-500">
+                  Can include slashes to create a folder-like path, e.g. <code>images/photo.png</code>
+                </p>
+              </div>
+
+              {/* Description (optional) */}
+              <div className="mt-4 flex flex-col gap-1.5">
+                <label
+                  htmlFor="object-description"
+                  className="text-sm font-medium text-zinc-700"
+                >
+                  Description <span className="font-normal text-zinc-400">(optional)</span>
+                </label>
+                <textarea
+                  id="object-description"
+                  value={objectDescription}
+                  onChange={(e) => setObjectDescription(e.target.value)}
+                  placeholder="A short description of this object"
+                  rows={2}
+                  className="block w-full rounded-lg border border-zinc-200 p-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-2 focus:outline-brand-600"
+                />
+              </div>
             </ModalBody>
             <ModalFooter>
               <div className="flex justify-end gap-2">
@@ -503,7 +623,7 @@ export function BucketDetailPage({ bucketName }: BucketDetailPageProps) {
                 </Button>
                 <Button
                   variant="filled"
-                  disabled={!selectedFile}
+                  disabled={!selectedFile || !objectName.trim()}
                   onClick={handleUpload}
                 >
                   Upload

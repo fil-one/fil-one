@@ -1,7 +1,6 @@
 import { createRouter } from '@tanstack/react-router';
 import { Route as rootRoute } from './routes/__root.js';
 import { Route as indexRoute } from './routes/index.js';
-import { Route as uploadRoute } from './routes/upload.js';
 import { Route as authRoute } from './routes/_auth.js';
 import { Route as signInRoute } from './routes/_auth/sign-in.js';
 import { Route as signUpRoute } from './routes/_auth/sign-up.js';
@@ -16,7 +15,6 @@ import { Route as supportRoute } from './routes/_app/support.js';
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  uploadRoute,
   authRoute.addChildren([signInRoute, signUpRoute]),
   appRoute.addChildren([
     dashboardRoute,

@@ -19,7 +19,7 @@ function buildAuth0LoginUrl(options?: LoginOptions): string {
     client_id: AUTH0_CLIENT_ID,
     redirect_uri: callbackUrl,
     response_type: 'code',
-    scope: 'openid profile email',
+    scope: 'openid profile email offline_access',
     audience: AUTH0_AUDIENCE,
   });
   if (options?.loginHint) params.set('login_hint', options.loginHint);
