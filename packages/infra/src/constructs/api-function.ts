@@ -1,19 +1,11 @@
 import * as cdk from 'aws-cdk-lib';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as apigwv2Integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as lambdaNodejs from 'aws-cdk-lib/aws-lambda-nodejs';
-import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as path from 'path';
 import { Construct } from 'constructs';
-
-export enum AccessLevel {
-  READ = 'read',
-  WRITE = 'write',
-  READ_WRITE = 'readWrite',
-}
 
 export interface ApiFunctionProps {
   handlerFile: string;
@@ -24,31 +16,18 @@ export interface ApiFunctionProps {
   auth0Env: Record<string, string>;
   sharedBundling: lambdaNodejs.BundlingOptions;
   environment?: Record<string, string>;
-  table?: dynamodb.ITable;
-  tableAccess?: AccessLevel;
-  s3Bucket?: s3.IBucket;
-  s3Access?: AccessLevel;
+  /** Skip granting auth secret access (for unauthenticated endpoints like webhooks) */
+  skipAuth?: boolean;
   lambdaProps?: Partial<lambdaNodejs.NodejsFunctionProps>;
 }
 
-function grantTableAccess(fn: lambda.IFunction, table: dynamodb.ITable, access: AccessLevel) {
-  const grants = {
-    [AccessLevel.READ]: () => table.grantReadData(fn),
-    [AccessLevel.WRITE]: () => table.grantWriteData(fn),
-    [AccessLevel.READ_WRITE]: () => table.grantReadWriteData(fn),
-  };
-  grants[access]();
-}
-
-function grantBucketAccess(fn: lambda.IFunction, bucket: s3.IBucket, access: AccessLevel) {
-  const grants = {
-    [AccessLevel.READ]: () => bucket.grantRead(fn),
-    [AccessLevel.WRITE]: () => bucket.grantWrite(fn),
-    [AccessLevel.READ_WRITE]: () => bucket.grantReadWrite(fn),
-  };
-  grants[access]();
-}
-
+/**
+ * Creates a Lambda function wired to an API Gateway route.
+ *
+ * Handles only the common baseline: bundling, auth secret, env vars, and
+ * route registration. Grant table, S3, or other permissions on `.function`
+ * at the call site.
+ */
 export class ApiFunction extends Construct {
   public readonly function: lambdaNodejs.NodejsFunction;
 
@@ -70,14 +49,8 @@ export class ApiFunction extends Construct {
       ...lambdaProps,
     });
 
-    rest.authSecret.grantRead(this.function);
-
-    if (rest.table && rest.tableAccess) {
-      grantTableAccess(this.function, rest.table, rest.tableAccess);
-    }
-
-    if (rest.s3Bucket && rest.s3Access) {
-      grantBucketAccess(this.function, rest.s3Bucket, rest.s3Access);
+    if (!rest.skipAuth) {
+      rest.authSecret.grantRead(this.function);
     }
 
     rest.httpApi.addRoutes({

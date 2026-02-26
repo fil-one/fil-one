@@ -9,6 +9,7 @@ import { getEnv } from '../lib/env.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
 const dynamo = new DynamoDBClient({});
 
@@ -60,4 +61,5 @@ async function baseHandler(
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
+  .use(subscriptionGuardMiddleware(AccessLevel.Write))
   .use(errorHandlerMiddleware());

@@ -1,72 +1,26 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
-import { CheckIcon, CreditCardIcon } from '@phosphor-icons/react/dist/ssr'
+import {
+  CheckCircleIcon,
+  CheckIcon,
+  CreditCardIcon,
+  ArrowRightIcon,
+  WarningIcon,
+  CloudIcon,
+} from '@phosphor-icons/react/dist/ssr'
 
-import { Button } from '@hyperspace/ui/Button'
-import { Input } from '@hyperspace/ui/Input'
-import { Modal, ModalBody, ModalFooter, ModalHeader } from '@hyperspace/ui/Modal'
 import { ProgressBar } from '@hyperspace/ui/ProgressBar'
 import { useToast } from '@hyperspace/ui/Toast'
 
-import type { BillingInfo, PaymentMethod, Plan, PlanId } from '@hyperspace/shared'
+import { SubscriptionStatus } from '@hyperspace/shared'
+import type {
+  BillingInfo,
+  CreateSetupIntentResponse,
+} from '@hyperspace/shared'
 
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_PLANS: Plan[] = [
-  {
-    id: 'free_trial',
-    name: 'Free Trial',
-    description: '14-day trial with 1 TiB storage and 10 TiB downloads',
-    storageLimitBytes: 1099511627776,
-    downloadLimitBytes: 10995116277760,
-    pricePerTibCents: 0,
-    features: ['1 TiB storage', '10 TiB downloads', 'Up to 100 buckets', 'S3-compatible API'],
-  },
-  {
-    id: 'pay_as_you_go',
-    name: 'Pay As You Go',
-    description: 'Pay only for what you use, no monthly commitment',
-    storageLimitBytes: -1,
-    downloadLimitBytes: -1,
-    pricePerTibCents: 499,
-    features: ['Unlimited storage', 'Unlimited downloads', '$4.99/TiB stored', 'No monthly fee'],
-  },
-  {
-    id: 'starter',
-    name: 'Starter',
-    description: 'For small teams with predictable usage',
-    storageLimitBytes: 10995116277760,
-    downloadLimitBytes: 109951162777600,
-    flatPriceCents: 4900,
-    pricePerTibCents: 0,
-    features: ['10 TiB storage', '100 TiB downloads', '$49/month flat rate', 'Priority support'],
-  },
-]
-
-const MOCK_BILLING: BillingInfo = {
-  subscription: {
-    planId: 'free_trial',
-    status: 'trialing',
-    trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-  paymentMethod: undefined,
-  plans: MOCK_PLANS,
-}
-
-// Mocked usage stats — these would normally come from the API
-const MOCK_USAGE = {
-  storageUsedBytes: 6979321856, // ~6.5 GB
-  storageLimitBytes: 1099511627776, // 1 TiB
-  downloadsUsedBytes: 0,
-  downloadsLimitBytes: 10995116277760, // 10 TiB
-  bucketsCount: 3,
-  bucketsLimit: 100,
-  objectsCount: 342,
-  accessKeysCount: 2,
-  accessKeysLimit: 300,
-}
+import { apiRequest } from '../../lib/api.js'
+import { ChoosePlanDialog } from '../billing/ChoosePlanDialog.js'
+import { AddPaymentDialog } from '../billing/AddPaymentDialog.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -85,29 +39,20 @@ function daysRemaining(isoString: string): number {
   return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)))
 }
 
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-type UsageRowProps = {
-  label: string
-  value: string
-  percent?: number
+function formatCents(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`
 }
 
-function UsageRow({ label, value, percent }: UsageRowProps) {
+// ---------------------------------------------------------------------------
+// Skeleton loaders
+// ---------------------------------------------------------------------------
+
+function SkeletonCard({ height = 'h-36' }: { height?: string }) {
   return (
-    <div className="flex items-center justify-between py-3 border-b border-zinc-100 last:border-0">
-      <span className="text-sm font-medium text-zinc-700 w-32 shrink-0">{label}</span>
-      <span className="text-sm text-zinc-600 flex-1">{value}</span>
-      {percent !== undefined ? (
-        <div className="flex items-center gap-2 w-32 justify-end">
-          <ProgressBar value={percent} size="sm" className="w-24" label={label} />
-          <span className="text-xs text-zinc-400 w-8 text-right">{percent.toFixed(1)}%</span>
-        </div>
-      ) : (
-        <div className="w-32" />
-      )}
+    <div className={`animate-pulse rounded-xl border border-[#e1e4ea] bg-white p-6 ${height}`}>
+      <div className="h-3 w-24 rounded bg-zinc-200 mb-4" />
+      <div className="h-4 w-48 rounded bg-zinc-200 mb-2" />
+      <div className="h-3 w-36 rounded bg-zinc-200" />
     </div>
   )
 }
@@ -119,272 +64,468 @@ function UsageRow({ label, value, percent }: UsageRowProps) {
 export function BillingPage() {
   const { toast } = useToast()
 
-  const [billing, setBilling] = useState<BillingInfo>(MOCK_BILLING)
+  const [billing, setBilling] = useState<BillingInfo | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // Modal states
   const [planOpen, setPlanOpen] = useState(false)
   const [paymentOpen, setPaymentOpen] = useState(false)
-  const [selectedPlan, setSelectedPlan] = useState<PlanId>('pay_as_you_go')
+  const [clientSecret, setClientSecret] = useState('')
 
-  // Payment form state
-  const [cardNumber, setCardNumber] = useState('')
-  const [expiry, setExpiry] = useState('')
-  const [cvc, setCvc] = useState('')
+  const fetchBilling = useCallback(async () => {
+    try {
+      setLoading(true)
+      const data = await apiRequest<BillingInfo>('/billing')
+      setBilling(data)
+      setError(null)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  const currentPlan = billing.plans.find((p) => p.id === billing.subscription.planId)
-  const isTrialing = billing.subscription.status === 'trialing'
+  useEffect(() => {
+    fetchBilling()
+  }, [fetchBilling])
+
+  // Handle portal return
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('portal_return') === 'true') {
+      // Clear the URL param and refresh billing data
+      window.history.replaceState({}, '', window.location.pathname)
+      fetchBilling()
+    }
+  }, [fetchBilling])
+
+  const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing
+  const isActive = billing?.subscription.status === SubscriptionStatus.Active
+  const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue
+  const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod
+  const isCanceled = billing?.subscription.status === SubscriptionStatus.Canceled
   const trialDays =
-    isTrialing && billing.subscription.trialEndsAt
+    isTrialing && billing?.subscription.trialEndsAt
       ? daysRemaining(billing.subscription.trialEndsAt)
       : null
+  const graceDays = billing?.subscription.gracePeriodEndsAt
+    ? daysRemaining(billing.subscription.gracePeriodEndsAt)
+    : null
+  const isTrialExpiredGrace = isGracePeriod && !!billing?.subscription.trialEndsAt
 
-  const storagePct =
-    MOCK_USAGE.storageLimitBytes > 0
-      ? (MOCK_USAGE.storageUsedBytes / MOCK_USAGE.storageLimitBytes) * 100
-      : 0
-  const downloadsPct =
-    MOCK_USAGE.downloadsLimitBytes > 0
-      ? (MOCK_USAGE.downloadsUsedBytes / MOCK_USAGE.downloadsLimitBytes) * 100
-      : 0
+  const storageUsed = billing?.usage?.storageUsedBytes ?? 0
+  const storageLimit = billing?.usage?.storageLimitBytes ?? 1
+  const storagePct = storageLimit > 0 ? Math.min(100, (storageUsed / storageLimit) * 100) : 0
+  const estimatedCost = billing?.usage?.estimatedMonthlyCostCents ?? 0
 
-  // Determine the CTA label for the Current Plan card
-  function getPlanCta(): string {
-    if (!billing.paymentMethod) return 'Add payment method'
-    if (isTrialing) return 'Upgrade now'
-    return 'Choose a plan'
+  // ── Handlers ─────────────────────────────────────────────────────
+
+  function handleUpgradeClick() {
+    setPlanOpen(true)
   }
 
-  function handlePlanCtaClick() {
-    if (!billing.paymentMethod) {
+  async function handleSelectPayAsYouGo() {
+    setPlanOpen(false)
+    try {
+      const { clientSecret: cs } = await apiRequest<CreateSetupIntentResponse>(
+        '/billing/setup-intent',
+        { method: 'POST' },
+      )
+      setClientSecret(cs)
       setPaymentOpen(true)
-    } else {
-      setPlanOpen(true)
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to set up payment. Please try again.')
     }
   }
 
-  function handleAddPayment() {
-    // UNKNOWN: Real Stripe integration needed. This mocks a successful card save.
-    const mockMethod: PaymentMethod = {
-      id: 'pm_mock_1',
-      last4: '4242',
-      brand: 'Visa',
-      expMonth: 12,
-      expYear: 26,
-    }
-    setBilling((prev) => ({ ...prev, paymentMethod: mockMethod }))
-    setCardNumber('')
-    setExpiry('')
-    setCvc('')
+  function handlePaymentBack() {
     setPaymentOpen(false)
-    toast.success('Payment method added')
+    setPlanOpen(true)
   }
 
-  function handleRemovePayment() {
-    setBilling((prev) => ({ ...prev, paymentMethod: undefined }))
-    toast.success('Payment method removed')
+  function handlePaymentSuccess() {
+    setPaymentOpen(false)
+    setClientSecret('')
+    toast.success('Subscription activated!')
+    fetchBilling()
+    window.dispatchEvent(new CustomEvent('billing:updated'))
   }
+
+  async function handleUpdatePayment() {
+    try {
+      const { url } = await apiRequest<{ url: string }>('/billing/portal', { method: 'POST' })
+      window.location.href = url
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to open billing portal.')
+    }
+  }
+
+  // ── Loading state ────────────────────────────────────────────────
+
+  if (loading && !billing) {
+    return (
+      <div className="p-8">
+        <h1 className="text-2xl font-semibold text-[#14181f] mb-6">Billing</h1>
+        <div className="flex gap-6">
+          <div className="flex-1 flex flex-col gap-4">
+            <SkeletonCard height="h-40" />
+            <SkeletonCard height="h-32" />
+            <SkeletonCard height="h-28" />
+          </div>
+          <div className="w-[368px] flex-shrink-0">
+            <SkeletonCard height="h-80" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error && !billing) {
+    return (
+      <div className="p-8">
+        <h1 className="text-2xl font-semibold text-[#14181f] mb-6">Billing</h1>
+        <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+          Failed to load billing information: {error}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Render ───────────────────────────────────────────────────────
 
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-semibold text-zinc-900 mb-6">Billing</h1>
+      <h1 className="text-2xl font-semibold text-[#14181f] mb-6">Billing</h1>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Current Plan */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="rounded-lg border border-zinc-200 bg-white p-6 mb-4">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-4">
-          Current Plan
-        </h2>
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <span className="text-lg font-semibold text-zinc-900">
-                {currentPlan?.name ?? billing.subscription.planId}
-              </span>
+      {/* Past due warning banner */}
+      {isPastDue && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <WarningIcon size={20} className="text-amber-600 flex-shrink-0" weight="fill" />
+          <span className="text-sm text-amber-800">
+            Your last payment failed. Please{' '}
+            <button type="button" onClick={handleUpdatePayment} className="font-semibold underline">
+              update your payment method
+            </button>{' '}
+            to avoid losing access.{graceDays !== null ? ` ${graceDays} days remaining.` : ''}
+          </span>
+        </div>
+      )}
+
+      {/* Grace period warning banner */}
+      {isGracePeriod && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <WarningIcon size={20} className="text-amber-600 flex-shrink-0" weight="fill" />
+          <span className="text-sm text-amber-800">
+            {isTrialExpiredGrace
+              ? `Your free trial has expired.${graceDays !== null ? ` ${graceDays} days remaining` : ''} to upgrade or download your data.`
+              : `Subscription canceled.${graceDays !== null ? ` ${graceDays} days remaining` : ''} to reactivate or download your data.`}
+            {' '}
+            <button type="button" onClick={handleUpgradeClick} className="font-semibold underline">
+              {isTrialExpiredGrace ? 'Upgrade now' : 'Reactivate'}
+            </button>
+          </span>
+        </div>
+      )}
+
+      {/* Canceled banner */}
+      {isCanceled && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <WarningIcon size={20} className="text-red-600 flex-shrink-0" weight="fill" />
+          <span className="text-sm text-red-800">
+            Your account has been canceled.{' '}
+            <button type="button" onClick={handleUpgradeClick} className="font-semibold underline">
+              Reactivate
+            </button>{' '}
+            to regain access.
+          </span>
+        </div>
+      )}
+
+      <div className="flex gap-6">
+        {/* ── Left column ──────────────────────────────────────── */}
+        <div className="flex-1 min-w-0 flex flex-col gap-4">
+
+          {/* Plan card */}
+          <div
+            className={`rounded-xl border-2 p-6 bg-white ${
+              isActive || isPastDue
+                ? 'border-[rgba(16,183,127,0.2)]'
+                : isCanceled
+                  ? 'border-red-200'
+                  : isGracePeriod
+                    ? 'border-amber-200'
+                    : 'border-[rgba(0,128,255,0.2)]'
+            }`}
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                {/* Icon */}
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+                    isActive || isPastDue
+                      ? 'bg-[rgba(16,183,127,0.1)]'
+                      : isGracePeriod
+                        ? 'bg-amber-100'
+                        : isCanceled
+                          ? 'bg-red-100'
+                          : 'bg-gradient-to-br from-[#0066ff] to-[#0052cc]'
+                  }`}
+                >
+                  <CloudIcon
+                    size={20}
+                    weight="fill"
+                    className={
+                      isActive || isPastDue
+                        ? 'text-[#10b77f]'
+                        : isGracePeriod
+                          ? 'text-amber-600'
+                          : isCanceled
+                            ? 'text-red-600'
+                            : 'text-white'
+                    }
+                  />
+                </div>
+
+                <div>
+                  <h2 className="text-lg font-semibold text-[#14181f]">
+                    {isActive || isPastDue || isGracePeriod || isCanceled ? 'Pay-as-you-go' : 'Free Trial'}
+                  </h2>
+                  <p className="text-sm text-[#677183]">
+                    {isActive || isPastDue
+                      ? 'Unlimited storage, pay only for what you use'
+                      : isGracePeriod
+                        ? `Read-only access${graceDays !== null ? ` — ${graceDays} days remaining` : ''}`
+                        : isCanceled
+                          ? 'Subscription inactive'
+                          : trialDays !== null
+                            ? `${trialDays} days remaining — 1 TiB included`
+                            : '14-day trial — 1 TiB included'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Status badge */}
               {isTrialing && (
-                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                <span className="rounded-full bg-[#dbeafe] px-3 py-1 text-xs font-semibold text-[#1e40af]">
                   Trial
                 </span>
               )}
+              {(isActive || isPastDue) && (
+                <span className="flex items-center gap-1 rounded-full bg-[rgba(16,183,127,0.1)] px-3 py-1 text-xs font-semibold text-[#059669]">
+                  <CheckCircleIcon size={14} weight="fill" />
+                  Active
+                </span>
+              )}
+              {isGracePeriod && (
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                  Grace Period
+                </span>
+              )}
+              {isCanceled && (
+                <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
+                  Canceled
+                </span>
+              )}
             </div>
-            {trialDays !== null && (
-              <span className="text-sm text-zinc-500">{trialDays} days remaining</span>
+
+            {/* Trial CTA banner */}
+            {isTrialing && (
+              <div className="mt-4 rounded-lg bg-[#f8fafc] border border-[#e1e4ea] px-4 py-3 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-[#14181f]">
+                    Ready to unlock unlimited storage?
+                  </p>
+                  <p className="text-xs text-[#99a0ae] mt-0.5">
+                    No credit card required during trial
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleUpgradeClick}
+                  className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#0066ff] to-[#0052cc] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                >
+                  Upgrade
+                  <ArrowRightIcon size={14} weight="bold" />
+                </button>
+              </div>
             )}
-            {currentPlan && (
-              <p className="text-sm text-zinc-600 mt-1">
-                {currentPlan.features.join(' · ')}
-              </p>
+
+            {/* Grace period / Canceled reactivation CTA */}
+            {(isGracePeriod || isCanceled) && (
+              <div className={`mt-4 rounded-lg px-4 py-3 flex items-center justify-between ${
+                isCanceled ? 'bg-red-50 border border-red-200' : 'bg-amber-50 border border-amber-200'
+              }`}>
+                <div>
+                  <p className="text-sm font-medium text-[#14181f]">
+                    {isCanceled
+                      ? 'Reactivate your subscription to regain full access'
+                      : isTrialExpiredGrace
+                        ? 'Upgrade to keep your data and unlock unlimited storage'
+                        : 'Reactivate your subscription to restore full access'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleUpgradeClick}
+                  className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#0066ff] to-[#0052cc] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                >
+                  {isTrialExpiredGrace ? 'Upgrade' : 'Reactivate'}
+                  <ArrowRightIcon size={14} weight="bold" />
+                </button>
+              </div>
             )}
           </div>
-          <div className="shrink-0">
-            <Button variant="filled" onClick={handlePlanCtaClick}>
-              {getPlanCta()}
-            </Button>
+
+          {/* Current usage card */}
+          <div className="rounded-xl border border-[#e1e4ea] bg-white p-6">
+            <h3 className="text-sm font-semibold text-[#14181f] mb-1">Current usage</h3>
+            <p className="text-xs text-[#99a0ae] mb-4">
+              {isActive || isPastDue || isGracePeriod
+                ? 'Your usage this billing period'
+                : isCanceled
+                  ? 'Usage at time of cancellation'
+                  : 'Trial usage (1 TiB limit)'}
+            </p>
+
+            {/* Storage bar */}
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-[#3a4252]">Storage used</span>
+              <span className="text-sm font-medium text-[#14181f]">
+                {formatBytes(storageUsed)}
+                {storageLimit > 0 && ` / ${formatBytes(storageLimit)}`}
+              </span>
+            </div>
+            <ProgressBar
+              value={storagePct}
+              size="sm"
+              label="Storage usage"
+            />
+
+            {/* Estimated cost (active/grace) */}
+            {(isActive || isPastDue || isGracePeriod) && (
+              <div className="mt-4 flex items-center justify-between pt-4 border-t border-[#f1f2f4]">
+                <span className="text-sm text-[#3a4252]">Estimated monthly cost</span>
+                <span className="text-sm font-semibold text-[#14181f]">
+                  {formatCents(estimatedCost)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Payment method card */}
+          <div className="rounded-xl border border-[#e1e4ea] bg-white p-6">
+            <h3 className="text-sm font-semibold text-[#14181f] mb-4">Payment method</h3>
+
+            {billing?.paymentMethod ? (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-[#0066ff] to-[#0052cc]">
+                    <CreditCardIcon size={20} className="text-white" weight="fill" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-[#14181f]">
+                      &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; {billing.paymentMethod.last4}
+                    </p>
+                    <p className="text-xs text-[#99a0ae]">
+                      Expires {String(billing.paymentMethod.expMonth).padStart(2, '0')}/{String(billing.paymentMethod.expYear).slice(-2)}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleUpdatePayment}
+                  className="rounded-lg border border-[#e1e4ea] px-3 py-1.5 text-sm font-medium text-[#3a4252] transition-colors hover:bg-zinc-50"
+                >
+                  Update
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-[#e1e4ea] px-6 py-8">
+                <CreditCardIcon size={32} className="text-[#c9cdd6]" />
+                <p className="text-sm text-[#99a0ae]">No payment method added</p>
+                <button
+                  type="button"
+                  onClick={handleUpgradeClick}
+                  className="rounded-lg border border-[#e1e4ea] px-3 py-1.5 text-sm font-medium text-[#3a4252] transition-colors hover:bg-zinc-50"
+                >
+                  Add
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Right column (pricing sidebar) ─────────────────── */}
+        <div className="w-[368px] flex-shrink-0">
+          <div className="rounded-xl border border-[#e1e4ea] bg-white overflow-hidden">
+            {/* Blue header */}
+            <div className="bg-gradient-to-r from-[#0066ff] to-[#0052cc] px-6 py-5">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-white/70">
+                {isActive || isPastDue || isGracePeriod ? 'Simple pricing' : 'Pay-as-you-go'}
+              </p>
+              <div className="mt-2 flex items-baseline gap-1">
+                <span className="text-3xl font-bold text-white">$4.99</span>
+                <span className="text-sm text-white/70">/ TiB / month</span>
+              </div>
+            </div>
+
+            {/* Features */}
+            <div className="px-6 py-5">
+              <ul className="flex flex-col gap-3">
+                {[
+                  'No egress fees',
+                  'No API request fees',
+                  'Data integrity guarantees',
+                  'Enterprise-grade security',
+                ].map((f) => (
+                  <li key={f} className="flex items-center gap-2.5 text-sm text-[#3a4252]">
+                    <CheckIcon size={16} className="text-[#10b77f] flex-shrink-0" weight="bold" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+
+              {/* CTA for trial / grace / canceled users */}
+              {(isTrialing || isGracePeriod || isCanceled) && (
+                <button
+                  type="button"
+                  onClick={handleUpgradeClick}
+                  className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#0066ff] to-[#0052cc] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                >
+                  {isTrialing ? 'Upgrade now' : 'Reactivate'}
+                </button>
+              )}
+
+              {/* Contact sales link */}
+              <div className="mt-4 text-center">
+                <span className="text-xs text-[#99a0ae]">Questions about pricing? </span>
+                <a
+                  href="mailto:sales@filhyperspace.com"
+                  className="text-xs font-medium text-[#0066ff] hover:underline"
+                >
+                  Contact sales →
+                </a>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Payment Method */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="rounded-lg border border-zinc-200 bg-white p-6 mb-4">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-4">
-          Payment Method
-        </h2>
-        {billing.paymentMethod ? (
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <CreditCardIcon size={20} className="text-zinc-500" />
-              <span className="text-sm text-zinc-700">
-                {billing.paymentMethod.brand} ending in {billing.paymentMethod.last4}
-              </span>
-              <span className="text-sm text-zinc-500">
-                Exp {String(billing.paymentMethod.expMonth).padStart(2, '0')}/
-                {String(billing.paymentMethod.expYear).slice(-2)}
-              </span>
-            </div>
-            <Button variant="ghost" onClick={handleRemovePayment}>
-              Remove
-            </Button>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <p className="text-sm text-zinc-500">No payment method on file.</p>
-            <div>
-              <Button variant="ghost" onClick={() => setPaymentOpen(true)}>
-                Add payment method
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Modals */}
+      <ChoosePlanDialog
+        open={planOpen}
+        onClose={() => setPlanOpen(false)}
+        onSelectPayAsYouGo={handleSelectPayAsYouGo}
+      />
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Usage This Period */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="rounded-lg border border-zinc-200 bg-white p-6">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-4">
-          Usage This Period
-        </h2>
-        <UsageRow
-          label="Storage used"
-          value={`${formatBytes(MOCK_USAGE.storageUsedBytes)} / ${formatBytes(MOCK_USAGE.storageLimitBytes)}`}
-          percent={storagePct}
-        />
-        <UsageRow
-          label="Downloads"
-          value={`${formatBytes(MOCK_USAGE.downloadsUsedBytes)} / ${formatBytes(MOCK_USAGE.downloadsLimitBytes)}`}
-          percent={downloadsPct}
-        />
-        <UsageRow
-          label="Buckets"
-          value={`${MOCK_USAGE.bucketsCount} / ${MOCK_USAGE.bucketsLimit}`}
-        />
-        <UsageRow
-          label="Objects"
-          value={String(MOCK_USAGE.objectsCount)}
-        />
-        <UsageRow
-          label="Access Keys"
-          value={`${MOCK_USAGE.accessKeysCount} / ${MOCK_USAGE.accessKeysLimit}`}
-        />
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Choose Plan Modal */}
-      {/* ------------------------------------------------------------------ */}
-      <Modal open={planOpen} onClose={() => setPlanOpen(false)} size="lg">
-        <ModalHeader onClose={() => setPlanOpen(false)}>Choose your plan</ModalHeader>
-        <ModalBody>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            {MOCK_PLANS.filter((p) => p.id !== 'free_trial').map((plan) => (
-              <div
-                key={plan.id}
-                onClick={() => setSelectedPlan(plan.id)}
-                className={[
-                  'cursor-pointer rounded-lg border-2 p-4 transition-colors',
-                  selectedPlan === plan.id
-                    ? 'border-brand-600 bg-brand-50'
-                    : 'border-zinc-200 hover:border-zinc-300',
-                ].join(' ')}
-              >
-                <h3 className="font-semibold text-zinc-900">{plan.name}</h3>
-                <p className="mt-1 text-sm text-zinc-500">{plan.description}</p>
-                <p className="mt-3 text-2xl font-bold text-zinc-900">
-                  {plan.flatPriceCents
-                    ? `$${(plan.flatPriceCents / 100).toFixed(0)}/mo`
-                    : `$${(plan.pricePerTibCents / 100).toFixed(2)}/TiB`}
-                </p>
-                <ul className="mt-3 flex flex-col gap-1">
-                  {plan.features.map((f) => (
-                    <li key={f} className="flex items-center gap-1.5 text-xs text-zinc-600">
-                      <CheckIcon size={12} className="text-green-500 flex-shrink-0" />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </ModalBody>
-        <ModalFooter>
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setPlanOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="filled"
-              onClick={() => {
-                setPlanOpen(false)
-                setPaymentOpen(true)
-              }}
-            >
-              Continue to payment
-            </Button>
-          </div>
-        </ModalFooter>
-      </Modal>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Add Payment Method Modal */}
-      {/* ------------------------------------------------------------------ */}
-      <Modal open={paymentOpen} onClose={() => setPaymentOpen(false)} size="sm">
-        <ModalHeader onClose={() => setPaymentOpen(false)}>Add payment method</ModalHeader>
-        <ModalBody>
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-zinc-700">Card number</label>
-              <Input
-                value={cardNumber}
-                onChange={setCardNumber}
-                placeholder="4242 4242 4242 4242"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-zinc-700">Expiry</label>
-                <Input value={expiry} onChange={setExpiry} placeholder="MM/YY" />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-zinc-700">CVC</label>
-                <Input value={cvc} onChange={setCvc} placeholder="123" />
-              </div>
-            </div>
-            <p className="text-xs text-zinc-400">
-              {/* UNKNOWN: Real Stripe integration needed. This is a UI-only placeholder. */}
-              Your payment information is encrypted and secure.
-            </p>
-          </div>
-        </ModalBody>
-        <ModalFooter>
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setPaymentOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="filled" onClick={handleAddPayment}>
-              Add payment method
-            </Button>
-          </div>
-        </ModalFooter>
-      </Modal>
+      <AddPaymentDialog
+        open={paymentOpen}
+        clientSecret={clientSecret}
+        onClose={() => setPaymentOpen(false)}
+        onBack={handlePaymentBack}
+        onSuccess={handlePaymentSuccess}
+      />
     </div>
   )
 }

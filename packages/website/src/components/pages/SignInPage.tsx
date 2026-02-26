@@ -26,7 +26,7 @@ export function SignInPage() {
       {/* Heading */}
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold text-zinc-950">Welcome back</h1>
-        <p className="text-sm text-zinc-500">Sign in to continue to Filstor</p>
+        <p className="text-sm text-zinc-500">Sign in to continue to start storing on the filecoin network!</p>
       </div>
 
       {/* Social buttons — redirect to Auth0 Universal Login with connection hint */}

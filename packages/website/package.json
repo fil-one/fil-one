@@ -12,6 +12,8 @@
   "dependencies": {
     "@hyperspace/shared": "*",
     "@hyperspace/ui": "*",
+    "@stripe/react-stripe-js": "^5.6.0",
+    "@stripe/stripe-js": "^8.8.0",
     "@tanstack/react-router": "^1.29.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

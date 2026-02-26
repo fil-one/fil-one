@@ -12,10 +12,11 @@ import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as path from 'path';
 import { Construct } from 'constructs';
-import { AccessLevel, ApiFunction } from '../constructs/api-function';
+import { ApiFunction } from '../constructs/api-function';
 
 interface PlatformStackProps extends cdk.StackProps {
   uploadsTable: dynamodb.ITable;
+  billingTable: dynamodb.ITable;
   certificate: acm.ICertificate;
   hostedZone: route53.IHostedZone;
   domainName: string;
@@ -31,6 +32,12 @@ export class PlatformStack extends cdk.Stack {
     const authSecret = new secretsmanager.Secret(this, 'AuthenticationSecrets', {
       secretName: 'AuthenticationSecrets',
       description: 'Auth0 client credentials (AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET)',
+    });
+
+    // ── Billing / Stripe credentials ───────────────────────────────────
+    const billingSecret = new secretsmanager.Secret(this, 'BillingSecrets', {
+      secretName: 'BillingSecrets',
+      description: 'Stripe credentials (STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID)',
     });
 
     const httpApi = new apigwv2.HttpApi(this, 'HyperspaceHttpApi');
@@ -117,101 +124,111 @@ export class PlatformStack extends cdk.Stack {
       target: route53.RecordTarget.fromAlias(new route53Targets.CloudFrontTarget(distribution)),
     });
 
-    // ── Lambda env vars (need domain for auth redirects) ─────────────
+    // ── Shared references ────────────────────────────────────────────
     const cfDomain = `https://${props.domainName}`;
-
     const apiDefaults = { httpApi, authSecret, auth0Env, sharedBundling };
+    const { uploadsTable, billingTable } = props;
 
-    const tableEnv = { UPLOADS_TABLE_NAME: props.uploadsTable.tableName };
-    const fileEnv = { ...tableEnv, USER_FILES_BUCKET_NAME: userFilesBucket.bucketName };
+    const uploadsEnv = { UPLOADS_TABLE_NAME: uploadsTable.tableName };
+    const uploadsAndFilesEnv = { ...uploadsEnv, USER_FILES_BUCKET_NAME: userFilesBucket.bucketName };
+    const billingEnv = {
+      BILLING_TABLE_NAME: billingTable.tableName,
+      BILLING_SECRET_NAME: billingSecret.secretName,
+    };
+    // Data handlers need billing table access for subscription guard middleware
+    const dataEnv = { ...uploadsEnv, BILLING_TABLE_NAME: billingTable.tableName };
+    const dataAndFilesEnv = { ...dataEnv, USER_FILES_BUCKET_NAME: userFilesBucket.bucketName };
 
-    new ApiFunction(this, 'Upload', {
+    // ── Uploads ──────────────────────────────────────────────────────
+
+    const upload = new ApiFunction(this, 'Upload', {
       ...apiDefaults,
       handlerFile: 'upload.ts',
       routePath: '/api/upload',
       methods: [apigwv2.HttpMethod.POST],
-      environment: tableEnv,
-      table: props.uploadsTable,
-      tableAccess: AccessLevel.WRITE,
+      environment: dataEnv,
     });
+    uploadsTable.grantWriteData(upload.function);
+    billingTable.grantReadWriteData(upload.function);
 
-    // ── Bucket CRUD ─────────────────────────────────────────────────────
-    new ApiFunction(this, 'ListBuckets', {
+    // ── Bucket CRUD ─────────────────────────────────────────────────
+
+    const listBuckets = new ApiFunction(this, 'ListBuckets', {
       ...apiDefaults,
       handlerFile: 'list-buckets.ts',
       routePath: '/api/buckets',
       methods: [apigwv2.HttpMethod.GET],
-      environment: tableEnv,
-      table: props.uploadsTable,
-      tableAccess: AccessLevel.READ,
+      environment: dataEnv,
     });
+    uploadsTable.grantReadData(listBuckets.function);
+    billingTable.grantReadWriteData(listBuckets.function);
 
-    new ApiFunction(this, 'CreateBucket', {
+    const createBucket = new ApiFunction(this, 'CreateBucket', {
       ...apiDefaults,
       handlerFile: 'create-bucket.ts',
       routePath: '/api/buckets',
       methods: [apigwv2.HttpMethod.POST],
-      environment: tableEnv,
-      table: props.uploadsTable,
-      tableAccess: AccessLevel.WRITE,
+      environment: dataEnv,
     });
+    uploadsTable.grantWriteData(createBucket.function);
+    billingTable.grantReadWriteData(createBucket.function);
 
-    new ApiFunction(this, 'DeleteBucket', {
+    const deleteBucket = new ApiFunction(this, 'DeleteBucket', {
       ...apiDefaults,
       handlerFile: 'delete-bucket.ts',
       routePath: '/api/buckets/{name}',
       methods: [apigwv2.HttpMethod.DELETE],
-      environment: tableEnv,
-      table: props.uploadsTable,
-      tableAccess: AccessLevel.READ_WRITE,
+      environment: dataEnv,
     });
+    uploadsTable.grantReadWriteData(deleteBucket.function);
+    billingTable.grantReadWriteData(deleteBucket.function);
 
-    // ── Object CRUD ─────────────────────────────────────────────────────
-    new ApiFunction(this, 'ListObjects', {
+    // ── Object CRUD ─────────────────────────────────────────────────
+
+    const listObjects = new ApiFunction(this, 'ListObjects', {
       ...apiDefaults,
       handlerFile: 'list-objects.ts',
       routePath: '/api/buckets/{name}/objects',
       methods: [apigwv2.HttpMethod.GET],
-      environment: tableEnv,
-      table: props.uploadsTable,
-      tableAccess: AccessLevel.READ,
+      environment: dataEnv,
     });
+    uploadsTable.grantReadData(listObjects.function);
+    billingTable.grantReadWriteData(listObjects.function);
 
-    new ApiFunction(this, 'UploadObject', {
+    const uploadObject = new ApiFunction(this, 'UploadObject', {
       ...apiDefaults,
       handlerFile: 'upload-object.ts',
       routePath: '/api/buckets/{name}/objects/upload',
       methods: [apigwv2.HttpMethod.POST],
-      environment: fileEnv,
-      table: props.uploadsTable,
-      tableAccess: AccessLevel.READ_WRITE,
-      s3Bucket: userFilesBucket,
-      s3Access: AccessLevel.WRITE,
+      environment: dataAndFilesEnv,
     });
+    uploadsTable.grantReadWriteData(uploadObject.function);
+    userFilesBucket.grantWrite(uploadObject.function);
+    billingTable.grantReadWriteData(uploadObject.function);
 
-    new ApiFunction(this, 'DownloadObject', {
+    const downloadObject = new ApiFunction(this, 'DownloadObject', {
       ...apiDefaults,
       handlerFile: 'download-object.ts',
       routePath: '/api/buckets/{name}/objects/download',
       methods: [apigwv2.HttpMethod.GET],
-      environment: fileEnv,
-      table: props.uploadsTable,
-      tableAccess: AccessLevel.READ,
-      s3Bucket: userFilesBucket,
-      s3Access: AccessLevel.READ,
+      environment: dataAndFilesEnv,
     });
+    uploadsTable.grantReadData(downloadObject.function);
+    userFilesBucket.grantRead(downloadObject.function);
+    billingTable.grantReadWriteData(downloadObject.function);
 
-    new ApiFunction(this, 'DeleteObject', {
+    const deleteObject = new ApiFunction(this, 'DeleteObject', {
       ...apiDefaults,
       handlerFile: 'delete-object.ts',
       routePath: '/api/buckets/{name}/objects',
       methods: [apigwv2.HttpMethod.DELETE],
-      environment: fileEnv,
-      table: props.uploadsTable,
-      tableAccess: AccessLevel.READ_WRITE,
-      s3Bucket: userFilesBucket,
-      s3Access: AccessLevel.READ_WRITE,
+      environment: dataAndFilesEnv,
     });
+    uploadsTable.grantReadWriteData(deleteObject.function);
+    userFilesBucket.grantReadWrite(deleteObject.function);
+    billingTable.grantReadWriteData(deleteObject.function);
+
+    // ── Auth ────────────────────────────────────────────────────────
 
     new ApiFunction(this, 'AuthCallback', {
       ...apiDefaults,
@@ -228,6 +245,60 @@ export class PlatformStack extends cdk.Stack {
       methods: [apigwv2.HttpMethod.GET],
       environment: { WEBSITE_URL: cfDomain },
     });
+
+    // ── Billing API ─────────────────────────────────────────────────
+
+    const getBilling = new ApiFunction(this, 'GetBilling', {
+      ...apiDefaults,
+      handlerFile: 'get-billing.ts',
+      routePath: '/api/billing',
+      methods: [apigwv2.HttpMethod.GET],
+      environment: { ...billingEnv, UPLOADS_TABLE_NAME: uploadsTable.tableName },
+    });
+    billingTable.grantReadWriteData(getBilling.function);
+    uploadsTable.grantReadData(getBilling.function);
+    billingSecret.grantRead(getBilling.function);
+
+    const createSetupIntent = new ApiFunction(this, 'CreateSetupIntent', {
+      ...apiDefaults,
+      handlerFile: 'create-setup-intent.ts',
+      routePath: '/api/billing/setup-intent',
+      methods: [apigwv2.HttpMethod.POST],
+      environment: billingEnv,
+    });
+    billingTable.grantReadWriteData(createSetupIntent.function);
+    billingSecret.grantRead(createSetupIntent.function);
+
+    const activateSubscription = new ApiFunction(this, 'ActivateSubscription', {
+      ...apiDefaults,
+      handlerFile: 'activate-subscription.ts',
+      routePath: '/api/billing/activate',
+      methods: [apigwv2.HttpMethod.POST],
+      environment: billingEnv,
+    });
+    billingTable.grantReadWriteData(activateSubscription.function);
+    billingSecret.grantRead(activateSubscription.function);
+
+    const createPortalSession = new ApiFunction(this, 'CreatePortalSession', {
+      ...apiDefaults,
+      handlerFile: 'create-portal-session.ts',
+      routePath: '/api/billing/portal',
+      methods: [apigwv2.HttpMethod.POST],
+      environment: { ...billingEnv, WEBSITE_URL: cfDomain },
+    });
+    billingTable.grantReadData(createPortalSession.function);
+    billingSecret.grantRead(createPortalSession.function);
+
+    const stripeWebhook = new ApiFunction(this, 'StripeWebhook', {
+      ...apiDefaults,
+      handlerFile: 'stripe-webhook.ts',
+      routePath: '/api/stripe/webhook',
+      methods: [apigwv2.HttpMethod.POST],
+      skipAuth: true,
+      environment: billingEnv,
+    });
+    billingTable.grantReadWriteData(stripeWebhook.function);
+    billingSecret.grantRead(stripeWebhook.function);
 
     // ── Deploy SPA to S3 ───────────────────────────────────────────────
     new s3deploy.BucketDeployment(this, 'HyperspaceDeployment', {

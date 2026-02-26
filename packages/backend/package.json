@@ -16,6 +16,7 @@
     "@middy/core": "^5.0.0",
     "@middy/http-header-normalizer": "^5.0.0",
     "jose": "^5.0.0",
+    "stripe": "^20.4.0",
     "uuid": "^9.0.0"
   },
   "devDependencies": {

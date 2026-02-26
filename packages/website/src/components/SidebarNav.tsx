@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   SquaresFourIcon,
   DatabaseIcon,
@@ -12,6 +13,9 @@ import {
 import { Link, useMatchRoute } from '@tanstack/react-router';
 import { ProgressBar } from '@hyperspace/ui/ProgressBar';
 import { Button } from '@hyperspace/ui/Button';
+import { SubscriptionStatus } from '@hyperspace/shared';
+import type { BillingInfo } from '@hyperspace/shared';
+import { getBilling } from '../lib/api.js';
 
 type SidebarNavProps = {
   collapsed: boolean;
@@ -32,8 +36,37 @@ const navItems: NavItem[] = [
   { path: '/settings', icon: GearIcon, label: 'Settings' },
 ];
 
+function daysRemaining(isoString: string): number {
+  const ms = new Date(isoString).getTime() - Date.now();
+  return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)));
+}
+
 export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
+  const [billing, setBilling] = useState<BillingInfo | null>(null);
+
+  useEffect(() => {
+    const refresh = () => getBilling().then(setBilling).catch(() => {/* silent */});
+    refresh();
+    window.addEventListener('billing:updated', refresh);
+    return () => window.removeEventListener('billing:updated', refresh);
+  }, []);
+
+  const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
+  const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod;
+  const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
+  const isCanceled = billing?.subscription.status === SubscriptionStatus.Canceled;
+  const trialDays = isTrialing && billing?.subscription.trialEndsAt
+    ? daysRemaining(billing.subscription.trialEndsAt)
+    : null;
+  const graceDays = billing?.subscription.gracePeriodEndsAt
+    ? daysRemaining(billing.subscription.gracePeriodEndsAt)
+    : null;
+  const isTrialExpiredGrace = isGracePeriod && !!billing?.subscription.trialEndsAt;
+
+  const storageUsed = billing?.usage?.storageUsedBytes ?? 0;
+  const storageLimit = billing?.usage?.storageLimitBytes ?? 1;
+  const storagePct = storageLimit > 0 ? Math.min(100, (storageUsed / storageLimit) * 100) : 0;
 
   return (
     <nav className="flex h-full flex-col border-r border-zinc-200 bg-white">
@@ -69,10 +102,9 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
             <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
               Storage
             </span>
-            <span className="text-xs text-zinc-700">0%</span>
+            <span className="text-xs text-zinc-700">{storagePct.toFixed(0)}%</span>
           </div>
-          {/* UNKNOWN: storage usage value should come from an API/context — using 0 as placeholder */}
-          <ProgressBar value={0} size="sm" label="Storage usage" />
+          <ProgressBar value={storagePct} size="sm" label="Storage usage" />
         </div>
       )}
 
@@ -109,17 +141,74 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Trial section (expanded only) */}
-      {!collapsed && (
+      {/* Trial section (expanded only) — only shown for trialing users */}
+      {!collapsed && isTrialing && (
         <div className="border-t border-zinc-200 px-3 py-4">
-          <p className="text-xs text-zinc-500">14 days left in trial</p>
+          <p className="text-xs text-zinc-500">
+            {trialDays !== null ? `${trialDays} days left in trial` : 'Trial active'}
+          </p>
           <p className="mt-0.5 text-xs text-zinc-400">
-            Upgrade to continue using Filstor.
+            Upgrade to continue using Hyperspace.
           </p>
           <div className="mt-3">
-            {/* UNKNOWN: upgrade href — using /billing as the most defensible default */}
             <Button variant="filled" href="/billing" className="w-full justify-center text-xs">
               Upgrade
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Grace period banner (trial expired) */}
+      {!collapsed && isGracePeriod && isTrialExpiredGrace && (
+        <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
+          <p className="text-xs font-medium text-amber-800">
+            Your free trial has expired.{graceDays !== null ? ` ${graceDays} days left` : ''} to upgrade or download your data.
+          </p>
+          <div className="mt-3">
+            <Button variant="filled" href="/billing" className="w-full justify-center text-xs">
+              Upgrade
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Grace period banner (subscription canceled) */}
+      {!collapsed && isGracePeriod && !isTrialExpiredGrace && (
+        <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
+          <p className="text-xs font-medium text-amber-800">
+            Subscription canceled.{graceDays !== null ? ` ${graceDays} days left` : ''} to reactivate or download your data.
+          </p>
+          <div className="mt-3">
+            <Button variant="filled" href="/billing" className="w-full justify-center text-xs">
+              Reactivate
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Past due banner */}
+      {!collapsed && isPastDue && (
+        <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
+          <p className="text-xs font-medium text-amber-800">
+            Payment failed. Update your payment method to avoid losing access.{graceDays !== null ? ` ${graceDays} days remaining.` : ''}
+          </p>
+          <div className="mt-3">
+            <Button variant="filled" href="/billing" className="w-full justify-center text-xs">
+              Update payment
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Canceled banner */}
+      {!collapsed && isCanceled && (
+        <div className="border-t border-red-200 bg-red-50 px-3 py-4">
+          <p className="text-xs font-medium text-red-800">
+            Account canceled. Reactivate to regain access.
+          </p>
+          <div className="mt-3">
+            <Button variant="filled" href="/billing" className="w-full justify-center text-xs">
+              Reactivate
             </Button>
           </div>
         </div>

@@ -32,6 +32,7 @@ const platformStack = new PlatformStack(app, 'HyperspacePlatformStack', {
   env,
   crossRegionReferences: true,
   uploadsTable: databaseStack.uploadsTable,
+  billingTable: databaseStack.billingTable,
   certificate: certificateStack.certificate,
   hostedZone: domainStack.hostedZone,
   domainName: 'console.filhyperspace.com',

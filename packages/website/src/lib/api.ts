@@ -62,10 +62,46 @@ export async function apiRequest<T>(
     throw new Error('Session expired. Redirecting to login...');
   }
 
+  if (response.status === 403) {
+    const body = await response.json().catch(() => ({})) as { message?: string; code?: string };
+    if (body.code === 'GRACE_PERIOD_WRITE_BLOCKED') {
+      throw new Error('Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.');
+    }
+    if (body.code === 'SUBSCRIPTION_CANCELED') {
+      throw new Error('Your subscription has been canceled. Please reactivate to regain access.');
+    }
+    throw new Error(body.message ?? 'Access denied');
+  }
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({})) as { message?: string };
     throw new Error(error.message ?? `Request failed with status ${response.status}`);
   }
 
   return response.json() as Promise<T>;
+}
+
+// ── Billing API ─────────────────────────────────────────────────────────
+
+import type {
+  BillingInfo,
+  CreateSetupIntentResponse,
+  ActivateSubscriptionResponse,
+  CreatePortalSessionResponse,
+} from '@hyperspace/shared';
+
+export function getBilling(): Promise<BillingInfo> {
+  return apiRequest<BillingInfo>('/billing');
+}
+
+export function createSetupIntent(): Promise<CreateSetupIntentResponse> {
+  return apiRequest<CreateSetupIntentResponse>('/billing/setup-intent', { method: 'POST' });
+}
+
+export function activateSubscription(): Promise<ActivateSubscriptionResponse> {
+  return apiRequest<ActivateSubscriptionResponse>('/billing/activate', { method: 'POST' });
+}
+
+export function createPortalSession(): Promise<CreatePortalSessionResponse> {
+  return apiRequest<CreatePortalSessionResponse>('/billing/portal', { method: 'POST' });
 }

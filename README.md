@@ -118,14 +118,70 @@ aws secretsmanager put-secret-value \
 - **Identifier (audience)**: `console.filhyperspace.com` — this must match `AUTH0_AUDIENCE` in the CDK stack and website env. It's what makes Auth0 issue a JWT access token (instead of an opaque one) and is the `aud` claim the middleware validates.
 - Under the API's **Machine to Machine Applications** tab, authorize your application so it can exchange tokens.
 
+## Stripe (Billing)
+
+### 1. Create the product in Stripe Dashboard
+
+Use **test mode** first. Switch to live mode for production.
+
+1. **Products > Add product**
+   - Name: `Hyperspace Storage`
+   - Description: `Decentralized cloud storage — $4.99/TiB/month`
+2. **Add price** on that product:
+   - Pricing model: Standard
+   - Recurring: Monthly
+   - Usage type: **Metered** (sum of usage values during period)
+   - Price: `$4.99` per unit, unit label: `TiB`
+3. Note the **Price ID** (`price_xxxxx`)
+
+### 2. Configure Customer Portal
+
+**Settings > Billing > Customer portal** — enable:
+- Update payment method
+- View billing history / invoices
+- Cancel subscription
+
+### 3. Configure Webhooks (after first deploy)
+
+**Developers > Webhooks > Add endpoint**:
+- URL: `https://console.filhyperspace.com/api/stripe/webhook`
+- Events: `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `customer.subscription.trial_will_end`, `invoice.payment_succeeded`, `invoice.payment_failed`
+- Note the **Signing Secret** (`whsec_xxxxx`)
+
+### 4. Secrets
+
+The backend reads Stripe credentials from `BillingSecrets` in AWS Secrets Manager:
+
+```json
+{
+  "STRIPE_SECRET_KEY": "sk_test_xxxxx",
+  "STRIPE_WEBHOOK_SECRET": "whsec_xxxxx",
+  "STRIPE_PRICE_ID": "price_xxxxx"
+}
+```
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id BillingSecrets \
+  --secret-string '{"STRIPE_SECRET_KEY":"...","STRIPE_WEBHOOK_SECRET":"...","STRIPE_PRICE_ID":"..."}' \
+  --profile hyperspace
+```
+
+The frontend needs the **publishable key** in its env:
+
+```bash
+# packages/website/.env.local
+VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx
+```
+
 ## Stacks
 
 | Stack | Resources |
 |---|---|
 | `HyperspaceDomainStack` | Route53 hosted zone for `*.filhyperspace.com` |
-| `HyperspaceDatabaseStack` | DynamoDB table `hyperspace-uploads` |
-| `HyperspaceApiStack` | API Gateway HTTP API + Lambda upload handler |
-| `HyperspaceWebsiteStack` | S3 + CloudFront distribution + Route53 alias |
+| `HyperspaceCertificateStack` | ACM certificate in us-east-1 for CloudFront |
+| `HyperspaceDatabaseStack` | DynamoDB tables: `hyperspace-uploads`, `hyperspace-billing` |
+| `HyperspacePlatformStack` | API Gateway + Lambda handlers, S3 buckets, CloudFront, Route53 aliases, Secrets Manager (`AuthenticationSecrets`, `BillingSecrets`) |
 
 ## UI submodule (`packages/ui`)
 

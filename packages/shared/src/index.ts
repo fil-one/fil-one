@@ -39,15 +39,14 @@ export type {
   RecentActivityResponse,
 } from './api/dashboard.js';
 
+export { PlanId, SubscriptionStatus } from './api/billing.js';
 export type {
-  PlanId,
   Plan,
-  SubscriptionStatus,
   Subscription,
   PaymentMethod,
+  UsageInfo,
   BillingInfo,
-  AddPaymentMethodRequest,
-  AddPaymentMethodResponse,
-  ChangePlanRequest,
-  ChangePlanResponse,
+  CreateSetupIntentResponse,
+  ActivateSubscriptionResponse,
+  CreatePortalSessionResponse,
 } from './api/billing.js';

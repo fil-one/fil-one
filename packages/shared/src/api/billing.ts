@@ -1,23 +1,32 @@
-export type PlanId = 'free_trial' | 'pay_as_you_go' | 'starter' | 'pro'
+export enum PlanId {
+  FreeTrial = 'free_trial',
+  PayAsYouGo = 'pay_as_you_go',
+}
+
+export enum SubscriptionStatus {
+  Trialing = 'trialing',
+  Active = 'active',
+  PastDue = 'past_due',
+  Canceled = 'canceled',
+  GracePeriod = 'grace_period',
+}
 
 export interface Plan {
   id: PlanId
   name: string
   description: string
   storageLimitBytes: number
-  downloadLimitBytes: number
   pricePerTibCents: number
-  flatPriceCents?: number
   features: string[]
 }
-
-export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled'
 
 export interface Subscription {
   planId: PlanId
   status: SubscriptionStatus
   trialEndsAt?: string
   currentPeriodEnd?: string
+  canceledAt?: string
+  gracePeriodEndsAt?: string
 }
 
 export interface PaymentMethod {
@@ -28,25 +37,26 @@ export interface PaymentMethod {
   expYear: number
 }
 
+export interface UsageInfo {
+  storageUsedBytes: number
+  storageLimitBytes: number
+  estimatedMonthlyCostCents: number
+}
+
 export interface BillingInfo {
   subscription: Subscription
   paymentMethod?: PaymentMethod
-  plans: Plan[]
+  usage?: UsageInfo
 }
 
-// UNKNOWN: Payment processor token format. Defaulting to a generic tokenized approach (e.g. Stripe PaymentMethod ID).
-export interface AddPaymentMethodRequest {
-  paymentMethodToken: string
+export interface CreateSetupIntentResponse {
+  clientSecret: string
 }
 
-export interface AddPaymentMethodResponse {
-  paymentMethod: PaymentMethod
-}
-
-export interface ChangePlanRequest {
-  planId: PlanId
-}
-
-export interface ChangePlanResponse {
+export interface ActivateSubscriptionResponse {
   subscription: Subscription
+}
+
+export interface CreatePortalSessionResponse {
+  url: string
 }
