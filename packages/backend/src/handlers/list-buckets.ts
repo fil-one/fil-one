@@ -4,7 +4,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { Bucket, ListBucketsResponse } from '@hyperspace/shared';
-import { getEnv } from '../lib/env.js';
+import { Resource } from "sst";
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -21,7 +21,7 @@ async function baseHandler(
 
   const result = await dynamo.send(
     new QueryCommand({
-      TableName: getEnv('UPLOADS_TABLE_NAME'),
+      TableName: Resource.UploadsTable.name,
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
       ExpressionAttributeValues: {
         ':pk': { S: `USER#${sub}` },

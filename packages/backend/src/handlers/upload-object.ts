@@ -4,7 +4,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { ErrorResponse, UploadObjectRequest, UploadObjectResponse } from '@hyperspace/shared';
-import { getEnv } from '../lib/env.js';
+import { Resource } from "sst";
 import { FileStorageClient } from '../lib/file-storage-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -45,7 +45,7 @@ async function baseHandler(
   }
 
   const { sub } = getUserInfo(event);
-  const tableName = getEnv('UPLOADS_TABLE_NAME');
+  const tableName = Resource.UploadsTable.name;
 
   // Verify bucket ownership
   const bucketRecord = await dynamo.send(
@@ -65,7 +65,7 @@ async function baseHandler(
   // Upload file to S3
   const fileBuffer = Buffer.from(fileBase64, 'base64');
   const s3Key = `${bucketName}/${key}`;
-  const storage = new FileStorageClient(getEnv('USER_FILES_BUCKET_NAME'));
+  const storage = new FileStorageClient(Resource.UserFilesBucket.name);
   const { etag } = await storage.put(s3Key, fileBuffer, contentType);
 
   // Store metadata in DynamoDB

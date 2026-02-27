@@ -5,7 +5,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import { SubscriptionStatus } from '@hyperspace/shared';
 import type { CreateSetupIntentResponse } from '@hyperspace/shared';
-import { getEnv } from '../lib/env.js';
+import { Resource } from "sst";
 import { getStripeClient } from '../lib/stripe-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -19,8 +19,8 @@ async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyResultV2> {
   const { sub, email } = getUserInfo(event);
-  const tableName = getEnv('BILLING_TABLE_NAME');
-  const stripe = await getStripeClient();
+  const tableName = Resource.BillingTable.name;
+  const stripe = getStripeClient();
 
   // 1. Check if customer already exists in billing table
   const existing = await dynamo.send(

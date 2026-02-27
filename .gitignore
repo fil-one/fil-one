@@ -6,8 +6,8 @@ build/
 *.js.map
 *.d.ts.map
 
-# CDK
-packages/infra/cdk.out/
+# SST
+.sst/
 
 # TypeScript build output
 packages/*/dist/

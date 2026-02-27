@@ -4,7 +4,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { CreatePortalSessionResponse } from '@hyperspace/shared';
-import { getEnv } from '../lib/env.js';
+import { Resource } from "sst";
 import { getStripeClient } from '../lib/stripe-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -18,9 +18,9 @@ async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyResultV2> {
   const { sub } = getUserInfo(event);
-  const tableName = getEnv('BILLING_TABLE_NAME');
-  const websiteUrl = getEnv('WEBSITE_URL');
-  const stripe = await getStripeClient();
+  const tableName = Resource.BillingTable.name;
+  const websiteUrl = process.env.WEBSITE_URL!;
+  const stripe = getStripeClient();
 
   // Get customer record
   const result = await dynamo.send(

@@ -3,7 +3,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
 import { SubscriptionStatus } from '@hyperspace/shared';
-import { getEnv } from '../lib/env.js';
+import { Resource } from "sst";
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
 
 const dynamo = new DynamoDBClient({});
@@ -15,9 +15,9 @@ const dynamo = new DynamoDBClient({});
 export async function handler(
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> {
-  const tableName = getEnv('BILLING_TABLE_NAME');
-  const secrets = await getBillingSecrets();
-  const stripe = await getStripeClient();
+  const tableName = Resource.BillingTable.name;
+  const secrets = getBillingSecrets();
+  const stripe = getStripeClient();
 
   // 1. Get raw body for signature verification
   const rawBody = event.isBase64Encoded
@@ -122,7 +122,7 @@ async function handleSubscriptionUpdate(tableName: string, subscription: Stripe.
   const userId = subscription.metadata?.userId;
   if (!userId) {
     // Try fetching from Stripe customer metadata
-    const stripe = await getStripeClient();
+    const stripe = getStripeClient();
     const customer = await stripe.customers.retrieve(customerId);
     if ('deleted' in customer && customer.deleted) {
       console.warn('[stripe-webhook] Customer deleted, skipping subscription update');
@@ -160,7 +160,7 @@ async function updateBillingRecord(tableName: string, userId: string, subscripti
 }
 
 async function handleSubscriptionDeleted(tableName: string, subscription: Stripe.Subscription): Promise<void> {
-  const stripe = await getStripeClient();
+  const stripe = getStripeClient();
   const customerId = getCustomerIdString(subscription.customer);
   const customer = await stripe.customers.retrieve(customerId);
   if ('deleted' in customer && customer.deleted) return;
@@ -190,7 +190,7 @@ async function handleSubscriptionDeleted(tableName: string, subscription: Stripe
 
 async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice): Promise<void> {
   if (!invoice.customer) return;
-  const stripe = await getStripeClient();
+  const stripe = getStripeClient();
   const customerId = getCustomerIdString(invoice.customer);
   const customer = await stripe.customers.retrieve(customerId);
   if ('deleted' in customer && customer.deleted) return;
@@ -216,7 +216,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
 
 async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): Promise<void> {
   if (!invoice.customer) return;
-  const stripe = await getStripeClient();
+  const stripe = getStripeClient();
   const customerId = getCustomerIdString(invoice.customer);
   const customer = await stripe.customers.retrieve(customerId);
   if ('deleted' in customer && customer.deleted) return;

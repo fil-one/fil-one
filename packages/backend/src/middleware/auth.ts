@@ -9,7 +9,6 @@ import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import type { UserInfo } from '../lib/user-context.js';
 import type { ErrorResponse } from '@hyperspace/shared';
 import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader, ResponseBuilder } from '../lib/response-builder.js';
-import { getEnv } from '../lib/env.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 
 // ---------------------------------------------------------------------------
@@ -91,10 +90,10 @@ export function authMiddleware(): MiddlewareObj<APIGatewayProxyEventV2, APIGatew
 
     // TODO [Option D]: AUTH0_DOMAIN env var will change to custom domain
     // (e.g. auth.filhyperspace.com). JWKS, issuer, and token endpoints use the same domain.
-    const domain = getEnv('AUTH0_DOMAIN');
-    const audience = getEnv('AUTH0_AUDIENCE');
+    const domain = process.env.AUTH0_DOMAIN!;
+    const audience = process.env.AUTH0_AUDIENCE!;
     const issuer = `https://${domain}/`;
-    const secrets = await getAuthSecrets();
+    const secrets = getAuthSecrets();
     const jwks = getJWKS(domain);
 
     const hasCookies = { accessToken: !!accessToken, idToken: !!idToken, refreshToken: !!refreshToken };

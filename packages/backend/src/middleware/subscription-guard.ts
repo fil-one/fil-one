@@ -3,7 +3,7 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import type { MiddlewareObj, Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
 import { SubscriptionStatus } from '@hyperspace/shared';
-import { getEnv } from '../lib/env.js';
+import { Resource } from "sst";
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -30,7 +30,7 @@ export function subscriptionGuardMiddleware(
   ): Promise<APIGatewayProxyResultV2 | void> => {
     const event = request.event as AuthenticatedEvent;
     const { sub } = getUserInfo(event);
-    const tableName = getEnv('BILLING_TABLE_NAME');
+    const tableName = Resource.BillingTable.name;
 
     // 1. Read billing record
     const result = await dynamo.send(

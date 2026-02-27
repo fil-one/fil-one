@@ -1,7 +1,6 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
-import { getEnv } from '../lib/env.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { COOKIE_NAMES, makeClearCookieHeader } from '../lib/response-builder.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -9,11 +8,11 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 async function baseHandler(
   _event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> {
-  const websiteUrl = getEnv('WEBSITE_URL');
+  const websiteUrl = process.env.WEBSITE_URL!;
   // TODO [Option D]: AUTH0_DOMAIN env var will change to custom domain
   // (e.g. auth.filhyperspace.com). Logout endpoint uses the same domain.
-  const domain = getEnv('AUTH0_DOMAIN');
-  const secrets = await getAuthSecrets();
+  const domain = process.env.AUTH0_DOMAIN!;
+  const secrets = getAuthSecrets();
 
   const cookies = [
     makeClearCookieHeader(COOKIE_NAMES.ACCESS_TOKEN),

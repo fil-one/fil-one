@@ -1,30 +1,25 @@
-import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
+import { Resource } from "sst";
 import Stripe from 'stripe';
-import { getEnv } from './env.js';
 
-interface BillingSecrets {
+export interface BillingSecrets {
   STRIPE_SECRET_KEY: string;
   STRIPE_WEBHOOK_SECRET: string;
   STRIPE_PRICE_ID: string;
 }
 
 // Module-level cache — reused across Lambda warm starts
-const smClient = new SecretsManagerClient({});
-let cachedSecrets: BillingSecrets | null = null;
 let cachedStripe: Stripe | null = null;
 
-export async function getBillingSecrets(): Promise<BillingSecrets> {
-  if (cachedSecrets) return cachedSecrets;
-  const result = await smClient.send(
-    new GetSecretValueCommand({ SecretId: getEnv('BILLING_SECRET_NAME') }),
-  );
-  cachedSecrets = JSON.parse(result.SecretString ?? '{}') as BillingSecrets;
-  return cachedSecrets;
+export function getBillingSecrets(): BillingSecrets {
+  return {
+    STRIPE_SECRET_KEY: Resource.StripeSecretKey.value,
+    STRIPE_WEBHOOK_SECRET: Resource.StripeWebhookSecret.value,
+    STRIPE_PRICE_ID: Resource.StripePriceId.value,
+  };
 }
 
-export async function getStripeClient(): Promise<Stripe> {
+export function getStripeClient(): Stripe {
   if (cachedStripe) return cachedStripe;
-  const secrets = await getBillingSecrets();
-  cachedStripe = new Stripe(secrets.STRIPE_SECRET_KEY);
+  cachedStripe = new Stripe(getBillingSecrets().STRIPE_SECRET_KEY);
   return cachedStripe;
 }

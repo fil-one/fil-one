@@ -5,7 +5,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { v4 as uuidv4 } from 'uuid';
 import type { ErrorResponse, UploadRequest, UploadResponse } from '@hyperspace/shared';
-import { getEnv } from '../lib/env.js';
+import { Resource } from "sst";
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -38,7 +38,7 @@ async function baseHandler(
 
   await dynamo.send(
     new PutItemCommand({
-      TableName: getEnv('UPLOADS_TABLE_NAME'),
+      TableName: Resource.UploadsTable.name,
       Item: marshall({
         pk: `UPLOAD#${uploadId}`,
         sk: 'METADATA',

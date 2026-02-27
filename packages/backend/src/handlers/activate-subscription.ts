@@ -5,7 +5,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import { PlanId, SubscriptionStatus } from '@hyperspace/shared';
 import type { ActivateSubscriptionResponse } from '@hyperspace/shared';
-import { getEnv } from '../lib/env.js';
+import { Resource } from "sst";
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -19,9 +19,9 @@ async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyResultV2> {
   const { sub } = getUserInfo(event);
-  const tableName = getEnv('BILLING_TABLE_NAME');
-  const stripe = await getStripeClient();
-  const secrets = await getBillingSecrets();
+  const tableName = Resource.BillingTable.name;
+  const stripe = getStripeClient();
+  const secrets = getBillingSecrets();
 
   // 1. Get customer record from billing table
   const result = await dynamo.send(

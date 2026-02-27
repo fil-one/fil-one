@@ -4,7 +4,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { CreateBucketRequest, CreateBucketResponse, ErrorResponse } from '@hyperspace/shared';
-import { getEnv } from '../lib/env.js';
+import { Resource } from "sst";
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -52,7 +52,7 @@ async function baseHandler(
   try {
     await dynamo.send(
       new PutItemCommand({
-        TableName: getEnv('UPLOADS_TABLE_NAME'),
+        TableName: Resource.UploadsTable.name,
         Item: marshall({
           pk: `USER#${sub}`,
           sk: `BUCKET#${name}`,

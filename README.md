@@ -1,20 +1,20 @@
 # Hyperspace
 
-Full-stack prototype — npm workspaces monorepo deploying to AWS (S3 + CloudFront, API Gateway + Lambda, DynamoDB).
+Full-stack prototype — npm workspaces monorepo deploying to AWS via [SST v3](https://sst.dev/).
 
 ## Structure
 
 ```
 hyperspace/
+├── sst.config.ts  # SST v3 infrastructure (replaces CDK stacks)
 ├── packages/
 │   ├── shared/     # TypeScript interfaces shared between website and backend
 │   ├── backend/    # Lambda handlers (upload → DynamoDB)
-│   ├── infra/      # AWS CDK stacks (domain, database, api, website)
 │   ├── ui/         # UI component library (git submodule → joemocode-business/ui-hyperspace)
 │   └── website/    # Vite + React 19 + TanStack Router SPA + Tailwind v4
 ```
 
-> `packages/ui` is a git submodule — a standalone fork of `@filecoin-foundation/ui-filecoin` adapted for React/Vite. The upstream fork lives at `joemocode-business/filecoin-foundation` for tracking upstream changes. TODO Move this to something more official and not my Github :) 
+> `packages/ui` is a git submodule — a standalone fork of `@filecoin-foundation/ui-filecoin` adapted for React/Vite. The upstream fork lives at `joemocode-business/filecoin-foundation` for tracking upstream changes. TODO Move this to something more official and not my Github :)
 
 ## AWS account
 
@@ -40,12 +40,32 @@ When prompted:
 - Default region: `us-east-2`
 - Output format: `json`
 
-**2. Log in at the start of each session**
+**2. Log in and activate the profile**
 
 *MUST do this before you can deploy.*
 
 ```bash
 aws sso login --profile hyperspace
+```
+
+Then set the profile for your shell session so SST picks it up:
+
+```bash
+export AWS_PROFILE=hyperspace
+```
+
+To make this permanent, add it to your shell config:
+
+```bash
+# Add to ~/.zshrc (or ~/.bashrc)
+echo 'export AWS_PROFILE=hyperspace' >> ~/.zshrc
+source ~/.zshrc
+```
+
+You can verify it's working with:
+
+```bash
+aws sts get-caller-identity
 ```
 
 **3. Initialize submodules**
@@ -60,28 +80,71 @@ git submodule update --init --recursive
 npm install
 ```
 
-**5. Set the API URL for local dev**
+**5. Set SST secrets (one-time per stage)**
 
 ```bash
-echo "VITE_API_URL=https://<api-id>.execute-api.us-east-2.amazonaws.com" > packages/website/.env.local
+npx sst secret set Auth0ClientId <value> [--stage <stage>]
+npx sst secret set Auth0ClientSecret <value> [--stage <stage>]
+npx sst secret set StripeSecretKey <value> [--stage <stage>]
+npx sst secret set StripeWebhookSecret <value> [--stage <stage>]
+npx sst secret set StripePriceId <value> [--stage <stage>]
 ```
+
+Omit `--stage` to set for your personal dev stage (defaults to OS username).
 
 ## Commands
 
 ```bash
-npm run build       # shared → backend → website → cdk synth (in order)
-npm run deploy      # build + cdk deploy --all
-npm run typecheck   # tsc --noEmit across all packages
+npm run dev              # SST live dev mode (live Lambda debugging)
+npm run deploy           # Deploy personal dev stack (uses OS username as stage)
+npm run deploy:staging   # Deploy to staging.filhyperspace.com
+npm run deploy:production # Deploy to console.filhyperspace.com
+npm run remove           # Remove your personal dev stack
+npm run typecheck        # tsc --noEmit across all packages
 ```
 
 ```bash
-# Local dev server
+# Local website dev server (for frontend-only changes)
 cd packages/website && npm run dev
-
-# Manual CloudFront cache invalidation
-aws cloudfront create-invalidation \
-  --distribution-id <id> --paths "/*" --profile=hyperspace
 ```
+
+### Personal Dev Stack
+
+```bash
+npx sst deploy
+```
+
+Uses your OS username as the stage name. No custom domain — outputs a CloudFront URL.
+
+### Staging / Production
+
+```bash
+npx sst deploy --stage staging
+npx sst deploy --stage production
+```
+
+Custom domains require a pre-provisioned ACM certificate in us-east-1 and a DNS CNAME pointing to the CloudFront distribution (managed by a separate pipeline).
+
+### Live Dev Mode
+
+```bash
+npx sst dev
+```
+
+Runs Lambda functions locally with live reload. Changes to handler code take effect immediately without redeploying.
+
+## ACM Certificate Provisioning
+
+Custom domains require an ACM certificate in **us-east-1** (CloudFront requirement):
+
+1. Go to AWS Certificate Manager in the us-east-1 region
+2. Request a public certificate for the domain (e.g. `console.filhyperspace.com`)
+3. Complete DNS validation by adding the provided CNAME record
+4. The `sst.config.ts` looks up the certificate by domain name automatically
+
+## DNS Setup
+
+DNS is managed by a separate pipeline. After deploying, create a CNAME record pointing the custom domain to the CloudFront distribution domain name shown in the deploy output.
 
 ## Auth0
 
@@ -91,23 +154,7 @@ aws cloudfront create-invalidation \
 | Tenant domain | `dev-oar2nhqh58xf5pwf.us.auth0.com` |
 | Dashboard | https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ/settings |
 
-The backend reads Auth0 credentials from an AWS Secrets Manager secret named `AuthenticationSecrets`. The secret value must be JSON with this shape:
-
-```json
-{
-  "AUTH0_CLIENT_ID": "<your-auth0-client-id>",
-  "AUTH0_CLIENT_SECRET": "<your-auth0-client-secret>"
-}
-```
-
-You can set it via the CLI:
-
-```bash
-aws secretsmanager put-secret-value \
-  --secret-id AuthenticationSecrets \
-  --secret-string '{"AUTH0_CLIENT_ID":"...","AUTH0_CLIENT_SECRET":"..."}' \
-  --profile hyperspace
-```
+Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecret`). See the "Set SST secrets" step above.
 
 **Application settings** (Applications > your app > Settings):
 - **Allowed Callback URLs**: `{CLOUDFRONT_DOMAIN}/api/auth/callback`
@@ -115,7 +162,7 @@ aws secretsmanager put-secret-value \
 - Under **Advanced Settings > Grant Types**, ensure **Authorization Code** and **Refresh Token** are enabled.
 
 **API setup** (APIs > Create API):
-- **Identifier (audience)**: `console.filhyperspace.com` — this must match `AUTH0_AUDIENCE` in the CDK stack and website env. It's what makes Auth0 issue a JWT access token (instead of an opaque one) and is the `aud` claim the middleware validates.
+- **Identifier (audience)**: `console.filhyperspace.com` — this must match `AUTH0_AUDIENCE` in `sst.config.ts` and website env. It's what makes Auth0 issue a JWT access token (instead of an opaque one) and is the `aud` claim the middleware validates.
 - Under the API's **Machine to Machine Applications** tab, authorize your application so it can exchange tokens.
 
 ## Stripe (Billing)
@@ -150,22 +197,7 @@ Use **test mode** first. Switch to live mode for production.
 
 ### 4. Secrets
 
-The backend reads Stripe credentials from `BillingSecrets` in AWS Secrets Manager:
-
-```json
-{
-  "STRIPE_SECRET_KEY": "sk_test_xxxxx",
-  "STRIPE_WEBHOOK_SECRET": "whsec_xxxxx",
-  "STRIPE_PRICE_ID": "price_xxxxx"
-}
-```
-
-```bash
-aws secretsmanager put-secret-value \
-  --secret-id BillingSecrets \
-  --secret-string '{"STRIPE_SECRET_KEY":"...","STRIPE_WEBHOOK_SECRET":"...","STRIPE_PRICE_ID":"..."}' \
-  --profile hyperspace
-```
+Stripe credentials are managed as SST secrets (`StripeSecretKey`, `StripeWebhookSecret`, `StripePriceId`). See the "Set SST secrets" step above.
 
 The frontend needs the **publishable key** in its env:
 
@@ -173,15 +205,6 @@ The frontend needs the **publishable key** in its env:
 # packages/website/.env.local
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx
 ```
-
-## Stacks
-
-| Stack | Resources |
-|---|---|
-| `HyperspaceDomainStack` | Route53 hosted zone for `*.filhyperspace.com` |
-| `HyperspaceCertificateStack` | ACM certificate in us-east-1 for CloudFront |
-| `HyperspaceDatabaseStack` | DynamoDB tables: `hyperspace-uploads`, `hyperspace-billing` |
-| `HyperspacePlatformStack` | API Gateway + Lambda handlers, S3 buckets, CloudFront, Route53 aliases, Secrets Manager (`AuthenticationSecrets`, `BillingSecrets`) |
 
 ## UI submodule (`packages/ui`)
 
@@ -217,5 +240,3 @@ The full fork at `joemocode-business/filecoin-foundation` tracks the upstream `F
 ```
 
 > **Note**: Several components in `packages/ui` use Next.js-specific APIs (`next/navigation`, `next/image`) or `nuqs` and are not usable as-is in this Vite app. These include `Navigation/*`, `Network/*`, and `Search/Search`. They will be adapted for React Router as needed.
-
-## Stacks — after deploying `HyperspaceDomainStack`, add the `HyperspaceDelegationNameServers` output as an NS record for `console.filhyperspace.com` in the `filhyperspace.com` hosted zone. Once live, re-enable the ACM certificate in `domain-stack.ts`.

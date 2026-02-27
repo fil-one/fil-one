@@ -5,9 +5,18 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w packages/shared && npm run build -w packages/backend && npm run build -w packages/website && npm run build -w packages/infra",
-    "deploy": "npm run build && npm run deploy -w packages/infra",
+    "dev": "sst dev",
+    "build": "npm run build -w packages/shared && npm run build -w packages/backend && npm run build -w packages/website",
+    "deploy": "sst deploy",
+    "deploy:staging": "sst deploy --stage staging",
+    "deploy:production": "sst deploy --stage production",
+    "remove": "sst remove",
     "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "sst": "^3",
+    "aws-cdk-lib": "^2.170.0",
+    "constructs": "^10.3.0"
   },
   "engines": {
     "node": ">=20"

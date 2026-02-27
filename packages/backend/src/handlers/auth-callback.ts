@@ -1,7 +1,6 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
-import { getEnv } from '../lib/env.js';
 import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader } from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -22,7 +21,7 @@ function redirect(location: string, cookies: string[] = []): APIGatewayProxyResu
 async function baseHandler(
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> {
-  const websiteUrl = getEnv('WEBSITE_URL');
+  const websiteUrl = process.env.WEBSITE_URL!;
   const signInUrl = `${websiteUrl}/sign-in`;
 
   const { code, error, error_description } = event.queryStringParameters ?? {};
@@ -36,10 +35,10 @@ async function baseHandler(
 
   // TODO [Option D]: AUTH0_DOMAIN env var will change to custom domain
   // (e.g. auth.filhyperspace.com). Token endpoint uses the same domain.
-  const domain = getEnv('AUTH0_DOMAIN');
-  const audience = getEnv('AUTH0_AUDIENCE');
-  const callbackUrl = getEnv('AUTH_CALLBACK_URL');
-  const secrets = await getAuthSecrets();
+  const domain = process.env.AUTH0_DOMAIN!;
+  const audience = process.env.AUTH0_AUDIENCE!;
+  const callbackUrl = process.env.AUTH_CALLBACK_URL!;
+  const secrets = getAuthSecrets();
 
   const tokenRes = await fetch(`https://${domain}/oauth/token`, {
     method: 'POST',
