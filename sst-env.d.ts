@@ -50,10 +50,6 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Bucket"
     }
-    "Website": {
-      "type": "sst.aws.StaticSite"
-      "url": string
-    }
   }
 }
 /// <reference path="sst-env.d.ts" />

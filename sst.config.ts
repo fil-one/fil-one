@@ -67,11 +67,11 @@ export default $config({
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
 
-    type SiteDomain = Exclude<sst.aws.StaticSiteArgs["domain"], undefined>;
-    let domain: SiteDomain | undefined;
+    let domainName: string | undefined;
+    let certArn: string | undefined;
 
     if (stage === "production" || stage === "staging") {
-      const domainName =
+      domainName =
         stage === "production"
           ? "console.filhyperspace.com"
           : "staging.filhyperspace.com";
@@ -86,82 +86,19 @@ export default $config({
         { provider: usEast1 },
       );
 
-      domain = {
-        name: domainName,
-        dns: false, // DNS CNAME is managed by a separate pipeline
-        cert: cert.arn,
-      };
+      certArn = cert.arn;
     }
 
-    // ── Static Site + CloudFront ─────────────────────────────────────
-    const site = new sst.aws.StaticSite("Website", {
-      path: "packages/website/dist",
-      ...(domain && { domain }),
-      indexPage: "index.html",
-      errorPage: "redirect_to_index_page",
-      transform: {
-        cdn: (args: Record<string, any>) => {
-          // Add API Gateway as an additional CloudFront origin
-          const apiDomain = api.url.apply(
-            (url: string) => new URL(url).hostname,
-          );
-
-          args.origins = $output(args.origins).apply((origins: any[]) => [
-            ...origins,
-            {
-              domainName: apiDomain,
-              originId: "apiGateway",
-              customOriginConfig: {
-                httpPort: 80,
-                httpsPort: 443,
-                originProtocolPolicy: "https-only",
-                originSslProtocols: ["TLSv1.2"],
-              },
-            },
-          ]);
-
-          // Add /api/* cache behavior routing to API Gateway
-          args.orderedCacheBehaviors = [
-            ...(args.orderedCacheBehaviors ?? []),
-            {
-              pathPattern: "/api/*",
-              targetOriginId: "apiGateway",
-              viewerProtocolPolicy: "redirect-to-https",
-              allowedMethods: [
-                "GET",
-                "HEAD",
-                "OPTIONS",
-                "PUT",
-                "POST",
-                "PATCH",
-                "DELETE",
-              ],
-              cachedMethods: ["GET", "HEAD"],
-              // AWS managed policy: CachingDisabled
-              cachePolicyId: "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
-              // AWS managed policy: AllViewerExceptHostHeader
-              originRequestPolicyId:
-                "b689b0a8-53d0-40ab-baf2-68738e2966ac",
-              compress: true,
-            },
-          ];
-
-          // SPA fallback: route S3 403/404 to index.html
-          args.customErrorResponses = [
-            {
-              errorCode: 403,
-              responseCode: 200,
-              responsePagePath: "/index.html",
-            },
-            {
-              errorCode: 404,
-              responseCode: 200,
-              responsePagePath: "/index.html",
-            },
-          ];
-        },
-      },
+    // ── Website (S3 + CloudFront) ────────────────────────────────────
+    const { createWebsite } = await import("./infra/website");
+    const website = createWebsite({
+      distPath: "packages/website/dist",
+      apiUrl: api.url,
+      domainName,
+      certArn,
     });
+
+    const siteUrl = website.url;
 
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
     const setupFn = new sst.aws.Function("SetupIntegrations", {
@@ -182,7 +119,7 @@ export default $config({
       timeout: "30 seconds",
     });
 
-    const setupResource = new aws.cloudformation.Stack("SetupStack", {
+    new aws.cloudformation.Stack("SetupStack", {
       templateBody: $jsonStringify({
         AWSTemplateFormatVersion: "2010-09-09",
         Resources: {
@@ -190,7 +127,7 @@ export default $config({
             Type: "Custom::HyperspaceSetup",
             Properties: {
               ServiceToken: setupFn.arn,
-              SiteUrl: site.url,
+              SiteUrl: siteUrl,
               Stage: $app.stage,
             },
           },
@@ -201,10 +138,6 @@ export default $config({
           },
         },
       }),
-    });
-
-    const webhookSecret = setupResource.outputs.apply((outputs) => {
-      return outputs?.WebhookSecret ?? "";
     });
 
     // ── Shared function config ───────────────────────────────────────
@@ -257,11 +190,11 @@ export default $config({
 
     // ── Auth routes ──────────────────────────────────────────────────
     addRoute("GET", "/api/auth/callback", "auth-callback", {
-      WEBSITE_URL: site.url,
-      AUTH_CALLBACK_URL: $interpolate`${site.url}/api/auth/callback`,
+      WEBSITE_URL: siteUrl,
+      AUTH_CALLBACK_URL: $interpolate`${siteUrl}/api/auth/callback`,
     });
     addRoute("GET", "/api/auth/logout", "auth-logout", {
-      WEBSITE_URL: site.url,
+      WEBSITE_URL: siteUrl,
     });
 
     // ── Billing routes ───────────────────────────────────────────────
@@ -269,12 +202,12 @@ export default $config({
     addRoute("POST", "/api/billing/setup-intent", "create-setup-intent");
     addRoute("POST", "/api/billing/activate", "activate-subscription");
     addRoute("POST", "/api/billing/portal", "create-portal-session", {
-      WEBSITE_URL: site.url,
+      WEBSITE_URL: siteUrl,
     });
     addRoute("POST", "/api/stripe/webhook", "stripe-webhook");
 
     return {
-      url: site.url,
+      url: siteUrl,
       api: api.url,
     };
   },

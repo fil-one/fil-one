@@ -24,6 +24,11 @@ hyperspace/
 | Region | `us-east-2` |
 | SSO portal | https://d-9067ff87d6.awsapps.com/start |
 
+## Prerequisites
+
+- **Node.js** >= 20
+- **AWS CLI** — required for S3 sync and CloudFront invalidation during deploy. [Install guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+
 ## Setup
 
 **1. Configure the AWS profile (one-time)**

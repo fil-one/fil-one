@@ -7,9 +7,9 @@
   "scripts": {
     "dev": "sst dev",
     "build": "npm run build -w packages/shared && npm run build -w packages/backend && npm run build -w packages/website",
-    "deploy": "sst deploy",
-    "deploy:staging": "sst deploy --stage staging",
-    "deploy:production": "sst deploy --stage production",
+    "deploy": "npm run build && sst deploy",
+    "deploy:staging": "npm run build && sst deploy --stage staging",
+    "deploy:production": "npm run build && sst deploy --stage production",
     "remove": "sst remove",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
