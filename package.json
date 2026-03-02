@@ -6,19 +6,28 @@
   ],
   "scripts": {
     "dev": "sst dev",
-    "build": "npm run build -w packages/shared && npm run build -w packages/backend && npm run build -w packages/website",
-    "deploy": "npm run build && sst deploy",
-    "deploy:staging": "npm run build && sst deploy --stage staging",
-    "deploy:production": "npm run build && sst deploy --stage production",
+    "build": "pnpm --filter @hyperspace/shared build && pnpm --filter @hyperspace/backend build && pnpm --filter @hyperspace/website build",
+    "deploy": "pnpm build && sst deploy",
+    "deploy:staging": "pnpm build && sst deploy --stage staging",
+    "deploy:production": "pnpm build && sst deploy --stage production",
     "remove": "sst remove",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "pnpm -r --if-present typecheck"
   },
   "devDependencies": {
+    "@pulumi/aws": "^6",
+    "@pulumi/command": "^1",
     "sst": "^3",
     "aws-cdk-lib": "^2.170.0",
     "constructs": "^10.3.0"
   },
   "engines": {
     "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "@pulumi/command",
+      "protobufjs"
+    ]
   }
 }

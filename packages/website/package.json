@@ -10,8 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hyperspace/shared": "*",
-    "@hyperspace/ui": "*",
+    "@hyperspace/shared": "workspace:*",
+    "@hyperspace/ui": "workspace:*",
+    "@phosphor-icons/react": "^2.1.10",
     "@stripe/react-stripe-js": "^5.6.0",
     "@stripe/stripe-js": "^8.8.0",
     "@tanstack/react-router": "^1.29.0",

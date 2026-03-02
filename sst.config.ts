@@ -89,16 +89,50 @@ export default $config({
       certArn = cert.arn;
     }
 
-    // ── Website (S3 + CloudFront) ────────────────────────────────────
-    const { createWebsite } = await import("./infra/website");
-    const website = createWebsite({
-      distPath: "packages/website/dist",
-      apiUrl: api.url,
-      domainName,
-      certArn,
+    // ── Website (S3 + CloudFront via sst.aws.Router) ─────────────────
+    const { local } = await import("@pulumi/command");
+
+    const websiteBucket = new sst.aws.Bucket("WebsiteBucket", {
+      access: "cloudfront",
+      transform: {
+        bucket: { forceDestroy: true },
+      },
     });
 
-    const siteUrl = website.url;
+    const router = new sst.aws.Router("WebsiteRouter", {
+      routes: {
+        "/*": { bucket: websiteBucket },
+        "/api/*": {
+          url: api.url,
+          cachePolicy: "4135ea2d-6df8-44a3-9df3-4b5a84be39ad", // CachingDisabled
+        },
+      },
+      ...(domainName && certArn
+        ? { domain: { name: domainName, dns: false, cert: certArn } }
+        : {}),
+      transform: {
+        cdn: (args) => {
+          args.defaultRootObject = "index.html";
+          args.customErrorResponses = [
+            { errorCode: 403, responseCode: 200, responsePagePath: "/index.html", errorCachingMinTtl: 0 },
+            { errorCode: 404, responseCode: 200, responsePagePath: "/index.html", errorCachingMinTtl: 0 },
+          ];
+        },
+      },
+    });
+
+    const distPath = require("path").resolve("packages/website/dist");
+    const sync = new local.Command("WebsiteSync", {
+      create: $interpolate`aws s3 sync ${distPath} s3://${websiteBucket.nodes.bucket.bucket} --delete`,
+      triggers: [Date.now().toString()],
+    });
+
+    new local.Command("WebsiteInvalidation", {
+      create: $interpolate`aws cloudfront create-invalidation --distribution-id ${router.distributionID} --paths "/*"`,
+      triggers: [Date.now().toString()],
+    }, { dependsOn: [sync] });
+
+    const siteUrl = router.url;
 
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
     const setupFn = new sst.aws.Function("SetupIntegrations", {

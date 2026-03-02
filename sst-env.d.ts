@@ -50,6 +50,14 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Bucket"
     }
+    "WebsiteBucket": {
+      "name": string
+      "type": "sst.aws.Bucket"
+    }
+    "WebsiteRouter": {
+      "type": "sst.aws.Router"
+      "url": string
+    }
   }
 }
 /// <reference path="sst-env.d.ts" />
