@@ -1,0 +1,105 @@
+import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import middy from '@middy/core';
+import httpHeaderNormalizer from '@middy/http-header-normalizer';
+import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import { SubscriptionStatus } from '@hyperspace/shared';
+import type { CreateSetupIntentResponse } from '@hyperspace/shared';
+import { Resource } from "sst";
+import { getStripeClient } from '../lib/stripe-client.js';
+import { ResponseBuilder } from '../lib/response-builder.js';
+import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { getUserInfo } from '../lib/user-context.js';
+import { authMiddleware } from '../middleware/auth.js';
+import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+
+const dynamo = new DynamoDBClient({});
+
+async function baseHandler(
+  event: AuthenticatedEvent,
+): Promise<APIGatewayProxyResultV2> {
+  const { sub, email } = getUserInfo(event);
+  const tableName = Resource.BillingTable.name;
+  const stripe = getStripeClient();
+
+  // 1. Check if customer already exists in billing table
+  const existing = await dynamo.send(
+    new GetItemCommand({
+      TableName: tableName,
+      Key: {
+        pk: { S: `CUSTOMER#${sub}` },
+        sk: { S: 'SUBSCRIPTION' },
+      },
+    }),
+  );
+
+  let stripeCustomerId: string;
+
+  if (existing.Item) {
+    const record = unmarshall(existing.Item);
+    if (record.stripeCustomerId) {
+      stripeCustomerId = record.stripeCustomerId as string;
+    } else {
+      // Create Stripe customer and update record
+      const customer = await stripe.customers.create({
+        email: email ?? undefined,
+        metadata: { userId: sub },
+      });
+      stripeCustomerId = customer.id;
+
+      await dynamo.send(
+        new PutItemCommand({
+          TableName: tableName,
+          Item: marshall({
+            pk: `CUSTOMER#${sub}`,
+            sk: 'SUBSCRIPTION',
+            stripeCustomerId,
+            subscriptionStatus: SubscriptionStatus.Trialing,
+            trialStartedAt: record.trialStartedAt ?? new Date().toISOString(),
+            trialEndsAt: record.trialEndsAt ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+            updatedAt: new Date().toISOString(),
+          }, { removeUndefinedValues: true }),
+        }),
+      );
+    }
+  } else {
+    // First time — create Stripe customer and billing record
+    const customer = await stripe.customers.create({
+      email: email ?? undefined,
+      metadata: { userId: sub },
+    });
+    stripeCustomerId = customer.id;
+
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: tableName,
+        Item: marshall({
+          pk: `CUSTOMER#${sub}`,
+          sk: 'SUBSCRIPTION',
+          stripeCustomerId,
+          subscriptionStatus: SubscriptionStatus.Trialing,
+          trialStartedAt: new Date().toISOString(),
+          trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      }),
+    );
+  }
+
+  // 2. Create SetupIntent
+  const setupIntent = await stripe.setupIntents.create({
+    customer: stripeCustomerId,
+    usage: 'off_session',
+  });
+
+  const response: CreateSetupIntentResponse = {
+    clientSecret: setupIntent.client_secret!,
+  };
+
+  return new ResponseBuilder().status(200).body(response).build();
+}
+
+export const handler = middy(baseHandler)
+  .use(httpHeaderNormalizer())
+  .use(authMiddleware())
+  .use(errorHandlerMiddleware());

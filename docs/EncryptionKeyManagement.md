@@ -138,6 +138,8 @@ Data stored via Filecoin SPs is publicly accessible ciphertext with potentially 
 
 For **symmetric** encryption, 256-bit key lengths are already considered quantum-safe. Grover's algorithm reduces effective security by half (256-bit → 128-bit equivalent), which remains well beyond brute-force feasibility. The real quantum threat is to **asymmetric** crypto (RSA, ECC) used in key exchange — that concern applies to how we protect MEK transport, not the data encryption algorithm itself. All options below with 256-bit keys are quantum-safe for the symmetric layer.
 
+Blog: https://www.ssh.com/academy/quantum-safe-cryptography-algorithms-vs-quantum-resistant-algorithms-whats-difference
+
 ---
 
 ### Option 1: AES-256-GCM (Recommended for MVP)

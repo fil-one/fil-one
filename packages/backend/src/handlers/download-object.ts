@@ -1,0 +1,90 @@
+import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import middy from '@middy/core';
+import httpHeaderNormalizer from '@middy/http-header-normalizer';
+import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { ErrorResponse } from '@hyperspace/shared';
+import { Resource } from "sst";
+import { FileStorageClient } from '../lib/file-storage-client.js';
+import { ResponseBuilder } from '../lib/response-builder.js';
+import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { getUserInfo } from '../lib/user-context.js';
+import { authMiddleware } from '../middleware/auth.js';
+import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+
+const dynamo = new DynamoDBClient({});
+
+async function baseHandler(
+  event: AuthenticatedEvent,
+): Promise<APIGatewayProxyResultV2> {
+  const bucketName = event.pathParameters?.name;
+  const objectKey = event.queryStringParameters?.key;
+
+  if (!bucketName) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: 'Missing bucket name in path' })
+      .build();
+  }
+
+  if (!objectKey) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: 'Missing object key query parameter' })
+      .build();
+  }
+
+  const { sub } = getUserInfo(event);
+  const tableName = Resource.UploadsTable.name;
+
+  // Verify bucket ownership
+  const bucketRecord = await dynamo.send(
+    new GetItemCommand({
+      TableName: tableName,
+      Key: marshall({ pk: `USER#${sub}`, sk: `BUCKET#${bucketName}` }),
+    }),
+  );
+
+  if (!bucketRecord.Item) {
+    return new ResponseBuilder()
+      .status(404)
+      .body<ErrorResponse>({ message: 'Bucket not found' })
+      .build();
+  }
+
+  // Get object metadata to find s3Key
+  const objectRecord = await dynamo.send(
+    new GetItemCommand({
+      TableName: tableName,
+      Key: marshall({
+        pk: `BUCKET#${sub}#${bucketName}`,
+        sk: `OBJECT#${objectKey}`,
+      }),
+    }),
+  );
+
+  if (!objectRecord.Item) {
+    return new ResponseBuilder()
+      .status(404)
+      .body<ErrorResponse>({ message: 'Object not found' })
+      .build();
+  }
+
+  const record = unmarshall(objectRecord.Item);
+  const s3Key = record.s3Key as string;
+
+  const storage = new FileStorageClient(Resource.UserFilesBucket.name);
+  const url = await storage.getPresignedUrl(s3Key);
+
+  return new ResponseBuilder()
+    .status(200)
+    .body({ url })
+    .build();
+}
+
+export const handler = middy(baseHandler)
+  .use(httpHeaderNormalizer())
+  .use(authMiddleware())
+  .use(subscriptionGuardMiddleware(AccessLevel.Read))
+  .use(errorHandlerMiddleware());

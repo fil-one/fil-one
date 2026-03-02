@@ -1,0 +1,33 @@
+{
+  "name": "hyperspace",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "sst dev",
+    "build": "pnpm --filter @hyperspace/shared build && pnpm --filter @hyperspace/backend build && pnpm --filter @hyperspace/website build",
+    "deploy": "pnpm build && sst deploy",
+    "deploy:staging": "pnpm build && sst deploy --stage staging",
+    "deploy:production": "pnpm build && sst deploy --stage production",
+    "remove": "sst remove",
+    "typecheck": "pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "@pulumi/aws": "^6",
+    "@pulumi/command": "^1",
+    "sst": "^3",
+    "aws-cdk-lib": "^2.170.0",
+    "constructs": "^10.3.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "@pulumi/command",
+      "protobufjs"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "types": ["vite/client"],
+    "paths": {
+      "@hyperspace/shared": ["../shared/src/index.ts"],
+      "@hyperspace/ui/utils": ["../ui/src/utils/index.ts"],
+      "@hyperspace/ui/styles": ["../ui/src/styles/globals.css"],
+      "@hyperspace/ui/constants/tailwindConstants": ["../ui/src/constants/tailwindConstants.ts"],
+      "@hyperspace/ui/config/ui-config": ["../ui/src/config/ui-config.ts"],
+      "@hyperspace/ui/*": ["../ui/src/components/*"]
+    }
+  },
+  "include": ["src", "../shared/src"]
+}

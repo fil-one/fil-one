@@ -1,0 +1,180 @@
+import type { MiddlewareObj, Request } from '@middy/core';
+import type {
+  APIGatewayProxyEventV2,
+  APIGatewayProxyResultV2,
+  APIGatewayProxyStructuredResultV2,
+  Context,
+} from 'aws-lambda';
+import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
+import type { UserInfo } from '../lib/user-context.js';
+import type { ErrorResponse } from '@hyperspace/shared';
+import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader, ResponseBuilder } from '../lib/response-builder.js';
+import { getAuthSecrets } from '../lib/auth-secrets.js';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface NewTokens {
+  access_token: string;
+  id_token: string;
+  refresh_token: string;
+}
+
+interface AuthInternal extends Record<string, unknown> {
+  newTokens?: NewTokens;
+}
+
+type AuthMiddlewareRequest = Request<
+  APIGatewayProxyEventV2,
+  APIGatewayProxyResultV2,
+  Error,
+  Context,
+  AuthInternal
+>;
+
+// ---------------------------------------------------------------------------
+// Module-level JWKS cache — reused across Lambda warm starts
+// ---------------------------------------------------------------------------
+
+let cachedJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
+  if (cachedJWKS) return cachedJWKS;
+  cachedJWKS = createRemoteJWKSet(
+    new URL(`https://${domain}/.well-known/jwks.json`),
+  );
+  return cachedJWKS;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse cookies from the API Gateway v2 event.
+ * Payload format 2.0 puts cookies in `event.cookies` (string[]),
+ * NOT in `event.headers['cookie']`.
+ */
+function parseCookies(cookieArray: string[] | undefined): Record<string, string> {
+  if (!cookieArray?.length) return {};
+  return Object.fromEntries(
+    cookieArray.flatMap((entry) => {
+      const eqIdx = entry.indexOf('=');
+      if (eqIdx === -1) return [];
+      return [[entry.slice(0, eqIdx).trim(), entry.slice(eqIdx + 1).trim()]];
+    }),
+  );
+}
+
+function unauthorizedResponse(): APIGatewayProxyResultV2 {
+  return new ResponseBuilder()
+    .status(401)
+    .body<ErrorResponse>({ message: 'Unauthorized' })
+    .build();
+}
+
+// ---------------------------------------------------------------------------
+// Middleware factory
+// ---------------------------------------------------------------------------
+export function authMiddleware(): MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2> {
+  const before = async (
+    request: AuthMiddlewareRequest,
+  ): Promise<APIGatewayProxyResultV2 | void> => {
+    const { event } = request;
+    const cookies = parseCookies(event.cookies);
+
+    const accessToken = cookies[COOKIE_NAMES.ACCESS_TOKEN];
+    const idToken = cookies[COOKIE_NAMES.ID_TOKEN];
+    const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
+
+    // TODO [Option D]: AUTH0_DOMAIN env var will change to custom domain
+    // (e.g. auth.filhyperspace.com). JWKS, issuer, and token endpoints use the same domain.
+    const domain = process.env.AUTH0_DOMAIN!;
+    const audience = process.env.AUTH0_AUDIENCE!;
+    const issuer = `https://${domain}/`;
+    const secrets = getAuthSecrets();
+    const jwks = getJWKS(domain);
+
+    const hasCookies = { accessToken: !!accessToken, idToken: !!idToken, refreshToken: !!refreshToken };
+    console.warn('[auth] Starting auth check', { hasCookies });
+
+    // Step 1: Validate existing access token
+    if (accessToken) {
+      try {
+        const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
+        (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
+          sub: payload.sub!,
+          email: payload.email as string | undefined,
+        };
+        return; // Valid — continue to handler
+      } catch (err) {
+        // Expired or invalid — fall through to refresh
+        console.warn('[auth] Access token verification failed', { error: (err as Error).message });
+      }
+    }
+
+    // Step 2: Attempt token refresh
+    if (refreshToken) {
+      try {
+        const tokenRes = await fetch(`https://${domain}/oauth/token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            client_id: secrets.AUTH0_CLIENT_ID,
+            client_secret: secrets.AUTH0_CLIENT_SECRET,
+            refresh_token: refreshToken,
+          }).toString(),
+        });
+
+        if (tokenRes.ok) {
+          const tokens = (await tokenRes.json()) as {
+            access_token: string;
+            id_token: string;
+            refresh_token?: string;
+          };
+          // Stash new tokens — the after hook attaches them as Set-Cookie headers
+          request.internal.newTokens = {
+            access_token: tokens.access_token,
+            id_token: tokens.id_token,
+            // Use the rotated token if Auth0 returned one, otherwise reuse the old one
+            refresh_token: tokens.refresh_token ?? refreshToken,
+          } satisfies NewTokens;
+          const refreshedPayload = decodeJwt(tokens.access_token);
+          (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
+            sub: refreshedPayload.sub!,
+            email: refreshedPayload.email as string | undefined,
+          };
+          console.warn('[auth] Token refresh succeeded');
+          return; // Continue to handler
+        }
+        const refreshBody = await tokenRes.text().catch(() => '');
+        console.warn('[auth] Token refresh failed', { status: tokenRes.status, body: refreshBody });
+      } catch (err) {
+        // Refresh failed — fall through
+        console.warn('[auth] Token refresh threw', { error: (err as Error).message });
+      }
+    }
+
+    console.warn('[auth] Returning 401 — no valid tokens');
+    return unauthorizedResponse();
+  };
+
+  const after = async (request: AuthMiddlewareRequest): Promise<void> => {
+    const { newTokens } = request.internal;
+    // Narrow to structured result — the string form has no cookies field
+    const response = request.response as APIGatewayProxyStructuredResultV2 | undefined;
+    if (!newTokens || !response) return;
+
+    response.cookies = [
+      ...(response.cookies ?? []),
+      makeCookieHeader(COOKIE_NAMES.ACCESS_TOKEN, newTokens.access_token, TOKEN_MAX_AGE.ACCESS),
+      makeCookieHeader(COOKIE_NAMES.ID_TOKEN, newTokens.id_token, TOKEN_MAX_AGE.ACCESS),
+      makeCookieHeader(COOKIE_NAMES.REFRESH_TOKEN, newTokens.refresh_token, TOKEN_MAX_AGE.REFRESH),
+      makeHintCookieHeader(COOKIE_NAMES.LOGGED_IN, '1', TOKEN_MAX_AGE.REFRESH),
+    ];
+  };
+
+  return { before, after };
+}
