@@ -166,11 +166,6 @@ export default $config({
             },
           },
         },
-        Outputs: {
-          WebhookSecret: {
-            Value: { "Fn::GetAtt": ["Setup", "webhookSecret"] },
-          },
-        },
       }),
     });
 
