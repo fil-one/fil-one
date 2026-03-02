@@ -21,7 +21,7 @@
     "constructs": "^10.3.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

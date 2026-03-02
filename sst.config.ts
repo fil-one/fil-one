@@ -149,7 +149,7 @@ export default $config({
           ],
         },
       ],
-      runtime: "nodejs20.x",
+      runtime: "nodejs22.x",
       timeout: "30 seconds",
     });
 
@@ -198,7 +198,7 @@ export default $config({
           ...sharedEnv,
           ...extraEnv,
         },
-        runtime: "nodejs20.x",
+        runtime: "nodejs22.x",
         timeout: "10 seconds",
       });
     }
