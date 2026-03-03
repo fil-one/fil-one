@@ -11,14 +11,15 @@
     "deploy:staging": "pnpm build && sst deploy --stage staging",
     "deploy:production": "pnpm build && sst deploy --stage production",
     "remove": "sst remove",
+    "refresh": "sst refresh",
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "devDependencies": {
     "@pulumi/aws": "^6",
     "@pulumi/command": "^1",
-    "sst": "^3",
     "aws-cdk-lib": "^2.170.0",
-    "constructs": "^10.3.0"
+    "constructs": "^10.3.0",
+    "sst": "3"
   },
   "engines": {
     "node": ">=22"

@@ -21,7 +21,7 @@ importers:
         specifier: ^10.3.0
         version: 10.5.1
       sst:
-        specifier: ^3
+        specifier: '3'
         version: 3.19.3
 
   packages/backend:
