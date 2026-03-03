@@ -33,8 +33,6 @@ async function baseHandler(
     return redirect(`${signInUrl}?error=${encodeURIComponent(reason)}`);
   }
 
-  // TODO [Option D]: AUTH0_DOMAIN env var will change to custom domain
-  // (e.g. auth.filhyperspace.com). Token endpoint uses the same domain.
   const domain = process.env.AUTH0_DOMAIN!;
   const audience = process.env.AUTH0_AUDIENCE!;
   const callbackUrl = process.env.AUTH_CALLBACK_URL!;

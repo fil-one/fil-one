@@ -43,7 +43,7 @@ describe('auth-logout handler', () => {
 
   it('returns a 302 redirect to the Auth0 logout endpoint', async () => {
     const event = new EventBuilder().build();
-    const result = (await handler(event, stubContext, () => {})) as APIGatewayProxyStructuredResultV2;
+    const result = (await handler(event, stubContext)) as APIGatewayProxyStructuredResultV2;
 
     expect(result.statusCode).toBe(302);
     const location = result.headers!['Location'] as string;
@@ -52,7 +52,7 @@ describe('auth-logout handler', () => {
 
   it('includes client_id and returnTo in the logout URL', async () => {
     const event = new EventBuilder().build();
-    const result = (await handler(event, stubContext, () => {})) as APIGatewayProxyStructuredResultV2;
+    const result = (await handler(event, stubContext)) as APIGatewayProxyStructuredResultV2;
 
     const location = new URL(result.headers!['Location'] as string);
     expect(location.searchParams.get('client_id')).toBe('test-client-id');
@@ -61,7 +61,7 @@ describe('auth-logout handler', () => {
 
   it('clears all four auth cookies', async () => {
     const event = new EventBuilder().build();
-    const result = (await handler(event, stubContext, () => {})) as APIGatewayProxyStructuredResultV2;
+    const result = (await handler(event, stubContext)) as APIGatewayProxyStructuredResultV2;
 
     expect(result.cookies).toHaveLength(4);
     expect(result.cookies![0]).toContain('hs_access_token=');
@@ -76,7 +76,7 @@ describe('auth-logout handler', () => {
 
   it('returns an empty body', async () => {
     const event = new EventBuilder().build();
-    const result = (await handler(event, stubContext, () => {})) as APIGatewayProxyStructuredResultV2;
+    const result = (await handler(event, stubContext)) as APIGatewayProxyStructuredResultV2;
 
     expect(result.body).toBe('');
   });

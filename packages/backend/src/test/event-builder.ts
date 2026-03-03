@@ -48,6 +48,6 @@ export class EventBuilder {
       },
       isBase64Encoded: false,
       ...(this._cookies ? { cookies: this._cookies } : {}),
-    } as unknown as APIGatewayProxyEventV2;
+    } as unknown as APIGatewayProxyEventV2 & NormalizedHeaderEvent;
   }
 }
