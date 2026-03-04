@@ -17,7 +17,11 @@ packages/*/dist/
 # OS
 .DS_Store
 
+# Compiler files
+contracts/cache/
+contracts/out/
 
-# Smart contract build artifacts
-packages/contracts/out/
-packages/contracts/cache/
+# Ignores development broadcast logs
+!/broadcast
+/contracts/broadcast/*/31337/
+/contracts/broadcast/**/dry-run/
