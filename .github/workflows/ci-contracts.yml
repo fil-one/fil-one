@@ -1,4 +1,4 @@
-name: Contracts tests
+name: CI [contracts]
 
 on:
   push:
