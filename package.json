@@ -12,7 +12,8 @@
     "deploy:production": "pnpm build && sst deploy --stage production",
     "remove": "sst remove",
     "refresh": "sst refresh",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test"
   },
   "devDependencies": {
     "@pulumi/aws": "^7.21.0",
