@@ -38,8 +38,11 @@ aws configure sso --profile hyperspace
 ```
 
 When prompted:
+
+- SSO Session name: `hyperspace-sandbox`
 - SSO start URL: `https://d-9067ff87d6.awsapps.com/start`
 - SSO region: `us-east-1`
+- SSO registration scopes: `sso:account:access`
 - Account ID: `654654381893`
 - Role: `AdministratorAccess`
 - Default region: `us-east-2` - Or whatever region you want.
