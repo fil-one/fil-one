@@ -20,6 +20,7 @@
     "aws-cdk-lib": "^2.170.0",
     "constructs": "^10.3.0"
   },
+  "packageManager": "pnpm@10",
   "engines": {
     "node": ">=20"
   },
