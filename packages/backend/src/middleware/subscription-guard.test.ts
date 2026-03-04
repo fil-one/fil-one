@@ -4,6 +4,7 @@ import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/clie
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
+import { expectErrorResponse } from '../test/assert-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -101,8 +102,19 @@ describe('subscriptionGuardMiddleware', () => {
     // Verify UpdateItemCommand was called to transition status
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(1);
-    const updateInput = updateCalls[0].args[0].input;
-    expect(updateInput.ExpressionAttributeValues![':status'].S).toBe(SubscriptionStatus.GracePeriod);
+    expect(updateCalls[0].args[0].input).toStrictEqual({
+      TableName: 'BillingTable',
+      Key: {
+        pk: { S: `CUSTOMER#${USER_ID}` },
+        sk: { S: 'SUBSCRIPTION' },
+      },
+      UpdateExpression: 'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+      ExpressionAttributeValues: {
+        ':status': { S: SubscriptionStatus.GracePeriod },
+        ':grace': { S: expect.any(String) },
+        ':now': { S: expect.any(String) },
+      },
+    });
   });
 
   it('blocks write access during grace period', async () => {
@@ -117,11 +129,10 @@ describe('subscriptionGuardMiddleware', () => {
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
     const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })));
 
-    expect(result).toBeDefined();
-    const response = result!;
-    expect(response.statusCode).toBe(403);
-    const body = JSON.parse(response.body as string);
-    expect(body.code).toBe('GRACE_PERIOD_WRITE_BLOCKED');
+    expectErrorResponse(result, 403, {
+      message: 'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
+      code: 'GRACE_PERIOD_WRITE_BLOCKED',
+    });
   });
 
   it('allows read access during grace period', async () => {
@@ -152,16 +163,26 @@ describe('subscriptionGuardMiddleware', () => {
     const { before } = subscriptionGuardMiddleware(AccessLevel.Read);
     const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })));
 
-    expect(result).toBeDefined();
-    const response = result!;
-    expect(response.statusCode).toBe(403);
-    const body = JSON.parse(response.body as string);
-    expect(body.code).toBe('SUBSCRIPTION_CANCELED');
+    expectErrorResponse(result, 403, {
+      message: 'Your subscription has been canceled. Please reactivate to regain access.',
+      code: 'SUBSCRIPTION_CANCELED',
+    });
 
     // Verify transition to canceled
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(1);
-    expect(updateCalls[0].args[0].input.ExpressionAttributeValues![':status'].S).toBe(SubscriptionStatus.Canceled);
+    expect(updateCalls[0].args[0].input).toStrictEqual({
+      TableName: 'BillingTable',
+      Key: {
+        pk: { S: `CUSTOMER#${USER_ID}` },
+        sk: { S: 'SUBSCRIPTION' },
+      },
+      UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
+      ExpressionAttributeValues: {
+        ':status': { S: SubscriptionStatus.Canceled },
+        ':now': { S: expect.any(String) },
+      },
+    });
   });
 
   it('allows when billing record exists but has no subscriptionStatus', async () => {
@@ -187,10 +208,9 @@ describe('subscriptionGuardMiddleware', () => {
     const { before } = subscriptionGuardMiddleware(AccessLevel.Read);
     const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })));
 
-    expect(result).toBeDefined();
-    const response = result!;
-    expect(response.statusCode).toBe(403);
-    const body = JSON.parse(response.body as string);
-    expect(body.code).toBe('SUBSCRIPTION_CANCELED');
+    expectErrorResponse(result, 403, {
+      message: 'Your subscription has been canceled. Please reactivate to regain access.',
+      code: 'SUBSCRIPTION_CANCELED',
+    });
   });
 });

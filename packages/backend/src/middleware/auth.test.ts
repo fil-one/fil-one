@@ -10,13 +10,14 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
+import { expectErrorResponse } from '../test/assert-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const MOCK_USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-const MOCK_ORG_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const MOCK_ORG_ID = '11111111-2222-3333-4444-555555555555';
 const MOCK_SUB = 'auth0|abc123';
 const MOCK_EMAIL = 'user@example.com';
 
@@ -24,8 +25,10 @@ const MOCK_EMAIL = 'user@example.com';
 // Mocks — must be set up before importing the module under test
 // ---------------------------------------------------------------------------
 
+let uuidCallCount = 0;
+const MOCK_UUIDS = [MOCK_USER_ID, MOCK_ORG_ID];
 vi.mock('uuid', () => ({
-  v4: () => MOCK_USER_ID,
+  v4: () => MOCK_UUIDS[uuidCallCount++],
 }));
 
 vi.mock('sst', () => ({
@@ -88,6 +91,7 @@ describe('authMiddleware', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    uuidCallCount = 0;
   });
 
   describe('before hook', () => {
@@ -97,10 +101,7 @@ describe('authMiddleware', () => {
 
       const result = await before(request);
 
-      expect(result).toBeDefined();
-      const response = result!;
-      expect(response.statusCode).toBe(401);
-      expect(JSON.parse(response.body as string)).toEqual({ message: 'Unauthorized' });
+      expectErrorResponse(result, 401, { message: 'Unauthorized' });
     });
 
     it('resolves existing user from UserInfoTable on valid access token', async () => {
@@ -134,11 +135,11 @@ describe('authMiddleware', () => {
       const result = await before(request);
 
       expect(result).toBeUndefined();
-      const userInfo = getUserInfoFromEvent(event);
-      expect(userInfo.userId).toBe(existingUserId);
-      expect(userInfo.orgId).toBe(existingOrgId);
-      expect(userInfo.email).toBe(MOCK_EMAIL);
-      expect(userInfo).not.toHaveProperty('sub');
+      expect(getUserInfoFromEvent(event)).toStrictEqual({
+        userId: existingUserId,
+        orgId: existingOrgId,
+        email: MOCK_EMAIL,
+      });
     });
 
     it('creates new user and org when no UserInfoTable record exists', async () => {
@@ -156,29 +157,71 @@ describe('authMiddleware', () => {
       const result = await before(request);
 
       expect(result).toBeUndefined();
-      const userInfo = getUserInfoFromEvent(event);
-      expect(userInfo.userId).toBe(MOCK_USER_ID);
-      expect(userInfo.orgId).toBe(MOCK_ORG_ID);
-      expect(userInfo.email).toBe(MOCK_EMAIL);
+      expect(getUserInfoFromEvent(event)).toStrictEqual({
+        userId: MOCK_USER_ID,
+        orgId: MOCK_ORG_ID,
+        email: MOCK_EMAIL,
+      });
 
       const transactCalls = ddbMock.commandCalls(TransactWriteItemsCommand);
       expect(transactCalls).toHaveLength(1);
-      const items = transactCalls[0].args[0].input.TransactItems!;
-      expect(items).toHaveLength(4);
-      // SUB → identity mapping
-      expect(items[0].Put!.Item!.pk.S).toBe(`SUB#${MOCK_SUB}`);
-      expect(items[0].Put!.Item!.orgId!.S).toBe(MOCK_ORG_ID);
-      // User profile
-      expect(items[1].Put!.Item!.pk.S).toBe(`USER#${MOCK_USER_ID}`);
-      expect(items[1].Put!.Item!.orgId!.S).toBe(MOCK_ORG_ID);
-      // Org profile
-      expect(items[2].Put!.Item!.pk.S).toBe(`ORG#${MOCK_ORG_ID}`);
-      expect(items[2].Put!.Item!.sk.S).toBe('PROFILE');
-      expect(items[2].Put!.Item!.name!.S).toBe('example.com');
-      // Org membership
-      expect(items[3].Put!.Item!.pk.S).toBe(`ORG#${MOCK_ORG_ID}`);
-      expect(items[3].Put!.Item!.sk.S).toBe(`MEMBER#${MOCK_USER_ID}`);
-      expect(items[3].Put!.Item!.role!.S).toBe('admin');
+      expect(transactCalls[0].args[0].input.TransactItems).toStrictEqual([
+        // SUB → identity mapping
+        {
+          Put: {
+            TableName: 'UserInfoTable',
+            Item: {
+              pk: { S: `SUB#${MOCK_SUB}` },
+              sk: { S: 'IDENTITY' },
+              userId: { S: MOCK_USER_ID },
+              orgId: { S: MOCK_ORG_ID },
+              email: { S: MOCK_EMAIL },
+              createdAt: { S: expect.any(String) },
+            },
+            ConditionExpression: 'attribute_not_exists(pk)',
+          },
+        },
+        // User profile
+        {
+          Put: {
+            TableName: 'UserInfoTable',
+            Item: {
+              pk: { S: `USER#${MOCK_USER_ID}` },
+              sk: { S: 'PROFILE' },
+              sub: { S: MOCK_SUB },
+              orgId: { S: MOCK_ORG_ID },
+              email: { S: MOCK_EMAIL },
+              createdAt: { S: expect.any(String) },
+            },
+          },
+        },
+        // Org profile
+        {
+          Put: {
+            TableName: 'UserInfoTable',
+            Item: {
+              pk: { S: `ORG#${MOCK_ORG_ID}` },
+              sk: { S: 'PROFILE' },
+              name: { S: 'example.com' },
+              createdBy: { S: MOCK_USER_ID },
+              createdAt: { S: expect.any(String) },
+            },
+          },
+        },
+        // Org membership
+        {
+          Put: {
+            TableName: 'UserInfoTable',
+            Item: {
+              pk: { S: `ORG#${MOCK_ORG_ID}` },
+              sk: { S: `MEMBER#${MOCK_USER_ID}` },
+              role: { S: 'admin' },
+              email: { S: MOCK_EMAIL },
+              joinedAt: { S: expect.any(String) },
+            },
+          },
+        },
+      ]);
     });
 
     it('refreshes tokens when access token is expired but refresh token is valid', async () => {
@@ -222,9 +265,11 @@ describe('authMiddleware', () => {
       const result = await before(request);
 
       expect(result).toBeUndefined();
-      const userInfo = getUserInfoFromEvent(event);
-      expect(userInfo.userId).toBe(existingUserId);
-      expect(userInfo.orgId).toBe(existingOrgId);
+      expect(getUserInfoFromEvent(event)).toStrictEqual({
+        userId: existingUserId,
+        orgId: existingOrgId,
+        email: MOCK_EMAIL,
+      });
       expect(request.internal.newTokens).toEqual({
         access_token: 'new-access-token',
         id_token: 'new-id-token',
@@ -251,8 +296,7 @@ describe('authMiddleware', () => {
 
       const result = await before(request);
 
-      expect(result).toBeDefined();
-      expect(result!.statusCode).toBe(401);
+      expectErrorResponse(result, 401, { message: 'Unauthorized' });
     });
 
     it('returns 401 when access token expired and refresh fetch throws', async () => {
@@ -269,8 +313,7 @@ describe('authMiddleware', () => {
 
       const result = await before(request);
 
-      expect(result).toBeDefined();
-      expect(result!.statusCode).toBe(401);
+      expectErrorResponse(result, 401, { message: 'Unauthorized' });
     });
 
     it('parses cookies from event.cookies array correctly', async () => {
@@ -322,7 +365,12 @@ describe('authMiddleware', () => {
 
       await after(request);
 
-      const expected = ['hs_access_token=new-at',  'hs_id_token=new-it', 'hs_refresh_token=new-rt', 'hs_logged_in=1']
+      const expected = [
+        'hs_access_token=new-at; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+        'hs_id_token=new-it; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+        'hs_refresh_token=new-rt; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000',
+        'hs_logged_in=1; Secure; SameSite=Lax; Path=/; Max-Age=2592000',
+      ]
       expect(response.cookies).toStrictEqual(expected)
     });
 
