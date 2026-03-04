@@ -14,19 +14,19 @@ hyperspace/
 │   └── website/    # Vite + React 19 + TanStack Router SPA + Tailwind v4
 ```
 
-> `packages/ui` is a git submodule — a standalone fork of `@filecoin-foundation/ui-filecoin` adapted for React/Vite. The upstream fork lives at `joemocode-business/filecoin-foundation` for tracking upstream changes. TODO Move this to something more official and not my Github :)
+> `packages/ui` is a git submodule — a standalone fork of `@filecoin-foundation/ui-filecoin` adapted for React/Vite. The upstream fork lives at `joemocode-business/filecoin-foundation` for tracking upstream changes. This package does not build on its own! We import the UI components we use and build through Website package. TODO Move this to something more official and not my Github, probably.
 
 ## AWS account
 
 | | |
 |---|---|
-| Account | `654654381893` |
+| Staging/dev Account | `654654381893` |
 | Region | `us-east-2` |
 | SSO portal | https://d-9067ff87d6.awsapps.com/start |
 
 ## Prerequisites
 
-- **Node.js** >= 20
+- **Node.js** >= 24
 - **AWS CLI** — required for S3 sync and CloudFront invalidation during deploy. [Install guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
 
 ## Setup
@@ -124,6 +124,12 @@ pnpx sst deploy
 
 Uses your OS username as the stage name. No custom domain — outputs a CloudFront URL.
 
+If you are having trouble deploying after SST Changes (eg, a version bump of SST or drift on components from manual actions), you may need to refresh the stack. To do this:
+
+`pnpm run refresh`
+
+Then deploy: `pnpm run deploy`
+
 ### Staging / Production
 
 ```bash
@@ -141,18 +147,13 @@ pnpx sst dev
 
 Runs Lambda functions locally with live reload. Changes to handler code take effect immediately without redeploying.
 
-## ACM Certificate Provisioning
+## ACM Certificate Provisioning & DNS Setup
 
 Custom domains require an ACM certificate in **us-east-1** (CloudFront requirement):
 
-1. Go to AWS Certificate Manager in the us-east-1 region
-2. Request a public certificate for the domain (e.g. `console.filhyperspace.com`)
-3. Complete DNS validation by adding the provided CNAME record
-4. The `sst.config.ts` looks up the certificate by domain name automatically
+We manage this in another repo: https://github.com/FilecoinFoundationWeb/FilHyperspace-Infrastructure
 
-## DNS Setup
-
-DNS is managed by a separate pipeline. After deploying, create a CNAME record pointing the custom domain to the CloudFront distribution domain name shown in the deploy output.
+Example PR To add `staging.filhyperspace.com`: https://github.com/FilecoinFoundationWeb/FilHyperspace-Infrastructure/pull/3
 
 ## Auth0
 
