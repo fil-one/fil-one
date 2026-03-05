@@ -1,0 +1,12 @@
+[profile.default]
+src = "contracts/src"
+out = "contracts/out"
+test = "contracts/test"
+libs = ["contracts/lib"]
+
+cache_path = "contracts/cache"
+broadcast = "contracts/broadcast"
+snapshots = "contracts/snapshots"
+test_failures_file = "contracts/cache/test-failures"
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
