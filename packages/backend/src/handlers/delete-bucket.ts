@@ -25,14 +25,14 @@ async function baseHandler(
       .build();
   }
 
-  const { sub } = getUserInfo(event);
+  const { userId } = getUserInfo(event);
   const tableName = Resource.UploadsTable.name;
 
   // Verify ownership
   const bucketRecord = await dynamo.send(
     new GetItemCommand({
       TableName: tableName,
-      Key: marshall({ pk: `USER#${sub}`, sk: `BUCKET#${bucketName}` }),
+      Key: marshall({ pk: `USER#${userId}`, sk: `BUCKET#${bucketName}` }),
     }),
   );
 
@@ -49,7 +49,7 @@ async function baseHandler(
       TableName: tableName,
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
       ExpressionAttributeValues: {
-        ':pk': { S: `BUCKET#${sub}#${bucketName}` },
+        ':pk': { S: `BUCKET#${userId}#${bucketName}` },
         ':skPrefix': { S: 'OBJECT#' },
       },
       Limit: 1,
@@ -67,7 +67,7 @@ async function baseHandler(
   await dynamo.send(
     new DeleteItemCommand({
       TableName: tableName,
-      Key: marshall({ pk: `USER#${sub}`, sk: `BUCKET#${bucketName}` }),
+      Key: marshall({ pk: `USER#${userId}`, sk: `BUCKET#${bucketName}` }),
     }),
   );
 

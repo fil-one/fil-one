@@ -17,7 +17,7 @@ const dynamo = new DynamoDBClient({});
 async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyResultV2> {
-  const { sub } = getUserInfo(event);
+  const { userId } = getUserInfo(event);
   const tableName = Resource.BillingTable.name;
   const websiteUrl = process.env.WEBSITE_URL!;
   const stripe = getStripeClient();
@@ -27,7 +27,7 @@ async function baseHandler(
     new GetItemCommand({
       TableName: tableName,
       Key: {
-        pk: { S: `CUSTOMER#${sub}` },
+        pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
     }),

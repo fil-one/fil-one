@@ -1,7 +1,8 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 
 export interface UserInfo {
-  sub: string;
+  userId: string;
+  orgId: string;
   email?: string;
 }
 

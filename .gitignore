@@ -14,5 +14,8 @@ packages/*/dist/
 # Keep the stub dist for CDK synth; real build output is not tracked
 !packages/website/dist/index.html
 
+# Test coverage
+coverage/
+
 # OS
 .DS_Store

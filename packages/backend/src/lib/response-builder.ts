@@ -1,4 +1,4 @@
-import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
 // TODO: Tighten once all external origins are known (Auth0 domain, any CDN assets).
 const CSP = "default-src 'none'; connect-src 'self'; frame-ancestors 'none'";
@@ -53,7 +53,7 @@ export class ResponseBuilder {
     return this;
   }
 
-  build(): APIGatewayProxyResultV2 {
+  build(): APIGatewayProxyStructuredResultV2 {
     return {
       statusCode: this._statusCode,
       headers: {

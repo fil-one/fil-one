@@ -22,7 +22,7 @@ const TRIAL_STORAGE_LIMIT_BYTES = TIB_BYTES; // 1 TiB
 async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyResultV2> {
-  const { sub, email } = getUserInfo(event);
+  const { userId, email } = getUserInfo(event);
   const billingTableName = Resource.BillingTable.name;
   const uploadsTableName = Resource.UploadsTable.name;
 
@@ -31,7 +31,7 @@ async function baseHandler(
     new GetItemCommand({
       TableName: billingTableName,
       Key: {
-        pk: { S: `CUSTOMER#${sub}` },
+        pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
     }),
@@ -46,7 +46,7 @@ async function baseHandler(
       TableName: uploadsTableName,
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
       ExpressionAttributeValues: {
-        ':pk': { S: `USER#${sub}` },
+        ':pk': { S: `USER#${userId}` },
         ':skPrefix': { S: 'BUCKET#' },
       },
     }),
@@ -61,7 +61,7 @@ async function baseHandler(
         TableName: uploadsTableName,
         KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
         ExpressionAttributeValues: {
-          ':pk': { S: `BUCKET#${sub}#${bucketName}` },
+          ':pk': { S: `BUCKET#${userId}#${bucketName}` },
           ':skPrefix': { S: 'OBJECT#' },
         },
         ProjectionExpression: 'sizeBytes',
@@ -99,7 +99,7 @@ async function baseHandler(
         new UpdateItemCommand({
           TableName: billingTableName,
           Key: {
-            pk: { S: `CUSTOMER#${sub}` },
+            pk: { S: `CUSTOMER#${userId}` },
             sk: { S: 'SUBSCRIPTION' },
           },
           UpdateExpression: 'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
@@ -188,7 +188,7 @@ async function baseHandler(
       new UpdateItemCommand({
         TableName: billingTableName,
         Key: {
-          pk: { S: `CUSTOMER#${sub}` },
+          pk: { S: `CUSTOMER#${userId}` },
           sk: { S: 'SUBSCRIPTION' },
         },
         UpdateExpression: 'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
@@ -211,7 +211,7 @@ async function baseHandler(
       new UpdateItemCommand({
         TableName: billingTableName,
         Key: {
-          pk: { S: `CUSTOMER#${sub}` },
+          pk: { S: `CUSTOMER#${userId}` },
           sk: { S: 'SUBSCRIPTION' },
         },
         UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',

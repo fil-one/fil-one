@@ -46,7 +46,7 @@ async function baseHandler(
       .build();
   }
 
-  const { sub } = getUserInfo(event);
+  const { userId } = getUserInfo(event);
   const now = new Date().toISOString();
 
   try {
@@ -54,7 +54,7 @@ async function baseHandler(
       new PutItemCommand({
         TableName: Resource.UploadsTable.name,
         Item: marshall({
-          pk: `USER#${sub}`,
+          pk: `USER#${userId}`,
           sk: `BUCKET#${name}`,
           name,
           region,

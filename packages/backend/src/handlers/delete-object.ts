@@ -35,14 +35,14 @@ async function baseHandler(
       .build();
   }
 
-  const { sub } = getUserInfo(event);
+  const { userId } = getUserInfo(event);
   const tableName = Resource.UploadsTable.name;
 
   // Verify bucket ownership
   const bucketRecord = await dynamo.send(
     new GetItemCommand({
       TableName: tableName,
-      Key: marshall({ pk: `USER#${sub}`, sk: `BUCKET#${bucketName}` }),
+      Key: marshall({ pk: `USER#${userId}`, sk: `BUCKET#${bucketName}` }),
     }),
   );
 
@@ -58,7 +58,7 @@ async function baseHandler(
     new GetItemCommand({
       TableName: tableName,
       Key: marshall({
-        pk: `BUCKET#${sub}#${bucketName}`,
+        pk: `BUCKET#${userId}#${bucketName}`,
         sk: `OBJECT#${objectKey}`,
       }),
     }),
@@ -83,7 +83,7 @@ async function baseHandler(
     new DeleteItemCommand({
       TableName: tableName,
       Key: marshall({
-        pk: `BUCKET#${sub}#${bucketName}`,
+        pk: `BUCKET#${userId}#${bucketName}`,
         sk: `OBJECT#${objectKey}`,
       }),
     }),

@@ -18,7 +18,7 @@ const dynamo = new DynamoDBClient({});
 async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyResultV2> {
-  const { sub, email } = getUserInfo(event);
+  const { userId, email } = getUserInfo(event);
   const tableName = Resource.BillingTable.name;
   const stripe = getStripeClient();
 
@@ -27,7 +27,7 @@ async function baseHandler(
     new GetItemCommand({
       TableName: tableName,
       Key: {
-        pk: { S: `CUSTOMER#${sub}` },
+        pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
     }),
@@ -43,7 +43,7 @@ async function baseHandler(
       // Create Stripe customer and update record
       const customer = await stripe.customers.create({
         email: email ?? undefined,
-        metadata: { userId: sub },
+        metadata: { userId },
       });
       stripeCustomerId = customer.id;
 
@@ -51,7 +51,7 @@ async function baseHandler(
         new PutItemCommand({
           TableName: tableName,
           Item: marshall({
-            pk: `CUSTOMER#${sub}`,
+            pk: `CUSTOMER#${userId}`,
             sk: 'SUBSCRIPTION',
             stripeCustomerId,
             subscriptionStatus: SubscriptionStatus.Trialing,
@@ -66,7 +66,7 @@ async function baseHandler(
     // First time — create Stripe customer and billing record
     const customer = await stripe.customers.create({
       email: email ?? undefined,
-      metadata: { userId: sub },
+      metadata: { userId },
     });
     stripeCustomerId = customer.id;
 
@@ -74,7 +74,7 @@ async function baseHandler(
       new PutItemCommand({
         TableName: tableName,
         Item: marshall({
-          pk: `CUSTOMER#${sub}`,
+          pk: `CUSTOMER#${userId}`,
           sk: 'SUBSCRIPTION',
           stripeCustomerId,
           subscriptionStatus: SubscriptionStatus.Trialing,

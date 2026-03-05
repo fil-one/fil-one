@@ -12,10 +12,11 @@
     "deploy:production": "pnpm build && sst deploy --stage production",
     "remove": "sst remove",
     "refresh": "sst refresh",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm --filter @hyperspace/backend test"
   },
   "devDependencies": {
-    "@pulumi/aws": "^7.20.0",
+    "@pulumi/aws": "^7.21.0",
     "@pulumi/command": "^1.2.1",
     "aws-cdk-lib": "^2.241.0",
     "constructs": "^10.5.1",

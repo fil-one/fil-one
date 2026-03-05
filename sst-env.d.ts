@@ -50,6 +50,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Bucket"
     }
+    "UserInfoTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
     "WebsiteBucket": {
       "name": string
       "type": "sst.aws.Bucket"

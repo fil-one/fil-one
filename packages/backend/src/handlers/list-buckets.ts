@@ -17,14 +17,14 @@ const dynamo = new DynamoDBClient({});
 async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyResultV2> {
-  const { sub } = getUserInfo(event);
+  const { userId } = getUserInfo(event);
 
   const result = await dynamo.send(
     new QueryCommand({
       TableName: Resource.UploadsTable.name,
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
       ExpressionAttributeValues: {
-        ':pk': { S: `USER#${sub}` },
+        ':pk': { S: `USER#${userId}` },
         ':skPrefix': { S: 'BUCKET#' },
       },
     }),

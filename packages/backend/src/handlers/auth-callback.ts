@@ -1,6 +1,6 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
-import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader } from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -9,7 +9,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 // Before redirecting to Auth0, generate a random state value, store it in a
 // short-lived cookie, and verify it matches the state returned here.
 
-function redirect(location: string, cookies: string[] = []): APIGatewayProxyResultV2 {
+function redirect(location: string, cookies: string[] = []): APIGatewayProxyStructuredResultV2 {
   return {
     statusCode: 302,
     headers: { Location: location },
@@ -20,7 +20,7 @@ function redirect(location: string, cookies: string[] = []): APIGatewayProxyResu
 
 async function baseHandler(
   event: APIGatewayProxyEventV2,
-): Promise<APIGatewayProxyResultV2> {
+): Promise<APIGatewayProxyStructuredResultV2> {
   const websiteUrl = process.env.WEBSITE_URL!;
   const signInUrl = `${websiteUrl}/sign-in`;
 
@@ -33,8 +33,6 @@ async function baseHandler(
     return redirect(`${signInUrl}?error=${encodeURIComponent(reason)}`);
   }
 
-  // TODO [Option D]: AUTH0_DOMAIN env var will change to custom domain
-  // (e.g. auth.filhyperspace.com). Token endpoint uses the same domain.
   const domain = process.env.AUTH0_DOMAIN!;
   const audience = process.env.AUTH0_AUDIENCE!;
   const callbackUrl = process.env.AUTH_CALLBACK_URL!;

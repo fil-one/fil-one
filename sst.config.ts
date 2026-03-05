@@ -59,6 +59,14 @@ export default $config({
       ttl: "ttl",
     });
 
+    const userInfoTable = new sst.aws.Dynamo("UserInfoTable", {
+      fields: {
+        pk: "string",
+        sk: "string",
+      },
+      primaryIndex: { hashKey: "pk", rangeKey: "sk" },
+    });
+
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket("UserFilesBucket");
 
@@ -176,6 +184,7 @@ export default $config({
     const allResources = [
       uploadsTable,
       billingTable,
+      userInfoTable,
       userFilesBucket,
       auth0ClientId,
       auth0ClientSecret,

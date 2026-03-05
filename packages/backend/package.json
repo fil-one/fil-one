@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "test": "vitest run --coverage"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1002.0",
@@ -22,7 +23,9 @@
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.161",
-    "@types/uuid": "^11.0.0",
-    "typescript": "^5.9.3"
+    "@vitest/coverage-v8": "^4.0.0",
+    "aws-sdk-client-mock": "^4.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0"
   }
 }

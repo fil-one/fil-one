@@ -18,7 +18,7 @@ const dynamo = new DynamoDBClient({});
 async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyResultV2> {
-  const { sub } = getUserInfo(event);
+  const { userId } = getUserInfo(event);
   const tableName = Resource.BillingTable.name;
   const stripe = getStripeClient();
   const secrets = getBillingSecrets();
@@ -28,7 +28,7 @@ async function baseHandler(
     new GetItemCommand({
       TableName: tableName,
       Key: {
-        pk: { S: `CUSTOMER#${sub}` },
+        pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
     }),
@@ -103,7 +103,7 @@ async function baseHandler(
     new UpdateItemCommand({
       TableName: tableName,
       Key: {
-        pk: { S: `CUSTOMER#${sub}` },
+        pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
       UpdateExpression: 'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
