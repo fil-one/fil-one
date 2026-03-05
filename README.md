@@ -289,25 +289,25 @@ forge update lib/forge-std --root contracts          # update a specific depende
 ### Build
 
 ```bash
-forge build --root contracts
+forge build
 ```
 
 ### Test
 
 ```bash
-forge test --root contracts
+forge test
 ```
 
 ### Format
 
 ```bash
-forge fmt --root contracts
+forge fmt
 ```
 
 ### Gas Snapshots
 
 ```bash
-forge snapshot --root contracts
+forge snapshot
 ```
 
 ### Anvil (local node)
@@ -319,5 +319,5 @@ anvil
 ### Deploy
 
 ```bash
-forge script script/Counter.s.sol:CounterScript --root contracts --rpc-url <your_rpc_url> --private-key <your_private_key>
+forge script contracts/script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
 ```
