@@ -1,19 +1,21 @@
 {
   "name": "hyperspace",
   "private": true,
+  "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
     "dev": "sst dev",
-    "build": "pnpm --filter @hyperspace/shared build && pnpm --filter @hyperspace/backend build && pnpm --filter @hyperspace/website build",
+    "build": "pnpm --filter @hyperspace/shared build && pnpm --filter @hyperspace/aurora-backoffice-client build && pnpm --filter @hyperspace/backend build && pnpm --filter @hyperspace/website build",
     "deploy": "pnpm build && sst deploy",
     "deploy:staging": "pnpm build && sst deploy --stage staging",
     "deploy:production": "pnpm build && sst deploy --stage production",
     "remove": "sst remove",
     "refresh": "sst refresh",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm --filter @hyperspace/backend test"
+    "test": "pnpm --filter @hyperspace/backend test",
+    "generate:aurora-backoffice": "pnpm --filter @hyperspace/aurora-backoffice-client generate"
   },
   "devDependencies": {
     "@pulumi/aws": "^7.21.0",

@@ -236,6 +236,23 @@ The frontend needs the **publishable key** in its env:
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx
 ```
 
+## Aurora Back Office API Client
+
+The backend package includes a generated TypeScript client for the Aurora Back
+Office API, located in `packages/backend/src/aurora-backoffice-client/`.
+
+**Regenerating the client** (after API changes):
+
+1. Download the updated Swagger spec from
+   https://backoffice.dev.aur.lu/ff/docs/backoffice-api (open the page, then
+   save the JSON loaded by the page)
+2. Replace `packages/backend/src/aurora-backoffice-client/aurora-backoffice.swagger.json`
+   with the downloaded file
+3. Run:
+   ```bash
+   pnpm generate:aurora-backoffice
+   ```
+
 ## UI submodule (`packages/ui`)
 
 `packages/ui` is a git submodule pointing to `joemocode-business/ui-hyperspace` — a fork of `@filecoin-foundation/ui-filecoin` adapted for Vite/React. It is consumed from source by the website (no separate build step in dev).
