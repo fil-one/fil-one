@@ -274,7 +274,7 @@ The full fork at `joemocode-business/filecoin-foundation` tracks the upstream `F
 
 ## Contracts (`contracts/`)
 
-Foundry project for EVM smart contracts. All commands below use `--root contracts` so they run from the monorepo root.
+Foundry project for EVM smart contracts. 
 
 **Prerequisites** — install Foundry if you haven't already:
 
@@ -285,9 +285,9 @@ curl -L https://foundry.paradigm.xyz | bash && foundryup
 ### Install / Update Dependencies
 
 ```bash
-forge install --root contracts                       # install from foundry.lock
-forge update --root contracts                        # update all dependencies
-forge update lib/forge-std --root contracts          # update a specific dependency
+forge install                             # install from foundry.lock
+forge update                              # update all dependencies
+forge update contracts/lib/forge-std      # update a specific dependency
 ```
 
 ### Build
