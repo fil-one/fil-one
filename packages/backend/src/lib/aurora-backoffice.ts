@@ -25,7 +25,7 @@ export async function createAuroraTenant({
   const client = createClient({
     baseUrl,
     headers: {
-      Authorization: `Bearer ${token}`,
+      "X-Api-Key": token,
     },
   });
 

@@ -200,7 +200,7 @@ export default $config({
       AUTH0_AUDIENCE: "console.filhyperspace.com",
       AURORA_BACKOFFICE_URL: isProduction
         ? "TODO"
-        : "https://backoffice.dev.aur.lu/api/v1",
+        : "https://api.backoffice.dev.aur.lu/api/v1",
       AURORA_PARTNER_ID: isProduction ? "TODO" : "ff",
       AURORA_REGION_ID: isProduction ? "TODO" : "ff",
     };
