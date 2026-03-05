@@ -99,7 +99,7 @@ First-class Vercel/Next.js integration. Middleware handles HTTP-only cookies, to
 
 **Integration (Next.js):**
 ```
-1. npm install @clerk/nextjs
+1. pnpm install @clerk/nextjs
 2. Wrap app in <ClerkProvider>
 3. Add Clerk middleware — automatically protects routes + manages session cookie
 4. Use <SignIn /> component (has Google/GitHub buttons built in)
@@ -117,7 +117,7 @@ Premium enterprise auth platform. Universal Login page is highly customizable an
 
 **Integration (Next.js):**
 ```
-1. npm install @auth0/nextjs-auth0
+1. pnpm install @auth0/nextjs-auth0
 2. Configure AUTH0_* env vars
 3. Add /api/auth/[auth0] catch-all API route — handles login, callback, logout
 4. Middleware validates session cookie on protected routes
@@ -128,7 +128,7 @@ Premium enterprise auth platform. Universal Login page is highly customizable an
 
 **Integration (Express/EKS — if no Vercel):**
 ```
-1. npm install express-openid-connect
+1. pnpm install express-openid-connect
 2. Configure auth middleware with Auth0 issuer, client ID/secret
 3. Middleware handles /login, /callback, /logout routes
 4. Sets HTTP-only session cookie automatically
@@ -166,7 +166,7 @@ Passwordless auth via email magic links and WebAuthn. Web3-native (DID tokens, w
 
 **Integration:**
 ```
-1. npm install magic-sdk @magic-sdk/admin
+1. pnpm install magic-sdk @magic-sdk/admin
 2. Client-side: magic.auth.loginWithMagicLink() or magic.oauth.loginWithRedirect('google')
 3. Returns a DID token (not a session cookie)
 4. Client sends DID token to your BFF
@@ -187,7 +187,7 @@ De facto open-source auth framework for Next.js. Supports Cognito, Auth0, Magic,
 
 **Integration (Next.js):**
 ```
-1. npm install next-auth
+1. pnpm install next-auth
 2. Configure providers in auth config:
    providers: [Google({...}), GitHub({...})]
 3. Add /api/auth/[...nextauth] catch-all route

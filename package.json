@@ -11,18 +11,19 @@
     "deploy:staging": "pnpm build && sst deploy --stage staging",
     "deploy:production": "pnpm build && sst deploy --stage production",
     "remove": "sst remove",
+    "refresh": "sst refresh",
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "devDependencies": {
-    "@pulumi/aws": "^6",
-    "@pulumi/command": "^1",
-    "sst": "^3",
-    "aws-cdk-lib": "^2.170.0",
-    "constructs": "^10.3.0"
+    "@pulumi/aws": "^7.20.0",
+    "@pulumi/command": "^1.2.1",
+    "aws-cdk-lib": "^2.241.0",
+    "constructs": "^10.5.1",
+    "sst": "^4.1.10"
   },
   "packageManager": "pnpm@10",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

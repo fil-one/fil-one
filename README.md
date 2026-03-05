@@ -1,6 +1,6 @@
 # Hyperspace
 
-Full-stack prototype — npm workspaces monorepo deploying to AWS via [SST v3](https://sst.dev/).
+Full-stack prototype — pnpm workspaces monorepo deploying to AWS via [SST v3](https://sst.dev/).
 
 ## Structure
 
@@ -14,19 +14,19 @@ hyperspace/
 │   └── website/    # Vite + React 19 + TanStack Router SPA + Tailwind v4
 ```
 
-> `packages/ui` is a git submodule — a standalone fork of `@filecoin-foundation/ui-filecoin` adapted for React/Vite. The upstream fork lives at `joemocode-business/filecoin-foundation` for tracking upstream changes. TODO Move this to something more official and not my Github :)
+> `packages/ui` is a git submodule — a standalone fork of `@filecoin-foundation/ui-filecoin` adapted for React/Vite. The upstream fork lives at `joemocode-business/filecoin-foundation` for tracking upstream changes. This package does not build on its own! We import the UI components we use and build through Website package. TODO Move this to something more official and not my Github, probably.
 
 ## AWS account
 
 | | |
 |---|---|
-| Account | `654654381893` |
+| Staging/dev Account | `654654381893` |
 | Region | `us-east-2` |
 | SSO portal | https://d-9067ff87d6.awsapps.com/start |
 
 ## Prerequisites
 
-- **Node.js** >= 20
+- **Node.js** >= 24
 - **AWS CLI** — required for S3 sync and CloudFront invalidation during deploy. [Install guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
 
 ## Setup
@@ -85,18 +85,18 @@ git submodule update --init --recursive
 **4. Install dependencies**
 
 ```bash
-npm install
+pnpm install
 ```
 
 **5. Set SST secrets (one-time per stage)**
 
 ```bash
-npx sst secret set Auth0ClientId <value> [--stage <stage>]
-npx sst secret set Auth0ClientSecret <value> [--stage <stage>]
-npx sst secret set Auth0MgmtClientId <value> [--stage <stage>]
-npx sst secret set Auth0MgmtClientSecret <value> [--stage <stage>]
-npx sst secret set StripeSecretKey <value> [--stage <stage>]
-npx sst secret set StripePriceId <value> [--stage <stage>]
+pnpx sst secret set Auth0ClientId <value> [--stage <stage>]
+pnpx sst secret set Auth0ClientSecret <value> [--stage <stage>]
+pnpx sst secret set Auth0MgmtClientId <value> [--stage <stage>]
+pnpx sst secret set Auth0MgmtClientSecret <value> [--stage <stage>]
+pnpx sst secret set StripeSecretKey <value> [--stage <stage>]
+pnpx sst secret set StripePriceId <value> [--stage <stage>]
 ```
 
 Omit `--stage` to set for your personal dev stage (defaults to OS username).
@@ -106,32 +106,38 @@ The `Auth0MgmtClientId` and `Auth0MgmtClientSecret` are from a **Machine-to-Mach
 ## Commands
 
 ```bash
-npm run dev              # SST live dev mode (live Lambda debugging)
-npm run deploy           # Deploy personal dev stack (uses OS username as stage)
-npm run deploy:staging   # Deploy to staging.filhyperspace.com
-npm run deploy:production # Deploy to console.filhyperspace.com
-npm run remove           # Remove your personal dev stack
-npm run typecheck        # tsc --noEmit across all packages
+pnpm run dev              # SST live dev mode (live Lambda debugging)
+pnpm run deploy           # Deploy personal dev stack (uses OS username as stage)
+pnpm run deploy:staging   # Deploy to staging.filhyperspace.com
+pnpm run deploy:production # Deploy to console.filhyperspace.com
+pnpm run remove           # Remove your personal dev stack
+pnpm run typecheck        # tsc --noEmit across all packages
 ```
 
 ```bash
 # Local website dev server (for frontend-only changes)
-cd packages/website && npm run dev
+cd packages/website && pnpm run dev
 ```
 
 ### Personal Dev Stack
 
 ```bash
-npx sst deploy
+pnpx sst deploy
 ```
 
 Uses your OS username as the stage name. No custom domain — outputs a CloudFront URL.
 
+If you are having trouble deploying after SST Changes (eg, a version bump of SST or drift on components from manual actions), you may need to refresh the stack. To do this:
+
+`pnpm run refresh`
+
+Then deploy: `pnpm run deploy`
+
 ### Staging / Production
 
 ```bash
-npx sst deploy --stage staging
-npx sst deploy --stage production
+pnpx sst deploy --stage staging
+pnpx sst deploy --stage production
 ```
 
 Custom domains require a pre-provisioned ACM certificate in us-east-1 and a DNS CNAME pointing to the CloudFront distribution (managed by a separate pipeline).
@@ -139,23 +145,18 @@ Custom domains require a pre-provisioned ACM certificate in us-east-1 and a DNS 
 ### Live Dev Mode
 
 ```bash
-npx sst dev
+pnpx sst dev
 ```
 
 Runs Lambda functions locally with live reload. Changes to handler code take effect immediately without redeploying.
 
-## ACM Certificate Provisioning
+## ACM Certificate Provisioning & DNS Setup
 
 Custom domains require an ACM certificate in **us-east-1** (CloudFront requirement):
 
-1. Go to AWS Certificate Manager in the us-east-1 region
-2. Request a public certificate for the domain (e.g. `console.filhyperspace.com`)
-3. Complete DNS validation by adding the provided CNAME record
-4. The `sst.config.ts` looks up the certificate by domain name automatically
+We manage this in another repo: https://github.com/FilecoinFoundationWeb/FilHyperspace-Infrastructure
 
-## DNS Setup
-
-DNS is managed by a separate pipeline. After deploying, create a CNAME record pointing the custom domain to the CloudFront distribution domain name shown in the deploy output.
+Example PR To add `staging.filhyperspace.com`: https://github.com/FilecoinFoundationWeb/FilHyperspace-Infrastructure/pull/3
 
 ## Auth0
 
@@ -191,8 +192,8 @@ The deploy automation uses an M2M application to update Auth0 settings programma
 
 Set these as SST secrets:
 ```bash
-npx sst secret set Auth0MgmtClientId <M2M-client-id> [--stage <stage>]
-npx sst secret set Auth0MgmtClientSecret <M2M-client-secret> [--stage <stage>]
+pnpx sst secret set Auth0MgmtClientId <M2M-client-id> [--stage <stage>]
+pnpx sst secret set Auth0MgmtClientSecret <M2M-client-secret> [--stage <stage>]
 ```
 
 ## Stripe (Billing)
