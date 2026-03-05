@@ -1,4 +1,4 @@
-import { DynamoDBClient, GetItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, DeleteItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
@@ -39,20 +39,29 @@ export async function handler(
     return { statusCode: 400, body: JSON.stringify({ message: 'Invalid signature' }) };
   }
 
-  // 3. Idempotency check
-  const idempotencyResult = await dynamo.send(
-    new GetItemCommand({
-      TableName: tableName,
-      Key: {
-        pk: { S: `WEBHOOK#${stripeEvent.id}` },
-        sk: { S: 'EVENT' },
-      },
-    }),
-  );
-
-  if (idempotencyResult.Item) {
-    console.log('[stripe-webhook] Already processed event:', stripeEvent.id);
-    return { statusCode: 200, body: JSON.stringify({ received: true }) };
+  // 3. Idempotency — atomic claim-or-skip
+  const idempotencyKey = { pk: { S: `WEBHOOK#${stripeEvent.id}` }, sk: { S: 'EVENT' } };
+  try {
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: tableName,
+        Item: marshall({
+          pk: `WEBHOOK#${stripeEvent.id}`,
+          sk: 'EVENT',
+          eventType: stripeEvent.type,
+          processedAt: new Date().toISOString(),
+          ttl: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+        }),
+        ConditionExpression: 'attribute_not_exists(pk)',
+      }),
+    );
+  } catch (err) {
+    if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+      console.log('[stripe-webhook] Already processed event:', stripeEvent.id);
+      return { statusCode: 200, body: JSON.stringify({ received: true }) };
+    }
+    console.error('[stripe-webhook] Idempotency check failed:', (err as Error).message);
+    return { statusCode: 500, body: JSON.stringify({ message: 'Idempotency check error' }) };
   }
 
   // 4. Process event
@@ -89,23 +98,14 @@ export async function handler(
     }
   } catch (err) {
     console.error('[stripe-webhook] Error processing event:', (err as Error).message);
+    // Release idempotency claim so Stripe retries can reprocess
+    try {
+      await dynamo.send(new DeleteItemCommand({ TableName: tableName, Key: idempotencyKey }));
+    } catch (deleteErr) {
+      console.error('[stripe-webhook] Failed to release idempotency claim:', (deleteErr as Error).message);
+    }
     return { statusCode: 500, body: JSON.stringify({ message: 'Processing error' }) };
   }
-
-  // 5. Record idempotency
-  const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
-  await dynamo.send(
-    new PutItemCommand({
-      TableName: tableName,
-      Item: marshall({
-        pk: `WEBHOOK#${stripeEvent.id}`,
-        sk: 'EVENT',
-        eventType: stripeEvent.type,
-        processedAt: new Date().toISOString(),
-        ttl,
-      }),
-    }),
-  );
 
   return { statusCode: 200, body: JSON.stringify({ received: true }) };
 }
