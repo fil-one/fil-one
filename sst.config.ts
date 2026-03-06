@@ -82,31 +82,12 @@ export default $config({
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket("UserFilesBucket");
 
+    // ── API Gateway ──────────────────────────────────────────────────
+    const api = new sst.aws.ApiGatewayV2("Api");
+
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
     const isProduction = stage === "production";
-    const isStaging = stage === "staging";
-
-    // ── Shared CloudWatch log group for all Lambda functions ────────
-    const logGroup = new aws.cloudwatch.LogGroup("LambdaLogGroup", {
-      name: `/hyperspace/${stage}`,
-      retentionInDays: isProduction ? 30 : isStaging ? 7 : 1,
-    });
-
-    const sharedLogging = {
-      logGroup: logGroup.name,
-    };
-
-    // ── API Gateway ──────────────────────────────────────────────────
-    const api = new sst.aws.ApiGatewayV2("Api", {
-      transform: {
-        route: {
-          handler: {
-            logging: sharedLogging,
-          },
-        },
-      },
-    });
 
     let domainName: string | undefined;
     let certArn: string | undefined;
@@ -178,7 +159,6 @@ export default $config({
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
     const setupFn = new sst.aws.Function("SetupIntegrations", {
       handler: "packages/backend/src/handlers/setup-integrations.handler",
-      logging: sharedLogging,
       link: [stripeSecretKey, auth0MgmtClientId, auth0MgmtClientSecret, auth0ClientId],
       environment: {
         AUTH0_DOMAIN: "dev-oar2nhqh58xf5pwf.us.auth0.com",
@@ -297,7 +277,6 @@ export default $config({
     tenantSetupQueue.subscribe(
       {
         handler: "packages/backend/src/handlers/aurora-tenant-setup.handler",
-        logging: sharedLogging,
         link: [userInfoTable, auroraBackofficeToken],
         environment: {
           AURORA_BACKOFFICE_URL: sharedEnv.AURORA_BACKOFFICE_URL,
