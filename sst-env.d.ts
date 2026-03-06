@@ -14,6 +14,14 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "AuroraTenantSetupDlq": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
+    "AuroraTenantSetupQueue": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
     "Auth0ClientId": {
       "type": "sst.sst.Secret"
       "value": string
