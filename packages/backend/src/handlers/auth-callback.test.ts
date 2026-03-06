@@ -25,7 +25,7 @@ vi.stubGlobal('fetch', mockFetch);
 process.env.WEBSITE_URL = 'https://app.example.com';
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
-process.env.AUTH_CALLBACK_URL = 'https://api.test.com/auth/callback';
+process.env.ALLOWED_REDIRECT_ORIGINS = '';
 
 import { handler } from './auth-callback.js';
 
@@ -180,7 +180,7 @@ describe('auth-callback handler', () => {
       expect(body.get('client_id')).toBe('test-client-id');
       expect(body.get('client_secret')).toBe('test-client-secret');
       expect(body.get('code')).toBe('auth-code-123');
-      expect(body.get('redirect_uri')).toBe('https://api.test.com/auth/callback');
+      expect(body.get('redirect_uri')).toBe('https://app.example.com/api/auth/callback');
       expect(body.get('audience')).toBe('https://api.test.com');
     });
 
@@ -195,6 +195,31 @@ describe('auth-callback handler', () => {
       expect(cookies[3]).toBe('hs_logged_in=1; Secure; SameSite=Lax; Path=/; Max-Age=2592000');
       expect(cookies[4]).toMatch(/^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/);
       expect(cookies[5]).toBe('hs_oauth_state=; Secure; SameSite=Lax; Path=/; Max-Age=0');
+    });
+
+    it('uses X-Dev-Origin when it matches ALLOWED_REDIRECT_ORIGINS', async () => {
+      process.env.ALLOWED_REDIRECT_ORIGINS = 'https://localhost:5173';
+      const event = validStateEvent();
+      event.headers['x-dev-origin'] = 'https://localhost:5173';
+
+      const result = await handler(event, stubContext);
+
+      expect(result.headers!['Location']).toBe('https://localhost:5173/dashboard');
+      const body = new URLSearchParams(mockFetch.mock.calls[0][1].body as string);
+      expect(body.get('redirect_uri')).toBe('https://localhost:5173/api/auth/callback');
+
+      // Reset
+      process.env.ALLOWED_REDIRECT_ORIGINS = '';
+    });
+
+    it('ignores X-Dev-Origin when not in ALLOWED_REDIRECT_ORIGINS', async () => {
+      process.env.ALLOWED_REDIRECT_ORIGINS = '';
+      const event = validStateEvent();
+      event.headers['x-dev-origin'] = 'https://evil.com';
+
+      const result = await handler(event, stubContext);
+
+      expect(result.headers!['Location']).toBe('https://app.example.com/dashboard');
     });
 
     it('omits refresh_token cookie when Auth0 does not return one', async () => {

@@ -6,6 +6,7 @@ import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader, ma
 import { parseCookies } from '../lib/cookies.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { resolveOrigin } from '../lib/resolve-origin.js';
 
 function redirect(location: string, cookies: string[] = []): APIGatewayProxyStructuredResultV2 {
   return {
@@ -19,8 +20,8 @@ function redirect(location: string, cookies: string[] = []): APIGatewayProxyStru
 async function baseHandler(
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const websiteUrl = process.env.WEBSITE_URL!;
-  const signInUrl = `${websiteUrl}/sign-in`;
+  const origin = resolveOrigin(event);
+  const signInUrl = `${origin}/sign-in`;
 
   const { code, error, error_description, state } = event.queryStringParameters ?? {};
 
@@ -43,7 +44,7 @@ async function baseHandler(
 
   const domain = process.env.AUTH0_DOMAIN!;
   const audience = process.env.AUTH0_AUDIENCE!;
-  const callbackUrl = process.env.AUTH_CALLBACK_URL!;
+  const callbackUrl = `${origin}/api/auth/callback`;
   const secrets = getAuthSecrets();
 
   const tokenRes = await fetch(`https://${domain}/oauth/token`, {
@@ -83,7 +84,7 @@ async function baseHandler(
     makeClearCookieHeader(OAUTH_STATE_COOKIE),
   ];
 
-  return redirect(`${websiteUrl}/dashboard`, responseCookies);
+  return redirect(`${origin}/dashboard`, responseCookies);
 }
 
 export const handler = middy(baseHandler)

@@ -100,7 +100,7 @@ export default $config({
     // we want to make sure to lock down to just our origin. 
     const allowedOrigins = domainName ? [`https://${domainName}`] : [];
     if (stage !== "production") {
-      allowedOrigins.push("http://localhost:5173");
+      allowedOrigins.push("https://localhost:5173");
     }
 
     const api = new sst.aws.ApiGatewayV2("Api", {
@@ -248,12 +248,14 @@ export default $config({
     addRoute("DELETE", "/api/buckets/{name}/objects", "delete-object");
 
     // ── Auth routes ──────────────────────────────────────────────────
+    const allowedRedirectOrigins = allowedOrigins.join(",");
     addRoute("GET", "/api/auth/callback", "auth-callback", {
       WEBSITE_URL: siteUrl,
-      AUTH_CALLBACK_URL: $interpolate`${siteUrl}/api/auth/callback`,
+      ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
     });
     addRoute("GET", "/api/auth/logout", "auth-logout", {
       WEBSITE_URL: siteUrl,
+      ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
     });
 
     // ── Billing routes ───────────────────────────────────────────────

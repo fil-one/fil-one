@@ -63,7 +63,7 @@ export async function apiRequest<T>(
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  if (method !== 'GET' && method !== 'HEAD') {
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
     const token = getCsrfToken();
     if (token) headers.set('X-CSRF-Token', token);
   }
