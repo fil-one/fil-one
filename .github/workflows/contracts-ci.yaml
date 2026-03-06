@@ -1,17 +1,15 @@
-name: CI [contracts]
+name: "CI [contracts]"
 
 on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch:
 
 env:
   FOUNDRY_PROFILE: ci
 
 jobs:
-  check:
-    name: Contracts checks
+  check-contracts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,21 +19,21 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
 
-      - name: Show Forge version
+      - name: Forge version
         run: |
           forge --version
 
-      - name: Run Forge fmt
+      - name: Format
         run: |
           forge fmt --check
         id: fmt
 
-      - name: Run Forge build
+      - name: Build
         run: |
           forge build --sizes
         id: build
 
-      - name: Run Forge tests
+      - name: Test
         run: |
           forge test -vvv
         id: test
