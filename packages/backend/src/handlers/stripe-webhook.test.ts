@@ -22,11 +22,7 @@ vi.mock('../lib/stripe-client.js', () => ({
     webhooks: { constructEvent: mockConstructEvent },
     customers: { retrieve: mockCustomersRetrieve },
   }),
-  getBillingSecrets: () => ({
-    STRIPE_SECRET_KEY: 'sk_test_fake',
-    STRIPE_WEBHOOK_SECRET: 'whsec_test_fake',
-    STRIPE_PRICE_ID: 'price_test_fake',
-  }),
+  getWebhookSecret: vi.fn().mockResolvedValue('whsec_test_fake'),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);

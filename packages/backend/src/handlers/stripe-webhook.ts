@@ -4,7 +4,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda
 import Stripe from 'stripe';
 import { SubscriptionStatus } from '@hyperspace/shared';
 import { Resource } from "sst";
-import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
+import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 
 const dynamo = new DynamoDBClient({});
 
@@ -16,7 +16,6 @@ export async function handler(
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> {
   const tableName = Resource.BillingTable.name;
-  const secrets = getBillingSecrets();
   const stripe = getStripeClient();
 
   // 1. Get raw body for signature verification
@@ -33,7 +32,7 @@ export async function handler(
   // 2. Verify webhook signature
   let stripeEvent: Stripe.Event;
   try {
-    stripeEvent = stripe.webhooks.constructEvent(rawBody, signatureHeader, secrets.STRIPE_WEBHOOK_SECRET);
+    stripeEvent = stripe.webhooks.constructEvent(rawBody, signatureHeader, await getWebhookSecret());
   } catch (err) {
     console.error('[stripe-webhook] Signature verification failed:', (err as Error).message);
     return { statusCode: 400, body: JSON.stringify({ message: 'Invalid signature' }) };

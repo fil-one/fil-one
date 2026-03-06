@@ -39,7 +39,6 @@ export default $config({
     const auth0MgmtClientSecret = new sst.Secret("Auth0MgmtClientSecret");
     const stripeSecretKey = new sst.Secret("StripeSecretKey");
     const stripePriceId = new sst.Secret("StripePriceId");
-    const stripeWebhookSecret = new sst.Secret("StripeWebhookSecret");
     const AWS_CACHING_DISABLED_POLICY = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad";
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
@@ -191,7 +190,6 @@ export default $config({
       auth0ClientSecret,
       stripeSecretKey,
       stripePriceId,
-      stripeWebhookSecret,
     ];
 
     const sharedEnv: Record<string, string> = {
@@ -204,6 +202,7 @@ export default $config({
       routePath: string,
       handler: string,
       extraEnv?: Record<string, any>,
+      permissions?: { actions: string[]; resources: any[] }[],
     ) {
       api.route(`${method} ${routePath}`, {
         handler: `packages/backend/src/handlers/${handler}.handler`,
@@ -213,8 +212,9 @@ export default $config({
           ...extraEnv,
         },
         // TODO: Remove `as any` once SST adds nodejs24.x to its type definitions
-      runtime: "nodejs24.x" as any,
+        runtime: "nodejs24.x" as any,
         timeout: "10 seconds",
+        ...(permissions ? { permissions } : {}),
       });
     }
 
@@ -248,7 +248,10 @@ export default $config({
     addRoute("POST", "/api/billing/portal", "create-portal-session", {
       WEBSITE_URL: siteUrl,
     });
-    addRoute("POST", "/api/stripe/webhook", "stripe-webhook");
+    addRoute("POST", "/api/stripe/webhook", "stripe-webhook",
+      { STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/hyperspace/${$app.stage}/stripe-webhook-secret` },
+      [{ actions: ["ssm:GetParameter"], resources: [$interpolate`arn:aws:ssm:*:*:parameter/hyperspace/${$app.stage}/stripe-webhook-secret`] }],
+    );
 
     return {
       url: siteUrl,
