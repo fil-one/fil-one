@@ -8,7 +8,16 @@ export default defineConfig({
   },
   options: {
     typeAware: true,
-    typeCheck: true, 
+    typeCheck: true,
   },
-  ignorePatterns: ['.sst', 'packages/ui', '**/dist', '**/sst-env.d.ts', 'sst.config.ts', 'bin/'],
+  ignorePatterns: ['.sst', 'packages/ui', '**/dist', '**/sst-env.d.ts', 'bin/'],
+  overrides: [
+    {
+      // sst.config.ts must use a triple-slash reference for SST's generated types
+      files: ['sst.config.ts'],
+      rules: {
+        'typescript/triple-slash-reference': 'off',
+      },
+    },
+  ],
 });
