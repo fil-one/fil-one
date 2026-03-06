@@ -10,5 +10,5 @@ export default defineConfig({
     typeAware: true,
     typeCheck: true, 
   },
-  ignorePatterns: ['.sst', 'packages/ui', '**/dist', '**/sst-env.d.ts'],
+  ignorePatterns: ['.sst', 'packages/ui', '**/dist', '**/sst-env.d.ts', 'sst.config.ts', 'bin/'],
 });
