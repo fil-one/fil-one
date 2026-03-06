@@ -14,7 +14,7 @@ export enum AccessLevel {
 }
 
 const TRIAL_GRACE_DAYS = 7;
-const PAID_GRACE_DAYS = 30;
+const _PAID_GRACE_DAYS = 30;
 
 const dynamo = new DynamoDBClient({});
 

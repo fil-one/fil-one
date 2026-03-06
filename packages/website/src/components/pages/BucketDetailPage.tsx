@@ -57,12 +57,6 @@ function formatBytes(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
 }
 
-/** Returns just the filename portion of a key (after last '/') */
-function objectDisplayName(key: string): string {
-  const parts = key.split('/')
-  return parts[parts.length - 1] ?? key
-}
-
 type BrowseEntry =
   | { kind: 'folder'; name: string; prefix: string }
   | { kind: 'object'; name: string; object: S3Object }
@@ -145,7 +139,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
 
   const setCurrentPrefix = useCallback(
     (newPrefix: string) => {
-      navigate({
+      void navigate({
         to: '/buckets/$bucketName',
         params: { bucketName },
         search: newPrefix ? { prefix: newPrefix } : {},
@@ -191,7 +185,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
         }
       }
     }
-    fetchObjects()
+    void fetchObjects()
     return () => { cancelled = true }
   }, [bucketName])
 

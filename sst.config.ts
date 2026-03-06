@@ -1,4 +1,4 @@
-/// <reference path="./.sst/platform/config.d.ts" />
+import './.sst/platform/config.d.ts'
 
 export default $config({
   app(input) {
@@ -12,7 +12,7 @@ export default $config({
         ? "us-east-2"
         : process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-west-2";
 
-    const awsProvider: Record<string, any> = { region };
+    const awsProvider: Record<string, unknown> = { region };
 
     if (isStaging) {
       awsProvider.allowedAccountIds = ["654654381893"];
@@ -113,7 +113,7 @@ export default $config({
         "/*": { bucket: websiteBucket },
         "/api/*": {
           url: api.url,
-          cachePolicy: AWS_CACHING_DISABLED_POLICY, 
+          cachePolicy: AWS_CACHING_DISABLED_POLICY,
         },
       },
       ...(domainName && certArn
@@ -160,6 +160,7 @@ export default $config({
       ],
       // TODO: Remove `as any` once SST adds nodejs24.x to its type definitions
       // this PR was merged: https://github.com/anomalyco/sst/pull/6243#ref-commit-6fb1396
+      // eslint-disable-next-line typescript/no-explicit-any
       runtime: "nodejs24.x" as any,
       timeout: "30 seconds",
     });
@@ -201,7 +202,7 @@ export default $config({
       method: string,
       routePath: string,
       handler: string,
-      extraEnv?: Record<string, any>,
+      extraEnv?: Record<string, string>,
     ) {
       api.route(`${method} ${routePath}`, {
         handler: `packages/backend/src/handlers/${handler}.handler`,
@@ -211,6 +212,7 @@ export default $config({
           ...extraEnv,
         },
         // TODO: Remove `as any` once SST adds nodejs24.x to its type definitions
+        // eslint-disable-next-line typescript/no-explicit-any
       runtime: "nodejs24.x" as any,
         timeout: "10 seconds",
       });

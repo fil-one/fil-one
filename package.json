@@ -4,6 +4,7 @@
   "workspaces": [
     "packages/*"
   ],
+  "type": "module",
   "scripts": {
     "dev": "sst dev",
     "build": "pnpm --filter @hyperspace/shared build && pnpm --filter @hyperspace/backend build && pnpm --filter @hyperspace/website build",
@@ -11,15 +12,19 @@
     "deploy:staging": "pnpm build && sst deploy --stage staging",
     "deploy:production": "pnpm build && sst deploy --stage production",
     "remove": "sst remove",
+    "lint": "oxlint --report-unused-disable-directives",
+    "lint:fix": "oxlint --fix",
     "refresh": "sst refresh",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm --filter @hyperspace/backend test"
+    "test": "pnpm lint && pnpm --filter @hyperspace/backend test"
   },
   "devDependencies": {
     "@pulumi/aws": "^7.21.0",
     "@pulumi/command": "^1.2.1",
     "aws-cdk-lib": "^2.241.0",
     "constructs": "^10.5.1",
+    "oxlint": "^1.51.0",
+    "oxlint-tsgolint": "^0.16.0",
     "sst": "^4.1.10"
   },
   "packageManager": "pnpm@10.30.3",

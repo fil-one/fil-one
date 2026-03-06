@@ -61,8 +61,8 @@ async function getStoredWebhookSecret(
       }),
     );
     return result.Parameter?.Value;
-  } catch (err: any) {
-    if (err.name === "ParameterNotFound") return undefined;
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === "ParameterNotFound") return undefined;
     throw err;
   }
 }
@@ -86,8 +86,9 @@ async function deleteWebhookSecret(stage: string): Promise<void> {
     await ssm.send(
       new DeleteParameterCommand({ Name: ssmParamName(stage) }),
     );
-  } catch (err: any) {
-    if (err.name !== "ParameterNotFound") throw err;
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === "ParameterNotFound") return;
+    throw err;
   }
 }
 
@@ -342,12 +343,12 @@ export async function handler(event: SetupEvent): Promise<void> {
         webhookEndpointId: stripeResult.webhookEndpointId,
       },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Setup/teardown failed:", err);
 
     await sendCfnResponse(event, {
       Status: "FAILED",
-      Reason: err.message ?? String(err),
+      Reason: err instanceof Error ? err.message : String(err),
       PhysicalResourceId: physicalResourceId,
       StackId: event.StackId,
       RequestId: event.RequestId,
