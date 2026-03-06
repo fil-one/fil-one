@@ -51,7 +51,7 @@ export async function createAuroraTenant({
     throw new Error(`Aurora API did not return a tenant id for org ${orgId}`);
   }
 
-  console.log(`Aurora tenant ${auroraTenantId} created for org ${orgId}`);
+  console.log(`Aurora tenant created for org ${orgId}:`, JSON.stringify(data));
   return { auroraTenantId };
 }
 
@@ -82,6 +82,8 @@ export async function setupAuroraTenant({
     client,
     path: { partnerId, tenantId },
     throwOnError: false,
+    // Aurora API returns content-type: text/plain, force JSON parsing
+    parseAs: "json",
   });
 
   if (error) {
@@ -93,6 +95,6 @@ export async function setupAuroraTenant({
     throw new Error(`Aurora API did not return setup data for tenant ${tenantId}`);
   }
 
-  console.log(`Aurora tenant ${tenantId} setup: lastSetupStep=${data.lastSetupStep}`);
+  console.log(`Aurora tenant ${tenantId} setup response:`, JSON.stringify(data));
   return { id: data.id!, lastSetupStep: data.lastSetupStep! };
 }

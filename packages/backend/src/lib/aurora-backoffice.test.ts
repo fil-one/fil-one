@@ -118,6 +118,7 @@ describe('setupAuroraTenant', () => {
       client: 'mock-aurora-client',
       path: { partnerId: 'test-partner', tenantId: 'tenant-123' },
       throwOnError: false,
+      parseAs: 'json',
     });
   });
 
