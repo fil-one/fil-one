@@ -14,7 +14,7 @@ setUIConfig({
   baseDomain: window.location.hostname,
   // Cast required because TanStack Router Link uses `to` not `href`,
   // but internal links in the UI package pass href as a string path.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line typescript/no-explicit-any
   Link: ({ href, children, ...rest }: any) => (
     <Link to={href} {...rest}>
       {children}

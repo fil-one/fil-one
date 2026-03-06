@@ -46,7 +46,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const [billing, setBilling] = useState<BillingInfo | null>(null);
 
   useEffect(() => {
-    const refresh = () => getBilling().then(setBilling).catch(() => {/* silent */});
+    const refresh = () => { getBilling().then(setBilling).catch(() => {/* silent */}) };
     refresh();
     window.addEventListener('billing:updated', refresh);
     return () => window.removeEventListener('billing:updated', refresh);

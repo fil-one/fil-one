@@ -46,7 +46,7 @@ function PaymentForm({ clientSecret, onClose, onBack, onSuccess }: Omit<AddPayme
   const elements = useElements()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [cardBrand, setCardBrand] = useState<string>('unknown')
+  const [_cardBrand, setCardBrand] = useState<string>('unknown')
 
   function handleCardChange(e: StripeCardNumberElementChangeEvent) {
     setCardBrand(e.brand ?? 'unknown')
@@ -177,7 +177,7 @@ export function AddPaymentDialog({ open, clientSecret, onClose, onBack, onSucces
 
   useEffect(() => {
     if (open) {
-      getStripe().then(setStripe)
+      void getStripe().then(setStripe)
     }
   }, [open])
 

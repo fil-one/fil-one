@@ -87,7 +87,7 @@ export function BillingPage() {
   }, [])
 
   useEffect(() => {
-    fetchBilling()
+    void fetchBilling()
   }, [fetchBilling])
 
   // Handle portal return
@@ -96,7 +96,7 @@ export function BillingPage() {
     if (params.get('portal_return') === 'true') {
       // Clear the URL param and refresh billing data
       window.history.replaceState({}, '', window.location.pathname)
-      fetchBilling()
+      void fetchBilling()
     }
   }, [fetchBilling])
 
@@ -148,7 +148,7 @@ export function BillingPage() {
     setPaymentOpen(false)
     setClientSecret('')
     toast.success('Subscription activated!')
-    fetchBilling()
+    void fetchBilling()
     window.dispatchEvent(new CustomEvent('billing:updated'))
   }
 
