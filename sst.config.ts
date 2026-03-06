@@ -70,9 +70,6 @@ export default $config({
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket("UserFilesBucket");
 
-    // ── API Gateway ──────────────────────────────────────────────────
-    const api = new sst.aws.ApiGatewayV2("Api");
-
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
 
@@ -97,6 +94,24 @@ export default $config({
 
       certArn = cert.arn;
     }
+
+    // ── API Gateway ──────────────────────────────────────────────────
+    // While we stick to a same origin for both website and API, 
+    // we want to make sure to lock down to just our origin. 
+    const allowedOrigins = domainName ? [`https://${domainName}`] : [];
+    if (stage !== "production") {
+      allowedOrigins.push("http://localhost:5173");
+    }
+
+    const api = new sst.aws.ApiGatewayV2("Api", {
+      cors: {
+        allowOrigins: allowedOrigins,
+        allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allowHeaders: ["Content-Type", "X-CSRF-Token", "X-Requested-With"],
+        allowCredentials: true,
+        maxAge: "1 day",
+      },
+    });
 
     // ── Website (S3 + CloudFront via sst.aws.Router) ─────────────────
     const { local } = await import("@pulumi/command");

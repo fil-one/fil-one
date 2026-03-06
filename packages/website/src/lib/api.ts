@@ -1,7 +1,15 @@
 import { API_URL, AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_AUDIENCE } from '../env.js';
+import { OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from '@hyperspace/shared';
 
 // Prevents multiple simultaneous 401 responses from each triggering a redirect.
 let isRedirecting = false;
+
+function getCsrfToken(): string | undefined {
+  return document.cookie
+    .split('; ')
+    .find(c => c.startsWith(`${CSRF_COOKIE_NAME}=`))
+    ?.split('=')[1];
+}
 
 interface LoginOptions {
   loginHint?: string;
@@ -15,12 +23,15 @@ interface LoginOptions {
 // just update the VITE_AUTH0_DOMAIN env var.
 function buildAuth0LoginUrl(options?: LoginOptions): string {
   const callbackUrl = `${window.location.origin}/api/auth/callback`;
+  const state = crypto.randomUUID();
+  document.cookie = `${OAUTH_STATE_COOKIE}=${state}; Secure; SameSite=Lax; Path=/; Max-Age=300`;
   const params = new URLSearchParams({
     client_id: AUTH0_CLIENT_ID,
     redirect_uri: callbackUrl,
     response_type: 'code',
     scope: 'openid profile email offline_access',
     audience: AUTH0_AUDIENCE,
+    state,
   });
   if (options?.loginHint) params.set('login_hint', options.loginHint);
   if (options?.screenHint) params.set('screen_hint', options.screenHint);
@@ -47,10 +58,16 @@ export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const method = options.method?.toUpperCase() ?? 'GET';
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
+  if (method !== 'GET' && method !== 'HEAD') {
+    const token = getCsrfToken();
+    if (token) headers.set('X-CSRF-Token', token);
+  }
+
   const response = await fetch(`${API_URL}/api${path}`, {
     ...options,
     credentials: 'include',

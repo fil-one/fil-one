@@ -57,19 +57,18 @@ describe('auth-logout handler', () => {
     expect(location.searchParams.get('returnTo')).toBe('https://app.example.com/sign-in');
   });
 
-  it('clears all four auth cookies', async () => {
+  it('clears all auth and CSRF cookies', async () => {
     const event = buildEvent();
     const result = await handler(event, stubContext);
+    const cookies = result.cookies ?? [];
 
-    expect(result.cookies).toHaveLength(4);
-    expect(result.cookies![0]).toContain('hs_access_token=');
-    expect(result.cookies![0]).toContain('Max-Age=0');
-    expect(result.cookies![1]).toContain('hs_id_token=');
-    expect(result.cookies![1]).toContain('Max-Age=0');
-    expect(result.cookies![2]).toContain('hs_refresh_token=');
-    expect(result.cookies![2]).toContain('Max-Age=0');
-    expect(result.cookies![3]).toContain('hs_logged_in=');
-    expect(result.cookies![3]).toContain('Max-Age=0');
+    expect(cookies).toStrictEqual([
+      'hs_access_token=; Secure; SameSite=Lax; Path=/; Max-Age=0',
+      'hs_id_token=; Secure; SameSite=Lax; Path=/; Max-Age=0',
+      'hs_refresh_token=; Secure; SameSite=Lax; Path=/; Max-Age=0',
+      'hs_logged_in=; Secure; SameSite=Lax; Path=/; Max-Age=0',
+      'hs_csrf_token=; Secure; SameSite=Lax; Path=/; Max-Age=0',
+    ]);
   });
 
   it('returns an empty body', async () => {

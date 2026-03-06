@@ -1,6 +1,7 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import { CSRF_COOKIE_NAME } from '@hyperspace/shared';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { COOKIE_NAMES, makeClearCookieHeader } from '../lib/response-builder.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -17,6 +18,7 @@ async function baseHandler(
     makeClearCookieHeader(COOKIE_NAMES.ID_TOKEN),
     makeClearCookieHeader(COOKIE_NAMES.REFRESH_TOKEN),
     makeClearCookieHeader(COOKIE_NAMES.LOGGED_IN),
+    makeClearCookieHeader(CSRF_COOKIE_NAME),
   ];
 
   const logoutUrl = new URL(`https://${domain}/v2/logout`);

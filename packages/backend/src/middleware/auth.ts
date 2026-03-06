@@ -54,21 +54,8 @@ function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Parse cookies from the API Gateway v2 event.
- * Payload format 2.0 puts cookies in `event.cookies` (string[]),
- * NOT in `event.headers['cookie']`.
- */
-function parseCookies(cookieArray: string[] | undefined): Record<string, string> {
-  if (!cookieArray?.length) return {};
-  return Object.fromEntries(
-    cookieArray.flatMap((entry) => {
-      const eqIdx = entry.indexOf('=');
-      if (eqIdx === -1) return [];
-      return [[entry.slice(0, eqIdx).trim(), entry.slice(eqIdx + 1).trim()]];
-    }),
-  );
-}
+import { parseCookies } from '../lib/cookies.js';
+import { CSRF_COOKIE_NAME } from '@hyperspace/shared';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
@@ -273,12 +260,14 @@ export function authMiddleware() {
     const response = request.response as APIGatewayProxyStructuredResultV2 | undefined;
     if (!newTokens || !response) return;
 
+    const csrfToken = crypto.randomUUID();
     response.cookies = [
       ...(response.cookies ?? []),
       makeCookieHeader(COOKIE_NAMES.ACCESS_TOKEN, newTokens.access_token, TOKEN_MAX_AGE.ACCESS),
       makeCookieHeader(COOKIE_NAMES.ID_TOKEN, newTokens.id_token, TOKEN_MAX_AGE.ACCESS),
       makeCookieHeader(COOKIE_NAMES.REFRESH_TOKEN, newTokens.refresh_token, TOKEN_MAX_AGE.REFRESH),
       makeHintCookieHeader(COOKIE_NAMES.LOGGED_IN, '1', TOKEN_MAX_AGE.REFRESH),
+      makeHintCookieHeader(CSRF_COOKIE_NAME, csrfToken, TOKEN_MAX_AGE.ACCESS),
     ];
   };
 
