@@ -1,3 +1,4 @@
+import assert from 'node:assert';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { createAuroraTenant, setupAuroraTenant } from './aurora-backoffice.js';
@@ -39,9 +40,12 @@ export async function processTenantSetup(message: AuroraTenantSetupMessage): Pro
       return;
     }
 
-    case SetupStatus.AURORA_TENANT_CREATED:
-      await runSetup(orgId, Item.auroraTenantId!.S!, key);
+    case SetupStatus.AURORA_TENANT_CREATED: {
+      const auroraTenantId = Item.auroraTenantId?.S;
+      assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
+      await runSetup(orgId, auroraTenantId, key);
       return;
+    }
 
     default:
       throw new Error(`Unexpected setupStatus "${setupStatus}" for org ${orgId}`);
