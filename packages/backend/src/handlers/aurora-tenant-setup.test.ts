@@ -59,6 +59,15 @@ describe('aurora-tenant-setup-consumer handler', () => {
     expect(mockProcessTenantSetup).toHaveBeenCalledWith(message);
   });
 
+  it('throws when batch contains more than one record', async () => {
+    const event = buildSQSEvent({ orgId: 'org-1', orgName: 'Test Org' });
+    event.Records.push({ ...event.Records[0], messageId: 'msg-2' });
+
+    await expect(handler(event, buildContext())).rejects.toThrow(
+      'Expected exactly 1 SQS record, got 2',
+    );
+  });
+
   it('propagates errors from processTenantSetup', async () => {
     mockProcessTenantSetup.mockRejectedValue(new Error('setup failed'));
 
