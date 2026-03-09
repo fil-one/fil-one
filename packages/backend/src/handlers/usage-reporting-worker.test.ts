@@ -9,9 +9,6 @@ import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
 
 vi.mock('sst', () => ({
   Resource: {
-    AuroraBaseUrl: { value: 'https://aurora.example.com' },
-    AuroraApiKey: { value: 'test-key' },
-    PartnerId: { value: 'partner-123' },
     StripeMeterEventName: { value: 'storage_usage' },
     BillingTable: { name: 'BillingTable' },
   },
@@ -27,7 +24,7 @@ vi.mock('../lib/stripe-client.js', () => ({
 }));
 
 const mockGetStorageSamples = vi.fn();
-vi.mock('../lib/aurora-analytics-client.js', () => ({
+vi.mock('../lib/aurora-backoffice.js', () => ({
   getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
 }));
 

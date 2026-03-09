@@ -39,11 +39,11 @@ export default $config({
     const auth0MgmtClientSecret = new sst.Secret("Auth0MgmtClientSecret");
     const stripeSecretKey = new sst.Secret("StripeSecretKey");
     const stripePriceId = new sst.Secret("StripePriceId");
-    const auroraBackofficeToken = new sst.Secret("AuroraBackofficeToken");
     const auroraApiKey = new sst.Secret("AuroraApiKey");
     const auroraBaseUrl = new sst.Secret("AuroraBaseUrl");
-    const stripeMeterEventName = new sst.Secret("StripeMeterEventName");
     const partnerId = new sst.Secret("PartnerId");
+    const stripeMeterEventName = new sst.Secret("StripeMeterEventName");
+    const auroraBackofficeToken = new sst.Secret("AuroraBackofficeToken");
     const AWS_CACHING_DISABLED_POLICY = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad";
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
@@ -333,7 +333,8 @@ export default $config({
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = new sst.aws.Function("UsageReportingWorker", {
       handler: "packages/backend/src/handlers/usage-reporting-worker.handler",
-      link: [billingTable, stripeSecretKey, auroraApiKey, auroraBaseUrl, stripeMeterEventName, partnerId],
+      link: [billingTable, stripeSecretKey, stripeMeterEventName, auroraBackofficeToken],
+      environment: { ...auroraEnv },
       // eslint-disable-next-line typescript/no-explicit-any
       runtime: "nodejs24.x" as any,
       timeout: "60 seconds",

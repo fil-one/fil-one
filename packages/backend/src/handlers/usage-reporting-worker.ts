@@ -2,7 +2,7 @@ import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { getStripeClient } from '../lib/stripe-client.js';
-import { getStorageSamples, type StorageApiConfig } from '../lib/aurora-analytics-client.js';
+import { getStorageSamples } from '../lib/aurora-backoffice.js';
 import { calculateAverageUsage } from '../lib/usage-calculator.js';
 
 const dynamo = new DynamoDBClient({});
@@ -21,14 +21,8 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
 
   console.log('[usage-worker] Processing', { userId, orgId, subscriptionId, reportDate });
 
-  const config: StorageApiConfig = {
-    baseUrl: Resource.AuroraBaseUrl.value,
-    apiKey: Resource.AuroraApiKey.value,
-    partnerId: Resource.PartnerId.value,
-  };
-
   const now = new Date().toISOString();
-  const samples = await getStorageSamples(config, orgId, currentPeriodStart, now, '1h');
+  const samples = await getStorageSamples(orgId, currentPeriodStart, now, '1h');
   const usage = calculateAverageUsage(samples);
 
   console.log('[usage-worker] Usage calculated', {

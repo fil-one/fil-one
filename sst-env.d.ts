@@ -46,18 +46,6 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "AuroraApiKey": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
-    "AuroraBaseUrl": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
-    "PartnerId": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
     "StripeMeterEventName": {
       "type": "sst.sst.Secret"
       "value": string
