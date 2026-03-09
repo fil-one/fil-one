@@ -226,11 +226,19 @@ export default $config({
     const sharedEnv: Record<string, string> = {
       AUTH0_DOMAIN: "dev-oar2nhqh58xf5pwf.us.auth0.com",
       AUTH0_AUDIENCE: "console.filhyperspace.com",
-      AURORA_BACKOFFICE_URL: isProduction
-        ? "TODO"
-        : "https://api.backoffice.dev.aur.lu/api/v1",
-      AURORA_PARTNER_ID: isProduction ? "TODO" : "ff",
-      AURORA_REGION_ID: isProduction ? "TODO" : "ff",
+    };
+
+    if (isProduction) {
+      throw new Error(
+        "Aurora Backoffice production configuration not yet available. "
+        + "Set AURORA_BACKOFFICE_URL, AURORA_PARTNER_ID, and AURORA_REGION_ID before deploying to production.",
+      );
+    }
+
+    const auroraEnv = {
+      AURORA_BACKOFFICE_URL: "https://api.backoffice.dev.aur.lu/api/v1",
+      AURORA_PARTNER_ID: "ff",
+      AURORA_REGION_ID: "ff",
     };
 
     function addRoute(
@@ -294,9 +302,7 @@ export default $config({
         handler: "packages/backend/src/handlers/aurora-tenant-setup.handler",
         link: [userInfoTable, auroraBackofficeToken],
         environment: {
-          AURORA_BACKOFFICE_URL: sharedEnv.AURORA_BACKOFFICE_URL,
-          AURORA_PARTNER_ID: sharedEnv.AURORA_PARTNER_ID,
-          AURORA_REGION_ID: sharedEnv.AURORA_REGION_ID,
+          ...auroraEnv,
         },
         // eslint-disable-next-line typescript/no-explicit-any
         runtime: "nodejs24.x" as any,
