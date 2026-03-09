@@ -5,7 +5,7 @@
  * It is best-effort only — the suggested name is never blocking.
  */
 
-const PUBLIC_EMAIL_DOMAINS = new Set([
+export const PUBLIC_EMAIL_DOMAINS = new Set([
   // Google
   'gmail.com',
   'googlemail.com',

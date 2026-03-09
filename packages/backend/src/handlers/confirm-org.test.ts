@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
-import type { UpdateItemCommandOutput } from '@aws-sdk/client-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { ORG_NAME_MIN_LENGTH, ORG_NAME_MAX_LENGTH } from '../lib/org-name-validation.js';
@@ -117,7 +116,7 @@ describe('POST /api/org/confirm handler', () => {
         orgConfirmed: { BOOL: true },
         setupStatus: { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED },
       },
-    } as UpdateItemCommandOutput);
+    });
     sqsMock.on(SendMessageCommand).resolves({});
   });
 
@@ -175,7 +174,7 @@ describe('POST /api/org/confirm handler', () => {
         orgConfirmed: { BOOL: true },
         setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
       },
-    } as UpdateItemCommandOutput);
+    });
 
     const event = confirmOrgEvent({ orgName: 'Acme Corp' });
     event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { suggestOrgName } from './suggest-org-name.js';
+import { PUBLIC_EMAIL_DOMAINS, suggestOrgName } from './suggest-org-name.js';
 
 const userId = 'test-user-123';
 
@@ -33,40 +33,7 @@ describe('suggestOrgName', () => {
   });
 
   describe('public email providers return undefined', () => {
-    const publicDomains = [
-      'gmail.com',
-      'googlemail.com',
-      'outlook.com',
-      'hotmail.com',
-      'live.com',
-      'yahoo.com',
-      'yahoo.co.uk',
-      'ymail.com',
-      'aol.com',
-      'icloud.com',
-      'me.com',
-      'mac.com',
-      'proton.me',
-      'protonmail.com',
-      'pm.me',
-      'zoho.com',
-      'mail.com',
-      'gmx.com',
-      'gmx.net',
-      'fastmail.com',
-      'tutanota.com',
-      'tutamail.com',
-      'tuta.io',
-      'hey.com',
-      'msn.com',
-      'hotmail.co.uk',
-      'yahoo.fr',
-      'mail.ru',
-      'yandex.com',
-      'qq.com',
-      '163.com',
-      '126.com',
-    ];
+    const publicDomains = PUBLIC_EMAIL_DOMAINS;
 
     for (const domain of publicDomains) {
       it(`returns undefined for ${domain}`, () => {
