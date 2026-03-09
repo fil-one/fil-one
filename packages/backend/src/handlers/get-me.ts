@@ -10,13 +10,14 @@ import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { suggestOrgName } from '../lib/suggest-org-name.js';
 
 const dynamo = new DynamoDBClient({});
 
 async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyResultV2> {
-  const { orgId, email } = getUserInfo(event);
+  const { userId, orgId, orgConfirmed, email } = getUserInfo(event);
 
   const { Item } = await dynamo.send(
     new GetItemCommand({
@@ -29,12 +30,20 @@ async function baseHandler(
   );
 
   const setupStatus = Item?.setupStatus?.S;
+  const orgName = Item?.name?.S ?? '';
 
   const body: MeResponse = {
     orgId,
+    orgName,
+    orgConfirmed,
     email,
     auroraTenantReady: setupStatus === OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE,
   };
+
+  // Only include suggested name if org is not yet confirmed
+  if (!orgConfirmed) {
+    body.suggestedOrgName = suggestOrgName(email, userId);
+  }
 
   return new ResponseBuilder().status(200).body(body).build();
 }

@@ -3,6 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
+import { ApiErrorCode, OrgRole } from '@hyperspace/shared';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
 import { expectErrorResponse } from '../test/assert-helpers.js';
 
@@ -49,7 +50,7 @@ describe('subscriptionGuardMiddleware', () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
-    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })));
+    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid', orgRole: OrgRole.Admin, orgConfirmed: true } })));
 
     expect(result).toBeUndefined();
   });
@@ -62,7 +63,7 @@ describe('subscriptionGuardMiddleware', () => {
     }));
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
-    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })));
+    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid', orgRole: OrgRole.Admin, orgConfirmed: true } })));
 
     expect(result).toBeUndefined();
   });
@@ -77,7 +78,7 @@ describe('subscriptionGuardMiddleware', () => {
     }));
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
-    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })));
+    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid', orgRole: OrgRole.Admin, orgConfirmed: true } })));
 
     expect(result).toBeUndefined();
   });
@@ -94,7 +95,7 @@ describe('subscriptionGuardMiddleware', () => {
     ddbMock.on(UpdateItemCommand).resolves({});
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Read);
-    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })));
+    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid', orgRole: OrgRole.Admin, orgConfirmed: true } })));
 
     // Read access during grace period → allowed
     expect(result).toBeUndefined();
@@ -127,11 +128,11 @@ describe('subscriptionGuardMiddleware', () => {
     }));
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
-    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })));
+    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid', orgRole: OrgRole.Admin, orgConfirmed: true } })));
 
     expectErrorResponse(result, 403, {
       message: 'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
-      code: 'GRACE_PERIOD_WRITE_BLOCKED',
+      code: ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED,
     });
   });
 
@@ -145,7 +146,7 @@ describe('subscriptionGuardMiddleware', () => {
     }));
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Read);
-    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })));
+    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid', orgRole: OrgRole.Admin, orgConfirmed: true } })));
 
     expect(result).toBeUndefined();
   });
@@ -161,11 +162,11 @@ describe('subscriptionGuardMiddleware', () => {
     ddbMock.on(UpdateItemCommand).resolves({});
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Read);
-    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })));
+    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid', orgRole: OrgRole.Admin, orgConfirmed: true } })));
 
     expectErrorResponse(result, 403, {
       message: 'Your subscription has been canceled. Please reactivate to regain access.',
-      code: 'SUBSCRIPTION_CANCELED',
+      code: ApiErrorCode.SUBSCRIPTION_CANCELED,
     });
 
     // Verify transition to canceled
@@ -193,7 +194,7 @@ describe('subscriptionGuardMiddleware', () => {
     }));
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
-    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })));
+    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid', orgRole: OrgRole.Admin, orgConfirmed: true } })));
 
     expect(result).toBeUndefined();
   });
@@ -206,11 +207,11 @@ describe('subscriptionGuardMiddleware', () => {
     }));
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Read);
-    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })));
+    const result = await before(buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid', orgRole: OrgRole.Admin, orgConfirmed: true } })));
 
     expectErrorResponse(result, 403, {
       message: 'Your subscription has been canceled. Please reactivate to regain access.',
-      code: 'SUBSCRIPTION_CANCELED',
+      code: ApiErrorCode.SUBSCRIPTION_CANCELED,
     });
   });
 });

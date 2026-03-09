@@ -11,6 +11,7 @@ import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { v4 as uuidv4 } from 'uuid';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
+import { ApiErrorCode, OrgRole } from '@hyperspace/shared';
 import type { ErrorResponse } from '@hyperspace/shared';
 import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader, ResponseBuilder } from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
@@ -67,6 +68,25 @@ function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
     .build();
 }
 
+function orgNotConfirmedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(403)
+    .body<ErrorResponse>({
+      message: 'Please create an organization to continue.',
+      code: ApiErrorCode.ORG_NOT_CONFIRMED,
+    })
+    .build();
+}
+
+/**
+ * Routes that are allowed through even when the user's org is not yet confirmed.
+ * All other authenticated routes will return 403 ORG_NOT_CONFIRMED.
+ */
+const ORG_CONFIRM_BYPASS_ROUTES = new Set([
+  '/api/me',
+  '/api/org/confirm',
+]);
+
 // ---------------------------------------------------------------------------
 // Sub → userId + orgId resolution via UserInfoTable
 // ---------------------------------------------------------------------------
@@ -74,6 +94,9 @@ function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
 interface ResolvedIdentity {
   userId: string;
   orgId: string;
+  orgRole: OrgRole;
+  orgConfirmed: boolean;
+  email?: string;
 }
 
 const dynamo = new DynamoDBClient({});
@@ -98,21 +121,38 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
     const userId = result.Item.userId.S;
     const orgId = result.Item.orgId.S;
+    // Prefer JWT email, fall back to stored email from identity record
+    const resolvedEmail = email ?? result.Item.email?.S;
 
-    const { Item: orgItem } = await dynamo.send(
-      new GetItemCommand({
-        TableName: tableName,
-        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      }),
-    );
+    // Read org profile and membership in parallel
+    const [{ Item: orgItem }, { Item: memberItem }] = await Promise.all([
+      dynamo.send(
+        new GetItemCommand({
+          TableName: tableName,
+          Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+        }),
+      ),
+      dynamo.send(
+        new GetItemCommand({
+          TableName: tableName,
+          Key: { pk: { S: `ORG#${orgId}` }, sk: { S: `MEMBER#${userId}` } },
+        }),
+      ),
+    ]);
 
-    await ensureTenantSetupEnqueued({
-      orgId,
-      orgName: orgItem?.name?.S ?? orgName,
-      setupStatus: orgItem?.setupStatus?.S,
-    });
+    const orgConfirmed = orgItem?.orgConfirmed?.BOOL === true;
+    const orgRole = (memberItem?.role?.S as OrgRole) ?? OrgRole.Admin;
 
-    return { userId, orgId };
+    // Only enqueue tenant setup if org is confirmed
+    if (orgConfirmed) {
+      await ensureTenantSetupEnqueued({
+        orgId,
+        orgName: orgItem?.name?.S ?? orgName,
+        setupStatus: orgItem?.setupStatus?.S,
+      });
+    }
+
+    return { userId, orgId, orgRole, orgConfirmed, email: resolvedEmail };
   }
 
   // New user — create user, org, and membership records atomically
@@ -157,6 +197,7 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
               pk: { S: `ORG#${orgId}` },
               sk: { S: 'PROFILE' },
               name: { S: orgName },
+              orgConfirmed: { BOOL: false },
               setupStatus: { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED },
               createdBy: { S: userId },
               createdAt: { S: now },
@@ -179,13 +220,10 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
     }),
   );
 
-  await ensureTenantSetupEnqueued({
-    orgId,
-    orgName,
-    setupStatus: OrgSetupStatus.HYPERSPACE_ORG_CREATED,
-  });
+  // Do NOT enqueue tenant setup here — org is not yet confirmed.
+  // Tenant setup will be triggered when the user confirms their org via POST /api/org/confirm.
 
-  return { userId, orgId };
+  return { userId, orgId, orgRole: OrgRole.Admin, orgConfirmed: false, email };
 }
 
 async function ensureTenantSetupEnqueued({
@@ -240,12 +278,17 @@ export function authMiddleware() {
         const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
         const sub = payload.sub!;
         const email = payload.email as string | undefined;
-        const { userId, orgId } = await resolveUserAndOrg(sub, email);
+        const resolved = await resolveUserAndOrg(sub, email);
         (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
-          userId,
-          orgId,
-          email,
+          userId: resolved.userId,
+          orgId: resolved.orgId,
+          orgRole: resolved.orgRole,
+          orgConfirmed: resolved.orgConfirmed,
+          email: resolved.email,
         };
+        if (!resolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
+          return orgNotConfirmedResponse();
+        }
         return; // Valid — continue to handler
       } catch (err) {
         // Expired or invalid — fall through to refresh
@@ -283,13 +326,18 @@ export function authMiddleware() {
           const refreshedPayload = decodeJwt(tokens.access_token);
           const refreshedSub = refreshedPayload.sub!;
           const refreshedEmail = refreshedPayload.email as string | undefined;
-          const { userId: refreshedUserId, orgId: refreshedOrgId } = await resolveUserAndOrg(refreshedSub, refreshedEmail);
+          const refreshedResolved = await resolveUserAndOrg(refreshedSub, refreshedEmail);
           (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
-            userId: refreshedUserId,
-            orgId: refreshedOrgId,
-            email: refreshedEmail,
+            userId: refreshedResolved.userId,
+            orgId: refreshedResolved.orgId,
+            orgRole: refreshedResolved.orgRole,
+            orgConfirmed: refreshedResolved.orgConfirmed,
+            email: refreshedResolved.email,
           };
           console.warn('[auth] Token refresh succeeded');
+          if (!refreshedResolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
+            return orgNotConfirmedResponse();
+          }
           return; // Continue to handler
         }
         const refreshBody = await tokenRes.text().catch(() => '');

@@ -9,6 +9,7 @@ interface BuildEventProps {
   userInfo?: UserInfo;
   queryStringParameters?: Record<string, string>;
   requestContext?: Partial<APIGatewayProxyEventV2['requestContext']>;
+  rawPath?: string;
 }
 
 export function buildEvent(props: BuildEventProps & { userInfo: UserInfo }): AuthenticatedEvent & NormalizedHeaderEvent;
@@ -17,7 +18,7 @@ export function buildEvent(props?: BuildEventProps): APIGatewayProxyEventV2 & No
   return {
     version: '2.0',
     routeKey: 'GET /test',
-    rawPath: '/test',
+    rawPath: props?.rawPath ?? '/test',
     rawQueryString: props?.queryStringParameters
       ? new URLSearchParams(props.queryStringParameters).toString()
       : '',

@@ -2,7 +2,7 @@ import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/clie
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import type { MiddlewareObj, Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2, Context } from 'aws-lambda';
-import { SubscriptionStatus } from '@hyperspace/shared';
+import { ApiErrorCode, SubscriptionStatus } from '@hyperspace/shared';
 import { Resource } from "sst";
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -104,14 +104,14 @@ export function subscriptionGuardMiddleware(
         );
         return new ResponseBuilder()
           .status(403)
-          .body({ message: 'Your subscription has been canceled. Please reactivate to regain access.', code: 'SUBSCRIPTION_CANCELED' })
+          .body({ message: 'Your subscription has been canceled. Please reactivate to regain access.', code: ApiErrorCode.SUBSCRIPTION_CANCELED })
           .build();
       }
 
       if (accessLevel === AccessLevel.Write) {
         return new ResponseBuilder()
           .status(403)
-          .body({ message: 'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.', code: 'GRACE_PERIOD_WRITE_BLOCKED' })
+          .body({ message: 'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.', code: ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED })
           .build();
       }
 
@@ -123,7 +123,7 @@ export function subscriptionGuardMiddleware(
     if (status === SubscriptionStatus.Canceled) {
       return new ResponseBuilder()
         .status(403)
-        .body({ message: 'Your subscription has been canceled. Please reactivate to regain access.', code: 'SUBSCRIPTION_CANCELED' })
+        .body({ message: 'Your subscription has been canceled. Please reactivate to regain access.', code: ApiErrorCode.SUBSCRIPTION_CANCELED })
         .build();
     }
 

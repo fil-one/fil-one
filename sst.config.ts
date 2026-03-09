@@ -289,6 +289,9 @@ export default $config({
     // ── Me route ───────────────────────────────────────────────────
     addRoute("GET", "/api/me", "get-me");
 
+    // ── Org routes ──────────────────────────────────────────────────
+    addRoute("POST", "/api/org/confirm", "confirm-org");
+
     // ── Billing routes ───────────────────────────────────────────────
     addRoute("GET", "/api/billing", "get-billing");
     addRoute("POST", "/api/billing/setup-intent", "create-setup-intent");

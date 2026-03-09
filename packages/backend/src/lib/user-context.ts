@@ -1,8 +1,11 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
+import type { OrgRole } from '@hyperspace/shared';
 
 export interface UserInfo {
   userId: string;
   orgId: string;
+  orgRole: OrgRole;
+  orgConfirmed: boolean;
   email?: string;
 }
 

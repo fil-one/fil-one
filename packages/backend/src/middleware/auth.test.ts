@@ -9,6 +9,7 @@ import type {
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { ApiErrorCode } from '@hyperspace/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
 import { expectErrorResponse } from '../test/assert-helpers.js';
@@ -137,7 +138,16 @@ describe('authMiddleware', () => {
           pk: { S: `ORG#${existingOrgId}` },
           sk: { S: 'PROFILE' },
           name: { S: 'example.com' },
+          orgConfirmed: { BOOL: true },
           setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+        },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: `MEMBER#${existingUserId}` } },
+      }).resolves({
+        Item: {
+          role: { S: 'admin' },
         },
       });
 
@@ -157,12 +167,14 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: existingUserId,
         orgId: existingOrgId,
+        orgRole: 'admin',
+        orgConfirmed: true,
         email: MOCK_EMAIL,
       });
       expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
     });
 
-    it('enqueues tenant setup when existing user org setup is not complete', async () => {
+    it('returns 403 ORG_NOT_CONFIRMED when org is not confirmed', async () => {
       const existingUserId = 'existing-user-uuid';
       const existingOrgId = 'existing-org-uuid';
 
@@ -189,7 +201,132 @@ describe('authMiddleware', () => {
           pk: { S: `ORG#${existingOrgId}` },
           sk: { S: 'PROFILE' },
           name: { S: 'example.com' },
+          orgConfirmed: { BOOL: false },
           setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
+        },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: `MEMBER#${existingUserId}` } },
+      }).resolves({
+        Item: {
+          role: { S: 'admin' },
+        },
+      });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`],
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expectErrorResponse(result, 403, {
+        message: 'Please create an organization to continue.',
+        code: ApiErrorCode.ORG_NOT_CONFIRMED,
+      });
+
+      // Should NOT enqueue because org is not confirmed
+      expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
+    });
+
+    it('allows bypass routes through when org is not confirmed', async () => {
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      mockJwtVerify.mockResolvedValue({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+      }).resolves({
+        Item: {
+          pk: { S: `SUB#${MOCK_SUB}` },
+          sk: { S: 'IDENTITY' },
+          userId: { S: existingUserId },
+          orgId: { S: existingOrgId },
+          email: { S: MOCK_EMAIL },
+        },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+      }).resolves({
+        Item: {
+          pk: { S: `ORG#${existingOrgId}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'example.com' },
+          orgConfirmed: { BOOL: false },
+          setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
+        },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: `MEMBER#${existingUserId}` } },
+      }).resolves({
+        Item: {
+          role: { S: 'admin' },
+        },
+      });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`],
+        rawPath: '/api/me',
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toStrictEqual({
+        userId: existingUserId,
+        orgId: existingOrgId,
+        orgRole: 'admin',
+        orgConfirmed: false,
+        email: MOCK_EMAIL,
+      });
+    });
+
+    it('enqueues tenant setup when org is confirmed but setup is not complete', async () => {
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      mockJwtVerify.mockResolvedValue({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+      }).resolves({
+        Item: {
+          pk: { S: `SUB#${MOCK_SUB}` },
+          sk: { S: 'IDENTITY' },
+          userId: { S: existingUserId },
+          orgId: { S: existingOrgId },
+          email: { S: MOCK_EMAIL },
+        },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+      }).resolves({
+        Item: {
+          pk: { S: `ORG#${existingOrgId}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'example.com' },
+          orgConfirmed: { BOOL: true },
+          setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
+        },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: `MEMBER#${existingUserId}` } },
+      }).resolves({
+        Item: {
+          role: { S: 'admin' },
         },
       });
 
@@ -207,6 +344,8 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: existingUserId,
         orgId: existingOrgId,
+        orgRole: 'admin',
+        orgConfirmed: true,
         email: MOCK_EMAIL,
       });
 
@@ -227,10 +366,10 @@ describe('authMiddleware', () => {
 
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
-      sqsMock.on(SendMessageCommand).resolves({});
 
       const { before } = authMiddleware();
-      const event = buildEvent({ cookies: [`hs_access_token=valid-token`] });
+      // Use bypass route so the handler proceeds (org is unconfirmed)
+      const event = buildEvent({ cookies: [`hs_access_token=valid-token`], rawPath: '/api/me' });
       const request = buildMiddyRequest(event);
 
       const result = await before(request);
@@ -239,17 +378,13 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: MOCK_USER_ID,
         orgId: MOCK_ORG_ID,
+        orgRole: 'admin',
+        orgConfirmed: false,
         email: MOCK_EMAIL,
       });
 
-      const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
-      expect(sqsCalls).toHaveLength(1);
-      expect(sqsCalls[0].args[0].input).toStrictEqual({
-        QueueUrl: MOCK_QUEUE_URL,
-        MessageBody: JSON.stringify({ orgId: MOCK_ORG_ID, orgName: 'example.com' }),
-        MessageGroupId: MOCK_ORG_ID,
-        MessageDeduplicationId: MOCK_ORG_ID,
-      });
+      // Should NOT enqueue SQS — org is not yet confirmed
+      expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
 
       const transactCalls = ddbMock.commandCalls(TransactWriteItemsCommand);
       expect(transactCalls).toHaveLength(1);
@@ -291,6 +426,7 @@ describe('authMiddleware', () => {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: 'PROFILE' },
               name: { S: 'example.com' },
+              orgConfirmed: { BOOL: false },
               setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
               createdBy: { S: MOCK_USER_ID },
               createdAt: { S: expect.any(String) },
@@ -333,12 +469,31 @@ describe('authMiddleware', () => {
         email: MOCK_EMAIL,
       });
 
-      ddbMock.on(GetItemCommand).resolves({
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+      }).resolves({
         Item: {
           pk: { S: `SUB#${MOCK_SUB}` },
           sk: { S: 'IDENTITY' },
           userId: { S: existingUserId },
           orgId: { S: existingOrgId },
+        },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+      }).resolves({
+        Item: {
+          orgConfirmed: { BOOL: true },
+          setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+        },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: `MEMBER#${existingUserId}` } },
+      }).resolves({
+        Item: {
+          role: { S: 'admin' },
         },
       });
 
@@ -357,6 +512,8 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: existingUserId,
         orgId: existingOrgId,
+        orgRole: 'admin',
+        orgConfirmed: true,
         email: MOCK_EMAIL,
       });
       expect(request.internal.newTokens).toEqual({
@@ -410,13 +567,30 @@ describe('authMiddleware', () => {
         payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
       });
 
-      ddbMock.on(GetItemCommand).resolves({
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+      }).resolves({
         Item: {
           pk: { S: `SUB#${MOCK_SUB}` },
           sk: { S: 'IDENTITY' },
           userId: { S: 'some-user' },
           orgId: { S: 'some-org' },
         },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `ORG#some-org` }, sk: { S: 'PROFILE' } },
+      }).resolves({
+        Item: {
+          orgConfirmed: { BOOL: true },
+          setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+        },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `ORG#some-org` }, sk: { S: `MEMBER#some-user` } },
+      }).resolves({
+        Item: { role: { S: 'admin' } },
       });
 
       const { before } = authMiddleware();
