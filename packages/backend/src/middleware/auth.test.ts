@@ -110,7 +110,7 @@ describe('authMiddleware', () => {
       expectErrorResponse(result, 401, { message: 'Unauthorized' });
     });
 
-    it('resolves existing user from UserInfoTable on valid access token', async () => {
+    it('resolves existing user without enqueuing when tenant setup is complete', async () => {
       const existingUserId = 'existing-user-uuid';
       const existingOrgId = 'existing-org-uuid';
 
@@ -118,13 +118,26 @@ describe('authMiddleware', () => {
         payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
       });
 
-      ddbMock.on(GetItemCommand).resolves({
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+      }).resolves({
         Item: {
           pk: { S: `SUB#${MOCK_SUB}` },
           sk: { S: 'IDENTITY' },
           userId: { S: existingUserId },
           orgId: { S: existingOrgId },
           email: { S: MOCK_EMAIL },
+        },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+      }).resolves({
+        Item: {
+          pk: { S: `ORG#${existingOrgId}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'example.com' },
+          setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
         },
       });
 
@@ -147,6 +160,64 @@ describe('authMiddleware', () => {
         email: MOCK_EMAIL,
       });
       expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
+    });
+
+    it('enqueues tenant setup when existing user org setup is not complete', async () => {
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      mockJwtVerify.mockResolvedValue({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+      }).resolves({
+        Item: {
+          pk: { S: `SUB#${MOCK_SUB}` },
+          sk: { S: 'IDENTITY' },
+          userId: { S: existingUserId },
+          orgId: { S: existingOrgId },
+          email: { S: MOCK_EMAIL },
+        },
+      });
+
+      ddbMock.on(GetItemCommand, {
+        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+      }).resolves({
+        Item: {
+          pk: { S: `ORG#${existingOrgId}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'example.com' },
+          setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
+        },
+      });
+
+      sqsMock.on(SendMessageCommand).resolves({});
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`],
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toStrictEqual({
+        userId: existingUserId,
+        orgId: existingOrgId,
+        email: MOCK_EMAIL,
+      });
+
+      const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
+      expect(sqsCalls).toHaveLength(1);
+      expect(sqsCalls[0].args[0].input).toStrictEqual({
+        QueueUrl: MOCK_QUEUE_URL,
+        MessageBody: JSON.stringify({ orgId: existingOrgId, orgName: 'example.com' }),
+        MessageGroupId: existingOrgId,
+        MessageDeduplicationId: existingOrgId,
+      });
     });
 
     it('creates new user and org when no UserInfoTable record exists', async () => {

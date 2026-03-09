@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -31,6 +32,7 @@ vi.mock('jose', () => ({
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
+const sqsMock = mockClient(SQSClient);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
@@ -62,6 +64,8 @@ describe('GET /api/me handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    sqsMock.reset();
+    sqsMock.on(SendMessageCommand).resolves({});
 
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: MOCK_EMAIL },

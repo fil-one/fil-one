@@ -92,15 +92,32 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
     }),
   );
 
+  // TODO: Improve the org display name (e.g. use the user's organization name from Auth0)
+  const orgName = (email && email.split('@')[1]) ?? 'My Organization';
+
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
-    return { userId: result.Item.userId.S, orgId: result.Item.orgId.S };
+    const userId = result.Item.userId.S;
+    const orgId = result.Item.orgId.S;
+
+    const { Item: orgItem } = await dynamo.send(
+      new GetItemCommand({
+        TableName: tableName,
+        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+      }),
+    );
+
+    await ensureTenantSetupEnqueued({
+      orgId,
+      orgName: orgItem?.name?.S ?? orgName,
+      setupStatus: orgItem?.setupStatus?.S,
+    });
+
+    return { userId, orgId };
   }
 
   // New user — create user, org, and membership records atomically
   const userId = uuidv4();
   const orgId = uuidv4();
-  // TODO: Improve the org display name (e.g. use the user's organization name from Auth0)
-  const orgName = (email && email.split('@')[1]) ?? 'My Organization';
   const now = new Date().toISOString();
 
   await dynamo.send(
@@ -162,6 +179,26 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
     }),
   );
 
+  await ensureTenantSetupEnqueued({
+    orgId,
+    orgName,
+    setupStatus: SetupStatus.HYPERSPACE_ORG_CREATED,
+  });
+
+  return { userId, orgId };
+}
+
+async function ensureTenantSetupEnqueued({
+  orgId,
+  orgName,
+  setupStatus,
+}: {
+  orgId: string;
+  orgName: string;
+  setupStatus: string | undefined;
+}): Promise<void> {
+  if (setupStatus === SetupStatus.AURORA_TENANT_SETUP_COMPLETE) return;
+
   await sqsClient.send(
     new SendMessageCommand({
       QueueUrl: Resource.AuroraTenantSetupQueue.url,
@@ -170,8 +207,6 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
       MessageDeduplicationId: orgId,
     }),
   );
-
-  return { userId, orgId };
 }
 
 // ---------------------------------------------------------------------------
