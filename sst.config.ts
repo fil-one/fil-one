@@ -76,7 +76,8 @@ export default $config({
     const tenantSetupQueue = new sst.aws.Queue("AuroraTenantSetupQueue", {
       fifo: true,
       dlq: tenantSetupDlq.arn,
-      visibilityTimeout: "60 seconds",
+      // Make visibility timeout longer than the Lambda timeout to avoid multiple retries
+      visibilityTimeout: "90 seconds",
     });
 
     // ── S3 Bucket for user file storage ──────────────────────────────
