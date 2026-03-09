@@ -58,6 +58,10 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "UploadsTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
     "UsageReportingOrchestrator": {
       "name": string
       "type": "sst.aws.Function"
@@ -65,10 +69,6 @@ declare module "sst" {
     "UsageReportingWorker": {
       "name": string
       "type": "sst.aws.Function"
-    }
-    "UploadsTable": {
-      "name": string
-      "type": "sst.aws.Dynamo"
     }
     "UserFilesBucket": {
       "name": string

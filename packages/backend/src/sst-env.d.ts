@@ -52,5 +52,9 @@ declare module "sst" {
       url: string;
       type: "sst.aws.Queue";
     };
+    StripeMeterEventName: {
+      value: string;
+      type: "sst.Secret";
+    };
   }
 }
