@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { OrgRole } from '@hyperspace/shared';
+
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -53,7 +53,7 @@ const MOCK_EMAIL = 'user@example.com';
 function authenticatedEvent() {
   return buildEvent({
     cookies: [`hs_access_token=valid-token`],
-    userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, orgRole: OrgRole.Admin, orgConfirmed: true, email: MOCK_EMAIL },
+    userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, orgConfirmed: true, email: MOCK_EMAIL },
   });
 }
 
@@ -86,13 +86,6 @@ describe('GET /api/me handler', () => {
       },
     });
 
-    // Auth middleware: resolve org membership
-    ddbMock.on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: `MEMBER#${MOCK_USER_ID}` } },
-    }).resolves({
-      Item: { role: { S: 'admin' } },
-    });
   });
 
   it('returns auroraTenantReady: true when setupStatus is AURORA_TENANT_SETUP_COMPLETE', async () => {

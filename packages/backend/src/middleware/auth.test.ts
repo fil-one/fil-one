@@ -8,8 +8,7 @@ import type {
 } from 'aws-lambda';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
-import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { ApiErrorCode } from '@hyperspace/shared';
+import { ApiErrorCode, OrgRole } from '@hyperspace/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
 import { expectErrorResponse } from '../test/assert-helpers.js';
@@ -22,7 +21,6 @@ const MOCK_USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const MOCK_ORG_ID = '11111111-2222-3333-4444-555555555555';
 const MOCK_SUB = 'auth0|abc123';
 const MOCK_EMAIL = 'user@example.com';
-const MOCK_QUEUE_URL = 'https://sqs.us-east-1.amazonaws.com/123/setup-queue';
 
 // ---------------------------------------------------------------------------
 // Mocks — must be set up before importing the module under test
@@ -65,7 +63,6 @@ const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
 const ddbMock = mockClient(DynamoDBClient);
-const sqsMock = mockClient(SQSClient);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
@@ -97,7 +94,6 @@ describe('authMiddleware', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    sqsMock.reset();
     uuidCallCount = 0;
   });
 
@@ -143,14 +139,6 @@ describe('authMiddleware', () => {
         },
       });
 
-      ddbMock.on(GetItemCommand, {
-        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: `MEMBER#${existingUserId}` } },
-      }).resolves({
-        Item: {
-          role: { S: 'admin' },
-        },
-      });
-
       const { before } = authMiddleware();
       const event = buildEvent({
         cookies: [
@@ -167,11 +155,9 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: existingUserId,
         orgId: existingOrgId,
-        orgRole: 'admin',
         orgConfirmed: true,
         email: MOCK_EMAIL,
       });
-      expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
     });
 
     it('returns 403 ORG_NOT_CONFIRMED when org is not confirmed', async () => {
@@ -206,14 +192,6 @@ describe('authMiddleware', () => {
         },
       });
 
-      ddbMock.on(GetItemCommand, {
-        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: `MEMBER#${existingUserId}` } },
-      }).resolves({
-        Item: {
-          role: { S: 'admin' },
-        },
-      });
-
       const { before } = authMiddleware();
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`],
@@ -226,9 +204,6 @@ describe('authMiddleware', () => {
         message: 'Please create an organization to continue.',
         code: ApiErrorCode.ORG_NOT_CONFIRMED,
       });
-
-      // Should NOT enqueue because org is not confirmed
-      expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
     });
 
     it('allows bypass routes through when org is not confirmed', async () => {
@@ -263,14 +238,6 @@ describe('authMiddleware', () => {
         },
       });
 
-      ddbMock.on(GetItemCommand, {
-        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: `MEMBER#${existingUserId}` } },
-      }).resolves({
-        Item: {
-          role: { S: 'admin' },
-        },
-      });
-
       const { before } = authMiddleware();
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`],
@@ -284,78 +251,8 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: existingUserId,
         orgId: existingOrgId,
-        orgRole: 'admin',
         orgConfirmed: false,
         email: MOCK_EMAIL,
-      });
-    });
-
-    it('enqueues tenant setup when org is confirmed but setup is not complete', async () => {
-      const existingUserId = 'existing-user-uuid';
-      const existingOrgId = 'existing-org-uuid';
-
-      mockJwtVerify.mockResolvedValue({
-        payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
-      });
-
-      ddbMock.on(GetItemCommand, {
-        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
-      }).resolves({
-        Item: {
-          pk: { S: `SUB#${MOCK_SUB}` },
-          sk: { S: 'IDENTITY' },
-          userId: { S: existingUserId },
-          orgId: { S: existingOrgId },
-          email: { S: MOCK_EMAIL },
-        },
-      });
-
-      ddbMock.on(GetItemCommand, {
-        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
-      }).resolves({
-        Item: {
-          pk: { S: `ORG#${existingOrgId}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'example.com' },
-          orgConfirmed: { BOOL: true },
-          setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
-        },
-      });
-
-      ddbMock.on(GetItemCommand, {
-        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: `MEMBER#${existingUserId}` } },
-      }).resolves({
-        Item: {
-          role: { S: 'admin' },
-        },
-      });
-
-      sqsMock.on(SendMessageCommand).resolves({});
-
-      const { before } = authMiddleware();
-      const event = buildEvent({
-        cookies: [`hs_access_token=valid-token`],
-      });
-      const request = buildMiddyRequest(event);
-
-      const result = await before(request);
-
-      expect(result).toBeUndefined();
-      expect(getUserInfoFromEvent(event)).toStrictEqual({
-        userId: existingUserId,
-        orgId: existingOrgId,
-        orgRole: 'admin',
-        orgConfirmed: true,
-        email: MOCK_EMAIL,
-      });
-
-      const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
-      expect(sqsCalls).toHaveLength(1);
-      expect(sqsCalls[0].args[0].input).toStrictEqual({
-        QueueUrl: MOCK_QUEUE_URL,
-        MessageBody: JSON.stringify({ orgId: existingOrgId, orgName: 'example.com' }),
-        MessageGroupId: existingOrgId,
-        MessageDeduplicationId: existingOrgId,
       });
     });
 
@@ -378,13 +275,9 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: MOCK_USER_ID,
         orgId: MOCK_ORG_ID,
-        orgRole: 'admin',
         orgConfirmed: false,
         email: MOCK_EMAIL,
       });
-
-      // Should NOT enqueue SQS — org is not yet confirmed
-      expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
 
       const transactCalls = ddbMock.commandCalls(TransactWriteItemsCommand);
       expect(transactCalls).toHaveLength(1);
@@ -440,7 +333,7 @@ describe('authMiddleware', () => {
             Item: {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: `MEMBER#${MOCK_USER_ID}` },
-              role: { S: 'admin' },
+              role: { S: OrgRole.Admin },
               email: { S: MOCK_EMAIL },
               joinedAt: { S: expect.any(String) },
             },
@@ -489,14 +382,6 @@ describe('authMiddleware', () => {
         },
       });
 
-      ddbMock.on(GetItemCommand, {
-        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: `MEMBER#${existingUserId}` } },
-      }).resolves({
-        Item: {
-          role: { S: 'admin' },
-        },
-      });
-
       const { before } = authMiddleware();
       const event = buildEvent({
         cookies: [
@@ -512,7 +397,6 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: existingUserId,
         orgId: existingOrgId,
-        orgRole: 'admin',
         orgConfirmed: true,
         email: MOCK_EMAIL,
       });
@@ -585,12 +469,6 @@ describe('authMiddleware', () => {
           orgConfirmed: { BOOL: true },
           setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
         },
-      });
-
-      ddbMock.on(GetItemCommand, {
-        Key: { pk: { S: `ORG#some-org` }, sk: { S: `MEMBER#some-user` } },
-      }).resolves({
-        Item: { role: { S: 'admin' } },
       });
 
       const { before } = authMiddleware();

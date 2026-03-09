@@ -6,7 +6,6 @@ import type {
   Context,
 } from 'aws-lambda';
 import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
-import { SendMessageCommand } from '@aws-sdk/client-sqs';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { v4 as uuidv4 } from 'uuid';
 import { Resource } from 'sst';
@@ -16,7 +15,7 @@ import type { ErrorResponse } from '@hyperspace/shared';
 import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader, ResponseBuilder } from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
-import { sqsClient } from '../lib/sqs-client.js';
+
 
 // ---------------------------------------------------------------------------
 // Types
@@ -94,7 +93,6 @@ const ORG_CONFIRM_BYPASS_ROUTES = new Set([
 interface ResolvedIdentity {
   userId: string;
   orgId: string;
-  orgRole: OrgRole;
   orgConfirmed: boolean;
   email?: string;
 }
@@ -121,38 +119,19 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
     const userId = result.Item.userId.S;
     const orgId = result.Item.orgId.S;
-    // Prefer JWT email, fall back to stored email from identity record
-    const resolvedEmail = email ?? result.Item.email?.S;
+    // Prefer stored email from identity record, fall back to JWT email
+    const resolvedEmail = result.Item.email?.S ?? email;
 
-    // Read org profile and membership in parallel
-    const [{ Item: orgItem }, { Item: memberItem }] = await Promise.all([
-      dynamo.send(
-        new GetItemCommand({
-          TableName: tableName,
-          Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-        }),
-      ),
-      dynamo.send(
-        new GetItemCommand({
-          TableName: tableName,
-          Key: { pk: { S: `ORG#${orgId}` }, sk: { S: `MEMBER#${userId}` } },
-        }),
-      ),
-    ]);
+    const { Item: orgItem } = await dynamo.send(
+      new GetItemCommand({
+        TableName: tableName,
+        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+      }),
+    );
 
     const orgConfirmed = orgItem?.orgConfirmed?.BOOL === true;
-    const orgRole = (memberItem?.role?.S as OrgRole) ?? OrgRole.Admin;
 
-    // Only enqueue tenant setup if org is confirmed
-    if (orgConfirmed) {
-      await ensureTenantSetupEnqueued({
-        orgId,
-        orgName: orgItem?.name?.S ?? orgName,
-        setupStatus: orgItem?.setupStatus?.S,
-      });
-    }
-
-    return { userId, orgId, orgRole, orgConfirmed, email: resolvedEmail };
+    return { userId, orgId, orgConfirmed, email: resolvedEmail };
   }
 
   // New user — create user, org, and membership records atomically
@@ -210,7 +189,7 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
             Item: {
               pk: { S: `ORG#${orgId}` },
               sk: { S: `MEMBER#${userId}` },
-              role: { S: 'admin' },
+              role: { S: OrgRole.Admin },
               ...(email ? { email: { S: email } } : {}),
               joinedAt: { S: now },
             },
@@ -223,28 +202,7 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
   // Do NOT enqueue tenant setup here — org is not yet confirmed.
   // Tenant setup will be triggered when the user confirms their org via POST /api/org/confirm.
 
-  return { userId, orgId, orgRole: OrgRole.Admin, orgConfirmed: false, email };
-}
-
-async function ensureTenantSetupEnqueued({
-  orgId,
-  orgName,
-  setupStatus,
-}: {
-  orgId: string;
-  orgName: string;
-  setupStatus: string | undefined;
-}): Promise<void> {
-  if (setupStatus === OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE) return;
-
-  await sqsClient.send(
-    new SendMessageCommand({
-      QueueUrl: Resource.AuroraTenantSetupQueue.url,
-      MessageBody: JSON.stringify({ orgId, orgName }),
-      MessageGroupId: orgId,
-      MessageDeduplicationId: orgId,
-    }),
-  );
+  return { userId, orgId, orgConfirmed: false, email };
 }
 
 // ---------------------------------------------------------------------------
@@ -282,7 +240,6 @@ export function authMiddleware() {
         (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
           userId: resolved.userId,
           orgId: resolved.orgId,
-          orgRole: resolved.orgRole,
           orgConfirmed: resolved.orgConfirmed,
           email: resolved.email,
         };
@@ -330,7 +287,6 @@ export function authMiddleware() {
           (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
             userId: refreshedResolved.userId,
             orgId: refreshedResolved.orgId,
-            orgRole: refreshedResolved.orgRole,
             orgConfirmed: refreshedResolved.orgConfirmed,
             email: refreshedResolved.email,
           };

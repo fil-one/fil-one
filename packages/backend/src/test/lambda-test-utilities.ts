@@ -10,6 +10,8 @@ interface BuildEventProps {
   queryStringParameters?: Record<string, string>;
   requestContext?: Partial<APIGatewayProxyEventV2['requestContext']>;
   rawPath?: string;
+  body?: string;
+  method?: string;
 }
 
 export function buildEvent(props: BuildEventProps & { userInfo: UserInfo }): AuthenticatedEvent & NormalizedHeaderEvent;
@@ -24,13 +26,14 @@ export function buildEvent(props?: BuildEventProps): APIGatewayProxyEventV2 & No
       : '',
     headers: {},
     rawHeaders: {},
+    ...(props?.body !== undefined && { body: props.body }),
     ...(props?.queryStringParameters && { queryStringParameters: props.queryStringParameters }),
     requestContext: {
       accountId: '123',
       apiId: 'abc',
       domainName: 'test.execute-api.us-east-1.amazonaws.com',
       domainPrefix: 'test',
-      http: { method: 'GET', path: '/test', protocol: 'HTTP/1.1', sourceIp: '127.0.0.1', userAgent: 'test' },
+      http: { method: props?.method ?? 'GET', path: props?.rawPath ?? '/test', protocol: 'HTTP/1.1', sourceIp: '127.0.0.1', userAgent: 'test' },
       requestId: 'req-1',
       routeKey: 'GET /test',
       stage: '$default',
