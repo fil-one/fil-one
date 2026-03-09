@@ -2,12 +2,9 @@ import assert from 'node:assert';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { createAuroraTenant, setupAuroraTenant } from './aurora-backoffice.js';
+import { OrgSetupStatus } from './org-setup-status.js';
 
-export const SetupStatus = {
-  HYPERSPACE_ORG_CREATED: 'HYPERSPACE_ORG_CREATED',
-  AURORA_TENANT_CREATED: 'AURORA_TENANT_CREATED',
-  AURORA_TENANT_SETUP_COMPLETE: 'AURORA_TENANT_SETUP_COMPLETE',
-} as const;
+export { OrgSetupStatus };
 
 export interface AuroraTenantSetupMessage {
   orgId: string;
@@ -31,16 +28,17 @@ export async function processTenantSetup(message: AuroraTenantSetupMessage): Pro
   const setupStatus = Item.setupStatus?.S;
 
   switch (setupStatus) {
-    case SetupStatus.AURORA_TENANT_SETUP_COMPLETE:
+    case OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE:
       return;
 
-    case SetupStatus.HYPERSPACE_ORG_CREATED: {
+    case OrgSetupStatus.HYPERSPACE_ORG_CREATED:
+    case undefined: {
       const auroraTenantId = await createTenant(orgId, orgName, key);
       await runSetup(orgId, auroraTenantId, key);
       return;
     }
 
-    case SetupStatus.AURORA_TENANT_CREATED: {
+    case OrgSetupStatus.AURORA_TENANT_CREATED: {
       const auroraTenantId = Item.auroraTenantId?.S;
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
       await runSetup(orgId, auroraTenantId, key);
@@ -64,11 +62,11 @@ async function createTenant(
       TableName: Resource.UserInfoTable.name,
       Key: key,
       UpdateExpression: 'SET auroraTenantId = :tid, setupStatus = :status, updatedAt = :now',
-      ConditionExpression: 'setupStatus = :expected',
+      ConditionExpression: 'attribute_not_exists(setupStatus) OR setupStatus = :expected',
       ExpressionAttributeValues: {
         ':tid': { S: auroraTenantId },
-        ':status': { S: SetupStatus.AURORA_TENANT_CREATED },
-        ':expected': { S: SetupStatus.HYPERSPACE_ORG_CREATED },
+        ':status': { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+        ':expected': { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED },
         ':now': { S: new Date().toISOString() },
       },
     }),
@@ -97,8 +95,8 @@ async function runSetup(
       UpdateExpression: 'SET setupStatus = :status, updatedAt = :now',
       ConditionExpression: 'setupStatus = :expected',
       ExpressionAttributeValues: {
-        ':status': { S: SetupStatus.AURORA_TENANT_SETUP_COMPLETE },
-        ':expected': { S: SetupStatus.AURORA_TENANT_CREATED },
+        ':status': { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
+        ':expected': { S: OrgSetupStatus.AURORA_TENANT_CREATED },
         ':now': { S: new Date().toISOString() },
       },
     }),

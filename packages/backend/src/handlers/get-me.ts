@@ -4,7 +4,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { MeResponse } from '@hyperspace/shared';
 import { Resource } from 'sst';
-import { SetupStatus } from '../lib/aurora-tenant-setup.js';
+import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -33,7 +33,7 @@ async function baseHandler(
   const body: MeResponse = {
     orgId,
     email,
-    auroraTenantReady: setupStatus === SetupStatus.AURORA_TENANT_SETUP_COMPLETE,
+    auroraTenantReady: setupStatus === OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE,
   };
 
   return new ResponseBuilder().status(200).body(body).build();
