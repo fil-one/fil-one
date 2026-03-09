@@ -39,6 +39,7 @@ export default $config({
     const auth0MgmtClientSecret = new sst.Secret("Auth0MgmtClientSecret");
     const stripeSecretKey = new sst.Secret("StripeSecretKey");
     const stripePriceId = new sst.Secret("StripePriceId");
+    const auroraBackofficeToken = new sst.Secret("AuroraBackofficeToken");
     const AWS_CACHING_DISABLED_POLICY = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad";
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
@@ -67,11 +68,24 @@ export default $config({
       primaryIndex: { hashKey: "pk", rangeKey: "sk" },
     });
 
+    // ── SQS Queues ─────────────────────────────────────────────────
+    const tenantSetupDlq = new sst.aws.Queue("AuroraTenantSetupDlq", {
+      fifo: true,
+    });
+
+    const tenantSetupQueue = new sst.aws.Queue("AuroraTenantSetupQueue", {
+      fifo: true,
+      dlq: tenantSetupDlq.arn,
+      // Make visibility timeout longer than the Lambda timeout to avoid multiple retries
+      visibilityTimeout: "90 seconds",
+    });
+
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket("UserFilesBucket");
 
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
+    const isProduction = stage === "production";
 
     let domainName: string | undefined;
     let certArn: string | undefined;
@@ -202,6 +216,7 @@ export default $config({
       billingTable,
       userInfoTable,
       userFilesBucket,
+      tenantSetupQueue,
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
@@ -211,6 +226,19 @@ export default $config({
     const sharedEnv: Record<string, string> = {
       AUTH0_DOMAIN: "dev-oar2nhqh58xf5pwf.us.auth0.com",
       AUTH0_AUDIENCE: "console.filhyperspace.com",
+    };
+
+    if (isProduction) {
+      throw new Error(
+        "Aurora Backoffice production configuration not yet available. "
+        + "Set AURORA_BACKOFFICE_URL, AURORA_PARTNER_ID, and AURORA_REGION_ID before deploying to production.",
+      );
+    }
+
+    const auroraEnv = {
+      AURORA_BACKOFFICE_URL: "https://api.backoffice.dev.aur.lu/api/v1",
+      AURORA_PARTNER_ID: "ff",
+      AURORA_REGION_ID: "ff",
     };
 
     function addRoute(
@@ -256,6 +284,9 @@ export default $config({
       WEBSITE_URL: siteUrl,
     });
 
+    // ── Me route ───────────────────────────────────────────────────
+    addRoute("GET", "/api/me", "get-me");
+
     // ── Billing routes ───────────────────────────────────────────────
     addRoute("GET", "/api/billing", "get-billing");
     addRoute("POST", "/api/billing/setup-intent", "create-setup-intent");
@@ -264,6 +295,36 @@ export default $config({
       WEBSITE_URL: siteUrl,
     });
     addRoute("POST", "/api/stripe/webhook", "stripe-webhook");
+
+    // ── Tenant setup consumer ──────────────────────────────────────
+    tenantSetupQueue.subscribe(
+      {
+        handler: "packages/backend/src/handlers/aurora-tenant-setup.handler",
+        link: [userInfoTable, auroraBackofficeToken],
+        environment: {
+          ...auroraEnv,
+        },
+        // eslint-disable-next-line typescript/no-explicit-any
+        runtime: "nodejs24.x" as any,
+        timeout: "60 seconds",
+      },
+      { batch: { size: 1 } },
+    );
+
+    // ── CloudWatch alarm on DLQ ──────────────────────────────────
+    // TODO: Rework this alarm to trigger alert in Grafana IRM
+    new aws.cloudwatch.MetricAlarm("AuroraTenantSetupDlqAlarm", {
+      alarmDescription: "Messages in tenant-setup DLQ — failed tenant setup needs investigation",
+      namespace: "AWS/SQS",
+      metricName: "ApproximateNumberOfMessagesVisible",
+      dimensions: { QueueName: tenantSetupDlq.nodes.queue.name },
+      statistic: "Maximum",
+      period: 60,
+      evaluationPeriods: 1,
+      threshold: 1,
+      comparisonOperator: "GreaterThanOrEqualToThreshold",
+      treatMissingData: "notBreaching",
+    });
 
     return {
       url: siteUrl,

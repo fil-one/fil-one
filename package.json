@@ -1,16 +1,17 @@
 {
   "name": "hyperspace",
   "private": true,
+  "type": "module",
   "workspaces": [
     "packages/*"
   ],
-  "type": "module",
   "scripts": {
     "dev": "sst dev",
     "build": "pnpm -r -F '!@hyperspace/ui' run build",
     "deploy": "pnpm build && sst deploy",
     "deploy:staging": "pnpm build && sst deploy --stage staging",
     "deploy:production": "pnpm build && sst deploy --stage production",
+    "generate:aurora-backoffice": "pnpm --filter @hyperspace/aurora-backoffice-client generate",
     "remove": "sst remove",
     "lint": "oxlint --report-unused-disable-directives",
     "lint:fix": "oxlint --fix",

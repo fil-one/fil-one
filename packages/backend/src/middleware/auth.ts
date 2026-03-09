@@ -6,6 +6,7 @@ import type {
   Context,
 } from 'aws-lambda';
 import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
+import { SendMessageCommand } from '@aws-sdk/client-sqs';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { v4 as uuidv4 } from 'uuid';
 import { Resource } from 'sst';
@@ -13,6 +14,8 @@ import type { UserInfo } from '../lib/user-context.js';
 import type { ErrorResponse } from '@hyperspace/shared';
 import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader, ResponseBuilder } from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
+import { OrgSetupStatus } from '../lib/org-setup-status.js';
+import { sqsClient } from '../lib/sqs-client.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -89,8 +92,27 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
     }),
   );
 
+  // TODO: Improve the org display name (e.g. use the user's organization name from Auth0)
+  const orgName = (email && email.split('@')[1]) ?? 'My Organization';
+
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
-    return { userId: result.Item.userId.S, orgId: result.Item.orgId.S };
+    const userId = result.Item.userId.S;
+    const orgId = result.Item.orgId.S;
+
+    const { Item: orgItem } = await dynamo.send(
+      new GetItemCommand({
+        TableName: tableName,
+        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+      }),
+    );
+
+    await ensureTenantSetupEnqueued({
+      orgId,
+      orgName: orgItem?.name?.S ?? orgName,
+      setupStatus: orgItem?.setupStatus?.S,
+    });
+
+    return { userId, orgId };
   }
 
   // New user — create user, org, and membership records atomically
@@ -134,7 +156,8 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
             Item: {
               pk: { S: `ORG#${orgId}` },
               sk: { S: 'PROFILE' },
-              ...(email ? { name: { S: email.split('@')[1] ?? 'My Organization' } } : { name: { S: 'My Organization' } }),
+              name: { S: orgName },
+              setupStatus: { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED },
               createdBy: { S: userId },
               createdAt: { S: now },
             },
@@ -156,7 +179,34 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
     }),
   );
 
+  await ensureTenantSetupEnqueued({
+    orgId,
+    orgName,
+    setupStatus: OrgSetupStatus.HYPERSPACE_ORG_CREATED,
+  });
+
   return { userId, orgId };
+}
+
+async function ensureTenantSetupEnqueued({
+  orgId,
+  orgName,
+  setupStatus,
+}: {
+  orgId: string;
+  orgName: string;
+  setupStatus: string | undefined;
+}): Promise<void> {
+  if (setupStatus === OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE) return;
+
+  await sqsClient.send(
+    new SendMessageCommand({
+      QueueUrl: Resource.AuroraTenantSetupQueue.url,
+      MessageBody: JSON.stringify({ orgId, orgName }),
+      MessageGroupId: orgId,
+      MessageDeduplicationId: orgId,
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------

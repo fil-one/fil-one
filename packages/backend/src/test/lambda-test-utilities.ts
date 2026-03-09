@@ -1,6 +1,6 @@
 import type { Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
-import type { UserInfo } from '../lib/user-context.js';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 
 type NormalizedHeaderEvent = { headers: Record<string, string>; rawHeaders: Record<string, string> };
 
@@ -11,6 +11,8 @@ interface BuildEventProps {
   requestContext?: Partial<APIGatewayProxyEventV2['requestContext']>;
 }
 
+export function buildEvent(props: BuildEventProps & { userInfo: UserInfo }): AuthenticatedEvent & NormalizedHeaderEvent;
+export function buildEvent(props?: BuildEventProps): APIGatewayProxyEventV2 & NormalizedHeaderEvent;
 export function buildEvent(props?: BuildEventProps): APIGatewayProxyEventV2 & NormalizedHeaderEvent {
   return {
     version: '2.0',

@@ -40,5 +40,17 @@ declare module "sst" {
       value: string;
       type: "sst.Secret";
     };
+    AuroraBackofficeToken: {
+      value: string;
+      type: "sst.Secret";
+    };
+    UserInfoTable: {
+      name: string;
+      type: "sst.aws.Dynamo";
+    };
+    AuroraTenantSetupQueue: {
+      url: string;
+      type: "sst.aws.Queue";
+    };
   }
 }

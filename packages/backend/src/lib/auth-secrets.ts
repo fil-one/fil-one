@@ -11,3 +11,13 @@ export function getAuthSecrets(): AuthSecrets {
     AUTH0_CLIENT_SECRET: Resource.Auth0ClientSecret.value,
   };
 }
+
+export interface AuroraBackofficeSecrets {
+  AURORA_BACKOFFICE_TOKEN: string;
+}
+
+export function getAuroraBackofficeSecrets(): AuroraBackofficeSecrets {
+  return {
+    AURORA_BACKOFFICE_TOKEN: Resource.AuroraBackofficeToken.value,
+  };
+}
