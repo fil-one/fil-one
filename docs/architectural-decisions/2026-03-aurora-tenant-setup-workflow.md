@@ -30,7 +30,7 @@ The frontend reads the `auroraTenantReady` boolean from the `/api/me` response (
 ## Consequences
 
 - Race conditions are handled by FIFO deduplication — only one message per org is processed in any 5-minute window.
-- Retries are handled by SQS automatically; failed messages land in the DLQ after 3 attempts and trigger a CloudWatch alarm.
+- Retries are handled by SQS automatically; failed messages land in the DLQ according to the queue's redrive policy and trigger a CloudWatch alarm.
 - Resume-from-failure is handled by the DynamoDB status field — the consumer always checks where it left off.
 - No additional orchestration services are introduced; SQS and DynamoDB are already in our stack.
 - Access key creation is intentionally deferred and can be added as a third step later.
