@@ -1,4 +1,4 @@
-import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SendMessageCommand } from '@aws-sdk/client-sqs';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
@@ -31,8 +31,9 @@ async function baseHandler(
       .build();
   }
 
-  // Update org profile: set name and mark as confirmed
-  await getDynamoClient().send(
+  // Update org profile: set name and mark as confirmed; return all attributes.
+  // ConditionExpression ensures we don't accidentally upsert a missing org record.
+  const { Attributes: updatedOrg } = await getDynamoClient().send(
     new UpdateItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: {
@@ -40,26 +41,17 @@ async function baseHandler(
         sk: { S: 'PROFILE' },
       },
       UpdateExpression: 'SET #name = :name, orgConfirmed = :confirmed',
+      ConditionExpression: 'attribute_exists(pk)',
       ExpressionAttributeNames: { '#name': 'name' },
       ExpressionAttributeValues: {
         ':name': { S: result.sanitized },
         ':confirmed': { BOOL: true },
       },
+      ReturnValues: 'ALL_NEW',
     }),
   );
 
-  // Now that the org is confirmed, enqueue Aurora tenant setup
-  const { Item: orgItem } = await getDynamoClient().send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: {
-        pk: { S: `ORG#${orgId}` },
-        sk: { S: 'PROFILE' },
-      },
-    }),
-  );
-
-  const setupStatus = orgItem?.setupStatus?.S;
+  const setupStatus = updatedOrg?.setupStatus?.S;
   if (setupStatus !== OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE) {
     await sqsClient.send(
       new SendMessageCommand({

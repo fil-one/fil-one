@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import type { UpdateItemCommandOutput } from '@aws-sdk/client-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { ORG_NAME_MIN_LENGTH, ORG_NAME_MAX_LENGTH } from '../lib/org-name-validation.js';
@@ -108,7 +109,15 @@ describe('POST /api/org/confirm handler', () => {
       },
     });
 
-    ddbMock.on(UpdateItemCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({
+      Attributes: {
+        pk: { S: `ORG#${MOCK_ORG_ID}` },
+        sk: { S: 'PROFILE' },
+        name: { S: 'Acme Corp' },
+        orgConfirmed: { BOOL: true },
+        setupStatus: { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED },
+      },
+    } as UpdateItemCommandOutput);
     sqsMock.on(SendMessageCommand).resolves({});
   });
 
@@ -126,7 +135,7 @@ describe('POST /api/org/confirm handler', () => {
       }),
     });
 
-    // Verify DDB update
+    // Verify DDB update with ConditionExpression and ReturnValues
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(1);
     expect(updateCalls[0].args[0].input).toStrictEqual({
@@ -136,11 +145,13 @@ describe('POST /api/org/confirm handler', () => {
         sk: { S: 'PROFILE' },
       },
       UpdateExpression: 'SET #name = :name, orgConfirmed = :confirmed',
+      ConditionExpression: 'attribute_exists(pk)',
       ExpressionAttributeNames: { '#name': 'name' },
       ExpressionAttributeValues: {
         ':name': { S: 'Acme Corp' },
         ':confirmed': { BOOL: true },
       },
+      ReturnValues: 'ALL_NEW',
     });
 
     // Verify SQS enqueue
@@ -155,19 +166,16 @@ describe('POST /api/org/confirm handler', () => {
   });
 
   it('skips SQS enqueue when Aurora tenant setup is already complete', async () => {
-    // Override org profile to show setup already complete
-    ddbMock.on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-    }).resolves({
-      Item: {
+    // Override UpdateItemCommand to return setup-complete status
+    ddbMock.on(UpdateItemCommand).resolves({
+      Attributes: {
         pk: { S: `ORG#${MOCK_ORG_ID}` },
         sk: { S: 'PROFILE' },
-        name: { S: 'example.com' },
-        orgConfirmed: { BOOL: false },
+        name: { S: 'Acme Corp' },
+        orgConfirmed: { BOOL: true },
         setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
       },
-    });
+    } as UpdateItemCommandOutput);
 
     const event = confirmOrgEvent({ orgName: 'Acme Corp' });
     event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
@@ -262,6 +270,21 @@ describe('POST /api/org/confirm handler', () => {
 
     const body = JSON.parse((result as { body: string }).body);
     expect(body.orgName).toBe('Acme Corp');
+  });
+
+  it('returns 500 when org profile does not exist (condition check fails)', async () => {
+    const conditionError = new Error('The conditional request failed');
+    conditionError.name = 'ConditionalCheckFailedException';
+    ddbMock.on(UpdateItemCommand).rejects(conditionError);
+
+    const event = confirmOrgEvent({ orgName: 'Acme Corp' });
+    event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
+
+    const result = await handler(event, buildContext());
+
+    // Error handler middleware catches the unhandled error and returns 500
+    expect(result).toMatchObject({ statusCode: 500 });
+    expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
   });
 
   it('returns 403 when CSRF token is missing', async () => {
