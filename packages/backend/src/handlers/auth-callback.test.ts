@@ -204,7 +204,7 @@ describe('auth-callback handler', () => {
 
       const result = await handler(event, stubContext);
 
-      expect(result.headers!['Location']).toBe('https://localhost:5173/dashboard');
+      expect(result.headers?.['Location']).toBe('https://localhost:5173/dashboard');
       const body = new URLSearchParams(mockFetch.mock.calls[0][1].body as string);
       expect(body.get('redirect_uri')).toBe('https://localhost:5173/api/auth/callback');
 
