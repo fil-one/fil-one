@@ -112,6 +112,8 @@ pnpm run deploy           # Deploy personal dev stack (uses OS username as stage
 pnpm run deploy:staging   # Deploy to staging.filhyperspace.com
 pnpm run deploy:production # Deploy to console.filhyperspace.com
 pnpm run remove           # Remove your personal dev stack
+pnpm run lint             # Lint all packages
+pnpm run lint:fix         # Lint and auto-fix where possible
 pnpm run typecheck        # tsc --noEmit across all packages
 ```
 

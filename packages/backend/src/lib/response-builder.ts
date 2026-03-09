@@ -1,7 +1,6 @@
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
-// TODO: Tighten once all external origins are known (Auth0 domain, any CDN assets).
-const CSP = "default-src 'none'; connect-src 'self'; frame-ancestors 'none'";
+const CSP = "default-src 'none'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
 export const COOKIE_ATTRIBUTES = 'HttpOnly; Secure; SameSite=Lax; Path=/';
 

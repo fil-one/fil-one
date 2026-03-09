@@ -72,7 +72,7 @@ export function BucketsPage() {
         }
       }
     }
-    fetchBuckets()
+    void fetchBuckets()
     return () => { cancelled = true }
   }, [])
 

@@ -3,7 +3,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
 const SECURITY_HEADERS = {
   'Content-Type': 'application/json',
-  'Content-Security-Policy': "default-src 'none'; connect-src 'self'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',

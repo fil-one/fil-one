@@ -22,7 +22,7 @@ const TRIAL_STORAGE_LIMIT_BYTES = TIB_BYTES; // 1 TiB
 async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyResultV2> {
-  const { userId, email } = getUserInfo(event);
+  const { userId } = getUserInfo(event);
   const billingTableName = Resource.BillingTable.name;
   const uploadsTableName = Resource.UploadsTable.name;
 

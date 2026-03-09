@@ -12,7 +12,7 @@ export default $config({
         ? "us-east-2"
         : process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-west-2";
 
-    const awsProvider: Record<string, any> = { region };
+    const awsProvider: Record<string, unknown> = { region };
 
     if (isStaging) {
       awsProvider.allowedAccountIds = ["654654381893"];
@@ -70,9 +70,6 @@ export default $config({
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket("UserFilesBucket");
 
-    // ── API Gateway ──────────────────────────────────────────────────
-    const api = new sst.aws.ApiGatewayV2("Api");
-
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
 
@@ -98,6 +95,24 @@ export default $config({
       certArn = cert.arn;
     }
 
+    // ── API Gateway ──────────────────────────────────────────────────
+    // While we stick to a same origin for both website and API, 
+    // we want to make sure to lock down to just our origin. 
+    const allowedOrigins = domainName ? [`https://${domainName}`] : [];
+    if (stage !== "production") {
+      allowedOrigins.push("http://localhost:5173");
+    }
+
+    const api = new sst.aws.ApiGatewayV2("Api", {
+      cors: {
+        allowOrigins: allowedOrigins,
+        allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allowHeaders: ["Content-Type", "X-CSRF-Token", "X-Requested-With"],
+        allowCredentials: true,
+        maxAge: "1 day",
+      },
+    });
+
     // ── Website (S3 + CloudFront via sst.aws.Router) ─────────────────
     const { local } = await import("@pulumi/command");
 
@@ -113,7 +128,7 @@ export default $config({
         "/*": { bucket: websiteBucket },
         "/api/*": {
           url: api.url,
-          cachePolicy: AWS_CACHING_DISABLED_POLICY, 
+          cachePolicy: AWS_CACHING_DISABLED_POLICY,
         },
       },
       ...(domainName && certArn
@@ -160,6 +175,7 @@ export default $config({
       ],
       // TODO: Remove `as any` once SST adds nodejs24.x to its type definitions
       // this PR was merged: https://github.com/anomalyco/sst/pull/6243#ref-commit-6fb1396
+      // eslint-disable-next-line typescript/no-explicit-any
       runtime: "nodejs24.x" as any,
       timeout: "30 seconds",
     });
@@ -201,7 +217,7 @@ export default $config({
       method: string,
       routePath: string,
       handler: string,
-      extraEnv?: Record<string, any>,
+      extraEnv?: Record<string, $util.Input<string>>,
     ) {
       api.route(`${method} ${routePath}`, {
         handler: `packages/backend/src/handlers/${handler}.handler`,
@@ -211,6 +227,7 @@ export default $config({
           ...extraEnv,
         },
         // TODO: Remove `as any` once SST adds nodejs24.x to its type definitions
+        // eslint-disable-next-line typescript/no-explicit-any
       runtime: "nodejs24.x" as any,
         timeout: "10 seconds",
       });

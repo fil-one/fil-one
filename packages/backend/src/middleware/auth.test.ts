@@ -365,13 +365,13 @@ describe('authMiddleware', () => {
 
       await after(request);
 
-      const expected = [
-        'hs_access_token=new-at; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
-        'hs_id_token=new-it; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
-        'hs_refresh_token=new-rt; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000',
-        'hs_logged_in=1; Secure; SameSite=Lax; Path=/; Max-Age=2592000',
-      ]
-      expect(response.cookies).toStrictEqual(expected)
+      const cookies = response.cookies ?? [];
+      expect(cookies).toHaveLength(5);
+      expect(cookies[0]).toBe('hs_access_token=new-at; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600');
+      expect(cookies[1]).toBe('hs_id_token=new-it; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600');
+      expect(cookies[2]).toBe('hs_refresh_token=new-rt; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000');
+      expect(cookies[3]).toBe('hs_logged_in=1; Secure; SameSite=Lax; Path=/; Max-Age=2592000');
+      expect(cookies[4]).toMatch(/^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/)
     });
 
     it('does not modify response when no newTokens', async () => {
