@@ -23,7 +23,11 @@ We need the workflow to run out of band (not blocking the API response), retry o
 
 Use an **SQS FIFO queue** (`aurora-tenant-setup.fifo`) with a dead letter queue.
 
-Route Lambdas enqueue a message with `MessageGroupId` and `MessageDeduplicationId` both set to the `orgId`. A consumer Lambda reads the tenant's current status from DynamoDB and resumes from whatever step is next. DynamoDB status values describe what has been completed so far: `HYPERSPACE_ORG_CREATED` → `AURORA_TENANT_CREATED` → `AURORA_TENANT_SETUP_COMPLETE`. This naming convention makes it straightforward to insert additional steps later (e.g. between `AURORA_TENANT_SETUP_COMPLETE` and a future final state).
+Route Lambdas enqueue a message with `MessageGroupId` and `MessageDeduplicationId` both set to the `orgId`.
+
+The FIFO queue guarantees exactly-once processing per deduplication ID within a 5-minute window, so even if multiple API routes fire simultaneously for the same org, only one setup execution runs.
+
+A consumer Lambda reads the tenant's current status from DynamoDB and resumes from whatever step is next. DynamoDB status values describe what has been completed so far: `HYPERSPACE_ORG_CREATED` → `AURORA_TENANT_CREATED` → `AURORA_TENANT_SETUP_COMPLETE`. This naming convention makes it straightforward to insert additional steps later (e.g. between `AURORA_TENANT_SETUP_COMPLETE` and a future final state).
 
 The frontend reads the `auroraTenantReady` boolean from the `/api/me` response (derived from the DynamoDB `setupStatus` field) to show setup progress.
 

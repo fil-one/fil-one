@@ -3,8 +3,8 @@ import {
   getPartnersByPartnerIdTenants,
   postPartnersByPartnerIdTenants,
   postPartnersByPartnerIdTenantsByTenantIdSetup,
-} from "@hyperspace/aurora-backoffice-client";
-import { getAuroraBackofficeSecrets } from "./auth-secrets.js";
+} from '@hyperspace/aurora-backoffice-client';
+import { getAuroraBackofficeSecrets } from './auth-secrets.js';
 
 export interface CreateAuroraTenantOptions {
   orgId: string;
@@ -27,7 +27,7 @@ export async function createAuroraTenant({
   const client = createClient({
     baseUrl,
     headers: {
-      "X-Api-Key": token,
+      'X-Api-Key': token,
     },
   });
 
@@ -45,17 +45,24 @@ export async function createAuroraTenant({
   if (error) {
     const status = response?.status;
     if (status === 409) {
-      console.log(`Aurora tenant already exists for org ${orgId}, looking up existing tenant`);
+      console.log(
+        `Aurora tenant already exists for org ${orgId}, looking up existing tenant`,
+      );
       try {
         return await findAuroraTenantByOrgId({ client, partnerId, orgId });
       } catch (cause) {
-        throw new Error(`Aurora tenant already exists for org ${orgId} but lookup failed`, {
-          cause,
-        });
+        throw new Error(
+          `Aurora tenant already exists for org ${orgId} but lookup failed`,
+          {
+            cause,
+          },
+        );
       }
     }
-    console.error("Failed to create Aurora tenant:", error);
-    throw new Error(`Aurora tenant creation failed for org ${orgId}`, { cause: error });
+    console.error('Failed to create Aurora tenant:', error);
+    throw new Error(`Aurora tenant creation failed for org ${orgId}`, {
+      cause: error,
+    });
   }
 
   const auroraTenantId = data?.id;
@@ -79,11 +86,15 @@ async function findAuroraTenantByOrgId({
   const { data, error } = await getPartnersByPartnerIdTenants({
     client,
     path: { partnerId },
+    // TODO: paginate through all pages instead of assuming ≤1000 tenants
+    query: { pageSize: 1000 },
     throwOnError: false,
   });
 
   if (error) {
-    throw new Error(`Failed to list Aurora tenants for partner ${partnerId}`, { cause: error });
+    throw new Error(`Failed to list Aurora tenants for partner ${partnerId}`, {
+      cause: error,
+    });
   }
 
   const tenant = data?.tenants?.find((t) => t.name === orgId);
@@ -114,7 +125,7 @@ export async function setupAuroraTenant({
   const client = createClient({
     baseUrl,
     headers: {
-      "X-Api-Key": token,
+      'X-Api-Key': token,
     },
   });
 
@@ -123,18 +134,25 @@ export async function setupAuroraTenant({
     path: { partnerId, tenantId },
     throwOnError: false,
     // Aurora API returns content-type: text/plain, force JSON parsing
-    parseAs: "json",
+    parseAs: 'json',
   });
 
   if (error) {
-    console.error("Failed to setup Aurora tenant:", error);
-    throw new Error(`Aurora tenant setup failed for tenant ${tenantId}`, { cause: error });
+    console.error('Failed to setup Aurora tenant:', error);
+    throw new Error(`Aurora tenant setup failed for tenant ${tenantId}`, {
+      cause: error,
+    });
   }
 
   if (!data) {
-    throw new Error(`Aurora API did not return setup data for tenant ${tenantId}`);
+    throw new Error(
+      `Aurora API did not return setup data for tenant ${tenantId}`,
+    );
   }
 
-  console.log(`Aurora tenant ${tenantId} setup response:`, JSON.stringify(data));
+  console.log(
+    `Aurora tenant ${tenantId} setup response:`,
+    JSON.stringify(data),
+  );
   return { id: data.id!, lastSetupStep: data.lastSetupStep! };
 }

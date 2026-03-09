@@ -14,7 +14,7 @@ import type { UserInfo } from '../lib/user-context.js';
 import type { ErrorResponse } from '@hyperspace/shared';
 import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader, ResponseBuilder } from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
-import { SetupStatus } from '../lib/aurora-tenant-setup.js';
+import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { sqsClient } from '../lib/sqs-client.js';
 
 // ---------------------------------------------------------------------------
@@ -157,7 +157,7 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
               pk: { S: `ORG#${orgId}` },
               sk: { S: 'PROFILE' },
               name: { S: orgName },
-              setupStatus: { S: SetupStatus.HYPERSPACE_ORG_CREATED },
+              setupStatus: { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED },
               createdBy: { S: userId },
               createdAt: { S: now },
             },
@@ -182,7 +182,7 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
   await ensureTenantSetupEnqueued({
     orgId,
     orgName,
-    setupStatus: SetupStatus.HYPERSPACE_ORG_CREATED,
+    setupStatus: OrgSetupStatus.HYPERSPACE_ORG_CREATED,
   });
 
   return { userId, orgId };
@@ -197,7 +197,7 @@ async function ensureTenantSetupEnqueued({
   orgName: string;
   setupStatus: string | undefined;
 }): Promise<void> {
-  if (setupStatus === SetupStatus.AURORA_TENANT_SETUP_COMPLETE) return;
+  if (setupStatus === OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE) return;
 
   await sqsClient.send(
     new SendMessageCommand({
