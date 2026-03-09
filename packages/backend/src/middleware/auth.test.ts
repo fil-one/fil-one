@@ -155,7 +155,7 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: existingUserId,
         orgId: existingOrgId,
-        orgConfirmed: true,
+
         email: MOCK_EMAIL,
       });
     });
@@ -251,7 +251,7 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: existingUserId,
         orgId: existingOrgId,
-        orgConfirmed: false,
+
         email: MOCK_EMAIL,
       });
     });
@@ -275,7 +275,7 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: MOCK_USER_ID,
         orgId: MOCK_ORG_ID,
-        orgConfirmed: false,
+
         email: MOCK_EMAIL,
       });
 
@@ -397,7 +397,7 @@ describe('authMiddleware', () => {
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: existingUserId,
         orgId: existingOrgId,
-        orgConfirmed: true,
+
         email: MOCK_EMAIL,
       });
       expect(request.internal.newTokens).toEqual({

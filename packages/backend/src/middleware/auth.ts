@@ -239,7 +239,6 @@ export function authMiddleware() {
         (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
           userId: resolved.userId,
           orgId: resolved.orgId,
-          orgConfirmed: resolved.orgConfirmed,
           email: resolved.email,
         };
         if (!resolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
@@ -286,7 +285,6 @@ export function authMiddleware() {
           (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
             userId: refreshedResolved.userId,
             orgId: refreshedResolved.orgId,
-            orgConfirmed: refreshedResolved.orgConfirmed,
             email: refreshedResolved.email,
           };
           console.warn('[auth] Token refresh succeeded');

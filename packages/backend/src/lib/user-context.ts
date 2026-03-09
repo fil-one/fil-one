@@ -3,7 +3,6 @@ import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 export interface UserInfo {
   userId: string;
   orgId: string;
-  orgConfirmed: boolean;
   email?: string;
 }
 

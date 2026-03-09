@@ -53,7 +53,7 @@ const MOCK_EMAIL = 'user@example.com';
 function authenticatedEvent() {
   return buildEvent({
     cookies: [`hs_access_token=valid-token`],
-    userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, orgConfirmed: true, email: MOCK_EMAIL },
+    userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, email: MOCK_EMAIL },
   });
 }
 

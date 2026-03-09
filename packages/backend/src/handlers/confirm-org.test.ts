@@ -59,7 +59,7 @@ function confirmOrgEvent(body: unknown) {
       `hs_access_token=valid-token`,
       `hs_csrf_token=${MOCK_CSRF_TOKEN}`,
     ],
-    userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, orgConfirmed: false, email: MOCK_EMAIL },
+    userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, email: MOCK_EMAIL },
     body: JSON.stringify(body),
     method: 'POST',
     rawPath: '/api/org/confirm',

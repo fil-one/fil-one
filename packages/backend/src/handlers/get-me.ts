@@ -16,7 +16,7 @@ import { getDynamoClient } from '../lib/ddb-client.js';
 async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyResultV2> {
-  const { userId, orgId, orgConfirmed, email } = getUserInfo(event);
+  const { userId, orgId, email } = getUserInfo(event);
 
   const { Item } = await getDynamoClient().send(
     new GetItemCommand({
@@ -30,6 +30,7 @@ async function baseHandler(
 
   const setupStatus = Item?.setupStatus?.S;
   const orgName = Item?.name?.S ?? '';
+  const orgConfirmed = Item?.orgConfirmed?.BOOL === true;
 
   const body: MeResponse = {
     orgId,
