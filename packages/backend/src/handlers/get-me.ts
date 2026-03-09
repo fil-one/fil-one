@@ -1,4 +1,4 @@
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
@@ -11,15 +11,14 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { suggestOrgName } from '../lib/suggest-org-name.js';
-
-const dynamo = new DynamoDBClient({});
+import { getDynamoClient } from '../lib/ddb-client.js';
 
 async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyResultV2> {
   const { userId, orgId, orgConfirmed, email } = getUserInfo(event);
 
-  const { Item } = await dynamo.send(
+  const { Item } = await getDynamoClient().send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: {

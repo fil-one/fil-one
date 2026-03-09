@@ -1,4 +1,4 @@
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SendMessageCommand } from '@aws-sdk/client-sqs';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
@@ -14,8 +14,7 @@ import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { sqsClient } from '../lib/sqs-client.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
-
-const dynamo = new DynamoDBClient({});
+import { getDynamoClient } from '../lib/ddb-client.js';
 
 async function baseHandler(
   event: AuthenticatedEvent,
@@ -33,7 +32,7 @@ async function baseHandler(
   }
 
   // Update org profile: set name and mark as confirmed
-  await dynamo.send(
+  await getDynamoClient().send(
     new UpdateItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: {
@@ -50,7 +49,7 @@ async function baseHandler(
   );
 
   // Now that the org is confirmed, enqueue Aurora tenant setup
-  const { Item: orgItem } = await dynamo.send(
+  const { Item: orgItem } = await getDynamoClient().send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: {

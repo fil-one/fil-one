@@ -5,7 +5,7 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context,
 } from 'aws-lambda';
-import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { v4 as uuidv4 } from 'uuid';
 import { Resource } from 'sst';
@@ -15,6 +15,7 @@ import type { ErrorResponse } from '@hyperspace/shared';
 import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader, ResponseBuilder } from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
+import { getDynamoClient } from '../lib/ddb-client.js';
 
 
 // ---------------------------------------------------------------------------
@@ -97,13 +98,11 @@ interface ResolvedIdentity {
   email?: string;
 }
 
-const dynamo = new DynamoDBClient({});
-
 async function resolveUserAndOrg(sub: string, email: string | undefined): Promise<ResolvedIdentity> {
   const tableName = Resource.UserInfoTable.name;
 
   // Look up existing mapping
-  const result = await dynamo.send(
+  const result = await getDynamoClient().send(
     new GetItemCommand({
       TableName: tableName,
       Key: {
@@ -122,7 +121,7 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
     // Prefer stored email from identity record, fall back to JWT email
     const resolvedEmail = result.Item.email?.S ?? email;
 
-    const { Item: orgItem } = await dynamo.send(
+    const { Item: orgItem } = await getDynamoClient().send(
       new GetItemCommand({
         TableName: tableName,
         Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
@@ -139,7 +138,7 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
   const orgId = uuidv4();
   const now = new Date().toISOString();
 
-  await dynamo.send(
+  await getDynamoClient().send(
     new TransactWriteItemsCommand({
       TransactItems: [
         {
