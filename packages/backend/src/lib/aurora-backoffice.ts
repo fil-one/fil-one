@@ -1,8 +1,8 @@
 import {
   createClient,
-  getPartnersByPartnerIdTenants,
-  postPartnersByPartnerIdTenants,
-  postPartnersByPartnerIdTenantsByTenantIdSetup,
+  getV1PartnersByPartnerIdTenants,
+  postV1PartnersByPartnerIdTenants,
+  postV1PartnersByPartnerIdTenantsByTenantIdSetup,
 } from "@hyperspace/aurora-backoffice-client";
 import { getAuroraBackofficeSecrets } from "./auth-secrets.js";
 
@@ -31,7 +31,7 @@ export async function createAuroraTenant({
     },
   });
 
-  const { data, error, response } = await postPartnersByPartnerIdTenants({
+  const { data, error, response } = await postV1PartnersByPartnerIdTenants({
     client,
     path: { partnerId },
     body: {
@@ -76,7 +76,7 @@ async function findAuroraTenantByOrgId({
   partnerId: string;
   orgId: string;
 }): Promise<CreateAuroraTenantResult> {
-  const { data, error } = await getPartnersByPartnerIdTenants({
+  const { data, error } = await getV1PartnersByPartnerIdTenants({
     client,
     path: { partnerId },
     throwOnError: false,
@@ -118,7 +118,7 @@ export async function setupAuroraTenant({
     },
   });
 
-  const { data, error } = await postPartnersByPartnerIdTenantsByTenantIdSetup({
+  const { data, error } = await postV1PartnersByPartnerIdTenantsByTenantIdSetup({
     client,
     path: { partnerId, tenantId },
     throwOnError: false,

@@ -17,9 +17,9 @@ const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-auror
 
 vi.mock('@hyperspace/aurora-backoffice-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
-  postPartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockPostTenants(options),
-  getPartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockGetTenants(options),
-  postPartnersByPartnerIdTenantsByTenantIdSetup: (options: Record<string, unknown>) => mockPostSetup(options),
+  postV1PartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockPostTenants(options),
+  getV1PartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockGetTenants(options),
+  postV1PartnersByPartnerIdTenantsByTenantIdSetup: (options: Record<string, unknown>) => mockPostSetup(options),
 }));
 
 process.env.AURORA_BACKOFFICE_URL = 'https://api.backoffice.test.example.com/api/v1';
