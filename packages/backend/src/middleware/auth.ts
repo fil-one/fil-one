@@ -8,7 +8,6 @@ import type {
 import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
 import { SendMessageCommand } from '@aws-sdk/client-sqs';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
-import { v4 as uuidv4 } from 'uuid';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
 import type { ErrorResponse } from '@hyperspace/shared';
@@ -116,8 +115,8 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
   }
 
   // New user — create user, org, and membership records atomically
-  const userId = uuidv4();
-  const orgId = uuidv4();
+  const userId = crypto.randomUUID();
+  const orgId = crypto.randomUUID();
   const now = new Date().toISOString();
 
   await dynamo.send(
