@@ -230,13 +230,14 @@ export default $config({
 
     if (isProduction) {
       throw new Error(
-        "Aurora Backoffice production configuration not yet available. "
-        + "Set AURORA_BACKOFFICE_URL, AURORA_PARTNER_ID, and AURORA_REGION_ID before deploying to production.",
+        "Aurora production configuration not yet available. "
+        + "Set AURORA_BACKOFFICE_URL, AURORA_PORTAL_URL, AURORA_PARTNER_ID, and AURORA_REGION_ID before deploying to production.",
       );
     }
 
     const auroraEnv = {
       AURORA_BACKOFFICE_URL: "https://api.backoffice.dev.aur.lu/api",
+      AURORA_PORTAL_URL: "https://api.portal.dev.aur.lu/api/v1",
       AURORA_PARTNER_ID: "ff",
       AURORA_REGION_ID: "ff",
     };
@@ -305,7 +306,16 @@ export default $config({
         link: [userInfoTable, auroraBackofficeToken],
         environment: {
           ...auroraEnv,
+          HYPERSPACE_STAGE: $app.stage,
         },
+        permissions: [
+          {
+            actions: ["ssm:PutParameter"],
+            resources: [
+              $interpolate`arn:aws:ssm:*:*:parameter/hyperspace/${$app.stage}/aurora-api-key/*`,
+            ],
+          },
+        ],
         // eslint-disable-next-line typescript/no-explicit-any
         runtime: "nodejs24.x" as any,
         timeout: "60 seconds",

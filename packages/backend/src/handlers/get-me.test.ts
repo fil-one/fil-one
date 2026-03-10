@@ -86,7 +86,7 @@ describe('GET /api/me handler', () => {
     });
   });
 
-  it('returns auroraTenantReady: true when setupStatus is AURORA_TENANT_SETUP_COMPLETE', async () => {
+  it('returns orgSetupComplete: true when setupStatus is AURORA_TENANT_API_KEY_CREATED', async () => {
     ddbMock.on(GetItemCommand, {
       TableName: 'UserInfoTable',
       Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
@@ -94,7 +94,7 @@ describe('GET /api/me handler', () => {
       Item: {
         pk: { S: `ORG#${MOCK_ORG_ID}` },
         sk: { S: 'PROFILE' },
-        setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+        setupStatus: { S: 'AURORA_TENANT_API_KEY_CREATED' },
       },
     });
 
@@ -105,12 +105,12 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         email: MOCK_EMAIL,
-        auroraTenantReady: true,
+        orgSetupComplete: true,
       }),
     });
   });
 
-  it('returns auroraTenantReady: false when setupStatus is HYPERSPACE_ORG_CREATED', async () => {
+  it('returns orgSetupComplete: false when setupStatus is HYPERSPACE_ORG_CREATED', async () => {
     ddbMock.on(GetItemCommand, {
       TableName: 'UserInfoTable',
       Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
@@ -129,12 +129,12 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         email: MOCK_EMAIL,
-        auroraTenantReady: false,
+        orgSetupComplete: false,
       }),
     });
   });
 
-  it('returns auroraTenantReady: false when setupStatus is missing', async () => {
+  it('returns orgSetupComplete: false when setupStatus is missing', async () => {
     ddbMock.on(GetItemCommand, {
       TableName: 'UserInfoTable',
       Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
@@ -152,7 +152,7 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         email: MOCK_EMAIL,
-        auroraTenantReady: false,
+        orgSetupComplete: false,
       }),
     });
   });
