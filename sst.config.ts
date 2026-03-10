@@ -187,10 +187,7 @@ export default $config({
           ],
         },
       ],
-      // TODO: Remove `as any` once SST adds nodejs24.x to its type definitions
-      // this PR was merged: https://github.com/anomalyco/sst/pull/6243#ref-commit-6fb1396
-      // eslint-disable-next-line typescript/no-explicit-any
-      runtime: "nodejs24.x" as any,
+      runtime: "nodejs24.x",
       timeout: "30 seconds",
     });
 
@@ -254,9 +251,7 @@ export default $config({
           ...sharedEnv,
           ...extraEnv,
         },
-        // TODO: Remove `as any` once SST adds nodejs24.x to its type definitions
-        // eslint-disable-next-line typescript/no-explicit-any
-      runtime: "nodejs24.x" as any,
+      runtime: "nodejs24.x",
         timeout: "10 seconds",
       });
     }
@@ -309,8 +304,7 @@ export default $config({
         environment: {
           ...auroraEnv,
         },
-        // eslint-disable-next-line typescript/no-explicit-any
-        runtime: "nodejs24.x" as any,
+        runtime: "nodejs24.x",
         timeout: "60 seconds",
       },
       { batch: { size: 1 } },
