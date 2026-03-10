@@ -3,7 +3,6 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
-import { v4 as uuidv4 } from 'uuid';
 import type { ErrorResponse, UploadRequest, UploadResponse } from '@hyperspace/shared';
 import { Resource } from 'sst';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -35,7 +34,7 @@ async function baseHandler(event: APIGatewayProxyEventV2): Promise<APIGatewayPro
       .build();
   }
 
-  const uploadId = uuidv4();
+  const uploadId = crypto.randomUUID();
 
   await dynamo.send(
     new PutItemCommand({
