@@ -4,7 +4,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@hyperspace/shared';
-import { Resource } from "sst";
+import { Resource } from 'sst';
 import { FileStorageClient } from '../lib/file-storage-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -16,9 +16,7 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 
 const dynamo = new DynamoDBClient({});
 
-async function baseHandler(
-  event: AuthenticatedEvent,
-): Promise<APIGatewayProxyResultV2> {
+async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const bucketName = event.pathParameters?.name;
   const objectKey = event.queryStringParameters?.key;
 

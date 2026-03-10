@@ -1,10 +1,10 @@
 {
   "name": "hyperspace",
   "private": true,
-  "type": "module",
   "workspaces": [
     "packages/*"
   ],
+  "type": "module",
   "scripts": {
     "dev": "sst dev",
     "build": "pnpm -r -F '!@hyperspace/ui' run build",
@@ -13,8 +13,8 @@
     "deploy:production": "pnpm build && sst deploy --stage production",
     "generate:aurora-backoffice": "pnpm --filter @hyperspace/aurora-backoffice-client generate",
     "remove": "sst remove",
-    "lint": "oxlint --report-unused-disable-directives",
-    "lint:fix": "oxlint --fix",
+    "lint": "oxlint --report-unused-disable-directives && oxfmt --check",
+    "lint:fix": "oxlint --fix && oxfmt --write",
     "refresh": "sst refresh",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm lint && pnpm --filter @hyperspace/backend test"
@@ -24,14 +24,15 @@
     "@pulumi/command": "^1.2.1",
     "aws-cdk-lib": "^2.241.0",
     "constructs": "^10.5.1",
+    "oxfmt": "^0.36.0",
     "oxlint": "^1.51.0",
     "oxlint-tsgolint": "^0.16.0",
     "sst": "^4.1.10"
   },
-  "packageManager": "pnpm@10.32.0",
   "engines": {
     "node": ">=24"
   },
+  "packageManager": "pnpm@10.32.0",
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",

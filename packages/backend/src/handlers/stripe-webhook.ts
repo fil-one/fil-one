@@ -1,9 +1,14 @@
-import { DynamoDBClient, GetItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
 import { SubscriptionStatus } from '@hyperspace/shared';
-import { Resource } from "sst";
+import { Resource } from 'sst';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
 
 const dynamo = new DynamoDBClient({});
@@ -12,9 +17,7 @@ const dynamo = new DynamoDBClient({});
  * Stripe webhook handler — NO auth middleware.
  * Verifies Stripe signature, processes billing events, and writes to billing table.
  */
-export async function handler(
-  event: APIGatewayProxyEventV2,
-): Promise<APIGatewayProxyResultV2> {
+export async function handler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const tableName = Resource.BillingTable.name;
   const secrets = getBillingSecrets();
   const stripe = getStripeClient();
@@ -22,18 +25,25 @@ export async function handler(
   // 1. Get raw body for signature verification
   const rawBody = event.isBase64Encoded
     ? Buffer.from(event.body ?? '', 'base64').toString('utf-8')
-    : event.body ?? '';
+    : (event.body ?? '');
 
   const signatureHeader = event.headers['stripe-signature'];
 
   if (!signatureHeader) {
-    return { statusCode: 400, body: JSON.stringify({ message: 'Missing stripe-signature header' }) };
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ message: 'Missing stripe-signature header' }),
+    };
   }
 
   // 2. Verify webhook signature
   let stripeEvent: Stripe.Event;
   try {
-    stripeEvent = stripe.webhooks.constructEvent(rawBody, signatureHeader, secrets.STRIPE_WEBHOOK_SECRET);
+    stripeEvent = stripe.webhooks.constructEvent(
+      rawBody,
+      signatureHeader,
+      secrets.STRIPE_WEBHOOK_SECRET,
+    );
   } catch (err) {
     console.error('[stripe-webhook] Signature verification failed:', (err as Error).message);
     return { statusCode: 400, body: JSON.stringify({ message: 'Invalid signature' }) };
@@ -114,7 +124,10 @@ function getCustomerIdString(customer: string | Stripe.Customer | Stripe.Deleted
   return typeof customer === 'string' ? customer : customer.id;
 }
 
-async function handleSubscriptionUpdate(tableName: string, subscription: Stripe.Subscription): Promise<void> {
+async function handleSubscriptionUpdate(
+  tableName: string,
+  subscription: Stripe.Subscription,
+): Promise<void> {
   const customerId = getCustomerIdString(subscription.customer);
 
   // Find billing record by Stripe customer ID — we need to scan or use a GSI.
@@ -140,7 +153,11 @@ async function handleSubscriptionUpdate(tableName: string, subscription: Stripe.
   await updateBillingRecord(tableName, userId, subscription);
 }
 
-async function updateBillingRecord(tableName: string, userId: string, subscription: Stripe.Subscription): Promise<void> {
+async function updateBillingRecord(
+  tableName: string,
+  userId: string,
+  subscription: Stripe.Subscription,
+): Promise<void> {
   await dynamo.send(
     new UpdateItemCommand({
       TableName: tableName,
@@ -148,18 +165,24 @@ async function updateBillingRecord(tableName: string, userId: string, subscripti
         pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
-      UpdateExpression: 'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
+      UpdateExpression:
+        'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
       ExpressionAttributeValues: {
         ':subId': { S: subscription.id },
         ':status': { S: subscription.status },
-        ':periodEnd': { S: new Date((subscription.items.data[0]?.current_period_end ?? 0) * 1000).toISOString() },
+        ':periodEnd': {
+          S: new Date((subscription.items.data[0]?.current_period_end ?? 0) * 1000).toISOString(),
+        },
         ':now': { S: new Date().toISOString() },
       },
     }),
   );
 }
 
-async function handleSubscriptionDeleted(tableName: string, subscription: Stripe.Subscription): Promise<void> {
+async function handleSubscriptionDeleted(
+  tableName: string,
+  subscription: Stripe.Subscription,
+): Promise<void> {
   const stripe = getStripeClient();
   const customerId = getCustomerIdString(subscription.customer);
   const customer = await stripe.customers.retrieve(customerId);
@@ -178,7 +201,8 @@ async function handleSubscriptionDeleted(tableName: string, subscription: Stripe
         pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
-      UpdateExpression: 'SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now',
+      UpdateExpression:
+        'SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now',
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.GracePeriod },
         ':now': { S: now.toISOString() },
@@ -205,7 +229,8 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
         pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
-      UpdateExpression: 'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt',
+      UpdateExpression:
+        'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt',
       ExpressionAttributeValues: {
         ':active': { S: SubscriptionStatus.Active },
         ':now': { S: new Date().toISOString() },
@@ -234,7 +259,8 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
         pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
-      UpdateExpression: 'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+      UpdateExpression:
+        'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.PastDue },
         ':grace': { S: gracePeriodEndsAt },

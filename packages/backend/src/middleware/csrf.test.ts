@@ -5,17 +5,28 @@ import { csrfMiddleware } from './csrf.js';
 
 describe('csrfMiddleware', () => {
   describe('safe methods', () => {
-    it.each(['GET', 'HEAD', 'OPTIONS'])('passes through %s requests without CSRF check', async (method) => {
-      const { before } = csrfMiddleware();
-      const event = buildEvent({
-        requestContext: { http: { method, path: '/test', protocol: 'HTTP/1.1', sourceIp: '127.0.0.1', userAgent: 'test' } },
-      });
-      const request = buildMiddyRequest(event);
+    it.each(['GET', 'HEAD', 'OPTIONS'])(
+      'passes through %s requests without CSRF check',
+      async (method) => {
+        const { before } = csrfMiddleware();
+        const event = buildEvent({
+          requestContext: {
+            http: {
+              method,
+              path: '/test',
+              protocol: 'HTTP/1.1',
+              sourceIp: '127.0.0.1',
+              userAgent: 'test',
+            },
+          },
+        });
+        const request = buildMiddyRequest(event);
 
-      const result = await before(request);
+        const result = await before(request);
 
-      expect(result).toBeUndefined();
-    });
+        expect(result).toBeUndefined();
+      },
+    );
   });
 
   describe('mutating methods', () => {
@@ -23,7 +34,15 @@ describe('csrfMiddleware', () => {
 
     function buildPostEvent(opts: { cookie?: string; header?: string }) {
       const event = buildEvent({
-        requestContext: { http: { method: 'POST', path: '/test', protocol: 'HTTP/1.1', sourceIp: '127.0.0.1', userAgent: 'test' } },
+        requestContext: {
+          http: {
+            method: 'POST',
+            path: '/test',
+            protocol: 'HTTP/1.1',
+            sourceIp: '127.0.0.1',
+            userAgent: 'test',
+          },
+        },
         ...(opts.cookie ? { cookies: [`hs_csrf_token=${opts.cookie}`] } : {}),
       });
       if (opts.header) {
@@ -75,7 +94,15 @@ describe('csrfMiddleware', () => {
     it('works for DELETE requests too', async () => {
       const { before } = csrfMiddleware();
       const event = buildEvent({
-        requestContext: { http: { method: 'DELETE', path: '/test', protocol: 'HTTP/1.1', sourceIp: '127.0.0.1', userAgent: 'test' } },
+        requestContext: {
+          http: {
+            method: 'DELETE',
+            path: '/test',
+            protocol: 'HTTP/1.1',
+            sourceIp: '127.0.0.1',
+            userAgent: 'test',
+          },
+        },
         cookies: [`hs_csrf_token=${validToken}`],
       });
       event.headers['x-csrf-token'] = validToken;

@@ -19,11 +19,11 @@ hyperspace/
 
 ## AWS account
 
-| | |
-|---|---|
-| Staging/dev Account | `654654381893` |
-| Region | `us-east-2` |
-| SSO portal | https://d-9067ff87d6.awsapps.com/start |
+|                     |                                        |
+| ------------------- | -------------------------------------- |
+| Staging/dev Account | `654654381893`                         |
+| Region              | `us-east-2`                            |
+| SSO portal          | https://d-9067ff87d6.awsapps.com/start |
 
 ## Prerequisites
 
@@ -51,7 +51,7 @@ When prompted:
 
 **2. Log in and activate the profile**
 
-*MUST do this before you can deploy.*
+_MUST do this before you can deploy._
 
 ```bash
 aws sso login --profile hyperspace
@@ -164,20 +164,22 @@ Example PR To add `staging.filhyperspace.com`: https://github.com/FilecoinFounda
 
 ## Auth0
 
-| | |
-|---|---|
-| Dev environment | **FilHyperspaceDev** |
-| Tenant domain | `dev-oar2nhqh58xf5pwf.us.auth0.com` |
-| Dashboard | https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ/settings |
+|                 |                                                                                                                   |
+| --------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Dev environment | **FilHyperspaceDev**                                                                                              |
+| Tenant domain   | `dev-oar2nhqh58xf5pwf.us.auth0.com`                                                                               |
+| Dashboard       | https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ/settings |
 
 Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecret`). See the "Set SST secrets" step above.
 
 **Callback and logout URLs are configured automatically during deploy** — no manual Dashboard edits needed. The deploy-time setup Lambda adds the correct URLs for the deployed domain (custom domain or CloudFront).
 
 **Application settings** (Applications > your app > Settings):
+
 - Under **Advanced Settings > Grant Types**, ensure **Authorization Code** and **Refresh Token** are enabled.
 
 **API setup** (APIs > Create API):
+
 - **Identifier (audience)**: `console.filhyperspace.com` — this must match `AUTH0_AUDIENCE` in `sst.config.ts` and website env. It's what makes Auth0 issue a JWT access token (instead of an opaque one) and is the `aud` claim the middleware validates.
 - Under the API's **Machine to Machine Applications** tab, authorize your application so it can exchange tokens.
 
@@ -195,6 +197,7 @@ The deploy automation uses an M2M application to update Auth0 settings programma
 6. Copy the **Client ID** and **Client Secret**
 
 Set these as SST secrets:
+
 ```bash
 pnpx sst secret set Auth0MgmtClientId <M2M-client-id> [--stage <stage>]
 pnpx sst secret set Auth0MgmtClientSecret <M2M-client-secret> [--stage <stage>]
@@ -219,6 +222,7 @@ Use **test mode** first. Switch to live mode for production.
 ### 2. Configure Customer Portal
 
 **Settings > Billing > Customer portal** — enable:
+
 - Update payment method
 - View billing history / invoices
 - Cancel subscription
@@ -284,9 +288,9 @@ After API changes:
 **Importing components in the website**
 
 ```tsx
-import { Button } from '@hyperspace/ui/Button'
-import { Section } from '@hyperspace/ui/Section/Section'
-import { Heading } from '@hyperspace/ui/Heading'
+import { Button } from '@hyperspace/ui/Button';
+import { Section } from '@hyperspace/ui/Section/Section';
+import { Heading } from '@hyperspace/ui/Heading';
 ```
 
 Styles are loaded globally via `packages/website/src/styles.css` which imports `@hyperspace/ui/styles` (Tailwind v4 theme + component CSS).
@@ -314,7 +318,7 @@ The full fork at `joemocode-business/filecoin-foundation` tracks the upstream `F
 
 ## Contracts (`contracts/`)
 
-Foundry project for EVM smart contracts. 
+Foundry project for EVM smart contracts.
 
 **Prerequisites** — install Foundry if you haven't already:
 

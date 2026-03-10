@@ -5,6 +5,7 @@
 We need (at minimum) per-customer/bucket encryption for data stored via Filecoin SPs through the onramp API. The primary constraint is **data transmission** — we cannot afford to proxy all uploads/downloads through our AWS infrastructure. Encryption must happen without bulk data flowing through AWS.
 
 ### Questions/constraints informing this
+
 1. Are onramps willing to integrate with a hosted key management service? If so, recommendation might change.
 2. S3 has a 50TB limit. PoRep has 32GB limit. What is the largest expected file size for first 90 days? Long term we want to support the former limits, I think.
 3. What encryption algorithm do we use? See **Encryption Algorithm Choices** section below.
@@ -14,9 +15,9 @@ We need (at minimum) per-customer/bucket encryption for data stored via Filecoin
 
 ## Recommendation
 
-**Client-side encryption with envelope encryption** with a path towards chunked files since S3 can have very large files stored which cannot be encrypted in one go on client side. 
+**Client-side encryption with envelope encryption** with a path towards chunked files since S3 can have very large files stored which cannot be encrypted in one go on client side.
 
-Our infra handles keys, the onramp only sees encrypted text, and clients perform encryption. We can open source the client side encryption as a library to hide the potential complexity with very large files that might not fit in client memory. This is likely to occur longer term and we want a consistent implementation for the community to use. 
+Our infra handles keys, the onramp only sees encrypted text, and clients perform encryption. We can open source the client side encryption as a library to hide the potential complexity with very large files that might not fit in client memory. This is likely to occur longer term and we want a consistent implementation for the community to use.
 
 ---
 
@@ -118,10 +119,10 @@ Same as Option A, but designed for large files:
 
 ### Key Hierarchy
 
-| Key | Scope | Storage | Purpose |
-|-----|-------|---------|---------|
-| Master Key (MEK) | Per customer/bucket | AWS Secrets Manager or encrypted DB table | Wraps DEKs |
-| Data Encryption Key (DEK) | Per object | Stored wrapped (encrypted) alongside object metadata | Encrypts actual data |
+| Key                       | Scope               | Storage                                              | Purpose              |
+| ------------------------- | ------------------- | ---------------------------------------------------- | -------------------- |
+| Master Key (MEK)          | Per customer/bucket | AWS Secrets Manager or encrypted DB table            | Wraps DEKs           |
+| Data Encryption Key (DEK) | Per object          | Stored wrapped (encrypted) alongside object metadata | Encrypts actual data |
 
 ### Key Lifecycle
 
@@ -146,20 +147,22 @@ Blog: https://www.ssh.com/academy/quantum-safe-cryptography-algorithms-vs-quantu
 
 Native to the Web Crypto API. Authenticated encryption (confidentiality + integrity in one pass).
 
-| Aspect | Detail |
-|--------|--------|
-| Key size | 256-bit (quantum-safe) |
-| Nonce | 96-bit (12 bytes) |
-| Auth tag | 128-bit |
+| Aspect          | Detail                                                  |
+| --------------- | ------------------------------------------------------- |
+| Key size        | 256-bit (quantum-safe)                                  |
+| Nonce           | 96-bit (12 bytes)                                       |
+| Auth tag        | 128-bit                                                 |
 | Browser support | Native Web Crypto API — works in all modern web workers |
 
 **Pros**
+
 - Zero external dependencies — native `crypto.subtle.encrypt("AES-GCM", ...)` in web workers
 - Hardware-accelerated via AES-NI on most devices — fast even for large chunks
 - Well-studied, NIST-approved, widely deployed (TLS 1.3, AWS S3 SSE, Google Tink)
 - Single-pass authenticated encryption simplifies implementation
 
 **Cons**
+
 - **96-bit nonce is small** — with random nonces, collision probability becomes dangerous after ~2^32 encryptions under the same key. With per-object DEKs this is mitigated (each DEK encrypts one object), but with chunked encryption (Option C) nonces must be sequential/counter-based per DEK, not random
 - **~64 GB per-key plaintext limit** before GCM's authentication guarantees degrade. Again mitigated by per-object DEKs, but large chunked files under one DEK need monitoring
 - **No streaming support** in Web Crypto — entire plaintext must be in memory for a single `encrypt()` call. Chunked encryption (Option C) works around this at the application layer
@@ -171,20 +174,22 @@ Native to the Web Crypto API. Authenticated encryption (confidentiality + integr
 
 A stream cipher + MAC construction. Not native to Web Crypto but available via **libsodium.js** (WASM-compiled, runs in web workers).
 
-| Aspect | Detail |
-|--------|--------|
-| Key size | 256-bit (quantum-safe) |
-| Nonce | 192-bit (24 bytes) |
-| Auth tag | 128-bit |
+| Aspect          | Detail                              |
+| --------------- | ----------------------------------- |
+| Key size        | 256-bit (quantum-safe)              |
+| Nonce           | 192-bit (24 bytes)                  |
+| Auth tag        | 128-bit                             |
 | Browser support | Requires libsodium.js (~200KB WASM) |
 
 **Pros**
+
 - **192-bit nonce eliminates collision risk** — safe to generate nonces randomly for every chunk without coordination, even at massive scale (~2^96 encryptions before concern)
 - Constant-time by design — no timing side-channels regardless of hardware (AES without AES-NI can be vulnerable to cache-timing attacks)
 - Simpler to use safely — the large nonce space makes misuse much harder
 - libsodium.js is battle-tested and audited; WASM runs well in web workers
 
 **Cons**
+
 - **Not in Web Crypto API** — requires bundling libsodium.js (~200KB WASM), adding a dependency to the security-critical web worker
 - No hardware acceleration — purely software, ~2-3x slower than AES-256-GCM on devices with AES-NI (most modern x86/ARM). For chunk sizes of 64MB this may add noticeable latency
 - Less common in enterprise compliance contexts — some regulated environments specifically require AES (FIPS 140-2/3)
@@ -196,14 +201,15 @@ A stream cipher + MAC construction. Not native to Web Crypto but available via *
 
 Separates encryption (AES-CTR) from authentication (HMAC). Both primitives are native to Web Crypto API.
 
-| Aspect | Detail |
-|--------|--------|
-| Key size | 256-bit encryption + 256-bit HMAC (two keys or derived from one via HKDF) |
-| Nonce/IV | 128-bit for CTR mode |
-| Auth tag | 256-bit HMAC |
-| Browser support | Native Web Crypto API (both AES-CTR and HMAC) |
+| Aspect          | Detail                                                                    |
+| --------------- | ------------------------------------------------------------------------- |
+| Key size        | 256-bit encryption + 256-bit HMAC (two keys or derived from one via HKDF) |
+| Nonce/IV        | 128-bit for CTR mode                                                      |
+| Auth tag        | 256-bit HMAC                                                              |
+| Browser support | Native Web Crypto API (both AES-CTR and HMAC)                             |
 
 **Pros**
+
 - **Both primitives are native Web Crypto** — no external dependencies
 - AES-CTR supports streaming/chunked encryption natively in Web Crypto (`encrypt` with a counter) — no need to buffer full plaintext
 - **No per-key plaintext limit** — CTR mode doesn't degrade like GCM at high volumes
@@ -211,6 +217,7 @@ Separates encryption (AES-CTR) from authentication (HMAC). Both primitives are n
 - 128-bit IV is larger than GCM's 96-bit nonce — more room for random generation
 
 **Cons**
+
 - **Two-pass construction** — must encrypt, then compute HMAC over the ciphertext. Slower than single-pass GCM for the same data
 - More implementation surface area — getting Encrypt-then-MAC wrong (e.g., MAC-then-Encrypt, or not including the IV in the HMAC) introduces vulnerabilities
 - Requires deriving two separate keys (encryption + MAC) from the DEK, adding HKDF or similar key derivation
@@ -223,19 +230,21 @@ Separates encryption (AES-CTR) from authentication (HMAC). Both primitives are n
 
 A variant of AES-GCM that remains secure even if a nonce is accidentally reused. Not native to Web Crypto.
 
-| Aspect | Detail |
-|--------|--------|
-| Key size | 256-bit (quantum-safe) |
-| Nonce | 96-bit (12 bytes) |
-| Auth tag | 128-bit |
+| Aspect          | Detail                                        |
+| --------------- | --------------------------------------------- |
+| Key size        | 256-bit (quantum-safe)                        |
+| Nonce           | 96-bit (12 bytes)                             |
+| Auth tag        | 128-bit                                       |
 | Browser support | Requires JS/WASM library (e.g., miscreant.js) |
 
 **Pros**
+
 - **Nonce-misuse resistant** — if a nonce is reused, only reveals whether two plaintexts are identical; does not leak plaintext XOR or auth key (unlike GCM)
 - Same key/nonce sizes as GCM — conceptually a drop-in replacement
 - Designed by Google, used in Google Tink and Android keystore
 
 **Cons**
+
 - **Not in Web Crypto API** — requires a JS/WASM library, same dependency concern as XChaCha20
 - Less mature browser library ecosystem compared to libsodium
 - ~2x slower than GCM (two AES passes per block)
@@ -248,6 +257,7 @@ A variant of AES-GCM that remains secure even if a nonce is accidentally reused.
 **AES-256-GCM for MVP** with a plan to evaluate **XChaCha20-Poly1305** for the chunked encryption path (Option C).
 
 Rationale:
+
 - AES-256-GCM is native Web Crypto, zero dependencies, hardware-accelerated, and quantum-safe at 256-bit keys
 - Per-object DEKs mitigate GCM's nonce-collision and plaintext-limit risks since each key encrypts one object (or a bounded number of chunks)
 - For chunked large files, use **sequential counter-based nonces** (not random) per DEK to eliminate collision risk
@@ -282,6 +292,7 @@ MEK rotation does **not** require re-encrypting data or creating new Filecoin de
 **Key design requirement**: Wrapped DEKs must be stored in our metadata DB, not on Filecoin alongside the ciphertext. The Filecoin blob should contain only the encrypted data (and optionally a reference ID to look up the wrapped DEK).
 
 **Migration window considerations**:
+
 - During migration, some DEKs are wrapped with v1 and some with v2 — each wrapped DEK record must be tagged with its MEK version so the Console API knows which MEK to use for unwrapping
 - Both MEK versions must remain available until migration completes
 - Cost scales with **number of objects** (one re-wrap per DEK), not data volume — a million objects is a million ~256-byte re-wrap operations, which is fast
@@ -303,13 +314,13 @@ This is expensive: new storage deal costs, sealing time, and the old ciphertext 
 
 ### Practical Guidance
 
-| Scenario | Action | Filecoin impact |
-|----------|--------|-----------------|
-| Routine rotation (policy/compliance) | Rotate MEK only | None — DB-only operation |
-| MEK compromised | Rotate MEK | None — re-wrap all DEKs in DB |
-| Specific DEK compromised | Rotate that DEK | Rewrite that object — new Filecoin deal (does this actually help??) |
-| Customer offboarding / data deletion | Delete MEK | None — all wrapped DEKs become unusable. Ciphertext remains on Filecoin but is unreadable |
-| Add MEK per file | Create N MEKs where N is user's file-data | High — New Filecoin deal **per object** |
+| Scenario                             | Action                                    | Filecoin impact                                                                           |
+| ------------------------------------ | ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Routine rotation (policy/compliance) | Rotate MEK only                           | None — DB-only operation                                                                  |
+| MEK compromised                      | Rotate MEK                                | None — re-wrap all DEKs in DB                                                             |
+| Specific DEK compromised             | Rotate that DEK                           | Rewrite that object — new Filecoin deal (does this actually help??)                       |
+| Customer offboarding / data deletion | Delete MEK                                | None — all wrapped DEKs become unusable. Ciphertext remains on Filecoin but is unreadable |
+| Add MEK per file                     | Create N MEKs where N is user's file-data | High — New Filecoin deal **per object**                                                   |
 
 ---
 
@@ -454,15 +465,15 @@ However, the S3-compatible endpoint design (see S3Considerations.md) introduces 
 
 ### The Tradeoff Matrix
 
-| | Client-Side Encryption (this doc, Option A) | S3 Server-Side Encryption (SSE) |
-|---|---|---|
-| **Data path** | Client → Onramp directly (bulk); Client ↔ Console API (keys only) | Client → Our S3 endpoint → Onramp (all data proxied) |
-| **Egress cost** | Minimal — only key material through AWS | **High** — every byte uploaded/downloaded passes through our infra |
-| **User experience** | Requires encryption-aware client (our SDK/library or S3 Encryption Client) | Fully transparent — standard `aws s3 cp` just works |
-| **Encryption control** | Client performs crypto; we manage keys | Server performs crypto; fully managed |
-| **Onramp trust model** | Onramp only sees ciphertext | Onramp only sees ciphertext (same) |
-| **Scalability** | Encryption compute is distributed across all clients | Encryption compute is centralized on our servers — scales with traffic |
-| **Compliance** | Plaintext never leaves the client device | Plaintext exists briefly on our servers (in memory during encryption) |
+|                        | Client-Side Encryption (this doc, Option A)                                | S3 Server-Side Encryption (SSE)                                        |
+| ---------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Data path**          | Client → Onramp directly (bulk); Client ↔ Console API (keys only)          | Client → Our S3 endpoint → Onramp (all data proxied)                   |
+| **Egress cost**        | Minimal — only key material through AWS                                    | **High** — every byte uploaded/downloaded passes through our infra     |
+| **User experience**    | Requires encryption-aware client (our SDK/library or S3 Encryption Client) | Fully transparent — standard `aws s3 cp` just works                    |
+| **Encryption control** | Client performs crypto; we manage keys                                     | Server performs crypto; fully managed                                  |
+| **Onramp trust model** | Onramp only sees ciphertext                                                | Onramp only sees ciphertext (same)                                     |
+| **Scalability**        | Encryption compute is distributed across all clients                       | Encryption compute is centralized on our servers — scales with traffic |
+| **Compliance**         | Plaintext never leaves the client device                                   | Plaintext exists briefly on our servers (in memory during encryption)  |
 
 ### Options to Reconcile
 
@@ -536,6 +547,7 @@ Deploy S3-compatible encryption at the edge (CDN/edge compute nodes close to use
 **Option 1 (client-side only) for MVP, with Option 3 (redirect layer) as the target architecture.**
 
 Rationale:
+
 - The low-egress constraint is a hard business requirement — we cannot afford to proxy bulk data through AWS, especially at scale
 - For MVP, users will use our SDK/library which handles encryption transparently on their machine; the S3 endpoint accepts ciphertext and routes to the onramp
 - Option 3 provides the best long-term balance: the S3 endpoint remains the control plane (auth, keys, metadata) while bulk data flows directly to onramps

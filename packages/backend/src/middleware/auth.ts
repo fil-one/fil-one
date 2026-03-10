@@ -5,13 +5,23 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context,
 } from 'aws-lambda';
-import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  TransactWriteItemsCommand,
+} from '@aws-sdk/client-dynamodb';
 import { SendMessageCommand } from '@aws-sdk/client-sqs';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
 import type { ErrorResponse } from '@hyperspace/shared';
-import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader, ResponseBuilder } from '../lib/response-builder.js';
+import {
+  COOKIE_NAMES,
+  TOKEN_MAX_AGE,
+  makeCookieHeader,
+  makeHintCookieHeader,
+  ResponseBuilder,
+} from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { sqsClient } from '../lib/sqs-client.js';
@@ -46,9 +56,7 @@ let cachedJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
 
 function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
   if (cachedJWKS) return cachedJWKS;
-  cachedJWKS = createRemoteJWKSet(
-    new URL(`https://${domain}/.well-known/jwks.json`),
-  );
+  cachedJWKS = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
   return cachedJWKS;
 }
 
@@ -60,10 +68,7 @@ import { parseCookies } from '../lib/cookies.js';
 import { CSRF_COOKIE_NAME } from '@hyperspace/shared';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(401)
-    .body<ErrorResponse>({ message: 'Unauthorized' })
-    .build();
+  return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +82,10 @@ interface ResolvedIdentity {
 
 const dynamo = new DynamoDBClient({});
 
-async function resolveUserAndOrg(sub: string, email: string | undefined): Promise<ResolvedIdentity> {
+async function resolveUserAndOrg(
+  sub: string,
+  email: string | undefined,
+): Promise<ResolvedIdentity> {
   const tableName = Resource.UserInfoTable.name;
 
   // Look up existing mapping
@@ -230,7 +238,11 @@ export function authMiddleware() {
     const secrets = getAuthSecrets();
     const jwks = getJWKS(domain);
 
-    const hasCookies = { accessToken: !!accessToken, idToken: !!idToken, refreshToken: !!refreshToken };
+    const hasCookies = {
+      accessToken: !!accessToken,
+      idToken: !!idToken,
+      refreshToken: !!refreshToken,
+    };
     console.warn('[auth] Starting auth check', { hasCookies });
 
     // Step 1: Validate existing access token
@@ -240,7 +252,9 @@ export function authMiddleware() {
         const sub = payload.sub!;
         const email = payload.email as string | undefined;
         const { userId, orgId } = await resolveUserAndOrg(sub, email);
-        (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
+        (
+          event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
+        ).userInfo = {
           userId,
           orgId,
           email,
@@ -282,8 +296,15 @@ export function authMiddleware() {
           const refreshedPayload = decodeJwt(tokens.access_token);
           const refreshedSub = refreshedPayload.sub!;
           const refreshedEmail = refreshedPayload.email as string | undefined;
-          const { userId: refreshedUserId, orgId: refreshedOrgId } = await resolveUserAndOrg(refreshedSub, refreshedEmail);
-          (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
+          const { userId: refreshedUserId, orgId: refreshedOrgId } = await resolveUserAndOrg(
+            refreshedSub,
+            refreshedEmail,
+          );
+          (
+            event.requestContext as APIGatewayProxyEventV2['requestContext'] & {
+              userInfo: UserInfo;
+            }
+          ).userInfo = {
             userId: refreshedUserId,
             orgId: refreshedOrgId,
             email: refreshedEmail,

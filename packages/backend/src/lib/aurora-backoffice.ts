@@ -3,8 +3,8 @@ import {
   getV1PartnersByPartnerIdTenants,
   postV1PartnersByPartnerIdTenants,
   postV1PartnersByPartnerIdTenantsByTenantIdSetup,
-} from "@hyperspace/aurora-backoffice-client";
-import { getAuroraBackofficeSecrets } from "./auth-secrets.js";
+} from '@hyperspace/aurora-backoffice-client';
+import { getAuroraBackofficeSecrets } from './auth-secrets.js';
 
 export interface CreateAuroraTenantOptions {
   orgId: string;
@@ -45,18 +45,13 @@ export async function createAuroraTenant({
   if (error) {
     const status = response?.status;
     if (status === 409) {
-      console.log(
-        `Aurora tenant already exists for org ${orgId}, looking up existing tenant`,
-      );
+      console.log(`Aurora tenant already exists for org ${orgId}, looking up existing tenant`);
       try {
         return await findAuroraTenantByOrgId({ client, partnerId, orgId });
       } catch (cause) {
-        throw new Error(
-          `Aurora tenant already exists for org ${orgId} but lookup failed`,
-          {
-            cause,
-          },
-        );
+        throw new Error(`Aurora tenant already exists for org ${orgId} but lookup failed`, {
+          cause,
+        });
       }
     }
     console.error('Failed to create Aurora tenant:', error);
@@ -145,14 +140,9 @@ export async function setupAuroraTenant({
   }
 
   if (!data) {
-    throw new Error(
-      `Aurora API did not return setup data for tenant ${tenantId}`,
-    );
+    throw new Error(`Aurora API did not return setup data for tenant ${tenantId}`);
   }
 
-  console.log(
-    `Aurora tenant ${tenantId} setup response:`,
-    JSON.stringify(data),
-  );
+  console.log(`Aurora tenant ${tenantId} setup response:`, JSON.stringify(data));
   return { id: data.id!, lastSetupStep: data.lastSetupStep! };
 }

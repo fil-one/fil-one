@@ -15,7 +15,9 @@ export function errorHandlerMiddleware(): MiddlewareObj<
 
     request.response = new ResponseBuilder()
       .status(500)
-      .body<ErrorResponse>({ message: 'An unexpected server error occurred. Please try again later.' })
+      .body<ErrorResponse>({
+        message: 'An unexpected server error occurred. Please try again later.',
+      })
       .build();
   };
 

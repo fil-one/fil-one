@@ -1,36 +1,32 @@
-import { useEffect, useRef, useState } from 'react'
-import { Link } from '@tanstack/react-router'
-import {
-  PlusIcon,
-  DatabaseIcon,
-  TrashIcon,
-} from '@phosphor-icons/react/dist/ssr'
+import { useEffect, useRef, useState } from 'react';
+import { Link } from '@tanstack/react-router';
+import { PlusIcon, DatabaseIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
-import { Button } from '@hyperspace/ui/Button'
-import { Input } from '@hyperspace/ui/Input'
-import { Modal, ModalHeader, ModalBody, ModalFooter } from '@hyperspace/ui/Modal'
-import { CodeBlock } from '@hyperspace/ui/CodeBlock'
-import { Spinner } from '@hyperspace/ui/Spinner'
-import { useToast } from '@hyperspace/ui/Toast'
+import { Button } from '@hyperspace/ui/Button';
+import { Input } from '@hyperspace/ui/Input';
+import { Modal, ModalHeader, ModalBody, ModalFooter } from '@hyperspace/ui/Modal';
+import { CodeBlock } from '@hyperspace/ui/CodeBlock';
+import { Spinner } from '@hyperspace/ui/Spinner';
+import { useToast } from '@hyperspace/ui/Toast';
 
 import type {
   Bucket,
   CreateBucketRequest,
   CreateBucketResponse,
   ListBucketsResponse,
-} from '@hyperspace/shared'
-import { apiRequest } from '../../lib/api.js'
+} from '@hyperspace/shared';
+import { apiRequest } from '../../lib/api.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -38,76 +34,78 @@ function formatBytes(bytes: number): string {
 // ---------------------------------------------------------------------------
 
 export function BucketsPage() {
-  const { toast } = useToast()
+  const { toast } = useToast();
 
-  const [buckets, setBuckets] = useState<Bucket[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [buckets, setBuckets] = useState<Bucket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Create bucket modal state
-  const [createOpen, setCreateOpen] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [name, setName] = useState('')
-  const [region, setRegion] = useState('us-east-1')
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [region, setRegion] = useState('us-east-1');
 
   // Save credentials modal state
-  const [credsOpen, setCredsOpen] = useState(false)
+  const [credsOpen, setCredsOpen] = useState(false);
 
-  const deleteBucket = useRef<string | null>(null)
+  const deleteBucket = useRef<string | null>(null);
 
   // Fetch buckets on mount
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
     async function fetchBuckets() {
       try {
-        const data = await apiRequest<ListBucketsResponse>('/buckets')
+        const data = await apiRequest<ListBucketsResponse>('/buckets');
         if (!cancelled) {
-          setBuckets(data.buckets)
-          setLoading(false)
+          setBuckets(data.buckets);
+          setLoading(false);
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load buckets')
-          setLoading(false)
+          setError(err instanceof Error ? err.message : 'Failed to load buckets');
+          setLoading(false);
         }
       }
     }
-    void fetchBuckets()
-    return () => { cancelled = true }
-  }, [])
+    void fetchBuckets();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleCreate() {
-    if (!name.trim()) return
-    setCreating(true)
+    if (!name.trim()) return;
+    setCreating(true);
     try {
-      const body: CreateBucketRequest = { name: name.trim(), region }
+      const body: CreateBucketRequest = { name: name.trim(), region };
       const data = await apiRequest<CreateBucketResponse>('/buckets', {
         method: 'POST',
         body: JSON.stringify(body),
-      })
-      setBuckets((prev) => [data.bucket, ...prev])
-      setCreateOpen(false)
-      setName('')
-      setRegion('us-east-1')
-      toast.success('Bucket created successfully')
-      setCredsOpen(true)
+      });
+      setBuckets((prev) => [data.bucket, ...prev]);
+      setCreateOpen(false);
+      setName('');
+      setRegion('us-east-1');
+      toast.success('Bucket created successfully');
+      setCredsOpen(true);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create bucket')
+      toast.error(err instanceof Error ? err.message : 'Failed to create bucket');
     } finally {
-      setCreating(false)
+      setCreating(false);
     }
   }
 
   async function handleDeleteBucket(bucketName: string) {
-    deleteBucket.current = bucketName
+    deleteBucket.current = bucketName;
     try {
       await apiRequest(`/buckets/${encodeURIComponent(bucketName)}`, {
         method: 'DELETE',
-      })
-      setBuckets((prev) => prev.filter((b) => b.name !== bucketName))
-      toast.success(`Bucket "${bucketName}" deleted`)
+      });
+      setBuckets((prev) => prev.filter((b) => b.name !== bucketName));
+      toast.success(`Bucket "${bucketName}" deleted`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete bucket')
+      toast.error(err instanceof Error ? err.message : 'Failed to delete bucket');
     }
   }
 
@@ -116,7 +114,7 @@ export function BucketsPage() {
       <div className="flex items-center justify-center p-16">
         <Spinner ariaLabel="Loading buckets" size={32} />
       </div>
-    )
+    );
   }
 
   if (error) {
@@ -126,7 +124,7 @@ export function BucketsPage() {
           {error}
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -136,11 +134,7 @@ export function BucketsPage() {
       {/* ------------------------------------------------------------------ */}
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-zinc-900">Buckets</h1>
-        <Button
-          variant="filled"
-          icon={PlusIcon}
-          onClick={() => setCreateOpen(true)}
-        >
+        <Button variant="filled" icon={PlusIcon} onClick={() => setCreateOpen(true)}>
           Create bucket
         </Button>
       </div>
@@ -155,11 +149,7 @@ export function BucketsPage() {
           <p className="mb-6 text-sm text-zinc-500">
             Create your first bucket to start storing objects
           </p>
-          <Button
-            variant="filled"
-            icon={PlusIcon}
-            onClick={() => setCreateOpen(true)}
-          >
+          <Button variant="filled" icon={PlusIcon} onClick={() => setCreateOpen(true)}>
             Create bucket
           </Button>
         </div>
@@ -205,12 +195,8 @@ export function BucketsPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-zinc-600">{bucket.region}</td>
-                  <td className="px-4 py-3 text-zinc-600">
-                    {bucket.objectCount.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-600">
-                    {formatBytes(bucket.sizeBytes)}
-                  </td>
+                  <td className="px-4 py-3 text-zinc-600">{bucket.objectCount.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-zinc-600">{formatBytes(bucket.sizeBytes)}</td>
                   <td className="px-4 py-3 text-zinc-600">
                     {new Date(bucket.createdAt).toLocaleDateString()}
                   </td>
@@ -246,16 +232,11 @@ export function BucketsPage() {
       {/* Create Bucket Modal */}
       {/* ------------------------------------------------------------------ */}
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} size="sm">
-        <ModalHeader onClose={() => setCreateOpen(false)}>
-          Create bucket
-        </ModalHeader>
+        <ModalHeader onClose={() => setCreateOpen(false)}>Create bucket</ModalHeader>
         <ModalBody>
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="bucket-name"
-                className="text-sm font-medium text-zinc-700"
-              >
+              <label htmlFor="bucket-name" className="text-sm font-medium text-zinc-700">
                 Bucket name
               </label>
               <Input
@@ -265,15 +246,10 @@ export function BucketsPage() {
                 placeholder="my-bucket-name"
                 autoComplete="off"
               />
-              <p className="text-xs text-zinc-500">
-                Lowercase letters, numbers, and hyphens only.
-              </p>
+              <p className="text-xs text-zinc-500">Lowercase letters, numbers, and hyphens only.</p>
             </div>
             <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="bucket-region"
-                className="text-sm font-medium text-zinc-700"
-              >
+              <label htmlFor="bucket-region" className="text-sm font-medium text-zinc-700">
                 Region
               </label>
               {/* UNKNOWN: no custom Select component found — using native <select> styled to match Input */}
@@ -306,13 +282,10 @@ export function BucketsPage() {
       {/* Save Credentials Modal */}
       {/* ------------------------------------------------------------------ */}
       <Modal open={credsOpen} onClose={() => setCredsOpen(false)} size="md">
-        <ModalHeader onClose={() => setCredsOpen(false)}>
-          Save your credentials
-        </ModalHeader>
+        <ModalHeader onClose={() => setCredsOpen(false)}>Save your credentials</ModalHeader>
         <ModalBody>
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            ⚠️ Make sure to copy your access key now. You won&apos;t be able to
-            see it again.
+            ⚠️ Make sure to copy your access key now. You won&apos;t be able to see it again.
           </div>
           <div className="flex flex-col gap-3">
             <div>
@@ -338,5 +311,5 @@ export function BucketsPage() {
         </ModalFooter>
       </Modal>
     </div>
-  )
+  );
 }

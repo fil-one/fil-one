@@ -1,11 +1,16 @@
-import { DynamoDBClient, QueryCommand, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  QueryCommand,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import { PlanId, SubscriptionStatus } from '@hyperspace/shared';
 import type { BillingInfo, UsageInfo } from '@hyperspace/shared';
-import { Resource } from "sst";
+import { Resource } from 'sst';
 import { getStripeClient } from '../lib/stripe-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -19,9 +24,7 @@ const TIB_BYTES = 1099511627776;
 const PRICE_PER_TIB_CENTS = 499;
 const TRIAL_STORAGE_LIMIT_BYTES = TIB_BYTES; // 1 TiB
 
-async function baseHandler(
-  event: AuthenticatedEvent,
-): Promise<APIGatewayProxyResultV2> {
+async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId } = getUserInfo(event);
   const billingTableName = Resource.BillingTable.name;
   const uploadsTableName = Resource.UploadsTable.name;
@@ -74,7 +77,9 @@ async function baseHandler(
     }
   }
 
-  const estimatedMonthlyCostCents = Math.round((storageUsedBytes / TIB_BYTES) * PRICE_PER_TIB_CENTS);
+  const estimatedMonthlyCostCents = Math.round(
+    (storageUsedBytes / TIB_BYTES) * PRICE_PER_TIB_CENTS,
+  );
 
   const usage: UsageInfo = {
     storageUsedBytes,
@@ -84,13 +89,15 @@ async function baseHandler(
 
   // 3. If no billing record → trial state
   if (!billingRecord || !billingRecord.stripeCustomerId) {
-    const trialEndsAt = billingRecord?.trialEndsAt ??
-      new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+    const trialEndsAt =
+      billingRecord?.trialEndsAt ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
 
     // Lazy eval: if trialing and trial has expired → transition to grace_period
-    if (billingRecord?.subscriptionStatus === SubscriptionStatus.Trialing
-      && billingRecord.trialEndsAt
-      && new Date(billingRecord.trialEndsAt as string).getTime() < Date.now()) {
+    if (
+      billingRecord?.subscriptionStatus === SubscriptionStatus.Trialing &&
+      billingRecord.trialEndsAt &&
+      new Date(billingRecord.trialEndsAt as string).getTime() < Date.now()
+    ) {
       const gracePeriodEndsAt = new Date(
         new Date(billingRecord.trialEndsAt as string).getTime() + 7 * 24 * 60 * 60 * 1000,
       ).toISOString();
@@ -102,7 +109,8 @@ async function baseHandler(
             pk: { S: `CUSTOMER#${userId}` },
             sk: { S: 'SUBSCRIPTION' },
           },
-          UpdateExpression: 'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+          UpdateExpression:
+            'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
           ExpressionAttributeValues: {
             ':status': { S: SubscriptionStatus.GracePeriod },
             ':grace': { S: gracePeriodEndsAt },
@@ -141,9 +149,12 @@ async function baseHandler(
 
   if (billingRecord.subscriptionId) {
     try {
-      const subscription = await stripe.subscriptions.retrieve(billingRecord.subscriptionId as string, {
-        expand: ['default_payment_method'],
-      });
+      const subscription = await stripe.subscriptions.retrieve(
+        billingRecord.subscriptionId as string,
+        {
+          expand: ['default_payment_method'],
+        },
+      );
 
       const pm = subscription.default_payment_method;
       if (pm && typeof pm === 'object' && pm.card) {
@@ -159,7 +170,9 @@ async function baseHandler(
       // Use unlimited storage for active subscribers
       usage.storageLimitBytes = -1;
     } catch (err) {
-      console.warn('[get-billing] Failed to fetch Stripe subscription', { error: (err as Error).message });
+      console.warn('[get-billing] Failed to fetch Stripe subscription', {
+        error: (err as Error).message,
+      });
     }
   }
 
@@ -177,9 +190,11 @@ async function baseHandler(
   let currentStatus = billingRecord.subscriptionStatus as SubscriptionStatus;
 
   // Lazy eval: trial expired → grace_period
-  if (currentStatus === SubscriptionStatus.Trialing
-    && billingRecord.trialEndsAt
-    && new Date(billingRecord.trialEndsAt as string).getTime() < Date.now()) {
+  if (
+    currentStatus === SubscriptionStatus.Trialing &&
+    billingRecord.trialEndsAt &&
+    new Date(billingRecord.trialEndsAt as string).getTime() < Date.now()
+  ) {
     const gracePeriodEndsAt = new Date(
       new Date(billingRecord.trialEndsAt as string).getTime() + 7 * 24 * 60 * 60 * 1000,
     ).toISOString();
@@ -191,7 +206,8 @@ async function baseHandler(
           pk: { S: `CUSTOMER#${userId}` },
           sk: { S: 'SUBSCRIPTION' },
         },
-        UpdateExpression: 'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+        UpdateExpression:
+          'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
         ExpressionAttributeValues: {
           ':status': { S: SubscriptionStatus.GracePeriod },
           ':grace': { S: gracePeriodEndsAt },
@@ -204,9 +220,12 @@ async function baseHandler(
   }
 
   // Lazy eval: grace_period / past_due expired → canceled
-  if ((currentStatus === SubscriptionStatus.GracePeriod || currentStatus === SubscriptionStatus.PastDue)
-    && billingRecord.gracePeriodEndsAt
-    && new Date(billingRecord.gracePeriodEndsAt as string).getTime() < Date.now()) {
+  if (
+    (currentStatus === SubscriptionStatus.GracePeriod ||
+      currentStatus === SubscriptionStatus.PastDue) &&
+    billingRecord.gracePeriodEndsAt &&
+    new Date(billingRecord.gracePeriodEndsAt as string).getTime() < Date.now()
+  ) {
     await dynamo.send(
       new UpdateItemCommand({
         TableName: billingTableName,
@@ -224,19 +243,30 @@ async function baseHandler(
     currentStatus = SubscriptionStatus.Canceled;
   }
 
-  const isActivePlan = currentStatus === SubscriptionStatus.Active
-    || currentStatus === SubscriptionStatus.PastDue
-    || currentStatus === SubscriptionStatus.GracePeriod;
+  const isActivePlan =
+    currentStatus === SubscriptionStatus.Active ||
+    currentStatus === SubscriptionStatus.PastDue ||
+    currentStatus === SubscriptionStatus.GracePeriod;
 
   const response: BillingInfo = {
     subscription: {
-      planId: isActivePlan ? PlanId.PayAsYouGo : (currentStatus === SubscriptionStatus.Trialing ? PlanId.FreeTrial : PlanId.PayAsYouGo),
+      planId: isActivePlan
+        ? PlanId.PayAsYouGo
+        : currentStatus === SubscriptionStatus.Trialing
+          ? PlanId.FreeTrial
+          : PlanId.PayAsYouGo,
       status: currentStatus,
-      ...(currentStatus === SubscriptionStatus.Trialing && billingRecord.trialEndsAt ? { trialEndsAt: billingRecord.trialEndsAt as string } : {}),
-      ...(billingRecord.trialEndsAt && currentStatus === SubscriptionStatus.GracePeriod ? { trialEndsAt: billingRecord.trialEndsAt as string } : {}),
+      ...(currentStatus === SubscriptionStatus.Trialing && billingRecord.trialEndsAt
+        ? { trialEndsAt: billingRecord.trialEndsAt as string }
+        : {}),
+      ...(billingRecord.trialEndsAt && currentStatus === SubscriptionStatus.GracePeriod
+        ? { trialEndsAt: billingRecord.trialEndsAt as string }
+        : {}),
       currentPeriodEnd: billingRecord.currentPeriodEnd as string | undefined,
       ...(billingRecord.canceledAt ? { canceledAt: billingRecord.canceledAt as string } : {}),
-      ...(billingRecord.gracePeriodEndsAt ? { gracePeriodEndsAt: billingRecord.gracePeriodEndsAt as string } : {}),
+      ...(billingRecord.gracePeriodEndsAt
+        ? { gracePeriodEndsAt: billingRecord.gracePeriodEndsAt as string }
+        : {}),
     },
     paymentMethod,
     usage,

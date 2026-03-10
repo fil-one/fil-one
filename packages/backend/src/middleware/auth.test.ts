@@ -7,7 +7,11 @@ import type {
   Context,
 } from 'aws-lambda';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  TransactWriteItemsCommand,
+} from '@aws-sdk/client-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
@@ -29,7 +33,9 @@ const MOCK_QUEUE_URL = 'https://sqs.us-east-1.amazonaws.com/123/setup-queue';
 
 let uuidCallCount = 0;
 const MOCK_UUIDS = [MOCK_USER_ID, MOCK_ORG_ID];
-vi.spyOn(crypto, 'randomUUID').mockImplementation(() => MOCK_UUIDS[uuidCallCount++] as `${string}-${string}-${string}-${string}-${string}`);
+vi.spyOn(crypto, 'randomUUID').mockImplementation(
+  () => MOCK_UUIDS[uuidCallCount++] as `${string}-${string}-${string}-${string}-${string}`,
+);
 
 vi.mock('sst', () => ({
   Resource: {
@@ -116,28 +122,32 @@ describe('authMiddleware', () => {
         payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
       });
 
-      ddbMock.on(GetItemCommand, {
-        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
-      }).resolves({
-        Item: {
-          pk: { S: `SUB#${MOCK_SUB}` },
-          sk: { S: 'IDENTITY' },
-          userId: { S: existingUserId },
-          orgId: { S: existingOrgId },
-          email: { S: MOCK_EMAIL },
-        },
-      });
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${MOCK_SUB}` },
+            sk: { S: 'IDENTITY' },
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+            email: { S: MOCK_EMAIL },
+          },
+        });
 
-      ddbMock.on(GetItemCommand, {
-        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
-      }).resolves({
-        Item: {
-          pk: { S: `ORG#${existingOrgId}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'example.com' },
-          setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
-        },
-      });
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `ORG#${existingOrgId}` },
+            sk: { S: 'PROFILE' },
+            name: { S: 'example.com' },
+            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+          },
+        });
 
       const { before } = authMiddleware();
       const event = buildEvent({
@@ -168,28 +178,32 @@ describe('authMiddleware', () => {
         payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
       });
 
-      ddbMock.on(GetItemCommand, {
-        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
-      }).resolves({
-        Item: {
-          pk: { S: `SUB#${MOCK_SUB}` },
-          sk: { S: 'IDENTITY' },
-          userId: { S: existingUserId },
-          orgId: { S: existingOrgId },
-          email: { S: MOCK_EMAIL },
-        },
-      });
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${MOCK_SUB}` },
+            sk: { S: 'IDENTITY' },
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+            email: { S: MOCK_EMAIL },
+          },
+        });
 
-      ddbMock.on(GetItemCommand, {
-        Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
-      }).resolves({
-        Item: {
-          pk: { S: `ORG#${existingOrgId}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'example.com' },
-          setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
-        },
-      });
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `ORG#${existingOrgId}` },
+            sk: { S: 'PROFILE' },
+            name: { S: 'example.com' },
+            setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
+          },
+        });
 
       sqsMock.on(SendMessageCommand).resolves({});
 
@@ -342,10 +356,7 @@ describe('authMiddleware', () => {
 
       const { before } = authMiddleware();
       const event = buildEvent({
-        cookies: [
-          `hs_access_token=expired-token`,
-          `hs_refresh_token=valid-refresh`,
-        ],
+        cookies: [`hs_access_token=expired-token`, `hs_refresh_token=valid-refresh`],
       });
       const request = buildMiddyRequest(event);
 
@@ -374,12 +385,11 @@ describe('authMiddleware', () => {
       });
 
       const { before } = authMiddleware();
-      const request = buildMiddyRequest(buildEvent({
-        cookies: [
-          `hs_access_token=expired`,
-          `hs_refresh_token=bad-refresh`,
-        ],
-      }));
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=expired`, `hs_refresh_token=bad-refresh`],
+        }),
+      );
 
       const result = await before(request);
 
@@ -391,12 +401,11 @@ describe('authMiddleware', () => {
       mockFetch.mockRejectedValue(new Error('network error'));
 
       const { before } = authMiddleware();
-      const request = buildMiddyRequest(buildEvent({
-        cookies: [
-          `hs_access_token=expired`,
-          `hs_refresh_token=some-refresh`,
-        ],
-      }));
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=expired`, `hs_refresh_token=some-refresh`],
+        }),
+      );
 
       const result = await before(request);
 
@@ -418,17 +427,18 @@ describe('authMiddleware', () => {
       });
 
       const { before } = authMiddleware();
-      const request = buildMiddyRequest(buildEvent({
-        cookies: [' hs_access_token = my-token '],
-      }));
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [' hs_access_token = my-token '],
+        }),
+      );
 
       await before(request);
 
-      expect(mockJwtVerify).toHaveBeenCalledWith(
-        'my-token',
-        'mock-jwks',
-        { audience: process.env.AUTH0_AUDIENCE, issuer: `https://${process.env.AUTH0_DOMAIN}/` },
-      );
+      expect(mockJwtVerify).toHaveBeenCalledWith('my-token', 'mock-jwks', {
+        audience: process.env.AUTH0_AUDIENCE,
+        issuer: `https://${process.env.AUTH0_DOMAIN}/`,
+      });
     });
   });
 
@@ -454,11 +464,19 @@ describe('authMiddleware', () => {
 
       const cookies = response.cookies ?? [];
       expect(cookies).toHaveLength(5);
-      expect(cookies[0]).toBe('hs_access_token=new-at; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600');
-      expect(cookies[1]).toBe('hs_id_token=new-it; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600');
-      expect(cookies[2]).toBe('hs_refresh_token=new-rt; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000');
+      expect(cookies[0]).toBe(
+        'hs_access_token=new-at; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+      );
+      expect(cookies[1]).toBe(
+        'hs_id_token=new-it; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+      );
+      expect(cookies[2]).toBe(
+        'hs_refresh_token=new-rt; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000',
+      );
       expect(cookies[3]).toBe('hs_logged_in=1; Secure; SameSite=Lax; Path=/; Max-Age=2592000');
-      expect(cookies[4]).toMatch(/^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/)
+      expect(cookies[4]).toMatch(
+        /^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/,
+      );
     });
 
     it('does not modify response when no newTokens', async () => {

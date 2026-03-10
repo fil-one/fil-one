@@ -1,4 +1,4 @@
-name: "CI [contracts]"
+name: 'CI [contracts]'
 
 on:
   push:

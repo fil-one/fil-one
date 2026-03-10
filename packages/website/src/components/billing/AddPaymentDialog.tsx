@@ -1,10 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react';
 
-import {
-  ShieldCheckIcon,
-  CreditCardIcon,
-  ArrowLeftIcon,
-} from '@phosphor-icons/react/dist/ssr'
+import { ShieldCheckIcon, CreditCardIcon, ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr';
 import {
   CardNumberElement,
   CardExpiryElement,
@@ -12,20 +8,20 @@ import {
   Elements,
   useStripe,
   useElements,
-} from '@stripe/react-stripe-js'
-import type { Stripe, StripeCardNumberElementChangeEvent } from '@stripe/stripe-js'
+} from '@stripe/react-stripe-js';
+import type { Stripe, StripeCardNumberElementChangeEvent } from '@stripe/stripe-js';
 
-import { Modal, ModalBody, ModalHeader } from '@hyperspace/ui/Modal'
+import { Modal, ModalBody, ModalHeader } from '@hyperspace/ui/Modal';
 
-import { getStripe } from '../../lib/stripe.js'
+import { getStripe } from '../../lib/stripe.js';
 
 type AddPaymentDialogProps = {
-  open: boolean
-  clientSecret: string
-  onClose: () => void
-  onBack: () => void
-  onSuccess: () => void
-}
+  open: boolean;
+  clientSecret: string;
+  onClose: () => void;
+  onBack: () => void;
+  onSuccess: () => void;
+};
 
 const ELEMENT_STYLE = {
   base: {
@@ -35,61 +31,66 @@ const ELEMENT_STYLE = {
     '::placeholder': { color: '#99a0ae' },
   },
   invalid: { color: '#ef4444' },
-}
+};
 
 const ELEMENT_OPTIONS = {
   style: ELEMENT_STYLE,
-}
+};
 
-function PaymentForm({ clientSecret, onClose, onBack, onSuccess }: Omit<AddPaymentDialogProps, 'open'>) {
-  const stripe = useStripe()
-  const elements = useElements()
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [_cardBrand, setCardBrand] = useState<string>('unknown')
+function PaymentForm({
+  clientSecret,
+  onClose,
+  onBack,
+  onSuccess,
+}: Omit<AddPaymentDialogProps, 'open'>) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [_cardBrand, setCardBrand] = useState<string>('unknown');
 
   function handleCardChange(e: StripeCardNumberElementChangeEvent) {
-    setCardBrand(e.brand ?? 'unknown')
+    setCardBrand(e.brand ?? 'unknown');
     if (e.error) {
-      setError(e.error.message)
+      setError(e.error.message);
     } else {
-      setError(null)
+      setError(null);
     }
   }
 
   async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!stripe || !elements) return
+    e.preventDefault();
+    if (!stripe || !elements) return;
 
-    setLoading(true)
-    setError(null)
+    setLoading(true);
+    setError(null);
 
-    const cardNumberElement = elements.getElement(CardNumberElement)
+    const cardNumberElement = elements.getElement(CardNumberElement);
     if (!cardNumberElement) {
-      setError('Card element not found')
-      setLoading(false)
-      return
+      setError('Card element not found');
+      setLoading(false);
+      return;
     }
 
     const result = await stripe.confirmCardSetup(clientSecret, {
       payment_method: { card: cardNumberElement },
-    })
+    });
 
     if (result.error) {
-      setError(result.error.message ?? 'An error occurred while confirming your card.')
-      setLoading(false)
-      return
+      setError(result.error.message ?? 'An error occurred while confirming your card.');
+      setLoading(false);
+      return;
     }
 
     // Card setup confirmed — activate subscription via API
     try {
-      const { apiRequest } = await import('../../lib/api.js')
-      await apiRequest('/billing/activate', { method: 'POST' })
-      onSuccess()
+      const { apiRequest } = await import('../../lib/api.js');
+      await apiRequest('/billing/activate', { method: 'POST' });
+      onSuccess();
     } catch (err) {
-      setError((err as Error).message || 'Failed to activate subscription.')
+      setError((err as Error).message || 'Failed to activate subscription.');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
@@ -97,9 +98,7 @@ function PaymentForm({ clientSecret, onClose, onBack, onSuccess }: Omit<AddPayme
     <form onSubmit={handleSubmit}>
       <ModalHeader onClose={onClose}>Add payment method</ModalHeader>
       <ModalBody>
-        <p className="text-sm text-[#677183] mb-4">
-          Pay as you go — $4.99/TiB/month
-        </p>
+        <p className="text-sm text-[#677183] mb-4">Pay as you go — $4.99/TiB/month</p>
 
         {/* Security banner */}
         <div className="flex items-center gap-2 rounded-lg bg-[#f0f6ff] px-3 py-2.5 mb-5">
@@ -138,9 +137,7 @@ function PaymentForm({ clientSecret, onClose, onBack, onSuccess }: Omit<AddPayme
           </div>
 
           {/* Error */}
-          {error && (
-            <p className="text-sm text-red-500">{error}</p>
-          )}
+          {error && <p className="text-sm text-red-500">{error}</p>}
         </div>
 
         {/* Buttons */}
@@ -169,19 +166,25 @@ function PaymentForm({ clientSecret, onClose, onBack, onSuccess }: Omit<AddPayme
         </p>
       </ModalBody>
     </form>
-  )
+  );
 }
 
-export function AddPaymentDialog({ open, clientSecret, onClose, onBack, onSuccess }: AddPaymentDialogProps) {
-  const [stripe, setStripe] = useState<Stripe | null>(null)
+export function AddPaymentDialog({
+  open,
+  clientSecret,
+  onClose,
+  onBack,
+  onSuccess,
+}: AddPaymentDialogProps) {
+  const [stripe, setStripe] = useState<Stripe | null>(null);
 
   useEffect(() => {
     if (open) {
-      void getStripe().then(setStripe)
+      void getStripe().then(setStripe);
     }
-  }, [open])
+  }, [open]);
 
-  if (!clientSecret || !stripe) return null
+  if (!clientSecret || !stripe) return null;
 
   return (
     <Modal open={open} onClose={onClose} size="sm">
@@ -194,5 +197,5 @@ export function AddPaymentDialog({ open, clientSecret, onClose, onBack, onSucces
         />
       </Elements>
     </Modal>
-  )
+  );
 }

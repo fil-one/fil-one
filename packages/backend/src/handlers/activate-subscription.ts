@@ -5,7 +5,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import { PlanId, SubscriptionStatus } from '@hyperspace/shared';
 import type { ActivateSubscriptionResponse } from '@hyperspace/shared';
-import { Resource } from "sst";
+import { Resource } from 'sst';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -16,9 +16,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 const dynamo = new DynamoDBClient({});
 
-async function baseHandler(
-  event: AuthenticatedEvent,
-): Promise<APIGatewayProxyResultV2> {
+async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId } = getUserInfo(event);
   const tableName = Resource.BillingTable.name;
   const stripe = getStripeClient();
@@ -62,13 +60,16 @@ async function baseHandler(
   if (!latestSetupIntent || latestSetupIntent.status !== 'succeeded') {
     return new ResponseBuilder()
       .status(400)
-      .body({ message: 'No confirmed payment method found. Please complete the payment setup first.' })
+      .body({
+        message: 'No confirmed payment method found. Please complete the payment setup first.',
+      })
       .build();
   }
 
-  const paymentMethodId = typeof latestSetupIntent.payment_method === 'string'
-    ? latestSetupIntent.payment_method
-    : latestSetupIntent.payment_method?.id;
+  const paymentMethodId =
+    typeof latestSetupIntent.payment_method === 'string'
+      ? latestSetupIntent.payment_method
+      : latestSetupIntent.payment_method?.id;
 
   if (!paymentMethodId) {
     return new ResponseBuilder()
@@ -107,11 +108,14 @@ async function baseHandler(
         pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
-      UpdateExpression: 'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
+      UpdateExpression:
+        'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
       ExpressionAttributeValues: {
         ':subId': { S: subscription.id },
         ':status': { S: subscription.status },
-        ':periodEnd': { S: new Date(subscription.items.data[0].current_period_end * 1000).toISOString() },
+        ':periodEnd': {
+          S: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
+        },
         ':pmId': { S: paymentMethodId },
         ':last4': { S: paymentMethodLast4 },
         ':brand': { S: paymentMethodBrand },
@@ -125,8 +129,11 @@ async function baseHandler(
   const response: ActivateSubscriptionResponse = {
     subscription: {
       planId: PlanId.PayAsYouGo,
-      status: subscription.status === 'active' ? SubscriptionStatus.Active : SubscriptionStatus.Trialing,
-      currentPeriodEnd: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
+      status:
+        subscription.status === 'active' ? SubscriptionStatus.Active : SubscriptionStatus.Trialing,
+      currentPeriodEnd: new Date(
+        subscription.items.data[0].current_period_end * 1000,
+      ).toISOString(),
     },
   };
 

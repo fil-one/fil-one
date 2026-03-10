@@ -49,9 +49,11 @@ describe('processTenantSetup', () => {
   });
 
   it('is a no-op when setupStatus is AURORA_TENANT_SETUP_COMPLETE', async () => {
-    ddbMock.on(GetItemCommand).resolves(
-      orgProfileItem({ setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE } }),
-    );
+    ddbMock
+      .on(GetItemCommand)
+      .resolves(
+        orgProfileItem({ setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE } }),
+      );
 
     await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
 
@@ -61,9 +63,9 @@ describe('processTenantSetup', () => {
   });
 
   it('creates tenant and runs setup when status is HYPERSPACE_ORG_CREATED', async () => {
-    ddbMock.on(GetItemCommand).resolves(
-      orgProfileItem({ setupStatus: { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED } }),
-    );
+    ddbMock
+      .on(GetItemCommand)
+      .resolves(orgProfileItem({ setupStatus: { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED } }));
     ddbMock.on(UpdateItemCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
     mockSetupAuroraTenant.mockResolvedValue({ id: 'aurora-t-1', lastSetupStep: 'FINISHED' });
@@ -139,9 +141,9 @@ describe('processTenantSetup', () => {
     );
     mockSetupAuroraTenant.mockResolvedValue({ id: 'aurora-t-3', lastSetupStep: 'WARM_TIER_ADDED' });
 
-    await expect(
-      processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' }),
-    ).rejects.toThrow('Aurora tenant setup not finished for org org-1: lastSetupStep=WARM_TIER_ADDED');
+    await expect(processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' })).rejects.toThrow(
+      'Aurora tenant setup not finished for org org-1: lastSetupStep=WARM_TIER_ADDED',
+    );
   });
 
   it('creates tenant and runs setup when setupStatus is undefined (pre-existing org)', async () => {

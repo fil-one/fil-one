@@ -10,7 +10,7 @@
     "build": "tsc --noEmit",
     "generate": "openapi-ts -f openapi-ts.config.ts"
   },
-"devDependencies": {
+  "devDependencies": {
     "@hey-api/openapi-ts": "0.94.0",
     "typescript": "^5.9.3"
   }

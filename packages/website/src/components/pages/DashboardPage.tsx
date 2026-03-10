@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useState } from 'react';
 import {
   PlusIcon,
   DatabaseIcon,
@@ -6,20 +6,20 @@ import {
   ArrowUpIcon,
   TrashIcon,
   XIcon,
-} from '@phosphor-icons/react/dist/ssr'
-import { Link } from '@tanstack/react-router'
+} from '@phosphor-icons/react/dist/ssr';
+import { Link } from '@tanstack/react-router';
 
-const UsageTrends = lazy(() => import('./UsageTrends'))
+const UsageTrends = lazy(() => import('./UsageTrends'));
 
-import { Button } from '@hyperspace/ui/Button'
-import { StatCard } from '@hyperspace/ui/StatCard'
+import { Button } from '@hyperspace/ui/Button';
+import { StatCard } from '@hyperspace/ui/StatCard';
 
-import type { RecentActivity, ActivityAction } from '@hyperspace/shared'
+import type { RecentActivity, ActivityAction } from '@hyperspace/shared';
 
 // ---------------------------------------------------------------------------
 // Dev toggle — set IS_POPULATED = false to see the first-time empty state
 // ---------------------------------------------------------------------------
-const IS_POPULATED = true
+const IS_POPULATED = true;
 
 // ---------------------------------------------------------------------------
 // Mock data
@@ -47,27 +47,27 @@ const MOCK_ACTIVITIES: RecentActivity[] = [
     resourceName: 'Production',
     timestamp: '2024-02-09T09:00:00Z',
   },
-]
+];
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
 function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,10 +75,10 @@ function timeAgo(iso: string): string {
 // ---------------------------------------------------------------------------
 
 type ActivityIconConfig = {
-  icon: React.ElementType
-  colorClass: string
-  label: string
-}
+  icon: React.ElementType;
+  colorClass: string;
+  label: string;
+};
 
 const ACTIVITY_CONFIG: Record<ActivityAction, ActivityIconConfig> = {
   'bucket.created': {
@@ -111,7 +111,7 @@ const ACTIVITY_CONFIG: Record<ActivityAction, ActivityIconConfig> = {
     colorClass: 'text-red-500',
     label: 'Key deleted',
   },
-}
+};
 
 // ---------------------------------------------------------------------------
 // Populated stats (mocked)
@@ -127,7 +127,7 @@ const POPULATED_STATS = {
   objectsCount: 342,
   accessKeysCount: 2,
   accessKeysLimit: 300,
-}
+};
 
 const EMPTY_STATS = {
   storageUsed: 0,
@@ -139,29 +139,25 @@ const EMPTY_STATS = {
   objectsCount: 0,
   accessKeysCount: 0,
   accessKeysLimit: 300,
-}
+};
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export function DashboardPage() {
-  const [trialBannerVisible, setTrialBannerVisible] = useState(true)
+  const [trialBannerVisible, setTrialBannerVisible] = useState(true);
   // UNKNOWN: completedSteps would come from user progress tracking — using empty array as default
-  const [completedSteps] = useState<string[]>([])
+  const [completedSteps] = useState<string[]>([]);
 
-  const stats = IS_POPULATED ? POPULATED_STATS : EMPTY_STATS
-  const activities = IS_POPULATED ? MOCK_ACTIVITIES : []
+  const stats = IS_POPULATED ? POPULATED_STATS : EMPTY_STATS;
+  const activities = IS_POPULATED ? MOCK_ACTIVITIES : [];
 
   const storageUsagePct =
-    stats.storageLimit > 0
-      ? Math.round((stats.storageUsed / stats.storageLimit) * 100)
-      : 0
+    stats.storageLimit > 0 ? Math.round((stats.storageUsed / stats.storageLimit) * 100) : 0;
 
   const downloadsUsagePct =
-    stats.downloadsLimit > 0
-      ? Math.round((stats.downloadsUsed / stats.downloadsLimit) * 100)
-      : 0
+    stats.downloadsLimit > 0 ? Math.round((stats.downloadsUsed / stats.downloadsLimit) * 100) : 0;
 
   // Quick setup tasks: first-time = tasks 1 + 3, populated = tasks 1 + 2 + 3
   const quickSetupTasks = IS_POPULATED
@@ -203,11 +199,11 @@ export function DashboardPage() {
           subtitle: 'Connect via S3 API',
           href: '/api-keys',
         },
-      ]
+      ];
 
-  const quickSetupDone = completedSteps.length
-  const quickSetupTotal = quickSetupTasks.length
-  const showQuickSetup = quickSetupDone < quickSetupTotal
+  const quickSetupDone = completedSteps.length;
+  const quickSetupTotal = quickSetupTasks.length;
+  const showQuickSetup = quickSetupDone < quickSetupTotal;
 
   return (
     <div className="p-6">
@@ -232,8 +228,7 @@ export function DashboardPage() {
             14 DAYS LEFT
           </span>
           <p className="flex-1 text-sm text-zinc-700">
-            Free trial — Add a payment method to unlock unlimited storage at
-            $4.99/TiB
+            Free trial — Add a payment method to unlock unlimited storage at $4.99/TiB
           </p>
           <Button variant="filled" href="/billing">
             Upgrade →
@@ -272,9 +267,7 @@ export function DashboardPage() {
                 <span className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-50 text-brand-600">
                   <Icon size={20} />
                 </span>
-                <span className="text-sm font-medium text-zinc-800">
-                  {title}
-                </span>
+                <span className="text-sm font-medium text-zinc-800">{title}</span>
                 <span className="text-xs text-zinc-500">{subtitle}</span>
               </Link>
             ))}
@@ -309,11 +302,7 @@ export function DashboardPage() {
           value={String(stats.bucketsCount)}
           limit={`/ ${stats.bucketsLimit}`}
         />
-        <StatCard
-          label="OBJECTS"
-          value={String(stats.objectsCount)}
-          limit="total"
-        />
+        <StatCard label="OBJECTS" value={String(stats.objectsCount)} limit="total" />
         <StatCard
           label="ACCESS KEYS"
           value={String(stats.accessKeysCount)}
@@ -325,10 +314,7 @@ export function DashboardPage() {
       {/* 5. Usage Trends (lazy-loaded to avoid forced layout before styles) */}
       {/* ------------------------------------------------------------------ */}
       <Suspense fallback={<div className="mb-6" style={{ height: 200 }} />}>
-        <UsageTrends
-          storageUsed={stats.storageUsed}
-          objectsCount={stats.objectsCount}
-        />
+        <UsageTrends storageUsed={stats.storageUsed} objectsCount={stats.objectsCount} />
       </Suspense>
 
       {/* ------------------------------------------------------------------ */}
@@ -343,9 +329,7 @@ export function DashboardPage() {
           /* Empty state */
           <div className="flex flex-col items-center gap-3 rounded-lg border border-zinc-200 bg-white py-12 text-center">
             <p className="text-sm font-medium text-zinc-700">No activity yet</p>
-            <p className="text-sm text-zinc-500">
-              Create a bucket to start storing objects
-            </p>
+            <p className="text-sm text-zinc-500">Create a bucket to start storing objects</p>
             <Button variant="filled" icon={PlusIcon} href="/buckets">
               Create bucket
             </Button>
@@ -369,31 +353,22 @@ export function DashboardPage() {
               </thead>
               <tbody>
                 {activities.map((activity) => {
-                  const config = ACTIVITY_CONFIG[activity.action]
-                  const Icon = config.icon
+                  const config = ACTIVITY_CONFIG[activity.action];
+                  const Icon = config.icon;
                   return (
-                    <tr
-                      key={activity.id}
-                      className="border-b border-zinc-100 last:border-0"
-                    >
+                    <tr key={activity.id} className="border-b border-zinc-100 last:border-0">
                       <td className="px-4 py-3">
                         <span className="flex items-center gap-2">
-                          <Icon
-                            size={16}
-                            className={config.colorClass}
-                            aria-hidden="true"
-                          />
+                          <Icon size={16} className={config.colorClass} aria-hidden="true" />
                           <span className="text-zinc-700">{config.label}</span>
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-zinc-600">
-                        {activity.resourceName}
-                      </td>
+                      <td className="px-4 py-3 text-zinc-600">{activity.resourceName}</td>
                       <td className="px-4 py-3 text-right text-zinc-400">
                         {timeAgo(activity.timestamp)}
                       </td>
                     </tr>
-                  )
+                  );
                 })}
               </tbody>
             </table>
@@ -401,5 +376,5 @@ export function DashboardPage() {
         )}
       </div>
     </div>
-  )
+  );
 }
