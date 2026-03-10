@@ -55,8 +55,7 @@ export function AuthLayout({ children }: AuthLayoutProps) {
 
         {/* Subtext */}
         <p className="mb-10 max-w-sm text-center text-base text-zinc-600">
-          Store objects with verifiable content addressing. Use your existing S3
-          tools.
+          Store objects with verifiable content addressing. Use your existing S3 tools.
         </p>
 
         {/* Feature list */}

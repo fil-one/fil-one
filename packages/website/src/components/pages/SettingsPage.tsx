@@ -1,34 +1,34 @@
-import { useState } from 'react'
+import { useState } from 'react';
 
-import { Button } from '@hyperspace/ui/Button'
-import { Input } from '@hyperspace/ui/Input'
-import { Modal, ModalBody, ModalFooter, ModalHeader } from '@hyperspace/ui/Modal'
-import { useToast } from '@hyperspace/ui/Toast'
+import { Button } from '@hyperspace/ui/Button';
+import { Input } from '@hyperspace/ui/Input';
+import { Modal, ModalBody, ModalFooter, ModalHeader } from '@hyperspace/ui/Modal';
+import { useToast } from '@hyperspace/ui/Toast';
 
 // ---------------------------------------------------------------------------
 // Mock data
 // ---------------------------------------------------------------------------
 
-const MOCK_USER = { name: 'Joe Muoio', email: 'joe@example.com' }
+const MOCK_USER = { name: 'Joe Muoio', email: 'joe@example.com' };
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 export function SettingsPage() {
-  const { toast } = useToast()
+  const { toast } = useToast();
 
   // Profile state
-  const [name, setName] = useState(MOCK_USER.name)
-  const [email] = useState(MOCK_USER.email)
+  const [name, setName] = useState(MOCK_USER.name);
+  const [email] = useState(MOCK_USER.email);
 
   // Password state
-  const [currentPassword, setCurrentPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   // Delete account modal state
-  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   // -------------------------------------------------------------------------
   // Handlers
@@ -36,21 +36,21 @@ export function SettingsPage() {
 
   function handleSaveProfile() {
     // UNKNOWN: Real profile update API call not implemented — UI-only.
-    toast.success('Profile updated')
+    toast.success('Profile updated');
   }
 
   function handleUpdatePassword() {
     // UNKNOWN: Real password change API call not implemented — UI-only.
-    setCurrentPassword('')
-    setNewPassword('')
-    setConfirmPassword('')
-    toast.success('Password updated')
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    toast.success('Password updated');
   }
 
   function handleDeleteAccount() {
     // UNKNOWN: Account deletion would need real auth + API. This is UI-only.
-    setDeleteOpen(false)
-    toast.info('Account deletion requested')
+    setDeleteOpen(false);
+    toast.info('Account deletion requested');
   }
 
   // -------------------------------------------------------------------------
@@ -208,5 +208,5 @@ export function SettingsPage() {
         </ModalFooter>
       </Modal>
     </div>
-  )
+  );
 }

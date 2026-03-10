@@ -57,7 +57,9 @@ describe('auth-callback handler', () => {
       const result = await handler(event, stubContext);
 
       expect(result.statusCode).toBe(302);
-      expect(result.headers!['Location']).toBe('https://app.example.com/sign-in?error=User%20cancelled');
+      expect(result.headers!['Location']).toBe(
+        'https://app.example.com/sign-in?error=User%20cancelled',
+      );
     });
 
     it('redirects to sign-in with the error code when no description', async () => {
@@ -68,7 +70,9 @@ describe('auth-callback handler', () => {
       const result = await handler(event, stubContext);
 
       expect(result.statusCode).toBe(302);
-      expect(result.headers!['Location']).toBe('https://app.example.com/sign-in?error=access_denied');
+      expect(result.headers!['Location']).toBe(
+        'https://app.example.com/sign-in?error=access_denied',
+      );
     });
   });
 
@@ -79,7 +83,9 @@ describe('auth-callback handler', () => {
       const result = await handler(event, stubContext);
 
       expect(result.statusCode).toBe(302);
-      expect(result.headers!['Location']).toBe('https://app.example.com/sign-in?error=Authentication%20failed');
+      expect(result.headers!['Location']).toBe(
+        'https://app.example.com/sign-in?error=Authentication%20failed',
+      );
     });
   });
 
@@ -97,7 +103,9 @@ describe('auth-callback handler', () => {
       const result = await handler(event, stubContext);
 
       expect(result.statusCode).toBe(302);
-      expect(result.headers!['Location']).toBe('https://app.example.com/sign-in?error=Invalid%20state');
+      expect(result.headers!['Location']).toBe(
+        'https://app.example.com/sign-in?error=Invalid%20state',
+      );
     });
 
     it('redirects to sign-in when state cookie is missing', async () => {
@@ -108,7 +116,9 @@ describe('auth-callback handler', () => {
       const result = await handler(event, stubContext);
 
       expect(result.statusCode).toBe(302);
-      expect(result.headers!['Location']).toBe('https://app.example.com/sign-in?error=Invalid%20state');
+      expect(result.headers!['Location']).toBe(
+        'https://app.example.com/sign-in?error=Invalid%20state',
+      );
     });
   });
 
@@ -128,7 +138,9 @@ describe('auth-callback handler', () => {
       const result = await handler(event, stubContext);
 
       expect(result.statusCode).toBe(302);
-      expect(result.headers!['Location']).toBe('https://app.example.com/sign-in?error=Token%20exchange%20failed');
+      expect(result.headers!['Location']).toBe(
+        'https://app.example.com/sign-in?error=Token%20exchange%20failed',
+      );
     });
   });
 
@@ -189,11 +201,19 @@ describe('auth-callback handler', () => {
       const cookies = result.cookies ?? [];
 
       expect(cookies).toHaveLength(6);
-      expect(cookies[0]).toBe('hs_access_token=new-access-token; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600');
-      expect(cookies[1]).toBe('hs_id_token=new-id-token; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600');
-      expect(cookies[2]).toBe('hs_refresh_token=new-refresh-token; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000');
+      expect(cookies[0]).toBe(
+        'hs_access_token=new-access-token; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+      );
+      expect(cookies[1]).toBe(
+        'hs_id_token=new-id-token; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+      );
+      expect(cookies[2]).toBe(
+        'hs_refresh_token=new-refresh-token; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000',
+      );
       expect(cookies[3]).toBe('hs_logged_in=1; Secure; SameSite=Lax; Path=/; Max-Age=2592000');
-      expect(cookies[4]).toMatch(/^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/);
+      expect(cookies[4]).toMatch(
+        /^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/,
+      );
       expect(cookies[5]).toBe('hs_oauth_state=; Secure; SameSite=Lax; Path=/; Max-Age=0');
     });
 
@@ -235,10 +255,16 @@ describe('auth-callback handler', () => {
       const cookies = result.cookies ?? [];
 
       expect(cookies).toHaveLength(5);
-      expect(cookies[0]).toBe('hs_access_token=at; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600');
-      expect(cookies[1]).toBe('hs_id_token=it; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600');
+      expect(cookies[0]).toBe(
+        'hs_access_token=at; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+      );
+      expect(cookies[1]).toBe(
+        'hs_id_token=it; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+      );
       expect(cookies[2]).toBe('hs_logged_in=1; Secure; SameSite=Lax; Path=/; Max-Age=2592000');
-      expect(cookies[3]).toMatch(/^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/);
+      expect(cookies[3]).toMatch(
+        /^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/,
+      );
       expect(cookies[4]).toBe('hs_oauth_state=; Secure; SameSite=Lax; Path=/; Max-Age=0');
     });
   });

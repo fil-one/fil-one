@@ -13,9 +13,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 const dynamo = new DynamoDBClient({});
 
-async function baseHandler(
-  event: AuthenticatedEvent,
-): Promise<APIGatewayProxyResultV2> {
+async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId, email } = getUserInfo(event);
 
   const { Item } = await dynamo.send(

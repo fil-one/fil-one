@@ -1,37 +1,33 @@
-import { useState } from 'react'
+import { useState } from 'react';
 
-import {
-  CalendarIcon,
-  ChatCircleIcon,
-  EnvelopeIcon,
-} from '@phosphor-icons/react/dist/ssr'
+import { CalendarIcon, ChatCircleIcon, EnvelopeIcon } from '@phosphor-icons/react/dist/ssr';
 
-import { Button } from '@hyperspace/ui/Button'
-import { Input } from '@hyperspace/ui/Input'
-import { TextArea } from '@hyperspace/ui/TextArea'
-import { useToast } from '@hyperspace/ui/Toast'
+import { Button } from '@hyperspace/ui/Button';
+import { Input } from '@hyperspace/ui/Input';
+import { TextArea } from '@hyperspace/ui/TextArea';
+import { useToast } from '@hyperspace/ui/Toast';
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 export function SupportPage() {
-  const { toast } = useToast()
+  const { toast } = useToast();
 
   // Contact form state
-  const [formName, setFormName] = useState('')
-  const [formEmail, setFormEmail] = useState('')
-  const [formSubject, setFormSubject] = useState('')
-  const [formMessage, setFormMessage] = useState('')
+  const [formName, setFormName] = useState('');
+  const [formEmail, setFormEmail] = useState('');
+  const [formSubject, setFormSubject] = useState('');
+  const [formMessage, setFormMessage] = useState('');
 
   function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+    e.preventDefault();
     // UNKNOWN: Real support ticket / email API not implemented — UI-only.
-    setFormName('')
-    setFormEmail('')
-    setFormSubject('')
-    setFormMessage('')
-    toast.success("Message sent! We'll get back to you within 1 business day.")
+    setFormName('');
+    setFormEmail('');
+    setFormSubject('');
+    setFormMessage('');
+    toast.success("Message sent! We'll get back to you within 1 business day.");
   }
 
   return (
@@ -44,9 +40,7 @@ export function SupportPage() {
         {/* ---------------------------------------------------------------- */}
         <div className="rounded-lg border border-zinc-200 bg-white p-6">
           <h2 className="text-lg font-semibold text-zinc-900 mb-2">Get in touch</h2>
-          <p className="text-sm text-zinc-600 mb-6">
-            We typically respond within 1 business day.
-          </p>
+          <p className="text-sm text-zinc-600 mb-6">We typically respond within 1 business day.</p>
 
           {/* Email support */}
           <div className="flex items-start gap-3 mb-4">
@@ -99,12 +93,7 @@ export function SupportPage() {
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium text-zinc-700">Name</label>
-              <Input
-                value={formName}
-                onChange={setFormName}
-                placeholder="Your name"
-                required
-              />
+              <Input value={formName} onChange={setFormName} placeholder="Your name" required />
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -148,5 +137,5 @@ export function SupportPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

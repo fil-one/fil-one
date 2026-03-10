@@ -11,11 +11,7 @@ const s3 = new S3Client({});
 export class FileStorageClient {
   constructor(private bucketName: string) {}
 
-  async put(
-    key: string,
-    body: Buffer,
-    contentType: string,
-  ): Promise<{ etag: string }> {
+  async put(key: string, body: Buffer, contentType: string): Promise<{ etag: string }> {
     const result = await s3.send(
       new PutObjectCommand({
         Bucket: this.bucketName,
@@ -51,10 +47,8 @@ export class FileStorageClient {
   }
 
   async getPresignedUrl(key: string, expiresInSeconds = 3600): Promise<string> {
-    return getSignedUrl(
-      s3,
-      new GetObjectCommand({ Bucket: this.bucketName, Key: key }),
-      { expiresIn: expiresInSeconds },
-    );
+    return getSignedUrl(s3, new GetObjectCommand({ Bucket: this.bucketName, Key: key }), {
+      expiresIn: expiresInSeconds,
+    });
   }
 }

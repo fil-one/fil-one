@@ -1,9 +1,4 @@
-import {
-  DatabaseIcon,
-  QuestionIcon,
-  BellIcon,
-  SignOutIcon,
-} from '@phosphor-icons/react/dist/ssr';
+import { DatabaseIcon, QuestionIcon, BellIcon, SignOutIcon } from '@phosphor-icons/react/dist/ssr';
 import { ProgressBar } from '@hyperspace/ui/ProgressBar';
 import { logout } from '../lib/api.js';
 

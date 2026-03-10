@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react';
 
 import {
   CheckCircleIcon,
@@ -7,40 +7,37 @@ import {
   ArrowRightIcon,
   WarningIcon,
   CloudIcon,
-} from '@phosphor-icons/react/dist/ssr'
+} from '@phosphor-icons/react/dist/ssr';
 
-import { ProgressBar } from '@hyperspace/ui/ProgressBar'
-import { useToast } from '@hyperspace/ui/Toast'
+import { ProgressBar } from '@hyperspace/ui/ProgressBar';
+import { useToast } from '@hyperspace/ui/Toast';
 
-import { SubscriptionStatus } from '@hyperspace/shared'
-import type {
-  BillingInfo,
-  CreateSetupIntentResponse,
-} from '@hyperspace/shared'
+import { SubscriptionStatus } from '@hyperspace/shared';
+import type { BillingInfo, CreateSetupIntentResponse } from '@hyperspace/shared';
 
-import { apiRequest } from '../../lib/api.js'
-import { ChoosePlanDialog } from '../billing/ChoosePlanDialog.js'
-import { AddPaymentDialog } from '../billing/AddPaymentDialog.js'
+import { apiRequest } from '../../lib/api.js';
+import { ChoosePlanDialog } from '../billing/ChoosePlanDialog.js';
+import { AddPaymentDialog } from '../billing/AddPaymentDialog.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
 function daysRemaining(isoString: string): number {
-  const ms = new Date(isoString).getTime() - Date.now()
-  return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)))
+  const ms = new Date(isoString).getTime() - Date.now();
+  return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)));
 }
 
 function formatCents(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`
+  return `$${(cents / 100).toFixed(2)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +51,7 @@ function SkeletonCard({ height = 'h-36' }: { height?: string }) {
       <div className="h-4 w-48 rounded bg-zinc-200 mb-2" />
       <div className="h-3 w-36 rounded bg-zinc-200" />
     </div>
-  )
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -62,102 +59,102 @@ function SkeletonCard({ height = 'h-36' }: { height?: string }) {
 // ---------------------------------------------------------------------------
 
 export function BillingPage() {
-  const { toast } = useToast()
+  const { toast } = useToast();
 
-  const [billing, setBilling] = useState<BillingInfo | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [billing, setBilling] = useState<BillingInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Modal states
-  const [planOpen, setPlanOpen] = useState(false)
-  const [paymentOpen, setPaymentOpen] = useState(false)
-  const [clientSecret, setClientSecret] = useState('')
+  const [planOpen, setPlanOpen] = useState(false);
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [clientSecret, setClientSecret] = useState('');
 
   const fetchBilling = useCallback(async () => {
     try {
-      setLoading(true)
-      const data = await apiRequest<BillingInfo>('/billing')
-      setBilling(data)
-      setError(null)
+      setLoading(true);
+      const data = await apiRequest<BillingInfo>('/billing');
+      setBilling(data);
+      setError(null);
     } catch (err) {
-      setError((err as Error).message)
+      setError((err as Error).message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [])
+  }, []);
 
   useEffect(() => {
-    void fetchBilling()
-  }, [fetchBilling])
+    void fetchBilling();
+  }, [fetchBilling]);
 
   // Handle portal return
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
+    const params = new URLSearchParams(window.location.search);
     if (params.get('portal_return') === 'true') {
       // Clear the URL param and refresh billing data
-      window.history.replaceState({}, '', window.location.pathname)
-      void fetchBilling()
+      window.history.replaceState({}, '', window.location.pathname);
+      void fetchBilling();
     }
-  }, [fetchBilling])
+  }, [fetchBilling]);
 
-  const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing
-  const isActive = billing?.subscription.status === SubscriptionStatus.Active
-  const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue
-  const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod
-  const isCanceled = billing?.subscription.status === SubscriptionStatus.Canceled
+  const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
+  const isActive = billing?.subscription.status === SubscriptionStatus.Active;
+  const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
+  const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod;
+  const isCanceled = billing?.subscription.status === SubscriptionStatus.Canceled;
   const trialDays =
     isTrialing && billing?.subscription.trialEndsAt
       ? daysRemaining(billing.subscription.trialEndsAt)
-      : null
+      : null;
   const graceDays = billing?.subscription.gracePeriodEndsAt
     ? daysRemaining(billing.subscription.gracePeriodEndsAt)
-    : null
-  const isTrialExpiredGrace = isGracePeriod && !!billing?.subscription.trialEndsAt
+    : null;
+  const isTrialExpiredGrace = isGracePeriod && !!billing?.subscription.trialEndsAt;
 
-  const storageUsed = billing?.usage?.storageUsedBytes ?? 0
-  const storageLimit = billing?.usage?.storageLimitBytes ?? 1
-  const storagePct = storageLimit > 0 ? Math.min(100, (storageUsed / storageLimit) * 100) : 0
-  const estimatedCost = billing?.usage?.estimatedMonthlyCostCents ?? 0
+  const storageUsed = billing?.usage?.storageUsedBytes ?? 0;
+  const storageLimit = billing?.usage?.storageLimitBytes ?? 1;
+  const storagePct = storageLimit > 0 ? Math.min(100, (storageUsed / storageLimit) * 100) : 0;
+  const estimatedCost = billing?.usage?.estimatedMonthlyCostCents ?? 0;
 
   // ── Handlers ─────────────────────────────────────────────────────
 
   function handleUpgradeClick() {
-    setPlanOpen(true)
+    setPlanOpen(true);
   }
 
   async function handleSelectPayAsYouGo() {
-    setPlanOpen(false)
+    setPlanOpen(false);
     try {
       const { clientSecret: cs } = await apiRequest<CreateSetupIntentResponse>(
         '/billing/setup-intent',
         { method: 'POST' },
-      )
-      setClientSecret(cs)
-      setPaymentOpen(true)
+      );
+      setClientSecret(cs);
+      setPaymentOpen(true);
     } catch (err) {
-      toast.error((err as Error).message || 'Failed to set up payment. Please try again.')
+      toast.error((err as Error).message || 'Failed to set up payment. Please try again.');
     }
   }
 
   function handlePaymentBack() {
-    setPaymentOpen(false)
-    setPlanOpen(true)
+    setPaymentOpen(false);
+    setPlanOpen(true);
   }
 
   function handlePaymentSuccess() {
-    setPaymentOpen(false)
-    setClientSecret('')
-    toast.success('Subscription activated!')
-    void fetchBilling()
-    window.dispatchEvent(new CustomEvent('billing:updated'))
+    setPaymentOpen(false);
+    setClientSecret('');
+    toast.success('Subscription activated!');
+    void fetchBilling();
+    window.dispatchEvent(new CustomEvent('billing:updated'));
   }
 
   async function handleUpdatePayment() {
     try {
-      const { url } = await apiRequest<{ url: string }>('/billing/portal', { method: 'POST' })
-      window.location.href = url
+      const { url } = await apiRequest<{ url: string }>('/billing/portal', { method: 'POST' });
+      window.location.href = url;
     } catch (err) {
-      toast.error((err as Error).message || 'Failed to open billing portal.')
+      toast.error((err as Error).message || 'Failed to open billing portal.');
     }
   }
 
@@ -178,7 +175,7 @@ export function BillingPage() {
           </div>
         </div>
       </div>
-    )
+    );
   }
 
   if (error && !billing) {
@@ -189,7 +186,7 @@ export function BillingPage() {
           Failed to load billing information: {error}
         </div>
       </div>
-    )
+    );
   }
 
   // ── Render ───────────────────────────────────────────────────────
@@ -219,8 +216,7 @@ export function BillingPage() {
           <span className="text-sm text-amber-800">
             {isTrialExpiredGrace
               ? `Your free trial has expired.${graceDays !== null ? ` ${graceDays} days remaining` : ''} to upgrade or download your data.`
-              : `Subscription canceled.${graceDays !== null ? ` ${graceDays} days remaining` : ''} to reactivate or download your data.`}
-            {' '}
+              : `Subscription canceled.${graceDays !== null ? ` ${graceDays} days remaining` : ''} to reactivate or download your data.`}{' '}
             <button type="button" onClick={handleUpgradeClick} className="font-semibold underline">
               {isTrialExpiredGrace ? 'Upgrade now' : 'Reactivate'}
             </button>
@@ -245,7 +241,6 @@ export function BillingPage() {
       <div className="flex gap-6">
         {/* ── Left column ──────────────────────────────────────── */}
         <div className="flex-1 min-w-0 flex flex-col gap-4">
-
           {/* Plan card */}
           <div
             className={`rounded-xl border-2 p-6 bg-white ${
@@ -289,7 +284,9 @@ export function BillingPage() {
 
                 <div>
                   <h2 className="text-lg font-semibold text-[#14181f]">
-                    {isActive || isPastDue || isGracePeriod || isCanceled ? 'Pay-as-you-go' : 'Free Trial'}
+                    {isActive || isPastDue || isGracePeriod || isCanceled
+                      ? 'Pay-as-you-go'
+                      : 'Free Trial'}
                   </h2>
                   <p className="text-sm text-[#677183]">
                     {isActive || isPastDue
@@ -353,9 +350,13 @@ export function BillingPage() {
 
             {/* Grace period / Canceled reactivation CTA */}
             {(isGracePeriod || isCanceled) && (
-              <div className={`mt-4 rounded-lg px-4 py-3 flex items-center justify-between ${
-                isCanceled ? 'bg-red-50 border border-red-200' : 'bg-amber-50 border border-amber-200'
-              }`}>
+              <div
+                className={`mt-4 rounded-lg px-4 py-3 flex items-center justify-between ${
+                  isCanceled
+                    ? 'bg-red-50 border border-red-200'
+                    : 'bg-amber-50 border border-amber-200'
+                }`}
+              >
                 <div>
                   <p className="text-sm font-medium text-[#14181f]">
                     {isCanceled
@@ -396,11 +397,7 @@ export function BillingPage() {
                 {storageLimit > 0 && ` / ${formatBytes(storageLimit)}`}
               </span>
             </div>
-            <ProgressBar
-              value={storagePct}
-              size="sm"
-              label="Storage usage"
-            />
+            <ProgressBar value={storagePct} size="sm" label="Storage usage" />
 
             {/* Estimated cost (active/grace) */}
             {(isActive || isPastDue || isGracePeriod) && (
@@ -425,10 +422,12 @@ export function BillingPage() {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-[#14181f]">
-                      &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; {billing.paymentMethod.last4}
+                      &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull;{' '}
+                      {billing.paymentMethod.last4}
                     </p>
                     <p className="text-xs text-[#99a0ae]">
-                      Expires {String(billing.paymentMethod.expMonth).padStart(2, '0')}/{String(billing.paymentMethod.expYear).slice(-2)}
+                      Expires {String(billing.paymentMethod.expMonth).padStart(2, '0')}/
+                      {String(billing.paymentMethod.expYear).slice(-2)}
                     </p>
                   </div>
                 </div>
@@ -527,5 +526,5 @@ export function BillingPage() {
         onSuccess={handlePaymentSuccess}
       />
     </div>
-  )
+  );
 }

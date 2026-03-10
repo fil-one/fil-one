@@ -34,6 +34,4 @@ async function baseHandler(
   };
 }
 
-export const handler = middy(baseHandler)
-  .use(httpHeaderNormalizer())
-  .use(errorHandlerMiddleware());
+export const handler = middy(baseHandler).use(httpHeaderNormalizer()).use(errorHandlerMiddleware());

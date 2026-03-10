@@ -26,14 +26,14 @@ VITE_AUTH0_CLIENT_ID=hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ
 VITE_AUTH0_AUDIENCE=console.filhyperspace.com
 ```
 
-| Variable | Purpose |
-|---|---|
-| `VITE_API_URL` | Must be empty for local dev. The Vite proxy serves `/api/*` so cookies stay on localhost. |
-| `DEV_PROXY_TARGET` | The backend URL that Vite proxies `/api/*` requests to. |
-| `VITE_S3_ENDPOINT` | S3-compatible endpoint shown in Connection Details UI. |
-| `VITE_AUTH0_DOMAIN` | Auth0 tenant domain. Use the dev value which allows localhost/dev stages. |
-| `VITE_AUTH0_CLIENT_ID` | Auth0 SPA application client ID - use dev value (above). |
-| `VITE_AUTH0_AUDIENCE` | Auth0 API audience identifier - use dev value (above). |
+| Variable               | Purpose                                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------------------- |
+| `VITE_API_URL`         | Must be empty for local dev. The Vite proxy serves `/api/*` so cookies stay on localhost. |
+| `DEV_PROXY_TARGET`     | The backend URL that Vite proxies `/api/*` requests to.                                   |
+| `VITE_S3_ENDPOINT`     | S3-compatible endpoint shown in Connection Details UI.                                    |
+| `VITE_AUTH0_DOMAIN`    | Auth0 tenant domain. Use the dev value which allows localhost/dev stages.                 |
+| `VITE_AUTH0_CLIENT_ID` | Auth0 SPA application client ID - use dev value (above).                                  |
+| `VITE_AUTH0_AUDIENCE`  | Auth0 API audience identifier - use dev value (above).                                    |
 
 ### 2. Start the dev server
 
