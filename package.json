@@ -24,9 +24,9 @@
     "@pulumi/command": "^1.2.1",
     "aws-cdk-lib": "^2.241.0",
     "constructs": "^10.5.1",
-    "oxlint": "^1.51.0",
+    "oxlint": "^1.52.0",
     "oxlint-tsgolint": "^0.16.0",
-    "sst": "^4.1.10"
+    "sst": "^4.2.4"
   },
   "packageManager": "pnpm@10.32.0",
   "engines": {

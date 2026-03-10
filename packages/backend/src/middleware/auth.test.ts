@@ -28,9 +28,7 @@ const MOCK_EMAIL = 'user@example.com';
 
 let uuidCallCount = 0;
 const MOCK_UUIDS = [MOCK_USER_ID, MOCK_ORG_ID];
-vi.mock('uuid', () => ({
-  v4: () => MOCK_UUIDS[uuidCallCount++],
-}));
+vi.spyOn(crypto, 'randomUUID').mockImplementation(() => MOCK_UUIDS[uuidCallCount++] as `${string}-${string}-${string}-${string}-${string}`);
 
 vi.mock('sst', () => ({
   Resource: {
