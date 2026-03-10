@@ -103,7 +103,7 @@ pnpx sst secret set AuroraBackofficeToken <value> [--stage <stage>]
 
 Omit `--stage` to set for your personal dev stage (defaults to OS username).
 
-The `Auth0MgmtClientId` and `Auth0MgmtClientSecret` are from a **Machine-to-Machine (M2M) application** in Auth0 — see the [Auth0 M2M Setup](#auth0-machine-to-machine-m2m-application) section below. The `AuroraBackofficeToken` is from the Aurora Backoffice dashboard — see the [Aurora API Token](#api-token) section below.
+The `Auth0MgmtClientId` and `Auth0MgmtClientSecret` are from a **Machine-to-Machine (M2M) application** in Auth0 — see the [Auth0 M2M Setup](#auth0-machine-to-machine-m2m-application) section below. The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below.
 
 ## Commands
 
@@ -252,7 +252,7 @@ The backend uses an API token to authenticate with the Aurora Back Office API
 
 **Generating the token:**
 
-1. Log in to the Aurora Backoffice dashboard at
+1. Log in to the Aurora Back Office dashboard at
    https://backoffice.dev.aur.lu/ff/docs/backoffice-api
 2. Navigate to the API token management section
 3. Generate a new token with the required permissions
