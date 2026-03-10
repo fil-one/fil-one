@@ -236,7 +236,7 @@ export default $config({
     }
 
     const auroraEnv = {
-      AURORA_BACKOFFICE_URL: "https://api.backoffice.dev.aur.lu/api/v1",
+      AURORA_BACKOFFICE_URL: "https://api.backoffice.dev.aur.lu/api",
       AURORA_PARTNER_ID: "ff",
       AURORA_REGION_ID: "ff",
     };
