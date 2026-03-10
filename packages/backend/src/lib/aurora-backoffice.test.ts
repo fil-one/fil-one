@@ -17,12 +17,12 @@ const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-auror
 
 vi.mock('@hyperspace/aurora-backoffice-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
-  postPartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockPostTenants(options),
-  getPartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockGetTenants(options),
-  postPartnersByPartnerIdTenantsByTenantIdSetup: (options: Record<string, unknown>) => mockPostSetup(options),
+  postV1PartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockPostTenants(options),
+  getV1PartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockGetTenants(options),
+  postV1PartnersByPartnerIdTenantsByTenantIdSetup: (options: Record<string, unknown>) => mockPostSetup(options),
 }));
 
-process.env.AURORA_BACKOFFICE_URL = 'https://api.backoffice.test.example.com/api/v1';
+process.env.AURORA_BACKOFFICE_URL = 'https://api.backoffice.test.example.com/api';
 process.env.AURORA_PARTNER_ID = 'test-partner';
 process.env.AURORA_REGION_ID = 'test-region';
 
@@ -51,7 +51,7 @@ describe('createAuroraTenant', () => {
     await createAuroraTenant({ orgId: 'org-123', displayName: 'My Org' });
 
     expect(mockCreateClient).toHaveBeenCalledWith({
-      baseUrl: 'https://api.backoffice.test.example.com/api/v1',
+      baseUrl: 'https://api.backoffice.test.example.com/api',
       headers: { 'X-Api-Key': 'test-aurora-token' },
     });
 
@@ -149,7 +149,7 @@ describe('setupAuroraTenant', () => {
     await setupAuroraTenant({ tenantId: 'tenant-123' });
 
     expect(mockCreateClient).toHaveBeenCalledWith({
-      baseUrl: 'https://api.backoffice.test.example.com/api/v1',
+      baseUrl: 'https://api.backoffice.test.example.com/api',
       headers: { 'X-Api-Key': 'test-aurora-token' },
     });
 

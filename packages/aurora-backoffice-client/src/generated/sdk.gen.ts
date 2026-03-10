@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.ts';
 import type { Client, Options as Options2, TDataShape } from './client/index.ts';
-import type { DeletePartnersByPartnerIdThemesByThemeIdData, DeletePartnersByPartnerIdThemesByThemeIdErrors, DeletePartnersByPartnerIdThemesByThemeIdResponses, GetBucketsByBucketNameOwnerData, GetBucketsByBucketNameOwnerErrors, GetBucketsByBucketNameOwnerResponses, GetEnvironmentData, GetEnvironmentResponses, GetPartnerData, GetPartnerErrors, GetPartnerResponses, GetPartnersByPartnerIdConfigData, GetPartnersByPartnerIdConfigErrors, GetPartnersByPartnerIdConfigResponses, GetPartnersByPartnerIdData, GetPartnersByPartnerIdErrors, GetPartnersByPartnerIdRegionsByRegionIdData, GetPartnersByPartnerIdRegionsByRegionIdErrors, GetPartnersByPartnerIdRegionsByRegionIdResponses, GetPartnersByPartnerIdRegionsData, GetPartnersByPartnerIdRegionsErrors, GetPartnersByPartnerIdRegionsResponses, GetPartnersByPartnerIdResponses, GetPartnersByPartnerIdTenantsByTenantIdBucketsData, GetPartnersByPartnerIdTenantsByTenantIdBucketsErrors, GetPartnersByPartnerIdTenantsByTenantIdBucketsResponses, GetPartnersByPartnerIdTenantsByTenantIdData, GetPartnersByPartnerIdTenantsByTenantIdErrors, GetPartnersByPartnerIdTenantsByTenantIdMembersData, GetPartnersByPartnerIdTenantsByTenantIdMembersErrors, GetPartnersByPartnerIdTenantsByTenantIdMembersResponses, GetPartnersByPartnerIdTenantsByTenantIdResponses, GetPartnersByPartnerIdTenantsData, GetPartnersByPartnerIdTenantsErrors, GetPartnersByPartnerIdTenantsResponses, GetPartnersByPartnerIdThemesByThemeIdData, GetPartnersByPartnerIdThemesByThemeIdErrors, GetPartnersByPartnerIdThemesByThemeIdResponses, GetPartnersByPartnerIdThemesData, GetPartnersByPartnerIdThemesErrors, GetPartnersByPartnerIdThemesResponses, GetPartnersByPartnerIdUsersByUserIdData, GetPartnersByPartnerIdUsersByUserIdErrors, GetPartnersByPartnerIdUsersByUserIdResponses, GetPartnersByPartnerIdUsersData, GetPartnersByPartnerIdUsersErrors, GetPartnersByPartnerIdUsersResponses, GetPartnersData, GetPartnersErrors, GetPartnersResponses, GetRegionsData, GetRegionsErrors, GetRegionsResponses, GetRolesData, GetRolesErrors, GetRolesResponses, GetS3CredentialsByS3CredentialIdData, GetS3CredentialsByS3CredentialIdErrors, GetS3CredentialsByS3CredentialIdResponses, GetS3CredentialsData, GetS3CredentialsErrors, GetS3CredentialsResponses, GetWarmTierCredentialsByWarmTierCredentialIdData, GetWarmTierCredentialsByWarmTierCredentialIdErrors, GetWarmTierCredentialsByWarmTierCredentialIdResponses, GetWarmTierCredentialsData, GetWarmTierCredentialsErrors, GetWarmTierCredentialsResponses, PostPartnersByPartnerIdTenantsByTenantIdSetupData, PostPartnersByPartnerIdTenantsByTenantIdSetupErrors, PostPartnersByPartnerIdTenantsByTenantIdSetupResponses, PostPartnersByPartnerIdTenantsByTenantIdStatusData, PostPartnersByPartnerIdTenantsByTenantIdStatusErrors, PostPartnersByPartnerIdTenantsByTenantIdStatusResponses, PostPartnersByPartnerIdTenantsData, PostPartnersByPartnerIdTenantsErrors, PostPartnersByPartnerIdTenantsResponses, PostPartnersByPartnerIdThemesData, PostPartnersByPartnerIdThemesErrors, PostPartnersByPartnerIdThemesResponses, PostPartnersByPartnerIdUsersData, PostPartnersByPartnerIdUsersErrors, PostPartnersByPartnerIdUsersResponses, PutPartnersByPartnerIdConfigData, PutPartnersByPartnerIdConfigErrors, PutPartnersByPartnerIdConfigResponses, PutPartnersByPartnerIdThemesByThemeIdData, PutPartnersByPartnerIdThemesByThemeIdErrors, PutPartnersByPartnerIdThemesByThemeIdResponses } from './types.gen.ts';
+import type { DeleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdData, DeleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdErrors, DeleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdResponses, DeleteAuthV1PartnersByPartnerIdTokensByTokenIdData, DeleteAuthV1PartnersByPartnerIdTokensByTokenIdErrors, DeleteAuthV1PartnersByPartnerIdTokensByTokenIdResponses, DeleteV1PartnersByPartnerIdThemesByThemeIdData, DeleteV1PartnersByPartnerIdThemesByThemeIdErrors, DeleteV1PartnersByPartnerIdThemesByThemeIdResponses, GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsData, GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsErrors, GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsResponses, GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageData, GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageErrors, GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageResponses, GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsData, GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsErrors, GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsResponses, GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageData, GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageErrors, GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageResponses, GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdData, GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdErrors, GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdResponses, GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensData, GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensErrors, GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensResponses, GetAuthV1PartnersByPartnerIdTokensByTokenIdData, GetAuthV1PartnersByPartnerIdTokensByTokenIdErrors, GetAuthV1PartnersByPartnerIdTokensByTokenIdResponses, GetAuthV1PartnersByPartnerIdTokensData, GetAuthV1PartnersByPartnerIdTokensErrors, GetAuthV1PartnersByPartnerIdTokensResponses, GetPartnersByPartnerIdRegionsData, GetPartnersByPartnerIdRegionsErrors, GetPartnersByPartnerIdRegionsResponses, GetRegionsData, GetRegionsErrors, GetRegionsResponses, GetV1BucketsByBucketNameOwnerData, GetV1BucketsByBucketNameOwnerErrors, GetV1BucketsByBucketNameOwnerResponses, GetV1EnvironmentData, GetV1EnvironmentResponses, GetV1PartnerData, GetV1PartnerErrors, GetV1PartnerResponses, GetV1PartnersByPartnerIdConfigData, GetV1PartnersByPartnerIdConfigErrors, GetV1PartnersByPartnerIdConfigResponses, GetV1PartnersByPartnerIdData, GetV1PartnersByPartnerIdErrors, GetV1PartnersByPartnerIdRegionsByRegionIdData, GetV1PartnersByPartnerIdRegionsByRegionIdErrors, GetV1PartnersByPartnerIdRegionsByRegionIdResponses, GetV1PartnersByPartnerIdResponses, GetV1PartnersByPartnerIdTenantsByTenantIdBucketsData, GetV1PartnersByPartnerIdTenantsByTenantIdBucketsErrors, GetV1PartnersByPartnerIdTenantsByTenantIdBucketsResponses, GetV1PartnersByPartnerIdTenantsByTenantIdData, GetV1PartnersByPartnerIdTenantsByTenantIdErrors, GetV1PartnersByPartnerIdTenantsByTenantIdMembersData, GetV1PartnersByPartnerIdTenantsByTenantIdMembersErrors, GetV1PartnersByPartnerIdTenantsByTenantIdMembersResponses, GetV1PartnersByPartnerIdTenantsByTenantIdResponses, GetV1PartnersByPartnerIdTenantsData, GetV1PartnersByPartnerIdTenantsErrors, GetV1PartnersByPartnerIdTenantsResponses, GetV1PartnersByPartnerIdThemesByThemeIdData, GetV1PartnersByPartnerIdThemesByThemeIdErrors, GetV1PartnersByPartnerIdThemesByThemeIdResponses, GetV1PartnersByPartnerIdThemesData, GetV1PartnersByPartnerIdThemesErrors, GetV1PartnersByPartnerIdThemesResponses, GetV1PartnersByPartnerIdUsersByUserIdData, GetV1PartnersByPartnerIdUsersByUserIdErrors, GetV1PartnersByPartnerIdUsersByUserIdResponses, GetV1PartnersByPartnerIdUsersData, GetV1PartnersByPartnerIdUsersErrors, GetV1PartnersByPartnerIdUsersResponses, GetV1PartnersData, GetV1PartnersErrors, GetV1PartnersResponses, GetV1RolesData, GetV1RolesErrors, GetV1RolesResponses, GetV1S3CredentialsByS3CredentialIdData, GetV1S3CredentialsByS3CredentialIdErrors, GetV1S3CredentialsByS3CredentialIdResponses, GetV1S3CredentialsData, GetV1S3CredentialsErrors, GetV1S3CredentialsResponses, GetV1WarmTierCredentialsByWarmTierCredentialIdData, GetV1WarmTierCredentialsByWarmTierCredentialIdErrors, GetV1WarmTierCredentialsByWarmTierCredentialIdResponses, GetV1WarmTierCredentialsData, GetV1WarmTierCredentialsErrors, GetV1WarmTierCredentialsResponses, PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensData, PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensErrors, PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensResponses, PostAuthV1PartnersByPartnerIdTokensData, PostAuthV1PartnersByPartnerIdTokensErrors, PostAuthV1PartnersByPartnerIdTokensResponses, PostV1PartnersByPartnerIdTenantsByTenantIdSetupData, PostV1PartnersByPartnerIdTenantsByTenantIdSetupErrors, PostV1PartnersByPartnerIdTenantsByTenantIdSetupResponses, PostV1PartnersByPartnerIdTenantsByTenantIdStatusData, PostV1PartnersByPartnerIdTenantsByTenantIdStatusErrors, PostV1PartnersByPartnerIdTenantsByTenantIdStatusResponses, PostV1PartnersByPartnerIdTenantsData, PostV1PartnersByPartnerIdTenantsErrors, PostV1PartnersByPartnerIdTenantsResponses, PostV1PartnersByPartnerIdThemesData, PostV1PartnersByPartnerIdThemesErrors, PostV1PartnersByPartnerIdThemesResponses, PostV1PartnersByPartnerIdUsersData, PostV1PartnersByPartnerIdUsersErrors, PostV1PartnersByPartnerIdUsersResponses, PutV1PartnersByPartnerIdConfigData, PutV1PartnersByPartnerIdConfigErrors, PutV1PartnersByPartnerIdConfigResponses, PutV1PartnersByPartnerIdThemesByThemeIdData, PutV1PartnersByPartnerIdThemesByThemeIdErrors, PutV1PartnersByPartnerIdThemesByThemeIdResponses } from './types.gen.ts';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -19,54 +19,68 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 };
 
 /**
- * Get bucket owner
+ * Get bucket operation metrics
  *
- * Returns the owner information for a specific bucket
+ * Returns S3 operation metrics for a bucket in the given time range, optionally resampled by window duration and grouped by tags
  */
-export const getBucketsByBucketNameOwner = <ThrowOnError extends boolean = false>(options: Options<GetBucketsByBucketNameOwnerData, ThrowOnError>) => (options.client ?? client).get<GetBucketsByBucketNameOwnerResponses, GetBucketsByBucketNameOwnerErrors, ThrowOnError>({ url: '/buckets/{bucketName}/owner', ...options });
+export const getAnalyticsV1ByPartnerIdBucketsByBucketNameOperations = <ThrowOnError extends boolean = false>(options: Options<GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsData, ThrowOnError>) => (options.client ?? client).get<GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsResponses, GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/analytics/v1/{partnerId}/buckets/{bucketName}/operations',
+    ...options
+});
 
 /**
- * Get environment configuration
+ * Get bucket storage metrics
  *
- * Returns environment configuration for the backoffice web application, including Auth0 settings
+ * Returns storage metrics for a bucket in the given time range, optionally resampled by window duration
  */
-export const getEnvironment = <ThrowOnError extends boolean = false>(options?: Options<GetEnvironmentData, ThrowOnError>) => (options?.client ?? client).get<GetEnvironmentResponses, unknown, ThrowOnError>({ url: '/environment', ...options });
+export const getAnalyticsV1ByPartnerIdBucketsByBucketNameStorage = <ThrowOnError extends boolean = false>(options: Options<GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageData, ThrowOnError>) => (options.client ?? client).get<GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageResponses, GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/analytics/v1/{partnerId}/buckets/{bucketName}/storage',
+    ...options
+});
 
 /**
- * Get current partner
+ * Get tenant operation metrics
  *
- * Returns details of the authenticated partner
+ * Returns S3 operation metrics for a tenant in the given time range, optionally resampled by window duration and grouped by tags
  */
-export const getPartner = <ThrowOnError extends boolean = false>(options?: Options<GetPartnerData, ThrowOnError>) => (options?.client ?? client).get<GetPartnerResponses, GetPartnerErrors, ThrowOnError>({ url: '/partner', ...options });
+export const getAnalyticsV1ByPartnerIdTenantsByTenantIdOperations = <ThrowOnError extends boolean = false>(options: Options<GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsData, ThrowOnError>) => (options.client ?? client).get<GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsResponses, GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/analytics/v1/{partnerId}/tenants/{tenantId}/operations',
+    ...options
+});
 
 /**
- * List partners
+ * Get tenant storage metrics
  *
- * Returns a paginated list of all partners
+ * Returns storage metrics for a tenant in the given time range, optionally resampled by window duration
  */
-export const getPartners = <ThrowOnError extends boolean = false>(options?: Options<GetPartnersData, ThrowOnError>) => (options?.client ?? client).get<GetPartnersResponses, GetPartnersErrors, ThrowOnError>({ url: '/partners', ...options });
+export const getAnalyticsV1ByPartnerIdTenantsByTenantIdStorage = <ThrowOnError extends boolean = false>(options: Options<GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageData, ThrowOnError>) => (options.client ?? client).get<GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageResponses, GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/analytics/v1/{partnerId}/tenants/{tenantId}/storage',
+    ...options
+});
 
 /**
- * Get partner
+ * List tenant tokens
  *
- * Returns details of a specific partner by ID
+ * Returns a list of all tokens for a tenant
  */
-export const getPartnersByPartnerId = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdResponses, GetPartnersByPartnerIdErrors, ThrowOnError>({ url: '/partners/{partnerId}', ...options });
+export const getAuthV1PartnersByPartnerIdTenantsByTenantIdTokens = <ThrowOnError extends boolean = false>(options: Options<GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensData, ThrowOnError>) => (options.client ?? client).get<GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensResponses, GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens',
+    ...options
+});
 
 /**
- * Get partner config
+ * Create tenant token
  *
- * Returns the configuration for the partner
+ * Creates a new token for a tenant
  */
-export const getPartnersByPartnerIdConfig = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdConfigData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdConfigResponses, GetPartnersByPartnerIdConfigErrors, ThrowOnError>({ url: '/partners/{partnerId}/config', ...options });
-
-/**
- * Update partner config
- *
- * Updates the configuration for the partner
- */
-export const putPartnersByPartnerIdConfig = <ThrowOnError extends boolean = false>(options: Options<PutPartnersByPartnerIdConfigData, ThrowOnError>) => (options.client ?? client).put<PutPartnersByPartnerIdConfigResponses, PutPartnersByPartnerIdConfigErrors, ThrowOnError>({
-    url: '/partners/{partnerId}/config',
+export const postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens = <ThrowOnError extends boolean = false>(options: Options<PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensData, ThrowOnError>) => (options.client ?? client).post<PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensResponses, PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -75,33 +89,204 @@ export const putPartnersByPartnerIdConfig = <ThrowOnError extends boolean = fals
 });
 
 /**
+ * Delete tenant token
+ *
+ * Deletes a tenant token by ID
+ */
+export const deleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenId = <ThrowOnError extends boolean = false>(options: Options<DeleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdData, ThrowOnError>) => (options.client ?? client).delete<DeleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdResponses, DeleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens/{tokenId}',
+    ...options
+});
+
+/**
+ * Get tenant token
+ *
+ * Returns a tenant token by ID
+ */
+export const getAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenId = <ThrowOnError extends boolean = false>(options: Options<GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdData, ThrowOnError>) => (options.client ?? client).get<GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdResponses, GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens/{tokenId}',
+    ...options
+});
+
+/**
+ * List tokens
+ *
+ * Returns a list of all tokens for a partner
+ */
+export const getAuthV1PartnersByPartnerIdTokens = <ThrowOnError extends boolean = false>(options: Options<GetAuthV1PartnersByPartnerIdTokensData, ThrowOnError>) => (options.client ?? client).get<GetAuthV1PartnersByPartnerIdTokensResponses, GetAuthV1PartnersByPartnerIdTokensErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/auth/v1/partners/{partnerId}/tokens',
+    ...options
+});
+
+/**
+ * Create token
+ *
+ * Creates a new token for a partner
+ */
+export const postAuthV1PartnersByPartnerIdTokens = <ThrowOnError extends boolean = false>(options: Options<PostAuthV1PartnersByPartnerIdTokensData, ThrowOnError>) => (options.client ?? client).post<PostAuthV1PartnersByPartnerIdTokensResponses, PostAuthV1PartnersByPartnerIdTokensErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/auth/v1/partners/{partnerId}/tokens',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Delete token
+ *
+ * Deletes a token by ID for a partner
+ */
+export const deleteAuthV1PartnersByPartnerIdTokensByTokenId = <ThrowOnError extends boolean = false>(options: Options<DeleteAuthV1PartnersByPartnerIdTokensByTokenIdData, ThrowOnError>) => (options.client ?? client).delete<DeleteAuthV1PartnersByPartnerIdTokensByTokenIdResponses, DeleteAuthV1PartnersByPartnerIdTokensByTokenIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/auth/v1/partners/{partnerId}/tokens/{tokenId}',
+    ...options
+});
+
+/**
+ * Get token
+ *
+ * Returns a token by ID for a partner
+ */
+export const getAuthV1PartnersByPartnerIdTokensByTokenId = <ThrowOnError extends boolean = false>(options: Options<GetAuthV1PartnersByPartnerIdTokensByTokenIdData, ThrowOnError>) => (options.client ?? client).get<GetAuthV1PartnersByPartnerIdTokensByTokenIdResponses, GetAuthV1PartnersByPartnerIdTokensByTokenIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/auth/v1/partners/{partnerId}/tokens/{tokenId}',
+    ...options
+});
+
+/**
  * List partner regions
  *
  * Returns a list of regions for the partner
  */
-export const getPartnersByPartnerIdRegions = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdRegionsData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdRegionsResponses, GetPartnersByPartnerIdRegionsErrors, ThrowOnError>({ url: '/partners/{partnerId}/regions', ...options });
+export const getPartnersByPartnerIdRegions = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdRegionsData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdRegionsResponses, GetPartnersByPartnerIdRegionsErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/partners/{partnerId}/regions',
+    ...options
+});
+
+/**
+ * List all regions
+ *
+ * Returns a list of all regions (bypasses partner scoping)
+ */
+export const getRegions = <ThrowOnError extends boolean = false>(options?: Options<GetRegionsData, ThrowOnError>) => (options?.client ?? client).get<GetRegionsResponses, GetRegionsErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/regions',
+    ...options
+});
+
+/**
+ * Get bucket owner
+ *
+ * Returns the owner information for a specific bucket
+ */
+export const getV1BucketsByBucketNameOwner = <ThrowOnError extends boolean = false>(options: Options<GetV1BucketsByBucketNameOwnerData, ThrowOnError>) => (options.client ?? client).get<GetV1BucketsByBucketNameOwnerResponses, GetV1BucketsByBucketNameOwnerErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/buckets/{bucketName}/owner',
+    ...options
+});
+
+/**
+ * Get environment configuration
+ *
+ * Returns environment configuration for the backoffice web application, including Auth0 settings
+ */
+export const getV1Environment = <ThrowOnError extends boolean = false>(options?: Options<GetV1EnvironmentData, ThrowOnError>) => (options?.client ?? client).get<GetV1EnvironmentResponses, unknown, ThrowOnError>({ url: '/v1/environment', ...options });
+
+/**
+ * Get current partner
+ *
+ * Returns details of the authenticated partner
+ */
+export const getV1Partner = <ThrowOnError extends boolean = false>(options?: Options<GetV1PartnerData, ThrowOnError>) => (options?.client ?? client).get<GetV1PartnerResponses, GetV1PartnerErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partner',
+    ...options
+});
+
+/**
+ * List partners
+ *
+ * Returns a paginated list of all partners
+ */
+export const getV1Partners = <ThrowOnError extends boolean = false>(options?: Options<GetV1PartnersData, ThrowOnError>) => (options?.client ?? client).get<GetV1PartnersResponses, GetV1PartnersErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners',
+    ...options
+});
+
+/**
+ * Get partner
+ *
+ * Returns details of a specific partner by ID
+ */
+export const getV1PartnersByPartnerId = <ThrowOnError extends boolean = false>(options: Options<GetV1PartnersByPartnerIdData, ThrowOnError>) => (options.client ?? client).get<GetV1PartnersByPartnerIdResponses, GetV1PartnersByPartnerIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}',
+    ...options
+});
+
+/**
+ * Get partner config
+ *
+ * Returns the configuration for the partner
+ */
+export const getV1PartnersByPartnerIdConfig = <ThrowOnError extends boolean = false>(options: Options<GetV1PartnersByPartnerIdConfigData, ThrowOnError>) => (options.client ?? client).get<GetV1PartnersByPartnerIdConfigResponses, GetV1PartnersByPartnerIdConfigErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/config',
+    ...options
+});
+
+/**
+ * Update partner config
+ *
+ * Updates the configuration for the partner
+ */
+export const putV1PartnersByPartnerIdConfig = <ThrowOnError extends boolean = false>(options: Options<PutV1PartnersByPartnerIdConfigData, ThrowOnError>) => (options.client ?? client).put<PutV1PartnersByPartnerIdConfigResponses, PutV1PartnersByPartnerIdConfigErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/config',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * Get region
  *
  * Returns details of a specific region by ID
  */
-export const getPartnersByPartnerIdRegionsByRegionId = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdRegionsByRegionIdData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdRegionsByRegionIdResponses, GetPartnersByPartnerIdRegionsByRegionIdErrors, ThrowOnError>({ url: '/partners/{partnerId}/regions/{regionId}', ...options });
+export const getV1PartnersByPartnerIdRegionsByRegionId = <ThrowOnError extends boolean = false>(options: Options<GetV1PartnersByPartnerIdRegionsByRegionIdData, ThrowOnError>) => (options.client ?? client).get<GetV1PartnersByPartnerIdRegionsByRegionIdResponses, GetV1PartnersByPartnerIdRegionsByRegionIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/regions/{regionId}',
+    ...options
+});
 
 /**
  * List partner tenants
  *
  * Returns a paginated list of tenants for the partner
  */
-export const getPartnersByPartnerIdTenants = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdTenantsData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdTenantsResponses, GetPartnersByPartnerIdTenantsErrors, ThrowOnError>({ url: '/partners/{partnerId}/tenants', ...options });
+export const getV1PartnersByPartnerIdTenants = <ThrowOnError extends boolean = false>(options: Options<GetV1PartnersByPartnerIdTenantsData, ThrowOnError>) => (options.client ?? client).get<GetV1PartnersByPartnerIdTenantsResponses, GetV1PartnersByPartnerIdTenantsErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants',
+    ...options
+});
 
 /**
  * Create tenant
  *
  * Creates a new tenant for the partner. Created tenant must be initialized with the Setup endpoint before it's ready to use.
  */
-export const postPartnersByPartnerIdTenants = <ThrowOnError extends boolean = false>(options: Options<PostPartnersByPartnerIdTenantsData, ThrowOnError>) => (options.client ?? client).post<PostPartnersByPartnerIdTenantsResponses, PostPartnersByPartnerIdTenantsErrors, ThrowOnError>({
-    url: '/partners/{partnerId}/tenants',
+export const postV1PartnersByPartnerIdTenants = <ThrowOnError extends boolean = false>(options: Options<PostV1PartnersByPartnerIdTenantsData, ThrowOnError>) => (options.client ?? client).post<PostV1PartnersByPartnerIdTenantsResponses, PostV1PartnersByPartnerIdTenantsErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -114,34 +299,51 @@ export const postPartnersByPartnerIdTenants = <ThrowOnError extends boolean = fa
  *
  * Returns details of a specific tenant by ID
  */
-export const getPartnersByPartnerIdTenantsByTenantId = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdTenantsByTenantIdData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdTenantsByTenantIdResponses, GetPartnersByPartnerIdTenantsByTenantIdErrors, ThrowOnError>({ url: '/partners/{partnerId}/tenants/{tenantId}', ...options });
+export const getV1PartnersByPartnerIdTenantsByTenantId = <ThrowOnError extends boolean = false>(options: Options<GetV1PartnersByPartnerIdTenantsByTenantIdData, ThrowOnError>) => (options.client ?? client).get<GetV1PartnersByPartnerIdTenantsByTenantIdResponses, GetV1PartnersByPartnerIdTenantsByTenantIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}',
+    ...options
+});
 
 /**
  * List buckets of given tenant
  */
-export const getPartnersByPartnerIdTenantsByTenantIdBuckets = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdTenantsByTenantIdBucketsData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdTenantsByTenantIdBucketsResponses, GetPartnersByPartnerIdTenantsByTenantIdBucketsErrors, ThrowOnError>({ url: '/partners/{partnerId}/tenants/{tenantId}/buckets', ...options });
+export const getV1PartnersByPartnerIdTenantsByTenantIdBuckets = <ThrowOnError extends boolean = false>(options: Options<GetV1PartnersByPartnerIdTenantsByTenantIdBucketsData, ThrowOnError>) => (options.client ?? client).get<GetV1PartnersByPartnerIdTenantsByTenantIdBucketsResponses, GetV1PartnersByPartnerIdTenantsByTenantIdBucketsErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/buckets',
+    ...options
+});
 
 /**
  * List tenant members
  *
  * Returns users that are members of given org
  */
-export const getPartnersByPartnerIdTenantsByTenantIdMembers = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdTenantsByTenantIdMembersData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdTenantsByTenantIdMembersResponses, GetPartnersByPartnerIdTenantsByTenantIdMembersErrors, ThrowOnError>({ url: '/partners/{partnerId}/tenants/{tenantId}/members', ...options });
+export const getV1PartnersByPartnerIdTenantsByTenantIdMembers = <ThrowOnError extends boolean = false>(options: Options<GetV1PartnersByPartnerIdTenantsByTenantIdMembersData, ThrowOnError>) => (options.client ?? client).get<GetV1PartnersByPartnerIdTenantsByTenantIdMembersResponses, GetV1PartnersByPartnerIdTenantsByTenantIdMembersErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/members',
+    ...options
+});
 
 /**
  * Setup tenant
  *
  * Initiates the setup process for a tenant
  */
-export const postPartnersByPartnerIdTenantsByTenantIdSetup = <ThrowOnError extends boolean = false>(options: Options<PostPartnersByPartnerIdTenantsByTenantIdSetupData, ThrowOnError>) => (options.client ?? client).post<PostPartnersByPartnerIdTenantsByTenantIdSetupResponses, PostPartnersByPartnerIdTenantsByTenantIdSetupErrors, ThrowOnError>({ url: '/partners/{partnerId}/tenants/{tenantId}/setup', ...options });
+export const postV1PartnersByPartnerIdTenantsByTenantIdSetup = <ThrowOnError extends boolean = false>(options: Options<PostV1PartnersByPartnerIdTenantsByTenantIdSetupData, ThrowOnError>) => (options.client ?? client).post<PostV1PartnersByPartnerIdTenantsByTenantIdSetupResponses, PostV1PartnersByPartnerIdTenantsByTenantIdSetupErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/setup',
+    ...options
+});
 
 /**
  * Update tenant status
  *
  * Updates the status of a tenant
  */
-export const postPartnersByPartnerIdTenantsByTenantIdStatus = <ThrowOnError extends boolean = false>(options: Options<PostPartnersByPartnerIdTenantsByTenantIdStatusData, ThrowOnError>) => (options.client ?? client).post<PostPartnersByPartnerIdTenantsByTenantIdStatusResponses, PostPartnersByPartnerIdTenantsByTenantIdStatusErrors, ThrowOnError>({
-    url: '/partners/{partnerId}/tenants/{tenantId}/status',
+export const postV1PartnersByPartnerIdTenantsByTenantIdStatus = <ThrowOnError extends boolean = false>(options: Options<PostV1PartnersByPartnerIdTenantsByTenantIdStatusData, ThrowOnError>) => (options.client ?? client).post<PostV1PartnersByPartnerIdTenantsByTenantIdStatusResponses, PostV1PartnersByPartnerIdTenantsByTenantIdStatusErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/status',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -154,15 +356,20 @@ export const postPartnersByPartnerIdTenantsByTenantIdStatus = <ThrowOnError exte
  *
  * Returns a list of themes for the partner
  */
-export const getPartnersByPartnerIdThemes = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdThemesData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdThemesResponses, GetPartnersByPartnerIdThemesErrors, ThrowOnError>({ url: '/partners/{partnerId}/themes', ...options });
+export const getV1PartnersByPartnerIdThemes = <ThrowOnError extends boolean = false>(options: Options<GetV1PartnersByPartnerIdThemesData, ThrowOnError>) => (options.client ?? client).get<GetV1PartnersByPartnerIdThemesResponses, GetV1PartnersByPartnerIdThemesErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/themes',
+    ...options
+});
 
 /**
  * Create theme
  *
  * Creates a new Aurora Portal theme for the partner
  */
-export const postPartnersByPartnerIdThemes = <ThrowOnError extends boolean = false>(options: Options<PostPartnersByPartnerIdThemesData, ThrowOnError>) => (options.client ?? client).post<PostPartnersByPartnerIdThemesResponses, PostPartnersByPartnerIdThemesErrors, ThrowOnError>({
-    url: '/partners/{partnerId}/themes',
+export const postV1PartnersByPartnerIdThemes = <ThrowOnError extends boolean = false>(options: Options<PostV1PartnersByPartnerIdThemesData, ThrowOnError>) => (options.client ?? client).post<PostV1PartnersByPartnerIdThemesResponses, PostV1PartnersByPartnerIdThemesErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/themes',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -175,22 +382,31 @@ export const postPartnersByPartnerIdThemes = <ThrowOnError extends boolean = fal
  *
  * Deletes a theme by ID
  */
-export const deletePartnersByPartnerIdThemesByThemeId = <ThrowOnError extends boolean = false>(options: Options<DeletePartnersByPartnerIdThemesByThemeIdData, ThrowOnError>) => (options.client ?? client).delete<DeletePartnersByPartnerIdThemesByThemeIdResponses, DeletePartnersByPartnerIdThemesByThemeIdErrors, ThrowOnError>({ url: '/partners/{partnerId}/themes/{themeId}', ...options });
+export const deleteV1PartnersByPartnerIdThemesByThemeId = <ThrowOnError extends boolean = false>(options: Options<DeleteV1PartnersByPartnerIdThemesByThemeIdData, ThrowOnError>) => (options.client ?? client).delete<DeleteV1PartnersByPartnerIdThemesByThemeIdResponses, DeleteV1PartnersByPartnerIdThemesByThemeIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/themes/{themeId}',
+    ...options
+});
 
 /**
  * Get theme
  *
  * Returns details of a specific theme by ID
  */
-export const getPartnersByPartnerIdThemesByThemeId = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdThemesByThemeIdData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdThemesByThemeIdResponses, GetPartnersByPartnerIdThemesByThemeIdErrors, ThrowOnError>({ url: '/partners/{partnerId}/themes/{themeId}', ...options });
+export const getV1PartnersByPartnerIdThemesByThemeId = <ThrowOnError extends boolean = false>(options: Options<GetV1PartnersByPartnerIdThemesByThemeIdData, ThrowOnError>) => (options.client ?? client).get<GetV1PartnersByPartnerIdThemesByThemeIdResponses, GetV1PartnersByPartnerIdThemesByThemeIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/themes/{themeId}',
+    ...options
+});
 
 /**
  * Update theme
  *
  * Updates an Aurora Portal theme for the partner
  */
-export const putPartnersByPartnerIdThemesByThemeId = <ThrowOnError extends boolean = false>(options: Options<PutPartnersByPartnerIdThemesByThemeIdData, ThrowOnError>) => (options.client ?? client).put<PutPartnersByPartnerIdThemesByThemeIdResponses, PutPartnersByPartnerIdThemesByThemeIdErrors, ThrowOnError>({
-    url: '/partners/{partnerId}/themes/{themeId}',
+export const putV1PartnersByPartnerIdThemesByThemeId = <ThrowOnError extends boolean = false>(options: Options<PutV1PartnersByPartnerIdThemesByThemeIdData, ThrowOnError>) => (options.client ?? client).put<PutV1PartnersByPartnerIdThemesByThemeIdResponses, PutV1PartnersByPartnerIdThemesByThemeIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/themes/{themeId}',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -203,15 +419,20 @@ export const putPartnersByPartnerIdThemesByThemeId = <ThrowOnError extends boole
  *
  * Returns a paginated list of users for the partner
  */
-export const getPartnersByPartnerIdUsers = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdUsersData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdUsersResponses, GetPartnersByPartnerIdUsersErrors, ThrowOnError>({ url: '/partners/{partnerId}/users', ...options });
+export const getV1PartnersByPartnerIdUsers = <ThrowOnError extends boolean = false>(options: Options<GetV1PartnersByPartnerIdUsersData, ThrowOnError>) => (options.client ?? client).get<GetV1PartnersByPartnerIdUsersResponses, GetV1PartnersByPartnerIdUsersErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/users',
+    ...options
+});
 
 /**
  * Create user
  *
  * Creates a new user and assigns them to a tenant. If a user with provided email already exists, creation will be skipped and that user will be assigned to a tenant.
  */
-export const postPartnersByPartnerIdUsers = <ThrowOnError extends boolean = false>(options: Options<PostPartnersByPartnerIdUsersData, ThrowOnError>) => (options.client ?? client).post<PostPartnersByPartnerIdUsersResponses, PostPartnersByPartnerIdUsersErrors, ThrowOnError>({
-    url: '/partners/{partnerId}/users',
+export const postV1PartnersByPartnerIdUsers = <ThrowOnError extends boolean = false>(options: Options<PostV1PartnersByPartnerIdUsersData, ThrowOnError>) => (options.client ?? client).post<PostV1PartnersByPartnerIdUsersResponses, PostV1PartnersByPartnerIdUsersErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/users',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -224,46 +445,63 @@ export const postPartnersByPartnerIdUsers = <ThrowOnError extends boolean = fals
  *
  * Returns details of a specific user including tenants and roles
  */
-export const getPartnersByPartnerIdUsersByUserId = <ThrowOnError extends boolean = false>(options: Options<GetPartnersByPartnerIdUsersByUserIdData, ThrowOnError>) => (options.client ?? client).get<GetPartnersByPartnerIdUsersByUserIdResponses, GetPartnersByPartnerIdUsersByUserIdErrors, ThrowOnError>({ url: '/partners/{partnerId}/users/{userId}', ...options });
-
-/**
- * List all regions
- *
- * Returns a list of all regions (bypasses partner scoping)
- */
-export const getRegions = <ThrowOnError extends boolean = false>(options?: Options<GetRegionsData, ThrowOnError>) => (options?.client ?? client).get<GetRegionsResponses, GetRegionsErrors, ThrowOnError>({ url: '/regions', ...options });
+export const getV1PartnersByPartnerIdUsersByUserId = <ThrowOnError extends boolean = false>(options: Options<GetV1PartnersByPartnerIdUsersByUserIdData, ThrowOnError>) => (options.client ?? client).get<GetV1PartnersByPartnerIdUsersByUserIdResponses, GetV1PartnersByPartnerIdUsersByUserIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/users/{userId}',
+    ...options
+});
 
 /**
  * List roles
  *
  * Returns a paginated list of all Aurora Portal roles
  */
-export const getRoles = <ThrowOnError extends boolean = false>(options?: Options<GetRolesData, ThrowOnError>) => (options?.client ?? client).get<GetRolesResponses, GetRolesErrors, ThrowOnError>({ url: '/roles', ...options });
+export const getV1Roles = <ThrowOnError extends boolean = false>(options?: Options<GetV1RolesData, ThrowOnError>) => (options?.client ?? client).get<GetV1RolesResponses, GetV1RolesErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/roles',
+    ...options
+});
 
 /**
  * List S3 credentials
  *
  * Returns a paginated list of all S3 credentials
  */
-export const getS3Credentials = <ThrowOnError extends boolean = false>(options?: Options<GetS3CredentialsData, ThrowOnError>) => (options?.client ?? client).get<GetS3CredentialsResponses, GetS3CredentialsErrors, ThrowOnError>({ url: '/s3_credentials', ...options });
+export const getV1S3Credentials = <ThrowOnError extends boolean = false>(options?: Options<GetV1S3CredentialsData, ThrowOnError>) => (options?.client ?? client).get<GetV1S3CredentialsResponses, GetV1S3CredentialsErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/s3_credentials',
+    ...options
+});
 
 /**
  * Get S3 credential
  *
  * Returns details of a specific S3 credential by ID
  */
-export const getS3CredentialsByS3CredentialId = <ThrowOnError extends boolean = false>(options: Options<GetS3CredentialsByS3CredentialIdData, ThrowOnError>) => (options.client ?? client).get<GetS3CredentialsByS3CredentialIdResponses, GetS3CredentialsByS3CredentialIdErrors, ThrowOnError>({ url: '/s3_credentials/{s3CredentialId}', ...options });
+export const getV1S3CredentialsByS3CredentialId = <ThrowOnError extends boolean = false>(options: Options<GetV1S3CredentialsByS3CredentialIdData, ThrowOnError>) => (options.client ?? client).get<GetV1S3CredentialsByS3CredentialIdResponses, GetV1S3CredentialsByS3CredentialIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/s3_credentials/{s3CredentialId}',
+    ...options
+});
 
 /**
  * List warm tier credentials
  *
  * Returns a paginated list of all warm tier credentials
  */
-export const getWarmTierCredentials = <ThrowOnError extends boolean = false>(options?: Options<GetWarmTierCredentialsData, ThrowOnError>) => (options?.client ?? client).get<GetWarmTierCredentialsResponses, GetWarmTierCredentialsErrors, ThrowOnError>({ url: '/warm_tier_credentials', ...options });
+export const getV1WarmTierCredentials = <ThrowOnError extends boolean = false>(options?: Options<GetV1WarmTierCredentialsData, ThrowOnError>) => (options?.client ?? client).get<GetV1WarmTierCredentialsResponses, GetV1WarmTierCredentialsErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/warm_tier_credentials',
+    ...options
+});
 
 /**
  * Get warm tier credential
  *
  * Returns details of a specific warm tier credential by ID
  */
-export const getWarmTierCredentialsByWarmTierCredentialId = <ThrowOnError extends boolean = false>(options: Options<GetWarmTierCredentialsByWarmTierCredentialIdData, ThrowOnError>) => (options.client ?? client).get<GetWarmTierCredentialsByWarmTierCredentialIdResponses, GetWarmTierCredentialsByWarmTierCredentialIdErrors, ThrowOnError>({ url: '/warm_tier_credentials/{warmTierCredentialId}', ...options });
+export const getV1WarmTierCredentialsByWarmTierCredentialId = <ThrowOnError extends boolean = false>(options: Options<GetV1WarmTierCredentialsByWarmTierCredentialIdData, ThrowOnError>) => (options.client ?? client).get<GetV1WarmTierCredentialsByWarmTierCredentialIdResponses, GetV1WarmTierCredentialsByWarmTierCredentialIdErrors, ThrowOnError>({
+    security: [{ name: 'Authorization', type: 'apiKey' }],
+    url: '/v1/warm_tier_credentials/{warmTierCredentialId}',
+    ...options
+});
