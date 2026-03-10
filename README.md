@@ -98,11 +98,12 @@ pnpx sst secret set Auth0MgmtClientId <value> [--stage <stage>]
 pnpx sst secret set Auth0MgmtClientSecret <value> [--stage <stage>]
 pnpx sst secret set StripeSecretKey <value> [--stage <stage>]
 pnpx sst secret set StripePriceId <value> [--stage <stage>]
+pnpx sst secret set AuroraBackofficeToken <value> [--stage <stage>]
 ```
 
 Omit `--stage` to set for your personal dev stage (defaults to OS username).
 
-The `Auth0MgmtClientId` and `Auth0MgmtClientSecret` are from a **Machine-to-Machine (M2M) application** in Auth0 — see the [Auth0 M2M Setup](#auth0-machine-to-machine-m2m-application) section below.
+The `Auth0MgmtClientId` and `Auth0MgmtClientSecret` are from a **Machine-to-Machine (M2M) application** in Auth0 — see the [Auth0 M2M Setup](#auth0-machine-to-machine-m2m-application) section below. The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below.
 
 ## Commands
 
@@ -244,7 +245,27 @@ VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx
 The project includes a generated TypeScript client for the Aurora Back Office
 API, located in `packages/aurora-backoffice-client/`.
 
-**Regenerating the client** (after API changes):
+### API Token
+
+The backend uses an API token to authenticate with the Aurora Back Office API
+(e.g., to create tenants on user registration).
+
+**Generating the token:**
+
+1. Log in to the Aurora Back Office dashboard at
+   https://backoffice.dev.aur.lu/ff/docs/backoffice-api
+2. Navigate to the API token management section
+3. Generate a new token with the required permissions
+
+**Setting the SST secret:**
+
+```bash
+pnpx sst secret set AuroraBackofficeToken <token> [--stage <stage>]
+```
+
+### Regenerating the client
+
+After API changes:
 
 1. Download the updated Swagger spec from
    https://backoffice.dev.aur.lu/ff/docs/backoffice-api (open the page, then

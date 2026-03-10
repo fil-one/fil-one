@@ -28,7 +28,7 @@
     "oxlint-tsgolint": "^0.16.0",
     "sst": "^4.1.10"
   },
-  "packageManager": "pnpm@10.30.3",
+  "packageManager": "pnpm@10.32.0",
   "engines": {
     "node": ">=24"
   },

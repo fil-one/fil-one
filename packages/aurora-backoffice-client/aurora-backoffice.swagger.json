@@ -1,1519 +1,7 @@
 {
-    "schemes": [],
-    "swagger": "2.0",
-    "info": {
-        "description": "This is Aurora Back Office API.",
-        "title": "Aurora Back Office API",
-        "contact": {},
-        "version": "1.0"
-    },
-    "host": "",
-    "basePath": "/api/v1",
-    "paths": {
-        "/buckets/{bucketName}/owner": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns the owner information for a specific bucket",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Buckets"
-                ],
-                "summary": "Get bucket owner",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bucket name",
-                        "name": "bucketName",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Bucket owner information",
-                        "schema": {
-                            "$ref": "#/definitions/buckets.BucketOwnerResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "404": {
-                        "description": "Bucket not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/environment": {
-            "get": {
-                "description": "Returns environment configuration for the backoffice web application, including Auth0 settings",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Environment"
-                ],
-                "summary": "Get environment configuration",
-                "responses": {
-                    "200": {
-                        "description": "Environment configuration",
-                        "schema": {
-                            "$ref": "#/definitions/models.BackofficeEnvironmentResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/partner": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns details of the authenticated partner",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Partners"
-                ],
-                "summary": "Get current partner",
-                "responses": {
-                    "200": {
-                        "description": "Partner details",
-                        "schema": {
-                            "$ref": "#/definitions/models.PartnerResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Partner not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Error getting partner",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns a paginated list of all partners",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Partners"
-                ],
-                "summary": "List partners",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "default": 1,
-                        "description": "Page number",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 10,
-                        "description": "Page size",
-                        "name": "pageSize",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "List of partners",
-                        "schema": {
-                            "$ref": "#/definitions/models.PaginatedPartnerListResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Error getting partners",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns details of a specific partner by ID",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Partners"
-                ],
-                "summary": "Get partner",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Partner details",
-                        "schema": {
-                            "$ref": "#/definitions/models.PartnerResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Partner not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Error processing request",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/config": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns the configuration for the partner",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Partner Config"
-                ],
-                "summary": "Get partner config",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Partner configuration",
-                        "schema": {
-                            "$ref": "#/definitions/models.PartnerConfigResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to get partner config",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Updates the configuration for the partner",
-                "consumes": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Partner Config"
-                ],
-                "summary": "Update partner config",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Partner configuration update",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.PartnerConfigRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No content"
-                    },
-                    "400": {
-                        "description": "Bad request",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "404": {
-                        "description": "Theme not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Error updating config",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/regions": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns a list of regions for the partner",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Regions"
-                ],
-                "summary": "List partner regions",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "List of regions",
-                        "schema": {
-                            "$ref": "#/definitions/models.RegionListResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/regions/{regionId}": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns details of a specific region by ID",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Regions"
-                ],
-                "summary": "Get region",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Region ID",
-                        "name": "regionId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Region details",
-                        "schema": {
-                            "$ref": "#/definitions/models.RegionResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Region not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to get region",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/tenants": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns a paginated list of tenants for the partner",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Tenants"
-                ],
-                "summary": "List partner tenants",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "default": 1,
-                        "description": "Page number",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 10,
-                        "description": "Page size",
-                        "name": "pageSize",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "List of tenants",
-                        "schema": {
-                            "$ref": "#/definitions/models.PaginatedTenantsResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Error getting tenants",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Creates a new tenant for the partner. Created tenant must be initialized with the Setup endpoint before it's ready to use.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Tenants"
-                ],
-                "summary": "Create tenant",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Tenant creation parameters",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.CreateTenantRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Tenant created successfully",
-                        "schema": {
-                            "$ref": "#/definitions/models.TenantManagementResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "404": {
-                        "description": "Region not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Error creating tenant",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/tenants/{tenantId}": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns details of a specific tenant by ID",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Tenants"
-                ],
-                "summary": "Get tenant",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Tenant ID",
-                        "name": "tenantId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Tenant details",
-                        "schema": {
-                            "$ref": "#/definitions/models.TenantWithMetricsManagementResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Tenant not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Error getting tenant",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/tenants/{tenantId}/buckets": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "tags": [
-                    "Tenants"
-                ],
-                "summary": "List buckets of given tenant",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Tenant ID",
-                        "name": "tenantId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Tenant buckets",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/buckets.ListBucketsResponse"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/tenants/{tenantId}/members": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns users that are members of given org",
-                "tags": [
-                    "Tenants"
-                ],
-                "summary": "List tenant members",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Tenant ID",
-                        "name": "tenantId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Tenant members",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/users.MemberResponse"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Tenant not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "409": {
-                        "description": "Organization id is null",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/tenants/{tenantId}/setup": {
-            "post": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Initiates the setup process for a tenant",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Tenants"
-                ],
-                "summary": "Setup tenant",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Tenant ID",
-                        "name": "tenantId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Setup response",
-                        "schema": {
-                            "$ref": "#/definitions/models.TenantSetupResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/tenants/{tenantId}/status": {
-            "post": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Updates the status of a tenant",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Tenants"
-                ],
-                "summary": "Update tenant status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Tenant ID",
-                        "name": "tenantId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Status update request",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/tenants.UpdateStatusRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No content"
-                    },
-                    "400": {
-                        "description": "Bad request",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Error updating status",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/themes": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns a list of themes for the partner",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Themes"
-                ],
-                "summary": "List themes",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "List of themes",
-                        "schema": {
-                            "$ref": "#/definitions/models.ThemeListResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Error getting themes",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Creates a new Aurora Portal theme for the partner",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Themes"
-                ],
-                "summary": "Create theme",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Theme creation parameters",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.MutateThemeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Theme created successfully",
-                        "schema": {
-                            "$ref": "#/definitions/models.ThemeResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "409": {
-                        "description": "Theme with this name already exists",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Error creating theme",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/themes/{themeId}": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns details of a specific theme by ID",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Themes"
-                ],
-                "summary": "Get theme",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Theme ID",
-                        "name": "themeId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Theme details",
-                        "schema": {
-                            "$ref": "#/definitions/models.ThemeResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Theme not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to get theme",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Updates an Aurora Portal theme for the partner",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Themes"
-                ],
-                "summary": "Update theme",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Theme ID",
-                        "name": "themeId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Theme update parameters",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.MutateThemeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Theme updated successfully",
-                        "schema": {
-                            "$ref": "#/definitions/models.ThemeResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "404": {
-                        "description": "Theme not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "409": {
-                        "description": "Another theme with this name already exists",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Error updating theme",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Deletes a theme by ID",
-                "tags": [
-                    "Themes"
-                ],
-                "summary": "Delete theme",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Theme ID",
-                        "name": "themeId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No content"
-                    },
-                    "404": {
-                        "description": "Theme not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "409": {
-                        "description": "Can't delete theme in use",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to delete theme",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/users": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns a paginated list of users for the partner",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Users"
-                ],
-                "summary": "List users",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "default": 1,
-                        "description": "Page number",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 10,
-                        "description": "Page size",
-                        "name": "pageSize",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Search by email",
-                        "name": "search",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "List of users",
-                        "schema": {
-                            "$ref": "#/definitions/models.PaginatedUserResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to list users",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Creates a new user and assigns them to a tenant. If a user with provided email already exists, creation will be skipped and that user will be assigned to a tenant.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Users"
-                ],
-                "summary": "Create user",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "User registration parameters",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/users.RegisterParams"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "User created successfully",
-                        "schema": {
-                            "$ref": "#/definitions/models.CreateUserResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "404": {
-                        "description": "Tenant or role not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to create user",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/partners/{partnerId}/users/{userId}": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns details of a specific user including tenants and roles",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Users"
-                ],
-                "summary": "Get user",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Partner ID",
-                        "name": "partnerId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "User ID",
-                        "name": "userId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "User details",
-                        "schema": {
-                            "$ref": "#/definitions/models.UserInfoResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "User not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to get user info",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/regions": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns a list of all regions (bypasses partner scoping)",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Regions"
-                ],
-                "summary": "List all regions",
-                "responses": {
-                    "200": {
-                        "description": "List of all regions",
-                        "schema": {
-                            "$ref": "#/definitions/models.RegionListResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Error getting regions",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/roles": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns a paginated list of all Aurora Portal roles",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Roles"
-                ],
-                "summary": "List roles",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "default": 1,
-                        "description": "Page number",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 10,
-                        "description": "Page size",
-                        "name": "pageSize",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "List of roles",
-                        "schema": {
-                            "$ref": "#/definitions/roles.PaginatedRoleResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to list roles",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/s3_credentials": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns a paginated list of all S3 credentials",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "S3 Credentials"
-                ],
-                "summary": "List S3 credentials",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "default": 1,
-                        "description": "Page number",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 10,
-                        "description": "Page size",
-                        "name": "pageSize",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "List of S3 credentials",
-                        "schema": {
-                            "$ref": "#/definitions/models.PaginatedS3CredentialResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Error getting s3 credentials",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/s3_credentials/{s3CredentialId}": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns details of a specific S3 credential by ID",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "S3 Credentials"
-                ],
-                "summary": "Get S3 credential",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "S3 Credential ID",
-                        "name": "s3CredentialId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "S3 credential details",
-                        "schema": {
-                            "$ref": "#/definitions/models.GetS3CredentialsResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "S3 credential not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to get s3 credential info",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/warm_tier_credentials": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns a paginated list of all warm tier credentials",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Warm Tier Credentials"
-                ],
-                "summary": "List warm tier credentials",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "default": 1,
-                        "description": "Page number",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 10,
-                        "description": "Page size",
-                        "name": "pageSize",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "List of warm tier credentials",
-                        "schema": {
-                            "$ref": "#/definitions/models.PaginatedWarmTierCredentialResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Error getting warm tier credentials",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        },
-        "/warm_tier_credentials/{warmTierCredentialId}": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns details of a specific warm tier credential by ID",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Warm Tier Credentials"
-                ],
-                "summary": "Get warm tier credential",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Warm Tier Credential ID",
-                        "name": "warmTierCredentialId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Warm tier credential details",
-                        "schema": {
-                            "$ref": "#/definitions/models.GetWarmTierCredentialResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Warm tier credential not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to get warm tier credential info",
-                        "schema": {
-                            "$ref": "#/definitions/common.ReturnMessage"
-                        }
-                    }
-                }
-            }
-        }
-    },
+    "basePath": "/api",
     "definitions": {
         "buckets.BucketOwnerResponse": {
-            "type": "object",
             "properties": {
                 "orgId": {
                     "type": "string"
@@ -1524,10 +12,10 @@
                 "tenantId": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "buckets.ListBucketsResponse": {
-            "type": "object",
             "properties": {
                 "createdAt": {
                     "type": "string"
@@ -1550,18 +38,192 @@
                 "versioning": {
                     "type": "boolean"
                 }
-            }
+            },
+            "type": "object"
         },
         "common.ReturnMessage": {
-            "type": "object",
             "properties": {
                 "message": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
+        },
+        "model.OperationMetricsResponse": {
+            "properties": {
+                "series": {
+                    "items": {
+                        "$ref": "#/definitions/model.OperationMetricsSeries"
+                    },
+                    "type": "array"
+                }
+            },
+            "type": "object"
+        },
+        "model.OperationMetricsSample": {
+            "properties": {
+                "abortMultipartUpload": {
+                    "type": "integer"
+                },
+                "completeMultipartUpload": {
+                    "type": "integer"
+                },
+                "copyObject": {
+                    "type": "integer"
+                },
+                "createMultipartUpload": {
+                    "type": "integer"
+                },
+                "deleteObject": {
+                    "type": "integer"
+                },
+                "deleteObjectTagging": {
+                    "type": "integer"
+                },
+                "deleteObjects": {
+                    "type": "integer"
+                },
+                "getBucketLocation": {
+                    "type": "integer"
+                },
+                "getBucketVersioning": {
+                    "type": "integer"
+                },
+                "getObject": {
+                    "type": "integer"
+                },
+                "getObjectAttributes": {
+                    "type": "integer"
+                },
+                "getObjectLegalHold": {
+                    "type": "integer"
+                },
+                "getObjectLockConfiguration": {
+                    "type": "integer"
+                },
+                "getObjectRetention": {
+                    "type": "integer"
+                },
+                "getObjectTagging": {
+                    "type": "integer"
+                },
+                "headBucket": {
+                    "type": "integer"
+                },
+                "headObject": {
+                    "type": "integer"
+                },
+                "listBuckets": {
+                    "type": "integer"
+                },
+                "listMultipartUploads": {
+                    "type": "integer"
+                },
+                "listObjectVersions": {
+                    "type": "integer"
+                },
+                "listObjects": {
+                    "type": "integer"
+                },
+                "listObjectsV2": {
+                    "type": "integer"
+                },
+                "listParts": {
+                    "type": "integer"
+                },
+                "putObject": {
+                    "type": "integer"
+                },
+                "putObjectLegalHold": {
+                    "type": "integer"
+                },
+                "putObjectLockConfiguration": {
+                    "type": "integer"
+                },
+                "putObjectRetention": {
+                    "type": "integer"
+                },
+                "putObjectTagging": {
+                    "type": "integer"
+                },
+                "rxBytes": {
+                    "type": "integer"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "txBytes": {
+                    "type": "integer"
+                },
+                "uploadPart": {
+                    "type": "integer"
+                },
+                "uploadPartCopy": {
+                    "type": "integer"
+                },
+                "windowSizeSeconds": {
+                    "type": "integer"
+                }
+            },
+            "type": "object"
+        },
+        "model.OperationMetricsSeries": {
+            "properties": {
+                "samples": {
+                    "items": {
+                        "$ref": "#/definitions/model.OperationMetricsSample"
+                    },
+                    "type": "array"
+                },
+                "tags": {
+                    "$ref": "#/definitions/model.OperationMetricsSeriesKey"
+                }
+            },
+            "type": "object"
+        },
+        "model.OperationMetricsSeriesKey": {
+            "properties": {
+                "requesterTenantId": {
+                    "type": "string"
+                },
+                "trafficClass": {
+                    "type": "string"
+                }
+            },
+            "type": "object"
+        },
+        "model.StorageMetricsResponse": {
+            "properties": {
+                "samples": {
+                    "items": {
+                        "$ref": "#/definitions/model.StorageMetricsSample"
+                    },
+                    "type": "array"
+                }
+            },
+            "type": "object"
+        },
+        "model.StorageMetricsSample": {
+            "properties": {
+                "bytesUsed": {
+                    "type": "integer"
+                },
+                "objectCount": {
+                    "type": "integer"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "versionCount": {
+                    "type": "integer"
+                },
+                "windowSize": {
+                    "type": "integer"
+                }
+            },
+            "type": "object"
         },
         "models.BackofficeEnvironmentResponse": {
-            "type": "object",
             "properties": {
                 "auth0Audience": {
                     "type": "string"
@@ -1578,10 +240,30 @@
                 "tracingUrl": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
+        },
+        "models.CreateBackOfficeTokenRequest": {
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "permissions": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array"
+                }
+            },
+            "type": "object"
         },
         "models.CreateTenantRequest": {
-            "type": "object",
             "properties": {
                 "accessKeyQuantityLimit": {
                     "type": "integer"
@@ -1601,18 +283,32 @@
                 "regionId": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
+        },
+        "models.CreateTokenPortalRequest": {
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            },
+            "type": "object"
         },
         "models.CreateUserResponse": {
-            "type": "object",
             "properties": {
                 "userId": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.GetS3CredentialsResponse": {
-            "type": "object",
             "properties": {
                 "accessKeyId": {
                     "type": "string"
@@ -1632,10 +328,10 @@
                 "region": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.GetWarmTierCredentialResponse": {
-            "type": "object",
             "properties": {
                 "accessKeyId": {
                     "type": "string"
@@ -1649,10 +345,10 @@
                 "name": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.MutateThemeRequest": {
-            "type": "object",
             "properties": {
                 "colors": {
                     "$ref": "#/definitions/models.ThemeColors"
@@ -1666,10 +362,10 @@
                 "name": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.PaginatedPartnerListResponse": {
-            "type": "object",
             "properties": {
                 "page": {
                     "type": "integer"
@@ -1678,18 +374,18 @@
                     "type": "integer"
                 },
                 "partners": {
-                    "type": "array",
                     "items": {
                         "$ref": "#/definitions/models.PartnerBaseResponse"
-                    }
+                    },
+                    "type": "array"
                 },
                 "totalCount": {
                     "type": "integer"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.PaginatedS3CredentialResponse": {
-            "type": "object",
             "properties": {
                 "page": {
                     "type": "integer"
@@ -1698,18 +394,18 @@
                     "type": "integer"
                 },
                 "s3Credentials": {
-                    "type": "array",
                     "items": {
                         "$ref": "#/definitions/models.S3CredentialBase"
-                    }
+                    },
+                    "type": "array"
                 },
                 "totalCount": {
                     "type": "integer"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.PaginatedTenantsResponse": {
-            "type": "object",
             "properties": {
                 "page": {
                     "type": "integer"
@@ -1718,18 +414,18 @@
                     "type": "integer"
                 },
                 "tenants": {
-                    "type": "array",
                     "items": {
                         "$ref": "#/definitions/models.TenantWithMetricsManagementResponse"
-                    }
+                    },
+                    "type": "array"
                 },
                 "totalCount": {
                     "type": "integer"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.PaginatedUserResponse": {
-            "type": "object",
             "properties": {
                 "page": {
                     "type": "integer"
@@ -1741,15 +437,15 @@
                     "type": "integer"
                 },
                 "users": {
-                    "type": "array",
                     "items": {
                         "$ref": "#/definitions/models.UserResponse"
-                    }
+                    },
+                    "type": "array"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.PaginatedWarmTierCredentialResponse": {
-            "type": "object",
             "properties": {
                 "page": {
                     "type": "integer"
@@ -1761,15 +457,15 @@
                     "type": "integer"
                 },
                 "warmTierCredentials": {
-                    "type": "array",
                     "items": {
                         "$ref": "#/definitions/models.WarmTierCredentialBase"
-                    }
+                    },
+                    "type": "array"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.PartnerBaseResponse": {
-            "type": "object",
             "properties": {
                 "id": {
                     "type": "string"
@@ -1777,18 +473,18 @@
                 "name": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.PartnerConfigRequest": {
-            "type": "object",
             "properties": {
                 "themeId": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.PartnerConfigResponse": {
-            "type": "object",
             "properties": {
                 "themeId": {
                     "type": "string"
@@ -1796,10 +492,10 @@
                 "themeName": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.PartnerResponse": {
-            "type": "object",
             "properties": {
                 "database": {
                     "type": "string"
@@ -1816,10 +512,10 @@
                 "portalDomain": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.RegionListBase": {
-            "type": "object",
             "properties": {
                 "id": {
                     "type": "string"
@@ -1830,21 +526,21 @@
                 "partnerId": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.RegionListResponse": {
-            "type": "object",
             "properties": {
                 "regions": {
-                    "type": "array",
                     "items": {
                         "$ref": "#/definitions/models.RegionListBase"
-                    }
+                    },
+                    "type": "array"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.RegionResponse": {
-            "type": "object",
             "properties": {
                 "id": {
                     "type": "string"
@@ -1861,10 +557,10 @@
                 "warmTierCredentialId": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.S3CredentialBase": {
-            "type": "object",
             "properties": {
                 "id": {
                     "type": "string"
@@ -1872,10 +568,10 @@
                 "name": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.SetupStep": {
-            "type": "string",
             "enum": [
                 "NOT_STARTED",
                 "ORGANIZATION_CREATED",
@@ -1886,6 +582,7 @@
                 "TENANT_ADMIN_USER_POLICY_ATTACHED",
                 "FINISHED"
             ],
+            "type": "string",
             "x-enum-varnames": [
                 "NOT_STARTED",
                 "ORGANIZATION_CRATED",
@@ -1898,7 +595,6 @@
             ]
         },
         "models.TenantManagementResponse": {
-            "type": "object",
             "properties": {
                 "accessKeyQuantityLimit": {
                     "type": "integer"
@@ -1936,10 +632,10 @@
                 "status": {
                     "$ref": "#/definitions/models.TenantStatus"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.TenantSetupResponse": {
-            "type": "object",
             "properties": {
                 "id": {
                     "type": "string"
@@ -1947,15 +643,28 @@
                 "lastSetupStep": {
                     "$ref": "#/definitions/models.SetupStep"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.TenantStatus": {
-            "type": "string",
             "enum": [
                 "DISABLED",
                 "LOCKED",
                 "WRITE_LOCKED",
                 "ACTIVE"
+            ],
+            "type": "string",
+            "x-enum-comments": {
+                "ACTIVE": "ACTIVE allows full access (read, write, delete).",
+                "DISABLED": "DISABLED denies all actions for the tenant.",
+                "LOCKED": "LOCKED makes the tenant read-only (no writes or deletes).",
+                "WRITE_LOCKED": "WRITE_LOCKED blocks writes but still allows reads and deletes."
+            },
+            "x-enum-descriptions": [
+                "DISABLED denies all actions for the tenant.",
+                "LOCKED makes the tenant read-only (no writes or deletes).",
+                "WRITE_LOCKED blocks writes but still allows reads and deletes.",
+                "ACTIVE allows full access (read, write, delete)."
             ],
             "x-enum-varnames": [
                 "DISABLED",
@@ -1965,7 +674,6 @@
             ]
         },
         "models.TenantWithMetricsManagementResponse": {
-            "type": "object",
             "properties": {
                 "accessKeyQuantityLimit": {
                     "type": "integer"
@@ -2009,10 +717,10 @@
                 "status": {
                     "$ref": "#/definitions/models.TenantStatus"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.ThemeColors": {
-            "type": "object",
             "properties": {
                 "accentBackground": {
                     "type": "string"
@@ -2029,21 +737,21 @@
                 "tableAccent": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.ThemeListResponse": {
-            "type": "object",
             "properties": {
                 "themes": {
-                    "type": "array",
                     "items": {
                         "$ref": "#/definitions/models.ThemeResponseBase"
-                    }
+                    },
+                    "type": "array"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.ThemeResponse": {
-            "type": "object",
             "properties": {
                 "colors": {
                     "$ref": "#/definitions/models.ThemeColors"
@@ -2066,10 +774,10 @@
                 "name": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.ThemeResponseBase": {
-            "type": "object",
             "properties": {
                 "createdAt": {
                     "type": "string"
@@ -2083,10 +791,150 @@
                 "name": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
+        },
+        "models.TokenBackOfficeResponse": {
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "permissions": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array"
+                }
+            },
+            "type": "object"
+        },
+        "models.TokenBackOfficeResponseBase": {
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            },
+            "type": "object"
+        },
+        "models.TokenCreateBackOfficeResponse": {
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "permissions": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array"
+                },
+                "token": {
+                    "type": "string"
+                }
+            },
+            "type": "object"
+        },
+        "models.TokenCreatePortalResponse": {
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                }
+            },
+            "type": "object"
+        },
+        "models.TokenListBackOfficeResponse": {
+            "properties": {
+                "tokens": {
+                    "items": {
+                        "$ref": "#/definitions/models.TokenBackOfficeResponseBase"
+                    },
+                    "type": "array"
+                }
+            },
+            "type": "object"
+        },
+        "models.TokenListPortalResponse": {
+            "properties": {
+                "tokens": {
+                    "items": {
+                        "$ref": "#/definitions/models.TokenPortalResponse"
+                    },
+                    "type": "array"
+                }
+            },
+            "type": "object"
+        },
+        "models.TokenPortalResponse": {
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            },
+            "type": "object"
         },
         "models.UserInfoResponse": {
-            "type": "object",
             "properties": {
                 "avatarUrl": {
                     "type": "string"
@@ -2104,18 +952,18 @@
                     "type": "string"
                 },
                 "tenants": {
-                    "type": "array",
                     "items": {
                         "$ref": "#/definitions/models.UserTenantInfoResponse"
-                    }
+                    },
+                    "type": "array"
                 },
                 "userId": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.UserResponse": {
-            "type": "object",
             "properties": {
                 "email": {
                     "type": "string"
@@ -2126,10 +974,10 @@
                 "userId": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.UserRole": {
-            "type": "object",
             "properties": {
                 "id": {
                     "type": "string"
@@ -2137,10 +985,10 @@
                 "name": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.UserTenantInfoResponse": {
-            "type": "object",
             "properties": {
                 "id": {
                     "type": "string"
@@ -2155,15 +1003,15 @@
                     "type": "string"
                 },
                 "roles": {
-                    "type": "array",
                     "items": {
                         "$ref": "#/definitions/models.UserRole"
-                    }
+                    },
+                    "type": "array"
                 }
-            }
+            },
+            "type": "object"
         },
         "models.WarmTierCredentialBase": {
-            "type": "object",
             "properties": {
                 "id": {
                     "type": "string"
@@ -2171,10 +1019,10 @@
                 "name": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "roles.PaginatedRoleResponse": {
-            "type": "object",
             "properties": {
                 "page": {
                     "type": "integer"
@@ -2183,18 +1031,18 @@
                     "type": "integer"
                 },
                 "roles": {
-                    "type": "array",
                     "items": {
                         "$ref": "#/definitions/roles.RoleResponse"
-                    }
+                    },
+                    "type": "array"
                 },
                 "totalCount": {
                     "type": "integer"
                 }
-            }
+            },
+            "type": "object"
         },
         "roles.RoleResponse": {
-            "type": "object",
             "properties": {
                 "id": {
                     "type": "string"
@@ -2202,18 +1050,18 @@
                 "name": {
                     "type": "string"
                 }
-            }
+            },
+            "type": "object"
         },
         "tenants.UpdateStatusRequest": {
-            "type": "object",
             "properties": {
                 "status": {
                     "$ref": "#/definitions/models.TenantStatus"
                 }
-            }
+            },
+            "type": "object"
         },
         "users.MemberResponse": {
-            "type": "object",
             "properties": {
                 "email": {
                     "type": "string"
@@ -2222,15 +1070,15 @@
                     "type": "string"
                 },
                 "roles": {
-                    "type": "array",
                     "items": {
                         "type": "string"
-                    }
+                    },
+                    "type": "array"
                 }
-            }
+            },
+            "type": "object"
         },
         "users.RegisterParams": {
-            "type": "object",
             "properties": {
                 "email": {
                     "type": "string"
@@ -2241,7 +1089,2271 @@
                 "tenantId": {
                     "type": "string"
                 }
+            },
+            "type": "object"
+        }
+    },
+    "host": "",
+    "info": {
+        "contact": {},
+        "description": "This is Aurora Back Office API.",
+        "title": "Aurora Back Office API",
+        "version": "1.0"
+    },
+    "paths": {
+        "/analytics/v1/{partnerId}/buckets/{bucketName}/operations": {
+            "get": {
+                "description": "Returns S3 operation metrics for a bucket in the given time range, optionally resampled by window duration and grouped by tags",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Bucket name",
+                        "in": "path",
+                        "name": "bucketName",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Start of time range (RFC3339)",
+                        "in": "query",
+                        "name": "from",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "End of time range (RFC3339)",
+                        "in": "query",
+                        "name": "to",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Resample window duration (e.g. 5m, 1h)",
+                        "in": "query",
+                        "name": "window",
+                        "type": "string"
+                    },
+                    {
+                        "description": "Group by fields (comma-separated): trafficClass,requesterTenantId",
+                        "in": "query",
+                        "name": "groupBy",
+                        "type": "string"
+                    },
+                    {
+                        "description": "Filter metrics to a requester tenant ID",
+                        "in": "query",
+                        "name": "requesterTenantId",
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Operation metrics",
+                        "schema": {
+                            "$ref": "#/definitions/model.OperationMetricsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get bucket operation metrics",
+                "tags": [
+                    "Metrics"
+                ]
+            }
+        },
+        "/analytics/v1/{partnerId}/buckets/{bucketName}/storage": {
+            "get": {
+                "description": "Returns storage metrics for a bucket in the given time range, optionally resampled by window duration",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Bucket name",
+                        "in": "path",
+                        "name": "bucketName",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Start of time range (RFC3339)",
+                        "in": "query",
+                        "name": "from",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "End of time range (RFC3339)",
+                        "in": "query",
+                        "name": "to",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "ResampleStorageMetrics window duration (e.g. 5m, 1h)",
+                        "in": "query",
+                        "name": "window",
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Storage metrics",
+                        "schema": {
+                            "$ref": "#/definitions/model.StorageMetricsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get bucket storage metrics",
+                "tags": [
+                    "Metrics"
+                ]
+            }
+        },
+        "/analytics/v1/{partnerId}/tenants/{tenantId}/operations": {
+            "get": {
+                "description": "Returns S3 operation metrics for a tenant in the given time range, optionally resampled by window duration and grouped by tags",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Tenant ID",
+                        "in": "path",
+                        "name": "tenantId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Start of time range (RFC3339)",
+                        "in": "query",
+                        "name": "from",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "End of time range (RFC3339)",
+                        "in": "query",
+                        "name": "to",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Resample window duration (e.g. 5m, 1h)",
+                        "in": "query",
+                        "name": "window",
+                        "type": "string"
+                    },
+                    {
+                        "description": "Group by fields (comma-separated): trafficClass",
+                        "in": "query",
+                        "name": "groupBy",
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Operation metrics",
+                        "schema": {
+                            "$ref": "#/definitions/model.OperationMetricsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get tenant operation metrics",
+                "tags": [
+                    "Metrics"
+                ]
+            }
+        },
+        "/analytics/v1/{partnerId}/tenants/{tenantId}/storage": {
+            "get": {
+                "description": "Returns storage metrics for a tenant in the given time range, optionally resampled by window duration",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Tenant ID",
+                        "in": "path",
+                        "name": "tenantId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Start of time range (RFC3339)",
+                        "in": "query",
+                        "name": "from",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "End of time range (RFC3339)",
+                        "in": "query",
+                        "name": "to",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Resample window duration (e.g. 5m, 1h)",
+                        "in": "query",
+                        "name": "window",
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Storage metrics",
+                        "schema": {
+                            "$ref": "#/definitions/model.StorageMetricsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get tenant storage metrics",
+                "tags": [
+                    "Metrics"
+                ]
+            }
+        },
+        "/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens": {
+            "get": {
+                "description": "Returns a list of all tokens for a tenant",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Tenant ID",
+                        "in": "path",
+                        "name": "tenantId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of tenant tokens",
+                        "schema": {
+                            "$ref": "#/definitions/models.TokenListPortalResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Error getting tokens",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List tenant tokens",
+                "tags": [
+                    "Tenant Token"
+                ]
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "description": "Creates a new token for a tenant",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Tenant ID",
+                        "in": "path",
+                        "name": "tenantId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Token creation request",
+                        "in": "body",
+                        "name": "request",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.CreateTokenPortalRequest"
+                        }
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Tenant token created",
+                        "schema": {
+                            "$ref": "#/definitions/models.TokenCreatePortalResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or parameters",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error while creating token",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Create tenant token",
+                "tags": [
+                    "Tenant Token"
+                ]
+            }
+        },
+        "/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens/{tokenId}": {
+            "delete": {
+                "description": "Deletes a tenant token by ID",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Tenant ID",
+                        "in": "path",
+                        "name": "tenantId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Token ID",
+                        "in": "path",
+                        "name": "tokenId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Token deleted"
+                    },
+                    "404": {
+                        "description": "Token not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error deleting token",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Delete tenant token",
+                "tags": [
+                    "Tenant Token"
+                ]
+            },
+            "get": {
+                "description": "Returns a tenant token by ID",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Tenant ID",
+                        "in": "path",
+                        "name": "tenantId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Token ID",
+                        "in": "path",
+                        "name": "tokenId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tenant token details",
+                        "schema": {
+                            "$ref": "#/definitions/models.TokenPortalResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Token not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error getting token",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get tenant token",
+                "tags": [
+                    "Tenant Token"
+                ]
+            }
+        },
+        "/auth/v1/partners/{partnerId}/tokens": {
+            "get": {
+                "description": "Returns a list of all tokens for a partner",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of tokens",
+                        "schema": {
+                            "$ref": "#/definitions/models.TokenListBackOfficeResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Error getting tokens",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List tokens",
+                "tags": [
+                    "Partner Token"
+                ]
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "description": "Creates a new token for a partner",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Token creation request",
+                        "in": "body",
+                        "name": "request",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.CreateBackOfficeTokenRequest"
+                        }
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Token created",
+                        "schema": {
+                            "$ref": "#/definitions/models.TokenCreateBackOfficeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or parameters",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "409": {
+                        "description": "Token with this name already exists",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error while creating token",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Create token",
+                "tags": [
+                    "Partner Token"
+                ]
+            }
+        },
+        "/auth/v1/partners/{partnerId}/tokens/{tokenId}": {
+            "delete": {
+                "description": "Deletes a token by ID for a partner",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Token ID",
+                        "in": "path",
+                        "name": "tokenId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Token deleted"
+                    },
+                    "404": {
+                        "description": "Token not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error deleting token",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Delete token",
+                "tags": [
+                    "Partner Token"
+                ]
+            },
+            "get": {
+                "description": "Returns a token by ID for a partner",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Token ID",
+                        "in": "path",
+                        "name": "tokenId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Token details",
+                        "schema": {
+                            "$ref": "#/definitions/models.TokenBackOfficeResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Token not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error getting token",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get token",
+                "tags": [
+                    "Partner Token"
+                ]
+            }
+        },
+        "/partners/{partnerId}/regions": {
+            "get": {
+                "description": "Returns a list of regions for the partner",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of regions",
+                        "schema": {
+                            "$ref": "#/definitions/models.RegionListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List partner regions",
+                "tags": [
+                    "Regions"
+                ]
+            }
+        },
+        "/regions": {
+            "get": {
+                "description": "Returns a list of all regions (bypasses partner scoping)",
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of all regions",
+                        "schema": {
+                            "$ref": "#/definitions/models.RegionListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Error getting regions",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List all regions",
+                "tags": [
+                    "Regions"
+                ]
+            }
+        },
+        "/v1/buckets/{bucketName}/owner": {
+            "get": {
+                "description": "Returns the owner information for a specific bucket",
+                "parameters": [
+                    {
+                        "description": "Bucket name",
+                        "in": "path",
+                        "name": "bucketName",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Bucket owner information",
+                        "schema": {
+                            "$ref": "#/definitions/buckets.BucketOwnerResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "404": {
+                        "description": "Bucket not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get bucket owner",
+                "tags": [
+                    "Buckets"
+                ]
+            }
+        },
+        "/v1/environment": {
+            "get": {
+                "description": "Returns environment configuration for the backoffice web application, including Auth0 settings",
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Environment configuration",
+                        "schema": {
+                            "$ref": "#/definitions/models.BackofficeEnvironmentResponse"
+                        }
+                    }
+                },
+                "summary": "Get environment configuration",
+                "tags": [
+                    "Environment"
+                ]
+            }
+        },
+        "/v1/partner": {
+            "get": {
+                "description": "Returns details of the authenticated partner",
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Partner details",
+                        "schema": {
+                            "$ref": "#/definitions/models.PartnerResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Partner not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error getting partner",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get current partner",
+                "tags": [
+                    "Partners"
+                ]
+            }
+        },
+        "/v1/partners": {
+            "get": {
+                "description": "Returns a paginated list of all partners",
+                "parameters": [
+                    {
+                        "default": 1,
+                        "description": "Page number",
+                        "in": "query",
+                        "name": "page",
+                        "type": "integer"
+                    },
+                    {
+                        "default": 10,
+                        "description": "Page size",
+                        "in": "query",
+                        "name": "pageSize",
+                        "type": "integer"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of partners",
+                        "schema": {
+                            "$ref": "#/definitions/models.PaginatedPartnerListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Error getting partners",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List partners",
+                "tags": [
+                    "Partners"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}": {
+            "get": {
+                "description": "Returns details of a specific partner by ID",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Partner details",
+                        "schema": {
+                            "$ref": "#/definitions/models.PartnerResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Partner not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error processing request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get partner",
+                "tags": [
+                    "Partners"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}/config": {
+            "get": {
+                "description": "Returns the configuration for the partner",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Partner configuration",
+                        "schema": {
+                            "$ref": "#/definitions/models.PartnerConfigResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to get partner config",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get partner config",
+                "tags": [
+                    "Partners"
+                ]
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "description": "Updates the configuration for the partner",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Partner configuration update",
+                        "in": "body",
+                        "name": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.PartnerConfigRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No content"
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "404": {
+                        "description": "Theme not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error updating config",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Update partner config",
+                "tags": [
+                    "Partners"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}/regions/{regionId}": {
+            "get": {
+                "description": "Returns details of a specific region by ID",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Region ID",
+                        "in": "path",
+                        "name": "regionId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Region details",
+                        "schema": {
+                            "$ref": "#/definitions/models.RegionResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Region not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to get region",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get region",
+                "tags": [
+                    "Regions"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}/tenants": {
+            "get": {
+                "description": "Returns a paginated list of tenants for the partner",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "default": 1,
+                        "description": "Page number",
+                        "in": "query",
+                        "name": "page",
+                        "type": "integer"
+                    },
+                    {
+                        "default": 10,
+                        "description": "Page size",
+                        "in": "query",
+                        "name": "pageSize",
+                        "type": "integer"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of tenants",
+                        "schema": {
+                            "$ref": "#/definitions/models.PaginatedTenantsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Error getting tenants",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List partner tenants",
+                "tags": [
+                    "Tenants"
+                ]
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "description": "Creates a new tenant for the partner. Created tenant must be initialized with the Setup endpoint before it's ready to use.",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Tenant creation parameters",
+                        "in": "body",
+                        "name": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.CreateTenantRequest"
+                        }
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Tenant created successfully",
+                        "schema": {
+                            "$ref": "#/definitions/models.TenantManagementResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "404": {
+                        "description": "Region not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error creating tenant",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Create tenant",
+                "tags": [
+                    "Tenants"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}/tenants/{tenantId}": {
+            "get": {
+                "description": "Returns details of a specific tenant by ID",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Tenant ID",
+                        "in": "path",
+                        "name": "tenantId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tenant details",
+                        "schema": {
+                            "$ref": "#/definitions/models.TenantWithMetricsManagementResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Tenant not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error getting tenant",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get tenant",
+                "tags": [
+                    "Tenants"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}/tenants/{tenantId}/buckets": {
+            "get": {
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Tenant ID",
+                        "in": "path",
+                        "name": "tenantId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tenant buckets",
+                        "schema": {
+                            "items": {
+                                "$ref": "#/definitions/buckets.ListBucketsResponse"
+                            },
+                            "type": "array"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List buckets of given tenant",
+                "tags": [
+                    "Tenants"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}/tenants/{tenantId}/members": {
+            "get": {
+                "description": "Returns users that are members of given org",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Tenant ID",
+                        "in": "path",
+                        "name": "tenantId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tenant members",
+                        "schema": {
+                            "items": {
+                                "$ref": "#/definitions/users.MemberResponse"
+                            },
+                            "type": "array"
+                        }
+                    },
+                    "404": {
+                        "description": "Tenant not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "409": {
+                        "description": "Organization id is null",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List tenant members",
+                "tags": [
+                    "Tenants"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}/tenants/{tenantId}/setup": {
+            "post": {
+                "description": "Initiates the setup process for a tenant",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Tenant ID",
+                        "in": "path",
+                        "name": "tenantId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Setup response",
+                        "schema": {
+                            "$ref": "#/definitions/models.TenantSetupResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Setup tenant",
+                "tags": [
+                    "Tenants"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}/tenants/{tenantId}/status": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "description": "Updates the status of a tenant",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Tenant ID",
+                        "in": "path",
+                        "name": "tenantId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Status update request",
+                        "in": "body",
+                        "name": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/tenants.UpdateStatusRequest"
+                        }
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No content"
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error updating status",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Update tenant status",
+                "tags": [
+                    "Tenants"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}/themes": {
+            "get": {
+                "description": "Returns a list of themes for the partner",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of themes",
+                        "schema": {
+                            "$ref": "#/definitions/models.ThemeListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Error getting themes",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List themes",
+                "tags": [
+                    "Themes"
+                ]
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "description": "Creates a new Aurora Portal theme for the partner",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Theme creation parameters",
+                        "in": "body",
+                        "name": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.MutateThemeRequest"
+                        }
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Theme created successfully",
+                        "schema": {
+                            "$ref": "#/definitions/models.ThemeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "409": {
+                        "description": "Theme with this name already exists",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error creating theme",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Create theme",
+                "tags": [
+                    "Themes"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}/themes/{themeId}": {
+            "delete": {
+                "description": "Deletes a theme by ID",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Theme ID",
+                        "in": "path",
+                        "name": "themeId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No content"
+                    },
+                    "404": {
+                        "description": "Theme not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "409": {
+                        "description": "Can't delete theme in use",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to delete theme",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Delete theme",
+                "tags": [
+                    "Themes"
+                ]
+            },
+            "get": {
+                "description": "Returns details of a specific theme by ID",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Theme ID",
+                        "in": "path",
+                        "name": "themeId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Theme details",
+                        "schema": {
+                            "$ref": "#/definitions/models.ThemeResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Theme not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to get theme",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get theme",
+                "tags": [
+                    "Themes"
+                ]
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "description": "Updates an Aurora Portal theme for the partner",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Theme ID",
+                        "in": "path",
+                        "name": "themeId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "Theme update parameters",
+                        "in": "body",
+                        "name": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.MutateThemeRequest"
+                        }
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Theme updated successfully",
+                        "schema": {
+                            "$ref": "#/definitions/models.ThemeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "404": {
+                        "description": "Theme not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "409": {
+                        "description": "Another theme with this name already exists",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Error updating theme",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Update theme",
+                "tags": [
+                    "Themes"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}/users": {
+            "get": {
+                "description": "Returns a paginated list of users for the partner",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "default": 1,
+                        "description": "Page number",
+                        "in": "query",
+                        "name": "page",
+                        "type": "integer"
+                    },
+                    {
+                        "default": 10,
+                        "description": "Page size",
+                        "in": "query",
+                        "name": "pageSize",
+                        "type": "integer"
+                    },
+                    {
+                        "description": "Search by email",
+                        "in": "query",
+                        "name": "search",
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of users",
+                        "schema": {
+                            "$ref": "#/definitions/models.PaginatedUserResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to list users",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List users",
+                "tags": [
+                    "Users"
+                ]
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "description": "Creates a new user and assigns them to a tenant. If a user with provided email already exists, creation will be skipped and that user will be assigned to a tenant.",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "User registration parameters",
+                        "in": "body",
+                        "name": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/users.RegisterParams"
+                        }
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "201": {
+                        "description": "User created successfully",
+                        "schema": {
+                            "$ref": "#/definitions/models.CreateUserResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "404": {
+                        "description": "Tenant or role not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to create user",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Create user",
+                "tags": [
+                    "Users"
+                ]
+            }
+        },
+        "/v1/partners/{partnerId}/users/{userId}": {
+            "get": {
+                "description": "Returns details of a specific user including tenants and roles",
+                "parameters": [
+                    {
+                        "description": "Partner ID",
+                        "in": "path",
+                        "name": "partnerId",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "description": "User ID",
+                        "in": "path",
+                        "name": "userId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User details",
+                        "schema": {
+                            "$ref": "#/definitions/models.UserInfoResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to get user info",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get user",
+                "tags": [
+                    "Users"
+                ]
+            }
+        },
+        "/v1/roles": {
+            "get": {
+                "description": "Returns a paginated list of all Aurora Portal roles",
+                "parameters": [
+                    {
+                        "default": 1,
+                        "description": "Page number",
+                        "in": "query",
+                        "name": "page",
+                        "type": "integer"
+                    },
+                    {
+                        "default": 10,
+                        "description": "Page size",
+                        "in": "query",
+                        "name": "pageSize",
+                        "type": "integer"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of roles",
+                        "schema": {
+                            "$ref": "#/definitions/roles.PaginatedRoleResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to list roles",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List roles",
+                "tags": [
+                    "Roles"
+                ]
+            }
+        },
+        "/v1/s3_credentials": {
+            "get": {
+                "description": "Returns a paginated list of all S3 credentials",
+                "parameters": [
+                    {
+                        "default": 1,
+                        "description": "Page number",
+                        "in": "query",
+                        "name": "page",
+                        "type": "integer"
+                    },
+                    {
+                        "default": 10,
+                        "description": "Page size",
+                        "in": "query",
+                        "name": "pageSize",
+                        "type": "integer"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of S3 credentials",
+                        "schema": {
+                            "$ref": "#/definitions/models.PaginatedS3CredentialResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Error getting s3 credentials",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List S3 credentials",
+                "tags": [
+                    "S3 Credentials"
+                ]
+            }
+        },
+        "/v1/s3_credentials/{s3CredentialId}": {
+            "get": {
+                "description": "Returns details of a specific S3 credential by ID",
+                "parameters": [
+                    {
+                        "description": "S3 Credential ID",
+                        "in": "path",
+                        "name": "s3CredentialId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "S3 credential details",
+                        "schema": {
+                            "$ref": "#/definitions/models.GetS3CredentialsResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "S3 credential not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to get s3 credential info",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get S3 credential",
+                "tags": [
+                    "S3 Credentials"
+                ]
+            }
+        },
+        "/v1/warm_tier_credentials": {
+            "get": {
+                "description": "Returns a paginated list of all warm tier credentials",
+                "parameters": [
+                    {
+                        "default": 1,
+                        "description": "Page number",
+                        "in": "query",
+                        "name": "page",
+                        "type": "integer"
+                    },
+                    {
+                        "default": 10,
+                        "description": "Page size",
+                        "in": "query",
+                        "name": "pageSize",
+                        "type": "integer"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of warm tier credentials",
+                        "schema": {
+                            "$ref": "#/definitions/models.PaginatedWarmTierCredentialResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Error getting warm tier credentials",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "List warm tier credentials",
+                "tags": [
+                    "Warm Tier Credentials"
+                ]
+            }
+        },
+        "/v1/warm_tier_credentials/{warmTierCredentialId}": {
+            "get": {
+                "description": "Returns details of a specific warm tier credential by ID",
+                "parameters": [
+                    {
+                        "description": "Warm Tier Credential ID",
+                        "in": "path",
+                        "name": "warmTierCredentialId",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Warm tier credential details",
+                        "schema": {
+                            "$ref": "#/definitions/models.GetWarmTierCredentialResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Warm tier credential not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to get warm tier credential info",
+                        "schema": {
+                            "$ref": "#/definitions/common.ReturnMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "summary": "Get warm tier credential",
+                "tags": [
+                    "Warm Tier Credentials"
+                ]
             }
         }
-    }
+    },
+    "schemes": [],
+    "securityDefinitions": {
+        "Bearer": {
+            "description": "Type \"Bearer\" followed by a space and then your token.",
+            "in": "header",
+            "name": "Authorization",
+            "type": "apiKey"
+        }
+    },
+    "swagger": "2.0"
 }

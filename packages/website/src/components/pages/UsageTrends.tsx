@@ -128,7 +128,7 @@ export function UsageTrends({ storageUsed, objectsCount }: UsageTrendsProps) {
               <YAxis hide />
               <Tooltip
                 contentStyle={{ fontSize: 12, borderRadius: 6 }}
-                formatter={(value: number | string | undefined) => [
+                formatter={(value) => [
                   typeof value === 'number' ? formatBytes(value) : String(value ?? ''),
                   'Storage',
                 ]}
@@ -175,7 +175,7 @@ export function UsageTrends({ storageUsed, objectsCount }: UsageTrendsProps) {
               <YAxis hide />
               <Tooltip
                 contentStyle={{ fontSize: 12, borderRadius: 6 }}
-                formatter={(value: number | string | undefined) => [
+                formatter={(value) => [
                   value ?? '',
                   'Objects',
                 ]}
