@@ -10,7 +10,7 @@ export default defineConfig({
     typeAware: true,
     typeCheck: true,
   },
-  ignorePatterns: ['.sst', 'packages/ui', '**/dist', '**/generated', '**/sst-env.d.ts'],
+  ignorePatterns: ['.sst', 'infra', 'packages/ui', '**/dist', '**/generated', '**/sst-env.d.ts'],
   overrides: [
     {
       // sst.config.ts must use a triple-slash reference for SST's generated types

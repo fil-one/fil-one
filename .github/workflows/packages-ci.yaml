@@ -40,3 +40,36 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  deploy-staging:
+    if: github.ref == 'refs/heads/main'
+    needs: [check-packages]
+    runs-on: ubuntu-latest
+    concurrency: deploy-staging
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::654654381893:role/hyperspace-infra-staging-github
+          aws-region: us-east-2
+
+      - run: pnpm build
+
+      - run: npx sst deploy --stage staging

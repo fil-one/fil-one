@@ -6,7 +6,8 @@ Full-stack prototype — pnpm workspaces monorepo deploying to AWS via [SST v3](
 
 ```
 hyperspace/
-├── sst.config.ts  # SST v3 infrastructure (replaces CDK stacks)
+├── sst.config.ts  # SST v3 infrastructure (app stack — API, website, queues, etc.)
+├── infra/         # SST v3 infrastructure (base infra — OIDC provider, IAM roles)
 ├── contracts/     # Foundry smart contracts
 ├── packages/
 │   ├── shared/     # TypeScript interfaces shared between website and backend
@@ -113,7 +114,9 @@ The `Auth0MgmtClientId` and `Auth0MgmtClientSecret` are from a **Machine-to-Mach
 pnpm run dev              # SST live dev mode (live Lambda debugging)
 pnpm run deploy           # Deploy personal dev stack (uses OS username as stage)
 pnpm run deploy:staging   # Deploy to staging.filhyperspace.com
-pnpm run deploy:production # Deploy to console.filhyperspace.com
+pnpm run deploy:production      # Deploy to console.filhyperspace.com
+pnpm run deploy:infra:staging   # Deploy base infra (OIDC, IAM) to staging
+pnpm run deploy:infra:production # Deploy base infra (OIDC, IAM) to production
 pnpm run remove           # Remove your personal dev stack
 pnpm run lint             # Lint all packages
 pnpm run lint:fix         # Lint and auto-fix where possible
