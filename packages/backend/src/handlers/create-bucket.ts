@@ -1,10 +1,12 @@
-import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
-import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketRequest, CreateBucketResponse, ErrorResponse } from '@hyperspace/shared';
 import { Resource } from 'sst';
+import { createAuroraBucket } from '../lib/aurora-portal.js';
+import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -17,7 +19,9 @@ const dynamo = new DynamoDBClient({});
 
 const BUCKET_NAME_REGEX = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 
-async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
+export async function baseHandler(
+  event: AuthenticatedEvent,
+): Promise<APIGatewayProxyStructuredResultV2> {
   let request: CreateBucketRequest;
   try {
     request = JSON.parse(event.body ?? '{}') as CreateBucketRequest;
@@ -46,7 +50,36 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  const { userId } = getUserInfo(event);
+  const { userId, orgId } = getUserInfo(event);
+
+  // Look up org profile to get auroraTenantId
+  const { Item: orgProfile } = await dynamo.send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+    }),
+  );
+
+  const auroraTenantId = orgProfile?.auroraTenantId?.S;
+  const setupStatus = orgProfile?.setupStatus?.S;
+  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
+    return new ResponseBuilder()
+      .status(503)
+      .body<ErrorResponse>({
+        message: 'Aurora tenant setup is not complete, please try again later',
+      })
+      .build();
+  }
+
+  // We create the Aurora bucket before the DynamoDB record so that:
+  // 1. If Aurora fails, we haven't written any state — clean failure.
+  // 2. If Aurora succeeds but DynamoDB fails, the user can safely retry:
+  //    Aurora returns 409 (treated as success), then DynamoDB insert succeeds.
+  // 3. If the bucket truly already exists (both Aurora and DynamoDB),
+  //    Aurora 409 is treated as success, then DynamoDB conditional check
+  //    catches the duplicate and we return 409 to the user.
+  await createAuroraBucket({ tenantId: auroraTenantId, bucketName: name });
+
   const now = new Date().toISOString();
 
   try {

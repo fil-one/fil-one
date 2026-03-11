@@ -173,7 +173,7 @@ describe('POST /api/org/confirm handler', () => {
         sk: { S: 'PROFILE' },
         name: { S: 'Acme Corp' },
         orgConfirmed: { BOOL: true },
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
+        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
       },
     });
 
