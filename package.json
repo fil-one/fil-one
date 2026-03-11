@@ -11,7 +11,7 @@
     "deploy": "pnpm build && sst deploy",
     "deploy:staging": "pnpm build && sst deploy --stage staging",
     "deploy:production": "pnpm build && sst deploy --stage production",
-    "generate:aurora-backoffice": "pnpm --filter @hyperspace/aurora-backoffice-client generate",
+    "generate:api-clients": "pnpm --filter @hyperspace/aurora-backoffice-client --filter @hyperspace/aurora-portal-client generate",
     "remove": "sst remove",
     "lint": "oxlint --report-unused-disable-directives && oxfmt --check",
     "lint:fix": "oxlint --fix && oxfmt --write",

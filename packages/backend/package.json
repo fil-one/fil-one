@@ -16,6 +16,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1002.0",
     "@aws-sdk/util-dynamodb": "^3.996.1",
     "@hyperspace/aurora-backoffice-client": "workspace:*",
+    "@hyperspace/aurora-portal-client": "workspace:*",
     "@hyperspace/shared": "workspace:*",
     "@middy/core": "^7.1.3",
     "@middy/http-header-normalizer": "^7.1.3",

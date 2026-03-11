@@ -10,6 +10,8 @@ hyperspace/
 ├── contracts/     # Foundry smart contracts
 ├── packages/
 │   ├── shared/     # TypeScript interfaces shared between website and backend
+│   ├── aurora-backoffice-client/ # Generated TS client for Aurora Back Office API
+│   ├── aurora-portal-client/    # Generated TS client for Aurora Portal API
 │   ├── backend/    # Lambda handlers (upload → DynamoDB)
 │   ├── ui/         # UI component library (git submodule → joemocode-business/ui-hyperspace)
 │   └── website/    # Vite + React 19 + TanStack Router SPA + Tailwind v4
@@ -244,10 +246,13 @@ The frontend needs the **publishable key** in its env:
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx
 ```
 
-## Aurora Back Office API Client
+## Aurora API Clients
 
-The project includes a generated TypeScript client for the Aurora Back Office
-API, located in `packages/aurora-backoffice-client/`.
+The project includes generated TypeScript clients for the Aurora APIs, built
+with [Hey API](https://heyapi.dev/):
+
+- **Back Office API** — `packages/aurora-backoffice-client/` (tenant management, admin operations)
+- **Portal API** — `packages/aurora-portal-client/` (access keys, buckets, tenant-facing operations)
 
 ### API Token
 
@@ -267,19 +272,29 @@ The backend uses an API token to authenticate with the Aurora Back Office API
 pnpx sst secret set AuroraBackofficeToken <token> [--stage <stage>]
 ```
 
-### Regenerating the client
+### Regenerating the clients
 
-After API changes:
+After API changes, update the relevant Swagger spec and regenerate:
+
+**Back Office client:**
 
 1. Download the updated Swagger spec from
    https://backoffice.dev.aur.lu/ff/docs/backoffice-api (open the page, then
    save the JSON loaded by the page)
 2. Replace `packages/aurora-backoffice-client/aurora-backoffice.swagger.json`
    with the downloaded file
-3. Run:
-   ```bash
-   pnpm generate:aurora-backoffice
-   ```
+
+**Portal client:**
+
+1. Download the updated Swagger spec from the Aurora Portal API docs
+2. Replace `packages/aurora-portal-client/aurora-portal.swagger.yaml`
+   with the downloaded file
+
+**Regenerate both clients:**
+
+```bash
+pnpm generate:api-clients
+```
 
 ## UI submodule (`packages/ui`)
 

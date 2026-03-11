@@ -143,7 +143,7 @@ describe('authMiddleware', () => {
             sk: { S: 'PROFILE' },
             name: { S: 'example.com' },
             orgConfirmed: { BOOL: true },
-            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            setupStatus: { S: 'AURORA_TENANT_API_KEY_CREATED' },
           },
         });
 

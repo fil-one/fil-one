@@ -4,7 +4,7 @@ export interface MeResponse {
   orgConfirmed: boolean;
   suggestedOrgName?: string;
   email?: string;
-  auroraTenantReady: boolean;
+  orgSetupComplete: boolean;
 }
 
 export interface ConfirmOrgRequest {

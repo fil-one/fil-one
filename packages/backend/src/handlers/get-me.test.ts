@@ -88,7 +88,7 @@ describe('GET /api/me handler', () => {
       });
   });
 
-  it('returns auroraTenantReady: true when setupStatus is AURORA_TENANT_SETUP_COMPLETE', async () => {
+  it('returns orgSetupComplete: true when setupStatus is AURORA_TENANT_API_KEY_CREATED', async () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
@@ -100,7 +100,7 @@ describe('GET /api/me handler', () => {
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
           orgConfirmed: { BOOL: true },
-          setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+          setupStatus: { S: 'AURORA_TENANT_API_KEY_CREATED' },
         },
       });
 
@@ -113,12 +113,12 @@ describe('GET /api/me handler', () => {
         orgName: 'Example Corp',
         orgConfirmed: true,
         email: MOCK_EMAIL,
-        auroraTenantReady: true,
+        orgSetupComplete: true,
       }),
     });
   });
 
-  it('returns auroraTenantReady: false when setupStatus is HYPERSPACE_ORG_CREATED', async () => {
+  it('returns orgSetupComplete: false when setupStatus is HYPERSPACE_ORG_CREATED', async () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
@@ -143,12 +143,12 @@ describe('GET /api/me handler', () => {
         orgName: 'Example Corp',
         orgConfirmed: true,
         email: MOCK_EMAIL,
-        auroraTenantReady: false,
+        orgSetupComplete: false,
       }),
     });
   });
 
-  it('returns auroraTenantReady: false when setupStatus is missing', async () => {
+  it('returns orgSetupComplete: false when setupStatus is missing', async () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
@@ -172,7 +172,7 @@ describe('GET /api/me handler', () => {
         orgName: 'Example Corp',
         orgConfirmed: true,
         email: MOCK_EMAIL,
-        auroraTenantReady: false,
+        orgSetupComplete: false,
       }),
     });
   });

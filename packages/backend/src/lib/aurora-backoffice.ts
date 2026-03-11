@@ -1,6 +1,7 @@
 import {
   createClient,
   getV1PartnersByPartnerIdTenants,
+  postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens,
   postV1PartnersByPartnerIdTenants,
   postV1PartnersByPartnerIdTenantsByTenantIdSetup,
 } from '@hyperspace/aurora-backoffice-client';
@@ -145,4 +146,59 @@ export async function setupAuroraTenant({
 
   console.log(`Aurora tenant ${tenantId} setup response:`, JSON.stringify(data));
   return { id: data.id!, lastSetupStep: data.lastSetupStep! };
+}
+
+export interface CreateAuroraTenantApiKeyOptions {
+  tenantId: string;
+  orgId: string;
+}
+
+export interface CreateAuroraTenantApiKeyResult {
+  token: string;
+  tokenId: string;
+}
+
+export async function createAuroraTenantApiKey({
+  tenantId,
+  orgId,
+}: CreateAuroraTenantApiKeyOptions): Promise<CreateAuroraTenantApiKeyResult> {
+  const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
+  const partnerId = process.env.AURORA_PARTNER_ID!;
+  const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
+
+  const client = createClient({
+    baseUrl,
+    headers: {
+      'X-Api-Key': token,
+    },
+  });
+
+  const { data, error } = await postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens({
+    client,
+    path: { partnerId, tenantId },
+    body: { name: `hyperspace-${orgId}` },
+    throwOnError: false,
+  });
+
+  if (error) {
+    console.error('Failed to create Aurora API key:', error);
+    throw new Error(`Aurora API key creation failed for org ${orgId}`, {
+      cause: error,
+    });
+  }
+
+  const apiToken = data?.token;
+  if (!apiToken) {
+    throw new Error(`Aurora API did not return a token for org ${orgId}: ${JSON.stringify(data)}`);
+  }
+
+  const tokenId = data.id;
+  if (!tokenId) {
+    throw new Error(
+      `Aurora API did not return a token ID for org ${orgId}: ${JSON.stringify(data)}`,
+    );
+  }
+
+  console.log(`Aurora API key created for org ${orgId}: tokenId=${tokenId}`);
+  return { token: apiToken, tokenId };
 }

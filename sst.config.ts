@@ -228,20 +228,22 @@ export default $config({
       stripePriceId,
     ];
 
-    const sharedEnv: Record<string, string> = {
+    const sharedEnv: Record<string, $util.Input<string>> = {
+      HYPERSPACE_STAGE: $app.stage,
       AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
       AUTH0_AUDIENCE: 'console.filhyperspace.com',
     };
 
     if (isProduction) {
       throw new Error(
-        'Aurora Backoffice production configuration not yet available. ' +
-          'Set AURORA_BACKOFFICE_URL, AURORA_PARTNER_ID, and AURORA_REGION_ID before deploying to production.',
+        'Aurora production configuration not yet available. ' +
+          'Set AURORA_BACKOFFICE_URL, AURORA_PORTAL_URL, AURORA_PARTNER_ID, and AURORA_REGION_ID before deploying to production.',
       );
     }
 
     const auroraEnv = {
       AURORA_BACKOFFICE_URL: 'https://api.backoffice.dev.aur.lu/api',
+      AURORA_PORTAL_URL: 'https://api.portal.dev.aur.lu/api/v1',
       AURORA_PARTNER_ID: 'ff',
       AURORA_REGION_ID: 'ff',
     };
@@ -251,6 +253,7 @@ export default $config({
       routePath: string,
       handler: string,
       extraEnv?: Record<string, $util.Input<string>>,
+      permissions?: sst.aws.FunctionPermissionArgs[],
     ) {
       api.route(`${method} ${routePath}`, {
         handler: `packages/backend/src/handlers/${handler}.handler`,
@@ -259,6 +262,7 @@ export default $config({
           ...sharedEnv,
           ...extraEnv,
         },
+        permissions,
         runtime: 'nodejs24.x',
         timeout: '10 seconds',
       });
@@ -267,7 +271,22 @@ export default $config({
     // ── Data routes ──────────────────────────────────────────────────
     addRoute('POST', '/api/upload', 'upload');
     addRoute('GET', '/api/buckets', 'list-buckets');
-    addRoute('POST', '/api/buckets', 'create-bucket');
+    addRoute(
+      'POST',
+      '/api/buckets',
+      'create-bucket',
+      {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+      },
+      [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [
+            $interpolate`arn:aws:ssm:*:*:parameter/hyperspace/${$app.stage}/aurora-portal/tenant-api-key/*`,
+          ],
+        },
+      ],
+    );
     addRoute('DELETE', '/api/buckets/{name}', 'delete-bucket');
     addRoute('GET', '/api/buckets/{name}/objects', 'list-objects');
     addRoute('POST', '/api/buckets/{name}/objects/upload', 'upload-object');
@@ -307,7 +326,16 @@ export default $config({
         link: [userInfoTable, auroraBackofficeToken],
         environment: {
           ...auroraEnv,
+          ...sharedEnv,
         },
+        permissions: [
+          {
+            actions: ['ssm:PutParameter'],
+            resources: [
+              $interpolate`arn:aws:ssm:*:*:parameter/hyperspace/${$app.stage}/aurora-portal/tenant-api-key/*`,
+            ],
+          },
+        ],
         runtime: 'nodejs24.x',
         timeout: '60 seconds',
       },

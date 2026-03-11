@@ -4,7 +4,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { MeResponse } from '@hyperspace/shared';
 import { Resource } from 'sst';
-import { OrgSetupStatus } from '../lib/org-setup-status.js';
+import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -35,7 +35,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     orgName,
     orgConfirmed,
     email,
-    auroraTenantReady: setupStatus === OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE,
+    orgSetupComplete: isOrgSetupComplete(setupStatus),
   };
 
   // Only include suggested name if org is not yet confirmed

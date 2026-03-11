@@ -8,12 +8,12 @@ type NormalizedHeaderEvent = {
 };
 
 interface BuildEventProps {
+  body?: string;
   cookies?: string[];
   userInfo?: UserInfo;
   queryStringParameters?: Record<string, string>;
   requestContext?: Partial<APIGatewayProxyEventV2['requestContext']>;
   rawPath?: string;
-  body?: string;
   method?: string;
 }
 
@@ -56,6 +56,7 @@ export function buildEvent(
       ...props?.requestContext,
     },
     isBase64Encoded: false,
+    ...(props?.body !== undefined ? { body: props.body } : {}),
     ...(props?.cookies ? { cookies: props.cookies } : {}),
   } as unknown as APIGatewayProxyEventV2 & NormalizedHeaderEvent;
 }
