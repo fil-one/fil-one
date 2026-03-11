@@ -14,41 +14,41 @@ The operations you'd need to implement fall into three groups, with priority lev
 
 ### Service-level operations
 
-| Priority | Method | Path | Operation | Notes |
-|----------|--------|------|-----------|-------|
-| **P0** | `GET` | `/` | ListBuckets | Every client calls this first |
+| Priority | Method | Path | Operation   | Notes                         |
+| -------- | ------ | ---- | ----------- | ----------------------------- |
+| **P0**   | `GET`  | `/`  | ListBuckets | Every client calls this first |
 
 ### Bucket-level operations
 
-| Priority | Method | Path | Operation | Notes |
-|----------|--------|------|-----------|-------|
-| **P0** | `PUT` | `/{bucket}` | CreateBucket | Required for initial setup |
-| **P0** | `GET` | `/{bucket}` | ListObjectsV2 | Core browsing; used by every S3 client and CLI |
-| **P0** | `HEAD` | `/{bucket}` | HeadBucket | Used by SDKs to check bucket existence before operations |
-| **P1** | `DELETE` | `/{bucket}` | DeleteBucket | Less frequent; bucket must be empty first |
-| **P1** | `GET` | `/{bucket}?uploads` | ListMultipartUploads | Needed to manage/clean up in-progress multipart uploads |
-| **P2** | `GET` | `/{bucket}?versioning` | GetBucketVersioning | Only needed if versioning is supported |
-| **P2** | `PUT` | `/{bucket}?versioning` | PutBucketVersioning | Only needed if versioning is supported |
-| **P2** | `GET` | `/{bucket}?tagging` | GetBucketTagging | QoL; metadata can be managed out-of-band |
-| **P2** | `PUT` | `/{bucket}?tagging` | PutBucketTagging | QoL; metadata can be managed out-of-band |
+| Priority | Method   | Path                   | Operation            | Notes                                                    |
+| -------- | -------- | ---------------------- | -------------------- | -------------------------------------------------------- |
+| **P0**   | `PUT`    | `/{bucket}`            | CreateBucket         | Required for initial setup                               |
+| **P0**   | `GET`    | `/{bucket}`            | ListObjectsV2        | Core browsing; used by every S3 client and CLI           |
+| **P0**   | `HEAD`   | `/{bucket}`            | HeadBucket           | Used by SDKs to check bucket existence before operations |
+| **P1**   | `DELETE` | `/{bucket}`            | DeleteBucket         | Less frequent; bucket must be empty first                |
+| **P1**   | `GET`    | `/{bucket}?uploads`    | ListMultipartUploads | Needed to manage/clean up in-progress multipart uploads  |
+| **P2**   | `GET`    | `/{bucket}?versioning` | GetBucketVersioning  | Only needed if versioning is supported                   |
+| **P2**   | `PUT`    | `/{bucket}?versioning` | PutBucketVersioning  | Only needed if versioning is supported                   |
+| **P2**   | `GET`    | `/{bucket}?tagging`    | GetBucketTagging     | QoL; metadata can be managed out-of-band                 |
+| **P2**   | `PUT`    | `/{bucket}?tagging`    | PutBucketTagging     | QoL; metadata can be managed out-of-band                 |
 
 ### Object-level operations
 
-| Priority | Method | Path | Operation | Notes |
-|----------|--------|------|-----------|-------|
-| **P0** | `PUT` | `/{bucket}/{key}` | PutObject | Core write path |
-| **P0** | `GET` | `/{bucket}/{key}` | GetObject | Core read path |
-| **P0** | `DELETE` | `/{bucket}/{key}` | DeleteObject | Core delete path |
-| **P0** | `HEAD` | `/{bucket}/{key}` | HeadObject | Used by SDKs/CLI to check existence and get metadata |
-| **P1** | `POST` | `/{bucket}/{key}?uploads` | CreateMultipartUpload | Required for files >5GB; SDKs auto-use for large uploads |
-| **P1** | `PUT` | `/{bucket}/{key}?partNumber=N&uploadId=X` | UploadPart | Required for multipart upload |
-| **P1** | `POST` | `/{bucket}/{key}?uploadId=X` | CompleteMultipartUpload | Required for multipart upload |
-| **P1** | `DELETE` | `/{bucket}/{key}?uploadId=X` | AbortMultipartUpload | Needed to clean up failed multipart uploads |
-| **P1** | `POST` | `/{bucket}?delete` | DeleteObjects (batch) | SDKs/CLI use this for bulk deletes (e.g., `aws s3 rm --recursive`) |
-| **P2** | `PUT` | `/{bucket}/{key}` + `x-amz-copy-source` | CopyObject | Sugar; clients can GET + PUT instead. Used by `aws s3 cp s3://a s3://b` |
-| **P2** | `GET` | `/{bucket}/{key}?tagging` | GetObjectTagging | QoL for metadata workflows |
-| **P2** | `PUT` | `/{bucket}/{key}?tagging` | PutObjectTagging | QoL for metadata workflows |
-| **P2** | -- | Presigned URL generation | GetObject / PutObject via presigned | Sugar; enables sharing time-limited URLs without SDK |
+| Priority | Method   | Path                                      | Operation                           | Notes                                                                   |
+| -------- | -------- | ----------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------- |
+| **P0**   | `PUT`    | `/{bucket}/{key}`                         | PutObject                           | Core write path                                                         |
+| **P0**   | `GET`    | `/{bucket}/{key}`                         | GetObject                           | Core read path                                                          |
+| **P0**   | `DELETE` | `/{bucket}/{key}`                         | DeleteObject                        | Core delete path                                                        |
+| **P0**   | `HEAD`   | `/{bucket}/{key}`                         | HeadObject                          | Used by SDKs/CLI to check existence and get metadata                    |
+| **P1**   | `POST`   | `/{bucket}/{key}?uploads`                 | CreateMultipartUpload               | Required for files >5GB; SDKs auto-use for large uploads                |
+| **P1**   | `PUT`    | `/{bucket}/{key}?partNumber=N&uploadId=X` | UploadPart                          | Required for multipart upload                                           |
+| **P1**   | `POST`   | `/{bucket}/{key}?uploadId=X`              | CompleteMultipartUpload             | Required for multipart upload                                           |
+| **P1**   | `DELETE` | `/{bucket}/{key}?uploadId=X`              | AbortMultipartUpload                | Needed to clean up failed multipart uploads                             |
+| **P1**   | `POST`   | `/{bucket}?delete`                        | DeleteObjects (batch)               | SDKs/CLI use this for bulk deletes (e.g., `aws s3 rm --recursive`)      |
+| **P2**   | `PUT`    | `/{bucket}/{key}` + `x-amz-copy-source`   | CopyObject                          | Sugar; clients can GET + PUT instead. Used by `aws s3 cp s3://a s3://b` |
+| **P2**   | `GET`    | `/{bucket}/{key}?tagging`                 | GetObjectTagging                    | QoL for metadata workflows                                              |
+| **P2**   | `PUT`    | `/{bucket}/{key}?tagging`                 | PutObjectTagging                    | QoL for metadata workflows                                              |
+| **P2**   | --       | Presigned URL generation                  | GetObject / PutObject via presigned | Sugar; enables sharing time-limited URLs without SDK                    |
 
 ### URL Addressing Styles
 
@@ -64,6 +64,7 @@ S3 supports two URL styles. Your server needs to handle at least one:
 This is the hardest part of S3 compatibility. Every request is authenticated using [AWS Signature Version 4](https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html). Your server must:
 
 1. **Parse the `Authorization` header** -- format:
+
    ```
    AWS4-HMAC-SHA256 Credential=AKID/20260216/us-east-1/s3/aws4_request,
    SignedHeaders=host;x-amz-content-sha256;x-amz-date,
@@ -73,6 +74,7 @@ This is the hardest part of S3 compatibility. Every request is authenticated usi
 2. **Reconstruct the canonical request** from the incoming HTTP request (method, URI, query string, headers, payload hash)
 
 3. **Derive the signing key** using HMAC-SHA256 chain:
+
    ```
    DateKey           = HMAC-SHA256("AWS4" + SecretKey, Date)
    DateRegionKey     = HMAC-SHA256(DateKey, Region)
@@ -92,12 +94,12 @@ This is the hardest part of S3 compatibility. Every request is authenticated usi
 
 Write an HTTP server that implements the S3 REST API and routes requests to your custom storage backend. Libraries that help:
 
-| Language | Library | What it does |
-|----------|---------|-------------|
-| .NET | [S3Server](https://github.com/jchristn/S3Server) | Parses S3 HTTP requests, routes to your callbacks |
-| Go | Build on `net/http` + reference [MinIO's source](https://github.com/minio/minio) | MinIO's codebase is the gold standard reference |
-| Python | `flask`/`fastapi` + manual SigV4 | Full control but more work |
-| Rust | `s3s` crate | S3 server framework |
+| Language | Library                                                                          | What it does                                      |
+| -------- | -------------------------------------------------------------------------------- | ------------------------------------------------- |
+| .NET     | [S3Server](https://github.com/jchristn/S3Server)                                 | Parses S3 HTTP requests, routes to your callbacks |
+| Go       | Build on `net/http` + reference [MinIO's source](https://github.com/minio/minio) | MinIO's codebase is the gold standard reference   |
+| Python   | `flask`/`fastapi` + manual SigV4                                                 | Full control but more work                        |
+| Rust     | `s3s` crate                                                                      | S3 server framework                               |
 
 **You implement**: the storage logic (put/get/delete objects on your backend -- e.g., Filecoin/IPFS, local disk, database, etc.)
 
@@ -150,36 +152,37 @@ This is months of protocol implementation you don't have to write.
 
 #### What You Replace in the Fork
 
-| MinIO component | Replace with | Purpose |
-|---|---|---|
-| **Disk/erasure storage layer** | Calls to onramp API for Filecoin storage | Swap local disk I/O for Filecoin put/get via onramp |
-| **IAM / identity system** | Calls to your AWS-hosted web service APIs | Auth and permission checks against your user/org model |
-| **Built-in bucket metadata** | Calls to your AWS-hosted metadata service | Object index, ACLs, bucket config stored in your DB |
-| **Built-in encryption (SSE)** | Encryption using keys fetched from your AWS-hosted key management service | See EncryptionKeyManagement.md for details on key hierarchy and rotation |
+| MinIO component                | Replace with                                                              | Purpose                                                                  |
+| ------------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **Disk/erasure storage layer** | Calls to onramp API for Filecoin storage                                  | Swap local disk I/O for Filecoin put/get via onramp                      |
+| **IAM / identity system**      | Calls to your AWS-hosted web service APIs                                 | Auth and permission checks against your user/org model                   |
+| **Built-in bucket metadata**   | Calls to your AWS-hosted metadata service                                 | Object index, ACLs, bucket config stored in your DB                      |
+| **Built-in encryption (SSE)**  | Encryption using keys fetched from your AWS-hosted key management service | See EncryptionKeyManagement.md for details on key hierarchy and rotation |
 
 #### What Stays on the Low-Egress Provider
 
-| Component | Size/bandwidth | Notes |
-|---|---|---|
-| MinIO fork process(es) | Compute only | Stateless; can scale horizontally |
-| TLS termination | -- | Handles client connections |
-| Ephemeral cache (optional) | Configurable | Cache hot objects locally to avoid repeated Filecoin retrievals |
-| Bulk data transit | Hundreds of TB | Client ↔ MinIO fork ↔ Onramp -- never touches AWS |
+| Component                  | Size/bandwidth | Notes                                                           |
+| -------------------------- | -------------- | --------------------------------------------------------------- |
+| MinIO fork process(es)     | Compute only   | Stateless; can scale horizontally                               |
+| TLS termination            | --             | Handles client connections                                      |
+| Ephemeral cache (optional) | Configurable   | Cache hot objects locally to avoid repeated Filecoin retrievals |
+| Bulk data transit          | Hundreds of TB | Client ↔ MinIO fork ↔ Onramp -- never touches AWS               |
 
 #### What Goes to AWS (Small Payloads Only)
 
-| API call | Payload size | Frequency |
-|---|---|---|
-| Auth / SigV4 key lookup | ~1 KB | Every request |
-| Encryption key retrieval | ~256 bytes | Every PUT/GET of object data |
-| Object metadata CRUD | ~1-5 KB | Every S3 operation |
-| Bucket ACL / permission check | ~1 KB | Every request |
+| API call                      | Payload size | Frequency                    |
+| ----------------------------- | ------------ | ---------------------------- |
+| Auth / SigV4 key lookup       | ~1 KB        | Every request                |
+| Encryption key retrieval      | ~256 bytes   | Every PUT/GET of object data |
+| Object metadata CRUD          | ~1-5 KB      | Every S3 operation           |
+| Bucket ACL / permission check | ~1 KB        | Every request                |
 
 At hundreds of TB of object data, these control-plane calls are negligible -- likely single-digit GB/month of AWS traffic.
 
 #### Hosting the MinIO Fork
 
 MinIO does **not** require Kubernetes. It runs as:
+
 - A standalone binary (`minio server /data`)
 - A Docker container
 - On Kubernetes via the MinIO Operator (most complex)
@@ -192,13 +195,13 @@ For the low-egress data plane, a VM or container on any provider with zero egres
 
 #### Risks and Mitigations
 
-| Risk | Impact | Mitigation |
-|---|---|---|
-| **AWS API latency** | Every S3 request requires a round-trip to AWS for auth + key lookup, adding 50-200ms | Cache auth sessions and keys locally with short TTLs (e.g., 5 min). Reduces per-request AWS calls. |
-| **AWS API unavailability** | If AWS services are down, the MinIO fork can't authenticate or decrypt | Local cache allows degraded-mode reads for cached objects. New uploads fail until AWS is back. |
-| **Low-egress provider instability** | Smaller providers have less redundancy | Run MinIO fork across 2+ zones or providers. Stateless design makes failover straightforward. |
-| **Network throughput limits** | Smaller providers may cap bandwidth | Benchmark before committing. Ask providers about dedicated bandwidth options. |
-| **Fork maintenance** | Upstream MinIO updates won't auto-merge | Keep changes modular (storage backend interface, auth adapter). Minimize diff from upstream to ease rebasing. |
+| Risk                                | Impact                                                                               | Mitigation                                                                                                    |
+| ----------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| **AWS API latency**                 | Every S3 request requires a round-trip to AWS for auth + key lookup, adding 50-200ms | Cache auth sessions and keys locally with short TTLs (e.g., 5 min). Reduces per-request AWS calls.            |
+| **AWS API unavailability**          | If AWS services are down, the MinIO fork can't authenticate or decrypt               | Local cache allows degraded-mode reads for cached objects. New uploads fail until AWS is back.                |
+| **Low-egress provider instability** | Smaller providers have less redundancy                                               | Run MinIO fork across 2+ zones or providers. Stateless design makes failover straightforward.                 |
+| **Network throughput limits**       | Smaller providers may cap bandwidth                                                  | Benchmark before committing. Ask providers about dedicated bandwidth options.                                 |
+| **Fork maintenance**                | Upstream MinIO updates won't auto-merge                                              | Keep changes modular (storage backend interface, auth adapter). Minimize diff from upstream to ease rebasing. |
 
 #### MinIO Gateway Deprecation Note
 
@@ -223,11 +226,13 @@ This is how [Cloudflare R2](https://developers.cloudflare.com/r2/api/s3/api/), [
 The key configuration is the **endpoint URL**. All AWS SDKs and the CLI support this:
 
 **AWS CLI:**
+
 ```bash
 aws s3 ls --endpoint-url https://your-s3-server.example.com
 ```
 
 **Python (boto3):**
+
 ```python
 import boto3
 s3 = boto3.client('s3',
@@ -238,12 +243,13 @@ s3 = boto3.client('s3',
 ```
 
 **JavaScript (AWS SDK v3):**
+
 ```javascript
-import { S3Client } from "@aws-sdk/client-s3";
+import { S3Client } from '@aws-sdk/client-s3';
 const client = new S3Client({
-    endpoint: "https://your-s3-server.example.com",
-    region: "auto",
-    credentials: { accessKeyId: "KEY", secretAccessKey: "SECRET" },
+  endpoint: 'https://your-s3-server.example.com',
+  region: 'auto',
+  credentials: { accessKeyId: 'KEY', secretAccessKey: 'SECRET' },
 });
 ```
 
@@ -284,7 +290,7 @@ A practical phased approach aligned with the priority levels above:
 
 ## Hooks / Extension Points for Custom Operations
 
-> Not sure we really need these custom operations, but it might be worth considering in a "P3" kinda way. 
+> Not sure we really need these custom operations, but it might be worth considering in a "P3" kinda way.
 
 If you want to do **custom operations beyond standard S3** (e.g., Filecoin deal-making, CID retrieval, proof verification), you have several mechanisms:
 
@@ -305,10 +311,10 @@ Since Filecoin stores data on a public, immutable network, traditional access co
 
 Access is enforced at two layers that work together:
 
-| Layer | What it controls | Mechanism |
-|-------|-----------------|-----------|
-| **API key authentication** (SigV4) | Who can call the S3 endpoint at all | Access key / secret key pair issued by your console |
-| **Encryption key authorization** | Who can read the actual data | Whether the authenticated identity is permitted to trigger decryption of the wrapping key for a given bucket/object |
+| Layer                              | What it controls                    | Mechanism                                                                                                           |
+| ---------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **API key authentication** (SigV4) | Who can call the S3 endpoint at all | Access key / secret key pair issued by your console                                                                 |
+| **Encryption key authorization**   | Who can read the actual data        | Whether the authenticated identity is permitted to trigger decryption of the wrapping key for a given bucket/object |
 
 Authentication alone is not sufficient — even if a user has valid API credentials, they should only be able to decrypt objects they're authorized to access. The wrapping key (MEK) is the enforcement point.
 
@@ -316,42 +322,42 @@ Authentication alone is not sufficient — even if a user has valid API credenti
 
 Permissions are scoped and enforced server-side in your console/control plane:
 
-| Scope | Description | Example |
-|-------|-------------|---------|
-| **Organization** | Top-level tenant isolation; each org has its own MEKs | Org A cannot access Org B's buckets or keys |
-| **Bucket** | Each bucket can have its own wrapping key and ACL | `s3://analytics` is read-only for data team, read-write for pipeline service account |
-| **Prefix** | Optional finer-grained scoping within a bucket | `s3://shared/team-alpha/*` accessible only by team-alpha's API keys |
-| **Object** | Per-object DEKs provide cryptographic isolation | Compromise of one object's DEK does not expose any other object |
+| Scope            | Description                                           | Example                                                                              |
+| ---------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **Organization** | Top-level tenant isolation; each org has its own MEKs | Org A cannot access Org B's buckets or keys                                          |
+| **Bucket**       | Each bucket can have its own wrapping key and ACL     | `s3://analytics` is read-only for data team, read-write for pipeline service account |
+| **Prefix**       | Optional finer-grained scoping within a bucket        | `s3://shared/team-alpha/*` accessible only by team-alpha's API keys                  |
+| **Object**       | Per-object DEKs provide cryptographic isolation       | Compromise of one object's DEK does not expose any other object                      |
 
 ### How Access Control Maps to Operations
 
-| S3 Operation | Access check |
-|---|---|
-| `PutObject` | API key must have write permission on the target bucket/prefix. Server generates a new DEK, encrypts, and stores. |
-| `GetObject` | API key must have read permission on the target bucket/prefix. Server retrieves the wrapped DEK, checks authorization to unwrap via the MEK, decrypts, and returns plaintext. |
-| `DeleteObject` | API key must have delete permission. Server removes metadata/index entry. On-chain ciphertext remains but becomes unlinkable. |
-| `ListObjectsV2` | API key must have list permission on the bucket. Only returns object keys the caller is authorized to see. |
-| `HeadObject` | Same as GetObject but returns only metadata (no decryption needed unless metadata itself is encrypted). |
+| S3 Operation    | Access check                                                                                                                                                                  |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PutObject`     | API key must have write permission on the target bucket/prefix. Server generates a new DEK, encrypts, and stores.                                                             |
+| `GetObject`     | API key must have read permission on the target bucket/prefix. Server retrieves the wrapped DEK, checks authorization to unwrap via the MEK, decrypts, and returns plaintext. |
+| `DeleteObject`  | API key must have delete permission. Server removes metadata/index entry. On-chain ciphertext remains but becomes unlinkable.                                                 |
+| `ListObjectsV2` | API key must have list permission on the bucket. Only returns object keys the caller is authorized to see.                                                                    |
+| `HeadObject`    | Same as GetObject but returns only metadata (no decryption needed unless metadata itself is encrypted).                                                                       |
 
 ### Access Revocation
 
 Because Filecoin is immutable, "deleting" data means making it unreadable:
 
-| Action | Effect | Data on Filecoin |
-|--------|--------|-----------------|
-| **Revoke API key** | User can no longer call the endpoint | Unchanged — ciphertext remains but user has no path to request decryption |
-| **Remove bucket permission** | User can authenticate but gets `AccessDenied` on that bucket | Unchanged |
-| **Delete wrapping key (MEK)** | All objects under that MEK become permanently unreadable | Ciphertext remains but is cryptographically inaccessible |
-| **Rotate wrapping key** | Re-wrap DEKs with new MEK; old MEK can be destroyed | Unchanged — only metadata DB is updated (see EncryptionKeyManagement.md Appendix A) |
+| Action                        | Effect                                                       | Data on Filecoin                                                                    |
+| ----------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| **Revoke API key**            | User can no longer call the endpoint                         | Unchanged — ciphertext remains but user has no path to request decryption           |
+| **Remove bucket permission**  | User can authenticate but gets `AccessDenied` on that bucket | Unchanged                                                                           |
+| **Delete wrapping key (MEK)** | All objects under that MEK become permanently unreadable     | Ciphertext remains but is cryptographically inaccessible                            |
+| **Rotate wrapping key**       | Re-wrap DEKs with new MEK; old MEK can be destroyed          | Unchanged — only metadata DB is updated (see EncryptionKeyManagement.md Appendix A) |
 
 ### Sharing and Delegation
 
-| Pattern | How it works |
-|---------|-------------|
-| **Share a bucket with another user** | Grant their API key read permission on the bucket; server handles decryption on their behalf |
-| **Time-limited access** | Issue a presigned URL (P2 feature) — embeds temporary credentials in the URL, expires after a set period |
-| **Cross-org sharing** | Create a shared bucket with a dedicated MEK; grant both orgs' API keys permission to that MEK |
-| **Service account access** | Issue a dedicated API key pair with scoped permissions for CI/CD, backup agents, etc. |
+| Pattern                              | How it works                                                                                             |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| **Share a bucket with another user** | Grant their API key read permission on the bucket; server handles decryption on their behalf             |
+| **Time-limited access**              | Issue a presigned URL (P2 feature) — embeds temporary credentials in the URL, expires after a set period |
+| **Cross-org sharing**                | Create a shared bucket with a dedicated MEK; grant both orgs' API keys permission to that MEK            |
+| **Service account access**           | Issue a dedicated API key pair with scoped permissions for CI/CD, backup agents, etc.                    |
 
 ### Key Principle
 
@@ -377,6 +383,7 @@ When using the S3-compatible endpoint approach, **no custom code runs on the use
 ### What Lives Where
 
 **On the user's machine:**
+
 - The standard `aws` CLI or any AWS SDK (boto3, etc.) -- software they already have or install from AWS/pip/npm
 - A config with three values:
   ```
@@ -387,6 +394,7 @@ When using the S3-compatible endpoint approach, **no custom code runs on the use
 - That's it. No custom binary, no agent, no plugin.
 
 **On your side (console/backend):**
+
 - **Key management**: Your console generates access key / secret key pairs, stores the secret (or a hash of it), and associates each pair with a user/org/permissions
 - **SigV4 verification**: When a request comes in, you look up the secret by the access key ID, recompute the signature, and compare
 - **Permission enforcement**: You map the key pair to whatever CRUD permissions / bucket ACLs you define in your console
@@ -429,29 +437,29 @@ This is the same model as AWS itself -- the secret is a shared secret used for s
 
 ### Console Key Management Features
 
-| Console feature | What it controls |
-|---|---|
-| Create API key pair | Issues `access_key_id` + `secret_access_key` |
-| Revoke / rotate keys | Invalidate old keys, issue new ones |
-| Permission scoping | Which buckets/prefixes a key can access, read-only vs read-write |
-| Rate limits / quotas | Throttle per key pair |
-| Audit logs | Every request tied to a key pair |
-| Billing / metering | Track storage and bandwidth per key |
+| Console feature      | What it controls                                                 |
+| -------------------- | ---------------------------------------------------------------- |
+| Create API key pair  | Issues `access_key_id` + `secret_access_key`                     |
+| Revoke / rotate keys | Invalidate old keys, issue new ones                              |
+| Permission scoping   | Which buckets/prefixes a key can access, read-only vs read-write |
+| Rate limits / quotas | Throttle per key pair                                            |
+| Audit logs           | Every request tied to a key pair                                 |
+| Billing / metering   | Track storage and bandwidth per key                              |
 
 ---
 
 ## Appendix B: Tradeoffs -- S3-Compatible Endpoint vs. Bespoke SDK
 
-| | S3-compatible (aws CLI/SDK + custom endpoint) | Bespoke SDK/CLI |
-|---|---|---|
-| **Client development cost** | Zero -- use existing AWS SDKs in every language | Must build + maintain SDKs per language (Python, JS, Go, etc.) |
-| **Ecosystem compatibility** | Works with Terraform S3 backend, rclone, Cyberduck, every backup tool, Kubernetes CSI drivers | Works with nothing else until you build integrations |
-| **User onboarding** | Developers already know `aws s3 cp` | New CLI, new concepts, new docs to learn |
-| **Server development cost** | **Higher** -- must implement SigV4, XML serialization, exact header/error contracts | **Lower** -- use JSON, any auth you want (API keys, JWT, OAuth) |
-| **Custom operations** | **Constrained** -- Filecoin-specific ops (deal status, CID lookup, retrieval proofs) have no S3 equivalent. Limited to `x-amz-meta-*` headers (2KB max, string-only) or a side-channel API | **Full control** -- first-class support for domain-specific operations |
-| **Error semantics** | Must return S3 error codes; can't express domain-specific errors naturally (e.g., "deal not sealed yet") | Rich, domain-specific error responses |
-| **API evolution** | Locked to S3's API surface; adding new operations means stepping outside the S3 contract | Evolve freely |
-| **Discoverability** | Users won't know what you support vs. don't without trial-and-error (e.g., does versioning work? lifecycle?) | Your SDK only exposes what exists |
+|                             | S3-compatible (aws CLI/SDK + custom endpoint)                                                                                                                                              | Bespoke SDK/CLI                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| **Client development cost** | Zero -- use existing AWS SDKs in every language                                                                                                                                            | Must build + maintain SDKs per language (Python, JS, Go, etc.)         |
+| **Ecosystem compatibility** | Works with Terraform S3 backend, rclone, Cyberduck, every backup tool, Kubernetes CSI drivers                                                                                              | Works with nothing else until you build integrations                   |
+| **User onboarding**         | Developers already know `aws s3 cp`                                                                                                                                                        | New CLI, new concepts, new docs to learn                               |
+| **Server development cost** | **Higher** -- must implement SigV4, XML serialization, exact header/error contracts                                                                                                        | **Lower** -- use JSON, any auth you want (API keys, JWT, OAuth)        |
+| **Custom operations**       | **Constrained** -- Filecoin-specific ops (deal status, CID lookup, retrieval proofs) have no S3 equivalent. Limited to `x-amz-meta-*` headers (2KB max, string-only) or a side-channel API | **Full control** -- first-class support for domain-specific operations |
+| **Error semantics**         | Must return S3 error codes; can't express domain-specific errors naturally (e.g., "deal not sealed yet")                                                                                   | Rich, domain-specific error responses                                  |
+| **API evolution**           | Locked to S3's API surface; adding new operations means stepping outside the S3 contract                                                                                                   | Evolve freely                                                          |
+| **Discoverability**         | Users won't know what you support vs. don't without trial-and-error (e.g., does versioning work? lifecycle?)                                                                               | Your SDK only exposes what exists                                      |
 
 ### Most Providers Do Both
 
@@ -494,13 +502,13 @@ S3 SDKs and the CLI have aggressive default timeouts designed for AWS's sub-seco
 
 **Default read timeouts across SDKs:**
 
-| SDK / Tool | Connect Timeout | Read Timeout |
-|---|---|---|
-| AWS CLI | 60s | 60s |
-| Python (boto3) | 60s | 60s |
-| Java SDK v2 | 2s | 30s |
-| .NET SDK | 100s | 300s |
-| JavaScript SDK v3 | -- | 120s |
+| SDK / Tool        | Connect Timeout | Read Timeout |
+| ----------------- | --------------- | ------------ |
+| AWS CLI           | 60s             | 60s          |
+| Python (boto3)    | 60s             | 60s          |
+| Java SDK v2       | 2s              | 30s          |
+| .NET SDK          | 100s            | 300s         |
+| JavaScript SDK v3 | --              | 120s         |
 
 The **read timeout** is the max wait for the next chunk of data on an open connection. If your Filecoin retrieval has 30+ seconds of silence before the first byte, Java SDK users will get a `ReadTimeoutException` by default.
 
@@ -508,18 +516,19 @@ Worse, when a timeout fires the SDK **retries automatically** (2-4 times with ex
 
 ### Server-Side Mitigations
 
-| Mitigation | Priority | Description |
-|---|---|---|
-| Return headers immediately, stream data later | **P0** | Respond with `200 OK` + `Transfer-Encoding: chunked` as soon as auth succeeds. Begin Filecoin retrieval in the background and stream chunks as they arrive. This resets the client's read timer. |
-| Send keepalive chunks during silence | **P0** | If there's a long pause waiting for Filecoin data, send minimal chunks to keep the connection alive and prevent read timeouts (is it possible to get any streamed data? I suspect no.). |
-| Support `Range` requests | **P1** | Return `Accept-Ranges: bytes` so SDKs can retry partial failures without re-downloading the entire object. |
-| Respect `Expect: 100-continue` | **P1** | For uploads, respond with `100 Continue` immediately before processing. SDKs send this by default. |
+| Mitigation                                    | Priority | Description                                                                                                                                                                                      |
+| --------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Return headers immediately, stream data later | **P0**   | Respond with `200 OK` + `Transfer-Encoding: chunked` as soon as auth succeeds. Begin Filecoin retrieval in the background and stream chunks as they arrive. This resets the client's read timer. |
+| Send keepalive chunks during silence          | **P0**   | If there's a long pause waiting for Filecoin data, send minimal chunks to keep the connection alive and prevent read timeouts (is it possible to get any streamed data? I suspect no.).          |
+| Support `Range` requests                      | **P1**   | Return `Accept-Ranges: bytes` so SDKs can retry partial failures without re-downloading the entire object.                                                                                       |
+| Respect `Expect: 100-continue`                | **P1**   | For uploads, respond with `100 Continue` immediately before processing. SDKs send this by default.                                                                                               |
 
 ### Client-Side Configuration (Document for Users)
 
 Users should be told to increase timeouts. Provide a recommended config profile (numbers likely need to be larger):
 
 **AWS CLI:**
+
 ```bash
 aws s3 cp s3://bucket/key ./file \
   --endpoint-url https://api.hyperspace.example.com \
@@ -528,6 +537,7 @@ aws s3 cp s3://bucket/key ./file \
 ```
 
 **Python (boto3):**
+
 ```python
 from botocore.config import Config
 s3 = boto3.client('s3',

@@ -5,14 +5,22 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context,
 } from 'aws-lambda';
-import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
-import { v4 as uuidv4 } from 'uuid';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
+import { ApiErrorCode, OrgRole } from '@hyperspace/shared';
 import type { ErrorResponse } from '@hyperspace/shared';
-import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader, ResponseBuilder } from '../lib/response-builder.js';
+import {
+  COOKIE_NAMES,
+  TOKEN_MAX_AGE,
+  makeCookieHeader,
+  makeHintCookieHeader,
+  ResponseBuilder,
+} from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
+import { OrgSetupStatus } from '../lib/org-setup-status.js';
+import { getDynamoClient } from '../lib/ddb-client.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,9 +52,7 @@ let cachedJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
 
 function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
   if (cachedJWKS) return cachedJWKS;
-  cachedJWKS = createRemoteJWKSet(
-    new URL(`https://${domain}/.well-known/jwks.json`),
-  );
+  cachedJWKS = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
   return cachedJWKS;
 }
 
@@ -54,28 +60,28 @@ function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Parse cookies from the API Gateway v2 event.
- * Payload format 2.0 puts cookies in `event.cookies` (string[]),
- * NOT in `event.headers['cookie']`.
- */
-function parseCookies(cookieArray: string[] | undefined): Record<string, string> {
-  if (!cookieArray?.length) return {};
-  return Object.fromEntries(
-    cookieArray.flatMap((entry) => {
-      const eqIdx = entry.indexOf('=');
-      if (eqIdx === -1) return [];
-      return [[entry.slice(0, eqIdx).trim(), entry.slice(eqIdx + 1).trim()]];
-    }),
-  );
-}
+import { parseCookies } from '../lib/cookies.js';
+import { CSRF_COOKIE_NAME } from '@hyperspace/shared';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
+}
+
+function orgNotConfirmedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
-    .status(401)
-    .body<ErrorResponse>({ message: 'Unauthorized' })
+    .status(403)
+    .body<ErrorResponse>({
+      message: 'Please create an organization to continue.',
+      code: ApiErrorCode.ORG_NOT_CONFIRMED,
+    })
     .build();
 }
+
+/**
+ * Routes that are allowed through even when the user's org is not yet confirmed.
+ * All other authenticated routes will return 403 ORG_NOT_CONFIRMED.
+ */
+const ORG_CONFIRM_BYPASS_ROUTES = new Set(['/api/me', '/api/org/confirm']);
 
 // ---------------------------------------------------------------------------
 // Sub → userId + orgId resolution via UserInfoTable
@@ -84,15 +90,18 @@ function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
 interface ResolvedIdentity {
   userId: string;
   orgId: string;
+  orgConfirmed: boolean;
+  email?: string;
 }
 
-const dynamo = new DynamoDBClient({});
-
-async function resolveUserAndOrg(sub: string, email: string | undefined): Promise<ResolvedIdentity> {
+async function resolveUserAndOrg(
+  sub: string,
+  email: string | undefined,
+): Promise<ResolvedIdentity> {
   const tableName = Resource.UserInfoTable.name;
 
   // Look up existing mapping
-  const result = await dynamo.send(
+  const result = await getDynamoClient().send(
     new GetItemCommand({
       TableName: tableName,
       Key: {
@@ -102,16 +111,33 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
     }),
   );
 
+  // TODO: Improve the org display name (e.g. use the user's organization name from Auth0)
+  const orgName = (email && email.split('@')[1]) ?? 'My Organization';
+
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
-    return { userId: result.Item.userId.S, orgId: result.Item.orgId.S };
+    const userId = result.Item.userId.S;
+    const orgId = result.Item.orgId.S;
+    // Prefer stored email from identity record, fall back to JWT email
+    const resolvedEmail = result.Item.email?.S ?? email;
+
+    const { Item: orgItem } = await getDynamoClient().send(
+      new GetItemCommand({
+        TableName: tableName,
+        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+      }),
+    );
+
+    const orgConfirmed = orgItem?.orgConfirmed?.BOOL === true;
+
+    return { userId, orgId, orgConfirmed, email: resolvedEmail };
   }
 
   // New user — create user, org, and membership records atomically
-  const userId = uuidv4();
-  const orgId = uuidv4();
+  const userId = crypto.randomUUID();
+  const orgId = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  await dynamo.send(
+  await getDynamoClient().send(
     new TransactWriteItemsCommand({
       TransactItems: [
         {
@@ -147,7 +173,9 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
             Item: {
               pk: { S: `ORG#${orgId}` },
               sk: { S: 'PROFILE' },
-              ...(email ? { name: { S: email.split('@')[1] ?? 'My Organization' } } : { name: { S: 'My Organization' } }),
+              name: { S: orgName },
+              orgConfirmed: { BOOL: false },
+              setupStatus: { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED },
               createdBy: { S: userId },
               createdAt: { S: now },
             },
@@ -159,7 +187,7 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
             Item: {
               pk: { S: `ORG#${orgId}` },
               sk: { S: `MEMBER#${userId}` },
-              role: { S: 'admin' },
+              role: { S: OrgRole.Admin },
               ...(email ? { email: { S: email } } : {}),
               joinedAt: { S: now },
             },
@@ -169,7 +197,10 @@ async function resolveUserAndOrg(sub: string, email: string | undefined): Promis
     }),
   );
 
-  return { userId, orgId };
+  // Do NOT enqueue tenant setup here — org is not yet confirmed.
+  // Tenant setup will be triggered when the user confirms their org via POST /api/org/confirm.
+
+  return { userId, orgId, orgConfirmed: false, email };
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +225,11 @@ export function authMiddleware() {
     const secrets = getAuthSecrets();
     const jwks = getJWKS(domain);
 
-    const hasCookies = { accessToken: !!accessToken, idToken: !!idToken, refreshToken: !!refreshToken };
+    const hasCookies = {
+      accessToken: !!accessToken,
+      idToken: !!idToken,
+      refreshToken: !!refreshToken,
+    };
     console.warn('[auth] Starting auth check', { hasCookies });
 
     // Step 1: Validate existing access token
@@ -203,12 +238,17 @@ export function authMiddleware() {
         const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
         const sub = payload.sub!;
         const email = payload.email as string | undefined;
-        const { userId, orgId } = await resolveUserAndOrg(sub, email);
-        (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
-          userId,
-          orgId,
-          email,
+        const resolved = await resolveUserAndOrg(sub, email);
+        (
+          event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
+        ).userInfo = {
+          userId: resolved.userId,
+          orgId: resolved.orgId,
+          email: resolved.email,
         };
+        if (!resolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
+          return orgNotConfirmedResponse();
+        }
         return; // Valid — continue to handler
       } catch (err) {
         // Expired or invalid — fall through to refresh
@@ -246,13 +286,20 @@ export function authMiddleware() {
           const refreshedPayload = decodeJwt(tokens.access_token);
           const refreshedSub = refreshedPayload.sub!;
           const refreshedEmail = refreshedPayload.email as string | undefined;
-          const { userId: refreshedUserId, orgId: refreshedOrgId } = await resolveUserAndOrg(refreshedSub, refreshedEmail);
-          (event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }).userInfo = {
-            userId: refreshedUserId,
-            orgId: refreshedOrgId,
-            email: refreshedEmail,
+          const refreshedResolved = await resolveUserAndOrg(refreshedSub, refreshedEmail);
+          (
+            event.requestContext as APIGatewayProxyEventV2['requestContext'] & {
+              userInfo: UserInfo;
+            }
+          ).userInfo = {
+            userId: refreshedResolved.userId,
+            orgId: refreshedResolved.orgId,
+            email: refreshedResolved.email,
           };
           console.warn('[auth] Token refresh succeeded');
+          if (!refreshedResolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
+            return orgNotConfirmedResponse();
+          }
           return; // Continue to handler
         }
         const refreshBody = await tokenRes.text().catch(() => '');
@@ -273,12 +320,14 @@ export function authMiddleware() {
     const response = request.response as APIGatewayProxyStructuredResultV2 | undefined;
     if (!newTokens || !response) return;
 
+    const csrfToken = crypto.randomUUID();
     response.cookies = [
       ...(response.cookies ?? []),
       makeCookieHeader(COOKIE_NAMES.ACCESS_TOKEN, newTokens.access_token, TOKEN_MAX_AGE.ACCESS),
       makeCookieHeader(COOKIE_NAMES.ID_TOKEN, newTokens.id_token, TOKEN_MAX_AGE.ACCESS),
       makeCookieHeader(COOKIE_NAMES.REFRESH_TOKEN, newTokens.refresh_token, TOKEN_MAX_AGE.REFRESH),
       makeHintCookieHeader(COOKIE_NAMES.LOGGED_IN, '1', TOKEN_MAX_AGE.REFRESH),
+      makeHintCookieHeader(CSRF_COOKIE_NAME, csrfToken, TOKEN_MAX_AGE.ACCESS),
     ];
   };
 

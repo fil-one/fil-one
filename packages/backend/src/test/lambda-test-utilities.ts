@@ -1,33 +1,52 @@
 import type { Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
-import type { UserInfo } from '../lib/user-context.js';
+import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.js';
 
-type NormalizedHeaderEvent = { headers: Record<string, string>; rawHeaders: Record<string, string> };
+type NormalizedHeaderEvent = {
+  headers: Record<string, string>;
+  rawHeaders: Record<string, string>;
+};
 
 interface BuildEventProps {
+  body?: string;
   cookies?: string[];
   userInfo?: UserInfo;
   queryStringParameters?: Record<string, string>;
   requestContext?: Partial<APIGatewayProxyEventV2['requestContext']>;
+  rawPath?: string;
+  method?: string;
 }
 
-export function buildEvent(props?: BuildEventProps): APIGatewayProxyEventV2 & NormalizedHeaderEvent {
+export function buildEvent(
+  props: BuildEventProps & { userInfo: UserInfo },
+): AuthenticatedEvent & NormalizedHeaderEvent;
+export function buildEvent(props?: BuildEventProps): APIGatewayProxyEventV2 & NormalizedHeaderEvent;
+export function buildEvent(
+  props?: BuildEventProps,
+): APIGatewayProxyEventV2 & NormalizedHeaderEvent {
   return {
     version: '2.0',
     routeKey: 'GET /test',
-    rawPath: '/test',
+    rawPath: props?.rawPath ?? '/test',
     rawQueryString: props?.queryStringParameters
       ? new URLSearchParams(props.queryStringParameters).toString()
       : '',
     headers: {},
     rawHeaders: {},
+    ...(props?.body !== undefined && { body: props.body }),
     ...(props?.queryStringParameters && { queryStringParameters: props.queryStringParameters }),
     requestContext: {
       accountId: '123',
       apiId: 'abc',
       domainName: 'test.execute-api.us-east-1.amazonaws.com',
       domainPrefix: 'test',
-      http: { method: 'GET', path: '/test', protocol: 'HTTP/1.1', sourceIp: '127.0.0.1', userAgent: 'test' },
+      http: {
+        method: props?.method ?? 'GET',
+        path: props?.rawPath ?? '/test',
+        protocol: 'HTTP/1.1',
+        sourceIp: '127.0.0.1',
+        userAgent: 'test',
+      },
       requestId: 'req-1',
       routeKey: 'GET /test',
       stage: '$default',
@@ -37,6 +56,7 @@ export function buildEvent(props?: BuildEventProps): APIGatewayProxyEventV2 & No
       ...props?.requestContext,
     },
     isBase64Encoded: false,
+    ...(props?.body !== undefined ? { body: props.body } : {}),
     ...(props?.cookies ? { cookies: props.cookies } : {}),
   } as unknown as APIGatewayProxyEventV2 & NormalizedHeaderEvent;
 }
@@ -62,7 +82,9 @@ export function buildContext(props?: Partial<Context>): Context {
 
 export function buildMiddyRequest<TResult = APIGatewayProxyResultV2>(
   event: APIGatewayProxyEventV2,
-  overrides?: Partial<Request<APIGatewayProxyEventV2, TResult, Error, Context, Record<string, unknown>>>,
+  overrides?: Partial<
+    Request<APIGatewayProxyEventV2, TResult, Error, Context, Record<string, unknown>>
+  >,
 ): Request<APIGatewayProxyEventV2, TResult, Error, Context, Record<string, unknown>> {
   return {
     event,

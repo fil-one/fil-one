@@ -1,9 +1,14 @@
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import type { MiddlewareObj, Request } from '@middy/core';
-import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2, Context } from 'aws-lambda';
-import { SubscriptionStatus } from '@hyperspace/shared';
-import { Resource } from "sst";
+import type {
+  APIGatewayProxyEventV2,
+  APIGatewayProxyResultV2,
+  APIGatewayProxyStructuredResultV2,
+  Context,
+} from 'aws-lambda';
+import { ApiErrorCode, SubscriptionStatus } from '@hyperspace/shared';
+import { Resource } from 'sst';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -22,9 +27,7 @@ function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
-export function subscriptionGuardMiddleware(
-  accessLevel: AccessLevel,
-) {
+export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
   const before = async (
     request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
@@ -68,7 +71,8 @@ export function subscriptionGuardMiddleware(
               pk: { S: `CUSTOMER#${userId}` },
               sk: { S: 'SUBSCRIPTION' },
             },
-            UpdateExpression: 'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+            UpdateExpression:
+              'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
             ExpressionAttributeValues: {
               ':status': { S: SubscriptionStatus.GracePeriod },
               ':grace': { S: gracePeriodEndsAt },
@@ -104,14 +108,21 @@ export function subscriptionGuardMiddleware(
         );
         return new ResponseBuilder()
           .status(403)
-          .body({ message: 'Your subscription has been canceled. Please reactivate to regain access.', code: 'SUBSCRIPTION_CANCELED' })
+          .body({
+            message: 'Your subscription has been canceled. Please reactivate to regain access.',
+            code: ApiErrorCode.SUBSCRIPTION_CANCELED,
+          })
           .build();
       }
 
       if (accessLevel === AccessLevel.Write) {
         return new ResponseBuilder()
           .status(403)
-          .body({ message: 'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.', code: 'GRACE_PERIOD_WRITE_BLOCKED' })
+          .body({
+            message:
+              'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
+            code: ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED,
+          })
           .build();
       }
 
@@ -123,7 +134,10 @@ export function subscriptionGuardMiddleware(
     if (status === SubscriptionStatus.Canceled) {
       return new ResponseBuilder()
         .status(403)
-        .body({ message: 'Your subscription has been canceled. Please reactivate to regain access.', code: 'SUBSCRIPTION_CANCELED' })
+        .body({
+          message: 'Your subscription has been canceled. Please reactivate to regain access.',
+          code: ApiErrorCode.SUBSCRIPTION_CANCELED,
+        })
         .build();
     }
 

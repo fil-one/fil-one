@@ -1,22 +1,18 @@
-import {
-  CheckIcon,
-  PhoneIcon,
-  ArrowRightIcon,
-} from '@phosphor-icons/react/dist/ssr'
-import { Modal, ModalBody, ModalHeader } from '@hyperspace/ui/Modal'
+import { CheckIcon, PhoneIcon, ArrowRightIcon } from '@phosphor-icons/react/dist/ssr';
+import { Modal, ModalBody, ModalHeader } from '@hyperspace/ui/Modal';
 
 type ChoosePlanDialogProps = {
-  open: boolean
-  onClose: () => void
-  onSelectPayAsYouGo: () => void
-}
+  open: boolean;
+  onClose: () => void;
+  onSelectPayAsYouGo: () => void;
+};
 
 const PAY_AS_YOU_GO_FEATURES = [
   'No egress fees',
   'No API request fees',
   'Data integrity guarantees',
   'Pay only for what you use',
-]
+];
 
 const BUSINESS_FEATURES = [
   '1/3/5-year commitments',
@@ -24,7 +20,7 @@ const BUSINESS_FEATURES = [
   'Data integrity guarantees',
   'Capacity assurance',
   'Deployment SLAs',
-]
+];
 
 export function ChoosePlanDialog({ open, onClose, onSelectPayAsYouGo }: ChoosePlanDialogProps) {
   return (
@@ -97,5 +93,5 @@ export function ChoosePlanDialog({ open, onClose, onSelectPayAsYouGo }: ChoosePl
         </p>
       </ModalBody>
     </Modal>
-  )
+  );
 }

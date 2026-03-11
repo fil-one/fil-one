@@ -1,0 +1,10 @@
+export const OrgSetupStatus = {
+  HYPERSPACE_ORG_CREATED: 'HYPERSPACE_ORG_CREATED',
+  AURORA_TENANT_CREATED: 'AURORA_TENANT_CREATED',
+  AURORA_TENANT_SETUP_COMPLETE: 'AURORA_TENANT_SETUP_COMPLETE',
+  AURORA_TENANT_API_KEY_CREATED: 'AURORA_TENANT_API_KEY_CREATED',
+} as const;
+
+export function isOrgSetupComplete(status: string | undefined): boolean {
+  return status === OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED;
+}

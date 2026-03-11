@@ -10,6 +10,18 @@ declare module "sst" {
       "type": "sst.aws.ApiGatewayV2"
       "url": string
     }
+    "AuroraBackofficeToken": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "AuroraTenantSetupDlq": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
+    "AuroraTenantSetupQueue": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
     "Auth0ClientId": {
       "type": "sst.sst.Secret"
       "value": string

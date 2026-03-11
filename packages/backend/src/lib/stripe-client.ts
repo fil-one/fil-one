@@ -1,4 +1,4 @@
-import { Resource } from "sst";
+import { Resource } from 'sst';
 import Stripe from 'stripe';
 import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
 

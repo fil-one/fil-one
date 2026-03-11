@@ -1,13 +1,18 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader } from '../lib/response-builder.js';
+import { OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from '@hyperspace/shared';
+import {
+  COOKIE_NAMES,
+  TOKEN_MAX_AGE,
+  makeCookieHeader,
+  makeHintCookieHeader,
+  makeClearCookieHeader,
+} from '../lib/response-builder.js';
+import { parseCookies } from '../lib/cookies.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-
-// TODO: Implement state parameter validation to prevent CSRF attacks.
-// Before redirecting to Auth0, generate a random state value, store it in a
-// short-lived cookie, and verify it matches the state returned here.
+import { resolveOrigin } from '../lib/resolve-origin.js';
 
 function redirect(location: string, cookies: string[] = []): APIGatewayProxyStructuredResultV2 {
   return {
@@ -21,10 +26,10 @@ function redirect(location: string, cookies: string[] = []): APIGatewayProxyStru
 async function baseHandler(
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const websiteUrl = process.env.WEBSITE_URL!;
-  const signInUrl = `${websiteUrl}/sign-in`;
+  const origin = resolveOrigin(event);
+  const signInUrl = `${origin}/sign-in`;
 
-  const { code, error, error_description } = event.queryStringParameters ?? {};
+  const { code, error, error_description, state } = event.queryStringParameters ?? {};
 
   // Auth0 sends error + error_description if the user denied access or something failed
   if (error ?? !code) {
@@ -33,9 +38,19 @@ async function baseHandler(
     return redirect(`${signInUrl}?error=${encodeURIComponent(reason)}`);
   }
 
+  // Validate OAuth state parameter to prevent CSRF on the login flow
+  const cookies = parseCookies(event.cookies);
+  const storedState = cookies[OAUTH_STATE_COOKIE];
+  if (!state || !storedState || state !== storedState) {
+    console.error('OAuth state mismatch', { state, storedState: !!storedState });
+    return redirect(`${signInUrl}?error=${encodeURIComponent('Invalid state')}`, [
+      makeClearCookieHeader(OAUTH_STATE_COOKIE),
+    ]);
+  }
+
   const domain = process.env.AUTH0_DOMAIN!;
   const audience = process.env.AUTH0_AUDIENCE!;
-  const callbackUrl = process.env.AUTH_CALLBACK_URL!;
+  const callbackUrl = `${origin}/api/auth/callback`;
   const secrets = getAuthSecrets();
 
   const tokenRes = await fetch(`https://${domain}/oauth/token`, {
@@ -63,18 +78,19 @@ async function baseHandler(
     refresh_token?: string;
   };
 
-  const cookies = [
+  const csrfToken = crypto.randomUUID();
+  const responseCookies = [
     makeCookieHeader(COOKIE_NAMES.ACCESS_TOKEN, access_token, TOKEN_MAX_AGE.ACCESS),
     makeCookieHeader(COOKIE_NAMES.ID_TOKEN, id_token, TOKEN_MAX_AGE.ACCESS),
     ...(refresh_token
       ? [makeCookieHeader(COOKIE_NAMES.REFRESH_TOKEN, refresh_token, TOKEN_MAX_AGE.REFRESH)]
       : []),
     makeHintCookieHeader(COOKIE_NAMES.LOGGED_IN, '1', TOKEN_MAX_AGE.REFRESH),
+    makeHintCookieHeader(CSRF_COOKIE_NAME, csrfToken, TOKEN_MAX_AGE.ACCESS),
+    makeClearCookieHeader(OAUTH_STATE_COOKIE),
   ];
 
-  return redirect(`${websiteUrl}/dashboard`, cookies);
+  return redirect(`${origin}/dashboard`, responseCookies);
 }
 
-export const handler = middy(baseHandler)
-  .use(httpHeaderNormalizer())
-  .use(errorHandlerMiddleware());
+export const handler = middy(baseHandler).use(httpHeaderNormalizer()).use(errorHandlerMiddleware());

@@ -33,6 +33,7 @@ Browser → Console API on EKS (handles auth + cookie) → internal services
 ### Cookie Configuration
 
 Regardless of hosting, the session cookie should be:
+
 - `HttpOnly` — not accessible via JS, prevents XSS token theft
 - `Secure` — only sent over HTTPS
 - `SameSite=Strict` (or `Lax` if cross-origin redirect is needed during OAuth callback)
@@ -98,6 +99,7 @@ First-class Vercel/Next.js integration. Middleware handles HTTP-only cookies, to
 - Cons: Newer company (less battle-tested at scale), pricing can be high at hundreds of thousands of users, no web3/wallet story
 
 **Integration (Next.js):**
+
 ```
 1. pnpm install @clerk/nextjs
 2. Wrap app in <ClerkProvider>
@@ -116,6 +118,7 @@ Premium enterprise auth platform. Universal Login page is highly customizable an
 - Cons: Most expensive option, enterprise features require paid plans
 
 **Integration (Next.js):**
+
 ```
 1. pnpm install @auth0/nextjs-auth0
 2. Configure AUTH0_* env vars
@@ -127,6 +130,7 @@ Premium enterprise auth platform. Universal Login page is highly customizable an
 ```
 
 **Integration (Express/EKS — if no Vercel):**
+
 ```
 1. pnpm install express-openid-connect
 2. Configure auth middleware with Auth0 issuer, client ID/secret
@@ -145,6 +149,7 @@ Native AWS integration (IAM, Secrets Manager, EKS). Supports SAML federation for
 - Cons: Hosted UI looks dated (custom UI likely needed), Cognito quirks are well-documented pain points, less compelling outside AWS
 
 **Integration (Express/EKS):**
+
 ```
 1. Create Cognito User Pool + App Client
 2. Add Google + GitHub as external identity providers on the user pool
@@ -165,6 +170,7 @@ Passwordless auth via email magic links and WebAuthn. Web3-native (DID tokens, w
 - Cons: Gives you a DID token not a session — you must build the session/cookie layer yourself. No built-in SAML SSO federation. Email magic links have UX friction (context-switch to email, delays, spam filters) that enterprise users may not love.
 
 **Integration:**
+
 ```
 1. pnpm install magic-sdk @magic-sdk/admin
 2. Client-side: magic.auth.loginWithMagicLink() or magic.oauth.loginWithRedirect('google')
@@ -186,6 +192,7 @@ De facto open-source auth framework for Next.js. Supports Cognito, Auth0, Magic,
 - Cons: You own the integration and maintenance, less polished than managed solutions
 
 **Integration (Next.js):**
+
 ```
 1. pnpm install next-auth
 2. Configure providers in auth config:
@@ -200,22 +207,22 @@ De facto open-source auth framework for Next.js. Supports Cognito, Auth0, Magic,
 
 ## Summary
 
-| Hosting | Top Pick | Runner Up |
-|---------|----------|-----------|
-| Vercel + Next.js | Clerk | Auth0 via `nextjs-auth0` |
-| AWS only | Auth0 | Cognito (if cost is primary concern) |
-| Either (max flexibility) | Auth.js + any OIDC provider | Auth0 |
-| Web3 identity required | Magic.link (+ custom session layer) | — |
+| Hosting                  | Top Pick                            | Runner Up                            |
+| ------------------------ | ----------------------------------- | ------------------------------------ |
+| Vercel + Next.js         | Clerk                               | Auth0 via `nextjs-auth0`             |
+| AWS only                 | Auth0                               | Cognito (if cost is primary concern) |
+| Either (max flexibility) | Auth.js + any OIDC provider         | Auth0                                |
+| Web3 identity required   | Magic.link (+ custom session layer) | —                                    |
 
 ### Social Login Support Matrix
 
-| Provider | Google | GitHub | Custom SSO (SAML) | Wallet/Web3 | Session Cookie Managed |
-|----------|--------|--------|-------------------|-------------|----------------------|
-| Clerk | Yes | Yes | Yes (paid) | No | Yes (automatic) |
-| Auth0 | Yes | Yes | Yes (paid) | No | Yes (via SDK) |
-| Cognito | Yes | Yes | Yes | No | No (DIY) |
-| Magic.link | Yes | Yes | No | Yes | No (DIY) |
-| Auth.js | Yes | Yes | Via provider | Via provider | Yes (built-in) |
+| Provider   | Google | GitHub | Custom SSO (SAML) | Wallet/Web3  | Session Cookie Managed |
+| ---------- | ------ | ------ | ----------------- | ------------ | ---------------------- |
+| Clerk      | Yes    | Yes    | Yes (paid)        | No           | Yes (automatic)        |
+| Auth0      | Yes    | Yes    | Yes (paid)        | No           | Yes (via SDK)          |
+| Cognito    | Yes    | Yes    | Yes               | No           | No (DIY)               |
+| Magic.link | Yes    | Yes    | No                | Yes          | No (DIY)               |
+| Auth.js    | Yes    | Yes    | Via provider      | Via provider | Yes (built-in)         |
 
 ---
 

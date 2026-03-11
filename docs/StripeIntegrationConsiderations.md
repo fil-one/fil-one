@@ -5,9 +5,9 @@
 1. **Wallet implementation** — Self-hosted hot wallet on EKS, or custodial service (Fireblocks, BitGo, Anchorage)? Custodial adds cost but provides signing policies, insurance, and audit trails.
 2. **FIL acquisition pipeline** — How do we convert USD (from Stripe payouts) to FIL? Automated via exchange API, manual/OTC, or fiat-to-crypto onramp?
 3. **Can any onramps accept USD?** — Would eliminate the FIL conversion step entirely for those providers. Might be useful for a prototype if acceptable to onramp. Potentially can bill offline as well for P0 through invoicing/contracts.
-4. **Data retention post-cancellation** — When a customer cancels, do we delete MEKs immediately (data unrecoverable) or retain for a grace period? - I suggest grace period (maybe smart contract duration?) since it's nominal cost to us at first. 
+4. **Data retention post-cancellation** — When a customer cancels, do we delete MEKs immediately (data unrecoverable) or retain for a grace period? - I suggest grace period (maybe smart contract duration?) since it's nominal cost to us at first.
 5. **Stripe Tax** — Do we have tax obligations worldwide as a storage orchestration layer? Likely yes in some jurisdictions (EU VAT, certain US states). Stripe Tax can automate but requires registration. Where do we register? Delaware/US? More complex?
-6. **Pricing model** — The $5/TB rate matches onramp cost, leaving negative margin after infra, tx fees, and Stripe fees. See [Appendix D: Economics & Pricing Alternatives](#appendix-d-economics--pricing-alternatives). We can ignore if we are fine with this. 
+6. **Pricing model** — The $5/TB rate matches onramp cost, leaving negative margin after infra, tx fees, and Stripe fees. See [Appendix D: Economics & Pricing Alternatives](#appendix-d-economics--pricing-alternatives). We can ignore if we are fine with this.
 7. **Multi-currency** — Charge everyone in USD, or support local currencies? Local currency improves international conversion rates but adds complexity.
 8. **Invoice detail level** — What customer-facing information on invoices? (Usage breakdown, object count, peak vs. average, etc.)
 9. **Dunning policy** — How many payment retries before suspension? Grace period before cancellation/reactivation?
@@ -36,24 +36,24 @@
 
 ### Use
 
-| Product | Purpose | Priority |
-|---------|---------|----------|
-| **Stripe Billing** | Subscriptions with metered usage reporting | Day 1 — core billing engine |
-| **Stripe Checkout** | Hosted payment page for signup / payment method collection | Day 1 — fastest path to collecting payment |
-| **Stripe Customer Portal** | Self-service billing management (update card, view invoices, cancel) | Day 1 — reduces support burden |
-| **Stripe Radar** | Fraud prevention (stolen cards, suspicious activity) | Day 1 — worldwide customers |
-| **Stripe Webhooks** | React to billing events (payment success/failure, subscription changes) | Day 1 — required for billing lifecycle |
-| **Stripe Tax** | Automatic sales tax / VAT for worldwide customers | Evaluate early |
-| **Stripe Invoicing** | PDF invoices, net-30/60 terms, purchase orders | Enterprise phase |
-| **Stripe Connect** | Multi-party payments (revenue-share with onramp providers) | Not needed now |
+| Product                    | Purpose                                                                 | Priority                                   |
+| -------------------------- | ----------------------------------------------------------------------- | ------------------------------------------ |
+| **Stripe Billing**         | Subscriptions with metered usage reporting                              | Day 1 — core billing engine                |
+| **Stripe Checkout**        | Hosted payment page for signup / payment method collection              | Day 1 — fastest path to collecting payment |
+| **Stripe Customer Portal** | Self-service billing management (update card, view invoices, cancel)    | Day 1 — reduces support burden             |
+| **Stripe Radar**           | Fraud prevention (stolen cards, suspicious activity)                    | Day 1 — worldwide customers                |
+| **Stripe Webhooks**        | React to billing events (payment success/failure, subscription changes) | Day 1 — required for billing lifecycle     |
+| **Stripe Tax**             | Automatic sales tax / VAT for worldwide customers                       | Evaluate early                             |
+| **Stripe Invoicing**       | PDF invoices, net-30/60 terms, purchase orders                          | Enterprise phase                           |
+| **Stripe Connect**         | Multi-party payments (revenue-share with onramp providers)              | Not needed now                             |
 
 ### Do Not Need
 
-| Product | Why Not |
-|---------|---------|
+| Product             | Why Not                                            |
+| ------------------- | -------------------------------------------------- |
 | **Stripe Identity** | No KYC requirement. Revisit if regulations change. |
-| **Stripe Issuing** | Not issuing cards |
-| **Stripe Terminal** | No physical point-of-sale |
+| **Stripe Issuing**  | Not issuing cards                                  |
+| **Stripe Terminal** | No physical point-of-sale                          |
 
 ---
 
@@ -75,6 +75,7 @@ Report actual storage consumption to Stripe each billing cycle. Stripe calculate
 **UX:** Customer pays only for what they use. No commitment, no tier selection. Feels like AWS/GCP billing.
 
 **Tradeoffs:**
+
 - Customer-friendly — low barrier, pay-as-you-go
 - Unpredictable revenue for us — hard to forecast
 - Requires robust usage tracking infrastructure (daily snapshots, averaging)
@@ -88,15 +89,16 @@ Report actual storage consumption to Stripe each billing cycle. Stripe calculate
 
 Sell storage in fixed blocks. Customer pays for the block whether or not they fill it.
 
-| Tier | Storage | Price | Effective $/TB |
-|------|---------|-------|----------------|
-| Starter | 1 TB | $7/mo | $7.00 |
-| Growth | 5 TB | $30/mo | $6.00 |
-| Scale | 10 TB | $50/mo | $5.00 |
+| Tier    | Storage | Price  | Effective $/TB |
+| ------- | ------- | ------ | -------------- |
+| Starter | 1 TB    | $7/mo  | $7.00          |
+| Growth  | 5 TB    | $30/mo | $6.00          |
+| Scale   | 10 TB   | $50/mo | $5.00          |
 
 **UX:** Customer picks a plan at signup. Upgrade/downgrade via Stripe Customer Portal.
 
 **Tradeoffs:**
+
 - Predictable revenue — customers pre-pay for capacity
 - Higher friction at signup (must choose a tier)
 - Customers who don't fill their block feel they're overpaying (churn risk)
@@ -115,6 +117,7 @@ Separate "platform access" from "storage consumption."
 **UX:** Two line items on the invoice. Customer sees platform value separated from raw storage.
 
 **Tradeoffs:**
+
 - Creates a margin floor from the platform fee regardless of storage usage
 - Two line items may confuse customers ("why am I paying twice?")
 - Platform fee deters tire-kickers — only committed users subscribe
@@ -129,6 +132,7 @@ Charge $5/TB metered, but enforce a monthly minimum (e.g., $10/month).
 **UX:** Feels like metered, but small/inactive users still pay a floor.
 
 **Tradeoffs:**
+
 - Guarantees minimum revenue per customer
 - Simple to explain ("$5/TB, $10 minimum")
 - May deter very small or experimental users
@@ -152,10 +156,10 @@ Start with **Option 1 (pure metered)** for launch to minimize signup friction an
 
 ### Payment Method at Signup: Tradeoff
 
-| Approach | Pros | Cons |
-|----------|------|------|
-| **Require card at signup** (Recommended) | Seamless conversion to paid, Radar scores card immediately, reduces freeloaders/trial abuse | Higher signup friction, lower top-of-funnel conversion |
-| **No card until trial ends** | Lower friction, more signups | Must prompt for card at trial end (drop-off point), trial abuse risk (new accounts for perpetual free storage), Radar can't assess until payment |
+| Approach                                 | Pros                                                                                        | Cons                                                                                                                                             |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Require card at signup** (Recommended) | Seamless conversion to paid, Radar scores card immediately, reduces freeloaders/trial abuse | Higher signup friction, lower top-of-funnel conversion                                                                                           |
+| **No card until trial ends**             | Lower friction, more signups                                                                | Must prompt for card at trial end (drop-off point), trial abuse risk (new accounts for perpetual free storage), Radar can't assess until payment |
 
 **Recommendation:** Require payment method at signup via Stripe Checkout in `setup` mode. This collects and validates the card without charging. Radar scores it immediately, blocking stolen/fraudulent cards before they consume real Filecoin storage (which costs us real FIL).
 
@@ -194,12 +198,12 @@ Stripe Radar uses ML to score every payment for fraud risk: card fingerprint, is
 
 ### Recommended Rules
 
-| Rule | Rationale |
-|------|-----------|
+| Rule                                | Rationale                                           |
+| ----------------------------------- | --------------------------------------------------- |
 | Block if card country != IP country | Reduces stolen card usage (may need VPN exceptions) |
-| Require 3D Secure for first charge | Shifts fraud liability to card issuer |
-| Block disposable email providers | Prevents trial abuse |
-| Review queue if risk score > 65 | Manual review for borderline cases |
+| Require 3D Secure for first charge  | Shifts fraud liability to card issuer               |
+| Block disposable email providers    | Prevents trial abuse                                |
+| Review queue if risk score > 65     | Manual review for borderline cases                  |
 
 ### Radar Is Not KYC
 
@@ -247,17 +251,17 @@ Radar prevents fraudulent payments. It does not verify identity. If identity ver
 
 ## Webhook Events to Handle
 
-| Event | Action |
-|-------|--------|
-| `customer.subscription.created` | Record subscription, start usage tracking |
-| `customer.subscription.trial_will_end` | Notify customer (3 days before) |
-| `customer.subscription.updated` | Handle plan changes, payment method updates |
-| `customer.subscription.deleted` | Stop tracking, begin data retention policy |
-| `invoice.creating` | **Report metered usage to Stripe** |
-| `invoice.payment_succeeded` | Record payment, update status |
-| `invoice.payment_failed` | Dunning flow |
-| `charge.dispute.created` | Flag account, potentially suspend |
-| `radar.early_fraud_warning` | Flag account for review |
+| Event                                  | Action                                      |
+| -------------------------------------- | ------------------------------------------- |
+| `customer.subscription.created`        | Record subscription, start usage tracking   |
+| `customer.subscription.trial_will_end` | Notify customer (3 days before)             |
+| `customer.subscription.updated`        | Handle plan changes, payment method updates |
+| `customer.subscription.deleted`        | Stop tracking, begin data retention policy  |
+| `invoice.creating`                     | **Report metered usage to Stripe**          |
+| `invoice.payment_succeeded`            | Record payment, update status               |
+| `invoice.payment_failed`               | Dunning flow                                |
+| `charge.dispute.created`               | Flag account, potentially suspend           |
+| `radar.early_fraud_warning`            | Flag account for review                     |
 
 Webhook security: verify signatures, idempotency layer (webhooks can be delivered multiple times), async processing via DB queue or SQS.
 
@@ -265,13 +269,13 @@ Webhook security: verify signatures, idempotency layer (webhooks can be delivere
 
 ## Enterprise Considerations (Future)
 
-| Need | Stripe Product | Notes |
-|------|---------------|-------|
-| Net-30/60 payment terms | Stripe Invoicing | PDF invoices, ACH/wire support |
-| Custom pricing / volume discounts | Custom Stripe Prices | Per-customer Price objects |
-| Annual contracts | Stripe Billing (subscription schedules) | Committed minimums with phases |
-| Purchase orders | Stripe Invoicing metadata | PO numbers on invoices |
-| SLA credits | Credit notes via Stripe API | Manual adjustments |
+| Need                              | Stripe Product                          | Notes                          |
+| --------------------------------- | --------------------------------------- | ------------------------------ |
+| Net-30/60 payment terms           | Stripe Invoicing                        | PDF invoices, ACH/wire support |
+| Custom pricing / volume discounts | Custom Stripe Prices                    | Per-customer Price objects     |
+| Annual contracts                  | Stripe Billing (subscription schedules) | Committed minimums with phases |
+| Purchase orders                   | Stripe Invoicing metadata               | PO numbers on invoices         |
+| SLA credits                       | Credit notes via Stripe API             | Manual adjustments             |
 
 ---
 
@@ -300,12 +304,12 @@ Our Postgres DB is the source of truth for usage. We report summarized usage to 
 
 ### Usage Events to Capture
 
-| Event | Data | When |
-|-------|------|------|
-| Object uploaded | `customer_id`, `object_id`, `encrypted_size_bytes`, `metadata_size_bytes`, `timestamp` | On upload confirmation (onramp confirms CID) |
-| Object deleted (logical) | `customer_id`, `object_id`, `deletion_timestamp` | Customer requests deletion |
-| Deal expiration | `customer_id`, `object_id`, `deal_expiry_timestamp` | Filecoin deal expires (poll onramp or chain) |
-| Metadata stored on-chain | `customer_id`, `chain_storage_bytes`, `tx_hash`, `fil_cost` | On-chain write confirmed |
+| Event                    | Data                                                                                   | When                                         |
+| ------------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Object uploaded          | `customer_id`, `object_id`, `encrypted_size_bytes`, `metadata_size_bytes`, `timestamp` | On upload confirmation (onramp confirms CID) |
+| Object deleted (logical) | `customer_id`, `object_id`, `deletion_timestamp`                                       | Customer requests deletion                   |
+| Deal expiration          | `customer_id`, `object_id`, `deal_expiry_timestamp`                                    | Filecoin deal expires (poll onramp or chain) |
+| Metadata stored on-chain | `customer_id`, `chain_storage_bytes`, `tx_hash`, `fil_cost`                            | On-chain write confirmed                     |
 
 ### Tables
 
@@ -409,25 +413,25 @@ CREATE TABLE onramp_payments (
 
 ## Appendix C: Backend Services
 
-| Service | Responsibility | Runs On |
-|---------|---------------|---------|
-| **Billing Service** | Stripe API calls, webhook processing, usage reporting | EKS pod |
-| **Usage Tracker** | Daily storage snapshots, aggregation, free trial enforcement | EKS cron job |
-| **Wallet Service** | FIL wallet management, onramp payments, cost tracking | EKS pod (or separate secure service) |
-| **Dunning Worker** | Payment failure notifications, account suspension logic | EKS cron/worker |
+| Service             | Responsibility                                               | Runs On                              |
+| ------------------- | ------------------------------------------------------------ | ------------------------------------ |
+| **Billing Service** | Stripe API calls, webhook processing, usage reporting        | EKS pod                              |
+| **Usage Tracker**   | Daily storage snapshots, aggregation, free trial enforcement | EKS cron job                         |
+| **Wallet Service**  | FIL wallet management, onramp payments, cost tracking        | EKS pod (or separate secure service) |
+| **Dunning Worker**  | Payment failure notifications, account suspension logic      | EKS cron/worker                      |
 
 ### DB Tables Summary
 
-| Table | Purpose |
-|-------|---------|
-| `customers` | Core customer record, linked to Stripe Customer ID |
-| `customer_trials` | Free trial tracking |
-| `stripe_subscriptions` | Local mirror of Stripe subscription state |
-| `storage_objects` | Per-object tracking (size, lifecycle, CID, deal) |
-| `storage_usage_snapshots` | Daily snapshots for billing aggregation |
-| `onramp_payments` | FIL payments to onramps (cost tracking) |
-| `stripe_webhook_events` | Idempotency log for webhook processing |
-| `invoices` | Local mirror of Stripe invoices |
+| Table                     | Purpose                                            |
+| ------------------------- | -------------------------------------------------- |
+| `customers`               | Core customer record, linked to Stripe Customer ID |
+| `customer_trials`         | Free trial tracking                                |
+| `stripe_subscriptions`    | Local mirror of Stripe subscription state          |
+| `storage_objects`         | Per-object tracking (size, lifecycle, CID, deal)   |
+| `storage_usage_snapshots` | Daily snapshots for billing aggregation            |
+| `onramp_payments`         | FIL payments to onramps (cost tracking)            |
+| `stripe_webhook_events`   | Idempotency log for webhook processing             |
+| `invoices`                | Local mirror of Stripe invoices                    |
 
 ---
 
@@ -436,6 +440,7 @@ CREATE TABLE onramp_payments (
 ### Current Margin Problem
 
 At $5/TB (matching onramp cost), margin is negative after:
+
 - AWS infrastructure (EKS, RDS, Secrets Manager, networking)
 - On-chain metadata storage (wrapped DEK references, object manifests, CIDs)
 - FIL transaction fees to onramps
@@ -466,6 +471,7 @@ On-chain metadata is infrastructure overhead. Track per-customer in `metadata_ch
 ## Appendix E: Deletion & Filecoin Immutability
 
 When a customer deletes an object:
+
 1. We mark it deleted in our DB
 2. We delete/disable the wrapped DEK (data becomes cryptographically inaccessible)
 3. The encrypted ciphertext **remains on Filecoin** until the deal expires
@@ -473,10 +479,10 @@ When a customer deletes an object:
 
 **Options:**
 
-| Approach | Customer UX | Our cost |
-|----------|-------------|----------|
-| Stop billing at deletion (Recommended) | Matches expectations | We absorb residual deal cost |
-| Bill until deal expires | Confusing — "I deleted it, why am I paying?" | Cost-neutral but churn risk |
+| Approach                               | Customer UX                                  | Our cost                     |
+| -------------------------------------- | -------------------------------------------- | ---------------------------- |
+| Stop billing at deletion (Recommended) | Matches expectations                         | We absorb residual deal cost |
+| Bill until deal expires                | Confusing — "I deleted it, why am I paying?" | Cost-neutral but churn risk  |
 
 **Recommendation:** Stop billing at logical deletion. Absorb residual cost. Disclose in ToS that data remains encrypted on-chain until deal expiration but is cryptographically inaccessible. Track the cost gap in `onramp_payments`.
 
@@ -503,25 +509,25 @@ Every download requires the client to call our Console API for the plaintext DEK
 
 ### Billing Models If We Do Charge
 
-| Model | How It Works | UX Impact |
-|-------|-------------|-----------|
-| **Per-request** | Charge per download request (e.g., $0.005 per 1,000 GET requests) | Predictable per-call, penalizes frequent small reads |
-| **Per-GB retrieved** | Charge based on bytes of objects retrieved (e.g., $0.01/GB) | Scales with data size, feels like egress pricing |
-| **Tiered free allowance** | Free retrievals up to N x stored data per month, then per-GB | Generous for normal use, catches abuse |
-| **Included in storage price** | No separate charge, baked into $5/TB | Simplest, but no abuse protection |
+| Model                         | How It Works                                                      | UX Impact                                            |
+| ----------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------- |
+| **Per-request**               | Charge per download request (e.g., $0.005 per 1,000 GET requests) | Predictable per-call, penalizes frequent small reads |
+| **Per-GB retrieved**          | Charge based on bytes of objects retrieved (e.g., $0.01/GB)       | Scales with data size, feels like egress pricing     |
+| **Tiered free allowance**     | Free retrievals up to N x stored data per month, then per-GB      | Generous for normal use, catches abuse               |
+| **Included in storage price** | No separate charge, baked into $5/TB                              | Simplest, but no abuse protection                    |
 
 ### What to Track Regardless of Billing Decision
 
 Track retrieval events in the DB even if we don't bill for them. This data informs future pricing decisions and helps identify abuse.
 
-| Field | Purpose |
-|-------|---------|
-| `customer_id` | Who requested |
-| `object_id` | What was retrieved |
-| `object_size_bytes` | Size of retrieved object |
-| `timestamp` | When |
-| `source_ip` | Abuse detection |
-| `request_count` (daily aggregate) | Volume patterns |
+| Field                             | Purpose                  |
+| --------------------------------- | ------------------------ |
+| `customer_id`                     | Who requested            |
+| `object_id`                       | What was retrieved       |
+| `object_size_bytes`               | Size of retrieved object |
+| `timestamp`                       | When                     |
+| `source_ip`                       | Abuse detection          |
+| `request_count` (daily aggregate) | Volume patterns          |
 
 ### Recommendation
 

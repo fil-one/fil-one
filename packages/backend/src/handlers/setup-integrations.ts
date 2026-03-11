@@ -1,15 +1,15 @@
-import { Resource } from "sst";
-import Stripe from "stripe";
+import { Resource } from 'sst';
+import Stripe from 'stripe';
 import {
   SSMClient,
   GetParameterCommand,
   PutParameterCommand,
   DeleteParameterCommand,
-} from "@aws-sdk/client-ssm";
+} from '@aws-sdk/client-ssm';
 import type {
   CloudFormationCustomResourceEvent,
   CloudFormationCustomResourceResponse,
-} from "aws-lambda";
+} from 'aws-lambda';
 
 // ── Custom resource property types ────────────────────────────────────
 
@@ -34,12 +34,12 @@ interface Auth0Client {
 // ── Constants ─────────────────────────────────────────────────────────
 
 const WEBHOOK_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
-  "customer.subscription.created",
-  "customer.subscription.updated",
-  "customer.subscription.deleted",
-  "customer.subscription.trial_will_end",
-  "invoice.payment_succeeded",
-  "invoice.payment_failed",
+  'customer.subscription.created',
+  'customer.subscription.updated',
+  'customer.subscription.deleted',
+  'customer.subscription.trial_will_end',
+  'invoice.payment_succeeded',
+  'invoice.payment_failed',
 ];
 
 const ssm = new SSMClient({});
@@ -50,9 +50,7 @@ function ssmParamName(stage: string): string {
 
 // ── SSM helpers ───────────────────────────────────────────────────────
 
-async function getStoredWebhookSecret(
-  stage: string,
-): Promise<string | undefined> {
+async function getStoredWebhookSecret(stage: string): Promise<string | undefined> {
   try {
     const result = await ssm.send(
       new GetParameterCommand({
@@ -62,20 +60,17 @@ async function getStoredWebhookSecret(
     );
     return result.Parameter?.Value;
   } catch (err: unknown) {
-    if (err instanceof Error && err.name === "ParameterNotFound") return undefined;
+    if (err instanceof Error && err.name === 'ParameterNotFound') return undefined;
     throw err;
   }
 }
 
-async function storeWebhookSecret(
-  stage: string,
-  secret: string,
-): Promise<void> {
+async function storeWebhookSecret(stage: string, secret: string): Promise<void> {
   await ssm.send(
     new PutParameterCommand({
       Name: ssmParamName(stage),
       Value: secret,
-      Type: "SecureString",
+      Type: 'SecureString',
       Overwrite: true,
     }),
   );
@@ -83,11 +78,9 @@ async function storeWebhookSecret(
 
 async function deleteWebhookSecret(stage: string): Promise<void> {
   try {
-    await ssm.send(
-      new DeleteParameterCommand({ Name: ssmParamName(stage) }),
-    );
+    await ssm.send(new DeleteParameterCommand({ Name: ssmParamName(stage) }));
   } catch (err: unknown) {
-    if (err instanceof Error && err.name === "ParameterNotFound") return;
+    if (err instanceof Error && err.name === 'ParameterNotFound') return;
     throw err;
   }
 }
@@ -148,10 +141,10 @@ async function teardownStripeWebhook(
 
 async function getAuth0ManagementToken(domain: string): Promise<string> {
   const resp = await fetch(`https://${domain}/oauth/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      grant_type: "client_credentials",
+      grant_type: 'client_credentials',
       client_id: Resource.Auth0MgmtClientId.value,
       client_secret: Resource.Auth0MgmtClientSecret.value,
       audience: `https://${domain}/api/v2/`,
@@ -172,10 +165,9 @@ async function getAuth0Client(
   token: string,
   clientId: string,
 ): Promise<Auth0Client> {
-  const resp = await fetch(
-    `https://${domain}/api/v2/clients/${clientId}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
+  const resp = await fetch(`https://${domain}/api/v2/clients/${clientId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
 
   if (!resp.ok) {
     const body = await resp.text();
@@ -191,17 +183,14 @@ async function patchAuth0Client(
   clientId: string,
   patch: Partial<Auth0Client>,
 ): Promise<void> {
-  const resp = await fetch(
-    `https://${domain}/api/v2/clients/${clientId}`,
-    {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(patch),
+  const resp = await fetch(`https://${domain}/api/v2/clients/${clientId}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
     },
-  );
+    body: JSON.stringify(patch),
+  });
 
   if (!resp.ok) {
     const body = await resp.text();
@@ -217,10 +206,7 @@ function removeValue(existing: string[], value: string): string[] {
   return existing.filter((v) => v !== value);
 }
 
-async function setupAuth0Callbacks(
-  domain: string,
-  siteUrl: string,
-): Promise<void> {
+async function setupAuth0Callbacks(domain: string, siteUrl: string): Promise<void> {
   const token = await getAuth0ManagementToken(domain);
   const clientId = Resource.Auth0ClientId.value;
   const client = await getAuth0Client(domain, token, clientId);
@@ -233,16 +219,13 @@ async function setupAuth0Callbacks(
     allowed_logout_urls: addUnique(client.allowed_logout_urls ?? [], loginUrl),
     web_origins: addUnique(client.web_origins ?? [], siteUrl),
     initiate_login_uri: addUnique(
-      (client.initiate_login_uri ?? "").split(",").filter(Boolean),
+      (client.initiate_login_uri ?? '').split(',').filter(Boolean),
       loginUrl,
-    ).join(","),
+    ).join(','),
   });
 }
 
-async function teardownAuth0Callbacks(
-  domain: string,
-  siteUrl: string,
-): Promise<void> {
+async function teardownAuth0Callbacks(domain: string, siteUrl: string): Promise<void> {
   const token = await getAuth0ManagementToken(domain);
   const clientId = Resource.Auth0ClientId.value;
   const client = await getAuth0Client(domain, token, clientId);
@@ -256,23 +239,20 @@ async function teardownAuth0Callbacks(
     web_origins: removeValue(client.web_origins ?? [], siteUrl),
   };
 
-  const loginUris = (client.initiate_login_uri ?? "").split(",").filter(Boolean);
+  const loginUris = (client.initiate_login_uri ?? '').split(',').filter(Boolean);
   const cleanedLoginUris = removeValue(loginUris, `${siteUrl}/sign-in`);
-  patch.initiate_login_uri = cleanedLoginUris.join(",");
+  patch.initiate_login_uri = cleanedLoginUris.join(',');
 
   await patchAuth0Client(domain, token, clientId, patch);
 }
 
 // ── CloudFormation Custom Resource response ───────────────────────────
 
-async function sendCfnResponse(
-  event: SetupEvent,
-  response: SetupResponse,
-): Promise<void> {
+async function sendCfnResponse(event: SetupEvent, response: SetupResponse): Promise<void> {
   const body = JSON.stringify(response);
   await fetch(event.ResponseURL, {
-    method: "PUT",
-    headers: { "Content-Type": "", "Content-Length": String(body.length) },
+    method: 'PUT',
+    headers: { 'Content-Type': '', 'Content-Length': String(body.length) },
     body,
   });
 }
@@ -281,13 +261,13 @@ async function sendCfnResponse(
 
 export async function handler(event: SetupEvent): Promise<void> {
   const { SiteUrl, Stage } = event.ResourceProperties;
-  const siteUrl = SiteUrl.replace(/\/$/, "");
+  const siteUrl = SiteUrl.replace(/\/$/, '');
   const physicalResourceId =
-    ("PhysicalResourceId" in event ? event.PhysicalResourceId : undefined) ??
+    ('PhysicalResourceId' in event ? event.PhysicalResourceId : undefined) ??
     `hyperspace-setup-${Stage}`;
 
   try {
-    if (event.RequestType === "Delete") {
+    if (event.RequestType === 'Delete') {
       const stripe = new Stripe(Resource.StripeSecretKey.value);
 
       await Promise.all([
@@ -295,10 +275,10 @@ export async function handler(event: SetupEvent): Promise<void> {
         teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl),
       ]);
 
-      console.log("Teardown complete:", { siteUrl, stage: Stage });
+      console.log('Teardown complete:', { siteUrl, stage: Stage });
 
       await sendCfnResponse(event, {
-        Status: "SUCCESS",
+        Status: 'SUCCESS',
         PhysicalResourceId: physicalResourceId,
         StackId: event.StackId,
         RequestId: event.RequestId,
@@ -311,8 +291,8 @@ export async function handler(event: SetupEvent): Promise<void> {
     const stripe = new Stripe(Resource.StripeSecretKey.value);
 
     // If Update changed the SiteUrl, clean up old URLs first
-    if (event.RequestType === "Update") {
-      const oldUrl = event.OldResourceProperties.SiteUrl?.replace(/\/$/, "");
+    if (event.RequestType === 'Update') {
+      const oldUrl = event.OldResourceProperties.SiteUrl?.replace(/\/$/, '');
       if (oldUrl && oldUrl !== siteUrl) {
         await Promise.all([
           teardownStripeWebhook(stripe, oldUrl, Stage),
@@ -326,14 +306,14 @@ export async function handler(event: SetupEvent): Promise<void> {
       setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl),
     ]);
 
-    console.log("Setup complete:", {
+    console.log('Setup complete:', {
       webhookEndpointId: stripeResult.webhookEndpointId,
       siteUrl,
       stage: Stage,
     });
 
     await sendCfnResponse(event, {
-      Status: "SUCCESS",
+      Status: 'SUCCESS',
       PhysicalResourceId: physicalResourceId,
       StackId: event.StackId,
       RequestId: event.RequestId,
@@ -344,10 +324,10 @@ export async function handler(event: SetupEvent): Promise<void> {
       },
     });
   } catch (err: unknown) {
-    console.error("Setup/teardown failed:", err);
+    console.error('Setup/teardown failed:', err);
 
     await sendCfnResponse(event, {
-      Status: "FAILED",
+      Status: 'FAILED',
       Reason: err instanceof Error ? err.message : String(err),
       PhysicalResourceId: physicalResourceId,
       StackId: event.StackId,

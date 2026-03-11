@@ -12,9 +12,11 @@ import { Route as apiKeysRoute } from './routes/_app/api-keys.js';
 import { Route as billingRoute } from './routes/_app/billing.js';
 import { Route as settingsRoute } from './routes/_app/settings.js';
 import { Route as supportRoute } from './routes/_app/support.js';
+import { Route as finishSignUpRoute } from './routes/finish-sign-up.js';
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  finishSignUpRoute,
   authRoute.addChildren([signInRoute, signUpRoute]),
   appRoute.addChildren([
     dashboardRoute,

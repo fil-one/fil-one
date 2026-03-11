@@ -25,7 +25,7 @@ vi.stubGlobal('fetch', mockFetch);
 process.env.WEBSITE_URL = 'https://app.example.com';
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
-process.env.AUTH_CALLBACK_URL = 'https://api.test.com/auth/callback';
+process.env.ALLOWED_REDIRECT_ORIGINS = '';
 
 import { handler } from './auth-callback.js';
 
@@ -57,7 +57,9 @@ describe('auth-callback handler', () => {
       const result = await handler(event, stubContext);
 
       expect(result.statusCode).toBe(302);
-      expect(result.headers!['Location']).toBe('https://app.example.com/sign-in?error=User%20cancelled');
+      expect(result.headers!['Location']).toBe(
+        'https://app.example.com/sign-in?error=User%20cancelled',
+      );
     });
 
     it('redirects to sign-in with the error code when no description', async () => {
@@ -68,7 +70,9 @@ describe('auth-callback handler', () => {
       const result = await handler(event, stubContext);
 
       expect(result.statusCode).toBe(302);
-      expect(result.headers!['Location']).toBe('https://app.example.com/sign-in?error=access_denied');
+      expect(result.headers!['Location']).toBe(
+        'https://app.example.com/sign-in?error=access_denied',
+      );
     });
   });
 
@@ -79,13 +83,44 @@ describe('auth-callback handler', () => {
       const result = await handler(event, stubContext);
 
       expect(result.statusCode).toBe(302);
-      expect(result.headers!['Location']).toBe('https://app.example.com/sign-in?error=Authentication%20failed');
+      expect(result.headers!['Location']).toBe(
+        'https://app.example.com/sign-in?error=Authentication%20failed',
+      );
     });
   });
 
   // -------------------------------------------------------------------------
   // Token exchange failure
   // -------------------------------------------------------------------------
+
+  describe('when OAuth state is invalid', () => {
+    it('redirects to sign-in with an invalid state error', async () => {
+      const event = buildEvent({
+        queryStringParameters: { code: 'auth-code-123', state: 'wrong-state' },
+        cookies: ['hs_oauth_state=correct-state'],
+      });
+
+      const result = await handler(event, stubContext);
+
+      expect(result.statusCode).toBe(302);
+      expect(result.headers!['Location']).toBe(
+        'https://app.example.com/sign-in?error=Invalid%20state',
+      );
+    });
+
+    it('redirects to sign-in when state cookie is missing', async () => {
+      const event = buildEvent({
+        queryStringParameters: { code: 'auth-code-123', state: 'some-state' },
+      });
+
+      const result = await handler(event, stubContext);
+
+      expect(result.statusCode).toBe(302);
+      expect(result.headers!['Location']).toBe(
+        'https://app.example.com/sign-in?error=Invalid%20state',
+      );
+    });
+  });
 
   describe('when token exchange fails', () => {
     it('redirects to sign-in with a token exchange error', async () => {
@@ -95,12 +130,17 @@ describe('auth-callback handler', () => {
         text: async () => 'Bad request',
       });
 
-      const event = buildEvent({ queryStringParameters: { code: 'auth-code-123' } });
+      const event = buildEvent({
+        queryStringParameters: { code: 'auth-code-123', state: 'valid-state' },
+        cookies: ['hs_oauth_state=valid-state'],
+      });
 
       const result = await handler(event, stubContext);
 
       expect(result.statusCode).toBe(302);
-      expect(result.headers!['Location']).toBe('https://app.example.com/sign-in?error=Token%20exchange%20failed');
+      expect(result.headers!['Location']).toBe(
+        'https://app.example.com/sign-in?error=Token%20exchange%20failed',
+      );
     });
   });
 
@@ -115,6 +155,13 @@ describe('auth-callback handler', () => {
       refresh_token: 'new-refresh-token',
     };
 
+    const validStateEvent = (overrides?: Parameters<typeof buildEvent>[0]) =>
+      buildEvent({
+        queryStringParameters: { code: 'auth-code-123', state: 'valid-state' },
+        cookies: ['hs_oauth_state=valid-state'],
+        ...overrides,
+      });
+
     beforeEach(() => {
       mockFetch.mockResolvedValue({
         ok: true,
@@ -123,18 +170,14 @@ describe('auth-callback handler', () => {
     });
 
     it('redirects to /dashboard', async () => {
-      const event = buildEvent({ queryStringParameters: { code: 'auth-code-123' } });
-
-      const result = await handler(event, stubContext);
+      const result = await handler(validStateEvent(), stubContext);
 
       expect(result.statusCode).toBe(302);
       expect(result.headers!['Location']).toBe('https://app.example.com/dashboard');
     });
 
     it('sends the correct token request to Auth0', async () => {
-      const event = buildEvent({ queryStringParameters: { code: 'auth-code-123' } });
-
-      await handler(event, stubContext);
+      await handler(validStateEvent(), stubContext);
 
       expect(mockFetch).toHaveBeenCalledWith(
         'https://test.auth0.com/oauth/token',
@@ -149,20 +192,54 @@ describe('auth-callback handler', () => {
       expect(body.get('client_id')).toBe('test-client-id');
       expect(body.get('client_secret')).toBe('test-client-secret');
       expect(body.get('code')).toBe('auth-code-123');
-      expect(body.get('redirect_uri')).toBe('https://api.test.com/auth/callback');
+      expect(body.get('redirect_uri')).toBe('https://app.example.com/api/auth/callback');
       expect(body.get('audience')).toBe('https://api.test.com');
     });
 
-    it('sets access, id, refresh, and logged_in cookies', async () => {
-      const event = buildEvent({ queryStringParameters: { code: 'auth-code-123' } });
+    it('sets auth cookies, CSRF cookie, and clears state cookie', async () => {
+      const result = await handler(validStateEvent(), stubContext);
+      const cookies = result.cookies ?? [];
+
+      expect(cookies).toHaveLength(6);
+      expect(cookies[0]).toBe(
+        'hs_access_token=new-access-token; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+      );
+      expect(cookies[1]).toBe(
+        'hs_id_token=new-id-token; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+      );
+      expect(cookies[2]).toBe(
+        'hs_refresh_token=new-refresh-token; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000',
+      );
+      expect(cookies[3]).toBe('hs_logged_in=1; Secure; SameSite=Lax; Path=/; Max-Age=2592000');
+      expect(cookies[4]).toMatch(
+        /^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/,
+      );
+      expect(cookies[5]).toBe('hs_oauth_state=; Secure; SameSite=Lax; Path=/; Max-Age=0');
+    });
+
+    it('uses X-Dev-Origin when it matches ALLOWED_REDIRECT_ORIGINS', async () => {
+      process.env.ALLOWED_REDIRECT_ORIGINS = 'https://localhost:5173';
+      const event = validStateEvent();
+      event.headers['x-dev-origin'] = 'https://localhost:5173';
 
       const result = await handler(event, stubContext);
 
-      expect(result.cookies).toHaveLength(4);
-      expect(result.cookies![0]).toContain('hs_access_token=new-access-token');
-      expect(result.cookies![1]).toContain('hs_id_token=new-id-token');
-      expect(result.cookies![2]).toContain('hs_refresh_token=new-refresh-token');
-      expect(result.cookies![3]).toContain('hs_logged_in=1');
+      expect(result.headers?.['Location']).toBe('https://localhost:5173/dashboard');
+      const body = new URLSearchParams(mockFetch.mock.calls[0][1].body as string);
+      expect(body.get('redirect_uri')).toBe('https://localhost:5173/api/auth/callback');
+
+      // Reset
+      process.env.ALLOWED_REDIRECT_ORIGINS = '';
+    });
+
+    it('ignores X-Dev-Origin when not in ALLOWED_REDIRECT_ORIGINS', async () => {
+      process.env.ALLOWED_REDIRECT_ORIGINS = '';
+      const event = validStateEvent();
+      event.headers['x-dev-origin'] = 'https://evil.com';
+
+      const result = await handler(event, stubContext);
+
+      expect(result.headers!['Location']).toBe('https://app.example.com/dashboard');
     });
 
     it('omits refresh_token cookie when Auth0 does not return one', async () => {
@@ -174,25 +251,21 @@ describe('auth-callback handler', () => {
         }),
       });
 
-      const event = buildEvent({ queryStringParameters: { code: 'auth-code-123' } });
+      const result = await handler(validStateEvent(), stubContext);
+      const cookies = result.cookies ?? [];
 
-      const result = await handler(event, stubContext);
-
-      expect(result.cookies).toHaveLength(3);
-      expect(result.cookies![0]).toContain('hs_access_token=at');
-      expect(result.cookies![1]).toContain('hs_id_token=it');
-      expect(result.cookies![2]).toContain('hs_logged_in=1');
-    });
-
-    it('sets HttpOnly on token cookies but not on logged_in hint cookie', async () => {
-      const event = buildEvent({ queryStringParameters: { code: 'auth-code-123' } });
-
-      const result = await handler(event, stubContext);
-
-      expect(result.cookies![0]).toContain('HttpOnly');
-      expect(result.cookies![1]).toContain('HttpOnly');
-      expect(result.cookies![2]).toContain('HttpOnly');
-      expect(result.cookies![3]).not.toContain('HttpOnly');
+      expect(cookies).toHaveLength(5);
+      expect(cookies[0]).toBe(
+        'hs_access_token=at; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+      );
+      expect(cookies[1]).toBe(
+        'hs_id_token=it; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600',
+      );
+      expect(cookies[2]).toBe('hs_logged_in=1; Secure; SameSite=Lax; Path=/; Max-Age=2592000');
+      expect(cookies[3]).toMatch(
+        /^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/,
+      );
+      expect(cookies[4]).toBe('hs_oauth_state=; Secure; SameSite=Lax; Path=/; Max-Age=0');
     });
   });
 });
