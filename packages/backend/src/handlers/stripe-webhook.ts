@@ -7,7 +7,7 @@ import {
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
-import { SubscriptionStatus } from '@hyperspace/shared';
+import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
 

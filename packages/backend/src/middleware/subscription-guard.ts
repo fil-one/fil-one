@@ -7,7 +7,7 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context,
 } from 'aws-lambda';
-import { ApiErrorCode, SubscriptionStatus } from '@hyperspace/shared';
+import { ApiErrorCode, SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';

@@ -1,5 +1,5 @@
 {
-  "name": "@hyperspace/infra",
+  "name": "@filone/infra",
   "private": true,
   "type": "module",
   "scripts": {

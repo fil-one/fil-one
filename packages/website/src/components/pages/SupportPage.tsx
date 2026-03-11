@@ -50,7 +50,7 @@ export function SupportPage() {
             <div className="flex flex-col gap-0.5">
               <span className="text-sm font-medium text-zinc-900">Email support</span>
               {/* UNKNOWN: Confirm the correct support email address. */}
-              <span className="text-sm text-zinc-500">support@hyperspace.filecoin.io</span>
+              <span className="text-sm text-zinc-500">support@fil.one</span>
             </div>
           </div>
 

@@ -1,5 +1,5 @@
 import { API_URL, AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_AUDIENCE } from '../env.js';
-import { ApiErrorCode, OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from '@hyperspace/shared';
+import { ApiErrorCode, OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from '@filone/shared';
 
 // Prevents multiple simultaneous 401 responses from each triggering a redirect.
 let isRedirecting = false;
@@ -18,7 +18,7 @@ interface LoginOptions {
   connection?: string;
 }
 
-// TODO [Option D]: When we move to a custom domain (e.g. auth.filhyperspace.com),
+// TODO [Option D]: When we move to a custom domain (e.g. auth.fil.one),
 // AUTH0_DOMAIN will change to the custom domain. No code changes needed here —
 // just update the VITE_AUTH0_DOMAIN env var.
 function buildAuth0LoginUrl(options?: LoginOptions): string {
@@ -50,7 +50,7 @@ export function logout(): void {
 }
 
 /**
- * Wrapper around fetch for all Hyperspace API calls.
+ * Wrapper around fetch for all Fil.one API calls.
  * - Always sends HttpOnly auth cookies via credentials: 'include'
  * - Redirects to Auth0 login on 401
  */
@@ -104,7 +104,7 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
 // ── Me / Org API ────────────────────────────────────────────────────────
 
-import type { MeResponse, ConfirmOrgResponse } from '@hyperspace/shared';
+import type { MeResponse, ConfirmOrgResponse } from '@filone/shared';
 
 export function getMe(): Promise<MeResponse> {
   return apiRequest<MeResponse>('/me');
@@ -124,7 +124,7 @@ import type {
   CreateSetupIntentResponse,
   ActivateSubscriptionResponse,
   CreatePortalSessionResponse,
-} from '@hyperspace/shared';
+} from '@filone/shared';
 
 export function getBilling(): Promise<BillingInfo> {
   return apiRequest<BillingInfo>('/billing');

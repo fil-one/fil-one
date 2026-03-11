@@ -4,7 +4,7 @@ import {
   postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens,
   postV1PartnersByPartnerIdTenants,
   postV1PartnersByPartnerIdTenantsByTenantIdSetup,
-} from '@hyperspace/aurora-backoffice-client';
+} from '@filone/aurora-backoffice-client';
 import { getAuroraBackofficeSecrets } from './auth-secrets.js';
 
 export interface CreateAuroraTenantOptions {
@@ -176,7 +176,7 @@ export async function createAuroraTenantApiKey({
   const { data, error } = await postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens({
     client,
     path: { partnerId, tenantId },
-    body: { name: `hyperspace-${orgId}` },
+    body: { name: `filone-${orgId}` },
     throwOnError: false,
   });
 

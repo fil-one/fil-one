@@ -79,7 +79,7 @@ export function ChoosePlanDialog({ open, onClose, onSelectPayAsYouGo }: ChoosePl
             </ul>
 
             <a
-              href="mailto:sales@filhyperspace.com"
+              href="mailto:sales@fil.one"
               className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg border border-[#0066ff] px-4 py-2.5 text-sm font-semibold text-[#0066ff] transition-colors hover:bg-[#f0f6ff]"
             >
               <PhoneIcon size={16} weight="bold" />

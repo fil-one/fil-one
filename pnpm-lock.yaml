@@ -90,13 +90,13 @@ importers:
       '@aws-sdk/util-dynamodb':
         specifier: ^3.996.1
         version: 3.996.2(@aws-sdk/client-dynamodb@3.1005.0)
-      '@hyperspace/aurora-backoffice-client':
+      '@filone/aurora-backoffice-client':
         specifier: workspace:*
         version: link:../aurora-backoffice-client
-      '@hyperspace/aurora-portal-client':
+      '@filone/aurora-portal-client':
         specifier: workspace:*
         version: link:../aurora-portal-client
-      '@hyperspace/shared':
+      '@filone/shared':
         specifier: workspace:*
         version: link:../shared
       '@middy/core':
@@ -212,7 +212,7 @@ importers:
 
   packages/website:
     dependencies:
-      '@hyperspace/shared':
+      '@filone/shared':
         specifier: workspace:*
         version: link:../shared
       '@hyperspace/ui':

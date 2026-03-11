@@ -12,7 +12,7 @@ import {
   GetItemCommand,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { ApiErrorCode, OrgRole } from '@hyperspace/shared';
+import { ApiErrorCode, OrgRole } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
 import { expectErrorResponse } from '../test/assert-helpers.js';
@@ -200,7 +200,7 @@ describe('authMiddleware', () => {
             sk: { S: 'PROFILE' },
             name: { S: 'example.com' },
             orgConfirmed: { BOOL: false },
-            setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
+            setupStatus: { S: 'FILONE_ORG_CREATED' },
           },
         });
 
@@ -250,7 +250,7 @@ describe('authMiddleware', () => {
             sk: { S: 'PROFILE' },
             name: { S: 'example.com' },
             orgConfirmed: { BOOL: false },
-            setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
+            setupStatus: { S: 'FILONE_ORG_CREATED' },
           },
         });
 
@@ -336,7 +336,7 @@ describe('authMiddleware', () => {
               sk: { S: 'PROFILE' },
               name: { S: 'example.com' },
               orgConfirmed: { BOOL: false },
-              setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
+              setupStatus: { S: 'FILONE_ORG_CREATED' },
               createdBy: { S: MOCK_USER_ID },
               createdAt: { S: expect.any(String) },
             },

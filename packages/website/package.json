@@ -1,5 +1,5 @@
 {
-  "name": "@hyperspace/website",
+  "name": "@filone/website",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hyperspace/shared": "workspace:*",
+    "@filone/shared": "workspace:*",
     "@hyperspace/ui": "workspace:*",
     "@phosphor-icons/react": "^2.1.10",
     "@stripe/react-stripe-js": "^5.6.1",

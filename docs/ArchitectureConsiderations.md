@@ -1,4 +1,4 @@
-# Hyperspace General Architecture
+# Fil.one General Architecture
 
 ## Business Requirements
 
@@ -47,7 +47,7 @@ High Level Data Flow: https://miro.com/app/board/uXjVGBRbr7E=/?focusWidget=34587
 - CDN for JS/CSS assets (cloudfront), maybe HTML if not using SSR - See below Frontend Tech Choices.
 - Docker compose for packaging of runtime for both ease of local development and deployments in a repeatable way
   - One for Our "private" APIs - Serving web pages if using SSR, APIs for payment flows and other CRUD operations against our owned data.
-  - Another for the Hyperspace Unified Onramp interface API and/or S3 Gateway API - Future OSS.
+  - Another for the Fil.one Unified Onramp interface API and/or S3 Gateway API - Future OSS.
 - Kubernetes and AWS EKS for compute.
 -
 

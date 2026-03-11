@@ -12,7 +12,7 @@ import type {
   AccessKey,
   CreateAccessKeyResponse,
   ListAccessKeysResponse,
-} from '@hyperspace/shared';
+} from '@filone/shared';
 
 import { apiRequest } from '../../lib/api.js';
 import { S3_ENDPOINT } from '../../env';
@@ -179,7 +179,7 @@ function ConnectionDetailsTab() {
         </p>
         <CodeBlock
           language="INI"
-          code={`[profile hyperspace]\nendpoint_url = ${S3_ENDPOINT}\nregion = us-east-1`}
+          code={`[profile filone]\nendpoint_url = ${S3_ENDPOINT}\nregion = us-east-1`}
         />
       </div>
 

@@ -3,7 +3,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { ErrorResponse } from '@hyperspace/shared';
+import type { ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { FileStorageClient } from '../lib/file-storage-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
