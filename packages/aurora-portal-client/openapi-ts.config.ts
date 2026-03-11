@@ -5,5 +5,6 @@ export default defineConfig({
   output: {
     path: './src/generated',
     importFileExtension: '.ts',
+    postProcess: ['oxfmt'],
   },
 });

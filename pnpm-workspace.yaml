@@ -1,3 +1,4 @@
 packages:
   - 'bin'
+  - 'infra'
   - 'packages/*'
