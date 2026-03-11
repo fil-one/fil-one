@@ -1,5 +1,5 @@
 import { createRootRoute, Outlet } from '@tanstack/react-router';
-import { ToastProvider } from '@filone/ui/Toast/ToastProvider';
+import { ToastProvider } from '@hyperspace/ui/Toast/ToastProvider';
 
 function RootLayout() {
   return (

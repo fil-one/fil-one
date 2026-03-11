@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Input } from '@filone/ui/Input';
-import { Button } from '@filone/ui/Button';
-import { DividerWithLabel } from '@filone/ui/DividerWithLabel';
+import { Input } from '@hyperspace/ui/Input';
+import { Button } from '@hyperspace/ui/Button';
+import { DividerWithLabel } from '@hyperspace/ui/DividerWithLabel';
 import { redirectToLogin } from '../../lib/api.js';
 
 export function SignInPage() {

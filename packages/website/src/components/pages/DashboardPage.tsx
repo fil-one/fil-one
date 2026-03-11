@@ -11,8 +11,8 @@ import { Link } from '@tanstack/react-router';
 
 const UsageTrends = lazy(() => import('./UsageTrends'));
 
-import { Button } from '@filone/ui/Button';
-import { StatCard } from '@filone/ui/StatCard';
+import { Button } from '@hyperspace/ui/Button';
+import { StatCard } from '@hyperspace/ui/StatCard';
 
 import type { RecentActivity, ActivityAction } from '@filone/shared';
 

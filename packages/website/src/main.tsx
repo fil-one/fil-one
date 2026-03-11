@@ -2,7 +2,7 @@ import './styles.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider, Link } from '@tanstack/react-router';
-import { setUIConfig } from '@filone/ui/config/ui-config';
+import { setUIConfig } from '@hyperspace/ui/config/ui-config';
 import { router } from './router.js';
 
 // Configure the UI library to use TanStack Router's Link component.

@@ -2,12 +2,12 @@ import { useState } from 'react';
 
 import { KeyIcon, PlusIcon, PowerIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
-import { Button } from '@filone/ui/Button';
-import { CodeBlock } from '@filone/ui/CodeBlock';
-import { Input } from '@filone/ui/Input';
-import { Modal, ModalBody, ModalFooter, ModalHeader } from '@filone/ui/Modal';
-import { Tab, TabList, TabPanel, TabPanels, Tabs } from '@filone/ui/Tabs';
-import { useToast } from '@filone/ui/Toast';
+import { Button } from '@hyperspace/ui/Button';
+import { CodeBlock } from '@hyperspace/ui/CodeBlock';
+import { Input } from '@hyperspace/ui/Input';
+import { Modal, ModalBody, ModalFooter, ModalHeader } from '@hyperspace/ui/Modal';
+import { Tab, TabList, TabPanel, TabPanels, Tabs } from '@hyperspace/ui/Tabs';
+import { useToast } from '@hyperspace/ui/Toast';
 
 import type { AccessKey } from '@filone/shared';
 

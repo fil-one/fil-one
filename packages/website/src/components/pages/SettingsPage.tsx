@@ -1,9 +1,9 @@
 import { useState } from 'react';
 
-import { Button } from '@filone/ui/Button';
-import { Input } from '@filone/ui/Input';
-import { Modal, ModalBody, ModalFooter, ModalHeader } from '@filone/ui/Modal';
-import { useToast } from '@filone/ui/Toast';
+import { Button } from '@hyperspace/ui/Button';
+import { Input } from '@hyperspace/ui/Input';
+import { Modal, ModalBody, ModalFooter, ModalHeader } from '@hyperspace/ui/Modal';
+import { useToast } from '@hyperspace/ui/Toast';
 
 // ---------------------------------------------------------------------------
 // Mock data

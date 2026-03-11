@@ -215,7 +215,7 @@ importers:
       '@filone/shared':
         specifier: workspace:*
         version: link:../shared
-      '@filone/ui':
+      '@hyperspace/ui':
         specifier: workspace:*
         version: link:../ui
       '@phosphor-icons/react':

@@ -306,12 +306,12 @@ pnpm generate:api-clients
 **Importing components in the website**
 
 ```tsx
-import { Button } from '@filone/ui/Button';
-import { Section } from '@filone/ui/Section/Section';
-import { Heading } from '@filone/ui/Heading';
+import { Button } from '@hyperspace/ui/Button';
+import { Section } from '@hyperspace/ui/Section/Section';
+import { Heading } from '@hyperspace/ui/Heading';
 ```
 
-Styles are loaded globally via `packages/website/src/styles.css` which imports `@filone/ui/styles` (Tailwind v4 theme + component CSS).
+Styles are loaded globally via `packages/website/src/styles.css` which imports `@hyperspace/ui/styles` (Tailwind v4 theme + component CSS).
 
 **Updating the submodule to a new commit**
 
