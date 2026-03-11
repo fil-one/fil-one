@@ -230,7 +230,7 @@ export default $config({
     const sharedEnv: Record<string, $util.Input<string>> = {
       FILONE_STAGE: $app.stage,
       AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
-      AUTH0_AUDIENCE: 'console.fil.one',
+      AUTH0_AUDIENCE: 'staging.fil.one',
     };
 
     if (isProduction) {
