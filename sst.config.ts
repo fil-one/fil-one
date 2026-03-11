@@ -230,7 +230,7 @@ export default $config({
     const sharedEnv: Record<string, $util.Input<string>> = {
       FILONE_STAGE: $app.stage,
       AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
-      AUTH0_AUDIENCE: 'staging.fil.one',
+      AUTH0_AUDIENCE: 'https://staging.fil.one',
     };
 
     if (isProduction) {
@@ -254,6 +254,12 @@ export default $config({
       extraEnv?: Record<string, $util.Input<string>>,
       permissions?: sst.aws.FunctionPermissionArgs[],
     ) {
+      // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
+      const fnName = handler
+        .split('-')
+        .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+        .join('');
+
       api.route(`${method} ${routePath}`, {
         handler: `packages/backend/src/handlers/${handler}.handler`,
         link: allResources,
@@ -264,6 +270,11 @@ export default $config({
         permissions,
         runtime: 'nodejs24.x',
         timeout: '10 seconds',
+        transform: {
+          function: (args) => {
+            args.name = $interpolate`filone-${$app.stage}-${fnName}`;
+          },
+        },
       });
     }
 

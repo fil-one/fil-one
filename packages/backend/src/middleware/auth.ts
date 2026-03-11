@@ -236,8 +236,14 @@ export function authMiddleware() {
     if (accessToken) {
       try {
         const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
+        console.warn('[auth] Access token claims', { claims: payload });
+
+        // Email lives in the ID token (OIDC profile), not the access token
+        const idClaims = idToken ? decodeJwt(idToken) : undefined;
+        console.warn('[auth] ID token claims', { claims: idClaims });
+
         const sub = payload.sub!;
-        const email = payload.email as string | undefined;
+        const email = (idClaims?.email as string | undefined) ?? (payload.email as string | undefined);
         const resolved = await resolveUserAndOrg(sub, email);
         (
           event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
@@ -284,8 +290,13 @@ export function authMiddleware() {
             refresh_token: tokens.refresh_token ?? refreshToken,
           } satisfies NewTokens;
           const refreshedPayload = decodeJwt(tokens.access_token);
+          console.warn('[auth] Refreshed access token claims', { claims: refreshedPayload });
+
+          const refreshedIdClaims = tokens.id_token ? decodeJwt(tokens.id_token) : undefined;
+          console.warn('[auth] Refreshed ID token claims', { claims: refreshedIdClaims });
+
           const refreshedSub = refreshedPayload.sub!;
-          const refreshedEmail = refreshedPayload.email as string | undefined;
+          const refreshedEmail = (refreshedIdClaims?.email as string | undefined) ?? (refreshedPayload.email as string | undefined);
           const refreshedResolved = await resolveUserAndOrg(refreshedSub, refreshedEmail);
           (
             event.requestContext as APIGatewayProxyEventV2['requestContext'] & {
