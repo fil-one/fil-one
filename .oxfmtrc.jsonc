@@ -7,6 +7,6 @@
     "packages/ui",
     "**/dist",
     "**/sst-env.d.ts",
-    "pnpm-lock.yaml"
-  ]
+    "pnpm-lock.yaml",
+  ],
 }
