@@ -1,5 +1,5 @@
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
-import { createClient, postTenantsByTenantIdBucket } from '@hyperspace/aurora-portal-client';
+import { createClient, postTenantsByTenantIdBucket } from '@filone/aurora-portal-client';
 
 const ssm = new SSMClient({});
 
@@ -13,7 +13,7 @@ export async function createAuroraBucket({
   bucketName,
 }: CreateAuroraBucketOptions): Promise<void> {
   const baseUrl = process.env.AURORA_PORTAL_URL!;
-  const stage = process.env.HYPERSPACE_STAGE!;
+  const stage = process.env.FILONE_STAGE!;
   const apiKey = await getAuroraPortalApiKey(stage, tenantId);
 
   const client = createClient({
@@ -48,7 +48,7 @@ export async function getAuroraPortalApiKey(stage: string, tenantId: string): Pr
   try {
     const { Parameter } = await ssm.send(
       new GetParameterCommand({
-        Name: `/hyperspace/${stage}/aurora-portal/tenant-api-key/${tenantId}`,
+        Name: `/filone/${stage}/aurora-portal/tenant-api-key/${tenantId}`,
         WithDecryption: true,
       }),
     );

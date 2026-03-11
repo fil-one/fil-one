@@ -1,4 +1,4 @@
-# Hyperspace
+# Fil.one
 
 Full-stack prototype — pnpm workspaces monorepo deploying to AWS via [SST v3](https://sst.dev/).
 
@@ -38,12 +38,12 @@ hyperspace/
 **1. Configure the AWS profile (one-time)**
 
 ```bash
-aws configure sso --profile hyperspace
+aws configure sso --profile filone
 ```
 
 When prompted:
 
-- SSO Session name: `hyperspace-sandbox`
+- SSO Session name: `filone-sandbox`
 - SSO start URL: `https://d-9067ff87d6.awsapps.com/start`
 - SSO region: `us-east-1`
 - SSO registration scopes: `sso:account:access`
@@ -57,20 +57,20 @@ When prompted:
 _MUST do this before you can deploy._
 
 ```bash
-aws sso login --profile hyperspace
+aws sso login --profile filone
 ```
 
 Then set the profile for your shell session so SST picks it up:
 
 ```bash
-export AWS_PROFILE=hyperspace
+export AWS_PROFILE=filone
 ```
 
 To make this permanent, add it to your shell config:
 
 ```bash
 # Add to ~/.zshrc (or ~/.bashrc)
-echo 'export AWS_PROFILE=hyperspace' >> ~/.zshrc
+echo 'export AWS_PROFILE=filone' >> ~/.zshrc
 source ~/.zshrc
 ```
 
@@ -113,8 +113,8 @@ The `Auth0MgmtClientId` and `Auth0MgmtClientSecret` are from a **Machine-to-Mach
 ```bash
 pnpm run dev              # SST live dev mode (live Lambda debugging)
 pnpm run deploy           # Deploy personal dev stack (uses OS username as stage)
-pnpm run deploy:staging   # Deploy to staging.filhyperspace.com
-pnpm run deploy:production      # Deploy to console.filhyperspace.com
+pnpm run deploy:staging   # Deploy to staging.fil.one
+pnpm run deploy:production      # Deploy to console.fil.one
 pnpm run deploy:infra:staging   # Deploy base infra (OIDC, IAM) to staging
 pnpm run deploy:infra:production # Deploy base infra (OIDC, IAM) to production
 pnpm run remove           # Remove your personal dev stack
@@ -165,13 +165,13 @@ Custom domains require an ACM certificate in **us-east-1** (CloudFront requireme
 
 We manage this in another repo: https://github.com/FilecoinFoundationWeb/FilHyperspace-Infrastructure
 
-Example PR To add `staging.filhyperspace.com`: https://github.com/FilecoinFoundationWeb/FilHyperspace-Infrastructure/pull/3
+Example PR To add `staging.fil.one`: https://github.com/FilecoinFoundationWeb/FilHyperspace-Infrastructure/pull/3
 
 ## Auth0
 
 |                 |                                                                                                                   |
 | --------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Dev environment | **FilHyperspaceDev**                                                                                              |
+| Dev environment | **FilOneDev**                                                                                                     |
 | Tenant domain   | `dev-oar2nhqh58xf5pwf.us.auth0.com`                                                                               |
 | Dashboard       | https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ/settings |
 
@@ -185,7 +185,7 @@ Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecre
 
 **API setup** (APIs > Create API):
 
-- **Identifier (audience)**: `console.filhyperspace.com` — this must match `AUTH0_AUDIENCE` in `sst.config.ts` and website env. It's what makes Auth0 issue a JWT access token (instead of an opaque one) and is the `aud` claim the middleware validates.
+- **Identifier (audience)**: `console.fil.one` — this must match `AUTH0_AUDIENCE` in `sst.config.ts` and website env. It's what makes Auth0 issue a JWT access token (instead of an opaque one) and is the `aud` claim the middleware validates.
 - Under the API's **Machine to Machine Applications** tab, authorize your application so it can exchange tokens.
 
 ### Auth0 Machine-to-Machine (M2M) Application
@@ -196,7 +196,7 @@ The deploy automation uses an M2M application to update Auth0 settings programma
 
 1. Go to **Applications > Create Application**
 2. Choose **Machine to Machine Applications**
-3. Name it something like `Hyperspace Deploy Automation`
+3. Name it something like `Fil.one Deploy Automation`
 4. Authorize it for the **Auth0 Management API** (`https://<tenant>.us.auth0.com/api/v2/`)
 5. Grant these scopes: `read:clients`, `update:clients`
 6. Copy the **Client ID** and **Client Secret**
@@ -215,7 +215,7 @@ pnpx sst secret set Auth0MgmtClientSecret <M2M-client-secret> [--stage <stage>]
 Use **test mode** first. Switch to live mode for production.
 
 1. **Products > Add product**
-   - Name: `Hyperspace Storage`
+   - Name: `Fil.one Storage`
    - Description: `Decentralized cloud storage — $4.99/TiB/month`
 2. **Add price** on that product:
    - Pricing model: Standard

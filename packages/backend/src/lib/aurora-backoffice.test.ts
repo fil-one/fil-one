@@ -16,7 +16,7 @@ const mockPostSetup = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockPostTokens = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-aurora-client');
 
-vi.mock('@hyperspace/aurora-backoffice-client', () => ({
+vi.mock('@filone/aurora-backoffice-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
   postV1PartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockPostTenants(options),
   getV1PartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockGetTenants(options),
@@ -207,7 +207,7 @@ describe('createAuroraTenantApiKey', () => {
     expect(mockPostTokens).toHaveBeenCalledWith({
       client: 'mock-aurora-client',
       path: { partnerId: 'test-partner', tenantId: 'tenant-1' },
-      body: { name: 'hyperspace-org-1' },
+      body: { name: 'filone-org-1' },
       throwOnError: false,
     });
   });

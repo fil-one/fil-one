@@ -20,7 +20,7 @@ export function SignUpPage() {
         <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-sm font-bold text-white">
           F
         </span>
-        <span className="text-sm font-semibold text-zinc-900">Fil Hyperspace</span>
+        <span className="text-sm font-semibold text-zinc-900">Fil.one</span>
       </div>
 
       {/* Heading */}

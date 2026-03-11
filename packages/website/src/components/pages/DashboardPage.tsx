@@ -14,7 +14,7 @@ const UsageTrends = lazy(() => import('./UsageTrends'));
 import { Button } from '@hyperspace/ui/Button';
 import { StatCard } from '@hyperspace/ui/StatCard';
 
-import type { RecentActivity, ActivityAction } from '@hyperspace/shared';
+import type { RecentActivity, ActivityAction } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Dev toggle — set IS_POPULATED = false to see the first-time empty state

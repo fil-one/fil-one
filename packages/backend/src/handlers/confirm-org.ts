@@ -3,7 +3,7 @@ import { SendMessageCommand } from '@aws-sdk/client-sqs';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { ConfirmOrgRequest, ConfirmOrgResponse, ErrorResponse } from '@hyperspace/shared';
+import type { ConfirmOrgRequest, ConfirmOrgResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';

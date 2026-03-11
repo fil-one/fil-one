@@ -23,7 +23,7 @@ vi.mock('./aurora-backoffice.js', () => ({
   createAuroraTenantApiKey: (...args: unknown[]) => mockCreateAuroraTenantApiKey(...args),
 }));
 
-process.env.HYPERSPACE_STAGE = 'test';
+process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
@@ -70,10 +70,10 @@ describe('processTenantSetup', () => {
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
-  it('creates tenant, runs setup, and creates API key when status is HYPERSPACE_ORG_CREATED', async () => {
+  it('creates tenant, runs setup, and creates API key when status is FILONE_ORG_CREATED', async () => {
     ddbMock
       .on(GetItemCommand)
-      .resolves(orgProfileItem({ setupStatus: { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED } }));
+      .resolves(orgProfileItem({ setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }));
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
@@ -105,7 +105,7 @@ describe('processTenantSetup', () => {
       ExpressionAttributeValues: {
         ':tid': { S: 'aurora-t-1' },
         ':status': { S: OrgSetupStatus.AURORA_TENANT_CREATED },
-        ':expected': { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED },
+        ':expected': { S: OrgSetupStatus.FILONE_ORG_CREATED },
         ':now': { S: expect.any(String) },
       },
     });
@@ -140,7 +140,7 @@ describe('processTenantSetup', () => {
     const ssmCalls = ssmMock.commandCalls(PutParameterCommand);
     expect(ssmCalls).toHaveLength(1);
     expect(ssmCalls[0].args[0].input).toStrictEqual({
-      Name: '/hyperspace/test/aurora-portal/tenant-api-key/aurora-t-1',
+      Name: '/filone/test/aurora-portal/tenant-api-key/aurora-t-1',
       Value: 'atp_secret',
       Type: 'SecureString',
       Overwrite: true,
@@ -207,7 +207,7 @@ describe('processTenantSetup', () => {
     const ssmCalls = ssmMock.commandCalls(PutParameterCommand);
     expect(ssmCalls).toHaveLength(1);
     expect(ssmCalls[0].args[0].input).toStrictEqual({
-      Name: '/hyperspace/test/aurora-portal/tenant-api-key/aurora-t-3',
+      Name: '/filone/test/aurora-portal/tenant-api-key/aurora-t-3',
       Value: 'atp_key3',
       Type: 'SecureString',
       Overwrite: true,

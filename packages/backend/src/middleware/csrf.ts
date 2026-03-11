@@ -6,8 +6,8 @@ import type {
   Context,
 } from 'aws-lambda';
 import type { Request } from '@middy/core';
-import { CSRF_COOKIE_NAME } from '@hyperspace/shared';
-import type { ErrorResponse } from '@hyperspace/shared';
+import { CSRF_COOKIE_NAME } from '@filone/shared';
+import type { ErrorResponse } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { parseCookies } from '../lib/cookies.js';
 

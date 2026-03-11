@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Tail CloudWatch logs from the Aurora tenant setup SQS handler Lambda.
-# The SQS handler Lambda doesn't follow the hyperspace-<stage>- naming
+# The SQS handler Lambda doesn't follow the filone-<stage>- naming
 # convention, making it hard to find the CloudWatch log group manually.
 # This script extracts the log group name from SST state and passes through
 # any additional arguments to `aws logs tail`.

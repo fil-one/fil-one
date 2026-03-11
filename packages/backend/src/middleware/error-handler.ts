@@ -1,6 +1,6 @@
 import type { MiddlewareObj, Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
-import type { ErrorResponse } from '@hyperspace/shared';
+import type { ErrorResponse } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.js';
 
 export function errorHandlerMiddleware(): MiddlewareObj<

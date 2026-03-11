@@ -21,7 +21,7 @@ export default $config({
     }
 
     return {
-      name: 'hyperspace-infra',
+      name: 'filone-infra',
       removal: stage === 'production' ? 'retain' : 'remove',
       home: 'aws',
       providers: {
@@ -37,7 +37,7 @@ export default $config({
     });
 
     // IAM Role for GitHub Actions
-    const roleName = `hyperspace-infra-${$app.stage}-github`;
+    const roleName = `filone-infra-${$app.stage}-github`;
     const role = new aws.iam.Role('GitHubActionsRole', {
       name: roleName,
       assumeRolePolicy: {

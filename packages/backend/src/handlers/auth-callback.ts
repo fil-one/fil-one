@@ -1,7 +1,7 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from '@hyperspace/shared';
+import { OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from '@filone/shared';
 import {
   COOKIE_NAMES,
   TOKEN_MAX_AGE,

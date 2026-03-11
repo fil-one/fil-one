@@ -3,7 +3,7 @@ import { Route as rootRoute } from './__root.js';
 import { FinishSignUpPage } from '../components/pages/FinishSignUpPage.js';
 import { getMe } from '../lib/api.js';
 import { useState, useEffect } from 'react';
-import type { MeResponse } from '@hyperspace/shared';
+import type { MeResponse } from '@filone/shared';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,

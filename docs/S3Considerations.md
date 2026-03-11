@@ -367,7 +367,7 @@ Access control is **not** enforced by obscuring the CID or hiding the ciphertext
 
 ## Recommendation
 
-Given the context of this project (Filecoin/Hyperspace):
+Given the context of this project (Filecoin/Fil.one):
 
 1. **Server-side**: Build an S3-compatible HTTP server (Go or Rust recommended for performance) that translates S3 operations to your storage backend. Use MinIO's source code as your reference implementation. (Or fork MinIO?)
 2. **Client SDK**: Let users use the **standard AWS SDKs** with a custom `endpoint_url` -- this gives you instant compatibility with every language.
@@ -387,7 +387,7 @@ When using the S3-compatible endpoint approach, **no custom code runs on the use
 - The standard `aws` CLI or any AWS SDK (boto3, etc.) -- software they already have or install from AWS/pip/npm
 - A config with three values:
   ```
-  endpoint_url = https://your-api.hyperspace.example.com
+  endpoint_url = https://your-api.filone.example.com
   aws_access_key_id = HS_XXXXXXXXXXXX
   aws_secret_access_key = HS_YYYYYYYYYYYYYYYYYYYY
   ```
@@ -471,7 +471,7 @@ Nearly every successful S3-compatible provider (Cloudflare R2, Backblaze B2, Sto
 ```
 ┌─────────────────────────────────────────────┐
 │              Your Storage Backend            │
-│         (Filecoin / IPFS / Hyperspace)       │
+│         (Filecoin / IPFS / Fil.one)       │
 └──────────────┬──────────────┬───────────────┘
                │              │
      ┌─────────▼────────┐  ┌─▼──────────────────┐
@@ -531,7 +531,7 @@ Users should be told to increase timeouts. Provide a recommended config profile 
 
 ```bash
 aws s3 cp s3://bucket/key ./file \
-  --endpoint-url https://api.hyperspace.example.com \
+  --endpoint-url https://api.filone.example.com \
   --cli-read-timeout 300 \
   --cli-connect-timeout 60
 ```
@@ -541,7 +541,7 @@ aws s3 cp s3://bucket/key ./file \
 ```python
 from botocore.config import Config
 s3 = boto3.client('s3',
-    endpoint_url='https://api.hyperspace.example.com',
+    endpoint_url='https://api.filone.example.com',
     config=Config(
         read_timeout=300,
         connect_timeout=60,

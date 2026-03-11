@@ -23,7 +23,7 @@ export default $config({
     // }
 
     return {
-      name: 'hyperspace',
+      name: 'filone',
       removal: isProduction ? 'retain' : 'remove',
       home: 'aws',
       providers: {
@@ -91,8 +91,7 @@ export default $config({
     let certArn: string | undefined;
 
     if (stage === 'production' || stage === 'staging') {
-      domainName =
-        stage === 'production' ? 'console.filhyperspace.com' : 'staging.filhyperspace.com';
+      domainName = stage === 'production' ? 'console.fil.one' : 'staging.fil.one';
 
       // ACM cert must be in us-east-1 for CloudFront
       const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
@@ -192,7 +191,7 @@ export default $config({
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter', 'ssm:DeleteParameter'],
-          resources: [$interpolate`arn:aws:ssm:*:*:parameter/hyperspace/${$app.stage}/*`],
+          resources: [$interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/*`],
         },
       ],
       runtime: 'nodejs24.x',
@@ -204,7 +203,7 @@ export default $config({
         AWSTemplateFormatVersion: '2010-09-09',
         Resources: {
           Setup: {
-            Type: 'Custom::HyperspaceSetup',
+            Type: 'Custom::FiloneSetup',
             Properties: {
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
@@ -229,9 +228,9 @@ export default $config({
     ];
 
     const sharedEnv: Record<string, $util.Input<string>> = {
-      HYPERSPACE_STAGE: $app.stage,
+      FILONE_STAGE: $app.stage,
       AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
-      AUTH0_AUDIENCE: 'console.filhyperspace.com',
+      AUTH0_AUDIENCE: 'console.fil.one',
     };
 
     if (isProduction) {
@@ -282,7 +281,7 @@ export default $config({
         {
           actions: ['ssm:GetParameter'],
           resources: [
-            $interpolate`arn:aws:ssm:*:*:parameter/hyperspace/${$app.stage}/aurora-portal/tenant-api-key/*`,
+            $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`,
           ],
         },
       ],
@@ -332,7 +331,7 @@ export default $config({
           {
             actions: ['ssm:PutParameter'],
             resources: [
-              $interpolate`arn:aws:ssm:*:*:parameter/hyperspace/${$app.stage}/aurora-portal/tenant-api-key/*`,
+              $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`,
             ],
           },
         ],

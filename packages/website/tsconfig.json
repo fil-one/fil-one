@@ -8,7 +8,7 @@
     "noEmit": true,
     "types": ["vite/client"],
     "paths": {
-      "@hyperspace/shared": ["../shared/src/index.ts"],
+      "@filone/shared": ["../shared/src/index.ts"],
       "@hyperspace/ui/utils": ["../ui/src/utils/index.ts"],
       "@hyperspace/ui/styles": ["../ui/src/styles/globals.css"],
       "@hyperspace/ui/constants/tailwindConstants": ["../ui/src/constants/tailwindConstants.ts"],
