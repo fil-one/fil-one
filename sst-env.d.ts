@@ -10,6 +10,10 @@ declare module "sst" {
       "type": "sst.aws.ApiGatewayV2"
       "url": string
     }
+    "AuroraBackofficeToken": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "AuroraTenantSetupDlq": {
       "type": "sst.aws.Queue"
       "url": string
@@ -18,9 +22,37 @@ declare module "sst" {
       "type": "sst.aws.Queue"
       "url": string
     }
+    "Auth0ClientId": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "Auth0ClientSecret": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "Auth0MgmtClientId": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "Auth0MgmtClientSecret": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "BillingTable": {
       "name": string
       "type": "sst.aws.Dynamo"
+    }
+    "SetupIntegrations": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "StripePriceId": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "StripeSecretKey": {
+      "type": "sst.sst.Secret"
+      "value": string
     }
     "UploadsTable": {
       "name": string
