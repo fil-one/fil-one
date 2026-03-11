@@ -6,6 +6,10 @@
 
 declare module "sst" {
   export interface Resource {
+    "AccessKeysTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
     "Api": {
       "type": "sst.aws.ApiGatewayV2"
       "url": string
@@ -37,10 +41,6 @@ declare module "sst" {
     "Auth0MgmtClientSecret": {
       "type": "sst.sst.Secret"
       "value": string
-    }
-    "AccessKeysTable": {
-      "name": string
-      "type": "sst.aws.Dynamo"
     }
     "BillingTable": {
       "name": string

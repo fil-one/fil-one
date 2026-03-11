@@ -1,39 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { KeyIcon, PlusIcon, PowerIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Button } from '@hyperspace/ui/Button';
 import { CodeBlock } from '@hyperspace/ui/CodeBlock';
+import { Spinner } from '@hyperspace/ui/Spinner';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '@hyperspace/ui/Tabs';
 import { useToast } from '@hyperspace/ui/Toast';
 
-import type { AccessKey, CreateAccessKeyResponse } from '@hyperspace/shared';
+import type {
+  AccessKey,
+  CreateAccessKeyResponse,
+  ListAccessKeysResponse,
+} from '@hyperspace/shared';
 
+import { apiRequest } from '../../lib/api.js';
 import { S3_ENDPOINT } from '../../env';
 import { CreateAccessKeyModal } from '../CreateAccessKeyModal';
-
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_KEYS: AccessKey[] = [
-  {
-    id: '1',
-    keyName: 'Production',
-    accessKeyId: 'HKIAXXXXXXXXXXX1ABCD',
-    createdAt: '2024-01-15T10:00:00Z',
-    lastUsedAt: '2024-02-15T10:00:00Z',
-    status: 'active',
-  },
-  {
-    id: '2',
-    keyName: 'Local dev',
-    accessKeyId: 'HKIAXXXXXXXXXXX2EFGH',
-    createdAt: '2024-02-01T09:00:00Z',
-    lastUsedAt: undefined,
-    status: 'inactive',
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -219,10 +202,35 @@ function ConnectionDetailsTab() {
 export function ApiKeysPage() {
   const { toast } = useToast();
 
-  const [keys, setKeys] = useState<AccessKey[]>(MOCK_KEYS);
+  const [keys, setKeys] = useState<AccessKey[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Create modal state
   const [createOpen, setCreateOpen] = useState(false);
+
+  // Fetch access keys on mount
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchKeys() {
+      try {
+        const data = await apiRequest<ListAccessKeysResponse>('/access-keys');
+        if (!cancelled) {
+          setKeys(data.keys);
+          setLoading(false);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load access keys');
+          setLoading(false);
+        }
+      }
+    }
+    void fetchKeys();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // -------------------------------------------------------------------------
   // Handlers
@@ -262,6 +270,24 @@ export function ApiKeysPage() {
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-16">
+        <Spinner ariaLabel="Loading access keys" size={32} />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {error}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8">

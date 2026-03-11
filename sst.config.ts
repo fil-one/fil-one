@@ -297,6 +297,7 @@ export default $config({
       ],
     );
     addRoute('DELETE', '/api/buckets/{name}', 'delete-bucket');
+    addRoute('GET', '/api/access-keys', 'list-access-keys');
     addRoute(
       'POST',
       '/api/access-keys',
