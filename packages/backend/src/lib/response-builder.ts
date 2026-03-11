@@ -1,6 +1,7 @@
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
-const CSP = "default-src 'none'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+const CSP =
+  "default-src 'none'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
 export const COOKIE_ATTRIBUTES = 'HttpOnly; Secure; SameSite=Lax; Path=/';
 
@@ -12,7 +13,7 @@ export const COOKIE_NAMES = {
 } as const;
 
 export const TOKEN_MAX_AGE = {
-  ACCESS: 60 * 60,            // 1 hour
+  ACCESS: 60 * 60, // 1 hour
   REFRESH: 30 * 24 * 60 * 60, // 30 days
 } as const;
 

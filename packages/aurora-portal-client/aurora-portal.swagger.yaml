@@ -63,22 +63,22 @@ definitions:
     type: object
   bucket.DurationType:
     enum:
-    - d
-    - "y"
+      - d
+      - 'y'
     type: string
     x-enum-varnames:
-    - Days
-    - Years
+      - Days
+      - Years
   bucket.Flag:
     enum:
-    - unencrypted
-    - encrypted
-    - versioned
+      - unencrypted
+      - encrypted
+      - versioned
     type: string
     x-enum-varnames:
-    - Unencrypted
-    - Encrypted
-    - Versioning
+      - Unencrypted
+      - Encrypted
+      - Versioning
   bucket.ObjectResponse:
     properties:
       bucket:
@@ -99,14 +99,14 @@ definitions:
     type: object
   bucket.RetentionMode:
     enum:
-    - "off"
-    - governance
-    - compliance
+      - 'off'
+      - governance
+      - compliance
     type: string
     x-enum-varnames:
-    - "Off"
-    - Governance
-    - Compliance
+      - 'Off'
+      - Governance
+      - Compliance
   buckets.BucketCreateRequest:
     properties:
       defaultRetention:
@@ -271,16 +271,16 @@ definitions:
     type: object
   models.TenantStatus:
     enum:
-    - DISABLED
-    - LOCKED
-    - WRITE_LOCKED
-    - ACTIVE
+      - DISABLED
+      - LOCKED
+      - WRITE_LOCKED
+      - ACTIVE
     type: string
     x-enum-varnames:
-    - DISABLED
-    - LOCKED
-    - WRITE_LOCKED
-    - ACTIVE
+      - DISABLED
+      - LOCKED
+      - WRITE_LOCKED
+      - ACTIVE
   models.TenantsResponse:
     properties:
       tenants:
@@ -292,434 +292,434 @@ info:
   contact: {}
   description: This is Aurora Portal API.
   title: Aurora Portal API
-  version: "1.0"
+  version: '1.0'
 paths:
   /environment:
     get:
       description: Returns environment configuration for the portal web application,
         including Auth0 settings
       produces:
-      - application/json
+        - application/json
       responses:
-        "200":
+        '200':
           description: Environment configuration
           schema:
             $ref: '#/definitions/models.ClientEnvironmentResponse'
-        "400":
+        '400':
           description: Bad request
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "404":
+        '404':
           description: Not found
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       summary: Get portal environment configuration
       tags:
-      - Environment
+        - Environment
   /tenants:
     get:
       description: Returns the list of active tenants for the authenticated organization
       produces:
-      - application/json
+        - application/json
       responses:
-        "200":
+        '200':
           description: Tenants
           schema:
             $ref: '#/definitions/models.TenantsResponse'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       security:
-      - Bearer: []
+        - Bearer: []
       summary: List tenants
       tags:
-      - Tenants
+        - Tenants
   /tenants/{tenantId}:
     get:
       description: Returns tenant details for the given tenant ID
       parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
+        - description: Tenant ID
+          in: path
+          name: tenantId
+          required: true
+          type: string
       produces:
-      - application/json
+        - application/json
       responses:
-        "200":
+        '200':
           description: Tenant details
           schema:
             $ref: '#/definitions/models.TenantResponse'
-        "404":
+        '404':
           description: Not found
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       security:
-      - Bearer: []
+        - Bearer: []
       summary: Get tenant
       tags:
-      - Tenants
+        - Tenants
   /tenants/{tenantId}/access_keys:
     get:
       description: Returns the list of access keys for the given tenant
       parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
+        - description: Tenant ID
+          in: path
+          name: tenantId
+          required: true
+          type: string
       produces:
-      - application/json
+        - application/json
       responses:
-        "200":
+        '200':
           description: Access keys
           schema:
             $ref: '#/definitions/models.ListKeysResponse'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       security:
-      - Bearer: []
+        - Bearer: []
       summary: List access keys
       tags:
-      - Access Keys
+        - Access Keys
     put:
       consumes:
-      - application/json
+        - application/json
       description: Creates a new access key for the given tenant
       parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Access key request
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/accesskeys.AccessKeyRequest'
+        - description: Tenant ID
+          in: path
+          name: tenantId
+          required: true
+          type: string
+        - description: Access key request
+          in: body
+          name: request
+          required: true
+          schema:
+            $ref: '#/definitions/accesskeys.AccessKeyRequest'
       produces:
-      - application/json
+        - application/json
       responses:
-        "201":
+        '201':
           description: Created access key
           schema:
             $ref: '#/definitions/models.AccessKeyFullResponse'
-        "400":
+        '400':
           description: Bad request
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "409":
+        '409':
           description: Conflict
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       security:
-      - Bearer: []
+        - Bearer: []
       summary: Create access key
       tags:
-      - Access Keys
+        - Access Keys
   /tenants/{tenantId}/access_keys/{accessKeyId}:
     delete:
       description: Deletes an access key for the given tenant
       parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Access key ID
-        in: path
-        name: accessKeyId
-        required: true
-        type: string
+        - description: Tenant ID
+          in: path
+          name: tenantId
+          required: true
+          type: string
+        - description: Access key ID
+          in: path
+          name: accessKeyId
+          required: true
+          type: string
       responses:
-        "204":
+        '204':
           description: No Content
           schema:
             type: string
-        "404":
+        '404':
           description: Not found
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       security:
-      - Bearer: []
+        - Bearer: []
       summary: Delete access key
       tags:
-      - Access Keys
+        - Access Keys
     get:
       description: Returns a single access key for the given tenant
       parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Access key ID
-        in: path
-        name: accessKeyId
-        required: true
-        type: string
+        - description: Tenant ID
+          in: path
+          name: tenantId
+          required: true
+          type: string
+        - description: Access key ID
+          in: path
+          name: accessKeyId
+          required: true
+          type: string
       produces:
-      - application/json
+        - application/json
       responses:
-        "200":
+        '200':
           description: Access key
           schema:
             $ref: '#/definitions/models.AccessKeyResponse'
-        "404":
+        '404':
           description: Not found
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       security:
-      - Bearer: []
+        - Bearer: []
       summary: Get access key
       tags:
-      - Access Keys
+        - Access Keys
   /tenants/{tenantId}/bucket:
     get:
       description: Returns the list of active buckets for the given tenant
       parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
+        - description: Tenant ID
+          in: path
+          name: tenantId
+          required: true
+          type: string
       produces:
-      - application/json
+        - application/json
       responses:
-        "200":
+        '200':
           description: Bucket list
           schema:
             $ref: '#/definitions/bucket.BucketListResponse'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       security:
-      - Bearer: []
+        - Bearer: []
       summary: List buckets
       tags:
-      - Buckets
+        - Buckets
     post:
       consumes:
-      - application/json
+        - application/json
       description: Creates a new bucket for the given tenant
       parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Bucket create request
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/buckets.BucketCreateRequest'
+        - description: Tenant ID
+          in: path
+          name: tenantId
+          required: true
+          type: string
+        - description: Bucket create request
+          in: body
+          name: request
+          required: true
+          schema:
+            $ref: '#/definitions/buckets.BucketCreateRequest'
       responses:
-        "201":
+        '201':
           description: Created
           schema:
             type: string
-        "400":
+        '400':
           description: Bad request
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "403":
+        '403':
           description: Forbidden
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "409":
+        '409':
           description: Conflict
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       security:
-      - Bearer: []
+        - Bearer: []
       summary: Create bucket
       tags:
-      - Buckets
+        - Buckets
   /tenants/{tenantId}/bucket/{bucketName}:
     get:
       description: Returns bucket details for the given tenant and bucket name
       parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Bucket name
-        in: path
-        name: bucketName
-        required: true
-        type: string
+        - description: Tenant ID
+          in: path
+          name: tenantId
+          required: true
+          type: string
+        - description: Bucket name
+          in: path
+          name: bucketName
+          required: true
+          type: string
       produces:
-      - application/json
+        - application/json
       responses:
-        "200":
+        '200':
           description: Bucket
           schema:
             $ref: '#/definitions/bucket.BucketResponse'
-        "404":
+        '404':
           description: Not found
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       security:
-      - Bearer: []
+        - Bearer: []
       summary: Get bucket
       tags:
-      - Buckets
+        - Buckets
     put:
       consumes:
-      - application/json
+        - application/json
       description: Updates bucket configuration (currently only default retention
         for object lock buckets)
       parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Bucket name
-        in: path
-        name: bucketName
-        required: true
-        type: string
-      - description: Bucket edit request
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/buckets.BucketEditRequest'
+        - description: Tenant ID
+          in: path
+          name: tenantId
+          required: true
+          type: string
+        - description: Bucket name
+          in: path
+          name: bucketName
+          required: true
+          type: string
+        - description: Bucket edit request
+          in: body
+          name: request
+          required: true
+          schema:
+            $ref: '#/definitions/buckets.BucketEditRequest'
       responses:
-        "204":
+        '204':
           description: No Content
           schema:
             type: string
-        "400":
+        '400':
           description: Bad request
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "404":
+        '404':
           description: Not found
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "409":
+        '409':
           description: Conflict
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       security:
-      - Bearer: []
+        - Bearer: []
       summary: Edit bucket
       tags:
-      - Buckets
+        - Buckets
   /tenants/{tenantId}/bucket/{bucketName}/clone_object:
     post:
       consumes:
-      - application/json
+        - application/json
       description: Creates a server-side clone of an object in the given bucket
       parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Bucket name
-        in: path
-        name: bucketName
-        required: true
-        type: string
-      - description: Clone object request
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/buckets.ObjectCloneRequest'
+        - description: Tenant ID
+          in: path
+          name: tenantId
+          required: true
+          type: string
+        - description: Bucket name
+          in: path
+          name: bucketName
+          required: true
+          type: string
+        - description: Clone object request
+          in: body
+          name: request
+          required: true
+          schema:
+            $ref: '#/definitions/buckets.ObjectCloneRequest'
       produces:
-      - application/json
+        - application/json
       responses:
-        "200":
+        '200':
           description: Cloned object
           schema:
             $ref: '#/definitions/bucket.ObjectResponse'
-        "400":
+        '400':
           description: Bad request
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "404":
+        '404':
           description: Not found
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       security:
-      - Bearer: []
+        - Bearer: []
       summary: Clone object
       tags:
-      - Buckets
+        - Buckets
   /tenants/{tenantId}/metrics:
     get:
       description: Returns summary metrics for the given tenant
       parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
+        - description: Tenant ID
+          in: path
+          name: tenantId
+          required: true
+          type: string
       produces:
-      - application/json
+        - application/json
       responses:
-        "200":
+        '200':
           description: Metrics
           schema:
             $ref: '#/definitions/models.MetricsResponse'
-        "404":
+        '404':
           description: Not found
           schema:
             $ref: '#/definitions/common.ReturnMessage'
-        "500":
+        '500':
           description: Internal server error
           schema:
             $ref: '#/definitions/common.ReturnMessage'
       security:
-      - Bearer: []
+        - Bearer: []
       summary: Get tenant metrics
       tags:
-      - Metrics
-swagger: "2.0"
+        - Metrics
+swagger: '2.0'

@@ -4,7 +4,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketRequest, CreateBucketResponse, ErrorResponse } from '@hyperspace/shared';
-import { Resource } from "sst";
+import { Resource } from 'sst';
 import { createAuroraBucket } from '../lib/aurora-portal.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -43,7 +43,8 @@ export async function baseHandler(
     return new ResponseBuilder()
       .status(400)
       .body<ErrorResponse>({
-        message: 'Bucket name must be 3-63 characters, lowercase letters, numbers, and hyphens only',
+        message:
+          'Bucket name must be 3-63 characters, lowercase letters, numbers, and hyphens only',
       })
       .build();
   }
@@ -62,7 +63,9 @@ export async function baseHandler(
   if (!auroraTenantId) {
     return new ResponseBuilder()
       .status(503)
-      .body<ErrorResponse>({ message: 'Aurora tenant setup is not complete, please try again later' })
+      .body<ErrorResponse>({
+        message: 'Aurora tenant setup is not complete, please try again later',
+      })
       .build();
   }
 

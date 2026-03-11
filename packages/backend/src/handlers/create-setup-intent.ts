@@ -5,7 +5,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import { SubscriptionStatus } from '@hyperspace/shared';
 import type { CreateSetupIntentResponse } from '@hyperspace/shared';
-import { Resource } from "sst";
+import { Resource } from 'sst';
 import { getStripeClient } from '../lib/stripe-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -16,9 +16,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 const dynamo = new DynamoDBClient({});
 
-async function baseHandler(
-  event: AuthenticatedEvent,
-): Promise<APIGatewayProxyResultV2> {
+async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId, email } = getUserInfo(event);
   const tableName = Resource.BillingTable.name;
   const stripe = getStripeClient();
@@ -51,15 +49,19 @@ async function baseHandler(
       await dynamo.send(
         new PutItemCommand({
           TableName: tableName,
-          Item: marshall({
-            pk: `CUSTOMER#${userId}`,
-            sk: 'SUBSCRIPTION',
-            stripeCustomerId,
-            subscriptionStatus: SubscriptionStatus.Trialing,
-            trialStartedAt: record.trialStartedAt ?? new Date().toISOString(),
-            trialEndsAt: record.trialEndsAt ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-            updatedAt: new Date().toISOString(),
-          }, { removeUndefinedValues: true }),
+          Item: marshall(
+            {
+              pk: `CUSTOMER#${userId}`,
+              sk: 'SUBSCRIPTION',
+              stripeCustomerId,
+              subscriptionStatus: SubscriptionStatus.Trialing,
+              trialStartedAt: record.trialStartedAt ?? new Date().toISOString(),
+              trialEndsAt:
+                record.trialEndsAt ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+            { removeUndefinedValues: true },
+          ),
         }),
       );
     }

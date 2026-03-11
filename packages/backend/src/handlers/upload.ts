@@ -5,7 +5,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { v4 as uuidv4 } from 'uuid';
 import type { ErrorResponse, UploadRequest, UploadResponse } from '@hyperspace/shared';
-import { Resource } from "sst";
+import { Resource } from 'sst';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
@@ -14,9 +14,7 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 
 const dynamo = new DynamoDBClient({});
 
-async function baseHandler(
-  event: APIGatewayProxyEventV2,
-): Promise<APIGatewayProxyResultV2> {
+async function baseHandler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   let request: UploadRequest;
   try {
     request = JSON.parse(event.body ?? '{}') as UploadRequest;
@@ -31,7 +29,9 @@ async function baseHandler(
   if (!bucketName || !key || !fileName || !contentType) {
     return new ResponseBuilder()
       .status(400)
-      .body<ErrorResponse>({ message: 'Missing required fields: bucketName, key, fileName, contentType' })
+      .body<ErrorResponse>({
+        message: 'Missing required fields: bucketName, key, fileName, contentType',
+      })
       .build();
   }
 

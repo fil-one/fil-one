@@ -20,15 +20,21 @@ vi.mock('@hyperspace/aurora-backoffice-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
   postV1PartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockPostTenants(options),
   getV1PartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockGetTenants(options),
-  postV1PartnersByPartnerIdTenantsByTenantIdSetup: (options: Record<string, unknown>) => mockPostSetup(options),
-  postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens: (options: Record<string, unknown>) => mockPostTokens(options),
+  postV1PartnersByPartnerIdTenantsByTenantIdSetup: (options: Record<string, unknown>) =>
+    mockPostSetup(options),
+  postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens: (options: Record<string, unknown>) =>
+    mockPostTokens(options),
 }));
 
 process.env.AURORA_BACKOFFICE_URL = 'https://api.backoffice.test.example.com/api';
 process.env.AURORA_PARTNER_ID = 'test-partner';
 process.env.AURORA_REGION_ID = 'test-region';
 
-import { createAuroraTenant, setupAuroraTenant, createAuroraTenantApiKey } from './aurora-backoffice.js';
+import {
+  createAuroraTenant,
+  setupAuroraTenant,
+  createAuroraTenantApiKey,
+} from './aurora-backoffice.js';
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -109,9 +115,9 @@ describe('createAuroraTenant', () => {
       error: undefined,
     });
 
-    await expect(
-      createAuroraTenant({ orgId: 'org-123', displayName: 'My Org' }),
-    ).rejects.toThrow('Aurora tenant already exists for org org-123 but lookup failed');
+    await expect(createAuroraTenant({ orgId: 'org-123', displayName: 'My Org' })).rejects.toThrow(
+      'Aurora tenant already exists for org org-123 but lookup failed',
+    );
   });
 });
 
@@ -166,17 +172,17 @@ describe('setupAuroraTenant', () => {
   it('throws when the Aurora API returns an error', async () => {
     mockPostSetup.mockResolvedValue({ data: undefined, error: { message: 'Setup failed' } });
 
-    await expect(
-      setupAuroraTenant({ tenantId: 'tenant-456' }),
-    ).rejects.toThrow('Aurora tenant setup failed for tenant tenant-456');
+    await expect(setupAuroraTenant({ tenantId: 'tenant-456' })).rejects.toThrow(
+      'Aurora tenant setup failed for tenant tenant-456',
+    );
   });
 
   it('throws when the Aurora API returns no data', async () => {
     mockPostSetup.mockResolvedValue({ data: undefined, error: undefined });
 
-    await expect(
-      setupAuroraTenant({ tenantId: 'tenant-789' }),
-    ).rejects.toThrow('Aurora API did not return setup data for tenant tenant-789');
+    await expect(setupAuroraTenant({ tenantId: 'tenant-789' })).rejects.toThrow(
+      'Aurora API did not return setup data for tenant tenant-789',
+    );
   });
 });
 

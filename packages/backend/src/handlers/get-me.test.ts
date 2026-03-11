@@ -72,31 +72,35 @@ describe('GET /api/me handler', () => {
     });
 
     // Auth middleware: resolve existing user
-    ddbMock.on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
-    }).resolves({
-      Item: {
-        pk: { S: `SUB#${MOCK_SUB}` },
-        sk: { S: 'IDENTITY' },
-        userId: { S: MOCK_USER_ID },
-        orgId: { S: MOCK_ORG_ID },
-        email: { S: MOCK_EMAIL },
-      },
-    });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `SUB#${MOCK_SUB}` },
+          sk: { S: 'IDENTITY' },
+          userId: { S: MOCK_USER_ID },
+          orgId: { S: MOCK_ORG_ID },
+          email: { S: MOCK_EMAIL },
+        },
+      });
   });
 
   it('returns orgSetupComplete: true when setupStatus is AURORA_TENANT_API_KEY_CREATED', async () => {
-    ddbMock.on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-    }).resolves({
-      Item: {
-        pk: { S: `ORG#${MOCK_ORG_ID}` },
-        sk: { S: 'PROFILE' },
-        setupStatus: { S: 'AURORA_TENANT_API_KEY_CREATED' },
-      },
-    });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          setupStatus: { S: 'AURORA_TENANT_API_KEY_CREATED' },
+        },
+      });
 
     const result = await handler(authenticatedEvent(), buildContext());
 
@@ -111,16 +115,18 @@ describe('GET /api/me handler', () => {
   });
 
   it('returns orgSetupComplete: false when setupStatus is HYPERSPACE_ORG_CREATED', async () => {
-    ddbMock.on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-    }).resolves({
-      Item: {
-        pk: { S: `ORG#${MOCK_ORG_ID}` },
-        sk: { S: 'PROFILE' },
-        setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
-      },
-    });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
+        },
+      });
 
     const result = await handler(authenticatedEvent(), buildContext());
 
@@ -135,15 +141,17 @@ describe('GET /api/me handler', () => {
   });
 
   it('returns orgSetupComplete: false when setupStatus is missing', async () => {
-    ddbMock.on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-    }).resolves({
-      Item: {
-        pk: { S: `ORG#${MOCK_ORG_ID}` },
-        sk: { S: 'PROFILE' },
-      },
-    });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+        },
+      });
 
     const result = await handler(authenticatedEvent(), buildContext());
 

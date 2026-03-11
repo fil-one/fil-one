@@ -1,15 +1,15 @@
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
-import {
-  createClient,
-  postTenantsByTenantIdBucket,
-} from '@hyperspace/aurora-portal-client';
+import { createClient, postTenantsByTenantIdBucket } from '@hyperspace/aurora-portal-client';
 
 export interface CreateAuroraBucketOptions {
   tenantId: string;
   bucketName: string;
 }
 
-export async function createAuroraBucket({ tenantId, bucketName }: CreateAuroraBucketOptions): Promise<void> {
+export async function createAuroraBucket({
+  tenantId,
+  bucketName,
+}: CreateAuroraBucketOptions): Promise<void> {
   const baseUrl = process.env.AURORA_PORTAL_URL!;
   const stage = process.env.HYPERSPACE_STAGE!;
 
@@ -40,7 +40,9 @@ export async function createAuroraBucket({ tenantId, bucketName }: CreateAuroraB
 
   if (error) {
     if (response?.status === 409) {
-      console.log(`Aurora bucket "${bucketName}" already exists for tenant ${tenantId}, treating as success`);
+      console.log(
+        `Aurora bucket "${bucketName}" already exists for tenant ${tenantId}, treating as success`,
+      );
       return;
     }
     throw new Error(`Failed to create Aurora bucket "${bucketName}" for tenant ${tenantId}`, {

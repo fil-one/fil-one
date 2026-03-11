@@ -2,7 +2,11 @@ import assert from 'node:assert';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
-import { createAuroraTenant, createAuroraTenantApiKey, setupAuroraTenant } from './aurora-backoffice.js';
+import {
+  createAuroraTenant,
+  createAuroraTenantApiKey,
+  setupAuroraTenant,
+} from './aurora-backoffice.js';
 import { OrgSetupStatus } from './org-setup-status.js';
 
 export { OrgSetupStatus };

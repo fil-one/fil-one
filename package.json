@@ -1,10 +1,10 @@
 {
   "name": "hyperspace",
   "private": true,
-  "type": "module",
   "workspaces": [
     "packages/*"
   ],
+  "type": "module",
   "scripts": {
     "dev": "sst dev",
     "build": "pnpm -r -F '!@hyperspace/ui' run build",
@@ -28,10 +28,10 @@
     "oxlint-tsgolint": "^0.16.0",
     "sst": "^4.1.10"
   },
-  "packageManager": "pnpm@10.32.0",
   "engines": {
     "node": ">=24"
   },
+  "packageManager": "pnpm@10.32.0",
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",

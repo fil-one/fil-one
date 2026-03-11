@@ -1,9 +1,9 @@
-import { defineConfig } from "@hey-api/openapi-ts";
+import { defineConfig } from '@hey-api/openapi-ts';
 
 export default defineConfig({
-  input: "./aurora-portal.swagger.yaml",
+  input: './aurora-portal.swagger.yaml',
   output: {
-    path: "./src/generated",
-    importFileExtension: ".ts",
+    path: './src/generated',
+    importFileExtension: '.ts',
   },
 });

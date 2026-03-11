@@ -10,9 +10,7 @@ export function getStripe(): Promise<Stripe | null> {
       return Promise.resolve(null);
     }
     // Dynamic import so stripe-js is only loaded when billing is actually used
-    stripePromise = import('@stripe/stripe-js').then((m) =>
-      m.loadStripe(STRIPE_PUBLISHABLE_KEY),
-    );
+    stripePromise = import('@stripe/stripe-js').then((m) => m.loadStripe(STRIPE_PUBLISHABLE_KEY));
   }
   return stripePromise;
 }

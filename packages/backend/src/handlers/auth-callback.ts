@@ -2,7 +2,13 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from '@hyperspace/shared';
-import { COOKIE_NAMES, TOKEN_MAX_AGE, makeCookieHeader, makeHintCookieHeader, makeClearCookieHeader } from '../lib/response-builder.js';
+import {
+  COOKIE_NAMES,
+  TOKEN_MAX_AGE,
+  makeCookieHeader,
+  makeHintCookieHeader,
+  makeClearCookieHeader,
+} from '../lib/response-builder.js';
 import { parseCookies } from '../lib/cookies.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -87,6 +93,4 @@ async function baseHandler(
   return redirect(`${origin}/dashboard`, responseCookies);
 }
 
-export const handler = middy(baseHandler)
-  .use(httpHeaderNormalizer())
-  .use(errorHandlerMiddleware());
+export const handler = middy(baseHandler).use(httpHeaderNormalizer()).use(errorHandlerMiddleware());

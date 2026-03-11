@@ -1,4 +1,4 @@
-import { Resource } from "sst";
+import { Resource } from 'sst';
 
 export interface AuthSecrets {
   AUTH0_CLIENT_ID: string;

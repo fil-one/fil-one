@@ -3,19 +3,19 @@
 export default $config({
   app(input) {
     const stage = input?.stage;
-    const isProduction = stage === "production";
-    const isStaging = stage === "staging";
+    const isProduction = stage === 'production';
+    const isStaging = stage === 'staging';
 
     // Region: us-east-2 for staging/production, AWS_REGION / profile default for personal dev
     const region =
       isProduction || isStaging
-        ? "us-east-2"
-        : process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-west-2";
+        ? 'us-east-2'
+        : (process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? 'us-west-2');
 
     const awsProvider: Record<string, unknown> = { region };
 
     if (isStaging) {
-      awsProvider.allowedAccountIds = ["654654381893"];
+      awsProvider.allowedAccountIds = ['654654381893'];
     }
     // TODO: Set production account ID once provisioned
     // if (isProduction) {
@@ -23,9 +23,9 @@ export default $config({
     // }
 
     return {
-      name: "hyperspace",
-      removal: isProduction ? "retain" : "remove",
-      home: "aws",
+      name: 'hyperspace',
+      removal: isProduction ? 'retain' : 'remove',
+      home: 'aws',
       providers: {
         aws: awsProvider,
       },
@@ -33,75 +33,73 @@ export default $config({
   },
   async run() {
     // ── Secrets (set via: pnpx sst secret set <Name> <value>) ─────────
-    const auth0ClientId = new sst.Secret("Auth0ClientId");
-    const auth0ClientSecret = new sst.Secret("Auth0ClientSecret");
-    const auth0MgmtClientId = new sst.Secret("Auth0MgmtClientId");
-    const auth0MgmtClientSecret = new sst.Secret("Auth0MgmtClientSecret");
-    const stripeSecretKey = new sst.Secret("StripeSecretKey");
-    const stripePriceId = new sst.Secret("StripePriceId");
-    const auroraBackofficeToken = new sst.Secret("AuroraBackofficeToken");
-    const AWS_CACHING_DISABLED_POLICY = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad";
+    const auth0ClientId = new sst.Secret('Auth0ClientId');
+    const auth0ClientSecret = new sst.Secret('Auth0ClientSecret');
+    const auth0MgmtClientId = new sst.Secret('Auth0MgmtClientId');
+    const auth0MgmtClientSecret = new sst.Secret('Auth0MgmtClientSecret');
+    const stripeSecretKey = new sst.Secret('StripeSecretKey');
+    const stripePriceId = new sst.Secret('StripePriceId');
+    const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
+    const AWS_CACHING_DISABLED_POLICY = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
-    const uploadsTable = new sst.aws.Dynamo("UploadsTable", {
+    const uploadsTable = new sst.aws.Dynamo('UploadsTable', {
       fields: {
-        pk: "string",
-        sk: "string",
+        pk: 'string',
+        sk: 'string',
       },
-      primaryIndex: { hashKey: "pk", rangeKey: "sk" },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
     });
 
-    const billingTable = new sst.aws.Dynamo("BillingTable", {
+    const billingTable = new sst.aws.Dynamo('BillingTable', {
       fields: {
-        pk: "string",
-        sk: "string",
+        pk: 'string',
+        sk: 'string',
       },
-      primaryIndex: { hashKey: "pk", rangeKey: "sk" },
-      ttl: "ttl",
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      ttl: 'ttl',
     });
 
-    const userInfoTable = new sst.aws.Dynamo("UserInfoTable", {
+    const userInfoTable = new sst.aws.Dynamo('UserInfoTable', {
       fields: {
-        pk: "string",
-        sk: "string",
+        pk: 'string',
+        sk: 'string',
       },
-      primaryIndex: { hashKey: "pk", rangeKey: "sk" },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
     });
 
     // ── SQS Queues ─────────────────────────────────────────────────
-    const tenantSetupDlq = new sst.aws.Queue("AuroraTenantSetupDlq", {
+    const tenantSetupDlq = new sst.aws.Queue('AuroraTenantSetupDlq', {
       fifo: true,
     });
 
-    const tenantSetupQueue = new sst.aws.Queue("AuroraTenantSetupQueue", {
+    const tenantSetupQueue = new sst.aws.Queue('AuroraTenantSetupQueue', {
       fifo: true,
       dlq: tenantSetupDlq.arn,
       // Make visibility timeout longer than the Lambda timeout to avoid multiple retries
-      visibilityTimeout: "90 seconds",
+      visibilityTimeout: '90 seconds',
     });
 
     // ── S3 Bucket for user file storage ──────────────────────────────
-    const userFilesBucket = new sst.aws.Bucket("UserFilesBucket");
+    const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
-    const isProduction = stage === "production";
+    const isProduction = stage === 'production';
 
     let domainName: string | undefined;
     let certArn: string | undefined;
 
-    if (stage === "production" || stage === "staging") {
+    if (stage === 'production' || stage === 'staging') {
       domainName =
-        stage === "production"
-          ? "console.filhyperspace.com"
-          : "staging.filhyperspace.com";
+        stage === 'production' ? 'console.filhyperspace.com' : 'staging.filhyperspace.com';
 
       // ACM cert must be in us-east-1 for CloudFront
-      const usEast1 = new aws.Provider("useast1", { region: "us-east-1" });
+      const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
       const cert = await aws.acm.getCertificate(
         {
           domain: domainName,
-          statuses: ["ISSUED"],
+          statuses: ['ISSUED'],
         },
         { provider: usEast1 },
       );
@@ -110,96 +108,106 @@ export default $config({
     }
 
     // ── API Gateway ──────────────────────────────────────────────────
-    // While we stick to a same origin for both website and API, 
-    // we want to make sure to lock down to just our origin. 
+    // While we stick to a same origin for both website and API,
+    // we want to make sure to lock down to just our origin.
     const allowedOrigins = domainName ? [`https://${domainName}`] : [];
-    if (stage !== "production") {
-      allowedOrigins.push("https://localhost:5173");
+    if (stage !== 'production') {
+      allowedOrigins.push('https://localhost:5173');
     }
 
-    const api = new sst.aws.ApiGatewayV2("Api", {
+    const api = new sst.aws.ApiGatewayV2('Api', {
       cors: {
         allowOrigins: allowedOrigins,
-        allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allowHeaders: ["Content-Type", "X-CSRF-Token", "X-Requested-With"],
+        allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Requested-With'],
         allowCredentials: true,
-        maxAge: "1 day",
+        maxAge: '1 day',
       },
     });
 
     // ── Website (S3 + CloudFront via sst.aws.Router) ─────────────────
-    const { local } = await import("@pulumi/command");
+    const { local } = await import('@pulumi/command');
 
-    const websiteBucket = new sst.aws.Bucket("WebsiteBucket", {
-      access: "cloudfront",
+    const websiteBucket = new sst.aws.Bucket('WebsiteBucket', {
+      access: 'cloudfront',
       transform: {
         bucket: { forceDestroy: true },
       },
     });
 
-    const router = new sst.aws.Router("WebsiteRouter", {
+    const router = new sst.aws.Router('WebsiteRouter', {
       routes: {
-        "/*": { bucket: websiteBucket },
-        "/api/*": {
+        '/*': { bucket: websiteBucket },
+        '/api/*': {
           url: api.url,
           cachePolicy: AWS_CACHING_DISABLED_POLICY,
         },
       },
-      ...(domainName && certArn
-        ? { domain: { name: domainName, dns: false, cert: certArn } }
-        : {}),
+      ...(domainName && certArn ? { domain: { name: domainName, dns: false, cert: certArn } } : {}),
       transform: {
         cdn: (args) => {
-          args.defaultRootObject = "index.html";
+          args.defaultRootObject = 'index.html';
           args.customErrorResponses = [
-            { errorCode: 403, responseCode: 200, responsePagePath: "/index.html", errorCachingMinTtl: 0 },
-            { errorCode: 404, responseCode: 200, responsePagePath: "/index.html", errorCachingMinTtl: 0 },
+            {
+              errorCode: 403,
+              responseCode: 200,
+              responsePagePath: '/index.html',
+              errorCachingMinTtl: 0,
+            },
+            {
+              errorCode: 404,
+              responseCode: 200,
+              responsePagePath: '/index.html',
+              errorCachingMinTtl: 0,
+            },
           ];
         },
       },
     });
 
-    const distPath = require("path").resolve("packages/website/dist");
-    const sync = new local.Command("WebsiteSync", {
+    const distPath = require('path').resolve('packages/website/dist');
+    const sync = new local.Command('WebsiteSync', {
       create: $interpolate`aws s3 sync ${distPath} s3://${websiteBucket.nodes.bucket.bucket} --delete`,
       triggers: [Date.now().toString()],
     });
 
-    new local.Command("WebsiteInvalidation", {
-      create: $interpolate`aws cloudfront create-invalidation --distribution-id ${router.distributionID} --paths "/*"`,
-      triggers: [Date.now().toString()],
-    }, { dependsOn: [sync] });
+    new local.Command(
+      'WebsiteInvalidation',
+      {
+        create: $interpolate`aws cloudfront create-invalidation --distribution-id ${router.distributionID} --paths "/*"`,
+        triggers: [Date.now().toString()],
+      },
+      { dependsOn: [sync] },
+    );
 
     const siteUrl = router.url;
 
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
-    const setupFn = new sst.aws.Function("SetupIntegrations", {
-      handler: "packages/backend/src/handlers/setup-integrations.handler",
+    const setupFn = new sst.aws.Function('SetupIntegrations', {
+      handler: 'packages/backend/src/handlers/setup-integrations.handler',
       link: [stripeSecretKey, auth0MgmtClientId, auth0MgmtClientSecret, auth0ClientId],
       environment: {
-        AUTH0_DOMAIN: "dev-oar2nhqh58xf5pwf.us.auth0.com",
+        AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
       },
       permissions: [
         {
-          actions: ["ssm:GetParameter", "ssm:PutParameter", "ssm:DeleteParameter"],
-          resources: [
-            $interpolate`arn:aws:ssm:*:*:parameter/hyperspace/${$app.stage}/*`,
-          ],
+          actions: ['ssm:GetParameter', 'ssm:PutParameter', 'ssm:DeleteParameter'],
+          resources: [$interpolate`arn:aws:ssm:*:*:parameter/hyperspace/${$app.stage}/*`],
         },
       ],
       // TODO: Remove `as any` once SST adds nodejs24.x to its type definitions
       // this PR was merged: https://github.com/anomalyco/sst/pull/6243#ref-commit-6fb1396
       // eslint-disable-next-line typescript/no-explicit-any
-      runtime: "nodejs24.x" as any,
-      timeout: "30 seconds",
+      runtime: 'nodejs24.x' as any,
+      timeout: '30 seconds',
     });
 
-    new aws.cloudformation.Stack("SetupStack", {
+    new aws.cloudformation.Stack('SetupStack', {
       templateBody: $jsonStringify({
-        AWSTemplateFormatVersion: "2010-09-09",
+        AWSTemplateFormatVersion: '2010-09-09',
         Resources: {
           Setup: {
-            Type: "Custom::HyperspaceSetup",
+            Type: 'Custom::HyperspaceSetup',
             Properties: {
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
@@ -224,22 +232,22 @@ export default $config({
     ];
 
     const sharedEnv: Record<string, string> = {
-      AUTH0_DOMAIN: "dev-oar2nhqh58xf5pwf.us.auth0.com",
-      AUTH0_AUDIENCE: "console.filhyperspace.com",
+      AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
+      AUTH0_AUDIENCE: 'console.filhyperspace.com',
     };
 
     if (isProduction) {
       throw new Error(
-        "Aurora production configuration not yet available. "
-        + "Set AURORA_BACKOFFICE_URL, AURORA_PORTAL_URL, AURORA_PARTNER_ID, and AURORA_REGION_ID before deploying to production.",
+        'Aurora production configuration not yet available. ' +
+          'Set AURORA_BACKOFFICE_URL, AURORA_PORTAL_URL, AURORA_PARTNER_ID, and AURORA_REGION_ID before deploying to production.',
       );
     }
 
     const auroraEnv = {
-      AURORA_BACKOFFICE_URL: "https://api.backoffice.dev.aur.lu/api",
-      AURORA_PORTAL_URL: "https://api.portal.dev.aur.lu/api/v1",
-      AURORA_PARTNER_ID: "ff",
-      AURORA_REGION_ID: "ff",
+      AURORA_BACKOFFICE_URL: 'https://api.backoffice.dev.aur.lu/api',
+      AURORA_PORTAL_URL: 'https://api.portal.dev.aur.lu/api/v1',
+      AURORA_PARTNER_ID: 'ff',
+      AURORA_REGION_ID: 'ff',
     };
 
     function addRoute(
@@ -259,62 +267,64 @@ export default $config({
         permissions,
         // TODO: Remove `as any` once SST adds nodejs24.x to its type definitions
         // eslint-disable-next-line typescript/no-explicit-any
-      runtime: "nodejs24.x" as any,
-        timeout: "10 seconds",
+        runtime: 'nodejs24.x' as any,
+        timeout: '10 seconds',
       });
     }
 
     // ── Data routes ──────────────────────────────────────────────────
-    addRoute("POST", "/api/upload", "upload");
-    addRoute("GET", "/api/buckets", "list-buckets");
-    addRoute("POST", "/api/buckets", "create-bucket", {
-      AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-      HYPERSPACE_STAGE: $app.stage,
-    }, [
-      {
-        actions: ["ssm:GetParameter"],
-        resources: [
-          $interpolate`arn:aws:ssm:*:*:parameter/hyperspace/${$app.stage}/aurora-portal/tenant-api-key/*`,
-        ],
-      },
-    ]);
-    addRoute("DELETE", "/api/buckets/{name}", "delete-bucket");
-    addRoute("GET", "/api/buckets/{name}/objects", "list-objects");
-    addRoute("POST", "/api/buckets/{name}/objects/upload", "upload-object");
+    addRoute('POST', '/api/upload', 'upload');
+    addRoute('GET', '/api/buckets', 'list-buckets');
     addRoute(
-      "GET",
-      "/api/buckets/{name}/objects/download",
-      "download-object",
+      'POST',
+      '/api/buckets',
+      'create-bucket',
+      {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        HYPERSPACE_STAGE: $app.stage,
+      },
+      [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [
+            $interpolate`arn:aws:ssm:*:*:parameter/hyperspace/${$app.stage}/aurora-portal/tenant-api-key/*`,
+          ],
+        },
+      ],
     );
-    addRoute("DELETE", "/api/buckets/{name}/objects", "delete-object");
+    addRoute('DELETE', '/api/buckets/{name}', 'delete-bucket');
+    addRoute('GET', '/api/buckets/{name}/objects', 'list-objects');
+    addRoute('POST', '/api/buckets/{name}/objects/upload', 'upload-object');
+    addRoute('GET', '/api/buckets/{name}/objects/download', 'download-object');
+    addRoute('DELETE', '/api/buckets/{name}/objects', 'delete-object');
 
     // ── Auth routes ──────────────────────────────────────────────────
-    const allowedRedirectOrigins = allowedOrigins.join(",");
-    addRoute("GET", "/api/auth/callback", "auth-callback", {
+    const allowedRedirectOrigins = allowedOrigins.join(',');
+    addRoute('GET', '/api/auth/callback', 'auth-callback', {
       WEBSITE_URL: siteUrl,
       ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
     });
-    addRoute("GET", "/api/auth/logout", "auth-logout", {
+    addRoute('GET', '/api/auth/logout', 'auth-logout', {
       WEBSITE_URL: siteUrl,
       ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
     });
 
     // ── Me route ───────────────────────────────────────────────────
-    addRoute("GET", "/api/me", "get-me");
+    addRoute('GET', '/api/me', 'get-me');
 
     // ── Billing routes ───────────────────────────────────────────────
-    addRoute("GET", "/api/billing", "get-billing");
-    addRoute("POST", "/api/billing/setup-intent", "create-setup-intent");
-    addRoute("POST", "/api/billing/activate", "activate-subscription");
-    addRoute("POST", "/api/billing/portal", "create-portal-session", {
+    addRoute('GET', '/api/billing', 'get-billing');
+    addRoute('POST', '/api/billing/setup-intent', 'create-setup-intent');
+    addRoute('POST', '/api/billing/activate', 'activate-subscription');
+    addRoute('POST', '/api/billing/portal', 'create-portal-session', {
       WEBSITE_URL: siteUrl,
     });
-    addRoute("POST", "/api/stripe/webhook", "stripe-webhook");
+    addRoute('POST', '/api/stripe/webhook', 'stripe-webhook');
 
     // ── Tenant setup consumer ──────────────────────────────────────
     tenantSetupQueue.subscribe(
       {
-        handler: "packages/backend/src/handlers/aurora-tenant-setup.handler",
+        handler: 'packages/backend/src/handlers/aurora-tenant-setup.handler',
         link: [userInfoTable, auroraBackofficeToken],
         environment: {
           ...auroraEnv,
@@ -322,32 +332,32 @@ export default $config({
         },
         permissions: [
           {
-            actions: ["ssm:PutParameter"],
+            actions: ['ssm:PutParameter'],
             resources: [
               $interpolate`arn:aws:ssm:*:*:parameter/hyperspace/${$app.stage}/aurora-portal/tenant-api-key/*`,
             ],
           },
         ],
         // eslint-disable-next-line typescript/no-explicit-any
-        runtime: "nodejs24.x" as any,
-        timeout: "60 seconds",
+        runtime: 'nodejs24.x' as any,
+        timeout: '60 seconds',
       },
       { batch: { size: 1 } },
     );
 
     // ── CloudWatch alarm on DLQ ──────────────────────────────────
     // TODO: Rework this alarm to trigger alert in Grafana IRM
-    new aws.cloudwatch.MetricAlarm("AuroraTenantSetupDlqAlarm", {
-      alarmDescription: "Messages in tenant-setup DLQ — failed tenant setup needs investigation",
-      namespace: "AWS/SQS",
-      metricName: "ApproximateNumberOfMessagesVisible",
+    new aws.cloudwatch.MetricAlarm('AuroraTenantSetupDlqAlarm', {
+      alarmDescription: 'Messages in tenant-setup DLQ — failed tenant setup needs investigation',
+      namespace: 'AWS/SQS',
+      metricName: 'ApproximateNumberOfMessagesVisible',
       dimensions: { QueueName: tenantSetupDlq.nodes.queue.name },
-      statistic: "Maximum",
+      statistic: 'Maximum',
       period: 60,
       evaluationPeriods: 1,
       threshold: 1,
-      comparisonOperator: "GreaterThanOrEqualToThreshold",
-      treatMissingData: "notBreaching",
+      comparisonOperator: 'GreaterThanOrEqualToThreshold',
+      treatMissingData: 'notBreaching',
     });
 
     return {

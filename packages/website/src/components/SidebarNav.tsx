@@ -46,7 +46,13 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const [billing, setBilling] = useState<BillingInfo | null>(null);
 
   useEffect(() => {
-    const refresh = () => { getBilling().then(setBilling).catch(() => {/* silent */}) };
+    const refresh = () => {
+      getBilling()
+        .then(setBilling)
+        .catch(() => {
+          /* silent */
+        });
+    };
     refresh();
     window.addEventListener('billing:updated', refresh);
     return () => window.removeEventListener('billing:updated', refresh);
@@ -56,9 +62,10 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod;
   const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
   const isCanceled = billing?.subscription.status === SubscriptionStatus.Canceled;
-  const trialDays = isTrialing && billing?.subscription.trialEndsAt
-    ? daysRemaining(billing.subscription.trialEndsAt)
-    : null;
+  const trialDays =
+    isTrialing && billing?.subscription.trialEndsAt
+      ? daysRemaining(billing.subscription.trialEndsAt)
+      : null;
   const graceDays = billing?.subscription.gracePeriodEndsAt
     ? daysRemaining(billing.subscription.gracePeriodEndsAt)
     : null;
@@ -78,9 +85,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
             F
           </span>
           {!collapsed && (
-            <span className="truncate text-sm font-semibold text-zinc-900">
-              Fil Hyperspace
-            </span>
+            <span className="truncate text-sm font-semibold text-zinc-900">Fil Hyperspace</span>
           )}
         </div>
 
@@ -111,9 +116,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
       {/* Primary nav items */}
       <div className="flex flex-col gap-0.5 p-2">
         {navItems.map(({ path, icon: Icon, label }) => {
-          const isActive = Boolean(
-            matchRoute({ to: path, fuzzy: path === '/buckets' }),
-          );
+          const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
 
           return (
             <Link
@@ -123,9 +126,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
               className={[
                 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                 collapsed ? 'justify-center' : '',
-                isActive
-                  ? 'bg-brand-50 text-brand-700'
-                  : 'text-zinc-600 hover:bg-zinc-100',
+                isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
               ]
                 .filter(Boolean)
                 .join(' ')}
@@ -147,9 +148,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           <p className="text-xs text-zinc-500">
             {trialDays !== null ? `${trialDays} days left in trial` : 'Trial active'}
           </p>
-          <p className="mt-0.5 text-xs text-zinc-400">
-            Upgrade to continue using Hyperspace.
-          </p>
+          <p className="mt-0.5 text-xs text-zinc-400">Upgrade to continue using Hyperspace.</p>
           <div className="mt-3">
             <Button variant="filled" href="/billing" className="w-full justify-center text-xs">
               Upgrade
@@ -162,7 +161,8 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
       {!collapsed && isGracePeriod && isTrialExpiredGrace && (
         <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
           <p className="text-xs font-medium text-amber-800">
-            Your free trial has expired.{graceDays !== null ? ` ${graceDays} days left` : ''} to upgrade or download your data.
+            Your free trial has expired.{graceDays !== null ? ` ${graceDays} days left` : ''} to
+            upgrade or download your data.
           </p>
           <div className="mt-3">
             <Button variant="filled" href="/billing" className="w-full justify-center text-xs">
@@ -176,7 +176,8 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
       {!collapsed && isGracePeriod && !isTrialExpiredGrace && (
         <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
           <p className="text-xs font-medium text-amber-800">
-            Subscription canceled.{graceDays !== null ? ` ${graceDays} days left` : ''} to reactivate or download your data.
+            Subscription canceled.{graceDays !== null ? ` ${graceDays} days left` : ''} to
+            reactivate or download your data.
           </p>
           <div className="mt-3">
             <Button variant="filled" href="/billing" className="w-full justify-center text-xs">
@@ -190,7 +191,8 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
       {!collapsed && isPastDue && (
         <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
           <p className="text-xs font-medium text-amber-800">
-            Payment failed. Update your payment method to avoid losing access.{graceDays !== null ? ` ${graceDays} days remaining.` : ''}
+            Payment failed. Update your payment method to avoid losing access.
+            {graceDays !== null ? ` ${graceDays} days remaining.` : ''}
           </p>
           <div className="mt-3">
             <Button variant="filled" href="/billing" className="w-full justify-center text-xs">
