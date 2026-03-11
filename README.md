@@ -128,6 +128,13 @@ pnpm run typecheck        # tsc --noEmit across all packages
 cd packages/website && pnpm run dev
 ```
 
+```bash
+# E2E tests (Playwright)
+pnpm test:e2e                          # Run e2e tests headless
+pnpm exec playwright test --ui         # Interactive UI mode
+pnpm exec playwright show-report       # View HTML report
+```
+
 ### Personal Dev Stack
 
 ```bash

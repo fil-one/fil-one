@@ -28,3 +28,10 @@ contracts/out/
 !/broadcast
 /contracts/broadcast/*/31337/
 /contracts/broadcast/**/dry-run/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/

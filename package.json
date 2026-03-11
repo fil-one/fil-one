@@ -19,11 +19,14 @@
     "lint:fix": "oxlint --fix && oxfmt --write",
     "refresh": "sst refresh",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm lint && pnpm --filter @hyperspace/backend test"
+    "test": "pnpm lint && pnpm --filter @hyperspace/backend test",
+    "test:e2e": "pnpm exec playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@pulumi/aws": "^7.21.0",
     "@pulumi/command": "^1.2.1",
+    "@types/node": "^25.4.0",
     "aws-cdk-lib": "^2.241.0",
     "constructs": "^10.5.1",
     "oxfmt": "^0.36.0",
