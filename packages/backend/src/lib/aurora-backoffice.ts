@@ -1,11 +1,15 @@
 import {
   createClient,
+  getAnalyticsV1ByPartnerIdTenantsByTenantIdStorage,
   getV1PartnersByPartnerIdTenants,
   postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens,
   postV1PartnersByPartnerIdTenants,
   postV1PartnersByPartnerIdTenantsByTenantIdSetup,
+  type ModelStorageMetricsSample,
 } from '@filone/aurora-backoffice-client';
 import { getAuroraBackofficeSecrets } from './auth-secrets.js';
+
+export type { ModelStorageMetricsSample };
 
 export interface CreateAuroraTenantOptions {
   orgId: string;
@@ -201,4 +205,42 @@ export async function createAuroraTenantApiKey({
 
   console.log(`Aurora API key created for org ${orgId}: tokenId=${tokenId}`);
   return { token: apiToken, tokenId };
+}
+
+export interface GetStorageSamplesOptions {
+  tenantId: string;
+  from: string;
+  to: string;
+  window?: string;
+}
+
+export async function getStorageSamples({
+  tenantId,
+  from,
+  to,
+  window = '1h',
+}: GetStorageSamplesOptions): Promise<ModelStorageMetricsSample[]> {
+  const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
+  const partnerId = process.env.AURORA_PARTNER_ID!;
+  const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
+
+  const client = createClient({
+    baseUrl,
+    headers: { 'X-Api-Key': token },
+  });
+
+  const { data, error } = await getAnalyticsV1ByPartnerIdTenantsByTenantIdStorage({
+    client,
+    path: { partnerId, tenantId },
+    query: { from, to, window },
+    throwOnError: false,
+  });
+
+  if (error) {
+    throw new Error(`Aurora storage API failed for tenant ${tenantId}`, {
+      cause: error,
+    });
+  }
+
+  return data?.samples ?? [];
 }
