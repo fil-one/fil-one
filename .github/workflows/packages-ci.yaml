@@ -139,7 +139,7 @@ jobs:
 
   deploy-staging:
     if: github.ref == 'refs/heads/main'
-    needs: [check]
+    needs: [check-packages]
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-staging
