@@ -380,6 +380,40 @@ export default $config({
       treatMissingData: 'notBreaching',
     });
 
+    // ── Usage reporting (cron-based) ────────────────────────────────
+    const usageWorker = new sst.aws.Function('UsageReportingWorker', {
+      handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
+      link: [billingTable, stripeSecretKey, auroraBackofficeToken],
+      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'tibmonthmeter' },
+      runtime: 'nodejs24.x',
+      timeout: '60 seconds',
+      memory: '256 MB',
+    });
+
+    const usageOrchestrator = new sst.aws.Function('UsageReportingOrchestrator', {
+      handler: 'packages/backend/src/jobs/usage-reporting-orchestrator.handler',
+      link: [billingTable],
+      environment: {
+        USAGE_WORKER_FUNCTION_NAME: usageWorker.name,
+        STRIPE_METER_EVENT_NAME: 'tibmonthmeter',
+      },
+      runtime: 'nodejs24.x',
+      timeout: '300 seconds',
+      memory: '256 MB',
+      permissions: [
+        {
+          actions: ['lambda:InvokeFunction'],
+          resources: [usageWorker.arn],
+        },
+      ],
+    });
+
+    new sst.aws.Cron('UsageReportingCron', {
+      // run the Lambda every day at 6:00 AM UTC.
+      schedule: 'cron(0 6 * * ? *)',
+      function: usageOrchestrator.arn,
+    });
+
     return {
       baseUrl: siteUrl,
     };

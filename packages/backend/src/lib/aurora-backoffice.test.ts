@@ -1,4 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  createAuroraTenant,
+  setupAuroraTenant,
+  getStorageSamples,
+  createAuroraTenantApiKey,
+} from './aurora-backoffice.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -15,11 +21,14 @@ const mockGetTenants = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockPostSetup = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockPostTokens = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-aurora-client');
+const mockGetStorage = vi.fn((_options: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/aurora-backoffice-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
   postV1PartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockPostTenants(options),
   getV1PartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockGetTenants(options),
+  getAnalyticsV1ByPartnerIdTenantsByTenantIdStorage: (options: Record<string, unknown>) =>
+    mockGetStorage(options),
   postV1PartnersByPartnerIdTenantsByTenantIdSetup: (options: Record<string, unknown>) =>
     mockPostSetup(options),
   postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens: (options: Record<string, unknown>) =>
@@ -29,12 +38,6 @@ vi.mock('@filone/aurora-backoffice-client', () => ({
 process.env.AURORA_BACKOFFICE_URL = 'https://api.backoffice.test.example.com/api';
 process.env.AURORA_PARTNER_ID = 'test-partner';
 process.env.AURORA_REGION_ID = 'test-region';
-
-import {
-  createAuroraTenant,
-  setupAuroraTenant,
-  createAuroraTenantApiKey,
-} from './aurora-backoffice.js';
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -234,5 +237,58 @@ describe('createAuroraTenantApiKey', () => {
     await expect(
       createAuroraTenantApiKey({ tenantId: 'tenant-1', orgId: 'org-1' }),
     ).rejects.toThrow('Aurora API did not return a token for org org-1: {"id":"token-id-1"}');
+  });
+});
+
+describe('getStorageSamples', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns samples on success', async () => {
+    const mockSamples = [
+      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1000 },
+      { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 2000 },
+    ];
+    mockGetStorage.mockResolvedValue({ data: { samples: mockSamples }, error: undefined });
+
+    const result = await getStorageSamples({
+      tenantId: 'tenant-1',
+      from: '2024-01-01T00:00:00Z',
+      to: '2024-01-02T00:00:00Z',
+      window: '1h',
+    });
+
+    expect(result).toEqual(mockSamples);
+    expect(mockGetStorage).toHaveBeenCalledWith({
+      client: 'mock-aurora-client',
+      path: { partnerId: 'test-partner', tenantId: 'tenant-1' },
+      query: { from: '2024-01-01T00:00:00Z', to: '2024-01-02T00:00:00Z', window: '1h' },
+      throwOnError: false,
+    });
+  });
+
+  it('returns empty array when data has no samples', async () => {
+    mockGetStorage.mockResolvedValue({ data: {}, error: undefined });
+
+    const result = await getStorageSamples({
+      tenantId: 'tenant-1',
+      from: '2024-01-01T00:00:00Z',
+      to: '2024-01-02T00:00:00Z',
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it('throws when the Aurora API returns an error', async () => {
+    mockGetStorage.mockResolvedValue({ data: undefined, error: { message: 'Not found' } });
+
+    await expect(
+      getStorageSamples({
+        tenantId: 'tenant-1',
+        from: '2024-01-01T00:00:00Z',
+        to: '2024-01-02T00:00:00Z',
+      }),
+    ).rejects.toThrow('Aurora storage API failed for tenant tenant-1');
   });
 });
