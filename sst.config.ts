@@ -87,7 +87,7 @@ export default $config({
     const stage = $app.stage;
     const isProduction = stage === 'production';
 
-    let domainName: string | undefined;
+    let domainName = "staging.fil.one";
     let certArn: string | undefined;
 
     //TODO Bring this back after we have a successful prod deployment.
