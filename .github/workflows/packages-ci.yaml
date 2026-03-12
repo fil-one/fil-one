@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  check-packages:
+  check:
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +27,7 @@ jobs:
       # type definitions live in .sst/platform/ and are not checked into git.
       # Run `sst install` to generate them so oxlint's type-aware checks pass.
       - name: Generate SST provider types
-        run: npx sst install
+        run: pnpx sst install
 
       - name: Lint
         run: pnpm lint
@@ -41,11 +41,109 @@ jobs:
       - name: Test
         run: pnpm test
 
+  deploy-preview:
+    if: github.event_name == 'pull_request'
+    needs: [check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: preview-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      STAGE: pr-${{ github.event.pull_request.number }}
+      AWS_REGION: us-east-2
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-ci-github
+          aws-region: us-east-2
+
+      - name: Set SST secrets
+        run: |
+          npx sst secret set Auth0ClientId "$AUTH0_CLIENT_ID" --stage "$STAGE"
+          npx sst secret set Auth0ClientSecret "$AUTH0_CLIENT_SECRET" --stage "$STAGE"
+          npx sst secret set Auth0MgmtClientId "$AUTH0_MGMT_CLIENT_ID" --stage "$STAGE"
+          npx sst secret set Auth0MgmtClientSecret "$AUTH0_MGMT_CLIENT_SECRET" --stage "$STAGE"
+          npx sst secret set StripeSecretKey "$STRIPE_SECRET_KEY" --stage "$STAGE"
+          npx sst secret set StripePriceId "$STRIPE_PRICE_ID" --stage "$STAGE"
+          npx sst secret set AuroraBackofficeToken "$AURORA_BACKOFFICE_TOKEN" --stage "$STAGE"
+        env:
+          AUTH0_CLIENT_ID: ${{ secrets.CI_AUTH0_CLIENT_ID }}
+          AUTH0_CLIENT_SECRET: ${{ secrets.CI_AUTH0_CLIENT_SECRET }}
+          AUTH0_MGMT_CLIENT_ID: ${{ secrets.CI_AUTH0_MGMT_CLIENT_ID }}
+          AUTH0_MGMT_CLIENT_SECRET: ${{ secrets.CI_AUTH0_MGMT_CLIENT_SECRET }}
+          STRIPE_SECRET_KEY: ${{ secrets.CI_STRIPE_SECRET_KEY }}
+          STRIPE_PRICE_ID: ${{ secrets.CI_STRIPE_PRICE_ID }}
+          AURORA_BACKOFFICE_TOKEN: ${{ secrets.CI_AURORA_BACKOFFICE_TOKEN }}
+
+      - name: Build
+        run: pnpm build
+
+      - name: Deploy SST stage
+        id: deploy
+        run: |
+          OUTPUT=$(npx sst deploy --stage "$STAGE" 2>&1)
+          echo "$OUTPUT"
+          URL=$(echo "$OUTPUT" | grep -oP 'url:\s*\K\S+' || true)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+  comment:
+    name: Add Preview Environment Comment on PR
+    if: github.event_name == 'pull_request'
+    needs: [deploy-preview]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Find existing comment
+        uses: peter-evans/find-comment@v3
+        id: find_comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-includes: "🚀 Preview Environment"
+
+      - name: Create or update comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-id: ${{ steps.find_comment.outputs.comment-id }}
+          edit-mode: replace
+          body: |
+            ## 🚀 Preview Environment
+
+            | | |
+            |---|---|
+            | **Latest commit** | `${{ github.sha }}` |
+            | **Status** | ✅ Deploy successful |
+            | **Preview URL** | [${{ needs.deploy-preview.outputs.url }}](${{ needs.deploy-preview.outputs.url }}) |
+
   deploy-staging:
     if: github.ref == 'refs/heads/main'
-    needs: [check-packages]
+    needs: [check]
     runs-on: ubuntu-latest
-    concurrency: deploy-staging
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
     environment: staging
     permissions:
       id-token: write
