@@ -13,7 +13,6 @@ import {
 
 vi.mock('sst', () => ({
   Resource: {
-    AccessKeysTable: { name: 'AccessKeysTable' },
     UserInfoTable: { name: 'UserInfoTable' },
   },
 }));

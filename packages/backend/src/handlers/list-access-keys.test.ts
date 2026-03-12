@@ -8,7 +8,7 @@ import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 
 vi.mock('sst', () => ({
   Resource: {
-    AccessKeysTable: { name: 'AccessKeysTable' },
+    UserInfoTable: { name: 'UserInfoTable' },
   },
 }));
 
@@ -98,7 +98,7 @@ describe('list-access-keys baseHandler', () => {
     expect(calls).toHaveLength(1);
     const input = calls[0].args[0].input;
     expect(input).toStrictEqual({
-      TableName: 'AccessKeysTable',
+      TableName: 'UserInfoTable',
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
       ExpressionAttributeValues: {
         ':pk': { S: 'ORG#org-1' },

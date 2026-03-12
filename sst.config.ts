@@ -68,14 +68,6 @@ export default $config({
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
     });
 
-    const accessKeysTable = new sst.aws.Dynamo('AccessKeysTable', {
-      fields: {
-        pk: 'string',
-        sk: 'string',
-      },
-      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
-    });
-
     // ── SQS Queues ─────────────────────────────────────────────────
     const tenantSetupDlq = new sst.aws.Queue('AuroraTenantSetupDlq', {
       fifo: true,
@@ -227,7 +219,6 @@ export default $config({
       uploadsTable,
       billingTable,
       userInfoTable,
-      accessKeysTable,
       userFilesBucket,
       tenantSetupQueue,
       auth0ClientId,

@@ -84,7 +84,7 @@ export async function baseHandler(
 
   await getDynamoClient().send(
     new PutItemCommand({
-      TableName: Resource.AccessKeysTable.name,
+      TableName: Resource.UserInfoTable.name,
       Item: marshall({
         pk: `ORG#${orgId}`,
         sk: `ACCESSKEY#${auroraKey.id}`,
@@ -115,7 +115,7 @@ async function recoverDuplicateKey(
   // Check if we already have a DynamoDB record for this key
   const { Items: existingKeys } = await getDynamoClient().send(
     new QueryCommand({
-      TableName: Resource.AccessKeysTable.name,
+      TableName: Resource.UserInfoTable.name,
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
       ExpressionAttributeValues: {
         ':pk': { S: `ORG#${orgId}` },
@@ -147,7 +147,7 @@ async function recoverDuplicateKey(
 
   await getDynamoClient().send(
     new PutItemCommand({
-      TableName: Resource.AccessKeysTable.name,
+      TableName: Resource.UserInfoTable.name,
       Item: marshall({
         pk: `ORG#${orgId}`,
         sk: `ACCESSKEY#${auroraKey.id}`,

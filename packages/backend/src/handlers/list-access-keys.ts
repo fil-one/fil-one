@@ -20,7 +20,7 @@ export async function baseHandler(
 
   const result = await getDynamoClient().send(
     new QueryCommand({
-      TableName: Resource.AccessKeysTable.name,
+      TableName: Resource.UserInfoTable.name,
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
       ExpressionAttributeValues: {
         ':pk': { S: `ORG#${orgId}` },
