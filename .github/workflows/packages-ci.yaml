@@ -10,13 +10,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - uses: pnpm/action-setup@v4
+      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
+      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm
@@ -56,7 +57,8 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: pnpm/action-setup@v4
+      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
+      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
 
       - uses: actions/setup-node@v4
         with:
