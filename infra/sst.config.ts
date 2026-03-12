@@ -3,15 +3,15 @@
 export default $config({
   app(input) {
     const stage = input?.stage;
-    if (stage !== 'staging' && stage !== 'production') {
+    if (stage !== 'staging' && stage !== 'production' && stage !== 'ci') {
       throw new Error(
-        `The infra project only supports "staging" and "production" stages, got "${stage}".`,
+        `The infra project only supports "staging", "production", and "ci" stages, got "${stage}".`,
       );
     }
 
     const awsProvider: Record<string, unknown> = { region: 'us-east-2' };
 
-    if (stage === 'staging') {
+    if (stage === 'staging' || stage === 'ci') {
       awsProvider.allowedAccountIds = ['654654381893'];
     } else if (stage === 'production') {
       throw new Error(
@@ -31,10 +31,20 @@ export default $config({
   },
   async run() {
     // OIDC Identity Provider for GitHub Actions
-    const github = new aws.iam.OpenIdConnectProvider('GithubOidcProvider', {
-      url: 'https://token.actions.githubusercontent.com',
-      clientIdLists: ['sts.amazonaws.com'],
-    });
+    // The ci stage reuses the provider already created by the staging stage
+    let githubArn: $util.Output<string>;
+    if ($app.stage === 'ci') {
+      const existing = await aws.iam.getOpenIdConnectProvider({
+        url: 'https://token.actions.githubusercontent.com',
+      });
+      githubArn = $util.output(existing.arn);
+    } else {
+      const github = new aws.iam.OpenIdConnectProvider('GithubOidcProvider', {
+        url: 'https://token.actions.githubusercontent.com',
+        clientIdLists: ['sts.amazonaws.com'],
+      });
+      githubArn = github.arn;
+    }
 
     // IAM Role for GitHub Actions
     const roleName = `filone-infra-${$app.stage}-github`;
@@ -45,7 +55,7 @@ export default $config({
         Statement: [
           {
             Effect: 'Allow',
-            Principal: { Federated: github.arn },
+            Principal: { Federated: githubArn },
             Action: 'sts:AssumeRoleWithWebIdentity',
             Condition: {
               StringLike: {

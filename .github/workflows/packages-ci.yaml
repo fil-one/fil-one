@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  check-packages:
+  check:
     runs-on: ubuntu-latest
 
     steps:
@@ -41,11 +41,117 @@ jobs:
       - name: Test
         run: pnpm test
 
+  deploy-preview:
+    if: github.event_name == 'pull_request'
+    needs: [check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: preview-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      STAGE: pr-${{ github.event.pull_request.number }}
+      AWS_REGION: us-east-2
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-ci-github
+          aws-region: us-east-2
+
+      - name: Set SST secrets
+        run: |
+          npx sst secret set Auth0ClientId "$AUTH0_CLIENT_ID" --stage "$STAGE"
+          npx sst secret set Auth0ClientSecret "$AUTH0_CLIENT_SECRET" --stage "$STAGE"
+          npx sst secret set Auth0MgmtClientId "$AUTH0_MGMT_CLIENT_ID" --stage "$STAGE"
+          npx sst secret set Auth0MgmtClientSecret "$AUTH0_MGMT_CLIENT_SECRET" --stage "$STAGE"
+          npx sst secret set StripeSecretKey "$STRIPE_SECRET_KEY" --stage "$STAGE"
+          npx sst secret set StripePriceId "$STRIPE_PRICE_ID" --stage "$STAGE"
+          npx sst secret set AuroraBackofficeToken "$AURORA_BACKOFFICE_TOKEN" --stage "$STAGE"
+        env:
+          AUTH0_CLIENT_ID: ${{ secrets.CI_AUTH0_CLIENT_ID }}
+          AUTH0_CLIENT_SECRET: ${{ secrets.CI_AUTH0_CLIENT_SECRET }}
+          AUTH0_MGMT_CLIENT_ID: ${{ secrets.CI_AUTH0_MGMT_CLIENT_ID }}
+          AUTH0_MGMT_CLIENT_SECRET: ${{ secrets.CI_AUTH0_MGMT_CLIENT_SECRET }}
+          STRIPE_SECRET_KEY: ${{ secrets.CI_STRIPE_SECRET_KEY }}
+          STRIPE_PRICE_ID: ${{ secrets.CI_STRIPE_PRICE_ID }}
+          AURORA_BACKOFFICE_TOKEN: ${{ secrets.CI_AURORA_BACKOFFICE_TOKEN }}
+
+      - name: Build
+        run: pnpm build
+
+      - name: Deploy SST stage
+        id: deploy
+        run: |
+          OUTPUT=$(npx sst deploy --stage "$STAGE" 2>&1)
+          echo "$OUTPUT"
+          URL=$(echo "$OUTPUT" | grep -oP 'url:\s*\K\S+' || true)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+  e2e-tests:
+    if: github.event_name == 'pull_request'
+    needs: [deploy-preview]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: preview-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Browsers
+        run: pnpm exec playwright install --with-deps
+
+      - name: Run Playwright tests
+        run: pnpm test:e2e
+        env:
+          BASE_URL: ${{ needs.deploy-preview.outputs.url }}
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
   deploy-staging:
     if: github.ref == 'refs/heads/main'
-    needs: [check-packages]
+    needs: [check]
     runs-on: ubuntu-latest
-    concurrency: deploy-staging
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
     environment: staging
     permissions:
       id-token: write
