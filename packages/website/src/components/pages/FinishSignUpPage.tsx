@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Input } from '@hyperspace/ui/Input';
 import { Button } from '@hyperspace/ui/Button';
 import { confirmOrg, logout } from '../../lib/api.js';
-import type { MeResponse } from '@hyperspace/shared';
+import type { MeResponse } from '@filone/shared';
 
 type FinishSignUpPageProps = {
   me: MeResponse;
@@ -52,7 +52,7 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-sm font-bold text-white">
               F
             </span>
-            <span className="text-sm font-semibold text-zinc-900">Fil Hyperspace</span>
+            <span className="text-sm font-semibold text-zinc-900">Fil.one</span>
           </div>
           <button
             type="button"
@@ -125,7 +125,7 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
         </div>
 
         <h2 className="mb-4 max-w-sm text-center text-3xl font-semibold text-zinc-950">
-          Welcome to Fil Hyperspace
+          Welcome to Fil.one
         </h2>
 
         <p className="mb-10 max-w-sm text-center text-base text-zinc-600">

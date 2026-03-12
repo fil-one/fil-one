@@ -3,7 +3,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { CreateBucketRequest, CreateBucketResponse, ErrorResponse } from '@hyperspace/shared';
+import type { CreateBucketRequest, CreateBucketResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { createAuroraBucket } from '../lib/aurora-portal.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';

@@ -27,7 +27,7 @@ import type {
   ListObjectsResponse,
   UploadObjectRequest,
   UploadObjectResponse,
-} from '@hyperspace/shared';
+} from '@filone/shared';
 import { apiRequest } from '../../lib/api.js';
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { ApiErrorCode } from '@hyperspace/shared';
+import { ApiErrorCode } from '@filone/shared';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
 import { expectErrorResponse } from '../test/assert-helpers.js';
 
@@ -24,7 +24,7 @@ vi.mock('../lib/user-context.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { subscriptionGuardMiddleware, AccessLevel } from './subscription-guard.js';
-import { SubscriptionStatus } from '@hyperspace/shared';
+import { SubscriptionStatus } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -13,8 +13,8 @@ import {
 import { Link, useMatchRoute } from '@tanstack/react-router';
 import { ProgressBar } from '@hyperspace/ui/ProgressBar';
 import { Button } from '@hyperspace/ui/Button';
-import { SubscriptionStatus } from '@hyperspace/shared';
-import type { BillingInfo } from '@hyperspace/shared';
+import { SubscriptionStatus } from '@filone/shared';
+import type { BillingInfo } from '@filone/shared';
 import { getBilling } from '../lib/api.js';
 
 type SidebarNavProps = {
@@ -85,7 +85,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
             F
           </span>
           {!collapsed && (
-            <span className="truncate text-sm font-semibold text-zinc-900">Fil Hyperspace</span>
+            <span className="truncate text-sm font-semibold text-zinc-900">Fil.one</span>
           )}
         </div>
 
@@ -148,7 +148,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           <p className="text-xs text-zinc-500">
             {trialDays !== null ? `${trialDays} days left in trial` : 'Trial active'}
           </p>
-          <p className="mt-0.5 text-xs text-zinc-400">Upgrade to continue using Hyperspace.</p>
+          <p className="mt-0.5 text-xs text-zinc-400">Upgrade to continue using Fil.one.</p>
           <div className="mt-3">
             <Button variant="filled" href="/billing" className="w-full justify-center text-xs">
               Upgrade

@@ -9,8 +9,8 @@ import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynam
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
-import { ApiErrorCode, OrgRole } from '@hyperspace/shared';
-import type { ErrorResponse } from '@hyperspace/shared';
+import { ApiErrorCode, OrgRole } from '@filone/shared';
+import type { ErrorResponse } from '@filone/shared';
 import {
   COOKIE_NAMES,
   TOKEN_MAX_AGE,
@@ -61,7 +61,7 @@ function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
 // ---------------------------------------------------------------------------
 
 import { parseCookies } from '../lib/cookies.js';
-import { CSRF_COOKIE_NAME } from '@hyperspace/shared';
+import { CSRF_COOKIE_NAME } from '@filone/shared';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
@@ -175,7 +175,7 @@ async function resolveUserAndOrg(
               sk: { S: 'PROFILE' },
               name: { S: orgName },
               orgConfirmed: { BOOL: false },
-              setupStatus: { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED },
+              setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: userId },
               createdAt: { S: now },
             },
@@ -218,7 +218,7 @@ export function authMiddleware() {
     const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
 
     // TODO [Option D]: AUTH0_DOMAIN env var will change to custom domain
-    // (e.g. auth.filhyperspace.com). JWKS, issuer, and token endpoints use the same domain.
+    // (e.g. auth.fil.one). JWKS, issuer, and token endpoints use the same domain.
     const domain = process.env.AUTH0_DOMAIN!;
     const audience = process.env.AUTH0_AUDIENCE!;
     const issuer = `https://${domain}/`;

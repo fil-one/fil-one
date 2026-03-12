@@ -12,8 +12,8 @@ import {
 import { ProgressBar } from '@hyperspace/ui/ProgressBar';
 import { useToast } from '@hyperspace/ui/Toast';
 
-import { SubscriptionStatus } from '@hyperspace/shared';
-import type { BillingInfo, CreateSetupIntentResponse } from '@hyperspace/shared';
+import { SubscriptionStatus } from '@filone/shared';
+import type { BillingInfo, CreateSetupIntentResponse } from '@filone/shared';
 
 import { apiRequest } from '../../lib/api.js';
 import { ChoosePlanDialog } from '../billing/ChoosePlanDialog.js';
@@ -500,7 +500,7 @@ export function BillingPage() {
               <div className="mt-4 text-center">
                 <span className="text-xs text-[#99a0ae]">Questions about pricing? </span>
                 <a
-                  href="mailto:sales@filhyperspace.com"
+                  href="mailto:sales@fil.one"
                   className="text-xs font-medium text-[#0066ff] hover:underline"
                 >
                   Contact sales →

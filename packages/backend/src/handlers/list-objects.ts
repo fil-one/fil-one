@@ -3,7 +3,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { ErrorResponse, ListObjectsResponse, S3Object } from '@hyperspace/shared';
+import type { ErrorResponse, ListObjectsResponse, S3Object } from '@filone/shared';
 import { Resource } from 'sst';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';

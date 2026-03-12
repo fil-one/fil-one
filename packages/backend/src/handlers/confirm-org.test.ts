@@ -105,7 +105,7 @@ describe('POST /api/org/confirm handler', () => {
           sk: { S: 'PROFILE' },
           name: { S: 'example.com' },
           orgConfirmed: { BOOL: false },
-          setupStatus: { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED },
+          setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
         },
       });
 
@@ -115,7 +115,7 @@ describe('POST /api/org/confirm handler', () => {
         sk: { S: 'PROFILE' },
         name: { S: 'Acme Corp' },
         orgConfirmed: { BOOL: true },
-        setupStatus: { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED },
+        setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
       },
     });
     sqsMock.on(SendMessageCommand).resolves({});

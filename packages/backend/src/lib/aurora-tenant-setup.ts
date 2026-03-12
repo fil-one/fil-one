@@ -44,7 +44,7 @@ export async function processTenantSetup(message: AuroraTenantSetupMessage): Pro
       return;
     }
 
-    case OrgSetupStatus.HYPERSPACE_ORG_CREATED:
+    case OrgSetupStatus.FILONE_ORG_CREATED:
     case undefined: {
       const auroraTenantId = await createTenant(orgId, orgName, key);
       await runSetup(orgId, auroraTenantId, key);
@@ -81,7 +81,7 @@ async function createTenant(
       ExpressionAttributeValues: {
         ':tid': { S: auroraTenantId },
         ':status': { S: OrgSetupStatus.AURORA_TENANT_CREATED },
-        ':expected': { S: OrgSetupStatus.HYPERSPACE_ORG_CREATED },
+        ':expected': { S: OrgSetupStatus.FILONE_ORG_CREATED },
         ':now': { S: new Date().toISOString() },
       },
     }),
@@ -123,12 +123,12 @@ async function createAndStoreApiKey(
   auroraTenantId: string,
   key: Record<string, { S: string }>,
 ): Promise<void> {
-  const stage = process.env.HYPERSPACE_STAGE!;
+  const stage = process.env.FILONE_STAGE!;
   const { token } = await createAuroraTenantApiKey({ tenantId: auroraTenantId, orgId });
 
   await ssm.send(
     new PutParameterCommand({
-      Name: `/hyperspace/${stage}/aurora-portal/tenant-api-key/${auroraTenantId}`,
+      Name: `/filone/${stage}/aurora-portal/tenant-api-key/${auroraTenantId}`,
       Value: token,
       Type: 'SecureString',
       Overwrite: true,

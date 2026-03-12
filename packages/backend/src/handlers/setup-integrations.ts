@@ -45,7 +45,7 @@ const WEBHOOK_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
 const ssm = new SSMClient({});
 
 function ssmParamName(stage: string): string {
-  return `/hyperspace/${stage}/stripe-webhook-secret`;
+  return `/filone/${stage}/stripe-webhook-secret`;
 }
 
 // ── SSM helpers ───────────────────────────────────────────────────────
@@ -264,7 +264,7 @@ export async function handler(event: SetupEvent): Promise<void> {
   const siteUrl = SiteUrl.replace(/\/$/, '');
   const physicalResourceId =
     ('PhysicalResourceId' in event ? event.PhysicalResourceId : undefined) ??
-    `hyperspace-setup-${Stage}`;
+    `filone-setup-${Stage}`;
 
   try {
     if (event.RequestType === 'Delete') {

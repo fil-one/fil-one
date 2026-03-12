@@ -37,7 +37,7 @@ Regardless of hosting, the session cookie should be:
 - `HttpOnly` — not accessible via JS, prevents XSS token theft
 - `Secure` — only sent over HTTPS
 - `SameSite=Strict` (or `Lax` if cross-origin redirect is needed during OAuth callback)
-- Scoped to the appropriate domain (e.g., `.hyperspace.xyz` if frontend and API are on subdomains)
+- Scoped to the appropriate domain (e.g., `.fil.one` if frontend and API are on subdomains)
 
 ### Auth Flow (OAuth2 Authorization Code with PKCE)
 

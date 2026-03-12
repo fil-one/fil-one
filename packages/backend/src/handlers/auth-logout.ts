@@ -1,7 +1,7 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CSRF_COOKIE_NAME } from '@hyperspace/shared';
+import { CSRF_COOKIE_NAME } from '@filone/shared';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { COOKIE_NAMES, makeClearCookieHeader } from '../lib/response-builder.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';

@@ -9,13 +9,13 @@ import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 const mockPostBucket = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-portal-client');
 
-vi.mock('@hyperspace/aurora-portal-client', () => ({
+vi.mock('@filone/aurora-portal-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
   postTenantsByTenantIdBucket: (options: Record<string, unknown>) => mockPostBucket(options),
 }));
 
 process.env.AURORA_PORTAL_URL = 'https://api.portal.test.example.com/api/v1';
-process.env.HYPERSPACE_STAGE = 'test';
+process.env.FILONE_STAGE = 'test';
 
 const ssmMock = mockClient(SSMClient);
 
@@ -50,7 +50,7 @@ describe('createAuroraBucket', () => {
     const ssmCalls = ssmMock.commandCalls(GetParameterCommand);
     expect(ssmCalls).toHaveLength(1);
     expect(ssmCalls[0].args[0].input).toStrictEqual({
-      Name: '/hyperspace/test/aurora-portal/tenant-api-key/tenant-1',
+      Name: '/filone/test/aurora-portal/tenant-api-key/tenant-1',
       WithDecryption: true,
     });
   });
@@ -128,7 +128,7 @@ describe('getAuroraPortalApiKey', () => {
     const ssmCalls = ssmMock.commandCalls(GetParameterCommand);
     expect(ssmCalls).toHaveLength(1);
     expect(ssmCalls[0].args[0].input).toStrictEqual({
-      Name: '/hyperspace/test/aurora-portal/tenant-api-key/tenant-1',
+      Name: '/filone/test/aurora-portal/tenant-api-key/tenant-1',
       WithDecryption: true,
     });
   });

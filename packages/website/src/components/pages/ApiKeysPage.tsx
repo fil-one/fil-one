@@ -9,7 +9,7 @@ import { Modal, ModalBody, ModalFooter, ModalHeader } from '@hyperspace/ui/Modal
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '@hyperspace/ui/Tabs';
 import { useToast } from '@hyperspace/ui/Toast';
 
-import type { AccessKey } from '@hyperspace/shared';
+import type { AccessKey } from '@filone/shared';
 
 import { S3_ENDPOINT } from '../../env';
 
@@ -197,7 +197,7 @@ function ConnectionDetailsTab() {
         </p>
         <CodeBlock
           language="INI"
-          code={`[profile hyperspace]\nendpoint_url = ${S3_ENDPOINT}\nregion = us-east-1`}
+          code={`[profile filone]\nendpoint_url = ${S3_ENDPOINT}\nregion = us-east-1`}
         />
       </div>
 

@@ -118,7 +118,7 @@ describe('GET /api/me handler', () => {
     });
   });
 
-  it('returns orgSetupComplete: false when setupStatus is HYPERSPACE_ORG_CREATED', async () => {
+  it('returns orgSetupComplete: false when setupStatus is FILONE_ORG_CREATED', async () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
@@ -130,7 +130,7 @@ describe('GET /api/me handler', () => {
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
           orgConfirmed: { BOOL: true },
-          setupStatus: { S: 'HYPERSPACE_ORG_CREATED' },
+          setupStatus: { S: 'FILONE_ORG_CREATED' },
         },
       });
 
