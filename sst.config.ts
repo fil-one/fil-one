@@ -17,10 +17,10 @@ export default $config({
     if (isStaging) {
       awsProvider.allowedAccountIds = ['654654381893'];
     }
-    // TODO: Set production account ID once provisioned
-    // if (isProduction) {
-    //   awsProvider.allowedAccountIds = ["<PRODUCTION_ACCOUNT_ID>"];
-    // }
+
+    if (isProduction) {
+      awsProvider.allowedAccountIds = ['811430801166'];
+    }
 
     return {
       name: 'filone',
@@ -87,12 +87,14 @@ export default $config({
     const stage = $app.stage;
     const isProduction = stage === 'production';
 
-    let domainName: string | undefined;
+    let domainName = 'staging.fil.one';
     let certArn: string | undefined;
 
-    if (stage === 'production' || stage === 'staging') {
-      domainName = stage === 'production' ? 'console.fil.one' : 'staging.fil.one';
-
+    //TODO Bring this back after we have a successful prod deployment.
+    // https://linear.app/filecoin-foundation/issue/FIL-12/console-prod-deployed-at-appfilone
+    // if (stage === 'production' || stage === 'staging') {
+    // domainName = stage === 'production' ? 'console.fil.one' : 'staging.fil.one';
+    if (stage == 'staging') {
       // ACM cert must be in us-east-1 for CloudFront
       const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
       const cert = await aws.acm.getCertificate(
@@ -230,7 +232,7 @@ export default $config({
     const sharedEnv: Record<string, $util.Input<string>> = {
       FILONE_STAGE: $app.stage,
       AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
-      AUTH0_AUDIENCE: 'console.fil.one',
+      AUTH0_AUDIENCE: 'https://staging.fil.one',
     };
 
     if (isProduction) {
@@ -254,8 +256,15 @@ export default $config({
       extraEnv?: Record<string, $util.Input<string>>,
       permissions?: sst.aws.FunctionPermissionArgs[],
     ) {
+      // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
+      const fnName = handler
+        .split('-')
+        .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+        .join('');
+
       api.route(`${method} ${routePath}`, {
         handler: `packages/backend/src/handlers/${handler}.handler`,
+        name: $interpolate`filone-${$app.stage}-${fnName}`,
         link: allResources,
         environment: {
           ...sharedEnv,
@@ -316,7 +325,22 @@ export default $config({
     addRoute('POST', '/api/billing/portal', 'create-portal-session', {
       WEBSITE_URL: siteUrl,
     });
-    addRoute('POST', '/api/stripe/webhook', 'stripe-webhook');
+    addRoute(
+      'POST',
+      '/api/stripe/webhook',
+      'stripe-webhook',
+      {
+        STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
+      },
+      [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [
+            $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/stripe-webhook-secret`,
+          ],
+        },
+      ],
+    );
 
     // ── Tenant setup consumer ──────────────────────────────────────
     tenantSetupQueue.subscribe(
@@ -357,8 +381,7 @@ export default $config({
     });
 
     return {
-      url: siteUrl,
-      api: api.url,
+      baseUrl: siteUrl,
     };
   },
 });
