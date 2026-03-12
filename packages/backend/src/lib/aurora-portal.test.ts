@@ -7,11 +7,18 @@ import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 // ---------------------------------------------------------------------------
 
 const mockPostBucket = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockPutAccessKeys = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockGetAccessKeys = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockGetAccessKeyById = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-portal-client');
 
 vi.mock('@filone/aurora-portal-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
   postTenantsByTenantIdBucket: (options: Record<string, unknown>) => mockPostBucket(options),
+  putTenantsByTenantIdAccessKeys: (options: Record<string, unknown>) => mockPutAccessKeys(options),
+  getTenantsByTenantIdAccessKeys: (options: Record<string, unknown>) => mockGetAccessKeys(options),
+  getTenantsByTenantIdAccessKeysByAccessKeyId: (options: Record<string, unknown>) =>
+    mockGetAccessKeyById(options),
 }));
 
 process.env.AURORA_PORTAL_URL = 'https://api.portal.test.example.com/api/v1';
@@ -19,7 +26,13 @@ process.env.FILONE_STAGE = 'test';
 
 const ssmMock = mockClient(SSMClient);
 
-import { createAuroraBucket, getAuroraPortalApiKey } from './aurora-portal.js';
+import {
+  createAuroraAccessKey,
+  createAuroraBucket,
+  DuplicateKeyNameError,
+  findAuroraAccessKeyByName,
+  getAuroraPortalApiKey,
+} from './aurora-portal.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -157,5 +170,244 @@ describe('getAuroraPortalApiKey', () => {
     await expect(getAuroraPortalApiKey('test', 'tenant-1')).rejects.toThrow(
       'Aurora API key not found in SSM for tenant tenant-1',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createAuroraAccessKey
+// ---------------------------------------------------------------------------
+
+const EXPECTED_ACCESS = [
+  'Default',
+  'Read',
+  'Write',
+  'Delete',
+  'List',
+  'GetBucketVersioning',
+  'GetBucketObjectLockConfiguration',
+  'ListBucketVersions',
+  'GetObjectVersion',
+  'GetObjectRetention',
+  'GetObjectLegalHold',
+  'PutObjectRetention',
+  'PutObjectLegalHold',
+  'DeleteObjectVersion',
+];
+
+const VALID_ACCESS_KEY_RESPONSE = {
+  data: {
+    accessKey: {
+      id: 'ak-id-1',
+      accessKeyId: 'AKIA-FAKE',
+      accessKeySecret: 'secret-123',
+      createdAt: '2026-03-12T00:00:00Z',
+      name: 'my-key',
+      modifiedAt: '2026-03-12T00:00:00Z',
+      tenantId: 'tenant-1',
+    },
+  },
+  error: undefined,
+};
+
+describe('createAuroraAccessKey', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ssmMock.reset();
+  });
+
+  it('calls SSM with correct parameter path using FILONE_STAGE', async () => {
+    setupSsmMock();
+    mockPutAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
+
+    await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
+
+    const ssmCalls = ssmMock.commandCalls(GetParameterCommand);
+    expect(ssmCalls).toHaveLength(1);
+    expect(ssmCalls[0].args[0].input).toStrictEqual({
+      Name: '/filone/test/aurora-portal/tenant-api-key/tenant-1',
+      WithDecryption: true,
+    });
+  });
+
+  it('calls putTenantsByTenantIdAccessKeys with correct params', async () => {
+    setupSsmMock();
+    mockPutAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
+
+    await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
+
+    expect(mockPutAccessKeys).toHaveBeenCalledWith({
+      client: 'mock-portal-client',
+      path: { tenantId: 'tenant-1' },
+      body: { name: 'my-key', access: EXPECTED_ACCESS },
+      throwOnError: false,
+    });
+  });
+
+  it('returns id, accessKeyId, accessKeySecret, createdAt on success', async () => {
+    setupSsmMock();
+    mockPutAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
+
+    const result = await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
+
+    expect(result).toStrictEqual({
+      id: 'ak-id-1',
+      accessKeyId: 'AKIA-FAKE',
+      accessKeySecret: 'secret-123',
+      createdAt: '2026-03-12T00:00:00Z',
+    });
+  });
+
+  it('throws DuplicateKeyNameError on 409 response', async () => {
+    setupSsmMock();
+    mockPutAccessKeys.mockResolvedValue({
+      data: undefined,
+      error: { message: 'Key with this name already exists' },
+      response: { status: 409 },
+    });
+
+    try {
+      await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
+      expect.unreachable('Expected DuplicateKeyNameError to be thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DuplicateKeyNameError);
+      expect((err as DuplicateKeyNameError).message).toBe(
+        'An access key with this name already exists',
+      );
+    }
+  });
+
+  it('throws on non-409 API error', async () => {
+    setupSsmMock();
+    mockPutAccessKeys.mockResolvedValue({
+      data: undefined,
+      error: { message: 'Internal server error' },
+      response: { status: 500 },
+    });
+
+    await expect(
+      createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' }),
+    ).rejects.toThrow('Failed to create Aurora access key "my-key" for tenant tenant-1');
+  });
+
+  it('throws when accessKey is missing from response', async () => {
+    setupSsmMock();
+    mockPutAccessKeys.mockResolvedValue({
+      data: {},
+      error: undefined,
+    });
+
+    await expect(
+      createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' }),
+    ).rejects.toThrow('Aurora API returned invalid access key for tenant tenant-1');
+  });
+
+  const requiredFields = ['id', 'accessKeyId', 'accessKeySecret', 'createdAt'] as const;
+  for (const field of requiredFields) {
+    it(`throws when "${field}" is missing from response`, async () => {
+      setupSsmMock();
+      mockPutAccessKeys.mockResolvedValue({
+        data: {
+          accessKey: {
+            ...VALID_ACCESS_KEY_RESPONSE.data.accessKey,
+            [field]: '',
+          },
+        },
+        error: undefined,
+      });
+
+      await expect(
+        createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' }),
+      ).rejects.toThrow(
+        `Aurora Portal API returned empty access key "${field}" for tenant tenant-1`,
+      );
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// findAuroraAccessKeyByName
+// ---------------------------------------------------------------------------
+
+describe('findAuroraAccessKeyByName', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ssmMock.reset();
+  });
+
+  it('returns key details when key is found by name', async () => {
+    setupSsmMock();
+    mockGetAccessKeys.mockResolvedValue({
+      data: {
+        accessKeys: [
+          { id: 'key-1', name: 'other-key' },
+          { id: 'key-2', name: 'my-key' },
+        ],
+      },
+      error: undefined,
+    });
+    mockGetAccessKeyById.mockResolvedValue({
+      data: {
+        accessKey: {
+          id: 'key-2',
+          name: 'my-key',
+          accessKeyId: 'S3KEY123',
+          createdAt: '2026-03-12T00:00:00Z',
+        },
+      },
+      error: undefined,
+    });
+
+    const result = await findAuroraAccessKeyByName({ tenantId: 'tenant-1', keyName: 'my-key' });
+
+    expect(result).toStrictEqual({
+      id: 'key-2',
+      accessKeyId: 'S3KEY123',
+      createdAt: '2026-03-12T00:00:00Z',
+    });
+  });
+
+  it('returns undefined when key is not found in list', async () => {
+    setupSsmMock();
+    mockGetAccessKeys.mockResolvedValue({
+      data: {
+        accessKeys: [{ id: 'key-1', name: 'other-key' }],
+      },
+      error: undefined,
+    });
+
+    const result = await findAuroraAccessKeyByName({ tenantId: 'tenant-1', keyName: 'my-key' });
+
+    expect(result).toBeUndefined();
+    expect(mockGetAccessKeyById).not.toHaveBeenCalled();
+  });
+
+  it('throws when list API call fails', async () => {
+    setupSsmMock();
+    mockGetAccessKeys.mockResolvedValue({
+      data: undefined,
+      error: { message: 'Server error' },
+    });
+
+    await expect(
+      findAuroraAccessKeyByName({ tenantId: 'tenant-1', keyName: 'my-key' }),
+    ).rejects.toThrow('Failed to list Aurora access keys for tenant tenant-1');
+  });
+
+  it('throws when get-by-id API call fails', async () => {
+    setupSsmMock();
+    mockGetAccessKeys.mockResolvedValue({
+      data: {
+        accessKeys: [{ id: 'key-2', name: 'my-key' }],
+      },
+      error: undefined,
+    });
+    mockGetAccessKeyById.mockResolvedValue({
+      data: undefined,
+      error: { message: 'Not found' },
+    });
+
+    await expect(
+      findAuroraAccessKeyByName({ tenantId: 'tenant-1', keyName: 'my-key' }),
+    ).rejects.toThrow('Failed to get Aurora access key "key-2" for tenant tenant-1');
   });
 });

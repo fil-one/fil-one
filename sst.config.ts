@@ -249,6 +249,8 @@ export default $config({
       AURORA_REGION_ID: 'ff',
     };
 
+    const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
+
     function addRoute(
       method: string,
       routePath: string,
@@ -289,13 +291,26 @@ export default $config({
       [
         {
           actions: ['ssm:GetParameter'],
-          resources: [
-            $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`,
-          ],
+          resources: [auroraApiKeySsmArn],
         },
       ],
     );
     addRoute('DELETE', '/api/buckets/{name}', 'delete-bucket');
+    addRoute('GET', '/api/access-keys', 'list-access-keys');
+    addRoute(
+      'POST',
+      '/api/access-keys',
+      'create-access-key',
+      {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+      },
+      [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [auroraApiKeySsmArn],
+        },
+      ],
+    );
     addRoute('GET', '/api/buckets/{name}/objects', 'list-objects');
     addRoute('POST', '/api/buckets/{name}/objects/upload', 'upload-object');
     addRoute('GET', '/api/buckets/{name}/objects/download', 'download-object');
@@ -354,9 +369,7 @@ export default $config({
         permissions: [
           {
             actions: ['ssm:PutParameter'],
-            resources: [
-              $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`,
-            ],
+            resources: [auroraApiKeySsmArn],
           },
         ],
         runtime: 'nodejs24.x',
