@@ -75,3 +75,23 @@ jobs:
       - run: pnpm build
 
       - run: npx sst deploy --stage staging
+
+      - if: failure()
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "filone-alerts",
+              "text": "Deployment of `${{ github.event.repository.name }}` to `staging` failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":warning: *<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Deployment of `${{ github.event.repository.name }}` to `staging` failed>*"
+                  }
+                }
+              ]
+            }
