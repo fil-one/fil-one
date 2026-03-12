@@ -124,7 +124,7 @@ describe('usage-reporting-worker', () => {
     expect(item.sk).toEqual({ S: 'USAGE_REPORT#2024-01-15' });
     expect(item.orgId).toEqual({ S: 'org-1' });
     expect(item.sampleCount).toEqual({ N: '2' });
-    expect(item.averageBytesUsed).toEqual({ N: '1000' });
+    expect(item.averageStorageBytesUsed).toEqual({ N: '1000' });
     expect(item.ttl).toBeDefined();
   });
 });

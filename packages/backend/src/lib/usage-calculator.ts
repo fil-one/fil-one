@@ -1,9 +1,7 @@
-import { TIB_BYTES } from '@filone/shared';
 import type { ModelStorageMetricsSample } from '@filone/aurora-backoffice-client';
 
 export interface UsageCalculationResult {
-  averageBytesUsed: number;
-  averageTib: number;
+  averageStorageBytesUsed: number;
   sampleCount: number;
 }
 
@@ -11,12 +9,11 @@ export function calculateAverageUsage(
   samples: ModelStorageMetricsSample[],
 ): UsageCalculationResult {
   if (samples.length === 0) {
-    return { averageBytesUsed: 0, averageTib: 0, sampleCount: 0 };
+    return { averageStorageBytesUsed: 0, sampleCount: 0 };
   }
 
-  const totalBytes = samples.reduce((sum, s) => sum + (s.bytesUsed ?? 0), 0);
-  const averageBytesUsed = totalBytes / samples.length;
-  const averageTib = averageBytesUsed / TIB_BYTES;
+  const totalBytes = samples.reduce((sum, s) => sum + BigInt(s.bytesUsed ?? 0), 0n);
+  const averageStorageBytesUsed = Number(totalBytes / BigInt(samples.length));
 
-  return { averageBytesUsed, averageTib, sampleCount: samples.length };
+  return { averageStorageBytesUsed, sampleCount: samples.length };
 }

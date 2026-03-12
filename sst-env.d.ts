@@ -46,10 +46,6 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "StripeMeterEventName": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
     "StripePriceId": {
       "type": "sst.sst.Secret"
       "value": string

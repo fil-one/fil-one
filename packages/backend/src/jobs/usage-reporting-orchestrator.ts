@@ -55,10 +55,10 @@ export async function handler(): Promise<void> {
       }
 
       records.push({
-        orgId: record.orgId as string,
-        subscriptionId: record.subscriptionId as string,
-        stripeCustomerId: record.stripeCustomerId as string,
-        currentPeriodStart: record.currentPeriodStart as string,
+        orgId: record.orgId,
+        subscriptionId: record.subscriptionId,
+        stripeCustomerId: record.stripeCustomerId,
+        currentPeriodStart: record.currentPeriodStart,
       });
     }
 
@@ -70,16 +70,36 @@ export async function handler(): Promise<void> {
   if (records.length === 0) return;
 
   // Step 2: Build payloads, deduplicate by orgId
-  const orgSeen = new Set<string>();
+  const orgSeen = new Map<string, { subscriptionId: string; stripeCustomerId: string }>();
   const payloads: UsageReportingWorkerPayload[] = [];
   let skippedDuplicate = 0;
 
   for (const record of records) {
-    if (orgSeen.has(record.orgId)) {
+    const existing = orgSeen.get(record.orgId);
+    if (existing) {
       skippedDuplicate++;
+      if (
+        existing.subscriptionId !== record.subscriptionId ||
+        existing.stripeCustomerId !== record.stripeCustomerId
+      ) {
+        console.warn('[usage-orchestrator] Conflicting duplicate for orgId', {
+          orgId: record.orgId,
+          first: {
+            subscriptionId: existing.subscriptionId,
+            stripeCustomerId: existing.stripeCustomerId,
+          },
+          duplicate: {
+            subscriptionId: record.subscriptionId,
+            stripeCustomerId: record.stripeCustomerId,
+          },
+        });
+      }
       continue;
     }
-    orgSeen.add(record.orgId);
+    orgSeen.set(record.orgId, {
+      subscriptionId: record.subscriptionId,
+      stripeCustomerId: record.stripeCustomerId,
+    });
 
     payloads.push({
       orgId: record.orgId,

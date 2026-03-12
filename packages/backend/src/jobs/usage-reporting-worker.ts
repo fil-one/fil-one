@@ -1,6 +1,7 @@
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
+import { TIB_BYTES } from '@filone/shared';
 import { getStripeClient } from '../lib/stripe-client.js';
 import { getStorageSamples } from '../lib/aurora-backoffice.js';
 import { calculateAverageUsage } from '../lib/usage-calculator.js';
@@ -28,26 +29,27 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     window: '1h',
   });
   const usage = calculateAverageUsage(samples);
+  const averageStorageTibUsed = usage.averageStorageBytesUsed / TIB_BYTES;
 
   console.log('[usage-worker] Usage calculated', {
     orgId,
     sampleCount: usage.sampleCount,
-    averageTib: usage.averageTib,
+    averageStorageTibUsed,
   });
 
-  if (usage.averageTib > 0) {
+  if (averageStorageTibUsed > 0) {
     const stripe = getStripeClient();
     await stripe.billing.meterEvents.create({
       event_name: process.env.STRIPE_METER_EVENT_NAME ?? '',
       payload: {
         stripe_customer_id: stripeCustomerId,
-        value: String(usage.averageTib),
+        value: String(averageStorageTibUsed),
       },
       timestamp: Math.floor(Date.now() / 1000),
     });
     console.log('[usage-worker] Stripe meter event created', {
       stripeCustomerId,
-      averageTib: usage.averageTib,
+      averageStorageTibUsed,
     });
   }
 
@@ -64,10 +66,10 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
         stripeCustomerId,
         currentPeriodStart,
         reportDate,
-        averageBytesUsed: usage.averageBytesUsed,
-        averageTib: usage.averageTib,
+        averageStorageBytesUsed: usage.averageStorageBytesUsed,
+        averageStorageTibUsed,
         sampleCount: usage.sampleCount,
-        reportedToStripe: usage.averageTib > 0,
+        reportedToStripe: averageStorageTibUsed > 0,
         createdAt: new Date().toISOString(),
         ttl,
       }),

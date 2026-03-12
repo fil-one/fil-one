@@ -39,7 +39,6 @@ export default $config({
     const auth0MgmtClientSecret = new sst.Secret('Auth0MgmtClientSecret');
     const stripeSecretKey = new sst.Secret('StripeSecretKey');
     const stripePriceId = new sst.Secret('StripePriceId');
-    const stripeMeterEventName = new sst.Secret('StripeMeterEventName');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const AWS_CACHING_DISABLED_POLICY = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
 
@@ -375,8 +374,8 @@ export default $config({
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = new sst.aws.Function('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
-      link: [billingTable, stripeSecretKey, stripeMeterEventName, auroraBackofficeToken],
-      environment: { ...auroraEnv },
+      link: [billingTable, stripeSecretKey, auroraBackofficeToken],
+      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'tibmonthmeter' },
       runtime: 'nodejs24.x',
       timeout: '60 seconds',
       memory: '256 MB',
