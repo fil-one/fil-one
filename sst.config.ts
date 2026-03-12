@@ -19,7 +19,7 @@ export default $config({
     }
 
     if (isProduction) {
-      awsProvider.allowedAccountIds = ["811430801166"];
+      awsProvider.allowedAccountIds = ['811430801166'];
     }
 
     return {
@@ -87,14 +87,14 @@ export default $config({
     const stage = $app.stage;
     const isProduction = stage === 'production';
 
-    let domainName = "staging.fil.one";
+    let domainName = 'staging.fil.one';
     let certArn: string | undefined;
 
     //TODO Bring this back after we have a successful prod deployment.
     // https://linear.app/filecoin-foundation/issue/FIL-12/console-prod-deployed-at-appfilone
     // if (stage === 'production' || stage === 'staging') {
-      // domainName = stage === 'production' ? 'console.fil.one' : 'staging.fil.one';
-    if(stage == 'staging') {
+    // domainName = stage === 'production' ? 'console.fil.one' : 'staging.fil.one';
+    if (stage == 'staging') {
       // ACM cert must be in us-east-1 for CloudFront
       const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
       const cert = await aws.acm.getCertificate(
@@ -262,21 +262,18 @@ export default $config({
         .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
         .join('');
 
-      api.route(
-        `${method} ${routePath}`,
-        {
-          handler: `packages/backend/src/handlers/${handler}.handler`,
-          name: $interpolate`filone-${$app.stage}-${fnName}`,
-          link: allResources,
-          environment: {
-            ...sharedEnv,
-            ...extraEnv,
-          },
-          permissions,
-          runtime: 'nodejs24.x',
-          timeout: '10 seconds',
+      api.route(`${method} ${routePath}`, {
+        handler: `packages/backend/src/handlers/${handler}.handler`,
+        name: $interpolate`filone-${$app.stage}-${fnName}`,
+        link: allResources,
+        environment: {
+          ...sharedEnv,
+          ...extraEnv,
         },
-      );
+        permissions,
+        runtime: 'nodejs24.x',
+        timeout: '10 seconds',
+      });
     }
 
     // ── Data routes ──────────────────────────────────────────────────
