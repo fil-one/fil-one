@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  check:
+  check-packages:
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +27,7 @@ jobs:
       # type definitions live in .sst/platform/ and are not checked into git.
       # Run `sst install` to generate them so oxlint's type-aware checks pass.
       - name: Generate SST provider types
-        run: pnpx sst install
+        run: npx sst install
 
       - name: Lint
         run: pnpm lint
@@ -120,7 +120,7 @@ jobs:
         id: find_comment
         with:
           issue-number: ${{ github.event.pull_request.number }}
-          body-includes: "🚀 Preview Environment"
+          body-includes: '🚀 Preview Environment'
 
       - name: Create or update comment
         uses: peter-evans/create-or-update-comment@v4
