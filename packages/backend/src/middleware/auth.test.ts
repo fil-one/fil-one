@@ -111,13 +111,14 @@ describe('authMiddleware', () => {
       expectErrorResponse(result, 401, { message: 'Unauthorized' });
     });
 
-    it('resolves existing user without enqueuing when tenant setup is complete', async () => {
+    it('resolves existing user and reads email from verified ID token', async () => {
       const existingUserId = 'existing-user-uuid';
       const existingOrgId = 'existing-org-uuid';
 
-      mockJwtVerify.mockResolvedValue({
-        payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
-      });
+      // First call: access token verify; second call: ID token verify
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
 
       ddbMock
         .on(GetItemCommand, {
@@ -160,11 +161,93 @@ describe('authMiddleware', () => {
       const result = await before(request);
 
       expect(result).toBeUndefined();
+      // ID token verified with client_id as audience
+      expect(mockJwtVerify).toHaveBeenCalledTimes(2);
+      expect(mockJwtVerify).toHaveBeenNthCalledWith(2, 'id-token', 'mock-jwks', {
+        audience: 'test-client-id',
+        issuer: `https://${process.env.AUTH0_DOMAIN}/`,
+      });
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         userId: existingUserId,
         orgId: existingOrgId,
-
         email: MOCK_EMAIL,
+      });
+    });
+
+    it('continues without email when ID token verification fails', async () => {
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      // Access token passes, ID token fails
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockRejectedValueOnce(new Error('id token expired'));
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${MOCK_SUB}` },
+            sk: { S: 'IDENTITY' },
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+            email: { S: 'stored@example.com' },
+          },
+        });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({
+          Item: {
+            orgConfirmed: { BOOL: true },
+            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+          },
+        });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=bad-id-token`],
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      // Falls back to DDB-stored email since ID token verification failed
+      expect(getUserInfoFromEvent(event)).toStrictEqual({
+        userId: existingUserId,
+        orgId: existingOrgId,
+        email: 'stored@example.com',
+      });
+    });
+
+    it('email is undefined when no ID token cookie is present', async () => {
+      mockJwtVerify.mockResolvedValue({
+        payload: { sub: MOCK_SUB, email: 'should-be-ignored@example.com' },
+      });
+
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`],
+        rawPath: '/api/me',
+      });
+      const request = buildMiddyRequest(event);
+
+      await before(request);
+
+      // Only one jwtVerify call (access token), no second call for ID token
+      expect(mockJwtVerify).toHaveBeenCalledTimes(1);
+      expect(getUserInfoFromEvent(event)).toStrictEqual({
+        userId: MOCK_USER_ID,
+        orgId: MOCK_ORG_ID,
+        email: undefined,
       });
     });
 
@@ -273,16 +356,20 @@ describe('authMiddleware', () => {
     });
 
     it('creates new user and org when no UserInfoTable record exists', async () => {
-      mockJwtVerify.mockResolvedValue({
-        payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
-      });
+      // First call: access token verify; second call: ID token verify
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
 
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
 
       const { before } = authMiddleware();
       // Use bypass route so the handler proceeds (org is unconfirmed)
-      const event = buildEvent({ cookies: [`hs_access_token=valid-token`], rawPath: '/api/me' });
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        rawPath: '/api/me',
+      });
       const request = buildMiddyRequest(event);
 
       const result = await before(request);
@@ -362,7 +449,10 @@ describe('authMiddleware', () => {
       const existingUserId = 'refreshed-user-uuid';
       const existingOrgId = 'refreshed-org-uuid';
 
-      mockJwtVerify.mockRejectedValue(new Error('token expired'));
+      // First call: access token verify fails; second call: refreshed ID token verify succeeds
+      mockJwtVerify
+        .mockRejectedValueOnce(new Error('token expired'))
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
 
       mockFetch.mockResolvedValue({
         ok: true,
@@ -373,9 +463,9 @@ describe('authMiddleware', () => {
         }),
       });
 
+      // decodeJwt is used for the refreshed access token (sub extraction)
       mockDecodeJwt.mockReturnValue({
         sub: MOCK_SUB,
-        email: MOCK_EMAIL,
       });
 
       ddbMock

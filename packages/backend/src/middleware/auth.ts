@@ -237,7 +237,22 @@ export function authMiddleware() {
       try {
         const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
         const sub = payload.sub!;
-        const email = payload.email as string | undefined;
+        // Email lives in the ID token (OIDC profile), not the access token.
+        // ID token audience is the client_id, not the API identifier.
+        let email: string | undefined;
+        if (idToken) {
+          try {
+            const { payload: idPayload } = await jwtVerify(idToken, jwks, {
+              audience: secrets.AUTH0_CLIENT_ID,
+              issuer,
+            });
+            email = idPayload.email as string | undefined;
+          } catch (err) {
+            console.warn('[auth] ID token verification failed, continuing without email', {
+              error: (err as Error).message,
+            });
+          }
+        }
         const resolved = await resolveUserAndOrg(sub, email);
         (
           event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
@@ -285,7 +300,24 @@ export function authMiddleware() {
           } satisfies NewTokens;
           const refreshedPayload = decodeJwt(tokens.access_token);
           const refreshedSub = refreshedPayload.sub!;
-          const refreshedEmail = refreshedPayload.email as string | undefined;
+          // Email lives in the ID token (OIDC profile), not the access token.
+          let refreshedEmail: string | undefined;
+          if (tokens.id_token) {
+            try {
+              const { payload: refreshedIdPayload } = await jwtVerify(tokens.id_token, jwks, {
+                audience: secrets.AUTH0_CLIENT_ID,
+                issuer,
+              });
+              refreshedEmail = refreshedIdPayload.email as string | undefined;
+            } catch (err) {
+              console.warn(
+                '[auth] Refreshed ID token verification failed, continuing without email',
+                {
+                  error: (err as Error).message,
+                },
+              );
+            }
+          }
           const refreshedResolved = await resolveUserAndOrg(refreshedSub, refreshedEmail);
           (
             event.requestContext as APIGatewayProxyEventV2['requestContext'] & {
