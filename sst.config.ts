@@ -377,8 +377,7 @@ export default $config({
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
       link: [billingTable, stripeSecretKey, stripeMeterEventName, auroraBackofficeToken],
       environment: { ...auroraEnv },
-      // eslint-disable-next-line typescript/no-explicit-any
-      runtime: 'nodejs24.x' as any,
+      runtime: 'nodejs24.x',
       timeout: '60 seconds',
       memory: '256 MB',
     });
@@ -387,8 +386,7 @@ export default $config({
       handler: 'packages/backend/src/jobs/usage-reporting-orchestrator.handler',
       link: [billingTable],
       environment: { USAGE_WORKER_FUNCTION_NAME: usageWorker.name },
-      // eslint-disable-next-line typescript/no-explicit-any
-      runtime: 'nodejs24.x' as any,
+      runtime: 'nodejs24.x',
       timeout: '300 seconds',
       memory: '256 MB',
       permissions: [
@@ -400,6 +398,7 @@ export default $config({
     });
 
     new sst.aws.Cron('UsageReportingCron', {
+      // run the Lambda every day at 6:00 AM UTC.
       schedule: 'cron(0 6 * * ? *)',
       function: usageOrchestrator.arn,
     });
