@@ -219,7 +219,7 @@ describe('createAuroraAccessKey', () => {
     setupSsmMock();
     mockPutAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
 
-    await createAuroraAccessKey({ tenantId: 'tenant-1', name: 'my-key' });
+    await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
 
     const ssmCalls = ssmMock.commandCalls(GetParameterCommand);
     expect(ssmCalls).toHaveLength(1);
@@ -233,7 +233,7 @@ describe('createAuroraAccessKey', () => {
     setupSsmMock();
     mockPutAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
 
-    await createAuroraAccessKey({ tenantId: 'tenant-1', name: 'my-key' });
+    await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
 
     expect(mockPutAccessKeys).toHaveBeenCalledWith({
       client: 'mock-portal-client',
@@ -247,7 +247,7 @@ describe('createAuroraAccessKey', () => {
     setupSsmMock();
     mockPutAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
 
-    const result = await createAuroraAccessKey({ tenantId: 'tenant-1', name: 'my-key' });
+    const result = await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
 
     expect(result).toStrictEqual({
       id: 'ak-id-1',
@@ -266,7 +266,7 @@ describe('createAuroraAccessKey', () => {
     });
 
     try {
-      await createAuroraAccessKey({ tenantId: 'tenant-1', name: 'my-key' });
+      await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
       expect.unreachable('Expected DuplicateKeyNameError to be thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(DuplicateKeyNameError);
@@ -284,9 +284,9 @@ describe('createAuroraAccessKey', () => {
       response: { status: 500 },
     });
 
-    await expect(createAuroraAccessKey({ tenantId: 'tenant-1', name: 'my-key' })).rejects.toThrow(
-      'Failed to create Aurora access key "my-key" for tenant tenant-1',
-    );
+    await expect(
+      createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' }),
+    ).rejects.toThrow('Failed to create Aurora access key "my-key" for tenant tenant-1');
   });
 
   it('throws when accessKey is missing from response', async () => {
@@ -296,9 +296,9 @@ describe('createAuroraAccessKey', () => {
       error: undefined,
     });
 
-    await expect(createAuroraAccessKey({ tenantId: 'tenant-1', name: 'my-key' })).rejects.toThrow(
-      'Aurora API returned invalid access key for tenant tenant-1',
-    );
+    await expect(
+      createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' }),
+    ).rejects.toThrow('Aurora API returned invalid access key for tenant tenant-1');
   });
 
   const requiredFields = ['id', 'accessKeyId', 'accessKeySecret', 'createdAt'] as const;
@@ -315,7 +315,9 @@ describe('createAuroraAccessKey', () => {
         error: undefined,
       });
 
-      await expect(createAuroraAccessKey({ tenantId: 'tenant-1', name: 'my-key' })).rejects.toThrow(
+      await expect(
+        createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' }),
+      ).rejects.toThrow(
         `Aurora Portal API returned empty access key "${field}" for tenant tenant-1`,
       );
     });
@@ -355,7 +357,7 @@ describe('findAuroraAccessKeyByName', () => {
       error: undefined,
     });
 
-    const result = await findAuroraAccessKeyByName({ tenantId: 'tenant-1', name: 'my-key' });
+    const result = await findAuroraAccessKeyByName({ tenantId: 'tenant-1', keyName: 'my-key' });
 
     expect(result).toStrictEqual({
       id: 'key-2',
@@ -373,7 +375,7 @@ describe('findAuroraAccessKeyByName', () => {
       error: undefined,
     });
 
-    const result = await findAuroraAccessKeyByName({ tenantId: 'tenant-1', name: 'my-key' });
+    const result = await findAuroraAccessKeyByName({ tenantId: 'tenant-1', keyName: 'my-key' });
 
     expect(result).toBeUndefined();
     expect(mockGetAccessKeyById).not.toHaveBeenCalled();
@@ -387,7 +389,7 @@ describe('findAuroraAccessKeyByName', () => {
     });
 
     await expect(
-      findAuroraAccessKeyByName({ tenantId: 'tenant-1', name: 'my-key' }),
+      findAuroraAccessKeyByName({ tenantId: 'tenant-1', keyName: 'my-key' }),
     ).rejects.toThrow('Failed to list Aurora access keys for tenant tenant-1');
   });
 
@@ -405,7 +407,7 @@ describe('findAuroraAccessKeyByName', () => {
     });
 
     await expect(
-      findAuroraAccessKeyByName({ tenantId: 'tenant-1', name: 'my-key' }),
+      findAuroraAccessKeyByName({ tenantId: 'tenant-1', keyName: 'my-key' }),
     ).rejects.toThrow('Failed to get Aurora access key "key-2" for tenant tenant-1');
   });
 });

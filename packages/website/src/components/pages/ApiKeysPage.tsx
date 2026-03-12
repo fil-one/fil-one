@@ -241,7 +241,7 @@ export function ApiKeysPage() {
       id: response.id,
       keyName: response.keyName,
       accessKeyId: response.accessKeyId,
-      createdAt: new Date().toISOString(),
+      createdAt: response.createdAt,
       lastUsedAt: undefined,
       status: 'active',
     };

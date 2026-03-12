@@ -22,6 +22,7 @@ export interface CreateAccessKeyResponse {
   keyName: string;
   accessKeyId: string;
   secretAccessKey: string;
+  createdAt: string;
 }
 
 export interface DeleteAccessKeyRequest {

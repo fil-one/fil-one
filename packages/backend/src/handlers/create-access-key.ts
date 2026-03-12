@@ -70,7 +70,7 @@ export async function baseHandler(
 
   let auroraKey;
   try {
-    auroraKey = await createAuroraAccessKey({ tenantId: auroraTenantId, name: keyName });
+    auroraKey = await createAuroraAccessKey({ tenantId: auroraTenantId, keyName });
   } catch (err) {
     if (err instanceof DuplicateKeyNameError) {
       await recoverDuplicateKey(orgId, auroraTenantId, keyName);
@@ -103,6 +103,7 @@ export async function baseHandler(
       keyName,
       accessKeyId: auroraKey.accessKeyId,
       secretAccessKey: auroraKey.accessKeySecret,
+      createdAt: auroraKey.createdAt,
     })
     .build();
 }
@@ -133,7 +134,7 @@ async function recoverDuplicateKey(
   // Recover by fetching key details from Aurora and writing the DB record.
   const auroraKey = await findAuroraAccessKeyByName({
     tenantId: auroraTenantId,
-    name: keyName,
+    keyName,
   });
 
   if (!auroraKey) {

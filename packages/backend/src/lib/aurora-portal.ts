@@ -59,7 +59,7 @@ export async function createAuroraBucket({
 
 export interface CreateAuroraAccessKeyOptions {
   tenantId: string;
-  name: string;
+  keyName: string;
 }
 export interface CreateAuroraAccessKeyResult {
   id: string;
@@ -70,7 +70,7 @@ export interface CreateAuroraAccessKeyResult {
 
 export async function createAuroraAccessKey({
   tenantId,
-  name,
+  keyName,
 }: CreateAuroraAccessKeyOptions): Promise<CreateAuroraAccessKeyResult> {
   const baseUrl = process.env.AURORA_PORTAL_URL!;
   const stage = process.env.FILONE_STAGE!;
@@ -85,7 +85,7 @@ export async function createAuroraAccessKey({
     client,
     path: { tenantId },
     body: {
-      name,
+      name: keyName,
       access: [
         'Default',
         'Read',
@@ -114,7 +114,7 @@ export async function createAuroraAccessKey({
       `Aurora access key creation failed for tenant ${tenantId}:`,
       JSON.stringify(error),
     );
-    throw new Error(`Failed to create Aurora access key "${name}" for tenant ${tenantId}`, {
+    throw new Error(`Failed to create Aurora access key "${keyName}" for tenant ${tenantId}`, {
       cause: error,
     });
   }
@@ -143,7 +143,7 @@ export async function createAuroraAccessKey({
   );
 
   console.log(
-    `Aurora access key "${name}" created for tenant ${tenantId}: accessKeyId=${accessKeyId}, createdAt=${createdAt}`,
+    `Aurora access key "${keyName}" created for tenant ${tenantId}: accessKeyId=${accessKeyId}, createdAt=${createdAt}`,
   );
   return { id, accessKeyId, accessKeySecret, createdAt };
 }
@@ -156,7 +156,7 @@ export interface FindAuroraAccessKeyResult {
 
 export async function findAuroraAccessKeyByName({
   tenantId,
-  name,
+  keyName,
 }: CreateAuroraAccessKeyOptions): Promise<FindAuroraAccessKeyResult | undefined> {
   const baseUrl = process.env.AURORA_PORTAL_URL!;
   const stage = process.env.FILONE_STAGE!;
@@ -181,14 +181,14 @@ export async function findAuroraAccessKeyByName({
   }
 
   const keys = listData?.accessKeys ?? [];
-  const match = keys.find((k: { name?: string }) => k.name === name);
+  const match = keys.find((k: { name?: string }) => k.name === keyName);
   if (!match) {
     return undefined;
   }
 
   assert(
     !!match.id,
-    `Aurora list access keys returned empty "id" for key "${name}" in tenant ${tenantId}. Full response: ${JSON.stringify(listData)}`,
+    `Aurora list access keys returned empty "id" for key "${keyName}" in tenant ${tenantId}. Full response: ${JSON.stringify(listData)}`,
   );
 
   // Step 2: Get full details by internal ID (list doesn't include accessKeyId)

@@ -102,6 +102,7 @@ describe('create-access-key baseHandler', () => {
       keyName: 'My Key',
       accessKeyId: 'AKIA1234567890',
       secretAccessKey: 'secret-abc-123',
+      createdAt: '2026-03-10T13:36:07.752371Z',
     });
   });
 
@@ -115,7 +116,7 @@ describe('create-access-key baseHandler', () => {
 
     expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
-      name: 'My Key',
+      keyName: 'My Key',
     });
   });
 
@@ -182,7 +183,7 @@ describe('create-access-key baseHandler', () => {
     expect(result.statusCode).toBe(201);
     expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
-      name: 'My Key',
+      keyName: 'My Key',
     });
     const body = JSON.parse(result.body!);
     expect(body.keyName).toBe('My Key');

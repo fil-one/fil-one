@@ -34,15 +34,15 @@ export function validateKeyName(raw: unknown): KeyNameValidationResult {
     };
   }
 
-  if (!validator.isLength(trimmed, { max: KEY_NAME_MAX_LENGTH })) {
+  const sanitized = validator.escape(trimmed);
+
+  if (!validator.isLength(sanitized, { max: KEY_NAME_MAX_LENGTH })) {
     return {
       valid: false,
-      sanitized: trimmed,
+      sanitized,
       error: `Key name must be at most ${KEY_NAME_MAX_LENGTH} characters.`,
     };
   }
-
-  const sanitized = validator.escape(trimmed);
 
   return { valid: true, sanitized };
 }
