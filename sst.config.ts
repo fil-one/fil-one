@@ -386,6 +386,7 @@ export default $config({
     });
 
     new sst.aws.Cron('UsageReportingCron', {
+      // run the Lambda every day at 6:00 AM UTC.
       schedule: 'cron(0 6 * * ? *)',
       function: usageOrchestrator.arn,
     });
