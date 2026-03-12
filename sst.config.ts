@@ -325,7 +325,22 @@ export default $config({
     addRoute('POST', '/api/billing/portal', 'create-portal-session', {
       WEBSITE_URL: siteUrl,
     });
-    addRoute('POST', '/api/stripe/webhook', 'stripe-webhook');
+    addRoute(
+      'POST',
+      '/api/stripe/webhook',
+      'stripe-webhook',
+      {
+        STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
+      },
+      [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [
+            $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/stripe-webhook-secret`,
+          ],
+        },
+      ],
+    );
 
     // ── Tenant setup consumer ──────────────────────────────────────
     tenantSetupQueue.subscribe(
