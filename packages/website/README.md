@@ -23,7 +23,7 @@ DEV_PROXY_TARGET=https://staging.fil.one
 VITE_S3_ENDPOINT=https://s3.hyperspace.filecoin.io
 VITE_AUTH0_DOMAIN=dev-oar2nhqh58xf5pwf.us.auth0.com
 VITE_AUTH0_CLIENT_ID=hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ
-VITE_AUTH0_AUDIENCE=console.fil.one
+VITE_AUTH0_AUDIENCE=https://staging.fil.one
 ```
 
 | Variable               | Purpose                                                                                   |

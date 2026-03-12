@@ -16,7 +16,8 @@ export const S3_ENDPOINT: string = import.meta.env['VITE_S3_ENDPOINT'] ?? '';
 export const AUTH0_DOMAIN: string =
   import.meta.env['VITE_AUTH0_DOMAIN'] ?? 'dev-oar2nhqh58xf5pwf.us.auth0.com';
 export const AUTH0_CLIENT_ID: string = import.meta.env['VITE_AUTH0_CLIENT_ID'] ?? '';
-export const AUTH0_AUDIENCE: string = import.meta.env['VITE_AUTH0_AUDIENCE'] ?? 'console.fil.one';
+export const AUTH0_AUDIENCE: string =
+  import.meta.env['VITE_AUTH0_AUDIENCE'] ?? 'https://staging.fil.one';
 export const STRIPE_PUBLISHABLE_KEY: string =
   import.meta.env['VITE_STRIPE_PUBLISHABLE_KEY'] ??
   'pk_test_51T2zW1AHbTIJ60DDv74RQYurdM94j0qvnJoqtrzurlbDsFgoE6SvQkTFccVKwp9kFkfv9wWC128IIpjHvmuLoVWX00ki9J0mN6';
