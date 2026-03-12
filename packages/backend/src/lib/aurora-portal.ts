@@ -2,11 +2,20 @@ import assert from 'node:assert';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import {
   createClient,
+  getTenantsByTenantIdAccessKeys,
+  getTenantsByTenantIdAccessKeysByAccessKeyId,
   postTenantsByTenantIdBucket,
   putTenantsByTenantIdAccessKeys,
 } from '@filone/aurora-portal-client';
 
 const ssm = new SSMClient({});
+
+export class DuplicateKeyNameError extends Error {
+  constructor() {
+    super('An access key with this name already exists');
+    this.name = 'DuplicateKeyNameError';
+  }
+}
 
 export interface CreateAuroraBucketOptions {
   tenantId: string;
@@ -72,7 +81,7 @@ export async function createAuroraAccessKey({
     headers: { 'X-Api-Key': apiKey },
   });
 
-  const { data, error } = await putTenantsByTenantIdAccessKeys({
+  const { data, error, response } = await putTenantsByTenantIdAccessKeys({
     client,
     path: { tenantId },
     body: {
@@ -98,6 +107,9 @@ export async function createAuroraAccessKey({
   });
 
   if (error) {
+    if (response?.status === 409) {
+      throw new DuplicateKeyNameError();
+    }
     console.error(
       `Aurora access key creation failed for tenant ${tenantId}:`,
       JSON.stringify(error),
@@ -134,6 +146,88 @@ export async function createAuroraAccessKey({
     `Aurora access key "${name}" created for tenant ${tenantId}: accessKeyId=${accessKeyId}, createdAt=${createdAt}`,
   );
   return { id, accessKeyId, accessKeySecret, createdAt };
+}
+
+export interface FindAuroraAccessKeyResult {
+  id: string;
+  accessKeyId: string;
+  createdAt: string;
+}
+
+export async function findAuroraAccessKeyByName({
+  tenantId,
+  name,
+}: CreateAuroraAccessKeyOptions): Promise<FindAuroraAccessKeyResult | undefined> {
+  const baseUrl = process.env.AURORA_PORTAL_URL!;
+  const stage = process.env.FILONE_STAGE!;
+  const apiKey = await getAuroraPortalApiKey(stage, tenantId);
+
+  const client = createClient({
+    baseUrl,
+    headers: { 'X-Api-Key': apiKey },
+  });
+
+  // Step 1: List all access keys and find by name
+  const { data: listData, error: listError } = await getTenantsByTenantIdAccessKeys({
+    client,
+    path: { tenantId },
+    throwOnError: false,
+  });
+
+  if (listError) {
+    throw new Error(`Failed to list Aurora access keys for tenant ${tenantId}`, {
+      cause: listError,
+    });
+  }
+
+  const keys = listData?.accessKeys ?? [];
+  const match = keys.find((k: { name?: string }) => k.name === name);
+  if (!match) {
+    return undefined;
+  }
+
+  assert(
+    !!match.id,
+    `Aurora list access keys returned empty "id" for key "${name}" in tenant ${tenantId}. Full response: ${JSON.stringify(listData)}`,
+  );
+
+  // Step 2: Get full details by internal ID (list doesn't include accessKeyId)
+  const { data: detailData, error: detailError } =
+    await getTenantsByTenantIdAccessKeysByAccessKeyId({
+      client,
+      path: { tenantId, accessKeyId: match.id },
+      throwOnError: false,
+    });
+
+  if (detailError) {
+    throw new Error(`Failed to get Aurora access key "${match.id}" for tenant ${tenantId}`, {
+      cause: detailError,
+    });
+  }
+
+  const accessKey = detailData?.accessKey;
+  assert(
+    typeof accessKey === 'object' && accessKey !== null,
+    `Aurora API returned invalid access key detail for tenant ${tenantId}: expected an object but got ${typeof accessKey}`,
+  );
+  assert(
+    !!accessKey.id,
+    `Aurora API returned empty "id" in access key detail for tenant ${tenantId}. Full response: ${JSON.stringify(detailData)}`,
+  );
+  assert(
+    !!accessKey.accessKeyId,
+    `Aurora API returned empty "accessKeyId" in access key detail for tenant ${tenantId}. Full response: ${JSON.stringify(detailData)}`,
+  );
+  assert(
+    !!accessKey.createdAt,
+    `Aurora API returned empty "createdAt" in access key detail for tenant ${tenantId}. Full response: ${JSON.stringify(detailData)}`,
+  );
+
+  return {
+    id: accessKey.id,
+    accessKeyId: accessKey.accessKeyId,
+    createdAt: accessKey.createdAt,
+  };
 }
 
 export async function getAuroraPortalApiKey(stage: string, tenantId: string): Promise<string> {

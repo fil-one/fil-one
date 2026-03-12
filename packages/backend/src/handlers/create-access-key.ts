@@ -1,4 +1,9 @@
-import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+  QueryCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
@@ -9,7 +14,11 @@ import type {
   ErrorResponse,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import { createAuroraAccessKey } from '../lib/aurora-portal.js';
+import {
+  createAuroraAccessKey,
+  DuplicateKeyNameError,
+  findAuroraAccessKeyByName,
+} from '../lib/aurora-portal.js';
 import { validateKeyName } from '../lib/key-name-validation.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -65,7 +74,19 @@ export async function baseHandler(
       .build();
   }
 
-  const auroraKey = await createAuroraAccessKey({ tenantId: auroraTenantId, name: keyName });
+  let auroraKey;
+  try {
+    auroraKey = await createAuroraAccessKey({ tenantId: auroraTenantId, name: keyName });
+  } catch (err) {
+    if (err instanceof DuplicateKeyNameError) {
+      await recoverDuplicateKey(orgId, auroraTenantId, keyName);
+      return new ResponseBuilder()
+        .status(409)
+        .body<ErrorResponse>({ message: 'An access key with this name already exists' })
+        .build();
+    }
+    throw err;
+  }
 
   await dynamo.send(
     new PutItemCommand({
@@ -90,6 +111,63 @@ export async function baseHandler(
       secretAccessKey: auroraKey.accessKeySecret,
     })
     .build();
+}
+
+async function recoverDuplicateKey(
+  orgId: string,
+  auroraTenantId: string,
+  keyName: string,
+): Promise<void> {
+  // Check if we already have a DynamoDB record for this key
+  const { Items: existingKeys } = await dynamo.send(
+    new QueryCommand({
+      TableName: Resource.AccessKeysTable.name,
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+      ExpressionAttributeValues: {
+        ':pk': { S: `ORG#${orgId}` },
+        ':skPrefix': { S: 'ACCESSKEY#' },
+      },
+    }),
+  );
+
+  const alreadyInDb = existingKeys?.some((item) => item.keyName?.S === keyName);
+  if (alreadyInDb) {
+    return; // Simple duplicate — nothing to recover
+  }
+
+  // Partial failure: Aurora key exists but DynamoDB record is missing.
+  // Recover by fetching key details from Aurora and writing the DB record.
+  const auroraKey = await findAuroraAccessKeyByName({
+    tenantId: auroraTenantId,
+    name: keyName,
+  });
+
+  if (!auroraKey) {
+    // Shouldn't happen — Aurora returned 409 but key not found in list.
+    // Just return and let the user see the 409 message.
+    console.error(
+      `Aurora returned 409 for key "${keyName}" but key not found in Aurora list for tenant ${auroraTenantId}`,
+    );
+    return;
+  }
+
+  await dynamo.send(
+    new PutItemCommand({
+      TableName: Resource.AccessKeysTable.name,
+      Item: marshall({
+        pk: `ORG#${orgId}`,
+        sk: `ACCESSKEY#${auroraKey.id}`,
+        keyName,
+        accessKeyId: auroraKey.accessKeyId,
+        createdAt: auroraKey.createdAt,
+        status: 'active',
+      }),
+    }),
+  );
+
+  console.log(
+    `Recovered DynamoDB record for Aurora access key "${keyName}" (id=${auroraKey.id}) for org ${orgId}`,
+  );
 }
 
 export const handler = middy(baseHandler)
