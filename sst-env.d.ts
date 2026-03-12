@@ -6,10 +6,6 @@
 
 declare module "sst" {
   export interface Resource {
-    "AccessKeysTable": {
-      "name": string
-      "type": "sst.aws.Dynamo"
-    }
     "Api": {
       "type": "sst.aws.ApiGatewayV2"
       "url": string
