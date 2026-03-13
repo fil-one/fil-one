@@ -405,10 +405,10 @@ export default $config({
     billingTrialQueue.subscribe(
       {
         handler: 'packages/backend/src/handlers/billing-trial-setup.handler',
-        link: [billingTable],
+        link: [billingTable, stripeSecretKey, stripePriceId],
         environment: { ...sharedEnv },
         runtime: 'nodejs24.x',
-        timeout: '10 seconds',
+        timeout: '30 seconds',
       },
       { batch: { size: 1 } },
     );

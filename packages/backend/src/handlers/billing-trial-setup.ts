@@ -5,6 +5,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
 
 export interface BillingTrialSetupMessage {
   userId: string;
@@ -17,9 +18,36 @@ const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 export async function handler(event: SQSEvent, _context: Context): Promise<void> {
   assert.equal(event.Records.length, 1, `Expected exactly 1 SQS record, got ${event.Records.length}`);
 
-  const { userId, orgId } = JSON.parse(event.Records[0].body) as BillingTrialSetupMessage;
-  const now = new Date().toISOString();
+  const { userId, orgId, email } = JSON.parse(event.Records[0].body) as BillingTrialSetupMessage;
+  const now = new Date();
+  const trialEndsAt = new Date(now.getTime() + TRIAL_DURATION_MS);
+  const trialEndsAtUnix = Math.floor(trialEndsAt.getTime() / 1000);
 
+  const stripe = getStripeClient();
+  const secrets = getBillingSecrets();
+
+  // 1. Create Stripe customer
+  const stripeCustomer = await stripe.customers.create(
+    {
+      email: email ?? undefined,
+      metadata: { userId, orgId },
+    },
+    { idempotencyKey: `billing-trial-${userId}` },
+  );
+
+  // 2. Create Stripe trial subscription
+  const subscription = await stripe.subscriptions.create(
+    {
+      customer: stripeCustomer.id,
+      items: [{ price: secrets.STRIPE_PRICE_ID }],
+      trial_end: trialEndsAtUnix,
+      trial_settings: { end_behavior: { missing_payment_method: 'cancel' } },
+      metadata: { userId, orgId },
+    },
+    { idempotencyKey: `billing-trial-sub-${userId}` },
+  );
+
+  // 3. Write to DynamoDB (idempotent — skips if record already exists)
   try {
     await getDynamoClient().send(
       new PutItemCommand({
@@ -28,10 +56,14 @@ export async function handler(event: SQSEvent, _context: Context): Promise<void>
           pk: `CUSTOMER#${userId}`,
           sk: 'SUBSCRIPTION',
           orgId,
+          stripeCustomerId: stripeCustomer.id,
+          subscriptionId: subscription.id,
           subscriptionStatus: SubscriptionStatus.Trialing,
-          trialStartedAt: now,
-          trialEndsAt: new Date(Date.now() + TRIAL_DURATION_MS).toISOString(),
-          updatedAt: now,
+          trialStartedAt: now.toISOString(),
+          trialEndsAt: trialEndsAt.toISOString(),
+          currentPeriodStart: new Date(subscription.items.data[0].current_period_start * 1000).toISOString(),
+          currentPeriodEnd: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
+          updatedAt: now.toISOString(),
         }),
         ConditionExpression: 'attribute_not_exists(pk)',
       }),

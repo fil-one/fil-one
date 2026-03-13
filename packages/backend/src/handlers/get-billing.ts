@@ -166,8 +166,10 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
         };
       }
 
-      // Use unlimited storage for active subscribers
-      usage.storageLimitBytes = -1;
+      // Only give unlimited storage to active/paid subscribers, not trialing
+      if (subscription.status !== 'trialing') {
+        usage.storageLimitBytes = -1;
+      }
     } catch (err) {
       console.warn('[get-billing] Failed to fetch Stripe subscription', {
         error: (err as Error).message,

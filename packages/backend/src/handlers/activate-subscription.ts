@@ -78,13 +78,23 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  // 3. Create subscription
-  const subscription = await stripe.subscriptions.create({
-    customer: stripeCustomerId,
-    items: [{ price: secrets.STRIPE_PRICE_ID }],
-    default_payment_method: paymentMethodId,
-    expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-  });
+  // 3. Create or update subscription
+  let subscription;
+  if (record.subscriptionId) {
+    // Trial subscription exists — update it with payment method
+    subscription = await stripe.subscriptions.update(record.subscriptionId as string, {
+      default_payment_method: paymentMethodId,
+      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+    });
+  } else {
+    // No subscription yet (legacy path) — create new
+    subscription = await stripe.subscriptions.create({
+      customer: stripeCustomerId,
+      items: [{ price: secrets.STRIPE_PRICE_ID }],
+      default_payment_method: paymentMethodId,
+      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+    });
+  }
 
   // 4. Get payment method details
   const pm = subscription.default_payment_method;
@@ -109,7 +119,9 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
         sk: { S: 'SUBSCRIPTION' },
       },
       UpdateExpression:
-        'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
+        subscription.status === 'active'
+          ? 'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt'
+          : 'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
       ExpressionAttributeValues: {
         ':subId': { S: subscription.id },
         ':status': { S: subscription.status },
