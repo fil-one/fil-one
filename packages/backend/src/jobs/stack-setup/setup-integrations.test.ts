@@ -36,7 +36,8 @@ vi.mock('sst', () => ({
 
 const ssmMock = mockClient(SSMClient);
 
-const mockFetch = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
+const mockFetch =
+  vi.fn<(url: string, init?: Omit<RequestInit, 'body'> & { body?: string }) => Promise<Response>>();
 vi.stubGlobal('fetch', mockFetch);
 
 import { handler } from './setup-integrations.js';
@@ -80,16 +81,18 @@ function buildCfnEvent(
 let capturedCfnBody: Record<string, unknown> | undefined;
 let capturedAuth0PatchBody: Record<string, unknown> | undefined;
 
-function stubAuth0Fetch(clientState = {
-  callbacks: ['https://old.example.com/callback'],
-  allowed_logout_urls: [] as string[],
-  web_origins: [] as string[],
-  initiate_login_uri: '',
-}) {
+function stubAuth0Fetch(
+  clientState = {
+    callbacks: ['https://old.example.com/callback'],
+    allowed_logout_urls: [] as string[],
+    web_origins: [] as string[],
+    initiate_login_uri: '',
+  },
+) {
   capturedCfnBody = undefined;
   capturedAuth0PatchBody = undefined;
 
-  mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+  mockFetch.mockImplementation(async (url, init) => {
     const urlStr = String(url);
     if (urlStr.includes('/oauth/token')) {
       return new Response(JSON.stringify({ access_token: 'mgmt-token' }), {
@@ -104,11 +107,11 @@ function stubAuth0Fetch(clientState = {
       });
     }
     if (urlStr.includes('/api/v2/clients/') && init?.method === 'PATCH') {
-      capturedAuth0PatchBody = JSON.parse(String(init.body));
+      capturedAuth0PatchBody = JSON.parse(init.body!);
       return new Response('{}', { status: 200 });
     }
     if (init?.method === 'PUT') {
-      capturedCfnBody = JSON.parse(String(init.body));
+      capturedCfnBody = JSON.parse(init.body!);
       return new Response('', { status: 200 });
     }
     return new Response('Not found', { status: 404 });
@@ -352,12 +355,12 @@ describe('setup-integrations', () => {
         secret: 'whsec_new',
       });
 
-      mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      mockFetch.mockImplementation(async (url, init) => {
         if (String(url).includes('/oauth/token')) {
           return new Response('Unauthorized', { status: 401 });
         }
         if (init?.method === 'PUT') {
-          capturedCfnBody = JSON.parse(String(init.body));
+          capturedCfnBody = JSON.parse(init.body!);
           return new Response('', { status: 200 });
         }
         return new Response('Not found', { status: 404 });
@@ -389,7 +392,10 @@ describe('setup-integrations', () => {
       await handler(buildCfnEvent({ RequestType: 'Create' }));
 
       expect(capturedAuth0PatchBody).toEqual({
-        callbacks: ['https://old.example.com/callback', 'https://app.example.com/api/auth/callback'],
+        callbacks: [
+          'https://old.example.com/callback',
+          'https://app.example.com/api/auth/callback',
+        ],
         allowed_logout_urls: ['https://app.example.com/sign-in'],
         web_origins: ['https://app.example.com'],
         initiate_login_uri: 'https://app.example.com/sign-in',
@@ -459,7 +465,11 @@ describe('setup-integrations', () => {
       await handler(
         buildCfnEvent({
           RequestType: 'Create',
-          ResourceProperties: { ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup', SiteUrl: 'https://app.example.com', Stage: 'staging' },
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://app.example.com',
+            Stage: 'staging',
+          },
         }),
       );
 
