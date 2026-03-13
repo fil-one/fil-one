@@ -139,7 +139,7 @@ jobs:
 
             | | |
             |---|---|
-            | **Latest commit** | `${{ github.sha }}` |
+            | **Latest commit** | `${{ github.event.pull_request.head.sha }}` |
             | **Status** | ✅ Deploy successful |
             | **Preview URL** | [${{ needs.deploy-preview.outputs.url }}](${{ needs.deploy-preview.outputs.url }}) |
 
