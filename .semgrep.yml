@@ -89,12 +89,13 @@ rules:
   # ── Infrastructure as Code (SST/Pulumi) ──
 
   - id: filone-no-admin-access-policy
-    pattern: |
-      policyArn: $ARN
-    metavariable-pattern:
-      metavariable: $ARN
-      pattern: |
-        'arn:aws:iam::aws:policy/AdministratorAccess'
+    patterns:
+      - pattern: |
+          policyArn: $ARN
+      - metavariable-pattern:
+          metavariable: $ARN
+          pattern: |
+            'arn:aws:iam::aws:policy/AdministratorAccess'
     paths:
       include:
         - sst.config.ts

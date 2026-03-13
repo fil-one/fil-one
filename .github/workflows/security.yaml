@@ -2,9 +2,11 @@ name: Security
 
 on:
   push:
-    branches: [security-pipeline]
+    branches: [main]
   pull_request:
-    branches: [security-pipeline]
+  schedule:
+    # Weekly scan: Sunday 2am UTC
+    - cron: '0 2 * * 0'
   workflow_dispatch:
 
 # Cancel in-progress runs for the same branch/PR
@@ -41,7 +43,7 @@ jobs:
 
       - name: Upload SARIF (requires GHAS for private repos)
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: semgrep-results.sarif
           category: semgrep
@@ -66,16 +68,16 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
 
@@ -107,20 +109,20 @@ jobs:
 
       # Trivy — broader vulnerability database + license scanning
       - name: Trivy vulnerability scan (fs mode)
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
           format: sarif
           output: trivy-deps.sarif
           severity: CRITICAL,HIGH,MEDIUM
-          ignorefile: .trivyignore
+          trivyignores: .trivyignore
           skip-dirs: packages/ui,packages/aurora-backoffice-client,packages/aurora-portal-client,contracts/lib,.sst,node_modules
         continue-on-error: true
 
       - name: Upload Trivy SARIF (requires GHAS for private repos)
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-deps.sarif
           category: trivy-dependencies
@@ -140,21 +142,17 @@ jobs:
         with:
           fetch-depth: 0 # Full history for git log scanning
 
+      # gitleaks-action v2 still uses Node 20; no v3 yet. Monitor:
+      # https://github.com/gitleaks/gitleaks-action/releases
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2
-        with:
-          args: --config=.gitleaks.toml --sarif-report=gitleaks-results.sarif
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'true'
+          GITLEAKS_ENABLE_SUMMARY: 'true'
         continue-on-error: true # Advisory mode — flip to false to block on secrets
-
-      - name: Upload Gitleaks SARIF (requires GHAS for private repos)
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: gitleaks-results.sarif
-          category: gitleaks
-        continue-on-error: true
 
   # ──────────────────────────────────────────────────
   # Job 5: IaC Scanning (Trivy config mode)
@@ -169,7 +167,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Trivy IaC misconfiguration scan
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: config
           scan-ref: .
@@ -181,7 +179,7 @@ jobs:
 
       - name: Upload Trivy IaC SARIF (requires GHAS for private repos)
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-iac.sarif
           category: trivy-iac
@@ -206,7 +204,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Trivy license scan
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .

@@ -53,21 +53,21 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
       # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
       - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
           aws-region: us-east-2
@@ -81,7 +81,7 @@ jobs:
         run: echo "subject=$(git log -1 --format=%s)" >> "$GITHUB_OUTPUT"
 
       - if: failure()
-        uses: slackapi/slack-github-action@v2.1.1
+        uses: slackapi/slack-github-action@v3
         with:
           method: chat.postMessage
           token: ${{ secrets.SLACK_BOT_TOKEN }}
