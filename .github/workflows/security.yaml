@@ -2,11 +2,9 @@ name: Security
 
 on:
   push:
-    branches: [main]
+    branches: [security-pipeline]
   pull_request:
-  schedule:
-    # Weekly scan: Sunday 2am UTC
-    - cron: '0 2 * * 0'
+    branches: [security-pipeline]
   workflow_dispatch:
 
 # Cancel in-progress runs for the same branch/PR

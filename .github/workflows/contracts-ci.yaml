@@ -2,7 +2,7 @@ name: 'CI [contracts]'
 
 on:
   push:
-    branches: [main]
+    branches: [main, contracts-pipeline]
   pull_request:
 
 env:
