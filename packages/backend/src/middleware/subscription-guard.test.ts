@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { ApiErrorCode } from '@filone/shared';
@@ -14,6 +15,7 @@ import { expectErrorResponse } from '../test/assert-helpers.js';
 vi.mock('sst', () => ({
   Resource: {
     BillingTable: { name: 'BillingTable' },
+    BillingTrialSetupQueue: { url: 'https://sqs.test/billing-trial' },
   },
 }));
 
@@ -22,6 +24,7 @@ vi.mock('../lib/user-context.js', () => ({
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
+const sqsMock = mockClient(SQSClient);
 
 import { subscriptionGuardMiddleware, AccessLevel } from './subscription-guard.js';
 import { SubscriptionStatus } from '@filone/shared';
@@ -43,18 +46,56 @@ const USER_ID = 'test-user-uuid';
 describe('subscriptionGuardMiddleware', () => {
   beforeEach(() => {
     ddbMock.reset();
+    sqsMock.reset();
+    sqsMock.on(SendMessageCommand).resolves({});
     vi.restoreAllMocks();
   });
 
-  it('allows when no billing record exists', async () => {
+  it('allows when no billing record exists and enqueues trial setup', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
     const result = await before(
-      buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })),
+      buildMiddyRequest(
+        buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid', email: 'test@example.com' } }),
+      ),
     );
 
     expect(result).toBeUndefined();
+
+    // Wait for fire-and-forget promise to settle
+    await new Promise((r) => setTimeout(r, 0));
+
+    const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
+    expect(sqsCalls).toHaveLength(1);
+    expect(sqsCalls[0].args[0].input).toEqual({
+      QueueUrl: 'https://sqs.test/billing-trial',
+      MessageBody: JSON.stringify({ userId: USER_ID, orgId: 'test-org-uuid', email: 'test@example.com' }),
+    });
+  });
+
+  it('still allows access when SQS enqueue fails (fire-and-forget)', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+    sqsMock.on(SendMessageCommand).rejects(new Error('SQS unavailable'));
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+    const result = await before(
+      buildMiddyRequest(
+        buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } }),
+      ),
+    );
+
+    expect(result).toBeUndefined();
+
+    // Wait for fire-and-forget promise to settle
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '[subscription-guard] Failed to enqueue billing trial setup',
+      expect.objectContaining({ userId: USER_ID }),
+    );
   });
 
   it('allows when subscription status is active', async () => {

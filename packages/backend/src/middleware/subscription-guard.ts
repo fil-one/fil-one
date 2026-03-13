@@ -1,4 +1,5 @@
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { SendMessageCommand } from '@aws-sdk/client-sqs';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import type { MiddlewareObj, Request } from '@middy/core';
 import type {
@@ -10,6 +11,7 @@ import type {
 import { ApiErrorCode, SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { ResponseBuilder } from '../lib/response-builder.js';
+import { sqsClient } from '../lib/sqs-client.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 
@@ -46,8 +48,27 @@ export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
       }),
     );
 
-    // 2. No billing record → allow (soft trial, no Stripe customer yet)
-    if (!result.Item) return;
+    // 2. No billing record → enqueue trial creation and allow access
+    if (!result.Item) {
+      const { orgId, email } = getUserInfo(event);
+
+      // Fire-and-forget: enqueue trial creation. Don't await — let the request proceed.
+      sqsClient
+        .send(
+          new SendMessageCommand({
+            QueueUrl: Resource.BillingTrialSetupQueue.url,
+            MessageBody: JSON.stringify({ userId, orgId, email }),
+          }),
+        )
+        .catch((err) => {
+          console.error('[subscription-guard] Failed to enqueue billing trial setup', {
+            userId,
+            error: (err as Error).message,
+          });
+        });
+
+      return; // Allow access — trial hasn't expired yet
+    }
 
     const record = unmarshall(result.Item);
     let status = record.subscriptionStatus as string | undefined;

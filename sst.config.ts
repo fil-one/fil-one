@@ -80,6 +80,13 @@ export default $config({
       visibilityTimeout: '90 seconds',
     });
 
+    const billingTrialDlq = new sst.aws.Queue('BillingTrialSetupDlq');
+
+    const billingTrialQueue = new sst.aws.Queue('BillingTrialSetupQueue', {
+      dlq: billingTrialDlq.arn,
+      visibilityTimeout: '90 seconds',
+    });
+
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
@@ -223,6 +230,7 @@ export default $config({
       userInfoTable,
       userFilesBucket,
       tenantSetupQueue,
+      billingTrialQueue,
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
@@ -385,6 +393,31 @@ export default $config({
       namespace: 'AWS/SQS',
       metricName: 'ApproximateNumberOfMessagesVisible',
       dimensions: { QueueName: tenantSetupDlq.nodes.queue.name },
+      statistic: 'Maximum',
+      period: 60,
+      evaluationPeriods: 1,
+      threshold: 1,
+      comparisonOperator: 'GreaterThanOrEqualToThreshold',
+      treatMissingData: 'notBreaching',
+    });
+
+    // ── Billing trial setup consumer ──────────────────────────────
+    billingTrialQueue.subscribe(
+      {
+        handler: 'packages/backend/src/handlers/billing-trial-setup.handler',
+        link: [billingTable],
+        environment: { ...sharedEnv },
+        runtime: 'nodejs24.x',
+        timeout: '10 seconds',
+      },
+      { batch: { size: 1 } },
+    );
+
+    new aws.cloudwatch.MetricAlarm('BillingTrialSetupDlqAlarm', {
+      alarmDescription: 'Messages in billing-trial-setup DLQ — failed trial creation needs investigation',
+      namespace: 'AWS/SQS',
+      metricName: 'ApproximateNumberOfMessagesVisible',
+      dimensions: { QueueName: billingTrialDlq.nodes.queue.name },
       statistic: 'Maximum',
       period: 60,
       evaluationPeriods: 1,

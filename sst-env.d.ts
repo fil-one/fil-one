@@ -42,6 +42,14 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Dynamo"
     }
+    "BillingTrialSetupDlq": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
+    "BillingTrialSetupQueue": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
     "SetupIntegrations": {
       "name": string
       "type": "sst.aws.Function"
