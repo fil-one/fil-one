@@ -37,7 +37,7 @@ import { apiRequest } from '../../lib/api.js';
 const MOCK_ACCESS_KEYS: AccessKey[] = [
   {
     id: '1',
-    name: 'Production',
+    keyName: 'Production',
     accessKeyId: 'HKIAXXX...ABCD',
     createdAt: '2024-01-15T10:00:00Z',
     lastUsedAt: '2024-02-15T10:00:00Z',
@@ -564,7 +564,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                           key={key.id}
                           className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50"
                         >
-                          <td className="px-4 py-3 font-medium text-zinc-900">{key.name}</td>
+                          <td className="px-4 py-3 font-medium text-zinc-900">{key.keyName}</td>
                           <td className="px-4 py-3 font-mono text-xs text-zinc-600">
                             {maskAccessKeyId(key.accessKeyId)}
                           </td>
@@ -588,7 +588,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                           <td className="px-4 py-3 text-right">
                             <button
                               type="button"
-                              aria-label={`Delete access key ${key.name}`}
+                              aria-label={`Delete access key ${key.keyName}`}
                               onClick={() => toast.info('Delete access key is not yet implemented')}
                               className="text-zinc-400 hover:text-red-500"
                             >

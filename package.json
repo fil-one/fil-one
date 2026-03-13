@@ -40,6 +40,9 @@
       "esbuild",
       "@pulumi/command",
       "protobufjs"
-    ]
+    ],
+    "overrides": {
+      "@smithy/types": "4.13.1"
+    }
   }
 }

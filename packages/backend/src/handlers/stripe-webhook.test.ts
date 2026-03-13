@@ -59,7 +59,12 @@ function mockSubscription(overrides?: Record<string, unknown>) {
     status: 'active',
     metadata: { userId: MOCK_USER_ID },
     items: {
-      data: [{ current_period_end: 1700000000 }],
+      data: [
+        {
+          current_period_start: 1600000000,
+          current_period_end: 1700000000,
+        },
+      ],
     },
     ...overrides,
   };
@@ -246,10 +251,11 @@ describe('stripe-webhook handler', () => {
           sk: { S: 'SUBSCRIPTION' },
         },
         UpdateExpression:
-          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
+          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
           ':subId': { S: MOCK_SUBSCRIPTION_ID },
           ':status': { S: 'active' },
+          ':periodStart': { S: new Date(1600000000 * 1000).toISOString() },
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
@@ -396,10 +402,11 @@ describe('stripe-webhook handler', () => {
           sk: { S: 'SUBSCRIPTION' },
         },
         UpdateExpression:
-          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
+          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
         ExpressionAttributeValues: {
           ':subId': { S: MOCK_SUBSCRIPTION_ID },
           ':status': { S: 'active' },
+          ':periodStart': { S: new Date(1600000000 * 1000).toISOString() },
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
