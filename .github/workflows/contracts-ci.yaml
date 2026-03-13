@@ -37,3 +37,37 @@ jobs:
         run: |
           forge test -vvv
         id: test
+
+  # ── Slither Static Analysis ──
+  slither:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build contracts
+        run: forge build
+
+      - name: Run Slither
+        uses: crytic/slither-action@v0.4.1
+        with:
+          slither-config: slither.config.json
+          sarif: slither-results.sarif
+          fail-on: medium
+          solc-version: '0.8.13'
+        continue-on-error: true # Advisory mode
+
+      - name: Upload Slither SARIF (requires GHAS for private repos)
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: slither-results.sarif
+          category: slither
+        continue-on-error: true
