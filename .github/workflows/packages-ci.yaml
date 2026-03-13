@@ -88,13 +88,16 @@ jobs:
           payload: |
             {
               "channel": "filone-alerts",
-              "text": "Deployment of `${{ github.event.repository.name }}` to `staging` failed.\nCommit: ${{ steps.commit-info.outputs.subject }} by @${{ github.actor }}\nDetails: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "text": ${{ toJSON(format('Deployment of `{0}` to `staging` failed.
+Commit: {1} by @{2}
+Details: {3}/{4}/actions/runs/{5}', github.event.repository.name, steps.commit-info.outputs.subject, github.actor, github.server_url, github.repository, github.run_id)) }},
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ":warning: *Deployment of `${{ github.event.repository.name }}` to `staging` failed* · <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Details>\nCommit: `${{ steps.commit-info.outputs.subject }}` by <https://github.com/${{ github.actor }}|@${{ github.actor }}>"
+                    "text": ${{ toJSON(format(':warning: *Deployment of `{0}` to `staging` failed* · <{1}/{2}/actions/runs/{3}|Details>
+Commit: `{4}` by <https://github.com/{5}|@{5}>', github.event.repository.name, github.server_url, github.repository, github.run_id, steps.commit-info.outputs.subject, github.actor)) }}
                   }
                 }
               ]
