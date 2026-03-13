@@ -1,4 +1,4 @@
-export { OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from './constants.js';
+export { OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME, TIB_BYTES } from './constants.js';
 export type { MeResponse, ConfirmOrgRequest, ConfirmOrgResponse } from './api/me.js';
 export { OrgRole } from './api/org.js';
 export type { UploadRequest, UploadResponse } from './api/upload.js';

@@ -83,6 +83,62 @@ function orgNotConfirmedResponse(): APIGatewayProxyStructuredResultV2 {
  */
 const ORG_CONFIRM_BYPASS_ROUTES = new Set(['/api/me', '/api/org/confirm']);
 
+/**
+ * Verify the ID token and extract the email claim.
+ * Returns undefined if the token is missing or invalid (non-fatal).
+ */
+async function extractEmailFromIdToken({
+  idToken,
+  jwks,
+  clientId,
+  issuer,
+}: {
+  idToken: string | undefined;
+  jwks: ReturnType<typeof createRemoteJWKSet>;
+  clientId: string;
+  issuer: string;
+}): Promise<string | null> {
+  if (!idToken) return null;
+  try {
+    const { payload } = await jwtVerify(idToken, jwks, { audience: clientId, issuer });
+    return (payload.email as string) ?? null;
+  } catch (err) {
+    console.warn('[auth] ID token verification failed, continuing without email', {
+      error: (err as Error).message,
+    });
+    return null;
+  }
+}
+
+/**
+ * Resolve user identity from sub+email, attach userInfo to the request context,
+ * and enforce the org-confirmed gate.
+ * Returns a 403 response if the org is not confirmed and the route is gated,
+ * or undefined to let the request continue.
+ */
+async function attachIdentity({
+  event,
+  sub,
+  email,
+}: {
+  event: APIGatewayProxyEventV2;
+  sub: string;
+  email: string | null;
+}): Promise<APIGatewayProxyStructuredResultV2 | null> {
+  const resolved = await resolveUserAndOrg(sub, email);
+  (
+    event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
+  ).userInfo = {
+    userId: resolved.userId,
+    orgId: resolved.orgId,
+    email: resolved.email ?? undefined,
+  };
+  if (!resolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
+    return orgNotConfirmedResponse();
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Sub → userId + orgId resolution via UserInfoTable
 // ---------------------------------------------------------------------------
@@ -91,13 +147,10 @@ interface ResolvedIdentity {
   userId: string;
   orgId: string;
   orgConfirmed: boolean;
-  email?: string;
+  email: string | null;
 }
 
-async function resolveUserAndOrg(
-  sub: string,
-  email: string | undefined,
-): Promise<ResolvedIdentity> {
+async function resolveUserAndOrg(sub: string, email: string | null): Promise<ResolvedIdentity> {
   const tableName = Resource.UserInfoTable.name;
 
   // Look up existing mapping
@@ -237,18 +290,14 @@ export function authMiddleware() {
       try {
         const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
         const sub = payload.sub!;
-        const email = payload.email as string | undefined;
-        const resolved = await resolveUserAndOrg(sub, email);
-        (
-          event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
-        ).userInfo = {
-          userId: resolved.userId,
-          orgId: resolved.orgId,
-          email: resolved.email,
-        };
-        if (!resolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
-          return orgNotConfirmedResponse();
-        }
+        const email = await extractEmailFromIdToken({
+          idToken,
+          jwks,
+          clientId: secrets.AUTH0_CLIENT_ID,
+          issuer,
+        });
+        const blocked = await attachIdentity({ event, sub, email });
+        if (blocked) return blocked;
         return; // Valid — continue to handler
       } catch (err) {
         // Expired or invalid — fall through to refresh
@@ -285,21 +334,15 @@ export function authMiddleware() {
           } satisfies NewTokens;
           const refreshedPayload = decodeJwt(tokens.access_token);
           const refreshedSub = refreshedPayload.sub!;
-          const refreshedEmail = refreshedPayload.email as string | undefined;
-          const refreshedResolved = await resolveUserAndOrg(refreshedSub, refreshedEmail);
-          (
-            event.requestContext as APIGatewayProxyEventV2['requestContext'] & {
-              userInfo: UserInfo;
-            }
-          ).userInfo = {
-            userId: refreshedResolved.userId,
-            orgId: refreshedResolved.orgId,
-            email: refreshedResolved.email,
-          };
+          const refreshedEmail = await extractEmailFromIdToken({
+            idToken: tokens.id_token,
+            jwks,
+            clientId: secrets.AUTH0_CLIENT_ID,
+            issuer,
+          });
           console.warn('[auth] Token refresh succeeded');
-          if (!refreshedResolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
-            return orgNotConfirmedResponse();
-          }
+          const blocked = await attachIdentity({ event, sub: refreshedSub, email: refreshedEmail });
+          if (blocked) return blocked;
           return; // Continue to handler
         }
         const refreshBody = await tokenRes.text().catch(() => '');

@@ -3,45 +3,57 @@
 import { client } from './client.gen.ts';
 import type { Client, Options as Options2, TDataShape } from './client/index.ts';
 import type {
-  DeleteTenantsByTenantIdAccessKeysByAccessKeyIdData,
-  DeleteTenantsByTenantIdAccessKeysByAccessKeyIdErrors,
-  DeleteTenantsByTenantIdAccessKeysByAccessKeyIdResponses,
-  GetEnvironmentData,
-  GetEnvironmentErrors,
-  GetEnvironmentResponses,
-  GetTenantsByTenantIdAccessKeysByAccessKeyIdData,
-  GetTenantsByTenantIdAccessKeysByAccessKeyIdErrors,
-  GetTenantsByTenantIdAccessKeysByAccessKeyIdResponses,
-  GetTenantsByTenantIdAccessKeysData,
-  GetTenantsByTenantIdAccessKeysErrors,
-  GetTenantsByTenantIdAccessKeysResponses,
-  GetTenantsByTenantIdBucketByBucketNameData,
-  GetTenantsByTenantIdBucketByBucketNameErrors,
-  GetTenantsByTenantIdBucketByBucketNameResponses,
-  GetTenantsByTenantIdBucketData,
-  GetTenantsByTenantIdBucketErrors,
-  GetTenantsByTenantIdBucketResponses,
-  GetTenantsByTenantIdData,
-  GetTenantsByTenantIdErrors,
-  GetTenantsByTenantIdMetricsData,
-  GetTenantsByTenantIdMetricsErrors,
-  GetTenantsByTenantIdMetricsResponses,
-  GetTenantsByTenantIdResponses,
-  GetTenantsData,
-  GetTenantsErrors,
-  GetTenantsResponses,
-  PostTenantsByTenantIdBucketByBucketNameCloneObjectData,
-  PostTenantsByTenantIdBucketByBucketNameCloneObjectErrors,
-  PostTenantsByTenantIdBucketByBucketNameCloneObjectResponses,
-  PostTenantsByTenantIdBucketData,
-  PostTenantsByTenantIdBucketErrors,
-  PostTenantsByTenantIdBucketResponses,
-  PutTenantsByTenantIdAccessKeysData,
-  PutTenantsByTenantIdAccessKeysErrors,
-  PutTenantsByTenantIdAccessKeysResponses,
-  PutTenantsByTenantIdBucketByBucketNameData,
-  PutTenantsByTenantIdBucketByBucketNameErrors,
-  PutTenantsByTenantIdBucketByBucketNameResponses,
+  DeleteV1TenantsByTenantIdAccessKeysByAccessKeyIdData,
+  DeleteV1TenantsByTenantIdAccessKeysByAccessKeyIdErrors,
+  DeleteV1TenantsByTenantIdAccessKeysByAccessKeyIdResponses,
+  GetAnalyticsV1OperationsBucketByBucketNameData,
+  GetAnalyticsV1OperationsBucketByBucketNameErrors,
+  GetAnalyticsV1OperationsBucketByBucketNameResponses,
+  GetAnalyticsV1OperationsMyorgData,
+  GetAnalyticsV1OperationsMyorgErrors,
+  GetAnalyticsV1OperationsMyorgResponses,
+  GetAnalyticsV1StorageBucketByBucketNameData,
+  GetAnalyticsV1StorageBucketByBucketNameErrors,
+  GetAnalyticsV1StorageBucketByBucketNameResponses,
+  GetAnalyticsV1StorageMyorgData,
+  GetAnalyticsV1StorageMyorgErrors,
+  GetAnalyticsV1StorageMyorgResponses,
+  GetV1EnvironmentData,
+  GetV1EnvironmentErrors,
+  GetV1EnvironmentResponses,
+  GetV1TenantsByTenantIdAccessKeysByAccessKeyIdData,
+  GetV1TenantsByTenantIdAccessKeysByAccessKeyIdErrors,
+  GetV1TenantsByTenantIdAccessKeysByAccessKeyIdResponses,
+  GetV1TenantsByTenantIdAccessKeysData,
+  GetV1TenantsByTenantIdAccessKeysErrors,
+  GetV1TenantsByTenantIdAccessKeysResponses,
+  GetV1TenantsByTenantIdBucketByBucketNameData,
+  GetV1TenantsByTenantIdBucketByBucketNameErrors,
+  GetV1TenantsByTenantIdBucketByBucketNameResponses,
+  GetV1TenantsByTenantIdBucketData,
+  GetV1TenantsByTenantIdBucketErrors,
+  GetV1TenantsByTenantIdBucketResponses,
+  GetV1TenantsByTenantIdData,
+  GetV1TenantsByTenantIdErrors,
+  GetV1TenantsByTenantIdMetricsData,
+  GetV1TenantsByTenantIdMetricsErrors,
+  GetV1TenantsByTenantIdMetricsResponses,
+  GetV1TenantsByTenantIdResponses,
+  GetV1TenantsData,
+  GetV1TenantsErrors,
+  GetV1TenantsResponses,
+  PostV1TenantsByTenantIdAccessKeysData,
+  PostV1TenantsByTenantIdAccessKeysErrors,
+  PostV1TenantsByTenantIdAccessKeysResponses,
+  PostV1TenantsByTenantIdBucketByBucketNameCloneObjectData,
+  PostV1TenantsByTenantIdBucketByBucketNameCloneObjectErrors,
+  PostV1TenantsByTenantIdBucketByBucketNameCloneObjectResponses,
+  PostV1TenantsByTenantIdBucketData,
+  PostV1TenantsByTenantIdBucketErrors,
+  PostV1TenantsByTenantIdBucketResponses,
+  PutV1TenantsByTenantIdBucketByBucketNameData,
+  PutV1TenantsByTenantIdBucketByBucketNameErrors,
+  PutV1TenantsByTenantIdBucketByBucketNameResponses,
 } from './types.gen.ts';
 
 export type Options<
@@ -62,15 +74,71 @@ export type Options<
 };
 
 /**
+ * Get bucket operation metrics
+ *
+ * Returns S3 operation metrics for a bucket, optionally filtered by requester tenant and grouped by tags
+ */
+export const getAnalyticsV1OperationsBucketByBucketName = <ThrowOnError extends boolean = false>(
+  options: Options<GetAnalyticsV1OperationsBucketByBucketNameData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetAnalyticsV1OperationsBucketByBucketNameResponses,
+    GetAnalyticsV1OperationsBucketByBucketNameErrors,
+    ThrowOnError
+  >({ url: '/analytics/v1/operations/bucket/{bucketName}', ...options });
+
+/**
+ * Get tenant operation metrics
+ *
+ * Returns S3 operation metrics for the authenticated tenant in the given time range, optionally resampled by window duration and grouped by tags
+ */
+export const getAnalyticsV1OperationsMyorg = <ThrowOnError extends boolean = false>(
+  options: Options<GetAnalyticsV1OperationsMyorgData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetAnalyticsV1OperationsMyorgResponses,
+    GetAnalyticsV1OperationsMyorgErrors,
+    ThrowOnError
+  >({ url: '/analytics/v1/operations/myorg', ...options });
+
+/**
+ * Get bucket storage metrics
+ *
+ * Returns storage metrics for a bucket owned by the authenticated tenant
+ */
+export const getAnalyticsV1StorageBucketByBucketName = <ThrowOnError extends boolean = false>(
+  options: Options<GetAnalyticsV1StorageBucketByBucketNameData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetAnalyticsV1StorageBucketByBucketNameResponses,
+    GetAnalyticsV1StorageBucketByBucketNameErrors,
+    ThrowOnError
+  >({ url: '/analytics/v1/storage/bucket/{bucketName}', ...options });
+
+/**
+ * Get tenant storage metrics
+ *
+ * Returns storage metrics for the authenticated tenant in the given time range, optionally resampled by window duration
+ */
+export const getAnalyticsV1StorageMyorg = <ThrowOnError extends boolean = false>(
+  options: Options<GetAnalyticsV1StorageMyorgData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetAnalyticsV1StorageMyorgResponses,
+    GetAnalyticsV1StorageMyorgErrors,
+    ThrowOnError
+  >({ url: '/analytics/v1/storage/myorg', ...options });
+
+/**
  * Get portal environment configuration
  *
  * Returns environment configuration for the portal web application, including Auth0 settings
  */
-export const getEnvironment = <ThrowOnError extends boolean = false>(
-  options?: Options<GetEnvironmentData, ThrowOnError>,
+export const getV1Environment = <ThrowOnError extends boolean = false>(
+  options?: Options<GetV1EnvironmentData, ThrowOnError>,
 ) =>
-  (options?.client ?? client).get<GetEnvironmentResponses, GetEnvironmentErrors, ThrowOnError>({
-    url: '/environment',
+  (options?.client ?? client).get<GetV1EnvironmentResponses, GetV1EnvironmentErrors, ThrowOnError>({
+    url: '/v1/environment',
     ...options,
   });
 
@@ -79,11 +147,11 @@ export const getEnvironment = <ThrowOnError extends boolean = false>(
  *
  * Returns the list of active tenants for the authenticated organization
  */
-export const getTenants = <ThrowOnError extends boolean = false>(
-  options?: Options<GetTenantsData, ThrowOnError>,
+export const getV1Tenants = <ThrowOnError extends boolean = false>(
+  options?: Options<GetV1TenantsData, ThrowOnError>,
 ) =>
-  (options?.client ?? client).get<GetTenantsResponses, GetTenantsErrors, ThrowOnError>({
-    url: '/tenants',
+  (options?.client ?? client).get<GetV1TenantsResponses, GetV1TenantsErrors, ThrowOnError>({
+    url: '/v1/tenants',
     ...options,
   });
 
@@ -92,43 +160,43 @@ export const getTenants = <ThrowOnError extends boolean = false>(
  *
  * Returns tenant details for the given tenant ID
  */
-export const getTenantsByTenantId = <ThrowOnError extends boolean = false>(
-  options: Options<GetTenantsByTenantIdData, ThrowOnError>,
+export const getV1TenantsByTenantId = <ThrowOnError extends boolean = false>(
+  options: Options<GetV1TenantsByTenantIdData, ThrowOnError>,
 ) =>
   (options.client ?? client).get<
-    GetTenantsByTenantIdResponses,
-    GetTenantsByTenantIdErrors,
+    GetV1TenantsByTenantIdResponses,
+    GetV1TenantsByTenantIdErrors,
     ThrowOnError
-  >({ url: '/tenants/{tenantId}', ...options });
+  >({ url: '/v1/tenants/{tenantId}', ...options });
 
 /**
  * List access keys
  *
  * Returns the list of access keys for the given tenant
  */
-export const getTenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = false>(
-  options: Options<GetTenantsByTenantIdAccessKeysData, ThrowOnError>,
+export const getV1TenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = false>(
+  options: Options<GetV1TenantsByTenantIdAccessKeysData, ThrowOnError>,
 ) =>
   (options.client ?? client).get<
-    GetTenantsByTenantIdAccessKeysResponses,
-    GetTenantsByTenantIdAccessKeysErrors,
+    GetV1TenantsByTenantIdAccessKeysResponses,
+    GetV1TenantsByTenantIdAccessKeysErrors,
     ThrowOnError
-  >({ url: '/tenants/{tenantId}/access_keys', ...options });
+  >({ url: '/v1/tenants/{tenantId}/access_keys', ...options });
 
 /**
  * Create access key
  *
  * Creates a new access key for the given tenant
  */
-export const putTenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = false>(
-  options: Options<PutTenantsByTenantIdAccessKeysData, ThrowOnError>,
+export const postV1TenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = false>(
+  options: Options<PostV1TenantsByTenantIdAccessKeysData, ThrowOnError>,
 ) =>
-  (options.client ?? client).put<
-    PutTenantsByTenantIdAccessKeysResponses,
-    PutTenantsByTenantIdAccessKeysErrors,
+  (options.client ?? client).post<
+    PostV1TenantsByTenantIdAccessKeysResponses,
+    PostV1TenantsByTenantIdAccessKeysErrors,
     ThrowOnError
   >({
-    url: '/tenants/{tenantId}/access_keys',
+    url: '/v1/tenants/{tenantId}/access_keys',
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -141,59 +209,59 @@ export const putTenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = fa
  *
  * Deletes an access key for the given tenant
  */
-export const deleteTenantsByTenantIdAccessKeysByAccessKeyId = <
+export const deleteV1TenantsByTenantIdAccessKeysByAccessKeyId = <
   ThrowOnError extends boolean = false,
 >(
-  options: Options<DeleteTenantsByTenantIdAccessKeysByAccessKeyIdData, ThrowOnError>,
+  options: Options<DeleteV1TenantsByTenantIdAccessKeysByAccessKeyIdData, ThrowOnError>,
 ) =>
   (options.client ?? client).delete<
-    DeleteTenantsByTenantIdAccessKeysByAccessKeyIdResponses,
-    DeleteTenantsByTenantIdAccessKeysByAccessKeyIdErrors,
+    DeleteV1TenantsByTenantIdAccessKeysByAccessKeyIdResponses,
+    DeleteV1TenantsByTenantIdAccessKeysByAccessKeyIdErrors,
     ThrowOnError
-  >({ url: '/tenants/{tenantId}/access_keys/{accessKeyId}', ...options });
+  >({ url: '/v1/tenants/{tenantId}/access_keys/{accessKeyId}', ...options });
 
 /**
  * Get access key
  *
  * Returns a single access key for the given tenant
  */
-export const getTenantsByTenantIdAccessKeysByAccessKeyId = <ThrowOnError extends boolean = false>(
-  options: Options<GetTenantsByTenantIdAccessKeysByAccessKeyIdData, ThrowOnError>,
+export const getV1TenantsByTenantIdAccessKeysByAccessKeyId = <ThrowOnError extends boolean = false>(
+  options: Options<GetV1TenantsByTenantIdAccessKeysByAccessKeyIdData, ThrowOnError>,
 ) =>
   (options.client ?? client).get<
-    GetTenantsByTenantIdAccessKeysByAccessKeyIdResponses,
-    GetTenantsByTenantIdAccessKeysByAccessKeyIdErrors,
+    GetV1TenantsByTenantIdAccessKeysByAccessKeyIdResponses,
+    GetV1TenantsByTenantIdAccessKeysByAccessKeyIdErrors,
     ThrowOnError
-  >({ url: '/tenants/{tenantId}/access_keys/{accessKeyId}', ...options });
+  >({ url: '/v1/tenants/{tenantId}/access_keys/{accessKeyId}', ...options });
 
 /**
  * List buckets
  *
  * Returns the list of active buckets for the given tenant
  */
-export const getTenantsByTenantIdBucket = <ThrowOnError extends boolean = false>(
-  options: Options<GetTenantsByTenantIdBucketData, ThrowOnError>,
+export const getV1TenantsByTenantIdBucket = <ThrowOnError extends boolean = false>(
+  options: Options<GetV1TenantsByTenantIdBucketData, ThrowOnError>,
 ) =>
   (options.client ?? client).get<
-    GetTenantsByTenantIdBucketResponses,
-    GetTenantsByTenantIdBucketErrors,
+    GetV1TenantsByTenantIdBucketResponses,
+    GetV1TenantsByTenantIdBucketErrors,
     ThrowOnError
-  >({ url: '/tenants/{tenantId}/bucket', ...options });
+  >({ url: '/v1/tenants/{tenantId}/bucket', ...options });
 
 /**
  * Create bucket
  *
  * Creates a new bucket for the given tenant
  */
-export const postTenantsByTenantIdBucket = <ThrowOnError extends boolean = false>(
-  options: Options<PostTenantsByTenantIdBucketData, ThrowOnError>,
+export const postV1TenantsByTenantIdBucket = <ThrowOnError extends boolean = false>(
+  options: Options<PostV1TenantsByTenantIdBucketData, ThrowOnError>,
 ) =>
   (options.client ?? client).post<
-    PostTenantsByTenantIdBucketResponses,
-    PostTenantsByTenantIdBucketErrors,
+    PostV1TenantsByTenantIdBucketResponses,
+    PostV1TenantsByTenantIdBucketErrors,
     ThrowOnError
   >({
-    url: '/tenants/{tenantId}/bucket',
+    url: '/v1/tenants/{tenantId}/bucket',
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -206,29 +274,29 @@ export const postTenantsByTenantIdBucket = <ThrowOnError extends boolean = false
  *
  * Returns bucket details for the given tenant and bucket name
  */
-export const getTenantsByTenantIdBucketByBucketName = <ThrowOnError extends boolean = false>(
-  options: Options<GetTenantsByTenantIdBucketByBucketNameData, ThrowOnError>,
+export const getV1TenantsByTenantIdBucketByBucketName = <ThrowOnError extends boolean = false>(
+  options: Options<GetV1TenantsByTenantIdBucketByBucketNameData, ThrowOnError>,
 ) =>
   (options.client ?? client).get<
-    GetTenantsByTenantIdBucketByBucketNameResponses,
-    GetTenantsByTenantIdBucketByBucketNameErrors,
+    GetV1TenantsByTenantIdBucketByBucketNameResponses,
+    GetV1TenantsByTenantIdBucketByBucketNameErrors,
     ThrowOnError
-  >({ url: '/tenants/{tenantId}/bucket/{bucketName}', ...options });
+  >({ url: '/v1/tenants/{tenantId}/bucket/{bucketName}', ...options });
 
 /**
  * Edit bucket
  *
  * Updates bucket configuration (currently only default retention for object lock buckets)
  */
-export const putTenantsByTenantIdBucketByBucketName = <ThrowOnError extends boolean = false>(
-  options: Options<PutTenantsByTenantIdBucketByBucketNameData, ThrowOnError>,
+export const putV1TenantsByTenantIdBucketByBucketName = <ThrowOnError extends boolean = false>(
+  options: Options<PutV1TenantsByTenantIdBucketByBucketNameData, ThrowOnError>,
 ) =>
   (options.client ?? client).put<
-    PutTenantsByTenantIdBucketByBucketNameResponses,
-    PutTenantsByTenantIdBucketByBucketNameErrors,
+    PutV1TenantsByTenantIdBucketByBucketNameResponses,
+    PutV1TenantsByTenantIdBucketByBucketNameErrors,
     ThrowOnError
   >({
-    url: '/tenants/{tenantId}/bucket/{bucketName}',
+    url: '/v1/tenants/{tenantId}/bucket/{bucketName}',
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -241,17 +309,17 @@ export const putTenantsByTenantIdBucketByBucketName = <ThrowOnError extends bool
  *
  * Creates a server-side clone of an object in the given bucket
  */
-export const postTenantsByTenantIdBucketByBucketNameCloneObject = <
+export const postV1TenantsByTenantIdBucketByBucketNameCloneObject = <
   ThrowOnError extends boolean = false,
 >(
-  options: Options<PostTenantsByTenantIdBucketByBucketNameCloneObjectData, ThrowOnError>,
+  options: Options<PostV1TenantsByTenantIdBucketByBucketNameCloneObjectData, ThrowOnError>,
 ) =>
   (options.client ?? client).post<
-    PostTenantsByTenantIdBucketByBucketNameCloneObjectResponses,
-    PostTenantsByTenantIdBucketByBucketNameCloneObjectErrors,
+    PostV1TenantsByTenantIdBucketByBucketNameCloneObjectResponses,
+    PostV1TenantsByTenantIdBucketByBucketNameCloneObjectErrors,
     ThrowOnError
   >({
-    url: '/tenants/{tenantId}/bucket/{bucketName}/clone_object',
+    url: '/v1/tenants/{tenantId}/bucket/{bucketName}/clone_object',
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -264,11 +332,11 @@ export const postTenantsByTenantIdBucketByBucketNameCloneObject = <
  *
  * Returns summary metrics for the given tenant
  */
-export const getTenantsByTenantIdMetrics = <ThrowOnError extends boolean = false>(
-  options: Options<GetTenantsByTenantIdMetricsData, ThrowOnError>,
+export const getV1TenantsByTenantIdMetrics = <ThrowOnError extends boolean = false>(
+  options: Options<GetV1TenantsByTenantIdMetricsData, ThrowOnError>,
 ) =>
   (options.client ?? client).get<
-    GetTenantsByTenantIdMetricsResponses,
-    GetTenantsByTenantIdMetricsErrors,
+    GetV1TenantsByTenantIdMetricsResponses,
+    GetV1TenantsByTenantIdMetricsErrors,
     ThrowOnError
-  >({ url: '/tenants/{tenantId}/metrics', ...options });
+  >({ url: '/v1/tenants/{tenantId}/metrics', ...options });

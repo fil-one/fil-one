@@ -58,6 +58,14 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Dynamo"
     }
+    "UsageReportingOrchestrator": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "UsageReportingWorker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "UserFilesBucket": {
       "name": string
       "type": "sst.aws.Bucket"

@@ -1,0 +1,1005 @@
+{
+  "basePath": "/api",
+  "definitions": {
+    "accesskeys.AccessKeyRequest": {
+      "properties": {
+        "access": {
+          "description": "Default s3 permissions: [s3:GetBucketLocation, s3:ListAllMyBuckets]\nAdditional permissions:\n\t* Read                             [s3:GetObject, s3:ListMultipartUploadParts]\n\t* Write                            [s3:PutObject, s3:AbortMultipartUpload]\n\t* Delete                           [s3:DeleteObject]\n\t* List                             [s3:ListBucket, s3:ListBucketMultipartUploads]\n\t* GetBucketVersioning              [s3:GetBucketVersioning]\n\t* GetBucketObjectLockConfiguration [s3:GetBucketObjectLockConfiguration]\n\t* ListBucketVersions               [s3:ListBucketVersions]\n\t* GetObjectVersion                 [s3:GetObjectVersion]\n\t* GetObjectRetention               [s3:GetObjectRetention]\n\t* GetObjectLegalHold               [s3:GetObjectLegalHold]\n\t* PutObjectRetention               [s3:PutObjectRetention]\n\t* PutObjectLegalHold               [s3:PutObjectLegalHold]\n\t* DeleteObjectVersion              [s3:DeleteObjectVersion]",
+          "items": { "type": "string" },
+          "type": "array"
+        },
+        "buckets": { "items": { "type": "string" }, "type": "array" },
+        "expiration": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "bucket.BaseBucketListResponse": {
+      "properties": {
+        "createdAt": { "type": "string" },
+        "flags": { "items": { "$ref": "#/definitions/bucket.Flag" }, "type": "array" },
+        "name": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "bucket.BucketListResponse": {
+      "properties": {
+        "buckets": {
+          "items": { "$ref": "#/definitions/bucket.BaseBucketListResponse" },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "bucket.BucketResponse": {
+      "properties": {
+        "createdAt": { "type": "string" },
+        "defaultRetention": { "$ref": "#/definitions/bucket.RetentionMode" },
+        "encrypted": { "type": "boolean" },
+        "name": { "type": "string" },
+        "objectLock": { "type": "boolean" },
+        "retentionDuration": { "type": "integer" },
+        "retentionDurationType": { "$ref": "#/definitions/bucket.DurationType" },
+        "versioning": { "type": "boolean" }
+      },
+      "type": "object"
+    },
+    "bucket.DefaultRetention": {
+      "properties": {
+        "duration": { "$ref": "#/definitions/bucket.RetentionDuration" },
+        "enabled": { "type": "boolean" },
+        "mode": { "$ref": "#/definitions/bucket.RetentionMode" }
+      },
+      "type": "object"
+    },
+    "bucket.DurationType": {
+      "enum": ["d", "y"],
+      "type": "string",
+      "x-enum-varnames": ["Days", "Years"]
+    },
+    "bucket.Flag": {
+      "enum": ["unencrypted", "encrypted", "versioned"],
+      "type": "string",
+      "x-enum-varnames": ["Unencrypted", "Encrypted", "Versioning"]
+    },
+    "bucket.ObjectResponse": {
+      "properties": {
+        "bucket": { "type": "string" },
+        "key": { "type": "string" },
+        "size": { "type": "integer" },
+        "versionId": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "bucket.RetentionDuration": {
+      "properties": {
+        "duration": { "type": "integer" },
+        "type": { "$ref": "#/definitions/bucket.DurationType" }
+      },
+      "type": "object"
+    },
+    "bucket.RetentionMode": {
+      "enum": ["off", "governance", "compliance"],
+      "type": "string",
+      "x-enum-varnames": ["Off", "Governance", "Compliance"]
+    },
+    "buckets.BucketCreateRequest": {
+      "properties": {
+        "defaultRetention": { "$ref": "#/definitions/bucket.DefaultRetention" },
+        "encrypted": { "type": "boolean" },
+        "lock": { "type": "boolean" },
+        "name": { "type": "string" },
+        "versioning": { "type": "boolean" }
+      },
+      "type": "object"
+    },
+    "buckets.BucketEditRequest": {
+      "properties": { "defaultRetention": { "$ref": "#/definitions/bucket.DefaultRetention" } },
+      "type": "object"
+    },
+    "buckets.ObjectCloneRequest": {
+      "properties": { "objectKey": { "type": "string" }, "versionId": { "type": "string" } },
+      "type": "object"
+    },
+    "common.ReturnMessage": { "properties": { "message": { "type": "string" } }, "type": "object" },
+    "model.OperationMetricsResponse": {
+      "properties": {
+        "series": {
+          "items": { "$ref": "#/definitions/model.OperationMetricsSeries" },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "model.OperationMetricsSample": {
+      "properties": {
+        "abortMultipartUpload": { "type": "integer" },
+        "completeMultipartUpload": { "type": "integer" },
+        "copyObject": { "type": "integer" },
+        "createMultipartUpload": { "type": "integer" },
+        "deleteObject": { "type": "integer" },
+        "deleteObjectTagging": { "type": "integer" },
+        "deleteObjects": { "type": "integer" },
+        "getBucketLocation": { "type": "integer" },
+        "getBucketVersioning": { "type": "integer" },
+        "getObject": { "type": "integer" },
+        "getObjectAttributes": { "type": "integer" },
+        "getObjectLegalHold": { "type": "integer" },
+        "getObjectLockConfiguration": { "type": "integer" },
+        "getObjectRetention": { "type": "integer" },
+        "getObjectTagging": { "type": "integer" },
+        "headBucket": { "type": "integer" },
+        "headObject": { "type": "integer" },
+        "listBuckets": { "type": "integer" },
+        "listMultipartUploads": { "type": "integer" },
+        "listObjectVersions": { "type": "integer" },
+        "listObjects": { "type": "integer" },
+        "listObjectsV2": { "type": "integer" },
+        "listParts": { "type": "integer" },
+        "putObject": { "type": "integer" },
+        "putObjectLegalHold": { "type": "integer" },
+        "putObjectLockConfiguration": { "type": "integer" },
+        "putObjectRetention": { "type": "integer" },
+        "putObjectTagging": { "type": "integer" },
+        "rxBytes": { "type": "integer" },
+        "timestamp": { "type": "string" },
+        "txBytes": { "type": "integer" },
+        "uploadPart": { "type": "integer" },
+        "uploadPartCopy": { "type": "integer" },
+        "windowSizeSeconds": { "type": "integer" }
+      },
+      "type": "object"
+    },
+    "model.OperationMetricsSeries": {
+      "properties": {
+        "samples": {
+          "items": { "$ref": "#/definitions/model.OperationMetricsSample" },
+          "type": "array"
+        },
+        "tags": { "$ref": "#/definitions/model.OperationMetricsSeriesKey" }
+      },
+      "type": "object"
+    },
+    "model.OperationMetricsSeriesKey": {
+      "properties": {
+        "requesterTenantId": { "type": "string" },
+        "trafficClass": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "model.StorageMetricsResponse": {
+      "properties": {
+        "samples": {
+          "items": { "$ref": "#/definitions/model.StorageMetricsSample" },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "model.StorageMetricsSample": {
+      "properties": {
+        "bytesUsed": { "type": "integer" },
+        "objectCount": { "type": "integer" },
+        "timestamp": { "type": "string" },
+        "versionCount": { "type": "integer" },
+        "windowSize": { "type": "integer" }
+      },
+      "type": "object"
+    },
+    "models.AccessKey": {
+      "properties": {
+        "accessKeyId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "id": { "type": "string" },
+        "modifiedAt": { "type": "string" },
+        "name": { "type": "string" },
+        "tenantId": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "models.AccessKeyBase": {
+      "properties": {
+        "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "id": { "type": "string" },
+        "modifiedAt": { "type": "string" },
+        "name": { "type": "string" },
+        "tenantId": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "models.AccessKeyFull": {
+      "properties": {
+        "accessKeyId": { "type": "string" },
+        "accessKeySecret": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "id": { "type": "string" },
+        "modifiedAt": { "type": "string" },
+        "name": { "type": "string" },
+        "tenantId": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "models.AccessKeyFullResponse": {
+      "properties": { "accessKey": { "$ref": "#/definitions/models.AccessKeyFull" } },
+      "type": "object"
+    },
+    "models.AccessKeyResponse": {
+      "properties": { "accessKey": { "$ref": "#/definitions/models.AccessKey" } },
+      "type": "object"
+    },
+    "models.ClientEnvironmentResponse": {
+      "properties": {
+        "auth0Audience": { "type": "string" },
+        "auth0ClientId": { "type": "string" },
+        "auth0Connection": { "type": "string" },
+        "auth0Issuer": { "type": "string" },
+        "bucketEncryptionEnabled": { "type": "boolean" },
+        "captchaToken": { "type": "string" },
+        "docsUrl": { "type": "string" },
+        "tracingEnabled": { "type": "boolean" },
+        "tracingUrl": { "type": "string" },
+        "trialRegistrationEnabled": { "type": "boolean" }
+      },
+      "type": "object"
+    },
+    "models.ListKeysResponse": {
+      "properties": {
+        "accessKeys": { "items": { "$ref": "#/definitions/models.AccessKeyBase" }, "type": "array" }
+      },
+      "type": "object"
+    },
+    "models.MetricsResponse": {
+      "properties": {
+        "bucketCount": { "type": "integer" },
+        "bucketLimit": { "type": "integer" },
+        "keyCount": { "type": "integer" },
+        "keyLimit": { "type": "integer" },
+        "maxBucketSize": { "type": "integer" },
+        "tenantName": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "models.TenantBase": {
+      "properties": { "id": { "type": "string" }, "name": { "type": "string" } },
+      "type": "object"
+    },
+    "models.TenantResponse": {
+      "properties": {
+        "endpoint": { "type": "string" },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "orgId": { "type": "string" },
+        "region": { "type": "string" },
+        "status": { "$ref": "#/definitions/models.TenantStatus" },
+        "trialEndDate": { "type": "string" },
+        "trialStartDate": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "models.TenantStatus": {
+      "enum": ["DISABLED", "LOCKED", "WRITE_LOCKED", "ACTIVE"],
+      "type": "string",
+      "x-enum-comments": {
+        "ACTIVE": "ACTIVE allows full access (read, write, delete).",
+        "DISABLED": "DISABLED denies all actions for the tenant.",
+        "LOCKED": "LOCKED makes the tenant read-only (no writes or deletes).",
+        "WRITE_LOCKED": "WRITE_LOCKED blocks writes but still allows reads and deletes."
+      },
+      "x-enum-descriptions": [
+        "DISABLED denies all actions for the tenant.",
+        "LOCKED makes the tenant read-only (no writes or deletes).",
+        "WRITE_LOCKED blocks writes but still allows reads and deletes.",
+        "ACTIVE allows full access (read, write, delete)."
+      ],
+      "x-enum-varnames": ["DISABLED", "LOCKED", "WRITE_LOCKED", "ACTIVE"]
+    },
+    "models.TenantsResponse": {
+      "properties": {
+        "tenants": { "items": { "$ref": "#/definitions/models.TenantBase" }, "type": "array" }
+      },
+      "type": "object"
+    }
+  },
+  "host": "",
+  "info": {
+    "contact": {},
+    "description": "This is Aurora Portal API.",
+    "title": "Aurora Portal API",
+    "version": "1.0"
+  },
+  "paths": {
+    "/analytics/v1/operations/bucket/{bucketName}": {
+      "get": {
+        "description": "Returns S3 operation metrics for a bucket, optionally filtered by requester tenant and grouped by tags",
+        "parameters": [
+          {
+            "description": "Bucket name",
+            "in": "path",
+            "name": "bucketName",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Start of time range (RFC3339)",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "End of time range (RFC3339)",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Resample window duration, e.g., 5m, 1h. Minutes and hours are the only supported units",
+            "in": "query",
+            "name": "window",
+            "type": "string"
+          },
+          {
+            "description": "Group by fields (comma-separated): trafficClass,requesterTenantId",
+            "in": "query",
+            "name": "groupBy",
+            "type": "string"
+          },
+          {
+            "description": "Filter metrics to a requester tenant ID",
+            "in": "query",
+            "name": "requesterTenantId",
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Operation metrics",
+            "schema": { "$ref": "#/definitions/model.OperationMetricsResponse" }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "403": {
+            "description": "Access denied",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Get bucket operation metrics",
+        "tags": ["Operations"]
+      }
+    },
+    "/analytics/v1/operations/myorg": {
+      "get": {
+        "description": "Returns S3 operation metrics for the authenticated tenant in the given time range, optionally resampled by window duration and grouped by tags",
+        "parameters": [
+          {
+            "description": "Start of time range (RFC3339)",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "End of time range (RFC3339)",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Resample window duration, e.g., 5m, 1h. Minutes and hours are the only supported units",
+            "in": "query",
+            "name": "window",
+            "type": "string"
+          },
+          {
+            "description": "Group by fields (comma-separated): trafficClass,requesterTenantId",
+            "in": "query",
+            "name": "groupBy",
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Operation metrics",
+            "schema": { "$ref": "#/definitions/model.OperationMetricsResponse" }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Get tenant operation metrics",
+        "tags": ["Operations"]
+      }
+    },
+    "/analytics/v1/storage/bucket/{bucketName}": {
+      "get": {
+        "description": "Returns storage metrics for a bucket owned by the authenticated tenant",
+        "parameters": [
+          {
+            "description": "Bucket name",
+            "in": "path",
+            "name": "bucketName",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Start of time range (RFC3339)",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "End of time range (RFC3339)",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Resample window duration, e.g., 5m, 1h. Minutes and hours are the only supported units",
+            "in": "query",
+            "name": "window",
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Storage metrics",
+            "schema": { "$ref": "#/definitions/model.StorageMetricsResponse" }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "403": {
+            "description": "Access denied",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Get bucket storage metrics",
+        "tags": ["Storage"]
+      }
+    },
+    "/analytics/v1/storage/myorg": {
+      "get": {
+        "description": "Returns storage metrics for the authenticated tenant in the given time range, optionally resampled by window duration",
+        "parameters": [
+          {
+            "description": "Start of time range (RFC3339)",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "End of time range (RFC3339)",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Resample window duration, e.g., 5m, 1h. Minutes and hours are the only supported units",
+            "in": "query",
+            "name": "window",
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Storage metrics",
+            "schema": { "$ref": "#/definitions/model.StorageMetricsResponse" }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Get tenant storage metrics",
+        "tags": ["Storage"]
+      }
+    },
+    "/v1/environment": {
+      "get": {
+        "description": "Returns environment configuration for the portal web application, including Auth0 settings",
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Environment configuration",
+            "schema": { "$ref": "#/definitions/models.ClientEnvironmentResponse" }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Get portal environment configuration",
+        "tags": ["Environment"]
+      }
+    },
+    "/v1/tenants": {
+      "get": {
+        "description": "Returns the list of active tenants for the authenticated organization",
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Tenants",
+            "schema": { "$ref": "#/definitions/models.TenantsResponse" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "List tenants",
+        "tags": ["Tenants"]
+      }
+    },
+    "/v1/tenants/{tenantId}": {
+      "get": {
+        "description": "Returns tenant details for the given tenant ID",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Tenant details",
+            "schema": { "$ref": "#/definitions/models.TenantResponse" }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Get tenant",
+        "tags": ["Tenants"]
+      }
+    },
+    "/v1/tenants/{tenantId}/access_keys": {
+      "get": {
+        "description": "Returns the list of access keys for the given tenant",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Access keys",
+            "schema": { "$ref": "#/definitions/models.ListKeysResponse" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "List access keys",
+        "tags": ["Access Keys"]
+      },
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a new access key for the given tenant",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Access key request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": { "$ref": "#/definitions/accesskeys.AccessKeyRequest" }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "201": {
+            "description": "Created access key",
+            "schema": { "$ref": "#/definitions/models.AccessKeyFullResponse" }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Create access key",
+        "tags": ["Access Keys"]
+      }
+    },
+    "/v1/tenants/{tenantId}/access_keys/{accessKeyId}": {
+      "delete": {
+        "description": "Deletes an access key for the given tenant",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Access key ID",
+            "in": "path",
+            "name": "accessKeyId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "204": { "description": "No Content", "schema": { "type": "string" } },
+          "404": {
+            "description": "Not found",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Delete access key",
+        "tags": ["Access Keys"]
+      },
+      "get": {
+        "description": "Returns a single access key for the given tenant",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Access key ID",
+            "in": "path",
+            "name": "accessKeyId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Access key",
+            "schema": { "$ref": "#/definitions/models.AccessKeyResponse" }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Get access key",
+        "tags": ["Access Keys"]
+      }
+    },
+    "/v1/tenants/{tenantId}/bucket": {
+      "get": {
+        "description": "Returns the list of active buckets for the given tenant",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Bucket list",
+            "schema": { "$ref": "#/definitions/bucket.BucketListResponse" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "List buckets",
+        "tags": ["Buckets"]
+      },
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a new bucket for the given tenant",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Bucket create request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": { "$ref": "#/definitions/buckets.BucketCreateRequest" }
+          }
+        ],
+        "responses": {
+          "201": { "description": "Created", "schema": { "type": "string" } },
+          "400": {
+            "description": "Bad request",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "403": {
+            "description": "Forbidden",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Create bucket",
+        "tags": ["Buckets"]
+      }
+    },
+    "/v1/tenants/{tenantId}/bucket/{bucketName}": {
+      "get": {
+        "description": "Returns bucket details for the given tenant and bucket name",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Bucket name",
+            "in": "path",
+            "name": "bucketName",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Bucket",
+            "schema": { "$ref": "#/definitions/bucket.BucketResponse" }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Get bucket",
+        "tags": ["Buckets"]
+      },
+      "put": {
+        "consumes": ["application/json"],
+        "description": "Updates bucket configuration (currently only default retention for object lock buckets)",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Bucket name",
+            "in": "path",
+            "name": "bucketName",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Bucket edit request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": { "$ref": "#/definitions/buckets.BucketEditRequest" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "No Content", "schema": { "type": "string" } },
+          "400": {
+            "description": "Bad request",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Edit bucket",
+        "tags": ["Buckets"]
+      }
+    },
+    "/v1/tenants/{tenantId}/bucket/{bucketName}/clone_object": {
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a server-side clone of an object in the given bucket",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Bucket name",
+            "in": "path",
+            "name": "bucketName",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Clone object request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": { "$ref": "#/definitions/buckets.ObjectCloneRequest" }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Cloned object",
+            "schema": { "$ref": "#/definitions/bucket.ObjectResponse" }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Clone object",
+        "tags": ["Buckets"]
+      }
+    },
+    "/v1/tenants/{tenantId}/metrics": {
+      "get": {
+        "description": "Returns summary metrics for the given tenant",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Metrics",
+            "schema": { "$ref": "#/definitions/models.MetricsResponse" }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "summary": "Get tenant metrics",
+        "tags": ["Metrics"]
+      }
+    }
+  },
+  "schemes": [],
+  "securityDefinitions": {
+    "Bearer": {
+      "description": "Type \"Bearer\" followed by a space and then your token.",
+      "in": "header",
+      "name": "Authorization",
+      "type": "apiKey"
+    }
+  },
+  "swagger": "2.0"
+}

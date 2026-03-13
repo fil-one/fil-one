@@ -244,10 +244,12 @@ export default $config({
 
     const auroraEnv = {
       AURORA_BACKOFFICE_URL: 'https://api.backoffice.dev.aur.lu/api',
-      AURORA_PORTAL_URL: 'https://api.portal.dev.aur.lu/api/v1',
+      AURORA_PORTAL_URL: 'https://api.portal.dev.aur.lu/api',
       AURORA_PARTNER_ID: 'ff',
       AURORA_REGION_ID: 'ff',
     };
+
+    const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
 
     function addRoute(
       method: string,
@@ -289,13 +291,26 @@ export default $config({
       [
         {
           actions: ['ssm:GetParameter'],
-          resources: [
-            $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`,
-          ],
+          resources: [auroraApiKeySsmArn],
         },
       ],
     );
     addRoute('DELETE', '/api/buckets/{name}', 'delete-bucket');
+    addRoute('GET', '/api/access-keys', 'list-access-keys');
+    addRoute(
+      'POST',
+      '/api/access-keys',
+      'create-access-key',
+      {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+      },
+      [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [auroraApiKeySsmArn],
+        },
+      ],
+    );
     addRoute('GET', '/api/buckets/{name}/objects', 'list-objects');
     addRoute('POST', '/api/buckets/{name}/objects/upload', 'upload-object');
     addRoute('GET', '/api/buckets/{name}/objects/download', 'download-object');
@@ -354,9 +369,7 @@ export default $config({
         permissions: [
           {
             actions: ['ssm:PutParameter'],
-            resources: [
-              $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`,
-            ],
+            resources: [auroraApiKeySsmArn],
           },
         ],
         runtime: 'nodejs24.x',
@@ -378,6 +391,40 @@ export default $config({
       threshold: 1,
       comparisonOperator: 'GreaterThanOrEqualToThreshold',
       treatMissingData: 'notBreaching',
+    });
+
+    // ── Usage reporting (cron-based) ────────────────────────────────
+    const usageWorker = new sst.aws.Function('UsageReportingWorker', {
+      handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
+      link: [billingTable, stripeSecretKey, auroraBackofficeToken],
+      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'tibmonthmeter' },
+      runtime: 'nodejs24.x',
+      timeout: '60 seconds',
+      memory: '256 MB',
+    });
+
+    const usageOrchestrator = new sst.aws.Function('UsageReportingOrchestrator', {
+      handler: 'packages/backend/src/jobs/usage-reporting-orchestrator.handler',
+      link: [billingTable],
+      environment: {
+        USAGE_WORKER_FUNCTION_NAME: usageWorker.name,
+        STRIPE_METER_EVENT_NAME: 'tibmonthmeter',
+      },
+      runtime: 'nodejs24.x',
+      timeout: '300 seconds',
+      memory: '256 MB',
+      permissions: [
+        {
+          actions: ['lambda:InvokeFunction'],
+          resources: [usageWorker.arn],
+        },
+      ],
+    });
+
+    new sst.aws.Cron('UsageReportingCron', {
+      // run the Lambda every day at 6:00 AM UTC.
+      schedule: 'cron(0 6 * * ? *)',
+      function: usageOrchestrator.arn,
     });
 
     return {
