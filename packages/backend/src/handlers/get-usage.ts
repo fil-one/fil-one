@@ -12,6 +12,7 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import type { BucketRecord, ObjectRecord, SubscriptionRecord } from '../lib/dynamo-records.js';
+import { SubscriptionStatus } from '../lib/dynamo-records.js';
 
 const dynamo = getDynamoClient();
 const TIB_BYTES = 1099511627776;
@@ -82,7 +83,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const billingRecord = billingResult.Item
     ? (unmarshall(billingResult.Item) as Pick<SubscriptionRecord, 'subscriptionStatus'>)
     : null;
-  const isActive = billingRecord?.subscriptionStatus === 'active';
+  const isActive = billingRecord?.subscriptionStatus === SubscriptionStatus.Active;
 
   const response: UsageResponse = {
     storage: {
