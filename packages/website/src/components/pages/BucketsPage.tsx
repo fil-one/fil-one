@@ -5,7 +5,6 @@ import { PlusIcon, DatabaseIcon, TrashIcon } from '@phosphor-icons/react/dist/ss
 import { Button } from '@hyperspace/ui/Button';
 import { Input } from '@hyperspace/ui/Input';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '@hyperspace/ui/Modal';
-import { CodeBlock } from '@hyperspace/ui/CodeBlock';
 import { Spinner } from '@hyperspace/ui/Spinner';
 import { useToast } from '@hyperspace/ui/Toast';
 
@@ -16,6 +15,7 @@ import type {
   ListBucketsResponse,
 } from '@filone/shared';
 import { apiRequest } from '../../lib/api.js';
+import { CreateAccessKeyModal } from '../CreateAccessKeyModal';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,8 +46,8 @@ export function BucketsPage() {
   const [name, setName] = useState('');
   const [region, setRegion] = useState('us-east-1');
 
-  // Save credentials modal state
-  const [credsOpen, setCredsOpen] = useState(false);
+  // Create access key modal state (shown after bucket creation)
+  const [accessKeyOpen, setAccessKeyOpen] = useState(false);
 
   const deleteBucket = useRef<string | null>(null);
 
@@ -88,7 +88,7 @@ export function BucketsPage() {
       setName('');
       setRegion('us-east-1');
       toast.success('Bucket created successfully');
-      setCredsOpen(true);
+      setAccessKeyOpen(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create bucket');
     } finally {
@@ -279,37 +279,13 @@ export function BucketsPage() {
       </Modal>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Save Credentials Modal */}
+      {/* Create Access Key Modal (shown after bucket creation) */}
       {/* ------------------------------------------------------------------ */}
-      <Modal open={credsOpen} onClose={() => setCredsOpen(false)} size="md">
-        <ModalHeader onClose={() => setCredsOpen(false)}>Save your credentials</ModalHeader>
-        <ModalBody>
-          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            ⚠️ Make sure to copy your access key now. You won&apos;t be able to see it again.
-          </div>
-          <div className="flex flex-col gap-3">
-            <div>
-              <p className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">
-                Access Key ID
-              </p>
-              <CodeBlock code="HKIAXXXXXXXXXXXXXXXXXXX" />
-            </div>
-            <div>
-              <p className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">
-                Secret Access Key
-              </p>
-              <CodeBlock code="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" />
-            </div>
-          </div>
-        </ModalBody>
-        <ModalFooter>
-          <div className="flex justify-end">
-            <Button variant="filled" onClick={() => setCredsOpen(false)}>
-              I&apos;ve saved my credentials
-            </Button>
-          </div>
-        </ModalFooter>
-      </Modal>
+      <CreateAccessKeyModal
+        open={accessKeyOpen}
+        onClose={() => setAccessKeyOpen(false)}
+        onDone={() => setAccessKeyOpen(false)}
+      />
     </div>
   );
 }
