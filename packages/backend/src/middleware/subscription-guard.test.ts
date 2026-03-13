@@ -57,7 +57,9 @@ describe('subscriptionGuardMiddleware', () => {
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
     const result = await before(
       buildMiddyRequest(
-        buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid', email: 'test@example.com' } }),
+        buildEvent({
+          userInfo: { userId: USER_ID, orgId: 'test-org-uuid', email: 'test@example.com' },
+        }),
       ),
     );
 
@@ -70,7 +72,11 @@ describe('subscriptionGuardMiddleware', () => {
     expect(sqsCalls).toHaveLength(1);
     expect(sqsCalls[0].args[0].input).toEqual({
       QueueUrl: 'https://sqs.test/billing-trial',
-      MessageBody: JSON.stringify({ userId: USER_ID, orgId: 'test-org-uuid', email: 'test@example.com' }),
+      MessageBody: JSON.stringify({
+        userId: USER_ID,
+        orgId: 'test-org-uuid',
+        email: 'test@example.com',
+      }),
     });
   });
 
@@ -82,9 +88,7 @@ describe('subscriptionGuardMiddleware', () => {
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
     const result = await before(
-      buildMiddyRequest(
-        buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } }),
-      ),
+      buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })),
     );
 
     expect(result).toBeUndefined();

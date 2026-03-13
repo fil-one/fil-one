@@ -131,9 +131,7 @@ describe('activate-subscription handler', () => {
     });
     ddbMock.on(UpdateItemCommand).resolves({});
 
-    mockSubscriptionsCreate.mockResolvedValue(
-      mockSubscriptionResponse({ status: 'active' }),
-    );
+    mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
 
     const event = buildEvent({
       userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
@@ -183,9 +181,7 @@ describe('activate-subscription handler', () => {
     });
     ddbMock.on(UpdateItemCommand).resolves({});
 
-    mockSubscriptionsCreate.mockResolvedValue(
-      mockSubscriptionResponse({ status: 'active' }),
-    );
+    mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
 
     const event = buildEvent({
       userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },

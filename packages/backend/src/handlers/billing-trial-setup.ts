@@ -16,7 +16,11 @@ export interface BillingTrialSetupMessage {
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
 export async function handler(event: SQSEvent, _context: Context): Promise<void> {
-  assert.equal(event.Records.length, 1, `Expected exactly 1 SQS record, got ${event.Records.length}`);
+  assert.equal(
+    event.Records.length,
+    1,
+    `Expected exactly 1 SQS record, got ${event.Records.length}`,
+  );
 
   const { userId, orgId, email } = JSON.parse(event.Records[0].body) as BillingTrialSetupMessage;
   const now = new Date();
@@ -61,8 +65,12 @@ export async function handler(event: SQSEvent, _context: Context): Promise<void>
           subscriptionStatus: SubscriptionStatus.Trialing,
           trialStartedAt: now.toISOString(),
           trialEndsAt: trialEndsAt.toISOString(),
-          currentPeriodStart: new Date(subscription.items.data[0].current_period_start * 1000).toISOString(),
-          currentPeriodEnd: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
+          currentPeriodStart: new Date(
+            subscription.items.data[0].current_period_start * 1000,
+          ).toISOString(),
+          currentPeriodEnd: new Date(
+            subscription.items.data[0].current_period_end * 1000,
+          ).toISOString(),
           updatedAt: now.toISOString(),
         }),
         ConditionExpression: 'attribute_not_exists(pk)',

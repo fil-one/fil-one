@@ -414,7 +414,8 @@ export default $config({
     );
 
     new aws.cloudwatch.MetricAlarm('BillingTrialSetupDlqAlarm', {
-      alarmDescription: 'Messages in billing-trial-setup DLQ — failed trial creation needs investigation',
+      alarmDescription:
+        'Messages in billing-trial-setup DLQ — failed trial creation needs investigation',
       namespace: 'AWS/SQS',
       metricName: 'ApproximateNumberOfMessagesVisible',
       dimensions: { QueueName: billingTrialDlq.nodes.queue.name },
