@@ -77,6 +77,10 @@ jobs:
       - run: npx sst deploy --stage staging
 
       - if: failure()
+        id: commit_info
+        run: echo "subject=$(git log -1 --format=%s)" >> "$GITHUB_OUTPUT"
+
+      - if: failure()
         uses: slackapi/slack-github-action@v2.1.1
         with:
           method: chat.postMessage
@@ -84,13 +88,20 @@ jobs:
           payload: |
             {
               "channel": "filone-alerts",
-              "text": "Deployment of `${{ github.event.repository.name }}` to `staging` failed",
+              "text": ${{ toJSON(format('Deployment of `{0}` to `staging` failed. Commit: {1} by @{2}. Details: {3}/{4}/actions/runs/{5}', github.event.repository.name, steps.commit_info.outputs.subject, github.actor, github.server_url, github.repository, github.run_id)) }},
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ":warning: *<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Deployment of `${{ github.event.repository.name }}` to `staging` failed>*"
+                    "text": ${{ toJSON(format(':warning: *Deployment of `{0}` to `staging` failed* · <{1}/{2}/actions/runs/{3}|Details>', github.event.repository.name, github.server_url, github.repository, github.run_id)) }}
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format('Commit: `{0}` by <https://github.com/{1}|@{1}>', steps.commit_info.outputs.subject, github.actor)) }}
                   }
                 }
               ]

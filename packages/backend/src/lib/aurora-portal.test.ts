@@ -7,21 +7,23 @@ import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 // ---------------------------------------------------------------------------
 
 const mockPostBucket = vi.fn((_options: Record<string, unknown>) => ({}));
-const mockPutAccessKeys = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockPostAccessKeys = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockGetAccessKeys = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockGetAccessKeyById = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-portal-client');
 
 vi.mock('@filone/aurora-portal-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
-  postTenantsByTenantIdBucket: (options: Record<string, unknown>) => mockPostBucket(options),
-  putTenantsByTenantIdAccessKeys: (options: Record<string, unknown>) => mockPutAccessKeys(options),
-  getTenantsByTenantIdAccessKeys: (options: Record<string, unknown>) => mockGetAccessKeys(options),
-  getTenantsByTenantIdAccessKeysByAccessKeyId: (options: Record<string, unknown>) =>
+  postV1TenantsByTenantIdBucket: (options: Record<string, unknown>) => mockPostBucket(options),
+  postV1TenantsByTenantIdAccessKeys: (options: Record<string, unknown>) =>
+    mockPostAccessKeys(options),
+  getV1TenantsByTenantIdAccessKeys: (options: Record<string, unknown>) =>
+    mockGetAccessKeys(options),
+  getV1TenantsByTenantIdAccessKeysByAccessKeyId: (options: Record<string, unknown>) =>
     mockGetAccessKeyById(options),
 }));
 
-process.env.AURORA_PORTAL_URL = 'https://api.portal.test.example.com/api/v1';
+process.env.AURORA_PORTAL_URL = 'https://api.portal.test.example.com/api';
 process.env.FILONE_STAGE = 'test';
 
 const ssmMock = mockClient(SSMClient);
@@ -75,7 +77,7 @@ describe('createAuroraBucket', () => {
     await createAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' });
 
     expect(mockCreateClient).toHaveBeenCalledWith({
-      baseUrl: 'https://api.portal.test.example.com/api/v1',
+      baseUrl: 'https://api.portal.test.example.com/api',
       headers: { 'X-Api-Key': 'my-secret-key' },
     });
   });
@@ -217,7 +219,7 @@ describe('createAuroraAccessKey', () => {
 
   it('calls SSM with correct parameter path using FILONE_STAGE', async () => {
     setupSsmMock();
-    mockPutAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
+    mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
 
     await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
 
@@ -229,13 +231,13 @@ describe('createAuroraAccessKey', () => {
     });
   });
 
-  it('calls putTenantsByTenantIdAccessKeys with correct params', async () => {
+  it('calls postV1TenantsByTenantIdAccessKeys with correct params', async () => {
     setupSsmMock();
-    mockPutAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
+    mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
 
     await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
 
-    expect(mockPutAccessKeys).toHaveBeenCalledWith({
+    expect(mockPostAccessKeys).toHaveBeenCalledWith({
       client: 'mock-portal-client',
       path: { tenantId: 'tenant-1' },
       body: { name: 'my-key', access: EXPECTED_ACCESS },
@@ -245,7 +247,7 @@ describe('createAuroraAccessKey', () => {
 
   it('returns id, accessKeyId, accessKeySecret, createdAt on success', async () => {
     setupSsmMock();
-    mockPutAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
+    mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
 
     const result = await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
 
@@ -259,7 +261,7 @@ describe('createAuroraAccessKey', () => {
 
   it('throws DuplicateKeyNameError on 409 response', async () => {
     setupSsmMock();
-    mockPutAccessKeys.mockResolvedValue({
+    mockPostAccessKeys.mockResolvedValue({
       data: undefined,
       error: { message: 'Key with this name already exists' },
       response: { status: 409 },
@@ -278,7 +280,7 @@ describe('createAuroraAccessKey', () => {
 
   it('throws on non-409 API error', async () => {
     setupSsmMock();
-    mockPutAccessKeys.mockResolvedValue({
+    mockPostAccessKeys.mockResolvedValue({
       data: undefined,
       error: { message: 'Internal server error' },
       response: { status: 500 },
@@ -291,7 +293,7 @@ describe('createAuroraAccessKey', () => {
 
   it('throws when accessKey is missing from response', async () => {
     setupSsmMock();
-    mockPutAccessKeys.mockResolvedValue({
+    mockPostAccessKeys.mockResolvedValue({
       data: {},
       error: undefined,
     });
@@ -305,7 +307,7 @@ describe('createAuroraAccessKey', () => {
   for (const field of requiredFields) {
     it(`throws when "${field}" is missing from response`, async () => {
       setupSsmMock();
-      mockPutAccessKeys.mockResolvedValue({
+      mockPostAccessKeys.mockResolvedValue({
         data: {
           accessKey: {
             ...VALID_ACCESS_KEY_RESPONSE.data.accessKey,

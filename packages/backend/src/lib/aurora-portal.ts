@@ -2,10 +2,10 @@ import assert from 'node:assert';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import {
   createClient,
-  getTenantsByTenantIdAccessKeys,
-  getTenantsByTenantIdAccessKeysByAccessKeyId,
-  postTenantsByTenantIdBucket,
-  putTenantsByTenantIdAccessKeys,
+  getV1TenantsByTenantIdAccessKeys,
+  getV1TenantsByTenantIdAccessKeysByAccessKeyId,
+  postV1TenantsByTenantIdAccessKeys,
+  postV1TenantsByTenantIdBucket,
 } from '@filone/aurora-portal-client';
 
 const ssm = new SSMClient({});
@@ -35,7 +35,7 @@ export async function createAuroraBucket({
     headers: { 'X-Api-Key': apiKey },
   });
 
-  const { error, response } = await postTenantsByTenantIdBucket({
+  const { error, response } = await postV1TenantsByTenantIdBucket({
     client,
     path: { tenantId },
     body: { name: bucketName },
@@ -81,7 +81,7 @@ export async function createAuroraAccessKey({
     headers: { 'X-Api-Key': apiKey },
   });
 
-  const { data, error, response } = await putTenantsByTenantIdAccessKeys({
+  const { data, error, response } = await postV1TenantsByTenantIdAccessKeys({
     client,
     path: { tenantId },
     body: {
@@ -168,7 +168,7 @@ export async function findAuroraAccessKeyByName({
   });
 
   // Step 1: List all access keys and find by name
-  const { data: listData, error: listError } = await getTenantsByTenantIdAccessKeys({
+  const { data: listData, error: listError } = await getV1TenantsByTenantIdAccessKeys({
     client,
     path: { tenantId },
     throwOnError: false,
@@ -193,7 +193,7 @@ export async function findAuroraAccessKeyByName({
 
   // Step 2: Get full details by internal ID (list doesn't include accessKeyId)
   const { data: detailData, error: detailError } =
-    await getTenantsByTenantIdAccessKeysByAccessKeyId({
+    await getV1TenantsByTenantIdAccessKeysByAccessKeyId({
       client,
       path: { tenantId, accessKeyId: match.id },
       throwOnError: false,
