@@ -17,6 +17,7 @@ import { SubscriptionStatus, getUsageLimits } from '@filone/shared';
 import type { BillingInfo, UsageResponse } from '@filone/shared';
 import { formatBytes } from '@hyperspace/ui/utils';
 import { getBilling, getUsage } from '../lib/api.js';
+import { daysUntil, formatDateTime } from '../lib/time.js';
 
 type SidebarNavProps = {
   collapsed: boolean;
@@ -36,11 +37,6 @@ const navItems: NavItem[] = [
   { path: '/billing', icon: CreditCardIcon, label: 'Billing' },
   { path: '/settings', icon: GearIcon, label: 'Settings' },
 ];
-
-function daysRemaining(isoString: string): number {
-  const ms = new Date(isoString).getTime() - Date.now();
-  return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)));
-}
 
 export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
@@ -71,11 +67,17 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const isCanceled = billing?.subscription.status === SubscriptionStatus.Canceled;
   const trialDays =
     isTrialing && billing?.subscription.trialEndsAt
-      ? daysRemaining(billing.subscription.trialEndsAt)
+      ? daysUntil(billing.subscription.trialEndsAt)
       : null;
+  const trialEndsLabel = billing?.subscription.trialEndsAt
+    ? `Expires ${formatDateTime(billing.subscription.trialEndsAt)}`
+    : undefined;
   const graceDays = billing?.subscription.gracePeriodEndsAt
-    ? daysRemaining(billing.subscription.gracePeriodEndsAt)
+    ? daysUntil(billing.subscription.gracePeriodEndsAt)
     : null;
+  const graceEndsLabel = billing?.subscription.gracePeriodEndsAt
+    ? `Expires ${formatDateTime(billing.subscription.gracePeriodEndsAt)}`
+    : undefined;
   const isTrialExpiredGrace = isGracePeriod && !!billing?.subscription.trialEndsAt;
 
   const isActivePaid = billing?.subscription.status === SubscriptionStatus.Active;
@@ -146,7 +148,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
       {/* Trial section (expanded only) — only shown for trialing users */}
       {!collapsed && isTrialing && (
         <div className="border-t border-zinc-200 px-3 py-4">
-          <p className="text-xs font-medium text-zinc-900">
+          <p className="text-xs font-medium text-zinc-900" title={trialEndsLabel}>
             {trialDays !== null ? `${trialDays} days left in trial` : 'Trial active'}
           </p>
           <div className="mt-2.5 space-y-2.5">
@@ -176,7 +178,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
       {/* Grace period banner (trial expired) */}
       {!collapsed && isGracePeriod && isTrialExpiredGrace && (
         <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
-          <p className="text-xs font-medium text-amber-800">
+          <p className="text-xs font-medium text-amber-800" title={graceEndsLabel}>
             Your free trial has expired.{graceDays !== null ? ` ${graceDays} days left` : ''} to
             upgrade or download your data.
           </p>
@@ -191,7 +193,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
       {/* Grace period banner (subscription canceled) */}
       {!collapsed && isGracePeriod && !isTrialExpiredGrace && (
         <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
-          <p className="text-xs font-medium text-amber-800">
+          <p className="text-xs font-medium text-amber-800" title={graceEndsLabel}>
             Subscription canceled.{graceDays !== null ? ` ${graceDays} days left` : ''} to
             reactivate or download your data.
           </p>
@@ -206,7 +208,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
       {/* Past due banner */}
       {!collapsed && isPastDue && (
         <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
-          <p className="text-xs font-medium text-amber-800">
+          <p className="text-xs font-medium text-amber-800" title={graceEndsLabel}>
             Payment failed. Update your payment method to avoid losing access.
             {graceDays !== null ? ` ${graceDays} days remaining.` : ''}
           </p>

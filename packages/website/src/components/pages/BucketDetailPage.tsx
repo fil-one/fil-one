@@ -30,6 +30,7 @@ import type {
   UploadObjectResponse,
 } from '@filone/shared';
 import { apiRequest } from '../../lib/api.js';
+import { formatDate } from '../../lib/time.js';
 
 // ---------------------------------------------------------------------------
 // Mock data (access keys — placeholder, out of scope)
@@ -456,7 +457,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                                   {entry.object.contentType}
                                 </td>
                                 <td className="px-4 py-3 text-zinc-600">
-                                  {new Date(entry.object.lastModified).toLocaleDateString()}
+                                  {formatDate(entry.object.lastModified)}
                                 </td>
                                 <td className="px-4 py-3">
                                   {entry.object.cid ? (
@@ -561,11 +562,9 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                           <td className="px-4 py-3 font-mono text-xs text-zinc-600">
                             {maskAccessKeyId(key.accessKeyId)}
                           </td>
+                          <td className="px-4 py-3 text-zinc-600">{formatDate(key.createdAt)}</td>
                           <td className="px-4 py-3 text-zinc-600">
-                            {new Date(key.createdAt).toLocaleDateString()}
-                          </td>
-                          <td className="px-4 py-3 text-zinc-600">
-                            {key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : '—'}
+                            {key.lastUsedAt ? formatDate(key.lastUsedAt) : '—'}
                           </td>
                           <td className="px-4 py-3">
                             {key.status === 'active' ? (

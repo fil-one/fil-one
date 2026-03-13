@@ -16,6 +16,7 @@ import type {
   ListBucketsResponse,
 } from '@filone/shared';
 import { apiRequest } from '../../lib/api.js';
+import { formatDate } from '../../lib/time.js';
 import { CreateAccessKeyModal } from '../CreateAccessKeyModal';
 
 // ---------------------------------------------------------------------------
@@ -190,9 +191,7 @@ export function BucketsPage() {
                   <td className="px-4 py-3 text-zinc-600">{bucket.region}</td>
                   <td className="px-4 py-3 text-zinc-600">{bucket.objectCount.toLocaleString()}</td>
                   <td className="px-4 py-3 text-zinc-600">{formatBytes(bucket.sizeBytes)}</td>
-                  <td className="px-4 py-3 text-zinc-600">
-                    {new Date(bucket.createdAt).toLocaleDateString()}
-                  </td>
+                  <td className="px-4 py-3 text-zinc-600">{formatDate(bucket.createdAt)}</td>
                   <td className="px-4 py-3">
                     {bucket.isPublic ? (
                       <span className="rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">

@@ -19,7 +19,10 @@ export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const { userId, orgId } = getUserInfo(event);
-  const limit = Math.min(Math.max(parseInt(event.queryStringParameters?.limit ?? '10', 10) || 10, 1), 50);
+  const limit = Math.min(
+    Math.max(parseInt(event.queryStringParameters?.limit ?? '10', 10) || 10, 1),
+    50,
+  );
   const period = event.queryStringParameters?.period === '30d' ? 30 : 7;
   const uploadsTableName = Resource.UploadsTable.name;
   const userInfoTableName = Resource.UserInfoTable.name;

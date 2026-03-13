@@ -19,24 +19,11 @@ import { PlanId, SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/sh
 import type { UsageResponse, BillingInfo, RecentActivity } from '@filone/shared';
 
 import { getUsage, getBilling, getActivity } from '../../lib/api.js';
+import { daysUntil, formatDateTime, timeAgo } from '../../lib/time.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
-function daysRemaining(isoString: string): number {
-  const ms = new Date(isoString).getTime() - Date.now();
-  return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)));
-}
 
 function planDisplayName(planId: PlanId): string {
   switch (planId) {
@@ -139,8 +126,11 @@ export function DashboardPage() {
   const isActivePaid = billing.subscription.status === SubscriptionStatus.Active;
   const trialDaysLeft =
     isTrialing && billing.subscription.trialEndsAt
-      ? daysRemaining(billing.subscription.trialEndsAt)
+      ? daysUntil(billing.subscription.trialEndsAt)
       : null;
+  const trialEndsLabel = billing.subscription.trialEndsAt
+    ? `Expires ${formatDateTime(billing.subscription.trialEndsAt)}`
+    : undefined;
 
   const showQuickSetup =
     usage.buckets.count === 0 || usage.objects.count === 0 || usage.accessKeys.count === 0;
@@ -207,7 +197,10 @@ export function DashboardPage() {
       {isTrialing && trialBannerVisible && (
         <div className="mb-5 flex items-center justify-between rounded-xl bg-[rgba(0,128,255,0.06)] px-5 py-3.5 shadow-[0px_0px_0px_1px_rgba(0,128,255,0.1)]">
           <div className="flex items-center gap-4">
-            <span className="rounded-full bg-[rgba(0,128,255,0.15)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#0080ff]">
+            <span
+              title={trialEndsLabel}
+              className="rounded-full bg-[rgba(0,128,255,0.15)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#0080ff]"
+            >
               {trialDaysLeft !== null ? `${trialDaysLeft} days left` : 'TRIAL'}
             </span>
             <p className="text-[13px]">
@@ -287,7 +280,10 @@ export function DashboardPage() {
                 PLAN
               </span>
               {isTrialing && trialDaysLeft !== null && (
-                <span className="rounded-full bg-[rgba(0,128,255,0.1)] px-2 py-0.5 text-[10px] font-semibold text-[#0080ff]">
+                <span
+                  title={trialEndsLabel}
+                  className="rounded-full bg-[rgba(0,128,255,0.1)] px-2 py-0.5 text-[10px] font-semibold text-[#0080ff]"
+                >
                   {trialDaysLeft} days left
                 </span>
               )}
