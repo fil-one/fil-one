@@ -108,11 +108,12 @@ jobs:
         id: deploy
         run: |
           URL=$(pnpm exec sst state export --stage "$STAGE" | jq -r '.latest.resources[] | select(.type == "pulumi:pulumi:Stack") | .outputs.baseUrl')
-          if [ -z "$URL" ]; then
+          URL_TRIMMED=$(printf '%s' "$URL" | xargs)
+          if [ -z "$URL_TRIMMED" ] || [ "$URL_TRIMMED" = "null" ]; then
             echo "::error::Failed to extract preview URL from SST state"
             exit 1
           fi
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "url=$URL_TRIMMED" >> "$GITHUB_OUTPUT"
 
   comment:
     name: Add Preview Environment Comment on PR
