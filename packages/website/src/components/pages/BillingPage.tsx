@@ -17,17 +17,13 @@ import { SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
 import type { BillingInfo, UsageResponse, CreateSetupIntentResponse } from '@filone/shared';
 
 import { apiRequest, getUsage } from '../../lib/api.js';
+import { daysUntil } from '../../lib/time.js';
 import { ChoosePlanDialog } from '../billing/ChoosePlanDialog.js';
 import { AddPaymentDialog } from '../billing/AddPaymentDialog.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function daysRemaining(isoString: string): number {
-  const ms = new Date(isoString).getTime() - Date.now();
-  return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)));
-}
 
 function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
@@ -102,10 +98,10 @@ export function BillingPage() {
   const isCanceled = billing?.subscription.status === SubscriptionStatus.Canceled;
   const trialDays =
     isTrialing && billing?.subscription.trialEndsAt
-      ? daysRemaining(billing.subscription.trialEndsAt)
+      ? daysUntil(billing.subscription.trialEndsAt)
       : null;
   const graceDays = billing?.subscription.gracePeriodEndsAt
-    ? daysRemaining(billing.subscription.gracePeriodEndsAt)
+    ? daysUntil(billing.subscription.gracePeriodEndsAt)
     : null;
   const isTrialExpiredGrace = isGracePeriod && !!billing?.subscription.trialEndsAt;
 

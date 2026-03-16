@@ -11,16 +11,9 @@ import { useToast } from '@hyperspace/ui/Toast';
 import type { AccessKey, CreateAccessKeyResponse, ListAccessKeysResponse } from '@filone/shared';
 
 import { apiRequest } from '../../lib/api.js';
+import { formatDate } from '../../lib/time.js';
 import { S3_ENDPOINT } from '../../env';
 import { CreateAccessKeyModal } from '../CreateAccessKeyModal';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString();
-}
 
 // ---------------------------------------------------------------------------
 // Sub-components
