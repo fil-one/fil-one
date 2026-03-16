@@ -333,6 +333,10 @@ export default $config({
     // ── Org routes ──────────────────────────────────────────────────
     addRoute('POST', '/api/org/confirm', 'confirm-org');
 
+    // ── Usage + Dashboard routes ─────────────────────────────────────
+    addRoute('GET', '/api/usage', 'get-usage');
+    addRoute('GET', '/api/activity', 'get-activity');
+
     // ── Billing routes ───────────────────────────────────────────────
     addRoute('GET', '/api/billing', 'get-billing');
     addRoute('POST', '/api/billing/setup-intent', 'create-setup-intent');

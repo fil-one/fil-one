@@ -5,11 +5,12 @@ import {
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { getDynamoClient } from '../lib/ddb-client.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { Resource } from 'sst';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
 
-const dynamo = new DynamoDBClient({});
+const dynamo = getDynamoClient();
 const lambda = new LambdaClient({});
 
 interface SubscriptionRecord {

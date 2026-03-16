@@ -11,25 +11,18 @@ import {
 
 import { ProgressBar } from '@hyperspace/ui/ProgressBar';
 import { useToast } from '@hyperspace/ui/Toast';
+import { formatBytes } from '@hyperspace/ui/utils';
 
-import { SubscriptionStatus } from '@filone/shared';
-import type { BillingInfo, CreateSetupIntentResponse } from '@filone/shared';
+import { SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
+import type { BillingInfo, UsageResponse, CreateSetupIntentResponse } from '@filone/shared';
 
-import { apiRequest } from '../../lib/api.js';
+import { apiRequest, getUsage } from '../../lib/api.js';
 import { ChoosePlanDialog } from '../billing/ChoosePlanDialog.js';
 import { AddPaymentDialog } from '../billing/AddPaymentDialog.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
 
 function daysRemaining(isoString: string): number {
   const ms = new Date(isoString).getTime() - Date.now();
@@ -62,6 +55,7 @@ export function BillingPage() {
   const { toast } = useToast();
 
   const [billing, setBilling] = useState<BillingInfo | null>(null);
+  const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,8 +67,12 @@ export function BillingPage() {
   const fetchBilling = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await apiRequest<BillingInfo>('/billing');
-      setBilling(data);
+      const [billingData, usageData] = await Promise.all([
+        apiRequest<BillingInfo>('/billing'),
+        getUsage(),
+      ]);
+      setBilling(billingData);
+      setUsage(usageData);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -111,10 +109,12 @@ export function BillingPage() {
     : null;
   const isTrialExpiredGrace = isGracePeriod && !!billing?.subscription.trialEndsAt;
 
-  const storageUsed = billing?.usage?.storageUsedBytes ?? 0;
-  const storageLimit = billing?.usage?.storageLimitBytes ?? 1;
+  const limits = getUsageLimits(!!isActive);
+  const storageUsed = usage?.storage.usedBytes ?? 0;
+  const storageLimit = limits.storageLimitBytes;
   const storagePct = storageLimit > 0 ? Math.min(100, (storageUsed / storageLimit) * 100) : 0;
-  const estimatedCost = billing?.usage?.estimatedMonthlyCostCents ?? 0;
+  const PRICE_PER_TB_CENTS = 499;
+  const estimatedCost = Math.round((storageUsed / TB_BYTES) * PRICE_PER_TB_CENTS);
 
   // ── Handlers ─────────────────────────────────────────────────────
 
@@ -296,8 +296,8 @@ export function BillingPage() {
                         : isCanceled
                           ? 'Subscription inactive'
                           : trialDays !== null
-                            ? `${trialDays} days remaining — 1 TiB included`
-                            : '14-day trial — 1 TiB included'}
+                            ? `${trialDays} days remaining — 1 TB included`
+                            : '14-day trial — 1 TB included'}
                   </p>
                 </div>
               </div>
@@ -386,7 +386,7 @@ export function BillingPage() {
                 ? 'Your usage this billing period'
                 : isCanceled
                   ? 'Usage at time of cancellation'
-                  : 'Trial usage (1 TiB limit)'}
+                  : 'Trial usage (1 TB limit)'}
             </p>
 
             {/* Storage bar */}
@@ -465,7 +465,7 @@ export function BillingPage() {
               </p>
               <div className="mt-2 flex items-baseline gap-1">
                 <span className="text-3xl font-bold text-white">$4.99</span>
-                <span className="text-sm text-white/70">/ TiB / month</span>
+                <span className="text-sm text-white/70">/ TB / month</span>
               </div>
             </div>
 

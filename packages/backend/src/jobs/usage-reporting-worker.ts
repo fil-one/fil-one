@@ -1,12 +1,13 @@
-import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
+import { getDynamoClient } from '../lib/ddb-client.js';
 import { Resource } from 'sst';
-import { TIB_BYTES } from '@filone/shared';
+import { TB_BYTES } from '@filone/shared';
 import { getStripeClient } from '../lib/stripe-client.js';
 import { getStorageSamples } from '../lib/aurora-backoffice.js';
 import { calculateAverageUsage } from '../lib/usage-calculator.js';
 
-const dynamo = new DynamoDBClient({});
+const dynamo = getDynamoClient();
 
 export interface UsageReportingWorkerPayload {
   orgId: string;
@@ -37,27 +38,27 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     window: '1h',
   });
   const usage = calculateAverageUsage(samples);
-  const averageStorageTibUsed = usage.averageStorageBytesUsed / TIB_BYTES;
+  const averageStorageTbUsed = usage.averageStorageBytesUsed / TB_BYTES;
 
   console.log('[usage-worker] Usage calculated', {
     orgId,
     sampleCount: usage.sampleCount,
-    averageStorageTibUsed,
+    averageStorageTbUsed,
   });
 
-  if (averageStorageTibUsed > 0) {
+  if (averageStorageTbUsed > 0) {
     const stripe = getStripeClient();
     await stripe.billing.meterEvents.create({
       event_name: process.env.STRIPE_METER_EVENT_NAME ?? '',
       payload: {
         stripe_customer_id: stripeCustomerId,
-        value: String(averageStorageTibUsed),
+        value: String(averageStorageTbUsed),
       },
       timestamp: Math.floor(Date.now() / 1000),
     });
     console.log('[usage-worker] Stripe meter event created', {
       stripeCustomerId,
-      averageStorageTibUsed,
+      averageStorageTbUsed,
     });
   }
 
@@ -75,9 +76,9 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
         currentPeriodStart,
         reportDate,
         averageStorageBytesUsed: usage.averageStorageBytesUsed,
-        averageStorageTibUsed,
+        averageStorageTbUsed,
         sampleCount: usage.sampleCount,
-        reportedToStripe: averageStorageTibUsed > 0,
+        reportedToStripe: averageStorageTbUsed > 0,
         createdAt: new Date().toISOString(),
         ttl,
       }),

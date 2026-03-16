@@ -12,12 +12,12 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {/* Top header — full width */}
-      <AppHeader collapsed={collapsed} />
+      <AppHeader />
 
       {/* Body row: sidebar + main */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <div className={`flex-shrink-0 transition-all duration-200 ${collapsed ? 'w-16' : 'w-60'}`}>
+        <div className={`flex-shrink-0 transition-all duration-200 ${collapsed ? 'w-20' : 'w-60'}`}>
           <SidebarNav collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
         </div>
 
