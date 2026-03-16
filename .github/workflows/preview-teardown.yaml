@@ -37,4 +37,34 @@ jobs:
           aws-region: us-east-2
 
       - name: Remove SST stage
-        run: npx sst remove --stage "pr-${{ github.event.pull_request.number }}"
+        id: remove
+        continue-on-error: true
+        run: pnpx sst remove --stage "pr-${{ github.event.pull_request.number }}"
+
+      - name: Notify Slack on teardown failure
+        if: steps.remove.outcome == 'failure'
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "filone-alerts",
+              "text": ${{ toJSON(format('Preview teardown failed for PR #{0}. Details: {1}/{2}/actions/runs/{3}', github.event.pull_request.number, github.server_url, github.repository, github.run_id)) }},
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format(':warning: *Preview teardown failed for PR <{1}/{2}/pull/{0}|#{0}>* · <{1}/{2}/actions/runs/{3}|Details>', github.event.pull_request.number, github.server_url, github.repository, github.run_id)) }}
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format('Stage `pr-{0}` may have orphaned resources that need manual cleanup.', github.event.pull_request.number)) }}
+                  }
+                }
+              ]
+            }

@@ -39,6 +39,7 @@ import { handler } from './usage-reporting-worker.js';
 
 const basePayload: UsageReportingWorkerPayload = {
   orgId: 'org-1',
+  auroraTenantId: 'aurora-tenant-123',
   subscriptionId: 'sub_123',
   stripeCustomerId: 'cus_123',
   currentPeriodStart: '2024-01-01T00:00:00Z',
@@ -54,6 +55,19 @@ describe('usage-reporting-worker', () => {
     ddbMock.reset();
     vi.clearAllMocks();
     ddbMock.on(PutItemCommand).resolves({});
+  });
+
+  it('calls getStorageSamples with auroraTenantId, not orgId', async () => {
+    mockGetStorageSamples.mockResolvedValue([]);
+
+    await handler(basePayload);
+
+    expect(mockGetStorageSamples).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 'aurora-tenant-123' }),
+    );
+    expect(mockGetStorageSamples).not.toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 'org-1' }),
+    );
   });
 
   it('reports usage to Stripe and writes audit record', async () => {
