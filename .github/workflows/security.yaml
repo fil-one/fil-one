@@ -41,13 +41,19 @@ jobs:
             --verbose
         continue-on-error: true # Advisory mode — flip to false to block PRs
 
-      - name: Upload SARIF (requires GHAS for private repos)
+      - name: Upload Semgrep results
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-results
+          path: semgrep-results.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always() && vars.ENABLE_GHAS == 'true'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: semgrep-results.sarif
           category: semgrep
-        continue-on-error: true # Gracefully skip if GHAS is unavailable
 
   # ──────────────────────────────────────────────────
   # Job 2: CodeQL (conditional — requires GHAS)
@@ -108,6 +114,9 @@ jobs:
         continue-on-error: true # Advisory mode — flip to false to block on CRITICAL
 
       # Trivy — broader vulnerability database + license scanning
+      # trivy-action@0.35.0 internally uses actions/cache@v4 (Node 20).
+      # No newer version available yet. Monitor:
+      # https://github.com/aquasecurity/trivy-action/releases
       - name: Trivy vulnerability scan (fs mode)
         uses: aquasecurity/trivy-action@0.35.0
         with:
@@ -120,13 +129,19 @@ jobs:
           skip-dirs: packages/ui,packages/aurora-backoffice-client,packages/aurora-portal-client,contracts/lib,.sst,node_modules
         continue-on-error: true
 
-      - name: Upload Trivy SARIF (requires GHAS for private repos)
+      - name: Upload Trivy dependency results
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-deps-results
+          path: trivy-deps.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always() && vars.ENABLE_GHAS == 'true'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-deps.sarif
           category: trivy-dependencies
-        continue-on-error: true
 
   # ──────────────────────────────────────────────────
   # Job 4: Secret Scanning (Gitleaks)
@@ -166,6 +181,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # trivy-action@0.35.0 internally uses actions/cache@v4 (Node 20).
+      # No newer version available yet. Monitor:
+      # https://github.com/aquasecurity/trivy-action/releases
       - name: Trivy IaC misconfiguration scan
         uses: aquasecurity/trivy-action@0.35.0
         with:
@@ -177,13 +195,19 @@ jobs:
           skip-dirs: packages/ui,contracts/lib,.sst,node_modules
         continue-on-error: true
 
-      - name: Upload Trivy IaC SARIF (requires GHAS for private repos)
+      - name: Upload Trivy IaC results
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-iac-results
+          path: trivy-iac.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always() && vars.ENABLE_GHAS == 'true'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-iac.sarif
           category: trivy-iac
-        continue-on-error: true
 
   # ──────────────────────────────────────────────────
   # Job 6: License Compliance
@@ -203,6 +227,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # trivy-action@0.35.0 internally uses actions/cache@v4 (Node 20).
+      # No newer version available yet. Monitor:
+      # https://github.com/aquasecurity/trivy-action/releases
       - name: Trivy license scan
         uses: aquasecurity/trivy-action@0.35.0
         with:
