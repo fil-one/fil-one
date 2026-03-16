@@ -1,6 +1,7 @@
 import assert from 'node:assert';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
+import { getDynamoClient } from './ddb-client.js';
 import { Resource } from 'sst';
 import {
   createAuroraTenant,
@@ -16,7 +17,7 @@ export interface AuroraTenantSetupMessage {
   orgName: string;
 }
 
-const dynamo = new DynamoDBClient({});
+const dynamo = getDynamoClient();
 const ssm = new SSMClient({});
 
 export async function processTenantSetup(message: AuroraTenantSetupMessage): Promise<void> {

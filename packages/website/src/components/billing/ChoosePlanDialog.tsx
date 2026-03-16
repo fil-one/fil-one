@@ -37,7 +37,7 @@ export function ChoosePlanDialog({ open, onClose, onSelectPayAsYouGo }: ChoosePl
             <h3 className="text-lg font-semibold text-[#14181f]">Pay as you go</h3>
             <div className="mt-3 flex items-baseline gap-1">
               <span className="text-3xl font-bold text-[#14181f]">$4.99</span>
-              <span className="text-sm text-[#677183]">/ TiB / month</span>
+              <span className="text-sm text-[#677183]">/ TB / month</span>
             </div>
 
             <ul className="mt-5 flex flex-col gap-2.5 flex-1">

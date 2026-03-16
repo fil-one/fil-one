@@ -1,4 +1,14 @@
-export { OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME, TIB_BYTES } from './constants.js';
+export {
+  OAUTH_STATE_COOKIE,
+  CSRF_COOKIE_NAME,
+  TB_BYTES,
+  TRIAL_STORAGE_LIMIT,
+  TRIAL_EGRESS_LIMIT,
+  UNLIMITED,
+  getUsageLimits,
+} from './constants.js';
+export type { UsageLimits } from './constants.js';
+export { formatBytes, formatBytesShort } from './formatBytes.js';
 export type { MeResponse, ConfirmOrgRequest, ConfirmOrgResponse } from './api/me.js';
 export { OrgRole } from './api/org.js';
 export type { UploadRequest, UploadResponse } from './api/upload.js';
@@ -34,21 +44,24 @@ export type {
 } from './api/access-keys.js';
 
 export type {
-  DashboardStats,
   UsageDataPoint,
   UsageTrendsRequest,
   UsageTrendsResponse,
-  ActivityAction,
+  BucketActivity,
+  ObjectActivity,
+  KeyActivity,
   RecentActivity,
   RecentActivityResponse,
+  ActivityResponse,
 } from './api/dashboard.js';
+
+export type { UsageResponse } from './api/usage.js';
 
 export { PlanId, SubscriptionStatus } from './api/billing.js';
 export type {
   Plan,
   Subscription,
   PaymentMethod,
-  UsageInfo,
   BillingInfo,
   CreateSetupIntentResponse,
   ActivateSubscriptionResponse,

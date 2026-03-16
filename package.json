@@ -19,7 +19,7 @@
     "lint:fix": "oxlint --fix && oxfmt --write",
     "refresh": "sst refresh",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm lint && pnpm --filter @filone/backend test"
+    "test": "pnpm lint && pnpm --filter @filone/shared --filter @filone/backend test"
   },
   "devDependencies": {
     "@pulumi/aws": "^7.21.0",

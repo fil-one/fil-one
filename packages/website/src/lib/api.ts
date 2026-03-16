@@ -117,6 +117,24 @@ export function confirmOrg(orgName: string): Promise<ConfirmOrgResponse> {
   });
 }
 
+// ── Usage API ────────────────────────────────────────────────────────────
+
+import type { UsageResponse, ActivityResponse } from '@filone/shared';
+
+export function getUsage(): Promise<UsageResponse> {
+  return apiRequest<UsageResponse>('/usage');
+}
+
+export function getActivity(
+  options: { limit?: number; period?: '7d' | '30d' } = {},
+): Promise<ActivityResponse> {
+  const params = new URLSearchParams();
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.period) params.set('period', options.period);
+  const qs = params.toString();
+  return apiRequest<ActivityResponse>(`/activity${qs ? `?${qs}` : ''}`);
+}
+
 // ── Billing API ─────────────────────────────────────────────────────────
 
 import type {

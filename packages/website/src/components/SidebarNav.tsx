@@ -13,9 +13,10 @@ import {
 import { Link, useMatchRoute } from '@tanstack/react-router';
 import { ProgressBar } from '@hyperspace/ui/ProgressBar';
 import { Button } from '@hyperspace/ui/Button';
-import { SubscriptionStatus } from '@filone/shared';
-import type { BillingInfo } from '@filone/shared';
-import { getBilling } from '../lib/api.js';
+import { SubscriptionStatus, getUsageLimits } from '@filone/shared';
+import type { BillingInfo, UsageResponse } from '@filone/shared';
+import { formatBytes } from '@hyperspace/ui/utils';
+import { getBilling, getUsage } from '../lib/api.js';
 
 type SidebarNavProps = {
   collapsed: boolean;
@@ -44,11 +45,17 @@ function daysRemaining(isoString: string): number {
 export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
   const [billing, setBilling] = useState<BillingInfo | null>(null);
+  const [usage, setUsage] = useState<UsageResponse | null>(null);
 
   useEffect(() => {
     const refresh = () => {
       getBilling()
         .then(setBilling)
+        .catch(() => {
+          /* silent */
+        });
+      getUsage()
+        .then(setUsage)
         .catch(() => {
           /* silent */
         });
@@ -71,9 +78,16 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
     : null;
   const isTrialExpiredGrace = isGracePeriod && !!billing?.subscription.trialEndsAt;
 
-  const storageUsed = billing?.usage?.storageUsedBytes ?? 0;
-  const storageLimit = billing?.usage?.storageLimitBytes ?? 1;
-  const storagePct = storageLimit > 0 ? Math.min(100, (storageUsed / storageLimit) * 100) : 0;
+  const isActivePaid = billing?.subscription.status === SubscriptionStatus.Active;
+  const limits = getUsageLimits(!!isActivePaid);
+  const storageUsed = usage?.storage.usedBytes ?? 0;
+  const storagePct =
+    limits.storageLimitBytes > 0
+      ? Math.min(100, (storageUsed / limits.storageLimitBytes) * 100)
+      : 0;
+  const egressUsed = usage?.egress.usedBytes ?? 0;
+  const egressPct =
+    limits.egressLimitBytes > 0 ? Math.min(100, (egressUsed / limits.egressLimitBytes) * 100) : 0;
 
   return (
     <nav className="flex h-full flex-col border-r border-zinc-200 bg-white">
@@ -99,19 +113,6 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           {collapsed ? <CaretRightIcon size={16} /> : <CaretLeftIcon size={16} />}
         </button>
       </div>
-
-      {/* Storage bar (expanded only) */}
-      {!collapsed && (
-        <div className="border-b border-zinc-200 px-3 py-3">
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Storage
-            </span>
-            <span className="text-xs text-zinc-700">{storagePct.toFixed(0)}%</span>
-          </div>
-          <ProgressBar value={storagePct} size="sm" label="Storage usage" />
-        </div>
-      )}
 
       {/* Primary nav items */}
       <div className="flex flex-col gap-0.5 p-2">
@@ -145,10 +146,25 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
       {/* Trial section (expanded only) — only shown for trialing users */}
       {!collapsed && isTrialing && (
         <div className="border-t border-zinc-200 px-3 py-4">
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs font-medium text-zinc-900">
             {trialDays !== null ? `${trialDays} days left in trial` : 'Trial active'}
           </p>
-          <p className="mt-0.5 text-xs text-zinc-400">Upgrade to continue using Fil.one.</p>
+          <div className="mt-2.5 space-y-2.5">
+            <div>
+              <div className="mb-1 flex items-center justify-between text-[11px]">
+                <span className="text-zinc-500">Storage</span>
+                <span className="text-zinc-700">{formatBytes(storageUsed)} / 1 TB</span>
+              </div>
+              <ProgressBar value={storagePct} size="sm" label="Storage usage" />
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between text-[11px]">
+                <span className="text-zinc-500">Egress</span>
+                <span className="text-zinc-700">{formatBytes(egressUsed)} / 2 TB</span>
+              </div>
+              <ProgressBar value={egressPct} size="sm" label="Egress usage" />
+            </div>
+          </div>
           <div className="mt-3">
             <Button variant="filled" href="/billing" className="w-full justify-center text-xs">
               Upgrade

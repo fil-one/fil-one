@@ -20,6 +20,7 @@ import { Breadcrumb } from '@hyperspace/ui/Breadcrumb';
 import { Spinner } from '@hyperspace/ui/Spinner';
 import { ProgressBar } from '@hyperspace/ui/ProgressBar';
 import { useToast } from '@hyperspace/ui/Toast';
+import { formatBytes } from '@hyperspace/ui/utils';
 
 import type {
   S3Object,
@@ -48,14 +49,6 @@ const MOCK_ACCESS_KEYS: AccessKey[] = [
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
 
 type BrowseEntry =
   | { kind: 'folder'; name: string; prefix: string }

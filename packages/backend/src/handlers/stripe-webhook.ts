@@ -1,17 +1,13 @@
-import {
-  DynamoDBClient,
-  DeleteItemCommand,
-  PutItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { DeleteItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
+import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 
-const dynamo = new DynamoDBClient({});
+const dynamo = getDynamoClient();
 
 /**
  * Stripe webhook handler — NO auth middleware.
