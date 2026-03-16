@@ -40,7 +40,7 @@ jobs:
       - name: Remove SST stage
         id: remove
         continue-on-error: true
-        run: pnpx sst remove --stage "pr-${{ github.event.pull_request.number }}"
+        run: pnpm exec sst remove --stage "pr-${{ github.event.pull_request.number }}"
 
       - name: Notify Slack on teardown failure
         if: steps.remove.outcome == 'failure'
