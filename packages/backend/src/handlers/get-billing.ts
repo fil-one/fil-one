@@ -167,7 +167,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       }
 
       // Only give unlimited storage to active/paid subscribers, not trialing
-      if (subscription.status !== 'trialing') {
+      if (subscription.status !== SubscriptionStatus.Trialing) {
         usage.storageLimitBytes = -1;
       }
     } catch (err) {
