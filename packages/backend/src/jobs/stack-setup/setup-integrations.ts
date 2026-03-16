@@ -246,6 +246,32 @@ async function teardownAuth0Callbacks(domain: string, siteUrl: string): Promise<
   await patchAuth0Client(domain, token, clientId, patch);
 }
 
+// ── Auth0 email provider helper ───────────────────────────────────────
+
+async function setupAuth0EmailProvider(domain: string, isProduction: boolean): Promise<void> {
+  const token = await getAuth0ManagementToken(domain);
+  const fromAddress = isProduction ? 'no-reply@filone.ai' : 'no-reply+staging@filone.ai';
+
+  const resp = await fetch(`https://${domain}/api/v2/emails/provider`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: 'sendgrid',
+      enabled: true,
+      credentials: { api_key: Resource.SendGridApiKey.value },
+      default_from_address: fromAddress,
+    }),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`Auth0 email provider setup failed (${resp.status}): ${body}`);
+  }
+}
+
 // ── CloudFormation Custom Resource response ───────────────────────────
 
 async function sendCfnResponse(event: SetupEvent, response: SetupResponse): Promise<void> {
@@ -304,6 +330,7 @@ export async function handler(event: SetupEvent): Promise<void> {
     const [stripeResult] = await Promise.all([
       setupStripeWebhook(stripe, siteUrl, Stage),
       setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl),
+      setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production'),
     ]);
 
     console.log('Setup complete:', {

@@ -50,6 +50,10 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "SendGridApiKey": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "StripeSecretKey": {
       "type": "sst.sst.Secret"
       "value": string

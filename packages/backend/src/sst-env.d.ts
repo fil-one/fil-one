@@ -44,6 +44,10 @@ declare module "sst" {
       value: string;
       type: "sst.Secret";
     };
+    SendGridApiKey: {
+      value: string;
+      type: "sst.Secret";
+    };
     UserInfoTable: {
       name: string;
       type: "sst.aws.Dynamo";

@@ -40,6 +40,7 @@ export default $config({
     const stripeSecretKey = new sst.Secret('StripeSecretKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
+    const sendGridApiKey = new sst.Secret('SendGridApiKey');
     const AWS_CACHING_DISABLED_POLICY = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
@@ -186,7 +187,7 @@ export default $config({
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
     const setupFn = new sst.aws.Function('SetupIntegrations', {
       handler: 'packages/backend/src/jobs/stack-setup/setup-integrations.handler',
-      link: [stripeSecretKey, auth0MgmtClientId, auth0MgmtClientSecret, auth0ClientId],
+      link: [stripeSecretKey, auth0MgmtClientId, auth0MgmtClientSecret, auth0ClientId, sendGridApiKey],
       environment: {
         AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
       },
