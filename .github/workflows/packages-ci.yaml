@@ -158,8 +158,6 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: pnpm/action-setup@v4
-
       # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
       - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
 
