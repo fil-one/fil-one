@@ -88,6 +88,9 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       expand: ['latest_invoice.payment_intent', 'default_payment_method'],
     });
   } else {
+    console.warn('[activate-subscription] No existing subscription found for user, creating new', {
+      userId,
+    });
     // No subscription yet (legacy path) — create new
     subscription = await stripe.subscriptions.create({
       customer: stripeCustomerId,
