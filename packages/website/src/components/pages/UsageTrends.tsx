@@ -1,81 +1,68 @@
-import { useState } from 'react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { useEffect, useState } from 'react';
+import {
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+  ResponsiveContainer,
+} from 'recharts';
 
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
+import type { UsageTrendsResponse } from '@filone/shared';
 
-const MOCK_STORAGE_7D = [
-  { date: 'Feb 4', value: 4200000000 },
-  { date: 'Feb 5', value: 4800000000 },
-  { date: 'Feb 6', value: 5000000000 },
-  { date: 'Feb 7', value: 5200000000 },
-  { date: 'Feb 8', value: 5500000000 },
-  { date: 'Feb 9', value: 6200000000 },
-  { date: 'Feb 10', value: 6500000000 },
-];
-
-const MOCK_OBJECTS_7D = [
-  { date: 'Feb 4', value: 280 },
-  { date: 'Feb 5', value: 295 },
-  { date: 'Feb 6', value: 300 },
-  { date: 'Feb 7', value: 310 },
-  { date: 'Feb 8', value: 318 },
-  { date: 'Feb 9', value: 330 },
-  { date: 'Feb 10', value: 342 },
-];
-
-// UNKNOWN: 30-day trend data is not specified — reusing 7-day data as a placeholder
-const MOCK_STORAGE_30D = MOCK_STORAGE_7D;
-const MOCK_OBJECTS_30D = MOCK_OBJECTS_7D;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
+import { formatBytes, formatBytesShort } from '@hyperspace/ui/utils';
+import { getActivity } from '../../lib/api.js';
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-type UsageTrendsProps = {
-  storageUsed: number;
-  objectsCount: number;
-};
+export function UsageTrends() {
+  const [period, setPeriod] = useState<'7d' | '30d'>('7d');
+  const [data, setData] = useState<UsageTrendsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
 
-export function UsageTrends({ storageUsed, objectsCount }: UsageTrendsProps) {
-  const [trendPeriod, setTrendPeriod] = useState<'7d' | '30d'>('7d');
+  useEffect(() => {
+    setLoading(true);
+    getActivity({ period })
+      .then((res) => setData(res.trends))
+      .catch(() => {
+        // silent — dashboard still usable without trends
+      })
+      .finally(() => setLoading(false));
+  }, [period]);
 
-  const storageChartData = trendPeriod === '7d' ? MOCK_STORAGE_7D : MOCK_STORAGE_30D;
-  const objectsChartData = trendPeriod === '7d' ? MOCK_OBJECTS_7D : MOCK_OBJECTS_30D;
+  const storageSeries = data?.storage ?? [];
+  const latestStorage =
+    storageSeries.length > 0 ? storageSeries[storageSeries.length - 1].value : 0;
+  const latestObjects = data?.objects.reduce((sum, p) => sum + p.value, 0) ?? 0;
 
   return (
     <div className="mb-6">
       {/* Section header */}
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-zinc-900">Usage Trends</h2>
-        <div className="flex items-center gap-1">
+        <h2 className="text-sm font-medium text-zinc-900">Usage Trends</h2>
+        <div className="flex items-center gap-1 rounded-lg bg-[rgba(243,244,246,0.6)] p-0.5">
           <button
             type="button"
-            onClick={() => setTrendPeriod('7d')}
-            className={`rounded-md px-3 py-1 text-sm transition-colors ${
-              trendPeriod === '7d' ? 'bg-zinc-900 text-white' : 'text-zinc-500 hover:bg-zinc-100'
+            onClick={() => setPeriod('7d')}
+            className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              period === '7d'
+                ? 'bg-white text-zinc-900 shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]'
+                : 'text-[#677183] hover:text-zinc-900'
             }`}
           >
             7 days
           </button>
           <button
             type="button"
-            onClick={() => setTrendPeriod('30d')}
-            className={`rounded-md px-3 py-1 text-sm transition-colors ${
-              trendPeriod === '30d' ? 'bg-zinc-900 text-white' : 'text-zinc-500 hover:bg-zinc-100'
+            onClick={() => setPeriod('30d')}
+            className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              period === '30d'
+                ? 'bg-white text-zinc-900 shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]'
+                : 'text-[#677183] hover:text-zinc-900'
             }`}
           >
             30 days
@@ -83,89 +70,109 @@ export function UsageTrends({ storageUsed, objectsCount }: UsageTrendsProps) {
         </div>
       </div>
 
-      {/* Chart cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {/* Storage chart */}
-        <div className="rounded-lg border border-zinc-200 bg-white p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-              STORAGE
-            </span>
-            <span className="text-sm font-semibold text-zinc-900">{formatBytes(storageUsed)}</span>
-          </div>
-          <ResponsiveContainer width="100%" height={120}>
-            <AreaChart data={storageChartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="storageGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#EFF6FF" stopOpacity={0.8} />
-                  <stop offset="95%" stopColor="#EFF6FF" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 10, fill: '#9ca3af' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis hide />
-              <Tooltip
-                contentStyle={{ fontSize: 12, borderRadius: 6 }}
-                formatter={(value) => [
-                  typeof value === 'number' ? formatBytes(value) : String(value ?? ''),
-                  'Storage',
-                ]}
-              />
-              <Area
-                type="monotone"
-                dataKey="value"
-                fill="#EFF6FF"
-                stroke="#2563EB"
-                strokeWidth={2}
-                dot={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+      {loading && !data ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="h-[180px] animate-pulse rounded-lg bg-zinc-100" />
+          <div className="h-[180px] animate-pulse rounded-lg bg-zinc-100" />
         </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* Storage chart — AreaChart */}
+          <div className="rounded-lg border border-[rgba(225,228,234,0.6)] bg-white p-4 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs font-medium uppercase tracking-wider text-[#677183]">
+                STORAGE
+              </span>
+              <span className="text-[13px] font-semibold text-zinc-900">
+                {formatBytes(latestStorage)}
+              </span>
+            </div>
+            <ResponsiveContainer width="100%" height={160}>
+              <AreaChart
+                data={data?.storage ?? []}
+                margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
+              >
+                <defs>
+                  <linearGradient id="storageGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0080FF" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#0080FF" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid
+                  horizontal={true}
+                  vertical={false}
+                  strokeDasharray="3 3"
+                  stroke="#e1e4ea"
+                  strokeOpacity={0.6}
+                />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 10, fill: '#677183' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: '#677183' }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={40}
+                  tickCount={5}
+                  tickFormatter={formatBytesShort}
+                  domain={['dataMin', 'dataMax']}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  fill="url(#storageGradient)"
+                  stroke="#0080FF"
+                  strokeWidth={2}
+                  dot={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
 
-        {/* Objects chart */}
-        <div className="rounded-lg border border-zinc-200 bg-white p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-              OBJECTS
-            </span>
-            <span className="text-sm font-semibold text-zinc-900">{objectsCount} total</span>
+          {/* Objects chart — BarChart */}
+          <div className="rounded-lg border border-[rgba(225,228,234,0.6)] bg-white p-4 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs font-medium uppercase tracking-wider text-[#677183]">
+                OBJECTS
+              </span>
+              <span className="text-[13px] font-semibold text-zinc-900">{latestObjects} total</span>
+            </div>
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart
+                data={data?.objects ?? []}
+                margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid
+                  horizontal={true}
+                  vertical={false}
+                  strokeDasharray="3 3"
+                  stroke="#e1e4ea"
+                  strokeOpacity={0.6}
+                />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 10, fill: '#677183' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: '#677183' }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={30}
+                  tickCount={6}
+                  allowDecimals={false}
+                  domain={['dataMin', 'dataMax']}
+                />
+                <Bar dataKey="value" fill="#0080FF" radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-          <ResponsiveContainer width="100%" height={120}>
-            <AreaChart data={objectsChartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="objectsGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#EFF6FF" stopOpacity={0.8} />
-                  <stop offset="95%" stopColor="#EFF6FF" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 10, fill: '#9ca3af' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis hide />
-              <Tooltip
-                contentStyle={{ fontSize: 12, borderRadius: 6 }}
-                formatter={(value) => [value ?? '', 'Objects']}
-              />
-              <Area
-                type="monotone"
-                dataKey="value"
-                fill="#EFF6FF"
-                stroke="#2563EB"
-                strokeWidth={2}
-                dot={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
         </div>
-      </div>
+      )}
     </div>
   );
 }

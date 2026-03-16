@@ -7,6 +7,7 @@ import { Input } from '@hyperspace/ui/Input';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '@hyperspace/ui/Modal';
 import { Spinner } from '@hyperspace/ui/Spinner';
 import { useToast } from '@hyperspace/ui/Toast';
+import { formatBytes } from '@hyperspace/ui/utils';
 
 import type {
   Bucket,
@@ -20,14 +21,6 @@ import { CreateAccessKeyModal } from '../CreateAccessKeyModal';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
 
 // ---------------------------------------------------------------------------
 // Component

@@ -6,6 +6,7 @@ on:
 
 jobs:
   teardown:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     concurrency:
       group: preview-pr-${{ github.event.pull_request.number }}
@@ -21,7 +22,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@3b1e0a8ff9e8cbbd91cce0ed6f246d1068188b1b
 
       - uses: actions/setup-node@v4
         with:
@@ -39,7 +40,7 @@ jobs:
       - name: Remove SST stage
         id: remove
         continue-on-error: true
-        run: pnpx sst remove --stage "pr-${{ github.event.pull_request.number }}"
+        run: pnpm exec sst remove --stage "pr-${{ github.event.pull_request.number }}"
 
       - name: Notify Slack on teardown failure
         if: steps.remove.outcome == 'failure'

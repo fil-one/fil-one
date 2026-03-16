@@ -1,10 +1,10 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import {
   PlusIcon,
   DatabaseIcon,
   KeyIcon,
   ArrowUpIcon,
-  TrashIcon,
+  HardDrivesIcon,
   XIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link } from '@tanstack/react-router';
@@ -12,54 +12,17 @@ import { Link } from '@tanstack/react-router';
 const UsageTrends = lazy(() => import('./UsageTrends'));
 
 import { Button } from '@hyperspace/ui/Button';
-import { StatCard } from '@hyperspace/ui/StatCard';
+import { ProgressBar } from '@hyperspace/ui/ProgressBar';
+import { formatBytes } from '@hyperspace/ui/utils';
 
-import type { RecentActivity, ActivityAction } from '@filone/shared';
+import { PlanId, SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
+import type { UsageResponse, BillingInfo, RecentActivity } from '@filone/shared';
 
-// ---------------------------------------------------------------------------
-// Dev toggle — set IS_POPULATED = false to see the first-time empty state
-// ---------------------------------------------------------------------------
-const IS_POPULATED = true;
-
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_ACTIVITIES: RecentActivity[] = [
-  {
-    id: '1',
-    action: 'bucket.created',
-    resourceType: 'bucket',
-    resourceName: 'my-media-files',
-    timestamp: '2024-02-10T14:30:00Z',
-  },
-  {
-    id: '2',
-    action: 'object.uploaded',
-    resourceType: 'object',
-    resourceName: 'video.mp4',
-    timestamp: '2024-02-10T15:00:00Z',
-  },
-  {
-    id: '3',
-    action: 'key.created',
-    resourceType: 'key',
-    resourceName: 'Production',
-    timestamp: '2024-02-09T09:00:00Z',
-  },
-];
+import { getUsage, getBilling, getActivity } from '../../lib/api.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -70,264 +33,445 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function daysRemaining(isoString: string): number {
+  const ms = new Date(isoString).getTime() - Date.now();
+  return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)));
+}
+
+function planDisplayName(planId: PlanId): string {
+  switch (planId) {
+    case PlanId.FreeTrial:
+      return 'Free trial';
+    case PlanId.PayAsYouGo:
+      return 'Pay As You Go';
+    default:
+      return 'Unknown';
+  }
+}
+
+function statusBadge(status: SubscriptionStatus): { label: string; className: string } {
+  switch (status) {
+    case SubscriptionStatus.Trialing:
+      return {
+        label: 'Trial',
+        className: 'bg-[rgba(0,128,255,0.1)] text-[#0080ff]',
+      };
+    case SubscriptionStatus.Active:
+      return {
+        label: 'Active',
+        className: 'bg-green-50 text-green-600',
+      };
+    case SubscriptionStatus.PastDue:
+      return {
+        label: 'Past Due',
+        className: 'bg-amber-50 text-amber-600',
+      };
+    case SubscriptionStatus.Canceled:
+      return {
+        label: 'Canceled',
+        className: 'bg-red-50 text-red-600',
+      };
+    case SubscriptionStatus.GracePeriod:
+      return {
+        label: 'Grace Period',
+        className: 'bg-amber-50 text-amber-600',
+      };
+    default:
+      return { label: status, className: 'bg-zinc-100 text-zinc-500' };
+  }
+}
+
+function estimateMonthlyCost(usedBytes: number, pricePerTbCents: number): string {
+  if (usedBytes === 0) return '$0.00';
+  const tb = usedBytes / TB_BYTES;
+  const cents = tb * pricePerTbCents;
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
 // ---------------------------------------------------------------------------
-// Activity helpers
+// Skeleton
 // ---------------------------------------------------------------------------
 
-type ActivityIconConfig = {
-  icon: React.ElementType;
-  colorClass: string;
-  label: string;
-};
-
-const ACTIVITY_CONFIG: Record<ActivityAction, ActivityIconConfig> = {
-  'bucket.created': {
-    icon: DatabaseIcon,
-    colorClass: 'text-green-600',
-    label: 'Bucket created',
-  },
-  'bucket.deleted': {
-    icon: DatabaseIcon,
-    colorClass: 'text-red-500',
-    label: 'Bucket deleted',
-  },
-  'object.uploaded': {
-    icon: ArrowUpIcon,
-    colorClass: 'text-blue-600',
-    label: 'Object uploaded',
-  },
-  'object.deleted': {
-    icon: TrashIcon,
-    colorClass: 'text-red-500',
-    label: 'Object deleted',
-  },
-  'key.created': {
-    icon: KeyIcon,
-    colorClass: 'text-green-600',
-    label: 'Key created',
-  },
-  'key.deleted': {
-    icon: KeyIcon,
-    colorClass: 'text-red-500',
-    label: 'Key deleted',
-  },
-};
-
-// ---------------------------------------------------------------------------
-// Populated stats (mocked)
-// ---------------------------------------------------------------------------
-
-const POPULATED_STATS = {
-  storageUsed: 6500000000, // 6.5 GB
-  storageLimit: 1099511627776, // 1 TiB
-  downloadsUsed: 0,
-  downloadsLimit: 10995116277760, // 10 TiB
-  bucketsCount: 3,
-  bucketsLimit: 100,
-  objectsCount: 342,
-  accessKeysCount: 2,
-  accessKeysLimit: 300,
-};
-
-const EMPTY_STATS = {
-  storageUsed: 0,
-  storageLimit: 1099511627776,
-  downloadsUsed: 0,
-  downloadsLimit: 10995116277760,
-  bucketsCount: 0,
-  bucketsLimit: 100,
-  objectsCount: 0,
-  accessKeysCount: 0,
-  accessKeysLimit: 300,
-};
+function DashboardSkeleton() {
+  return (
+    <div className="p-6 animate-pulse">
+      <div className="mb-6 h-8 w-40 rounded bg-zinc-200" />
+      <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="h-[157px] rounded-xl bg-zinc-100" />
+        <div className="h-[157px] rounded-xl bg-zinc-100" />
+        <div className="h-[157px] rounded-xl bg-zinc-100" />
+      </div>
+      <div className="mb-5 h-[88px] rounded-xl bg-zinc-100" />
+      <div className="h-48 rounded-lg bg-zinc-100" />
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export function DashboardPage() {
+  const [usage, setUsage] = useState<UsageResponse | null>(null);
+  const [billing, setBilling] = useState<BillingInfo | null>(null);
+  const [activities, setActivities] = useState<RecentActivity[]>([]);
+  const [loading, setLoading] = useState(true);
   const [trialBannerVisible, setTrialBannerVisible] = useState(true);
-  // UNKNOWN: completedSteps would come from user progress tracking — using empty array as default
-  const [completedSteps] = useState<string[]>([]);
 
-  const stats = IS_POPULATED ? POPULATED_STATS : EMPTY_STATS;
-  const activities = IS_POPULATED ? MOCK_ACTIVITIES : [];
+  useEffect(() => {
+    Promise.all([getUsage(), getBilling(), getActivity({ limit: 5 })])
+      .then(([u, b, a]) => {
+        setUsage(u);
+        setBilling(b);
+        setActivities(a.activities);
+      })
+      .catch(() => {
+        // Errors handled by apiRequest (401 redirect, etc.)
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
-  const storageUsagePct =
-    stats.storageLimit > 0 ? Math.round((stats.storageUsed / stats.storageLimit) * 100) : 0;
+  if (loading || !usage || !billing) {
+    return <DashboardSkeleton />;
+  }
 
-  const downloadsUsagePct =
-    stats.downloadsLimit > 0 ? Math.round((stats.downloadsUsed / stats.downloadsLimit) * 100) : 0;
+  const isTrialing = billing.subscription.status === SubscriptionStatus.Trialing;
+  const isActivePaid = billing.subscription.status === SubscriptionStatus.Active;
+  const trialDaysLeft =
+    isTrialing && billing.subscription.trialEndsAt
+      ? daysRemaining(billing.subscription.trialEndsAt)
+      : null;
 
-  // Quick setup tasks: first-time = tasks 1 + 3, populated = tasks 1 + 2 + 3
-  const quickSetupTasks = IS_POPULATED
-    ? [
-        {
-          id: 'create-bucket',
-          icon: DatabaseIcon,
-          title: 'Create a bucket',
-          subtitle: 'Organize your storage',
-          href: '/buckets',
-        },
-        {
-          id: 'upload-object',
-          icon: ArrowUpIcon,
-          title: 'Upload an object',
-          subtitle: 'Store files on Filecoin',
-          href: '/buckets',
-        },
-        {
-          id: 'generate-key',
-          icon: KeyIcon,
-          title: 'Generate API key',
-          subtitle: 'Connect via S3 API',
-          href: '/api-keys',
-        },
-      ]
-    : [
-        {
-          id: 'create-bucket',
-          icon: DatabaseIcon,
-          title: 'Create a bucket',
-          subtitle: 'Organize your storage',
-          href: '/buckets',
-        },
-        {
-          id: 'generate-key',
-          icon: KeyIcon,
-          title: 'Generate API key',
-          subtitle: 'Connect via S3 API',
-          href: '/api-keys',
-        },
-      ];
+  const showQuickSetup =
+    usage.buckets.count === 0 || usage.objects.count === 0 || usage.accessKeys.count === 0;
 
-  const quickSetupDone = completedSteps.length;
+  const badge = statusBadge(billing.subscription.status);
+  const pricePerTbCents = billing.subscription.planId === PlanId.PayAsYouGo ? 499 : 0;
+
+  const limits = getUsageLimits(isActivePaid);
+  const storagePct =
+    limits.storageLimitBytes > 0
+      ? Math.round((usage.storage.usedBytes / limits.storageLimitBytes) * 100)
+      : 0;
+
+  const egressPct =
+    limits.egressLimitBytes > 0
+      ? Math.round((usage.egress.usedBytes / limits.egressLimitBytes) * 100)
+      : 0;
+
+  const quickSetupTasks = [
+    {
+      id: 'create-bucket',
+      icon: DatabaseIcon,
+      title: 'Create a bucket',
+      subtitle: 'Organize your storage',
+      href: '/buckets',
+      done: usage.buckets.count > 0,
+    },
+    {
+      id: 'upload-object',
+      icon: ArrowUpIcon,
+      title: 'Upload an object',
+      subtitle: 'Store files on Filecoin',
+      href: '/buckets',
+      done: usage.objects.count > 0,
+    },
+    {
+      id: 'generate-key',
+      icon: KeyIcon,
+      title: 'Generate API key',
+      subtitle: 'Connect via S3 API',
+      href: '/api-keys',
+      done: usage.accessKeys.count > 0,
+    },
+  ];
+
+  const quickSetupDone = quickSetupTasks.filter((t) => t.done).length;
   const quickSetupTotal = quickSetupTasks.length;
-  const showQuickSetup = quickSetupDone < quickSetupTotal;
 
   return (
     <div className="p-6">
-      {/* ------------------------------------------------------------------ */}
       {/* 1. Page header */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-zinc-900">Dashboard</h1>
-        {IS_POPULATED && (
-          <Button variant="filled" icon={PlusIcon} href="/buckets">
-            New bucket
-          </Button>
-        )}
+      <div className="mb-5 flex items-center justify-between">
+        <h1 className="text-lg font-semibold text-zinc-900">Dashboard</h1>
+        <Link
+          to="/buckets"
+          className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-900 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] hover:bg-zinc-50"
+        >
+          <PlusIcon size={16} />
+          New bucket
+        </Link>
       </div>
 
-      {/* ------------------------------------------------------------------ */}
       {/* 2. Trial banner */}
-      {/* ------------------------------------------------------------------ */}
-      {trialBannerVisible && (
-        <div className="mb-6 flex items-center gap-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
-          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
-            14 DAYS LEFT
-          </span>
-          <p className="flex-1 text-sm text-zinc-700">
-            Free trial — Add a payment method to unlock unlimited storage at $4.99/TiB
-          </p>
-          <Button variant="filled" href="/billing">
-            Upgrade →
-          </Button>
-          <button
-            type="button"
-            aria-label="Dismiss trial banner"
-            onClick={() => setTrialBannerVisible(false)}
-            className="text-zinc-400 hover:text-zinc-600"
-          >
-            <XIcon size={18} />
-          </button>
+      {isTrialing && trialBannerVisible && (
+        <div className="mb-5 flex items-center justify-between rounded-xl bg-[rgba(0,128,255,0.06)] px-5 py-3.5 shadow-[0px_0px_0px_1px_rgba(0,128,255,0.1)]">
+          <div className="flex items-center gap-4">
+            <span className="rounded-full bg-[rgba(0,128,255,0.15)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#0080ff]">
+              {trialDaysLeft !== null ? `${trialDaysLeft} days left` : 'TRIAL'}
+            </span>
+            <p className="text-[13px]">
+              <span className="font-medium text-zinc-900">Free trial</span>
+              <span className="text-[#677183]">
+                {' '}
+                — Add a payment method to unlock unlimited storage at $4.99/TB
+              </span>
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link
+              to="/billing"
+              className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-br from-[#0080ff] to-[#256af4] px-3 py-1.5 text-xs font-medium text-white shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] hover:opacity-90"
+            >
+              Upgrade
+              <span aria-hidden="true">→</span>
+            </Link>
+            <button
+              type="button"
+              aria-label="Dismiss trial banner"
+              onClick={() => setTrialBannerVisible(false)}
+              className="rounded-md p-1.5 text-zinc-400 hover:text-zinc-600"
+            >
+              <XIcon size={16} />
+            </button>
+          </div>
         </div>
       )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* 3. Quick Setup card */}
-      {/* ------------------------------------------------------------------ */}
+      {/* 3. Quick Setup */}
       {showQuickSetup && (
-        <div className="mb-6 rounded-lg border border-zinc-200 bg-white p-6">
+        <div className="mb-5 rounded-xl border border-[#e1e4ea] bg-white p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
           <div className="mb-4 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-              Quick Setup
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#677183]">
+              QUICK SETUP
             </span>
-            <span className="text-xs text-zinc-400">
+            <span className="text-[11px] text-[#677183]">
               {quickSetupDone} of {quickSetupTotal}
             </span>
           </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {quickSetupTasks.map(({ id, icon: Icon, title, subtitle, href }) => (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {quickSetupTasks.map(({ id, icon: Icon, title, subtitle, href, done }) => (
               <Link
                 key={id}
                 to={href}
-                className="flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-zinc-200 p-4 text-center hover:bg-zinc-50"
+                className={`flex items-center gap-3 rounded-lg border p-4 ${
+                  done ? 'border-green-200 bg-green-50' : 'border-[#e1e4ea] hover:bg-zinc-50'
+                }`}
               >
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-50 text-brand-600">
-                  <Icon size={20} />
+                <span
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+                    done
+                      ? 'bg-green-100 text-green-600'
+                      : 'bg-[rgba(0,128,255,0.08)] text-[#0080ff]'
+                  }`}
+                >
+                  <Icon size={18} />
                 </span>
-                <span className="text-sm font-medium text-zinc-800">{title}</span>
-                <span className="text-xs text-zinc-500">{subtitle}</span>
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium text-zinc-900">{title}</p>
+                  <p className="text-[11px] text-[#677183]">{subtitle}</p>
+                </div>
               </Link>
             ))}
           </div>
         </div>
       )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* 4. Stats row */}
-      {/* ------------------------------------------------------------------ */}
+      {/* 4. Top row: Plan · Storage · Egress */}
+      <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {/* Plan card */}
+        <div className="flex h-[157px] flex-col justify-between rounded-xl border border-[#e1e4ea] bg-white p-5">
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-[#677183]">
+                PLAN
+              </span>
+              {isTrialing && trialDaysLeft !== null && (
+                <span className="rounded-full bg-[rgba(0,128,255,0.1)] px-2 py-0.5 text-[10px] font-semibold text-[#0080ff]">
+                  {trialDaysLeft} days left
+                </span>
+              )}
+              {!isTrialing && (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.className}`}
+                >
+                  {badge.label}
+                </span>
+              )}
+            </div>
+            <span className="text-xl font-semibold text-[#14181f]">
+              {planDisplayName(billing.subscription.planId)}
+            </span>
+            {isTrialing && (
+              <p className="mt-0.5 text-[11px] text-[#677183]">
+                1 TB storage &amp; egress included
+              </p>
+            )}
+            {!isTrialing && (
+              <p className="mt-0.5 text-[11px] text-[#677183]">$4.99/TB · no egress fees</p>
+            )}
+          </div>
+          <div>
+            {isTrialing ? (
+              <Link
+                to="/billing"
+                className="text-[12px] font-medium text-[#677183] hover:text-zinc-900"
+              >
+                Upgrade <span aria-hidden="true">→</span>
+              </Link>
+            ) : (
+              <Link
+                to="/billing"
+                className="text-[12px] font-medium text-[#677183] hover:text-zinc-900"
+              >
+                Manage plan <span aria-hidden="true">→</span>
+              </Link>
+            )}
+          </div>
+        </div>
 
-      {/* Wide stats: Storage + Downloads */}
-      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <StatCard
-          label="STORAGE"
-          value={formatBytes(stats.storageUsed)}
-          limit={`/ ${formatBytes(stats.storageLimit)}`}
-          usage={`${storageUsagePct}% used`}
-        />
-        <StatCard
-          label="DOWNLOADS"
-          value={formatBytes(stats.downloadsUsed)}
-          limit={`/ ${formatBytes(stats.downloadsLimit)}`}
-          usage={`${downloadsUsagePct}% used`}
-        />
+        {/* Storage card */}
+        <div className="flex h-[157px] flex-col justify-between rounded-xl border border-[#e1e4ea] bg-white p-5">
+          <div>
+            <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-[#677183]">
+              STORAGE
+            </span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-[30px] font-semibold leading-9 tracking-tight text-[#14181f]">
+                {formatBytes(usage.storage.usedBytes)}
+              </span>
+              {isTrialing && <span className="text-[13px] text-[#677183]">/ 1 TB</span>}
+            </div>
+          </div>
+          {isTrialing ? (
+            <ProgressBar value={storagePct} size="sm" label="Storage usage" />
+          ) : (
+            <div className="flex items-center justify-between border-t border-[#e1e4ea] pt-3">
+              <span className="text-[11px] text-[#677183]">Est. monthly cost</span>
+              <span className="text-[13px] font-semibold text-[#14181f]">
+                {estimateMonthlyCost(usage.storage.usedBytes, pricePerTbCents)}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Egress card */}
+        <div className="flex h-[157px] flex-col justify-between rounded-xl border border-[#e1e4ea] bg-white p-5">
+          <div>
+            <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-[#677183]">
+              EGRESS
+            </span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-[30px] font-semibold leading-9 tracking-tight text-[#14181f]">
+                {formatBytes(usage.egress.usedBytes)}
+              </span>
+              {isTrialing && <span className="text-[13px] text-[#677183]">/ 2 TB</span>}
+            </div>
+          </div>
+          {isTrialing ? (
+            <ProgressBar value={egressPct} size="sm" label="Egress usage" />
+          ) : (
+            <div className="flex items-center border-t border-[#e1e4ea] pt-3">
+              <span className="text-[11px] text-[#677183]">No egress fees · unlimited</span>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Narrow stats: Buckets + Objects + Access Keys */}
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard
-          label="BUCKETS"
-          value={String(stats.bucketsCount)}
-          limit={`/ ${stats.bucketsLimit}`}
-        />
-        <StatCard label="OBJECTS" value={String(stats.objectsCount)} limit="total" />
-        <StatCard
-          label="ACCESS KEYS"
-          value={String(stats.accessKeysCount)}
-          limit={`/ ${stats.accessKeysLimit}`}
-        />
+      {/* 5. Buckets · Objects · API Keys — single card with vertical dividers */}
+      <div className="mb-5 grid grid-cols-3 divide-x divide-[#e1e4ea] rounded-xl border border-[#e1e4ea] bg-white shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+        <div className="px-5 py-4">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-[#677183]">
+              BUCKETS
+            </span>
+            <Link to="/buckets" className="text-[11px] text-[#677183] hover:text-zinc-900">
+              View all
+            </Link>
+          </div>
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl font-semibold text-[#14181f]">{usage.buckets.count}</span>
+            <span className="text-[11px] text-[#677183]">/ {usage.buckets.limit}</span>
+          </div>
+        </div>
+        <div className="px-5 py-4">
+          <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-[#677183]">
+            OBJECTS
+          </span>
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl font-semibold text-[#14181f]">{usage.objects.count}</span>
+            <span className="text-[11px] text-[#677183]">total</span>
+          </div>
+        </div>
+        <div className="px-5 py-4">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-[#677183]">
+              API KEYS
+            </span>
+            <Link to="/api-keys" className="text-[11px] text-[#677183] hover:text-zinc-900">
+              View all
+            </Link>
+          </div>
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl font-semibold text-[#14181f]">{usage.accessKeys.count}</span>
+            <span className="text-[11px] text-[#677183]">/ {usage.accessKeys.limit}</span>
+          </div>
+        </div>
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* 5. Usage Trends (lazy-loaded to avoid forced layout before styles) */}
-      {/* ------------------------------------------------------------------ */}
+      {/* 6. Filecoin Sealing Status (visual placeholder) */}
+      <div className="mb-6 rounded-xl border border-[#e1e4ea] bg-white p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h2 className="text-[11px] font-medium uppercase tracking-wider text-[#677183]">
+              FILECOIN SEALING STATUS
+            </h2>
+            <span className="rounded-full bg-[rgba(0,128,255,0.1)] px-2 py-0.5 text-[10px] font-semibold text-[#0080ff]">
+              On-chain verification
+            </span>
+          </div>
+          <a
+            href="https://docs.filecoin.io"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[11px] text-[#677183] hover:text-zinc-900"
+          >
+            Learn more ↗
+          </a>
+        </div>
+        <div className="flex flex-col items-center gap-2 py-6 text-center">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100">
+            <HardDrivesIcon size={20} className="text-[#677183]" />
+          </div>
+          <p className="text-[13px] font-medium text-zinc-900">No objects sealing yet</p>
+          <p className="max-w-xs text-[11px] text-[#677183]">
+            Upload your first object to see real-time Filecoin sealing status and on-chain
+            verification
+          </p>
+          <Link
+            to="/buckets"
+            className="mt-1 text-[12px] font-medium text-[#0080ff] hover:underline"
+          >
+            Go to buckets <span aria-hidden="true">→</span>
+          </Link>
+        </div>
+      </div>
+
+      {/* 7. Usage Trends */}
       <Suspense fallback={<div className="mb-6" style={{ height: 200 }} />}>
-        <UsageTrends storageUsed={stats.storageUsed} objectsCount={stats.objectsCount} />
+        <UsageTrends />
       </Suspense>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* 6. Recent Activity */}
-      {/* ------------------------------------------------------------------ */}
-      <div>
-        <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-          Recent Activity
-        </h2>
+      {/* 8. Recent Activity */}
+      <div className="rounded-xl border border-[#e1e4ea] bg-white pb-5 pl-3 pr-5 pt-4 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+        <div className="mb-3">
+          <h2 className="text-xs font-medium uppercase tracking-wider text-[#677183]">
+            Recent Activity
+          </h2>
+        </div>
 
         {activities.length === 0 ? (
-          /* Empty state */
-          <div className="flex flex-col items-center gap-3 rounded-lg border border-zinc-200 bg-white py-12 text-center">
+          <div className="flex flex-col items-center gap-3 py-8 text-center">
             <p className="text-sm font-medium text-zinc-700">No activity yet</p>
             <p className="text-sm text-zinc-500">Create a bucket to start storing objects</p>
             <Button variant="filled" icon={PlusIcon} href="/buckets">
@@ -335,43 +479,47 @@ export function DashboardPage() {
             </Button>
           </div>
         ) : (
-          /* Activity table */
-          <div className="rounded-lg border border-zinc-200 bg-white">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-zinc-200">
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                    Action
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                    Resource
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-zinc-500">
-                    Time
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {activities.map((activity) => {
-                  const config = ACTIVITY_CONFIG[activity.action];
-                  const Icon = config.icon;
-                  return (
-                    <tr key={activity.id} className="border-b border-zinc-100 last:border-0">
-                      <td className="px-4 py-3">
-                        <span className="flex items-center gap-2">
-                          <Icon size={16} className={config.colorClass} aria-hidden="true" />
-                          <span className="text-zinc-700">{config.label}</span>
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-zinc-600">{activity.resourceName}</td>
-                      <td className="px-4 py-3 text-right text-zinc-400">
-                        {timeAgo(activity.timestamp)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="divide-y divide-zinc-100/50">
+            {activities.map((activity) => (
+              <div key={activity.id} className="flex items-center gap-4 rounded-lg px-2 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-[13px] font-medium text-zinc-900">
+                      {activity.resourceName}
+                    </span>
+                    <span
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+                        activity.resourceType === 'object'
+                          ? 'bg-[rgba(0,128,255,0.1)] text-[#0080ff]'
+                          : activity.resourceType === 'bucket'
+                            ? 'bg-zinc-100 text-[#677183]'
+                            : 'bg-purple-50 text-purple-600'
+                      }`}
+                    >
+                      {activity.resourceType}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-[#677183]">
+                    {activity.action.replace('.', ' ')}
+                  </p>
+                  {activity.resourceType === 'object' && activity.cid && (
+                    <p className="mt-0.5 truncate font-mono text-[10px] text-[#677183]">
+                      {activity.cid}
+                    </p>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-4">
+                  {activity.resourceType === 'object' && activity.sizeBytes !== undefined && (
+                    <span className="text-[11px] font-medium text-[#677183]">
+                      {formatBytes(activity.sizeBytes)}
+                    </span>
+                  )}
+                  <span className="w-14 text-right text-[11px] text-[#677183]">
+                    {timeAgo(activity.timestamp)}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

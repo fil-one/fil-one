@@ -72,7 +72,7 @@ describe('usage-reporting-worker', () => {
 
   it('reports usage to Stripe and writes audit record', async () => {
     mockGetStorageSamples.mockResolvedValue([
-      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_099_511_627_776 },
+      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
     ]);
 
     await handler(basePayload);

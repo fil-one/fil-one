@@ -1,32 +1,27 @@
-import {
-  DynamoDBClient,
-  QueryCommand,
-  GetItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
-import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import { PlanId, SubscriptionStatus, TIB_BYTES } from '@filone/shared';
-import type { BillingInfo, UsageInfo } from '@filone/shared';
+import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import { PlanId, SubscriptionStatus } from '@filone/shared';
+import type { BillingInfo } from '@filone/shared';
 import { Resource } from 'sst';
+import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient } from '../lib/stripe-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import type { SubscriptionRecord } from '../lib/dynamo-records.js';
 
-const dynamo = new DynamoDBClient({});
+const dynamo = getDynamoClient();
 
-const PRICE_PER_TIB_CENTS = 499;
-const TRIAL_STORAGE_LIMIT_BYTES = TIB_BYTES; // 1 TiB
-
-async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
+export async function baseHandler(
+  event: AuthenticatedEvent,
+): Promise<APIGatewayProxyStructuredResultV2> {
   const { userId } = getUserInfo(event);
   const billingTableName = Resource.BillingTable.name;
-  const uploadsTableName = Resource.UploadsTable.name;
 
   // 1. Get billing record
   const billingResult = await dynamo.send(
@@ -39,54 +34,11 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     }),
   );
 
-  const billingRecord = billingResult.Item ? unmarshall(billingResult.Item) : null;
+  const billingRecord = billingResult.Item
+    ? (unmarshall(billingResult.Item) as SubscriptionRecord)
+    : null;
 
-  // 2. Calculate usage from uploads table — sum sizeBytes of all objects
-  let storageUsedBytes = 0;
-  const bucketsResult = await dynamo.send(
-    new QueryCommand({
-      TableName: uploadsTableName,
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: `USER#${userId}` },
-        ':skPrefix': { S: 'BUCKET#' },
-      },
-    }),
-  );
-
-  const bucketNames = (bucketsResult.Items ?? []).map((item) => unmarshall(item).name as string);
-
-  // Query objects for each bucket and sum sizes
-  for (const bucketName of bucketNames) {
-    const objectsResult = await dynamo.send(
-      new QueryCommand({
-        TableName: uploadsTableName,
-        KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-        ExpressionAttributeValues: {
-          ':pk': { S: `BUCKET#${userId}#${bucketName}` },
-          ':skPrefix': { S: 'OBJECT#' },
-        },
-        ProjectionExpression: 'sizeBytes',
-      }),
-    );
-
-    for (const item of objectsResult.Items ?? []) {
-      const record = unmarshall(item);
-      storageUsedBytes += (record.sizeBytes as number) || 0;
-    }
-  }
-
-  const estimatedMonthlyCostCents = Math.round(
-    (storageUsedBytes / TIB_BYTES) * PRICE_PER_TIB_CENTS,
-  );
-
-  const usage: UsageInfo = {
-    storageUsedBytes,
-    storageLimitBytes: TRIAL_STORAGE_LIMIT_BYTES,
-    estimatedMonthlyCostCents,
-  };
-
-  // 3. If no billing record → trial state
+  // 2. If no billing record → trial state
   if (!billingRecord || !billingRecord.stripeCustomerId) {
     const trialEndsAt =
       billingRecord?.trialEndsAt ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
@@ -95,10 +47,10 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     if (
       billingRecord?.subscriptionStatus === SubscriptionStatus.Trialing &&
       billingRecord.trialEndsAt &&
-      new Date(billingRecord.trialEndsAt as string).getTime() < Date.now()
+      new Date(billingRecord.trialEndsAt).getTime() < Date.now()
     ) {
       const gracePeriodEndsAt = new Date(
-        new Date(billingRecord.trialEndsAt as string).getTime() + 7 * 24 * 60 * 60 * 1000,
+        new Date(billingRecord.trialEndsAt).getTime() + 7 * 24 * 60 * 60 * 1000,
       ).toISOString();
 
       await dynamo.send(
@@ -122,10 +74,9 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
         subscription: {
           planId: PlanId.FreeTrial,
           status: SubscriptionStatus.GracePeriod,
-          trialEndsAt: billingRecord.trialEndsAt as string,
+          trialEndsAt: billingRecord.trialEndsAt,
           gracePeriodEndsAt,
         },
-        usage,
       };
       return new ResponseBuilder().status(200).body(response).build();
     }
@@ -136,24 +87,20 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
         status: SubscriptionStatus.Trialing,
         trialEndsAt,
       },
-      usage,
     };
 
     return new ResponseBuilder().status(200).body(response).build();
   }
 
-  // 4. Has Stripe customer — fetch subscription + payment method
+  // 3. Has Stripe customer — fetch subscription + payment method
   const stripe = getStripeClient();
   let paymentMethod: BillingInfo['paymentMethod'];
 
   if (billingRecord.subscriptionId) {
     try {
-      const subscription = await stripe.subscriptions.retrieve(
-        billingRecord.subscriptionId as string,
-        {
-          expand: ['default_payment_method'],
-        },
-      );
+      const subscription = await stripe.subscriptions.retrieve(billingRecord.subscriptionId, {
+        expand: ['default_payment_method'],
+      });
 
       const pm = subscription.default_payment_method;
       if (pm && typeof pm === 'object' && pm.card) {
@@ -165,9 +112,6 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
           expYear: pm.card.exp_year,
         };
       }
-
-      // Use unlimited storage for active subscribers
-      usage.storageLimitBytes = -1;
     } catch (err) {
       console.warn('[get-billing] Failed to fetch Stripe subscription', {
         error: (err as Error).message,
@@ -179,23 +123,23 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   if (!paymentMethod && billingRecord.paymentMethodLast4) {
     paymentMethod = {
       id: billingRecord.paymentMethodId ?? '',
-      last4: billingRecord.paymentMethodLast4 as string,
-      brand: billingRecord.paymentMethodBrand as string,
-      expMonth: billingRecord.paymentMethodExpMonth as number,
-      expYear: billingRecord.paymentMethodExpYear as number,
+      last4: billingRecord.paymentMethodLast4,
+      brand: billingRecord.paymentMethodBrand ?? '',
+      expMonth: billingRecord.paymentMethodExpMonth ?? 0,
+      expYear: billingRecord.paymentMethodExpYear ?? 0,
     };
   }
 
-  let currentStatus = billingRecord.subscriptionStatus as SubscriptionStatus;
+  let currentStatus = billingRecord.subscriptionStatus ?? SubscriptionStatus.Trialing;
 
   // Lazy eval: trial expired → grace_period
   if (
     currentStatus === SubscriptionStatus.Trialing &&
     billingRecord.trialEndsAt &&
-    new Date(billingRecord.trialEndsAt as string).getTime() < Date.now()
+    new Date(billingRecord.trialEndsAt).getTime() < Date.now()
   ) {
     const gracePeriodEndsAt = new Date(
-      new Date(billingRecord.trialEndsAt as string).getTime() + 7 * 24 * 60 * 60 * 1000,
+      new Date(billingRecord.trialEndsAt).getTime() + 7 * 24 * 60 * 60 * 1000,
     ).toISOString();
 
     await dynamo.send(
@@ -223,7 +167,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     (currentStatus === SubscriptionStatus.GracePeriod ||
       currentStatus === SubscriptionStatus.PastDue) &&
     billingRecord.gracePeriodEndsAt &&
-    new Date(billingRecord.gracePeriodEndsAt as string).getTime() < Date.now()
+    new Date(billingRecord.gracePeriodEndsAt).getTime() < Date.now()
   ) {
     await dynamo.send(
       new UpdateItemCommand({
@@ -256,19 +200,18 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
           : PlanId.PayAsYouGo,
       status: currentStatus,
       ...(currentStatus === SubscriptionStatus.Trialing && billingRecord.trialEndsAt
-        ? { trialEndsAt: billingRecord.trialEndsAt as string }
+        ? { trialEndsAt: billingRecord.trialEndsAt }
         : {}),
       ...(billingRecord.trialEndsAt && currentStatus === SubscriptionStatus.GracePeriod
-        ? { trialEndsAt: billingRecord.trialEndsAt as string }
+        ? { trialEndsAt: billingRecord.trialEndsAt }
         : {}),
-      currentPeriodEnd: billingRecord.currentPeriodEnd as string | undefined,
-      ...(billingRecord.canceledAt ? { canceledAt: billingRecord.canceledAt as string } : {}),
+      currentPeriodEnd: billingRecord.currentPeriodEnd,
+      ...(billingRecord.canceledAt ? { canceledAt: billingRecord.canceledAt } : {}),
       ...(billingRecord.gracePeriodEndsAt
-        ? { gracePeriodEndsAt: billingRecord.gracePeriodEndsAt as string }
+        ? { gracePeriodEndsAt: billingRecord.gracePeriodEndsAt }
         : {}),
     },
     paymentMethod,
-    usage,
   };
 
   return new ResponseBuilder().status(200).body(response).build();

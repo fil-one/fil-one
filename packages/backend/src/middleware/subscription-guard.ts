@@ -1,4 +1,4 @@
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import type { MiddlewareObj, Request } from '@middy/core';
 import type {
@@ -9,6 +9,7 @@ import type {
 } from 'aws-lambda';
 import { ApiErrorCode, SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
+import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -21,7 +22,7 @@ export enum AccessLevel {
 const TRIAL_GRACE_DAYS = 7;
 const _PAID_GRACE_DAYS = 30;
 
-const dynamo = new DynamoDBClient({});
+const dynamo = getDynamoClient();
 
 function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
