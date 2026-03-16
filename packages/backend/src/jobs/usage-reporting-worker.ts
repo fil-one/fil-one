@@ -10,6 +10,7 @@ const dynamo = new DynamoDBClient({});
 
 export interface UsageReportingWorkerPayload {
   orgId: string;
+  auroraTenantId: string;
   subscriptionId: string;
   stripeCustomerId: string;
   currentPeriodStart: string;
@@ -17,13 +18,20 @@ export interface UsageReportingWorkerPayload {
 }
 
 export async function handler(event: UsageReportingWorkerPayload): Promise<void> {
-  const { orgId, subscriptionId, stripeCustomerId, currentPeriodStart, reportDate } = event;
+  const {
+    orgId,
+    auroraTenantId,
+    subscriptionId,
+    stripeCustomerId,
+    currentPeriodStart,
+    reportDate,
+  } = event;
 
   console.log('[usage-worker] Processing', { orgId, subscriptionId, reportDate });
 
   const now = new Date().toISOString();
   const samples = await getStorageSamples({
-    tenantId: orgId,
+    tenantId: auroraTenantId,
     from: currentPeriodStart,
     to: now,
     window: '1h',

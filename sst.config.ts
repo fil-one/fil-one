@@ -405,7 +405,7 @@ export default $config({
 
     const usageOrchestrator = new sst.aws.Function('UsageReportingOrchestrator', {
       handler: 'packages/backend/src/jobs/usage-reporting-orchestrator.handler',
-      link: [billingTable],
+      link: [billingTable, userInfoTable],
       environment: {
         USAGE_WORKER_FUNCTION_NAME: usageWorker.name,
         STRIPE_METER_EVENT_NAME: 'tibmonthmeter',
