@@ -62,7 +62,17 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     );
   }
 
-  await createBillingTrial({ userId, orgId, email });
+  try {
+    await createBillingTrial({ userId, orgId, email });
+  } catch (error) {
+    // Log billing trial creation failures but do not block org confirmation.
+    console.error('[confirm-org] Failed to create billing trial for org confirmation', {
+      error,
+      orgId,
+      userId,
+      email,
+    });
+  }
 
   const responseBody: ConfirmOrgResponse = {
     orgId,
