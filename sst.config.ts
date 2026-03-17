@@ -197,7 +197,7 @@ export default $config({
         },
       ],
       runtime: 'nodejs24.x',
-      timeout: '30 seconds',
+      timeout: '10 seconds',
     });
 
     new aws.cloudformation.Stack('SetupStack', {

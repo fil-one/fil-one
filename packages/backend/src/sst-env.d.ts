@@ -52,5 +52,9 @@ declare module "sst" {
       url: string;
       type: "sst.aws.Queue";
     };
+    BillingTrialSetupQueue: {
+      url: string;
+      type: "sst.aws.Queue";
+    };
   }
 }

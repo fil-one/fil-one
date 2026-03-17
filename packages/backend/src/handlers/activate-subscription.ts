@@ -79,13 +79,30 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  // 3. Create subscription
-  const subscription = await stripe.subscriptions.create({
-    customer: stripeCustomerId,
-    items: [{ price: secrets.STRIPE_PRICE_ID }],
-    default_payment_method: paymentMethodId,
-    expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-  });
+  // 3. Create or update subscription
+  let subscription;
+  if (record.subscriptionId) {
+    // Step 1: Attach payment method first
+    await stripe.subscriptions.update(record.subscriptionId as string, {
+      default_payment_method: paymentMethodId,
+    });
+    // Step 2: End trial — payment method already attached, so cancel behavior won't fire
+    subscription = await stripe.subscriptions.update(record.subscriptionId as string, {
+      trial_end: 'now',
+      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+    });
+  } else {
+    console.warn('[activate-subscription] No existing subscription found for user, creating new', {
+      userId,
+    });
+    // No subscription yet (legacy path) — create new
+    subscription = await stripe.subscriptions.create({
+      customer: stripeCustomerId,
+      items: [{ price: secrets.STRIPE_PRICE_ID }],
+      default_payment_method: paymentMethodId,
+      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+    });
+  }
 
   // 4. Get payment method details
   const pm = subscription.default_payment_method;
