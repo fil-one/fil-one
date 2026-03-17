@@ -14,6 +14,7 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.js';
 
 const dynamo = getDynamoClient();
 
@@ -80,7 +81,9 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
           orgId,
           subscriptionStatus: SubscriptionStatus.Trialing,
           trialStartedAt: new Date().toISOString(),
-          trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+          trialEndsAt: new Date(
+            Date.now() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000,
+          ).toISOString(),
           updatedAt: new Date().toISOString(),
         }),
       }),

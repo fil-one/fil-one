@@ -20,7 +20,7 @@
 
 - Customers pay in **USD via Stripe**; we pay onramp providers in **FIL** from a managed wallet (USD payment to onramps is an open question)
 - Flat rate: **$5/TB/month** for storage
-- **Free trial:** 14 days, 1 TB limit
+- **Free trial:** 30 days, 1 TB limit, 2 TB egress limit
 - Customer types: individual developers, commercial, and enterprise (focus on first two initially)
 - **Metered billing** — charge based on actual storage (maybe retrievals?) used per billing period
 - We store **metadata on-chain** (wrapped DEK references, object manifests) alongside customer data — this has its own FIL cost that we absorb
@@ -150,9 +150,10 @@ Start with **Option 1 (pure metered)** for launch to minimize signup friction an
 
 ### Structure
 
-- **Duration:** 14 days
+- **Duration:** 30 days
 - **Storage limit:** 1 TB
-- **Stripe native:** `trial_period_days: 14` on the Subscription — Stripe handles the trial window automatically
+- **Egress limit:** 2 TB
+- **Stripe native:** `trial_period_days: 30` on the Subscription — Stripe handles the trial window automatically
 
 ### Payment Method at Signup: Tradeoff
 
@@ -220,7 +221,7 @@ Radar prevents fraudulent payments. It does not verify identity. If identity ver
    |-- Radar scores card
    |-- Create Subscription (trial_period_days: 14, metered price)
 
-2. TRIAL (14 days, 1 TB limit)
+2. TRIAL (30 days, 1 TB limit, 2 TB egress limit)
    |-- Usage tracked in our DB, enforced at upload time
    |-- No charges
    |-- Day 11: trial_will_end webhook -> notify customer

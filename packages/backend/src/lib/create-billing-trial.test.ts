@@ -99,18 +99,18 @@ describe('createBillingTrial', () => {
     expect(item.updatedAt).toBeDefined();
   });
 
-  it('sets trial_end to 14 days from now', async () => {
+  it('sets trial_end to 30 days from now', async () => {
     ddbMock.on(PutItemCommand).resolves({});
 
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
 
     const trialEnd = mockSubscriptionsCreate.mock.calls[0][0].trial_end;
     const nowUnix = Math.floor(Date.now() / 1000);
-    const fourteenDaysInSeconds = 14 * 24 * 60 * 60;
+    const thirtyDaysInSeconds = 30 * 24 * 60 * 60;
 
     // Allow 5 seconds of tolerance for test execution time
-    expect(trialEnd).toBeGreaterThanOrEqual(nowUnix + fourteenDaysInSeconds - 5);
-    expect(trialEnd).toBeLessThanOrEqual(nowUnix + fourteenDaysInSeconds + 5);
+    expect(trialEnd).toBeGreaterThanOrEqual(nowUnix + thirtyDaysInSeconds - 5);
+    expect(trialEnd).toBeLessThanOrEqual(nowUnix + thirtyDaysInSeconds + 5);
   });
 
   it('passes undefined email when not provided', async () => {

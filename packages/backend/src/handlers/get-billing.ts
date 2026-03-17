@@ -14,6 +14,7 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import type { SubscriptionRecord } from '../lib/dynamo-records.js';
+import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.js';
 
 const dynamo = getDynamoClient();
 
@@ -41,7 +42,8 @@ export async function baseHandler(
   // 2. If no billing record → trial state
   if (!billingRecord || !billingRecord.stripeCustomerId) {
     const trialEndsAt =
-      billingRecord?.trialEndsAt ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+      billingRecord?.trialEndsAt ??
+      new Date(Date.now() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
     // Lazy eval: if trialing and trial has expired → transition to grace_period
     if (
