@@ -40,8 +40,6 @@ export default $config({
     const stripeSecretKey = new sst.Secret('StripeSecretKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
-    const grafanaCloudInstanceId = new sst.Secret('GrafanaCloudInstanceId');
-    const grafanaCloudApiKey = new sst.Secret('GrafanaCloudApiKey');
     const AWS_CACHING_DISABLED_POLICY = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
 
     // ── OTel Lambda Layers ─────────────────────────────────────────────
@@ -51,6 +49,23 @@ export default $config({
     // https://github.com/open-telemetry/opentelemetry-lambda/releases/tag/layer-nodejs%2F0.20.0
     const otelNodejsLayer = $interpolate`arn:aws:lambda:${awsRegion}:184161586896:layer:opentelemetry-nodejs-0_20_0:1`;
     const otelLayers = [otelCollectorLayer, otelNodejsLayer];
+
+    // The Grafana Collector Extension reads the API key from Secrets Manager
+    // via GRAFANA_CLOUD_API_KEY_ARN. Create and populate once per stage:
+    //   aws secretsmanager create-secret \
+    //     --name filone/<stage>/grafana-cloud-api-key \
+    //     --secret-string <api-key>
+    const grafanaApiKeySecretName = $interpolate`filone/${$app.stage}/grafana-cloud-api-key`;
+    const grafanaApiKeySecret = aws.secretsmanager.getSecretOutput({
+      name: grafanaApiKeySecretName,
+    });
+
+    const otelPermissions: sst.aws.FunctionPermissionArgs[] = [
+      {
+        actions: ['secretsmanager:GetSecretValue'],
+        resources: [grafanaApiKeySecret.arn],
+      },
+    ];
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
     const uploadsTable = new sst.aws.Dynamo('UploadsTable', {
@@ -204,8 +219,6 @@ export default $config({
       auth0ClientSecret,
       stripeSecretKey,
       stripePriceId,
-      grafanaCloudInstanceId,
-      grafanaCloudApiKey,
     ];
 
     const sharedEnv: Record<string, $util.Input<string>> = {
@@ -219,8 +232,8 @@ export default $config({
       OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
       AWS_LAMBDA_EXEC_WRAPPER: '/opt/otel-handler',
       OTEL_NODE_ENABLED_INSTRUMENTATIONS: 'aws-sdk,undici,aws-lambda',
-      GRAFANA_CLOUD_INSTANCE_ID: grafanaCloudInstanceId.value,
-      GRAFANA_CLOUD_API_KEY: grafanaCloudApiKey.value,
+      GRAFANA_CLOUD_INSTANCE_ID: '387458',
+      GRAFANA_CLOUD_API_KEY_ARN: grafanaApiKeySecret.arn,
       GRAFANA_CLOUD_OTLP_ENDPOINT: 'https://otlp-gateway-prod-us-central-0.grafana.net/otlp',
     };
 
@@ -234,6 +247,7 @@ export default $config({
       },
       layers: otelLayers,
       permissions: [
+        ...otelPermissions,
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter', 'ssm:DeleteParameter'],
           resources: [$interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/*`],
@@ -280,7 +294,7 @@ export default $config({
       routePath: string,
       handler: string,
       extraEnv?: Record<string, $util.Input<string>>,
-      permissions?: sst.aws.FunctionPermissionArgs[],
+      permissions: sst.aws.FunctionPermissionArgs[] = [],
     ) {
       // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
       const fnName = handler
@@ -297,7 +311,7 @@ export default $config({
           ...extraEnv,
         },
         layers: otelLayers,
-        permissions,
+        permissions: [...otelPermissions, ...permissions],
         runtime: 'nodejs24.x',
         timeout: '10 seconds',
       });
@@ -397,6 +411,7 @@ export default $config({
         },
         layers: otelLayers,
         permissions: [
+          ...otelPermissions,
           {
             actions: ['ssm:PutParameter'],
             resources: [auroraApiKeySsmArn],
@@ -429,6 +444,7 @@ export default $config({
       link: [billingTable, stripeSecretKey, auroraBackofficeToken],
       environment: { ...sharedEnv, ...auroraEnv, STRIPE_METER_EVENT_NAME: 'tibmonthmeter' },
       layers: otelLayers,
+      permissions: otelPermissions,
       runtime: 'nodejs24.x',
       timeout: '60 seconds',
       memory: '256 MB',
@@ -447,6 +463,7 @@ export default $config({
       timeout: '300 seconds',
       memory: '256 MB',
       permissions: [
+        ...otelPermissions,
         {
           actions: ['lambda:InvokeFunction'],
           resources: [usageWorker.arn],

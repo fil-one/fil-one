@@ -102,15 +102,23 @@ pnpx sst secret set Auth0MgmtClientSecret <value> [--stage <stage>]
 pnpx sst secret set StripeSecretKey <value> [--stage <stage>]
 pnpx sst secret set StripePriceId <value> [--stage <stage>]
 pnpx sst secret set AuroraBackofficeToken <value> [--stage <stage>]
-pnpx sst secret set GrafanaCloudInstanceId <value> [--stage <stage>]
-pnpx sst secret set GrafanaCloudApiKey <value> [--stage <stage>]
 ```
 
 Omit `--stage` to set for your personal dev stage (defaults to OS username).
 
 The `Auth0MgmtClientId` and `Auth0MgmtClientSecret` are from a **Machine-to-Machine (M2M) application** in Auth0 — see the [Auth0 M2M Setup](#auth0-machine-to-machine-m2m-application) section below. The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below.
 
-The Grafana Cloud credentials are found in your Grafana Cloud portal under **Connections > OpenTelemetry**. The instance ID is numeric and the API key is a Grafana Cloud API token with `MetricsPublisher`, `LogsPublisher`, and `TracesPublisher` scopes.
+**6. Set Grafana Cloud API key in Secrets Manager (one-time per stage)**
+
+The Grafana Collector Lambda Extension reads the API key from AWS Secrets Manager. Create the secret before your first deploy (replace `<stage>` with your stage name, e.g. `$USER` or `staging`):
+
+```bash
+aws secretsmanager create-secret \
+  --name filone/<stage>/grafana-cloud-api-key \
+  --secret-string <api-key>
+```
+
+The API key is a Grafana Cloud API token with `MetricsPublisher`, `LogsPublisher`, and `TracesPublisher` scopes. Find it in our shared 1Password vault.
 
 ## Commands
 

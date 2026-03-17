@@ -49,8 +49,9 @@ We use **two** Lambda layers in combination:
    `localhost:4318` and exports to Grafana Cloud. We chose Grafana's distribution
    over the upstream OTel collector layer because it includes built-in Grafana
    Cloud authentication via `GRAFANA_CLOUD_INSTANCE_ID` and
-   `GRAFANA_CLOUD_API_KEY` environment variables — no custom `collector.yaml`
-   required.
+   `GRAFANA_CLOUD_API_KEY_ARN` environment variables — no custom `collector.yaml`
+   required. The API key is stored in AWS Secrets Manager and the extension
+   fetches it at startup using the ARN.
 
 2. **OTel Node.js Auto-Instrumentation** (`opentelemetry-nodejs`) — wraps the
    Lambda handler via `AWS_LAMBDA_EXEC_WRAPPER=/opt/otel-handler`. It
@@ -100,7 +101,7 @@ OTEL_NODE_ENABLED_INSTRUMENTATIONS=aws-sdk,undici,aws-lambda
 
 # Grafana Cloud (used by collector extension layer)
 GRAFANA_CLOUD_INSTANCE_ID=<instance_id>
-GRAFANA_CLOUD_API_KEY=<api_key>
+GRAFANA_CLOUD_API_KEY_ARN=arn:aws:secretsmanager:<region>:<account>:secret:filone/<stage>/grafana-cloud-api-key-<suffix>
 GRAFANA_CLOUD_OTLP_ENDPOINT=https://otlp-gateway-prod-us-central-0.grafana.net/otlp
 ```
 
