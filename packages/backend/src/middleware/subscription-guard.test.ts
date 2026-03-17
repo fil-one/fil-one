@@ -94,7 +94,7 @@ describe('subscriptionGuardMiddleware', () => {
     await after!(request);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'Failed to create billing trial in subscription guard fallback:',
+      '[subscription-guard] Failed to create billing trial in subscription guard fallback:',
       trialError,
     );
   });
