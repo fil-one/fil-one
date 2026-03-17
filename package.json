@@ -19,7 +19,8 @@
     "lint:fix": "oxlint --fix && oxfmt --write",
     "refresh": "sst refresh",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm lint && pnpm --filter @filone/shared --filter @filone/backend --filter @filone/website test"
+    "test": "pnpm lint && pnpm --filter @filone/shared --filter @filone/backend --filter @filone/website test",
+    "test:e2e": "pnpm exec playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
