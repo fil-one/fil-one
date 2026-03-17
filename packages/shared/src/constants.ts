@@ -14,7 +14,7 @@ export const TB_BYTES = 1_000_000_000_000;
 /** Trial: 1 TB storage, 2 TB egress. Paid: unlimited (-1). */
 export const TRIAL_STORAGE_LIMIT = 1 * TB_BYTES;
 export const TRIAL_EGRESS_LIMIT = 2 * TB_BYTES;
-export const TRIAL_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+export const TRIAL_DURATION_DAYS = 30;
 export const UNLIMITED = -1;
 
 export interface UsageLimits {

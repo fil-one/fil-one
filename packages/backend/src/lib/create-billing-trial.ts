@@ -4,7 +4,7 @@ import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 import { getStripeClient, getBillingSecrets } from './stripe-client.js';
-import { TRIAL_DURATION_MS } from '@filone/shared/src/constants.js';
+import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.js';
 
 export interface CreateBillingTrialParams {
   userId: string;
@@ -18,7 +18,8 @@ export async function createBillingTrial({
   email,
 }: CreateBillingTrialParams): Promise<void> {
   const now = new Date();
-  const trialEndsAt = new Date(now.getTime() + TRIAL_DURATION_MS);
+  const trialDurationMs = TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000;
+  const trialEndsAt = new Date(now.getTime() + trialDurationMs);
   const trialEndsAtUnix = Math.floor(trialEndsAt.getTime() / 1000);
 
   const stripe = getStripeClient();
