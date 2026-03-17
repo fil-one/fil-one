@@ -1,3 +1,4 @@
+import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants';
 import {
   DatabaseIcon,
   GlobeIcon,
@@ -45,7 +46,7 @@ export function AuthLayout({ children }: AuthLayoutProps) {
       <div className="hidden flex-1 flex-col items-center justify-center bg-zinc-50 px-12 py-16 lg:flex">
         {/* Badge */}
         <div className="mb-8 rounded-full bg-zinc-100 px-4 py-1.5 text-sm text-zinc-700">
-          🚀 1 TB free for 30 days — no credit card required
+          🚀 1 TB free for ${TRIAL_DURATION_DAYS} days — no credit card required
         </div>
 
         {/* Heading */}
