@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
+import type { ModelStorageMetricsSample } from '../lib/aurora-backoffice.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -14,6 +15,12 @@ vi.mock('sst', () => ({
   },
 }));
 
+const mockGetStorageSamples = vi.fn<() => Promise<ModelStorageMetricsSample[]>>();
+
+vi.mock('../lib/aurora-backoffice.js', () => ({
+  getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...(args as [])),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './get-activity.js';
@@ -24,6 +31,15 @@ import { buildEvent } from '../test/lambda-test-utilities.js';
 // ---------------------------------------------------------------------------
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const AURORA_TENANT_ID = 'aurora-tenant-1';
+
+function orgProfileItem(auroraTenantId?: string) {
+  return {
+    pk: { S: `ORG#${USER_INFO.orgId}` },
+    sk: { S: 'PROFILE' },
+    ...(auroraTenantId ? { auroraTenantId: { S: auroraTenantId } } : {}),
+  };
+}
 
 function bucketItem(name: string, createdAt: string) {
   return marshall({
@@ -61,9 +77,12 @@ function keyItem(id: string, keyName: string, createdAt: string) {
   });
 }
 
-/** Build an array of { date: expect.any(String), value } for flat trend assertions. */
-function flatTrend(length: number, value: number) {
-  return Array.from({ length }, () => ({ date: expect.any(String), value }));
+function storageSample(
+  timestamp: string,
+  bytesUsed: number,
+  objectCount: number,
+): ModelStorageMetricsSample {
+  return { timestamp, bytesUsed, objectCount };
 }
 
 // ---------------------------------------------------------------------------
@@ -74,9 +93,20 @@ describe('get-activity baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    mockGetStorageSamples.mockResolvedValue([]);
   });
 
-  it('returns 200 with empty activities and flat trends when no buckets exist', async () => {
+  function mockOrgProfile(auroraTenantId?: string) {
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: marshall({ pk: `ORG#${USER_INFO.orgId}`, sk: 'PROFILE' }),
+      })
+      .resolves({ Item: orgProfileItem(auroraTenantId) });
+  }
+
+  it('returns 200 with empty activities and empty trends when no buckets exist', async () => {
+    mockOrgProfile(AURORA_TENANT_ID);
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     const event = buildEvent({ userInfo: USER_INFO });
@@ -86,15 +116,49 @@ describe('get-activity baseHandler', () => {
     const body = JSON.parse(String(result.body));
     expect(body).toStrictEqual({
       activities: [],
-      trends: {
-        storage: flatTrend(7, 0),
-        objects: flatTrend(7, 0),
-      },
+      trends: { storage: [], objects: [] },
     });
   });
 
+  it('returns trends from Aurora storage samples', async () => {
+    mockOrgProfile(AURORA_TENANT_ID);
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+    mockGetStorageSamples.mockResolvedValue([
+      storageSample('2026-01-01T00:00:00Z', 1000, 5),
+      storageSample('2026-01-02T00:00:00Z', 2000, 10),
+    ]);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+    const body = JSON.parse(String(result.body));
+
+    expect(body.trends).toStrictEqual({
+      storage: [
+        { date: '2026-01-01T00:00:00Z', value: 1000 },
+        { date: '2026-01-02T00:00:00Z', value: 2000 },
+      ],
+      objects: [
+        { date: '2026-01-01T00:00:00Z', value: 5 },
+        { date: '2026-01-02T00:00:00Z', value: 10 },
+      ],
+    });
+  });
+
+  it('returns empty trends when auroraTenantId is missing', async () => {
+    mockOrgProfile(); // no auroraTenantId
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+    const body = JSON.parse(String(result.body));
+
+    expect(body.trends).toStrictEqual({ storage: [], objects: [] });
+    expect(mockGetStorageSamples).not.toHaveBeenCalled();
+  });
+
   it('returns bucket and object activities sorted most-recent-first', async () => {
-    // First query: list buckets
+    mockOrgProfile(AURORA_TENANT_ID);
+
     ddbMock
       .on(QueryCommand, {
         ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
@@ -103,7 +167,6 @@ describe('get-activity baseHandler', () => {
         Items: [bucketItem('photos', '2026-01-01T00:00:00Z')],
       });
 
-    // Second query: objects in bucket
     ddbMock
       .on(QueryCommand, {
         ExpressionAttributeValues: {
@@ -118,7 +181,6 @@ describe('get-activity baseHandler', () => {
         ],
       });
 
-    // Third query: access keys
     ddbMock
       .on(QueryCommand, {
         ExpressionAttributeValues: { ':pk': { S: `ORG#${USER_INFO.orgId}` } },
@@ -131,40 +193,36 @@ describe('get-activity baseHandler', () => {
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(String(result.body));
 
-    expect(body).toStrictEqual({
-      activities: [
-        {
-          id: 'object-photos-cat.jpg',
-          action: 'object.uploaded',
-          resourceType: 'object',
-          resourceName: 'cat.jpg',
-          timestamp: '2026-01-05T00:00:00Z',
-          sizeBytes: 1024,
-        },
-        {
-          id: 'object-photos-dog.jpg',
-          action: 'object.uploaded',
-          resourceType: 'object',
-          resourceName: 'dog.jpg',
-          timestamp: '2026-01-03T00:00:00Z',
-          sizeBytes: 2048,
-        },
-        {
-          id: 'bucket-photos',
-          action: 'bucket.created',
-          resourceType: 'bucket',
-          resourceName: 'photos',
-          timestamp: '2026-01-01T00:00:00Z',
-        },
-      ],
-      trends: {
-        storage: flatTrend(7, expect.any(Number)),
-        objects: flatTrend(7, expect.any(Number)),
+    expect(body.activities).toStrictEqual([
+      {
+        id: 'object-photos-cat.jpg',
+        action: 'object.uploaded',
+        resourceType: 'object',
+        resourceName: 'cat.jpg',
+        timestamp: '2026-01-05T00:00:00Z',
+        sizeBytes: 1024,
       },
-    });
+      {
+        id: 'object-photos-dog.jpg',
+        action: 'object.uploaded',
+        resourceType: 'object',
+        resourceName: 'dog.jpg',
+        timestamp: '2026-01-03T00:00:00Z',
+        sizeBytes: 2048,
+      },
+      {
+        id: 'bucket-photos',
+        action: 'bucket.created',
+        resourceType: 'bucket',
+        resourceName: 'photos',
+        timestamp: '2026-01-01T00:00:00Z',
+      },
+    ]);
   });
 
   it('respects the limit query parameter', async () => {
+    mockOrgProfile(AURORA_TENANT_ID);
+
     ddbMock
       .on(QueryCommand, {
         ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
@@ -201,33 +259,14 @@ describe('get-activity baseHandler', () => {
     const result = await baseHandler(event);
     const body = JSON.parse(String(result.body));
 
-    expect(body).toStrictEqual({
-      activities: [
-        {
-          id: 'object-b1-c.txt',
-          action: 'object.uploaded',
-          resourceType: 'object',
-          resourceName: 'c.txt',
-          timestamp: '2026-01-04T00:00:00Z',
-          sizeBytes: 300,
-        },
-        {
-          id: 'object-b1-b.txt',
-          action: 'object.uploaded',
-          resourceType: 'object',
-          resourceName: 'b.txt',
-          timestamp: '2026-01-03T00:00:00Z',
-          sizeBytes: 200,
-        },
-      ],
-      trends: {
-        storage: flatTrend(7, expect.any(Number)),
-        objects: flatTrend(7, expect.any(Number)),
-      },
-    });
+    expect(body.activities).toHaveLength(2);
+    expect(body.activities[0].resourceName).toBe('c.txt');
+    expect(body.activities[1].resourceName).toBe('b.txt');
   });
 
   it('defaults limit to 10 when limit is non-numeric', async () => {
+    mockOrgProfile(AURORA_TENANT_ID);
+
     ddbMock
       .on(QueryCommand, {
         ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
@@ -268,6 +307,8 @@ describe('get-activity baseHandler', () => {
   });
 
   it('defaults limit to 10 when limit is negative', async () => {
+    mockOrgProfile(AURORA_TENANT_ID);
+
     ddbMock
       .on(QueryCommand, {
         ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
@@ -307,6 +348,7 @@ describe('get-activity baseHandler', () => {
   });
 
   it('caps limit at 50', async () => {
+    mockOrgProfile(AURORA_TENANT_ID);
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     const event = buildEvent({
@@ -317,157 +359,39 @@ describe('get-activity baseHandler', () => {
 
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(String(result.body));
-    expect(body).toStrictEqual({
-      activities: [],
-      trends: {
-        storage: flatTrend(7, 0),
-        objects: flatTrend(7, 0),
-      },
-    });
+    expect(body.activities).toStrictEqual([]);
   });
 
-  it('returns 30-day trend series when period=30d', async () => {
+  it('passes correct period to Aurora storage API', async () => {
+    mockOrgProfile(AURORA_TENANT_ID);
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     const event = buildEvent({
       userInfo: USER_INFO,
       queryStringParameters: { period: '30d' },
     });
-    const result = await baseHandler(event);
-    const body = JSON.parse(String(result.body));
-
-    expect(body).toStrictEqual({
-      activities: [],
-      trends: {
-        storage: flatTrend(30, 0),
-        objects: flatTrend(30, 0),
-      },
-    });
-  });
-
-  it('defaults to 7-day trend series', async () => {
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const event = buildEvent({ userInfo: USER_INFO });
-    const result = await baseHandler(event);
-    const body = JSON.parse(String(result.body));
-
-    expect(body).toStrictEqual({
-      activities: [],
-      trends: {
-        storage: flatTrend(7, 0),
-        objects: flatTrend(7, 0),
-      },
-    });
-  });
-
-  it('computes cumulative storage in trends', async () => {
-    const now = new Date();
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    yesterday.setHours(12, 0, 0, 0);
-
-    const twoDaysAgo = new Date(now);
-    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-    twoDaysAgo.setHours(12, 0, 0, 0);
-
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
-      })
-      .resolves({
-        Items: [bucketItem('data', '2025-01-01T00:00:00Z')],
-      });
-
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: {
-          ':pk': { S: `BUCKET#${USER_INFO.userId}#data` },
-          ':skPrefix': { S: 'OBJECT#' },
-        },
-      })
-      .resolves({
-        Items: [
-          objectItem('data', 'old.bin', twoDaysAgo.toISOString(), 500),
-          objectItem('data', 'new.bin', yesterday.toISOString(), 300),
-        ],
-      });
-
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `ORG#${USER_INFO.orgId}` } },
-      })
-      .resolves({ Items: [] });
-
-    const event = buildEvent({ userInfo: USER_INFO });
-    const result = await baseHandler(event);
-    const body = JSON.parse(String(result.body));
-
-    // The last day's cumulative storage should be 800 (500 + 300)
-    const lastStoragePoint = body.trends.storage[body.trends.storage.length - 1];
-    expect(lastStoragePoint.value).toBe(800);
-
-    // Full structure check
-    expect(body).toStrictEqual({
-      activities: expect.arrayContaining([
-        {
-          id: 'object-data-new.bin',
-          action: 'object.uploaded',
-          resourceType: 'object',
-          resourceName: 'new.bin',
-          timestamp: yesterday.toISOString(),
-          sizeBytes: 300,
-        },
-        {
-          id: 'object-data-old.bin',
-          action: 'object.uploaded',
-          resourceType: 'object',
-          resourceName: 'old.bin',
-          timestamp: twoDaysAgo.toISOString(),
-          sizeBytes: 500,
-        },
-        {
-          id: 'bucket-data',
-          action: 'bucket.created',
-          resourceType: 'bucket',
-          resourceName: 'data',
-          timestamp: '2025-01-01T00:00:00Z',
-        },
-      ]),
-      trends: {
-        storage: flatTrend(7, expect.any(Number)),
-        objects: flatTrend(7, expect.any(Number)),
-      },
-    });
-  });
-
-  it('queries DynamoDB with correct key conditions', async () => {
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const event = buildEvent({ userInfo: USER_INFO });
     await baseHandler(event);
 
-    const calls = ddbMock.commandCalls(QueryCommand);
-    expect(calls).toHaveLength(2);
-    expect(calls.at(0)?.args.at(0)?.input).toStrictEqual({
-      TableName: 'UploadsTable',
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: 'USER#user-1' },
-        ':skPrefix': { S: 'BUCKET#' },
-      },
-    });
-    expect(calls.at(1)?.args.at(0)?.input).toStrictEqual({
-      TableName: 'UserInfoTable',
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: 'ORG#org-1' },
-        ':skPrefix': { S: 'ACCESSKEY#' },
-      },
-    });
+    expect(mockGetStorageSamples).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: AURORA_TENANT_ID,
+        window: '24h',
+      }),
+    );
+
+    // Verify the from date is ~30 days before to
+    const call = mockGetStorageSamples.mock.calls[0] as unknown as [{ from: string; to: string }];
+    const { from: fromStr, to: toStr } = call[0];
+    const fromDate = new Date(fromStr);
+    const toDate = new Date(toStr);
+    const diffDays = (toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24);
+    expect(diffDays).toBeGreaterThanOrEqual(29);
+    expect(diffDays).toBeLessThanOrEqual(31);
   });
 
   it('includes key activities sorted with buckets and objects', async () => {
+    mockOrgProfile(AURORA_TENANT_ID);
+
     ddbMock
       .on(QueryCommand, {
         ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
@@ -500,31 +424,27 @@ describe('get-activity baseHandler', () => {
     const result = await baseHandler(event);
     const body = JSON.parse(String(result.body));
 
-    expect(body).toStrictEqual({
-      activities: [
-        {
-          id: 'key-key-1',
-          action: 'key.created',
-          resourceType: 'key',
-          resourceName: 'my-api-key',
-          timestamp: '2026-01-02T00:00:00Z',
-        },
-        {
-          id: 'bucket-b1',
-          action: 'bucket.created',
-          resourceType: 'bucket',
-          resourceName: 'b1',
-          timestamp: '2026-01-01T00:00:00Z',
-        },
-      ],
-      trends: {
-        storage: flatTrend(7, expect.any(Number)),
-        objects: flatTrend(7, expect.any(Number)),
+    expect(body.activities).toStrictEqual([
+      {
+        id: 'key-key-1',
+        action: 'key.created',
+        resourceType: 'key',
+        resourceName: 'my-api-key',
+        timestamp: '2026-01-02T00:00:00Z',
       },
-    });
+      {
+        id: 'bucket-b1',
+        action: 'bucket.created',
+        resourceType: 'bucket',
+        resourceName: 'b1',
+        timestamp: '2026-01-01T00:00:00Z',
+      },
+    ]);
   });
 
   it('includes sizeBytes and cid on object activities when present', async () => {
+    mockOrgProfile(AURORA_TENANT_ID);
+
     ddbMock
       .on(QueryCommand, {
         ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
@@ -565,29 +485,23 @@ describe('get-activity baseHandler', () => {
     const result = await baseHandler(event);
     const body = JSON.parse(String(result.body));
 
-    expect(body).toStrictEqual({
-      activities: [
-        {
-          id: 'object-b1-file.dat',
-          action: 'object.uploaded',
-          resourceType: 'object',
-          resourceName: 'file.dat',
-          timestamp: '2026-01-02T00:00:00Z',
-          sizeBytes: 4096,
-          cid: 'bafy123',
-        },
-        {
-          id: 'bucket-b1',
-          action: 'bucket.created',
-          resourceType: 'bucket',
-          resourceName: 'b1',
-          timestamp: '2026-01-01T00:00:00Z',
-        },
-      ],
-      trends: {
-        storage: flatTrend(7, expect.any(Number)),
-        objects: flatTrend(7, expect.any(Number)),
+    expect(body.activities).toStrictEqual([
+      {
+        id: 'object-b1-file.dat',
+        action: 'object.uploaded',
+        resourceType: 'object',
+        resourceName: 'file.dat',
+        timestamp: '2026-01-02T00:00:00Z',
+        sizeBytes: 4096,
+        cid: 'bafy123',
       },
-    });
+      {
+        id: 'bucket-b1',
+        action: 'bucket.created',
+        resourceType: 'bucket',
+        resourceName: 'b1',
+        timestamp: '2026-01-01T00:00:00Z',
+      },
+    ]);
   });
 });

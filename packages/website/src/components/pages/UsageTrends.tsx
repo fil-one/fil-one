@@ -15,6 +15,9 @@ import type { UsageTrendsResponse } from '@filone/shared';
 import { formatBytes, formatBytesShort } from '@hyperspace/ui/utils';
 import { getActivity } from '../../lib/api.js';
 
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -110,6 +113,7 @@ export function UsageTrends() {
                   tick={{ fontSize: 10, fill: '#677183' }}
                   axisLine={false}
                   tickLine={false}
+                  tickFormatter={formatDate}
                 />
                 <YAxis
                   tick={{ fontSize: 10, fill: '#677183' }}
@@ -157,6 +161,7 @@ export function UsageTrends() {
                   tick={{ fontSize: 10, fill: '#677183' }}
                   axisLine={false}
                   tickLine={false}
+                  tickFormatter={formatDate}
                 />
                 <YAxis
                   tick={{ fontSize: 10, fill: '#677183' }}
