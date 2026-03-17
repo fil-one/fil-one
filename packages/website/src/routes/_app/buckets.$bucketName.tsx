@@ -1,6 +1,6 @@
 import { createRoute } from '@tanstack/react-router';
 import { Route as appRoute } from '../_app';
-import { BucketDetailPage } from '../../components/pages/BucketDetailPage';
+import { BucketDetailPage } from '../../pages/BucketDetailPage';
 
 type BucketSearchParams = {
   prefix?: string;

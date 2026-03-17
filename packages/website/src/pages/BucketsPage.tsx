@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { PlusIcon, DatabaseIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
-import { Button } from '../primitives/Button';
-import { Input } from '../primitives/Input';
-import { Modal, ModalHeader, ModalBody, ModalFooter } from '../primitives/Modal';
-import { Spinner } from '../primitives/Spinner';
-import { useToast } from '../primitives/Toast';
+import { Button } from '../components/Button';
+import { Input } from '../components/Input';
+import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/Modal';
+import { Spinner } from '../components/Spinner';
+import { useToast } from '../components/Toast';
 import { formatBytes } from '@filone/shared';
 
 import type {
@@ -15,9 +15,9 @@ import type {
   CreateBucketResponse,
   ListBucketsResponse,
 } from '@filone/shared';
-import { apiRequest } from '../../lib/api.js';
-import { formatDate } from '../../lib/time.js';
-import { CreateAccessKeyModal } from '../CreateAccessKeyModal';
+import { apiRequest } from '../lib/api.js';
+import { formatDate } from '../lib/time.js';
+import { CreateAccessKeyModal } from '../components/CreateAccessKeyModal';
 
 // ---------------------------------------------------------------------------
 // Helpers

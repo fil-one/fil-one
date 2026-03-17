@@ -1,6 +1,6 @@
 import { createRoute } from '@tanstack/react-router';
 import { Route as appRoute } from '../_app';
-import { BucketsPage } from '../../components/pages/BucketsPage';
+import { BucketsPage } from '../../pages/BucketsPage';
 
 export const Route = createRoute({
   path: '/buckets',

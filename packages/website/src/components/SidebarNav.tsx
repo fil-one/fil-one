@@ -11,8 +11,8 @@ import {
   ChatCircleIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
-import { ProgressBar } from './primitives/ProgressBar';
-import { Button } from './primitives/Button';
+import { ProgressBar } from './ProgressBar.js';
+import { Button } from './Button.js';
 import { SubscriptionStatus, getUsageLimits, formatBytes } from '@filone/shared';
 import type { BillingInfo, UsageResponse } from '@filone/shared';
 import { getBilling, getUsage } from '../lib/api.js';

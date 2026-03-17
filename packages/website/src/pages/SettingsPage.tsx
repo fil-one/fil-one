@@ -1,9 +1,9 @@
 import { useState } from 'react';
 
-import { Button } from '../primitives/Button';
-import { Input } from '../primitives/Input';
-import { Modal, ModalBody, ModalFooter, ModalHeader } from '../primitives/Modal';
-import { useToast } from '../primitives/Toast';
+import { Button } from '../components/Button';
+import { Input } from '../components/Input';
+import { Modal, ModalBody, ModalFooter, ModalHeader } from '../components/Modal';
+import { useToast } from '../components/Toast';
 
 // ---------------------------------------------------------------------------
 // Mock data

@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Input } from '../primitives/Input';
-import { Button } from '../primitives/Button';
-import { confirmOrg, logout } from '../../lib/api.js';
+import { Input } from '../components/Input';
+import { Button } from '../components/Button';
+import { confirmOrg, logout } from '../lib/api.js';
 import type { MeResponse } from '@filone/shared';
 
 type FinishSignUpPageProps = {

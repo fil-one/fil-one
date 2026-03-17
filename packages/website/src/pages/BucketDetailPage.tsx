@@ -12,14 +12,14 @@ import {
   KeyIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
-import { Button } from '../primitives/Button';
-import { Input } from '../primitives/Input';
-import { Modal, ModalHeader, ModalBody, ModalFooter } from '../primitives/Modal';
-import { Tabs, TabList, Tab, TabPanels, TabPanel } from '../primitives/Tabs';
-import { Breadcrumb } from '../primitives/Breadcrumb';
-import { Spinner } from '../primitives/Spinner';
-import { ProgressBar } from '../primitives/ProgressBar';
-import { useToast } from '../primitives/Toast';
+import { Button } from '../components/Button';
+import { Input } from '../components/Input';
+import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/Modal';
+import { Tabs, TabList, Tab, TabPanels, TabPanel } from '../components/Tabs';
+import { Breadcrumb } from '../components/Breadcrumb';
+import { Spinner } from '../components/Spinner';
+import { ProgressBar } from '../components/ProgressBar';
+import { useToast } from '../components/Toast';
 import { formatBytes } from '@filone/shared';
 
 import type {
@@ -29,8 +29,8 @@ import type {
   UploadObjectRequest,
   UploadObjectResponse,
 } from '@filone/shared';
-import { apiRequest } from '../../lib/api.js';
-import { formatDate } from '../../lib/time.js';
+import { apiRequest } from '../lib/api.js';
+import { formatDate } from '../lib/time.js';
 
 // ---------------------------------------------------------------------------
 // Mock data (access keys — placeholder, out of scope)

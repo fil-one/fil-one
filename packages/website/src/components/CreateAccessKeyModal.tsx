@@ -1,10 +1,10 @@
 import { useState } from 'react';
 
-import { Button } from './primitives/Button';
-import { CodeBlock } from './primitives/CodeBlock';
-import { Input } from './primitives/Input';
-import { Modal, ModalBody, ModalFooter, ModalHeader } from './primitives/Modal';
-import { useToast } from './primitives/Toast';
+import { Button } from './Button.js';
+import { CodeBlock } from './CodeBlock.js';
+import { Input } from './Input.js';
+import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal/index.js';
+import { useToast } from './Toast/index.js';
 
 import type { CreateAccessKeyResponse } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';

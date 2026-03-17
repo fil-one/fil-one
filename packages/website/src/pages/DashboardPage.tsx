@@ -11,15 +11,15 @@ import { Link } from '@tanstack/react-router';
 
 const UsageTrends = lazy(() => import('./UsageTrends'));
 
-import { Button } from '../primitives/Button';
-import { ProgressBar } from '../primitives/ProgressBar';
+import { Button } from '../components/Button';
+import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
 
 import { PlanId, SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
 import type { UsageResponse, BillingInfo, RecentActivity } from '@filone/shared';
 
-import { getUsage, getBilling, getActivity } from '../../lib/api.js';
-import { daysUntil, formatDateTime, timeAgo } from '../../lib/time.js';
+import { getUsage, getBilling, getActivity } from '../lib/api.js';
+import { daysUntil, formatDateTime, timeAgo } from '../lib/time.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
