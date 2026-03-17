@@ -1,7 +1,7 @@
 import { createRoute } from '@tanstack/react-router';
 
 import { Route as appRoute } from '../_app';
-import { SupportPage } from '../../components/pages/SupportPage';
+import { SupportPage } from '../../pages/SupportPage';
 
 export const Route = createRoute({
   path: '/support',

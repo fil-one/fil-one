@@ -11,11 +11,10 @@ import {
   ChatCircleIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
-import { ProgressBar } from '@hyperspace/ui/ProgressBar';
-import { Button } from '@hyperspace/ui/Button';
-import { SubscriptionStatus, getUsageLimits } from '@filone/shared';
+import { ProgressBar } from './ProgressBar.js';
+import { Button } from './Button.js';
+import { SubscriptionStatus, getUsageLimits, formatBytes } from '@filone/shared';
 import type { BillingInfo, UsageResponse } from '@filone/shared';
-import { formatBytes } from '@hyperspace/ui/utils';
 import { getBilling, getUsage } from '../lib/api.js';
 import { daysUntil, formatDateTime } from '../lib/time.js';
 

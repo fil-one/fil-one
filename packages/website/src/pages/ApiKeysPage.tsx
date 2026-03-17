@@ -2,18 +2,18 @@ import { useEffect, useState } from 'react';
 
 import { KeyIcon, PlusIcon, PowerIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
-import { Button } from '@hyperspace/ui/Button';
-import { CodeBlock } from '@hyperspace/ui/CodeBlock';
-import { Spinner } from '@hyperspace/ui/Spinner';
-import { Tab, TabList, TabPanel, TabPanels, Tabs } from '@hyperspace/ui/Tabs';
-import { useToast } from '@hyperspace/ui/Toast';
+import { Button } from '../components/Button';
+import { CodeBlock } from '../components/CodeBlock';
+import { Spinner } from '../components/Spinner';
+import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
+import { useToast } from '../components/Toast';
 
 import type { AccessKey, CreateAccessKeyResponse, ListAccessKeysResponse } from '@filone/shared';
 
-import { apiRequest } from '../../lib/api.js';
-import { formatDate } from '../../lib/time.js';
-import { S3_ENDPOINT } from '../../env';
-import { CreateAccessKeyModal } from '../CreateAccessKeyModal';
+import { apiRequest } from '../lib/api.js';
+import { formatDate } from '../lib/time.js';
+import { S3_ENDPOINT } from '../env';
+import { CreateAccessKeyModal } from '../components/CreateAccessKeyModal';
 
 // ---------------------------------------------------------------------------
 // Sub-components

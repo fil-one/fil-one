@@ -1,5 +1,5 @@
 import { CheckIcon, PhoneIcon, ArrowRightIcon } from '@phosphor-icons/react/dist/ssr';
-import { Modal, ModalBody, ModalHeader } from '@hyperspace/ui/Modal';
+import { Modal, ModalBody, ModalHeader } from '../Modal';
 
 type ChoosePlanDialogProps = {
   open: boolean;

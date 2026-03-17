@@ -1,6 +1,3 @@
-[submodule "packages/ui"]
-	path = packages/ui
-	url = https://github.com/joemocode-business/ui-hyperspace.git
 [submodule "contracts/lib/forge-std"]
 	path = contracts/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std

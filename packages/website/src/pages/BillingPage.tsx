@@ -9,17 +9,17 @@ import {
   CloudIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
-import { ProgressBar } from '@hyperspace/ui/ProgressBar';
-import { useToast } from '@hyperspace/ui/Toast';
-import { formatBytes } from '@hyperspace/ui/utils';
+import { ProgressBar } from '../components/ProgressBar';
+import { useToast } from '../components/Toast';
+import { formatBytes } from '@filone/shared';
 
 import { SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
 import type { BillingInfo, UsageResponse, CreateSetupIntentResponse } from '@filone/shared';
 
-import { apiRequest, getUsage } from '../../lib/api.js';
-import { daysUntil } from '../../lib/time.js';
-import { ChoosePlanDialog } from '../billing/ChoosePlanDialog.js';
-import { AddPaymentDialog } from '../billing/AddPaymentDialog.js';
+import { apiRequest, getUsage } from '../lib/api.js';
+import { daysUntil } from '../lib/time.js';
+import { ChoosePlanDialog } from '../components/billing/ChoosePlanDialog.js';
+import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

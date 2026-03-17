@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Input } from '@hyperspace/ui/Input';
-import { Button } from '@hyperspace/ui/Button';
-import { DividerWithLabel } from '@hyperspace/ui/DividerWithLabel';
-import { redirectToLogin } from '../../lib/api.js';
+import { Input } from '../components/Input';
+import { Button } from '../components/Button';
+import { DividerWithLabel } from '../components/DividerWithLabel';
+import { redirectToLogin } from '../lib/api.js';
 
 export function SignUpPage() {
   const [email, setEmail] = useState('');

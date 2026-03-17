@@ -1,0 +1,46 @@
+@layer components {
+  .toast-container {
+    @apply fixed bottom-4 right-4 z-50 flex flex-col gap-2;
+  }
+
+  .toast-item {
+    @apply flex w-[360px] max-w-[calc(100vw-2rem)] items-start gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-lg;
+    /* Slide-in animation */
+    animation: toast-slide-in 0.2s ease-out;
+  }
+
+  .toast-item--success {
+    @apply border-l-4 border-l-green-500;
+  }
+
+  .toast-item--error {
+    @apply border-l-4 border-l-red-500;
+  }
+
+  .toast-item--info {
+    @apply border-l-4 border-l-brand-600;
+  }
+
+  .toast-message {
+    @apply flex-1 text-sm text-zinc-800;
+  }
+
+  .toast-close {
+    @apply flex cursor-pointer items-center justify-center rounded p-0.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700;
+
+    &:focus {
+      @apply brand-outline;
+    }
+  }
+
+  @keyframes toast-slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+}

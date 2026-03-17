@@ -1,0 +1,31 @@
+@layer components {
+  .tabs-list {
+    @apply flex border-b border-zinc-200;
+  }
+
+  .tab-item {
+    @apply relative -mb-px cursor-pointer border-b-2 border-transparent px-4 py-2.5 text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-700;
+
+    &:focus {
+      @apply brand-outline outline-offset-[-2px];
+    }
+
+    /* Headless UI selected state */
+    &[data-selected] {
+      @apply border-brand-600 text-brand-600;
+    }
+
+    /* Headless UI disabled state */
+    &[data-disabled] {
+      @apply cursor-not-allowed text-zinc-300;
+    }
+  }
+
+  .tab-panels {
+    @apply mt-4;
+  }
+
+  .tab-panel {
+    @apply focus:outline-none;
+  }
+}

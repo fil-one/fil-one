@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "sst dev",
-    "build": "pnpm -r -F '!@hyperspace/ui' run build",
+    "build": "pnpm -r run build",
     "deploy": "pnpm build && sst deploy",
     "deploy:staging": "pnpm build && sst deploy --stage staging",
     "deploy:production": "pnpm build && sst deploy --stage production",

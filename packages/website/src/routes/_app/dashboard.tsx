@@ -1,6 +1,6 @@
 import { createRoute } from '@tanstack/react-router';
 import { Route as appRoute } from '../_app';
-import { DashboardPage } from '../../components/pages/DashboardPage';
+import { DashboardPage } from '../../pages/DashboardPage';
 
 export const Route = createRoute({
   path: '/dashboard',

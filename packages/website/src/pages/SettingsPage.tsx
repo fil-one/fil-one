@@ -1,9 +1,9 @@
 import { useState } from 'react';
 
-import { Button } from '@hyperspace/ui/Button';
-import { Input } from '@hyperspace/ui/Input';
-import { Modal, ModalBody, ModalFooter, ModalHeader } from '@hyperspace/ui/Modal';
-import { useToast } from '@hyperspace/ui/Toast';
+import { Button } from '../components/Button';
+import { Input } from '../components/Input';
+import { Modal, ModalBody, ModalFooter, ModalHeader } from '../components/Modal';
+import { useToast } from '../components/Toast';
 
 // ---------------------------------------------------------------------------
 // Mock data

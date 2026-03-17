@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { PlusIcon, DatabaseIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
-import { Button } from '@hyperspace/ui/Button';
-import { Input } from '@hyperspace/ui/Input';
-import { Modal, ModalHeader, ModalBody, ModalFooter } from '@hyperspace/ui/Modal';
-import { Spinner } from '@hyperspace/ui/Spinner';
-import { useToast } from '@hyperspace/ui/Toast';
-import { formatBytes } from '@hyperspace/ui/utils';
+import { Button } from '../components/Button';
+import { Input } from '../components/Input';
+import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/Modal';
+import { Spinner } from '../components/Spinner';
+import { useToast } from '../components/Toast';
+import { formatBytes } from '@filone/shared';
 
 import type {
   Bucket,
@@ -15,9 +15,9 @@ import type {
   CreateBucketResponse,
   ListBucketsResponse,
 } from '@filone/shared';
-import { apiRequest } from '../../lib/api.js';
-import { formatDate } from '../../lib/time.js';
-import { CreateAccessKeyModal } from '../CreateAccessKeyModal';
+import { apiRequest } from '../lib/api.js';
+import { formatDate } from '../lib/time.js';
+import { CreateAccessKeyModal } from '../components/CreateAccessKeyModal';
 
 // ---------------------------------------------------------------------------
 // Helpers

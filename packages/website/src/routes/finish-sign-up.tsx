@@ -1,6 +1,6 @@
 import { createRoute, redirect, useNavigate } from '@tanstack/react-router';
 import { Route as rootRoute } from './__root.js';
-import { FinishSignUpPage } from '../components/pages/FinishSignUpPage.js';
+import { FinishSignUpPage } from '../pages/FinishSignUpPage';
 import { getMe } from '../lib/api.js';
 import { useState, useEffect } from 'react';
 import type { MeResponse } from '@filone/shared';

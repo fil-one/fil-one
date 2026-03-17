@@ -2,10 +2,10 @@ import { useState } from 'react';
 
 import { CalendarIcon, ChatCircleIcon, EnvelopeIcon } from '@phosphor-icons/react/dist/ssr';
 
-import { Button } from '@hyperspace/ui/Button';
-import { Input } from '@hyperspace/ui/Input';
-import { TextArea } from '@hyperspace/ui/TextArea';
-import { useToast } from '@hyperspace/ui/Toast';
+import { Button } from '../components/Button';
+import { Input } from '../components/Input';
+import { TextArea } from '../components/TextArea';
+import { useToast } from '../components/Toast';
 
 // ---------------------------------------------------------------------------
 // Page

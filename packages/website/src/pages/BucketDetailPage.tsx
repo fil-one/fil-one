@@ -12,15 +12,15 @@ import {
   KeyIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
-import { Button } from '@hyperspace/ui/Button';
-import { Input } from '@hyperspace/ui/Input';
-import { Modal, ModalHeader, ModalBody, ModalFooter } from '@hyperspace/ui/Modal';
-import { Tabs, TabList, Tab, TabPanels, TabPanel } from '@hyperspace/ui/Tabs';
-import { Breadcrumb } from '@hyperspace/ui/Breadcrumb';
-import { Spinner } from '@hyperspace/ui/Spinner';
-import { ProgressBar } from '@hyperspace/ui/ProgressBar';
-import { useToast } from '@hyperspace/ui/Toast';
-import { formatBytes } from '@hyperspace/ui/utils';
+import { Button } from '../components/Button';
+import { Input } from '../components/Input';
+import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/Modal';
+import { Tabs, TabList, Tab, TabPanels, TabPanel } from '../components/Tabs';
+import { Breadcrumb } from '../components/Breadcrumb';
+import { Spinner } from '../components/Spinner';
+import { ProgressBar } from '../components/ProgressBar';
+import { useToast } from '../components/Toast';
+import { formatBytes } from '@filone/shared';
 
 import type {
   S3Object,
@@ -29,8 +29,8 @@ import type {
   UploadObjectRequest,
   UploadObjectResponse,
 } from '@filone/shared';
-import { apiRequest } from '../../lib/api.js';
-import { formatDate } from '../../lib/time.js';
+import { apiRequest } from '../lib/api.js';
+import { formatDate } from '../lib/time.js';
 
 // ---------------------------------------------------------------------------
 // Mock data (access keys — placeholder, out of scope)
