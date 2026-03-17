@@ -227,6 +227,7 @@ export default $config({
       auth0ClientSecret,
       stripeSecretKey,
       stripePriceId,
+      auroraBackofficeToken,
     ];
 
     const sharedEnv: Record<string, $util.Input<string>> = {
@@ -334,8 +335,8 @@ export default $config({
     addRoute('POST', '/api/org/confirm', 'confirm-org');
 
     // ── Usage + Dashboard routes ─────────────────────────────────────
-    addRoute('GET', '/api/usage', 'get-usage');
-    addRoute('GET', '/api/activity', 'get-activity');
+    addRoute('GET', '/api/usage', 'get-usage', auroraEnv);
+    addRoute('GET', '/api/activity', 'get-activity', auroraEnv);
 
     // ── Billing routes ───────────────────────────────────────────────
     addRoute('GET', '/api/billing', 'get-billing');
