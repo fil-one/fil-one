@@ -200,7 +200,7 @@ describe('create-access-key baseHandler', () => {
     expect(body.keyName).toBe('My Key');
   });
 
-  it('converts YYYY-MM-DD expiresAt to RFC3339 when calling Aurora', async () => {
+  it('passes YYYY-MM-DD expiresAt to Aurora as-is', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(PutItemCommand).resolves({});
     mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
@@ -217,7 +217,7 @@ describe('create-access-key baseHandler', () => {
     await baseHandler(event);
 
     expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith(
-      expect.objectContaining({ expiresAt: '2026-06-01T00:00:00Z' }),
+      expect.objectContaining({ expiresAt: '2026-06-01' }),
     );
   });
 

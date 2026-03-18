@@ -1,5 +1,14 @@
-import { Button } from './Button';
-import { CodeBlock } from './CodeBlock';
+import { useState } from 'react';
+
+import {
+  WarningCircle,
+  CopySimple,
+  Eye,
+  EyeSlash,
+  DownloadSimple,
+  CheckCircle,
+} from '@phosphor-icons/react/dist/ssr';
+
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal/index.js';
 
 export type SaveCredentialsModalProps = {
@@ -10,17 +19,19 @@ export type SaveCredentialsModalProps = {
     accessKeyId: string;
     secretAccessKey: string;
   };
-  /** Label for the primary done button, e.g. "I've saved my credentials" or "Continue to bucket" */
-  doneLabel: string;
 };
+
+const COPY_RESET_DELAY_MS = 2000;
 
 export function SaveCredentialsModal({
   open,
   onClose,
   onDone,
   credentials,
-  doneLabel,
 }: SaveCredentialsModalProps) {
+  const [copiedField, setCopiedField] = useState<'accessKeyId' | 'secret' | null>(null);
+  const [showSecret, setShowSecret] = useState(false);
+
   function handleDownload() {
     const csv = [
       'Access Key ID,Secret Access Key',
@@ -35,38 +46,110 @@ export function SaveCredentialsModal({
     URL.revokeObjectURL(url);
   }
 
+  async function handleCopy(value: string, field: 'accessKeyId' | 'secret') {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), COPY_RESET_DELAY_MS);
+    } catch {
+      // Silently fail — no design spec for copy-failure state
+    }
+  }
+
   return (
     <Modal open={open} onClose={onClose} size="md">
-      <ModalHeader>Save your credentials</ModalHeader>
+      <ModalHeader onClose={onClose}>Save your credentials</ModalHeader>
       <ModalBody>
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          Your bucket has been created and an API key generated. Save these credentials in a safe
-          place. Do not share your secret key with anyone. This is the only time you will be able to
-          see the secret access key.
+        {/* Warning banner */}
+        <div className="mb-4 flex gap-2.5 rounded-lg border border-orange-500/20 bg-orange-500/10 p-3">
+          <WarningCircle
+            size={16}
+            weight="fill"
+            className="mt-0.5 shrink-0 text-orange-500"
+          />
+          <p className="text-xs leading-[18px] text-zinc-900">
+            Save your credentials in a safe place. Do not share your secret key with anyone.
+          </p>
         </div>
+
+        {/* Credential fields */}
         <div className="flex flex-col gap-3">
+          {/* Access Key ID */}
           <div>
-            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">
-              API Key ID
-            </p>
-            <CodeBlock code={credentials.accessKeyId} />
+            <p className="mb-2 text-[13px] font-medium text-zinc-900">Access Key ID</p>
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 flex-1 items-center overflow-hidden rounded-md border border-zinc-200 bg-zinc-50 px-3">
+                <span className="truncate font-mono text-xs text-zinc-900">
+                  {credentials.accessKeyId}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleCopy(credentials.accessKeyId, 'accessKeyId')}
+                aria-label={copiedField === 'accessKeyId' ? 'Copied' : 'Copy Access Key ID'}
+                className="flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:text-zinc-600"
+              >
+                {copiedField === 'accessKeyId' ? (
+                  <CheckCircle size={16} className="text-green-500" />
+                ) : (
+                  <CopySimple size={16} />
+                )}
+              </button>
+            </div>
           </div>
+
+          {/* Secret Access Key */}
           <div>
-            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">
-              Secret API Key
-            </p>
-            <CodeBlock code={credentials.secretAccessKey} />
+            <p className="mb-2 text-[13px] font-medium text-zinc-900">Secret Access Key</p>
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 flex-1 items-center overflow-hidden rounded-md border border-zinc-200 bg-zinc-50 px-3">
+                <span className="truncate font-mono text-xs text-zinc-900">
+                  {showSecret
+                    ? credentials.secretAccessKey
+                    : '\u2022'.repeat(40)}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSecret((s) => !s)}
+                aria-label={showSecret ? 'Hide secret key' : 'Show secret key'}
+                className="flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:text-zinc-600"
+              >
+                {showSecret ? <EyeSlash size={16} /> : <Eye size={16} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCopy(credentials.secretAccessKey, 'secret')}
+                aria-label={copiedField === 'secret' ? 'Copied' : 'Copy Secret Access Key'}
+                className="flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:text-zinc-600"
+              >
+                {copiedField === 'secret' ? (
+                  <CheckCircle size={16} className="text-green-500" />
+                ) : (
+                  <CopySimple size={16} />
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </ModalBody>
       <ModalFooter>
-        <div className="flex justify-between gap-2">
-          <Button variant="ghost" onClick={handleDownload}>
+        <div className="flex w-full gap-2">
+          <button
+            type="button"
+            onClick={onDone}
+            className="flex h-9 flex-1 items-center justify-center rounded-md border border-zinc-200 bg-zinc-50 text-[13px] font-medium text-zinc-900 shadow-sm transition-colors hover:bg-zinc-100"
+          >
+            Done
+          </button>
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-gradient-to-br from-[#0080ff] to-[#256af4] text-[13px] font-medium text-white shadow-sm transition-colors hover:from-[#0070e0] hover:to-[#2060d8]"
+          >
+            <DownloadSimple size={16} weight="bold" />
             Download credentials
-          </Button>
-          <Button variant="filled" onClick={onDone}>
-            {doneLabel}
-          </Button>
+          </button>
         </div>
       </ModalFooter>
     </Modal>

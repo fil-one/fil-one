@@ -112,7 +112,6 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
         onClose={handleClose}
         onDone={handleDone}
         credentials={{ accessKeyId: result.accessKeyId, secretAccessKey: result.secretAccessKey }}
-        doneLabel="I've saved my credentials"
       />
     );
   }

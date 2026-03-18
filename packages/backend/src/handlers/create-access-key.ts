@@ -80,7 +80,7 @@ export async function baseHandler(
       keyName,
       permissions,
       buckets,
-      expiresAt: expiresAt ? `${expiresAt}T00:00:00Z` : null,
+      expiresAt,
     });
   } catch (err) {
     if (err instanceof DuplicateKeyNameError) {

@@ -258,6 +258,39 @@ describe('createAuroraAccessKey', () => {
     });
   });
 
+  it('sends expiration as YYYY-MM-DD to Aurora', async () => {
+    setupSsmMock();
+    mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
+
+    await createAuroraAccessKey({
+      tenantId: 'tenant-1',
+      keyName: 'my-key',
+      permissions: ['read'],
+      expiresAt: '2026-06-01',
+    });
+
+    expect(mockPostAccessKeys).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({ expiration: '2026-06-01' }),
+      }),
+    );
+  });
+
+  it('omits expiration field when expiresAt is null', async () => {
+    setupSsmMock();
+    mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
+
+    await createAuroraAccessKey({
+      tenantId: 'tenant-1',
+      keyName: 'my-key',
+      permissions: ['read'],
+      expiresAt: null,
+    });
+
+    const body = (mockPostAccessKeys.mock.calls[0][0] as { body: Record<string, unknown> }).body;
+    expect(body).not.toHaveProperty('expiration');
+  });
+
   it('returns id, accessKeyId, accessKeySecret, createdAt on success', async () => {
     setupSsmMock();
     mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);

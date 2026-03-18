@@ -222,7 +222,6 @@ export function CreateApiKeyPage() {
           onClose={handleCredentialsDone}
           onDone={handleCredentialsDone}
           credentials={credentials}
-          doneLabel="I've saved my credentials"
         />
       )}
     </>
