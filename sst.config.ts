@@ -254,6 +254,16 @@ export default $config({
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
 
+    const auroraS3GatewayEnv = {
+      AURORA_S3_GATEWAY_URL: auroraS3GatewayUrl,
+    };
+    const auroraS3GatewayPermissions: sst.aws.FunctionPermissionArgs[] = [
+      {
+        actions: ['ssm:GetParameter'],
+        resources: [auroraS3KeySsmArn],
+      },
+    ];
+
     function addRoute(
       method: string,
       routePath: string,
@@ -318,18 +328,17 @@ export default $config({
       'POST',
       '/api/buckets/{name}/objects/presign',
       'presign-upload',
-      {
-        AURORA_S3_GATEWAY_URL: auroraS3GatewayUrl,
-      },
-      [
-        {
-          actions: ['ssm:GetParameter'],
-          resources: [auroraS3KeySsmArn],
-        },
-      ],
+      auroraS3GatewayEnv,
+      auroraS3GatewayPermissions,
     );
     addRoute('POST', '/api/buckets/{name}/objects/confirm', 'confirm-upload');
-    addRoute('GET', '/api/buckets/{name}/objects/download', 'download-object');
+    addRoute(
+      'GET',
+      '/api/buckets/{name}/objects/download',
+      'download-object',
+      auroraS3GatewayEnv,
+      auroraS3GatewayPermissions,
+    );
     addRoute('DELETE', '/api/buckets/{name}/objects', 'delete-object');
 
     // ── Auth routes ──────────────────────────────────────────────────
