@@ -62,11 +62,7 @@ export function SaveCredentialsModal({
       <ModalBody>
         {/* Warning banner */}
         <div className="mb-4 flex gap-2.5 rounded-lg border border-orange-500/20 bg-orange-500/10 p-3">
-          <WarningCircle
-            size={16}
-            weight="fill"
-            className="mt-0.5 shrink-0 text-orange-500"
-          />
+          <WarningCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-orange-500" />
           <p className="text-xs leading-[18px] text-zinc-900">
             Save your credentials in a safe place. Do not share your secret key with anyone.
           </p>
@@ -104,9 +100,7 @@ export function SaveCredentialsModal({
             <div className="flex items-center gap-2">
               <div className="flex h-9 flex-1 items-center overflow-hidden rounded-md border border-zinc-200 bg-zinc-50 px-3">
                 <span className="truncate font-mono text-xs text-zinc-900">
-                  {showSecret
-                    ? credentials.secretAccessKey
-                    : '\u2022'.repeat(40)}
+                  {showSecret ? credentials.secretAccessKey : '\u2022'.repeat(40)}
                 </span>
               </div>
               <button

@@ -312,9 +312,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
         </div>
         <div className="flex items-center px-4 py-3">
           <span className="w-28 shrink-0 text-sm text-zinc-500">Region</span>
-          <span className="flex-1 font-mono text-sm text-zinc-900">
-            {S3_REGION}
-          </span>
+          <span className="flex-1 font-mono text-sm text-zinc-900">{S3_REGION}</span>
           <CopyButton value={S3_REGION} />
         </div>
       </div>

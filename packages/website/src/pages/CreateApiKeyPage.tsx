@@ -82,7 +82,8 @@ export function CreateApiKeyPage() {
   }
 
   const bucketsValid = bucketScope === 'all' || selectedBuckets.length > 0;
-  const canSubmit = keyName.trim().length > 0 && permissions.length > 0 && bucketsValid && !creating;
+  const canSubmit =
+    keyName.trim().length > 0 && permissions.length > 0 && bucketsValid && !creating;
 
   return (
     <>

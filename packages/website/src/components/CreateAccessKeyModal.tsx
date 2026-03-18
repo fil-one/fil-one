@@ -121,7 +121,8 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
   }
 
   const bucketsValid = bucketScope === 'all' || selectedBuckets.length > 0;
-  const canSubmit = keyName.trim().length > 0 && permissions.length > 0 && bucketsValid && !creating;
+  const canSubmit =
+    keyName.trim().length > 0 && permissions.length > 0 && bucketsValid && !creating;
 
   return (
     <Modal open={open} onClose={handleClose} size="lg">

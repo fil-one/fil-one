@@ -95,9 +95,7 @@ export function AccessKeyBucketScopeFields({
             </div>
           )}
 
-          {error && (
-            <p className="px-4 py-3 text-sm text-red-600">{error}</p>
-          )}
+          {error && <p className="px-4 py-3 text-sm text-red-600">{error}</p>}
 
           {!loading && !error && buckets.length === 0 && (
             <p className="px-4 py-3 text-sm text-zinc-500">No buckets found.</p>
