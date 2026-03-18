@@ -1,10 +1,5 @@
-import {
-  DeleteItemCommand,
-  GetItemCommand,
-  PutItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
-import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { DeleteItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
 import { PAID_GRACE_DAYS, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
@@ -198,23 +193,7 @@ async function handleSubscriptionDeleted(
   const userId = customer.metadata?.userId;
   if (!userId) return;
 
-  // Read existing billing record to determine previous subscription status
-  const existing = await dynamo.send(
-    new GetItemCommand({
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-    }),
-  );
-
-  const previousStatus = existing.Item
-    ? (unmarshall(existing.Item).subscriptionStatus as string | undefined)
-    : undefined;
-
-  const graceDays =
-    previousStatus === SubscriptionStatus.Trialing ? TRIAL_GRACE_DAYS : PAID_GRACE_DAYS;
+  const graceDays = subscription.trial_end ? TRIAL_GRACE_DAYS : PAID_GRACE_DAYS;
 
   const now = new Date();
   const gracePeriodEndsAt = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();

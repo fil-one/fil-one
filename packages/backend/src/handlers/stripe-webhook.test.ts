@@ -3,11 +3,9 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
   DeleteItemCommand,
-  GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 import { SubscriptionStatus } from '@filone/shared';
 
@@ -111,9 +109,6 @@ describe('stripe-webhook handler', () => {
   beforeEach(() => {
     ddbMock.reset();
     ddbMock.on(PutItemCommand).resolves({});
-    ddbMock.on(GetItemCommand).resolves({
-      Item: marshall({ subscriptionStatus: SubscriptionStatus.Active }),
-    });
     ddbMock.on(UpdateItemCommand).resolves({});
     ddbMock.on(DeleteItemCommand).resolves({});
     mockConstructEvent.mockReset();
@@ -504,11 +499,11 @@ describe('stripe-webhook handler', () => {
     });
 
     it('sets GracePeriod status with 7-day grace window for trialing subscriptions', async () => {
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupStripeEvent(
+        'customer.subscription.deleted',
+        mockSubscription({ trial_end: 1700000000 }),
+      );
       setupCustomerRetrieve();
-      ddbMock.on(GetItemCommand).resolves({
-        Item: marshall({ subscriptionStatus: SubscriptionStatus.Trialing }),
-      });
 
       const before = Date.now();
       const result = await handler(buildWebhookEvent('{}'));
