@@ -409,7 +409,31 @@ describe('setup-integrations', () => {
         ],
         allowed_logout_urls: ['https://app.example.com/sign-in'],
         web_origins: ['https://app.example.com'],
-        initiate_login_uri: 'https://app.example.com/sign-in',
+      });
+    });
+
+    it('sets initiate_login_uri for staging stage', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://staging.fil.one',
+            Stage: 'staging',
+          },
+        }),
+      );
+
+      expect(capturedAuth0PatchBody).toMatchObject({
+        initiate_login_uri: 'https://staging.fil.one/sign-in',
       });
     });
 
@@ -438,7 +462,6 @@ describe('setup-integrations', () => {
         callbacks: ['https://other.example.com/callback'],
         allowed_logout_urls: [],
         web_origins: [],
-        initiate_login_uri: '',
       });
     });
   });
