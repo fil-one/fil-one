@@ -206,7 +206,11 @@ function removeValue(existing: string[], value: string): string[] {
   return existing.filter((v) => v !== value);
 }
 
-async function setupAuth0Callbacks(domain: string, siteUrl: string): Promise<void> {
+async function setupAuth0Callbacks(
+  domain: string,
+  siteUrl: string,
+  isStagingOrProd: boolean,
+): Promise<void> {
   const token = await getAuth0ManagementToken(domain);
   const clientId = Resource.Auth0ClientId.value;
   const client = await getAuth0Client(domain, token, clientId);
@@ -214,18 +218,24 @@ async function setupAuth0Callbacks(domain: string, siteUrl: string): Promise<voi
   const callbackUrl = `${siteUrl}/api/auth/callback`;
   const loginUrl = `${siteUrl}/sign-in`;
 
-  await patchAuth0Client(domain, token, clientId, {
+  const patch: Partial<Auth0Client> = {
     callbacks: addUnique(client.callbacks ?? [], callbackUrl),
     allowed_logout_urls: addUnique(client.allowed_logout_urls ?? [], loginUrl),
     web_origins: addUnique(client.web_origins ?? [], siteUrl),
-    initiate_login_uri: addUnique(
-      (client.initiate_login_uri ?? '').split(',').filter(Boolean),
-      loginUrl,
-    ).join(','),
-  });
+  };
+
+  if (isStagingOrProd) {
+    patch.initiate_login_uri = loginUrl;
+  }
+
+  await patchAuth0Client(domain, token, clientId, patch);
 }
 
-async function teardownAuth0Callbacks(domain: string, siteUrl: string): Promise<void> {
+async function teardownAuth0Callbacks(
+  domain: string,
+  siteUrl: string,
+  isStagingOrProd: boolean,
+): Promise<void> {
   const token = await getAuth0ManagementToken(domain);
   const clientId = Resource.Auth0ClientId.value;
   const client = await getAuth0Client(domain, token, clientId);
@@ -239,9 +249,9 @@ async function teardownAuth0Callbacks(domain: string, siteUrl: string): Promise<
     web_origins: removeValue(client.web_origins ?? [], siteUrl),
   };
 
-  const loginUris = (client.initiate_login_uri ?? '').split(',').filter(Boolean);
-  const cleanedLoginUris = removeValue(loginUris, `${siteUrl}/sign-in`);
-  patch.initiate_login_uri = cleanedLoginUris.join(',');
+  if (isStagingOrProd) {
+    patch.initiate_login_uri = '';
+  }
 
   await patchAuth0Client(domain, token, clientId, patch);
 }
@@ -293,12 +303,14 @@ export async function handler(event: SetupEvent): Promise<void> {
     `filone-setup-${Stage}`;
 
   try {
+    const isStagingOrProd = Stage === 'staging' || Stage === 'production';
+
     if (event.RequestType === 'Delete') {
       const stripe = new Stripe(Resource.StripeSecretKey.value);
 
       await Promise.all([
         teardownStripeWebhook(stripe, siteUrl, Stage),
-        teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl),
+        teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
       ]);
 
       console.log('Teardown complete:', { siteUrl, stage: Stage });
@@ -322,15 +334,17 @@ export async function handler(event: SetupEvent): Promise<void> {
       if (oldUrl && oldUrl !== siteUrl) {
         await Promise.all([
           teardownStripeWebhook(stripe, oldUrl, Stage),
-          teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, oldUrl),
+          teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, oldUrl, isStagingOrProd),
         ]);
       }
     }
 
     const [stripeResult] = await Promise.all([
       setupStripeWebhook(stripe, siteUrl, Stage),
-      setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl),
-      setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production'),
+      setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
+      ...(isStagingOrProd
+        ? [setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production')]
+        : []),
     ]);
 
     console.log('Setup complete:', {

@@ -15,9 +15,10 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { sqsClient } from '../lib/sqs-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { createBillingTrial } from '../lib/create-billing-trial.js';
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId, email } = getUserInfo(event);
   const body = JSON.parse(event.body ?? '{}') as Partial<ConfirmOrgRequest>;
 
   // Validate and sanitize org name
@@ -59,6 +60,18 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
         MessageDeduplicationId: orgId,
       }),
     );
+  }
+
+  try {
+    await createBillingTrial({ userId, orgId, email });
+  } catch (error) {
+    // Log billing trial creation failures but do not block org confirmation.
+    console.error('[confirm-org] Failed to create billing trial for org confirmation', {
+      error,
+      orgId,
+      userId,
+      email,
+    });
   }
 
   const responseBody: ConfirmOrgResponse = {
