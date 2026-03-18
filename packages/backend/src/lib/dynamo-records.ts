@@ -46,6 +46,7 @@ export interface SubscriptionRecord {
   gracePeriodEndsAt?: string;
   currentPeriodEnd?: string;
   canceledAt?: string;
+  lastPaymentFailedAt?: string;
   paymentMethodId?: string;
   paymentMethodLast4?: string;
   paymentMethodBrand?: string;
