@@ -94,7 +94,6 @@ export async function baseHandler(
     credentials,
     bucketName,
     key,
-    contentType,
     PRESIGN_EXPIRY_SECONDS,
   );
 

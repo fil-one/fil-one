@@ -41,12 +41,11 @@ export async function getPresignedPutUrl(
   credentials: AuroraS3Credentials,
   bucket: string,
   key: string,
-  contentType: string,
   expiresIn: number,
 ): Promise<string> {
   const s3 = new S3Client({
     endpoint: endpointUrl,
-    region: 'us-east-1',
+    region: 'auto',
     credentials: {
       accessKeyId: credentials.accessKeyId,
       secretAccessKey: credentials.secretAccessKey,
@@ -54,12 +53,19 @@ export async function getPresignedPutUrl(
     forcePathStyle: true,
   });
 
+  console.log('[aurora-s3] Creating presigned PUT URL', {
+    endpoint: endpointUrl,
+    bucket,
+    key,
+    accessKeyId: credentials.accessKeyId,
+    expiresIn,
+  });
+
   return getSignedUrl(
     s3,
     new PutObjectCommand({
       Bucket: bucket,
       Key: key,
-      ContentType: contentType,
     }),
     { expiresIn },
   );
