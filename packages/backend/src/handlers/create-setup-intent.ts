@@ -1,4 +1,4 @@
-import { GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
@@ -14,6 +14,7 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.js';
 
 const dynamo = getDynamoClient();
 
@@ -40,7 +41,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     if (record.stripeCustomerId) {
       stripeCustomerId = record.stripeCustomerId as string;
     } else {
-      // Create Stripe customer and update record
+      // Create Stripe customer and update record (without clobbering existing fields)
       const customer = await stripe.customers.create({
         email: email ?? undefined,
         metadata: { userId },
@@ -48,22 +49,17 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       stripeCustomerId = customer.id;
 
       await dynamo.send(
-        new PutItemCommand({
+        new UpdateItemCommand({
           TableName: tableName,
-          Item: marshall(
-            {
-              pk: `CUSTOMER#${userId}`,
-              sk: 'SUBSCRIPTION',
-              stripeCustomerId,
-              orgId,
-              subscriptionStatus: SubscriptionStatus.Trialing,
-              trialStartedAt: record.trialStartedAt ?? new Date().toISOString(),
-              trialEndsAt:
-                record.trialEndsAt ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-              updatedAt: new Date().toISOString(),
-            },
-            { removeUndefinedValues: true },
-          ),
+          Key: {
+            pk: { S: `CUSTOMER#${userId}` },
+            sk: { S: 'SUBSCRIPTION' },
+          },
+          UpdateExpression: 'SET stripeCustomerId = :cid, updatedAt = :now',
+          ExpressionAttributeValues: {
+            ':cid': { S: stripeCustomerId },
+            ':now': { S: new Date().toISOString() },
+          },
         }),
       );
     }
@@ -85,7 +81,9 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
           orgId,
           subscriptionStatus: SubscriptionStatus.Trialing,
           trialStartedAt: new Date().toISOString(),
-          trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+          trialEndsAt: new Date(
+            Date.now() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000,
+          ).toISOString(),
           updatedAt: new Date().toISOString(),
         }),
       }),

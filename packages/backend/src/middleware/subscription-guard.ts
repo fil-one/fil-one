@@ -9,6 +9,7 @@ import type {
 } from 'aws-lambda';
 import { ApiErrorCode, SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
+import { createBillingTrial } from '../lib/create-billing-trial.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -17,6 +18,10 @@ import { getUserInfo } from '../lib/user-context.js';
 export enum AccessLevel {
   Read = 'read',
   Write = 'write',
+}
+
+export interface GuardInternal extends Record<string, unknown> {
+  billingTrialPromise?: Promise<void>;
 }
 
 const TRIAL_GRACE_DAYS = 7;
@@ -30,10 +35,16 @@ function addDays(date: Date, days: number): Date {
 
 export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
   const before = async (
-    request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
+    request: Request<
+      APIGatewayProxyEventV2,
+      APIGatewayProxyResultV2,
+      Error,
+      Context,
+      GuardInternal
+    >,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
     const event = request.event as AuthenticatedEvent;
-    const { userId } = getUserInfo(event);
+    const { userId, orgId, email } = getUserInfo(event);
     const tableName = Resource.BillingTable.name;
 
     // 1. Read billing record
@@ -47,8 +58,11 @@ export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
       }),
     );
 
-    // 2. No billing record → allow (soft trial, no Stripe customer yet)
-    if (!result.Item) return;
+    // 2. No billing record → allow access and attempt trial creation in background
+    if (!result.Item) {
+      request.internal.billingTrialPromise = createBillingTrial({ userId, orgId, email });
+      return;
+    }
 
     const record = unmarshall(result.Item);
     let status = record.subscriptionStatus as string | undefined;
@@ -145,5 +159,32 @@ export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
     // Unknown status → allow (fail open for safety)
   };
 
-  return { before } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;
+  const after = async (
+    request: Request<
+      APIGatewayProxyEventV2,
+      APIGatewayProxyResultV2,
+      Error,
+      Context,
+      GuardInternal
+    >,
+  ): Promise<void> => {
+    if (request.internal.billingTrialPromise) {
+      try {
+        await request.internal.billingTrialPromise;
+      } catch (error) {
+        console.error(
+          '[subscription-guard] Failed to create billing trial in subscription guard fallback:',
+          error,
+        );
+      }
+    }
+  };
+
+  return { before, after } satisfies MiddlewareObj<
+    APIGatewayProxyEventV2,
+    APIGatewayProxyResultV2,
+    Error,
+    Context,
+    GuardInternal
+  >;
 }
