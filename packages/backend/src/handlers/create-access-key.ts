@@ -3,11 +3,8 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type {
-  CreateAccessKeyRequest,
-  CreateAccessKeyResponse,
-  ErrorResponse,
-} from '@filone/shared';
+import { CreateAccessKeySchema } from '@filone/shared';
+import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import {
   createAuroraAccessKey,
@@ -15,7 +12,6 @@ import {
   findAuroraAccessKeyByName,
 } from '../lib/aurora-portal.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { validateKeyName } from '../lib/key-name-validation.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -28,9 +24,9 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  let request: CreateAccessKeyRequest;
+  let body: unknown;
   try {
-    request = JSON.parse(event.body ?? '{}') as CreateAccessKeyRequest;
+    body = JSON.parse(event.body ?? '{}');
   } catch {
     return new ResponseBuilder()
       .status(400)
@@ -38,49 +34,23 @@ export async function baseHandler(
       .build();
   }
 
-  const keyNameResult = validateKeyName(request.keyName);
-  if (!keyNameResult.valid) {
+  const parsed = CreateAccessKeySchema.safeParse(body);
+  if (!parsed.success) {
     return new ResponseBuilder()
       .status(400)
-      .body<ErrorResponse>({ message: keyNameResult.error! })
-      .build();
-  }
-  const keyName = keyNameResult.sanitized;
-
-  const permissions = request.permissions;
-  if (!Array.isArray(permissions) || permissions.length === 0) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: 'At least one permission is required' })
+      .body<ErrorResponse>({ message: parsed.error.issues[0].message })
       .build();
   }
 
-  const validPermissions = new Set(['read', 'write', 'list', 'delete']);
-  for (const p of permissions) {
-    if (!validPermissions.has(p)) {
-      return new ResponseBuilder()
-        .status(400)
-        .body<ErrorResponse>({ message: `Invalid permission: ${p}` })
-        .build();
-    }
-  }
-
-  const bucketScope = request.bucketScope ?? 'all';
-  if (bucketScope !== 'all' && bucketScope !== 'specific') {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: 'bucketScope must be "all" or "specific"' })
-      .build();
-  }
-
-  const buckets = bucketScope === 'specific' ? (request.buckets ?? []) : undefined;
-  const expiresAt = request.expiresAt ?? null;
-  if (expiresAt !== null && !/^\d{4}-\d{2}-\d{2}$/.test(expiresAt)) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: 'expiresAt must be in YYYY-MM-DD format' })
-      .build();
-  }
+  const {
+    keyName,
+    permissions,
+    bucketScope,
+    buckets: bucketList,
+    expiresAt: expiresAtRaw,
+  } = parsed.data;
+  const buckets = bucketScope === 'specific' ? (bucketList ?? []) : undefined;
+  const expiresAt = expiresAtRaw ?? null;
 
   const { orgId } = getUserInfo(event);
 

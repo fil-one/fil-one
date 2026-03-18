@@ -34,6 +34,12 @@ export type {
   DeleteObjectRequest,
 } from './api/objects.js';
 
+export {
+  ACCESS_KEY_PERMISSIONS,
+  ACCESS_KEY_BUCKET_SCOPES,
+  KEY_NAME_MAX_LENGTH,
+  CreateAccessKeySchema,
+} from './api/access-keys.js';
 export type {
   AccessKeyStatus,
   AccessKeyPermission,

@@ -2,7 +2,7 @@
 export const S3_ENDPOINT = 'https://s3.fil.one';
 
 /** S3 region for Fil One. */
-export const S3_REGION = 'us-east-1';
+export const S3_REGION = 'eu-west-1';
 
 /** Cookie name for the OAuth state parameter (CSRF protection for login flow). */
 export const OAUTH_STATE_COOKIE = 'hs_oauth_state';

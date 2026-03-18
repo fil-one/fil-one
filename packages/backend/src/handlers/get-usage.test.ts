@@ -37,6 +37,7 @@ process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './get-usage.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { S3_REGION } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -104,7 +105,7 @@ function mockBuckets(bucketNames: string[]) {
           pk: `USER#${MOCK_USER_ID}`,
           sk: `BUCKET#${name}`,
           name,
-          region: 'us-east-1',
+          region: S3_REGION,
           createdAt: '2024-01-01T00:00:00Z',
           isPublic: false,
         }),

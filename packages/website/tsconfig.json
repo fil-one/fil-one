@@ -6,7 +6,7 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "noEmit": true,
-    "types": ["vite/client"],
+    "types": ["vite/client", "@testing-library/jest-dom"],
     "paths": {
       "@filone/shared": ["../shared/src/index.ts"],
       "@hyperspace/ui/utils": ["../ui/src/utils/index.ts"],

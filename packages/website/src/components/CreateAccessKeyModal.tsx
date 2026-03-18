@@ -36,9 +36,9 @@ function expiresAtFromForm(expiration: ExpirationOption, customDate: string | nu
   if (expiration === '30d') {
     const d = new Date();
     d.setDate(d.getDate() + 30);
-    return d.toISOString();
+    return d.toISOString().split('T')[0]; // YYYY-MM-DD
   }
-  return customDate ? new Date(customDate).toISOString() : null;
+  return customDate ?? null; // date input already yields YYYY-MM-DD
 }
 
 // ---------------------------------------------------------------------------

@@ -260,6 +260,28 @@ describe('create-access-key baseHandler', () => {
     expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
   });
 
+  it('returns 400 for the exact input that caused the production error', async () => {
+    // "joes 30 day key with all" was failing because the old CreateAccessKeyModal
+    // sent d.toISOString() (with milliseconds) instead of YYYY-MM-DD
+    const isoTimestamp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const event = buildEvent({
+      body: JSON.stringify({
+        keyName: 'joes 30 day key with all',
+        permissions: ['read', 'write', 'list', 'delete'],
+        bucketScope: 'all',
+        expiresAt: isoTimestamp,
+      }),
+      userInfo: USER_INFO,
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      message: 'expiresAt must be in YYYY-MM-DD format',
+    });
+    expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
+  });
+
   it('returns 400 for invalid JSON body', async () => {
     const event = buildEvent({ body: 'not-json', userInfo: USER_INFO });
     const result = await baseHandler(event);
