@@ -6,7 +6,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ErrorResponse, PresignUploadRequest, PresignUploadResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraS3Credentials, getPresignedPutUrl } from '../lib/aurora-s3-client.js';
+import { getAuroraS3Credentials, getPresignedPutObjectUrl } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -89,7 +89,7 @@ export async function baseHandler(
   const gatewayUrl = process.env.AURORA_S3_GATEWAY_URL!;
 
   const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
-  const url = await getPresignedPutUrl(
+  const url = await getPresignedPutObjectUrl(
     gatewayUrl,
     credentials,
     bucketName,

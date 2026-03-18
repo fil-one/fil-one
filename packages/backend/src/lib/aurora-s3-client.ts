@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 
@@ -36,7 +36,7 @@ export async function getAuroraS3Credentials(
   return JSON.parse(value) as AuroraS3Credentials;
 }
 
-export async function getPresignedPutUrl(
+export async function getPresignedPutObjectUrl(
   endpointUrl: string,
   credentials: AuroraS3Credentials,
   bucket: string,
@@ -53,7 +53,7 @@ export async function getPresignedPutUrl(
     forcePathStyle: true,
   });
 
-  console.log('[aurora-s3] Creating presigned PUT URL', {
+  console.log('[aurora-s3] Creating presigned PutObject URL', {
     endpoint: endpointUrl,
     bucket,
     key,
@@ -64,6 +64,41 @@ export async function getPresignedPutUrl(
   return getSignedUrl(
     s3,
     new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    }),
+    { expiresIn },
+  );
+}
+
+export async function getPresignedGetObjectUrl(
+  endpointUrl: string,
+  credentials: AuroraS3Credentials,
+  bucket: string,
+  key: string,
+  expiresIn: number,
+): Promise<string> {
+  const s3 = new S3Client({
+    endpoint: endpointUrl,
+    region: 'auto',
+    credentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+    },
+    forcePathStyle: true,
+  });
+
+  console.log('[aurora-s3] Creating presigned GetObject URL', {
+    endpoint: endpointUrl,
+    bucket,
+    key,
+    accessKeyId: credentials.accessKeyId,
+    expiresIn,
+  });
+
+  return getSignedUrl(
+    s3,
+    new GetObjectCommand({
       Bucket: bucket,
       Key: key,
     }),
