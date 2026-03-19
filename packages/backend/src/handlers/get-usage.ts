@@ -34,8 +34,8 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   // Fetch usage data from Aurora in parallel
   const now = new Date();
-  const thirtyDaysAgo = new Date(now);
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const thirtyDaysAgo = new Date(now.getTime());
+  thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
   const [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
     auroraTenantId
