@@ -3,7 +3,7 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { ActivityResponse, RecentActivity, S3Object, UsageDataPoint } from '@filone/shared';
+import type { ActivityResponse, RecentActivity, UsageDataPoint } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getAuroraS3Credentials, listObjects } from '../lib/aurora-s3-client.js';
@@ -14,8 +14,15 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import type { AccessKeyRecord, BucketRecord } from '../lib/dynamo-records.js';
+import { getStorageSamples } from '../lib/aurora-backoffice.js';
 
 const dynamo = getDynamoClient();
+
+function endOfDay(d: Date): Date {
+  const eod = new Date(d);
+  eod.setUTCHours(23, 59, 59, 999);
+  return eod;
+}
 
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -55,7 +62,6 @@ export async function baseHandler(
 
   // Collect activities and objects in a single pass over all buckets
   const activities: RecentActivity[] = [];
-  const allObjects: Pick<S3Object, 'sizeBytes' | 'lastModified'>[] = [];
 
   const stage = process.env.FILONE_STAGE!;
   const gatewayUrl = process.env.AURORA_S3_GATEWAY_URL!;
@@ -91,7 +97,6 @@ export async function baseHandler(
             timestamp: obj.lastModified,
             sizeBytes: obj.sizeBytes || undefined,
           });
-          allObjects.push({ sizeBytes: obj.sizeBytes, lastModified: obj.lastModified });
         }
         continuationToken = result.nextToken;
       } while (continuationToken);
@@ -123,35 +128,36 @@ export async function baseHandler(
   // Sort activities most-recent-first
   activities.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-  // Build daily trend data points
+  // Fetch time series data from Aurora
   const now = new Date();
-  const startDate = new Date(now);
-  startDate.setDate(startDate.getDate() - period + 1);
-  startDate.setHours(0, 0, 0, 0);
+  const from = new Date(now);
+  from.setUTCDate(from.getUTCDate() - period + 1);
+  from.setUTCHours(0, 0, 0, 0);
 
-  allObjects.sort((a, b) => a.lastModified.localeCompare(b.lastModified));
+  const storageSamples = auroraTenantId
+    ? await getStorageSamples({
+        tenantId: auroraTenantId,
+        from: from.toISOString(),
+        to: now.toISOString(),
+        window: '24h',
+      })
+    : [];
 
+  // Index Aurora samples by end-of-day timestamp
+  const samplesByDate = new Map(
+    storageSamples
+      .filter((s) => s.timestamp)
+      .map((s) => [endOfDay(new Date(s.timestamp!)).toISOString(), s] as const),
+  );
+
+  // Build full date range with gap-filling
   const storageSeries: UsageDataPoint[] = [];
   const objectsSeries: UsageDataPoint[] = [];
-
-  for (let d = 0; d < period; d++) {
-    const date = new Date(startDate);
-    date.setDate(date.getDate() + d);
-    const label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
-
-    let cumulativeStorage = 0;
-    let dailyObjectCount = 0;
-    for (const obj of allObjects) {
-      const objDate = new Date(obj.lastModified);
-      if (objDate <= endOfDay) cumulativeStorage += obj.sizeBytes;
-      if (objDate >= date && objDate <= endOfDay) dailyObjectCount++;
-    }
-
-    storageSeries.push({ date: label, value: cumulativeStorage });
-    objectsSeries.push({ date: label, value: dailyObjectCount });
+  for (const d = new Date(from); d <= now; d.setUTCDate(d.getUTCDate() + 1)) {
+    const date = endOfDay(d).toISOString();
+    const sample = samplesByDate.get(date);
+    storageSeries.push({ date, value: sample?.bytesUsed ?? 0 });
+    objectsSeries.push({ date, value: sample?.objectCount ?? 0 });
   }
 
   const response: ActivityResponse = {

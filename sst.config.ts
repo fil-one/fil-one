@@ -90,6 +90,7 @@ export default $config({
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
     const isProduction = stage === 'production';
+    const isEphemeralStage = stage !== 'production' && stage !== 'staging';
 
     let domainName = 'staging.fil.one';
     let certArn: string | undefined;
@@ -211,6 +212,7 @@ export default $config({
     });
 
     new aws.cloudformation.Stack('SetupStack', {
+      ...(isEphemeralStage && { onFailure: 'DELETE' }),
       templateBody: $jsonStringify({
         AWSTemplateFormatVersion: '2010-09-09',
         Resources: {
@@ -226,6 +228,21 @@ export default $config({
       }),
     });
 
+    // Ensure the Stripe webhook endpoint is removed when an ephemeral
+    // stage is torn down. The CloudFormation custom resource above may
+    // not fire its Delete event if the Lambda is destroyed first.
+    if (isEphemeralStage) {
+      new local.Command('TeardownStripeWebhook', {
+        create: 'echo "Teardown hook registered"',
+        delete: $interpolate`node packages/backend/src/scripts/teardown-stripe-webhook.ts`,
+        environment: {
+          STRIPE_SECRET_KEY: stripeSecretKey.value,
+          SITE_URL: siteUrl,
+          STAGE: $app.stage,
+        },
+      });
+    }
+
     // ── Shared function config ───────────────────────────────────────
     const allResources = [
       uploadsTable,
@@ -237,6 +254,7 @@ export default $config({
       auth0ClientSecret,
       stripeSecretKey,
       stripePriceId,
+      auroraBackofficeToken,
     ];
 
     const sharedEnv: Record<string, $util.Input<string>> = {
@@ -387,12 +405,12 @@ export default $config({
     addRoute('POST', '/api/org/confirm', 'confirm-org');
 
     // ── Usage + Dashboard routes ─────────────────────────────────────
-    addRoute('GET', '/api/usage', 'get-usage', auroraS3GatewayEnv, auroraS3GatewayPermissions);
+    addRoute('GET', '/api/usage', 'get-usage', auroraEnv);
     addRoute(
       'GET',
       '/api/activity',
       'get-activity',
-      auroraS3GatewayEnv,
+      { ...auroraEnv, ...auroraS3GatewayEnv },
       auroraS3GatewayPermissions,
     );
 
