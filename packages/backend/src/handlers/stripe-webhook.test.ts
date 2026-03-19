@@ -499,9 +499,10 @@ describe('stripe-webhook handler', () => {
     });
 
     it('sets GracePeriod status with 7-day grace window for trialing subscriptions', async () => {
+      const futureTrialEnd = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60;
       setupStripeEvent(
         'customer.subscription.deleted',
-        mockSubscription({ trial_end: 1700000000 }),
+        mockSubscription({ trial_end: futureTrialEnd }),
       );
       setupCustomerRetrieve();
 
