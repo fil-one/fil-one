@@ -86,7 +86,6 @@ export default $config({
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
     const isProduction = stage === 'production';
-    const isEphemeralStage = stage !== 'production' && stage !== 'staging';
 
     let domainName = 'staging.fil.one';
     let certArn: string | undefined;
@@ -202,7 +201,6 @@ export default $config({
     });
 
     new aws.cloudformation.Stack('SetupStack', {
-      ...(isEphemeralStage && { onFailure: 'DELETE' }),
       templateBody: $jsonStringify({
         AWSTemplateFormatVersion: '2010-09-09',
         Resources: {

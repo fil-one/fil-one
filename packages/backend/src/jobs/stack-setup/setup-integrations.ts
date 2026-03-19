@@ -109,14 +109,6 @@ async function setupStripeWebhook(
     await stripe.webhookEndpoints.del(existing.id);
   }
 
-  // Clean up disabled endpoints to stay under Stripe's 16-endpoint test limit.
-  // Endpoints are disabled by Stripe after repeated delivery failures (e.g. when
-  // a preview environment has been torn down but the endpoint wasn't deleted).
-  const disabled = endpoints.data.filter(
-    (ep) => ep.status === 'disabled' && ep.id !== existing?.id,
-  );
-  await Promise.all(disabled.map((ep) => stripe.webhookEndpoints.del(ep.id)));
-
   const newEndpoint = await stripe.webhookEndpoints.create({
     url: webhookUrl,
     enabled_events: WEBHOOK_EVENTS,
