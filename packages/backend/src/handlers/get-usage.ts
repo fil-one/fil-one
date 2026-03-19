@@ -1,5 +1,4 @@
-import { GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
@@ -40,7 +39,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const thirtyDaysAgo = new Date(now.getTime());
   thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
-  const shouldFetchData =  auroraTenantId && isOrgSetupComplete(setupStatus);
+  const shouldFetchData = auroraTenantId && isOrgSetupComplete(setupStatus);
 
   const [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
     shouldFetchData
