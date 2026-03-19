@@ -62,3 +62,26 @@ export function timeAgo(isoString: string): string {
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
 }
+
+// ---------------------------------------------------------------------------
+// Form helpers
+// ---------------------------------------------------------------------------
+
+import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';
+
+/**
+ * Convert form expiration fields to a YYYY-MM-DD string (or null).
+ * Uses UTC arithmetic so the result is consistent with toISOString().
+ */
+export function expiresAtFromForm(
+  expiration: ExpirationOption,
+  customDate: string | null,
+): string | null {
+  if (expiration === 'never') return null;
+  if (expiration === '30d') {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + 30);
+    return d.toISOString().split('T')[0]; // YYYY-MM-DD
+  }
+  return customDate ?? null; // date input already yields YYYY-MM-DD
+}

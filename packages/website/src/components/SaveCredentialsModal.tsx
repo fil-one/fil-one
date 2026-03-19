@@ -32,18 +32,30 @@ export function SaveCredentialsModal({
   const [copiedField, setCopiedField] = useState<'accessKeyId' | 'secret' | null>(null);
   const [showSecret, setShowSecret] = useState(false);
 
-  function handleDownload() {
+  function downloadBlob(content: string, filename: string, type: string) {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleDownloadCsv() {
     const csv = [
       'Access Key ID,Secret Access Key',
       `${credentials.accessKeyId},${credentials.secretAccessKey}`,
     ].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'credentials.csv';
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(csv, 'credentials.csv', 'text/csv');
+  }
+
+  function handleDownloadEnv() {
+    const env = [
+      `export AWS_ACCESS_KEY_ID=${credentials.accessKeyId}`,
+      `export AWS_SECRET_ACCESS_KEY=${credentials.secretAccessKey}`,
+    ].join('\n');
+    downloadBlob(env, 'credentials.env', 'text/plain');
   }
 
   async function handleCopy(value: string, field: 'accessKeyId' | 'secret') {
@@ -138,11 +150,19 @@ export function SaveCredentialsModal({
           </button>
           <button
             type="button"
-            onClick={handleDownload}
+            onClick={handleDownloadCsv}
             className="flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-gradient-to-br from-[#0080ff] to-[#256af4] text-[13px] font-medium text-white shadow-sm transition-colors hover:from-[#0070e0] hover:to-[#2060d8]"
           >
             <DownloadSimple size={16} weight="bold" />
-            Download credentials
+            Download .csv
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadEnv}
+            className="flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-gradient-to-br from-[#0080ff] to-[#256af4] text-[13px] font-medium text-white shadow-sm transition-colors hover:from-[#0070e0] hover:to-[#2060d8]"
+          >
+            <DownloadSimple size={16} weight="bold" />
+            Download .env
           </button>
         </div>
       </ModalFooter>

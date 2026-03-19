@@ -7,6 +7,7 @@ import type {
   CreateAccessKeyResponse,
 } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
+import { expiresAtFromForm } from '../lib/time.js';
 import { AccessKeyExpirationFields } from './AccessKeyExpirationFields.js';
 import type { ExpirationOption } from './AccessKeyExpirationFields.js';
 import { AccessKeyBucketScopeFields } from './AccessKeyBucketScopeFields.js';
@@ -27,20 +28,6 @@ export type CreateAccessKeyModalProps = {
   /** Called after the user acknowledges the credentials screen. */
   onDone: (response: CreateAccessKeyResponse) => void;
 };
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function expiresAtFromForm(expiration: ExpirationOption, customDate: string | null): string | null {
-  if (expiration === 'never') return null;
-  if (expiration === '30d') {
-    const d = new Date();
-    d.setDate(d.getDate() + 30);
-    return d.toISOString().split('T')[0]; // YYYY-MM-DD
-  }
-  return customDate ?? null; // date input already yields YYYY-MM-DD
-}
 
 // ---------------------------------------------------------------------------
 // Component

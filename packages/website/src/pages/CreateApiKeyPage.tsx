@@ -7,7 +7,9 @@ import type {
   AccessKeyPermission,
   CreateAccessKeyResponse,
 } from '@filone/shared';
+import { CreateAccessKeySchema } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
+import { expiresAtFromForm } from '../lib/time.js';
 import { AccessKeyExpirationFields } from '../components/AccessKeyExpirationFields.js';
 import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';
 import { AccessKeyBucketScopeFields } from '../components/AccessKeyBucketScopeFields.js';
@@ -16,20 +18,6 @@ import { Button } from '../components/Button.js';
 import { Input } from '../components/Input.js';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal.js';
 import { useToast } from '../components/Toast/index.js';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function expiresAtFromForm(expiration: ExpirationOption, customDate: string | null): string | null {
-  if (expiration === 'never') return null;
-  if (expiration === '30d') {
-    const d = new Date();
-    d.setDate(d.getDate() + 30);
-    return d.toISOString().split('T')[0]; // YYYY-MM-DD
-  }
-  return customDate ?? null; // date input already yields YYYY-MM-DD
-}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -53,18 +41,23 @@ export function CreateApiKeyPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!keyName.trim() || permissions.length === 0) return;
+    const body = {
+      keyName: keyName.trim(),
+      permissions,
+      bucketScope,
+      buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
+      expiresAt: expiresAtFromForm(expiration, customDate),
+    };
+    const parsed = CreateAccessKeySchema.safeParse(body);
+    if (!parsed.success) {
+      toast.error(parsed.error.issues[0].message);
+      return;
+    }
     setCreating(true);
     try {
       const response = await apiRequest<CreateAccessKeyResponse>('/access-keys', {
         method: 'POST',
-        body: JSON.stringify({
-          keyName: keyName.trim(),
-          permissions,
-          bucketScope,
-          buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
-          expiresAt: expiresAtFromForm(expiration, customDate),
-        }),
+        body: JSON.stringify(body),
       });
       setCredentials({
         accessKeyId: response.accessKeyId,

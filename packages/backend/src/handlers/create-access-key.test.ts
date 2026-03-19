@@ -262,7 +262,7 @@ describe('create-access-key baseHandler', () => {
     expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
   });
 
-  it('returns 400 for the exact input that caused the production error', async () => {
+  it('returns 400 when expiresAt is a timestamp formatted as ISO date-time string', async () => {
     // "joes 30 day key with all" was failing because the old CreateAccessKeyModal
     // sent d.toISOString() (with milliseconds) instead of YYYY-MM-DD
     const isoTimestamp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
