@@ -205,6 +205,7 @@ function CopyButton({ value }: { value: string }) {
       type="button"
       onClick={handleCopy}
       title={copied ? 'Copied' : 'Copy'}
+      aria-label={copied ? 'Copied to clipboard' : 'Copy to clipboard'}
       className="ml-2 shrink-0 rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
     >
       <CopySimpleIcon size={14} />
