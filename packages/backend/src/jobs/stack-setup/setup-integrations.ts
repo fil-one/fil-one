@@ -137,10 +137,12 @@ async function setupStripeWebhook(
 }
 
 function isOrphanedEphemeralEndpoint(ep: Stripe.WebhookEndpoint): boolean {
+  const stage = ep.metadata?.stage;
   return (
     ep.status === 'disabled' &&
     ep.metadata?.app === 'filone' &&
-    !PROTECTED_STAGES.has(ep.metadata?.stage ?? '')
+    !!stage &&
+    !PROTECTED_STAGES.has(stage)
   );
 }
 

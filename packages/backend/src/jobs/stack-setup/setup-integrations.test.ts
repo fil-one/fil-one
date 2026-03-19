@@ -309,6 +309,12 @@ describe('setup-integrations', () => {
         status: 'disabled',
         metadata: {},
       } as unknown as Stripe.WebhookEndpoint,
+      'disabled filone endpoint with missing stage': {
+        id: 'we_no_stage',
+        url: 'https://mystery.example.com/api/stripe/webhook',
+        status: 'disabled',
+        metadata: { app: 'filone' },
+      } as unknown as Stripe.WebhookEndpoint,
       'disabled endpoint from another app': {
         id: 'we_other_app',
         url: 'https://otherapp.example.com/api/stripe/webhook',
