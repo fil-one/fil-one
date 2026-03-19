@@ -42,6 +42,8 @@ const WEBHOOK_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
   'invoice.payment_failed',
 ];
 
+const PROTECTED_STAGES = new Set(['production', 'staging']);
+
 const ssm = new SSMClient({});
 
 function ssmParamName(stage: string): string {
@@ -101,6 +103,7 @@ async function setupStripeWebhook(
   if (existing && storedSecret) {
     await stripe.webhookEndpoints.update(existing.id, {
       enabled_events: WEBHOOK_EVENTS,
+      metadata: { app: 'filone', stage },
     });
     return { webhookSecret: storedSecret, webhookEndpointId: existing.id };
   }
@@ -109,15 +112,38 @@ async function setupStripeWebhook(
     await stripe.webhookEndpoints.del(existing.id);
   }
 
+  // Clean up disabled endpoints to stay under Stripe's 16-endpoint test limit.
+  // Endpoints are disabled by Stripe after repeated delivery failures (e.g. when
+  // a preview environment has been torn down but the endpoint wasn't deleted).
+  // Only clean up from non-production stages — production should never delete
+  // other endpoints.
+  if (stage !== 'production') {
+    const disabled = endpoints.data.filter(
+      (ep) => isOrphanedEphemeralEndpoint(ep) && ep.id !== existing?.id,
+    );
+    await Promise.all(disabled.map((ep) => stripe.webhookEndpoints.del(ep.id)));
+  }
+
   const newEndpoint = await stripe.webhookEndpoints.create({
     url: webhookUrl,
     enabled_events: WEBHOOK_EVENTS,
+    metadata: { app: 'filone', stage },
   });
 
   const secret = newEndpoint.secret!;
   await storeWebhookSecret(stage, secret);
 
   return { webhookSecret: secret, webhookEndpointId: newEndpoint.id };
+}
+
+function isOrphanedEphemeralEndpoint(ep: Stripe.WebhookEndpoint): boolean {
+  const stage = ep.metadata?.stage;
+  return (
+    ep.status === 'disabled' &&
+    ep.metadata?.app === 'filone' &&
+    !!stage &&
+    !PROTECTED_STAGES.has(stage)
+  );
 }
 
 async function teardownStripeWebhook(
