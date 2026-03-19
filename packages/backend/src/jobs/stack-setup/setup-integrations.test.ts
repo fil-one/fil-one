@@ -253,6 +253,37 @@ describe('setup-integrations', () => {
       });
     }
 
+    it('skips orphaned endpoint cleanup when running in production', async () => {
+      const orphan = {
+        id: 'we_orphan',
+        url: 'https://old-preview.example.com/api/stripe/webhook',
+        status: 'disabled',
+        metadata: { app: 'filone', stage: 'pr-42' },
+      } as unknown as Stripe.WebhookEndpoint;
+
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [orphan] });
+      mockStripeWebhookEndpoints.del.mockResolvedValue({});
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_new',
+        secret: 'whsec_new',
+      });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            Stage: 'production',
+            SiteUrl: 'https://prod.example.com',
+          },
+        }),
+      );
+
+      expect(mockStripeWebhookEndpoints.del).not.toHaveBeenCalledWith(orphan.id);
+    });
+
     const keptCases: Record<string, Stripe.WebhookEndpoint> = {
       'disabled production endpoint': {
         id: 'we_prod',
