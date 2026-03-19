@@ -57,6 +57,13 @@ export async function baseHandler(
   const activities: RecentActivity[] = [];
   const allObjects: Pick<S3Object, 'sizeBytes' | 'lastModified'>[] = [];
 
+  const stage = process.env.FILONE_STAGE!;
+  const gatewayUrl = process.env.AURORA_S3_GATEWAY_URL!;
+  const credentials =
+    auroraTenantId && isOrgSetupComplete(setupStatus)
+      ? await getAuroraS3Credentials(stage, auroraTenantId)
+      : undefined;
+
   for (const bucket of buckets) {
     activities.push({
       id: `bucket-${bucket.name}`,
@@ -66,11 +73,7 @@ export async function baseHandler(
       timestamp: bucket.createdAt,
     });
 
-    if (auroraTenantId && isOrgSetupComplete(setupStatus)) {
-      const stage = process.env.FILONE_STAGE!;
-      const gatewayUrl = process.env.AURORA_S3_GATEWAY_URL!;
-      const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
-
+    if (credentials) {
       let continuationToken: string | undefined;
       do {
         const result = await listObjects({
