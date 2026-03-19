@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -91,9 +91,14 @@ function storageSample(
 
 describe('get-activity baseHandler', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
     ddbMock.reset();
     mockGetStorageSamples.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   function mockOrgProfile(auroraTenantId?: string) {
@@ -121,7 +126,6 @@ describe('get-activity baseHandler', () => {
     expect(body.trends.storage.every((p: { value: number }) => p.value === 0)).toBe(true);
     expect(body.trends.objects.length).toBe(8);
     expect(body.trends.objects.every((p: { value: number }) => p.value === 0)).toBe(true);
-    vi.useRealTimers();
   });
 
   it('returns trends from Aurora with missing days zero-filled', async () => {
@@ -148,7 +152,6 @@ describe('get-activity baseHandler', () => {
     expect(body.trends.objects[0]).toStrictEqual({ date: '2025-12-29T23:59:59.999Z', value: 5 });
     expect(body.trends.objects[2]).toStrictEqual({ date: '2025-12-31T23:59:59.999Z', value: 10 });
     expect(body.trends.objects[3]).toStrictEqual({ date: '2026-01-01T23:59:59.999Z', value: 0 });
-    vi.useRealTimers();
   });
 
   it('returns zero-filled trends when auroraTenantId is missing', async () => {
