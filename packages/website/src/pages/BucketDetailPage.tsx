@@ -214,7 +214,10 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
       );
       setUploadProgress(1);
 
-      // Step 2: Upload directly to Aurora S3 via XHR for real progress
+      // Step 2: Upload directly to Aurora S3 via XHR for real progress.
+      // We use XMLHttpRequest instead of fetch() because the Fetch API does not
+      // support upload progress tracking.
+      // See https://jakearchibald.com/2025/fetch-streams-not-for-progress/
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.upload.onprogress = (e) => {
