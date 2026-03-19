@@ -1,4 +1,6 @@
 export {
+  S3_ENDPOINT,
+  S3_REGION,
   OAUTH_STATE_COOKIE,
   CSRF_COOKIE_NAME,
   TB_BYTES,
@@ -31,15 +33,22 @@ export type {
   PresignUploadResponse,
 } from './api/objects.js';
 
+export {
+  ACCESS_KEY_PERMISSIONS,
+  ACCESS_KEY_BUCKET_SCOPES,
+  KEY_NAME_MAX_LENGTH,
+  KEY_NAME_PATTERN,
+  CreateAccessKeySchema,
+} from './api/access-keys.js';
 export type {
   AccessKeyStatus,
+  AccessKeyPermission,
+  AccessKeyBucketScope,
   AccessKey,
   ListAccessKeysResponse,
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
   DeleteAccessKeyRequest,
-  UpdateAccessKeyRequest,
-  UpdateAccessKeyResponse,
 } from './api/access-keys.js';
 
 export type {

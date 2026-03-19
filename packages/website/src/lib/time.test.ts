@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { daysUntil, formatDate, formatDateTime, timeAgo } from './time.js';
+import { daysUntil, expiresAtFromForm, formatDate, formatDateTime, timeAgo } from './time.js';
 
 // ---------------------------------------------------------------------------
 // daysUntil — UTC calendar-day math
@@ -120,5 +120,53 @@ describe('timeAgo', () => {
   it('shows days for >= 24 hours', () => {
     vi.useFakeTimers({ now: new Date('2026-03-18T12:00:00Z') });
     expect(timeAgo('2026-03-15T12:00:00Z')).toBe('3d ago');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// expiresAtFromForm — form expiration to YYYY-MM-DD
+// ---------------------------------------------------------------------------
+
+describe('expiresAtFromForm', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('returns null for "never"', () => {
+    expect(expiresAtFromForm('never', null)).toBeNull();
+  });
+
+  it('returns null for "never" even when customDate is set', () => {
+    expect(expiresAtFromForm('never', '2026-05-01')).toBeNull();
+  });
+
+  it('returns YYYY-MM-DD 30 days from now for "30d"', () => {
+    vi.useFakeTimers({ now: new Date('2026-03-01T12:00:00Z') });
+    expect(expiresAtFromForm('30d', null)).toBe('2026-03-31');
+  });
+
+  it('uses UTC so result is correct near midnight UTC', () => {
+    // 2026-03-01T23:30:00Z — local time in UTC+2 would be 2026-03-02 01:30
+    // but UTC date is still March 1, so +30 should be March 31
+    vi.useFakeTimers({ now: new Date('2026-03-01T23:30:00Z') });
+    expect(expiresAtFromForm('30d', null)).toBe('2026-03-31');
+  });
+
+  it('handles month rollover correctly', () => {
+    vi.useFakeTimers({ now: new Date('2026-01-15T10:00:00Z') });
+    expect(expiresAtFromForm('30d', null)).toBe('2026-02-14');
+  });
+
+  it('handles year rollover correctly', () => {
+    vi.useFakeTimers({ now: new Date('2026-12-10T10:00:00Z') });
+    expect(expiresAtFromForm('30d', null)).toBe('2027-01-09');
+  });
+
+  it('returns customDate for "custom"', () => {
+    expect(expiresAtFromForm('custom', '2026-06-15')).toBe('2026-06-15');
+  });
+
+  it('returns null for "custom" when customDate is null', () => {
+    expect(expiresAtFromForm('custom', null)).toBeNull();
   });
 });

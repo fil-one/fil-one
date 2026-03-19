@@ -34,6 +34,7 @@ process.env.FILONE_STAGE = 'test';
 const ddbMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
 
+import { ACCESS_KEY_PERMISSIONS } from '@filone/shared';
 import { processTenantSetup, OrgSetupStatus } from './aurora-tenant-setup.js';
 
 // ---------------------------------------------------------------------------
@@ -105,6 +106,7 @@ describe('processTenantSetup', () => {
     expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
       keyName: 'filone-console',
+      permissions: [...ACCESS_KEY_PERMISSIONS],
     });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -148,6 +150,7 @@ describe('processTenantSetup', () => {
     expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
       keyName: 'filone-console',
+      permissions: [...ACCESS_KEY_PERMISSIONS],
     });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -247,6 +250,7 @@ describe('processTenantSetup', () => {
     expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith({
       tenantId: 'aurora-t-2',
       keyName: 'filone-console',
+      permissions: [...ACCESS_KEY_PERMISSIONS],
     });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -285,6 +289,7 @@ describe('processTenantSetup', () => {
     expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith({
       tenantId: 'aurora-t-3',
       keyName: 'filone-console',
+      permissions: [...ACCESS_KEY_PERMISSIONS],
     });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -392,6 +397,7 @@ describe('processTenantSetup', () => {
     expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith({
       tenantId: 'aurora-t-new',
       keyName: 'filone-console',
+      permissions: [...ACCESS_KEY_PERMISSIONS],
     });
   });
 

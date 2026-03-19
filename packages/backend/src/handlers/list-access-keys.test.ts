@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
+import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -23,15 +24,30 @@ import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
-function ddbItem(id: string, keyName: string, accessKeyId: string, createdAt: string) {
-  return {
+function ddbItem(overrides: {
+  id: string;
+  keyName: string;
+  accessKeyId: string;
+  createdAt: string;
+  status?: string;
+  permissions?: string[];
+  bucketScope?: string;
+  buckets?: string[];
+  expiresAt?: string;
+}) {
+  const item: Record<string, AttributeValue> = {
     pk: { S: `ORG#${USER_INFO.orgId}` },
-    sk: { S: `ACCESSKEY#${id}` },
-    keyName: { S: keyName },
-    accessKeyId: { S: accessKeyId },
-    createdAt: { S: createdAt },
-    status: { S: 'active' },
+    sk: { S: `ACCESSKEY#${overrides.id}` },
+    keyName: { S: overrides.keyName },
+    accessKeyId: { S: overrides.accessKeyId },
+    createdAt: { S: overrides.createdAt },
+    status: { S: overrides.status ?? 'active' },
   };
+  if (overrides.permissions) item.permissions = { L: overrides.permissions.map((p) => ({ S: p })) };
+  if (overrides.bucketScope) item.bucketScope = { S: overrides.bucketScope };
+  if (overrides.buckets) item.buckets = { L: overrides.buckets.map((b) => ({ S: b })) };
+  if (overrides.expiresAt) item.expiresAt = { S: overrides.expiresAt };
+  return item;
 }
 
 // ---------------------------------------------------------------------------
@@ -44,11 +60,17 @@ describe('list-access-keys baseHandler', () => {
     ddbMock.reset();
   });
 
-  it('returns 200 with keys array', async () => {
+  it('returns 200 with mapped key fields from DynamoDB', async () => {
     ddbMock.on(QueryCommand).resolves({
       Items: [
-        ddbItem('key-1', 'Production', 'AKIA1111', '2026-01-01T00:00:00Z'),
-        ddbItem('key-2', 'Dev', 'AKIA2222', '2026-02-01T00:00:00Z'),
+        ddbItem({
+          id: 'key-1',
+          keyName: 'Production',
+          accessKeyId: 'AKIA1111',
+          createdAt: '2026-01-01T00:00:00Z',
+          permissions: ['read', 'list'],
+          bucketScope: 'all',
+        }),
       ],
     });
 
@@ -65,16 +87,59 @@ describe('list-access-keys baseHandler', () => {
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
           status: 'active',
-        },
-        {
-          id: 'key-2',
-          keyName: 'Dev',
-          accessKeyId: 'AKIA2222',
-          createdAt: '2026-02-01T00:00:00Z',
-          status: 'active',
+          permissions: ['read', 'list'],
+          bucketScope: 'all',
+          expiresAt: null,
         },
       ],
     });
+  });
+
+  it('returns bucket-scoped key with buckets list', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        ddbItem({
+          id: 'key-1',
+          keyName: 'Scoped Key',
+          accessKeyId: 'AKIA1111',
+          createdAt: '2026-01-01T00:00:00Z',
+          permissions: ['read'],
+          bucketScope: 'specific',
+          buckets: ['bucket-a', 'bucket-b'],
+        }),
+      ],
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    const body = JSON.parse(result.body!);
+    expect(body.keys[0]).toMatchObject({
+      bucketScope: 'specific',
+      buckets: ['bucket-a', 'bucket-b'],
+    });
+  });
+
+  it('returns expiresAt when set', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        ddbItem({
+          id: 'key-1',
+          keyName: 'Expiring Key',
+          accessKeyId: 'AKIA1111',
+          createdAt: '2026-01-01T00:00:00Z',
+          permissions: ['read'],
+          bucketScope: 'all',
+          expiresAt: '2026-06-01',
+        }),
+      ],
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    const body = JSON.parse(result.body!);
+    expect(body.keys[0].expiresAt).toBe('2026-06-01');
   });
 
   it('returns 200 with empty array when no keys exist', async () => {
@@ -86,6 +151,37 @@ describe('list-access-keys baseHandler', () => {
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(result.body!);
     expect(body).toStrictEqual({ keys: [] });
+  });
+
+  it('returns multiple keys', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        ddbItem({
+          id: 'key-1',
+          keyName: 'Production',
+          accessKeyId: 'AKIA1111',
+          createdAt: '2026-01-01T00:00:00Z',
+          permissions: ['read', 'write', 'list', 'delete'],
+          bucketScope: 'all',
+        }),
+        ddbItem({
+          id: 'key-2',
+          keyName: 'Dev',
+          accessKeyId: 'AKIA2222',
+          createdAt: '2026-02-01T00:00:00Z',
+          permissions: ['read'],
+          bucketScope: 'all',
+        }),
+      ],
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    const body = JSON.parse(result.body!);
+    expect(body.keys).toHaveLength(2);
+    expect(body.keys[0].id).toBe('key-1');
+    expect(body.keys[1].id).toBe('key-2');
   });
 
   it('queries DynamoDB with correct key condition', async () => {

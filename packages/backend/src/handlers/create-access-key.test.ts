@@ -43,7 +43,11 @@ import { buildEvent } from '../test/lambda-test-utilities.js';
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
 function validBody() {
-  return JSON.stringify({ keyName: 'My Key' });
+  return JSON.stringify({
+    keyName: 'My Key',
+    permissions: ['read', 'write', 'list', 'delete'],
+    bucketScope: 'all',
+  });
 }
 
 function orgProfileWithTenant(tenantId: string) {
@@ -118,6 +122,9 @@ describe('create-access-key baseHandler', () => {
     expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
       keyName: 'My Key',
+      permissions: ['read', 'write', 'list', 'delete'],
+      buckets: undefined,
+      expiresAt: null,
     });
   });
 
@@ -138,6 +145,7 @@ describe('create-access-key baseHandler', () => {
     expect(item.accessKeyId.S).toBe('AKIA1234567890');
     expect(item.createdAt.S).toBe('2026-03-10T13:36:07.752371Z');
     expect(item.status.S).toBe('active');
+    expect(item.bucketScope.S).toBe('all');
     // Secret must NOT be stored
     expect(item.accessKeySecret).toBeUndefined();
     expect(item.secretAccessKey).toBeUndefined();
@@ -154,7 +162,8 @@ describe('create-access-key baseHandler', () => {
   const invalidKeyNameCases: Record<string, string> = {
     'whitespace only': '   ',
     'empty string': '',
-    'too long (257 chars)': 'a'.repeat(257),
+    'too long (65 chars)': 'a'.repeat(65),
+    'special characters': 'key()!*$&@name',
   };
 
   for (const [desc, keyName] of Object.entries(invalidKeyNameCases)) {
@@ -176,7 +185,7 @@ describe('create-access-key baseHandler', () => {
     mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
 
     const event = buildEvent({
-      body: JSON.stringify({ keyName: '  My Key  ' }),
+      body: JSON.stringify({ keyName: '  My Key  ', permissions: ['read'], bucketScope: 'all' }),
       userInfo: USER_INFO,
     });
     const result = await baseHandler(event);
@@ -185,9 +194,94 @@ describe('create-access-key baseHandler', () => {
     expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
       keyName: 'My Key',
+      permissions: ['read'],
+      buckets: undefined,
+      expiresAt: null,
     });
     const body = JSON.parse(result.body!);
     expect(body.keyName).toBe('My Key');
+  });
+
+  it('passes YYYY-MM-DD expiresAt to Aurora as-is', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(PutItemCommand).resolves({});
+    mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+
+    const event = buildEvent({
+      body: JSON.stringify({
+        keyName: 'My Key',
+        permissions: ['read'],
+        bucketScope: 'all',
+        expiresAt: '2026-06-01',
+      }),
+      userInfo: USER_INFO,
+    });
+    await baseHandler(event);
+
+    expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith(
+      expect.objectContaining({ expiresAt: '2026-06-01' }),
+    );
+  });
+
+  it('stores the YYYY-MM-DD expiresAt in DynamoDB (not RFC3339)', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(PutItemCommand).resolves({});
+    mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+
+    const event = buildEvent({
+      body: JSON.stringify({
+        keyName: 'My Key',
+        permissions: ['read'],
+        bucketScope: 'all',
+        expiresAt: '2026-06-01',
+      }),
+      userInfo: USER_INFO,
+    });
+    await baseHandler(event);
+
+    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    expect(item.expiresAt.S).toBe('2026-06-01');
+  });
+
+  it('returns 400 when expiresAt is not in YYYY-MM-DD format', async () => {
+    const event = buildEvent({
+      body: JSON.stringify({
+        keyName: 'My Key',
+        permissions: ['read'],
+        bucketScope: 'all',
+        expiresAt: '2026-04-16T12:34:56.789Z',
+      }),
+      userInfo: USER_INFO,
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      message: 'expiresAt must be in YYYY-MM-DD format',
+    });
+    expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when expiresAt is a timestamp formatted as ISO date-time string', async () => {
+    // "joes 30 day key with all" was failing because the old CreateAccessKeyModal
+    // sent d.toISOString() (with milliseconds) instead of YYYY-MM-DD
+    const isoTimestamp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const event = buildEvent({
+      body: JSON.stringify({
+        keyName: 'joes 30 day key with all',
+        permissions: ['read', 'write', 'list', 'delete'],
+        bucketScope: 'all',
+        expiresAt: isoTimestamp,
+      }),
+      userInfo: USER_INFO,
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      message: 'expiresAt must be in YYYY-MM-DD format',
+    });
+    expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
   });
 
   it('returns 400 for invalid JSON body', async () => {
@@ -199,6 +293,7 @@ describe('create-access-key baseHandler', () => {
 
   it('returns 503 when auroraTenantId is missing', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithoutTenant());
+    ddbMock.on(PutItemCommand).resolves({});
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -268,7 +363,7 @@ describe('create-access-key baseHandler', () => {
     const putCalls = ddbMock.commandCalls(PutItemCommand);
     expect(putCalls).toHaveLength(1);
     const item = putCalls[0].args[0].input.Item!;
-    expect(item).toStrictEqual({
+    expect(item).toMatchObject({
       pk: { S: 'ORG#org-1' },
       sk: { S: 'ACCESSKEY#aurora-key-1' },
       keyName: { S: 'My Key' },

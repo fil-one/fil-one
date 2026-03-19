@@ -43,6 +43,9 @@ const MOCK_ACCESS_KEYS: AccessKey[] = [
     createdAt: '2024-01-15T10:00:00Z',
     lastUsedAt: '2024-02-15T10:00:00Z',
     status: 'active',
+    permissions: ['read', 'write', 'list', 'delete'],
+    bucketScope: 'all',
+    expiresAt: null,
   },
 ];
 

@@ -7,7 +7,7 @@ import { Input } from '../components/Input';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/Modal';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { formatBytes } from '@filone/shared';
+import { formatBytes, S3_REGION } from '@filone/shared';
 
 import type {
   Bucket,
@@ -38,7 +38,7 @@ export function BucketsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
-  const [region, setRegion] = useState('us-east-1');
+  const [region, setRegion] = useState(S3_REGION);
 
   // Create access key modal state (shown after bucket creation)
   const [accessKeyOpen, setAccessKeyOpen] = useState(false);
@@ -80,7 +80,7 @@ export function BucketsPage() {
       setBuckets((prev) => [data.bucket, ...prev]);
       setCreateOpen(false);
       setName('');
-      setRegion('us-east-1');
+      setRegion(S3_REGION);
       toast.success('Bucket created successfully');
       setAccessKeyOpen(true);
     } catch (err) {
@@ -251,7 +251,7 @@ export function BucketsPage() {
                 onChange={(e) => setRegion(e.target.value)}
                 className="block w-full rounded-lg border border-zinc-200 p-3 text-zinc-900 focus:outline-2 focus:outline-brand-600"
               >
-                <option value="us-east-1">US East (N. Virginia)</option>
+                <option value={S3_REGION}>{S3_REGION}</option>
                 <option value="us-west-2">US West (Oregon)</option>
                 <option value="eu-west-1">Europe (Ireland)</option>
               </select>

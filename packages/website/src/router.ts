@@ -9,6 +9,7 @@ import { Route as dashboardRoute } from './routes/_app/dashboard.js';
 import { Route as bucketsRoute } from './routes/_app/buckets.js';
 import { Route as bucketDetailRoute } from './routes/_app/buckets.$bucketName.js';
 import { Route as apiKeysRoute } from './routes/_app/api-keys.js';
+import { Route as createApiKeyRoute } from './routes/_app/api-keys.create.js';
 import { Route as billingRoute } from './routes/_app/billing.js';
 import { Route as settingsRoute } from './routes/_app/settings.js';
 import { Route as supportRoute } from './routes/_app/support.js';
@@ -25,6 +26,7 @@ const routeTree = rootRoute.addChildren([
     bucketsRoute,
     bucketDetailRoute,
     apiKeysRoute,
+    createApiKeyRoute,
     billingRoute,
     settingsRoute,
     supportRoute,

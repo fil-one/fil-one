@@ -3,19 +3,16 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type {
-  CreateAccessKeyRequest,
-  CreateAccessKeyResponse,
-  ErrorResponse,
-} from '@filone/shared';
+import { CreateAccessKeySchema } from '@filone/shared';
+import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import {
+  AuroraValidationError,
   createAuroraAccessKey,
   DuplicateKeyNameError,
   findAuroraAccessKeyByName,
 } from '../lib/aurora-portal.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { validateKeyName } from '../lib/key-name-validation.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -28,9 +25,9 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  let request: CreateAccessKeyRequest;
+  let body: unknown;
   try {
-    request = JSON.parse(event.body ?? '{}') as CreateAccessKeyRequest;
+    body = JSON.parse(event.body ?? '{}');
   } catch {
     return new ResponseBuilder()
       .status(400)
@@ -38,14 +35,23 @@ export async function baseHandler(
       .build();
   }
 
-  const keyNameResult = validateKeyName(request.keyName);
-  if (!keyNameResult.valid) {
+  const parsed = CreateAccessKeySchema.safeParse(body);
+  if (!parsed.success) {
     return new ResponseBuilder()
       .status(400)
-      .body<ErrorResponse>({ message: keyNameResult.error! })
+      .body<ErrorResponse>({ message: parsed.error.issues[0].message })
       .build();
   }
-  const keyName = keyNameResult.sanitized;
+
+  const {
+    keyName,
+    permissions,
+    bucketScope,
+    buckets: bucketList,
+    expiresAt: expiresAtRaw,
+  } = parsed.data;
+  const buckets = bucketScope === 'specific' ? (bucketList ?? []) : undefined;
+  const expiresAt = expiresAtRaw ?? null;
 
   const { orgId } = getUserInfo(event);
 
@@ -71,13 +77,25 @@ export async function baseHandler(
 
   let auroraKey;
   try {
-    auroraKey = await createAuroraAccessKey({ tenantId: auroraTenantId, keyName });
+    auroraKey = await createAuroraAccessKey({
+      tenantId: auroraTenantId,
+      keyName,
+      permissions,
+      buckets,
+      expiresAt,
+    });
   } catch (err) {
     if (err instanceof DuplicateKeyNameError) {
       await recoverDuplicateKey(orgId, auroraTenantId, keyName);
       return new ResponseBuilder()
         .status(409)
         .body<ErrorResponse>({ message: 'An access key with this name already exists' })
+        .build();
+    }
+    if (err instanceof AuroraValidationError) {
+      return new ResponseBuilder()
+        .status(400)
+        .body<ErrorResponse>({ message: err.message })
         .build();
     }
     throw err;
@@ -93,6 +111,10 @@ export async function baseHandler(
         accessKeyId: auroraKey.accessKeyId,
         createdAt: auroraKey.createdAt,
         status: 'active',
+        permissions,
+        bucketScope,
+        ...(buckets ? { buckets } : {}),
+        ...(expiresAt ? { expiresAt } : {}),
       }),
     }),
   );

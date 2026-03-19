@@ -8,6 +8,7 @@ import {
   createAuroraTenantApiKey,
   setupAuroraTenant,
 } from './aurora-backoffice.js';
+import { ACCESS_KEY_PERMISSIONS } from '@filone/shared';
 import { createAuroraAccessKey } from './aurora-portal.js';
 import { OrgSetupStatus } from './org-setup-status.js';
 
@@ -175,6 +176,7 @@ async function createAndStoreS3AccessKey(
     const result = await createAuroraAccessKey({
       tenantId: auroraTenantId,
       keyName: 'filone-console',
+      permissions: [...ACCESS_KEY_PERMISSIONS],
     });
     accessKeyId = result.accessKeyId;
     accessKeySecret = result.accessKeySecret;

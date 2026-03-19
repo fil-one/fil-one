@@ -37,6 +37,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './get-activity.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
+import { S3_REGION } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -60,7 +61,7 @@ function bucketItem(name: string, createdAt: string) {
     pk: `USER#${USER_INFO.userId}`,
     sk: `BUCKET#${name}`,
     name,
-    region: 'us-east-1',
+    region: S3_REGION,
     createdAt,
     isPublic: false,
   });

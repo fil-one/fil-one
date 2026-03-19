@@ -19,6 +19,7 @@
     "lint:fix": "oxlint --fix && oxfmt --write",
     "refresh": "sst refresh",
     "typecheck": "pnpm -r --if-present typecheck",
+    "prepare": "husky",
     "test": "pnpm lint && pnpm --filter @filone/shared --filter @filone/backend --filter @filone/website test",
     "test:e2e": "pnpm exec playwright test"
   },
@@ -28,10 +29,16 @@
     "@pulumi/command": "^1.2.1",
     "aws-cdk-lib": "^2.241.0",
     "constructs": "^10.5.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.3.3",
     "oxfmt": "^0.36.0",
     "oxlint": "^1.52.0",
     "oxlint-tsgolint": "^0.16.0",
     "sst": "^4.2.4"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs}": "oxlint --report-unused-disable-directives",
+    "*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc}": "oxfmt --no-error-on-unmatched-pattern --check"
   },
   "engines": {
     "node": ">=24"

@@ -24,6 +24,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './create-bucket.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
+import { S3_REGION } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -32,7 +33,7 @@ import { buildEvent } from '../test/lambda-test-utilities.js';
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
 function validBody() {
-  return JSON.stringify({ name: 'my-bucket', region: 'us-east-1' });
+  return JSON.stringify({ name: 'my-bucket', region: S3_REGION });
 }
 
 function orgProfileWithTenant(tenantId: string) {

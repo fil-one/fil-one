@@ -12,6 +12,8 @@ const mockGetAccessKeys = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockGetAccessKeyById = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-portal-client');
 
+const mockDeleteAccessKey = vi.fn((_options: Record<string, unknown>) => ({}));
+
 vi.mock('@filone/aurora-portal-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
   postV1TenantsByTenantIdBucket: (options: Record<string, unknown>) => mockPostBucket(options),
@@ -21,6 +23,8 @@ vi.mock('@filone/aurora-portal-client', () => ({
     mockGetAccessKeys(options),
   getV1TenantsByTenantIdAccessKeysByAccessKeyId: (options: Record<string, unknown>) =>
     mockGetAccessKeyById(options),
+  deleteV1TenantsByTenantIdAccessKeysByAccessKeyId: (options: Record<string, unknown>) =>
+    mockDeleteAccessKey(options),
 }));
 
 process.env.AURORA_PORTAL_URL = 'https://api.portal.test.example.com/api';
@@ -179,20 +183,21 @@ describe('getAuroraPortalApiKey', () => {
 // createAuroraAccessKey
 // ---------------------------------------------------------------------------
 
+// Full-access array produced by buildAuroraAccessArray(['read','write','list','delete'])
 const EXPECTED_ACCESS = [
   'Default',
-  'Read',
-  'Write',
-  'Delete',
-  'List',
   'GetBucketVersioning',
   'GetBucketObjectLockConfiguration',
-  'ListBucketVersions',
+  'Read',
   'GetObjectVersion',
   'GetObjectRetention',
   'GetObjectLegalHold',
+  'Write',
   'PutObjectRetention',
   'PutObjectLegalHold',
+  'List',
+  'ListBucketVersions',
+  'Delete',
   'DeleteObjectVersion',
 ];
 
@@ -221,7 +226,11 @@ describe('createAuroraAccessKey', () => {
     setupSsmMock();
     mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
 
-    await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
+    await createAuroraAccessKey({
+      tenantId: 'tenant-1',
+      keyName: 'my-key',
+      permissions: ['read', 'write', 'list', 'delete'],
+    });
 
     const ssmCalls = ssmMock.commandCalls(GetParameterCommand);
     expect(ssmCalls).toHaveLength(1);
@@ -235,7 +244,11 @@ describe('createAuroraAccessKey', () => {
     setupSsmMock();
     mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
 
-    await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
+    await createAuroraAccessKey({
+      tenantId: 'tenant-1',
+      keyName: 'my-key',
+      permissions: ['read', 'write', 'list', 'delete'],
+    });
 
     expect(mockPostAccessKeys).toHaveBeenCalledWith({
       client: 'mock-portal-client',
@@ -245,11 +258,48 @@ describe('createAuroraAccessKey', () => {
     });
   });
 
+  it('sends expiration as YYYY-MM-DD to Aurora', async () => {
+    setupSsmMock();
+    mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
+
+    await createAuroraAccessKey({
+      tenantId: 'tenant-1',
+      keyName: 'my-key',
+      permissions: ['read'],
+      expiresAt: '2026-06-01',
+    });
+
+    expect(mockPostAccessKeys).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({ expiration: '2026-06-01' }),
+      }),
+    );
+  });
+
+  it('omits expiration field when expiresAt is null', async () => {
+    setupSsmMock();
+    mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
+
+    await createAuroraAccessKey({
+      tenantId: 'tenant-1',
+      keyName: 'my-key',
+      permissions: ['read'],
+      expiresAt: null,
+    });
+
+    const body = (mockPostAccessKeys.mock.calls[0][0] as { body: Record<string, unknown> }).body;
+    expect(body).not.toHaveProperty('expiration');
+  });
+
   it('returns id, accessKeyId, accessKeySecret, createdAt on success', async () => {
     setupSsmMock();
     mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
 
-    const result = await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
+    const result = await createAuroraAccessKey({
+      tenantId: 'tenant-1',
+      keyName: 'my-key',
+      permissions: ['read', 'write', 'list', 'delete'],
+    });
 
     expect(result).toStrictEqual({
       id: 'ak-id-1',
@@ -268,7 +318,11 @@ describe('createAuroraAccessKey', () => {
     });
 
     try {
-      await createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' });
+      await createAuroraAccessKey({
+        tenantId: 'tenant-1',
+        keyName: 'my-key',
+        permissions: ['read', 'write', 'list', 'delete'],
+      });
       expect.unreachable('Expected DuplicateKeyNameError to be thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(DuplicateKeyNameError);
@@ -287,7 +341,11 @@ describe('createAuroraAccessKey', () => {
     });
 
     await expect(
-      createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' }),
+      createAuroraAccessKey({
+        tenantId: 'tenant-1',
+        keyName: 'my-key',
+        permissions: ['read', 'write', 'list', 'delete'],
+      }),
     ).rejects.toThrow('Failed to create Aurora access key "my-key" for tenant tenant-1');
   });
 
@@ -299,7 +357,11 @@ describe('createAuroraAccessKey', () => {
     });
 
     await expect(
-      createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' }),
+      createAuroraAccessKey({
+        tenantId: 'tenant-1',
+        keyName: 'my-key',
+        permissions: ['read', 'write', 'list', 'delete'],
+      }),
     ).rejects.toThrow('Aurora API returned invalid access key for tenant tenant-1');
   });
 
@@ -318,7 +380,11 @@ describe('createAuroraAccessKey', () => {
       });
 
       await expect(
-        createAuroraAccessKey({ tenantId: 'tenant-1', keyName: 'my-key' }),
+        createAuroraAccessKey({
+          tenantId: 'tenant-1',
+          keyName: 'my-key',
+          permissions: ['read', 'write', 'list', 'delete'],
+        }),
       ).rejects.toThrow(
         `Aurora Portal API returned empty access key "${field}" for tenant tenant-1`,
       );

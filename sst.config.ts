@@ -352,6 +352,13 @@ export default $config({
       ],
     );
     addRoute(
+      'DELETE',
+      '/api/access-keys/{keyId}',
+      'delete-access-key',
+      auroraS3GatewayEnv,
+      auroraS3GatewayPermissions,
+    );
+    addRoute(
       'GET',
       '/api/buckets/{name}/objects',
       'list-objects',
