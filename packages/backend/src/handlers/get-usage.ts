@@ -1,47 +1,32 @@
-import { GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { UsageResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraS3Credentials, listObjects } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import type { BucketRecord } from '../lib/dynamo-records.js';
+import {
+  getStorageSamples,
+  getOperationsSamples,
+  getTenantInfo,
+} from '../lib/aurora-backoffice.js';
 
 const dynamo = getDynamoClient();
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { userId, orgId } = getUserInfo(event);
-  const uploadsTableName = Resource.UploadsTable.name;
+  const { orgId } = getUserInfo(event);
+  const userInfoTableName = Resource.UserInfoTable.name;
 
-  // TODO: Integrate with aurora to get the definitive form of this data.
-  // https://linear.app/filecoin-foundation/issue/FIL-68/create-a-data-summary-api
-  // Iterating over all buckets and their objects is not a scalable way to do this
-
-  // 1. Query all buckets
-  const bucketsResult = await dynamo.send(
-    new QueryCommand({
-      TableName: uploadsTableName,
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: `USER#${userId}` },
-        ':skPrefix': { S: 'BUCKET#' },
-      },
-    }),
-  );
-  const buckets = (bucketsResult.Items ?? []).map((item) => unmarshall(item) as BucketRecord);
-
-  // 2. Look up org profile for Aurora S3 credentials
+  // 1. Look up org profile for Aurora S3 credentials
   const { Item: orgProfile } = await dynamo.send(
     new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
+      TableName: userInfoTableName,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
     }),
   );
@@ -49,65 +34,51 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
   const setupStatus = orgProfile?.setupStatus?.S;
 
-  // 3. Sum object sizes + count across all buckets via S3
-  let storageUsedBytes = 0;
-  let objectCount = 0;
+  // 2. Fetch usage data from Aurora in parallel
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime());
+  thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
-  if (buckets.length > 0 && auroraTenantId && isOrgSetupComplete(setupStatus)) {
-    const stage = process.env.FILONE_STAGE!;
-    const gatewayUrl = process.env.AURORA_S3_GATEWAY_URL!;
-    const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
+  const shouldFetchData = auroraTenantId && isOrgSetupComplete(setupStatus);
 
-    for (const bucket of buckets) {
-      let continuationToken: string | undefined;
-      do {
-        const result = await listObjects({
-          endpointUrl: gatewayUrl,
-          credentials,
-          bucket: bucket.name,
-          continuationToken,
-        });
-        for (const obj of result.objects) {
-          storageUsedBytes += obj.sizeBytes;
-          objectCount++;
-        }
-        continuationToken = result.nextToken;
-      } while (continuationToken);
-    }
-  }
+  const [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
+    shouldFetchData
+      ? getStorageSamples({
+          tenantId: auroraTenantId,
+          from: thirtyDaysAgo.toISOString(),
+          to: now.toISOString(),
+          window: '720h',
+        })
+      : [],
+    shouldFetchData
+      ? getOperationsSamples({
+          tenantId: auroraTenantId,
+          from: thirtyDaysAgo.toISOString(),
+          to: now.toISOString(),
+          window: '720h',
+        })
+      : [],
+    shouldFetchData ? getTenantInfo({ tenantId: auroraTenantId }) : null,
+  ]);
 
-  // 4. Count access keys (stored in UserInfoTable with ORG# pk and ACCESSKEY# sk prefix)
-  const keysResult = await dynamo.send(
-    new QueryCommand({
-      TableName: Resource.UserInfoTable.name,
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: `ORG#${orgId}` },
-        ':skPrefix': { S: 'ACCESSKEY#' },
-      },
-      Select: 'COUNT',
-    }),
-  );
+  const latestStorage = storageSamples.at(-1);
+  const storageUsedBytes = latestStorage?.bytesUsed ?? 0;
+  const objectCount = latestStorage?.objectCount ?? 0;
+
+  const egressSample = operationsSamples.at(-1);
+  const egressUsedBytes = egressSample?.rxBytes ?? 0;
+
+  const bucketCount = tenantInfo?.bucketCount ?? 0;
+  const bucketLimit = tenantInfo?.bucketQuantityLimit ?? 100;
+  const accessKeyCount = tenantInfo?.keyCount ?? 0;
+  const accessKeyLimit = tenantInfo?.accessKeyQuantityLimit ?? 300;
 
   const response: UsageResponse = {
-    storage: {
-      usedBytes: storageUsedBytes,
-    },
-    egress: {
-      // TODO: implement egress: https://linear.app/filecoin-foundation/issue/FIL-82/get-egress-from-aurora
-      usedBytes: 0,
-    },
-    buckets: {
-      count: buckets.length,
-      limit: 100,
-    },
-    objects: {
-      count: objectCount,
-    },
-    accessKeys: {
-      count: keysResult.Count ?? 0,
-      limit: 300,
-    },
+    storage: { usedBytes: storageUsedBytes },
+    egress: { usedBytes: egressUsedBytes },
+    buckets: { count: bucketCount, limit: bucketLimit },
+    objects: { count: objectCount },
+    accessKeys: { count: accessKeyCount, limit: accessKeyLimit },
   };
 
   return new ResponseBuilder().status(200).body(response).build();

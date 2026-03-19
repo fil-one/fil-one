@@ -14,6 +14,7 @@ import type { UsageTrendsResponse } from '@filone/shared';
 
 import { formatBytes, formatBytesShort } from '@filone/shared';
 import { getActivity } from '../lib/api.js';
+import { formatDate } from '../lib/time.js';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -110,6 +111,7 @@ export function UsageTrends() {
                   tick={{ fontSize: 10, fill: '#677183' }}
                   axisLine={false}
                   tickLine={false}
+                  tickFormatter={formatDate}
                 />
                 <YAxis
                   tick={{ fontSize: 10, fill: '#677183' }}
@@ -157,6 +159,7 @@ export function UsageTrends() {
                   tick={{ fontSize: 10, fill: '#677183' }}
                   axisLine={false}
                   tickLine={false}
+                  tickFormatter={formatDate}
                 />
                 <YAxis
                   tick={{ fontSize: 10, fill: '#677183' }}
