@@ -233,7 +233,7 @@ describe('setup-integrations', () => {
         url: 'https://old-preview.example.com/api/stripe/webhook',
         status: 'disabled',
         metadata: { app: 'filone', stage: 'pr-42' },
-      } as Stripe.WebhookEndpoint,
+      } as unknown as Stripe.WebhookEndpoint,
     };
 
     for (const [desc, endpoint] of Object.entries(deletedCases)) {
@@ -259,31 +259,31 @@ describe('setup-integrations', () => {
         url: 'https://prod.example.com/api/stripe/webhook',
         status: 'disabled',
         metadata: { app: 'filone', stage: 'production' },
-      } as Stripe.WebhookEndpoint,
+      } as unknown as Stripe.WebhookEndpoint,
       'disabled staging endpoint': {
         id: 'we_staging',
         url: 'https://staging.example.com/api/stripe/webhook',
         status: 'disabled',
         metadata: { app: 'filone', stage: 'staging' },
-      } as Stripe.WebhookEndpoint,
+      } as unknown as Stripe.WebhookEndpoint,
       'enabled ephemeral endpoint': {
         id: 'we_enabled',
         url: 'https://preview.example.com/api/stripe/webhook',
         status: 'enabled',
         metadata: { app: 'filone', stage: 'pr-99' },
-      } as Stripe.WebhookEndpoint,
+      } as unknown as Stripe.WebhookEndpoint,
       'disabled endpoint without our metadata': {
         id: 'we_unknown',
         url: 'https://other.example.com/api/stripe/webhook',
         status: 'disabled',
         metadata: {},
-      } as Stripe.WebhookEndpoint,
+      } as unknown as Stripe.WebhookEndpoint,
       'disabled endpoint from another app': {
         id: 'we_other_app',
         url: 'https://otherapp.example.com/api/stripe/webhook',
         status: 'disabled',
         metadata: { app: 'other-app', stage: 'dev' },
-      } as Stripe.WebhookEndpoint,
+      } as unknown as Stripe.WebhookEndpoint,
     };
 
     for (const [desc, endpoint] of Object.entries(keptCases)) {

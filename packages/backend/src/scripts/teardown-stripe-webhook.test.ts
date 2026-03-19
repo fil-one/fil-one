@@ -95,10 +95,7 @@ describe('teardownStripeWebhook', () => {
 
     await teardownStripeWebhook(DEFAULT_OPTS);
 
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Stripe'),
-      expect.any(Error),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Stripe'), expect.any(Error));
     warnSpy.mockRestore();
   });
 
@@ -109,10 +106,7 @@ describe('teardownStripeWebhook', () => {
 
     await teardownStripeWebhook(DEFAULT_OPTS);
 
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('SSM'),
-      expect.any(Error),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('SSM'), expect.any(Error));
     warnSpy.mockRestore();
   });
 });

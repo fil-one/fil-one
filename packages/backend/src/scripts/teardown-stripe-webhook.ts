@@ -26,9 +26,7 @@ export async function teardownStripeWebhook(opts: TeardownOpts): Promise<void> {
 
   try {
     const ssm = new SSMClient({});
-    await ssm.send(
-      new DeleteParameterCommand({ Name: `/filone/${stage}/stripe-webhook-secret` }),
-    );
+    await ssm.send(new DeleteParameterCommand({ Name: `/filone/${stage}/stripe-webhook-secret` }));
     console.log(`Deleted SSM parameter /filone/${stage}/stripe-webhook-secret`);
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'ParameterNotFound') return;
@@ -53,7 +51,6 @@ if (isMainModule) {
     process.exit(1);
   }
 
-  teardownStripeWebhook({ stripeSecretKey, siteUrl, stage }).then(() => {
-    console.log('Teardown complete');
-  });
+  await teardownStripeWebhook({ stripeSecretKey, siteUrl, stage });
+  console.log('Teardown complete');
 }
