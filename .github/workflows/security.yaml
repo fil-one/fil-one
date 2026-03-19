@@ -2,7 +2,7 @@ name: Security
 
 on:
   push:
-    branches: [security-pipeline]
+    branches: [main, security-pipeline]
   pull_request:
   schedule:
     # Weekly scan: Sunday 2am UTC
