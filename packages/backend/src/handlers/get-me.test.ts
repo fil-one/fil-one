@@ -253,6 +253,7 @@ describe('GET /api/me handler', () => {
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
         orgConfirmed: true,
+        emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: false,
       }),
