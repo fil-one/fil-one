@@ -393,7 +393,7 @@ export default $config({
       'GET',
       '/api/activity',
       'get-activity',
-      auroraS3GatewayEnv,
+      { ...auroraEnv, ...auroraS3GatewayEnv },
       auroraS3GatewayPermissions,
     );
 
