@@ -3,6 +3,8 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  DeleteBucketCommand,
+  ListBucketsCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import type { S3Object } from '@filone/shared';
@@ -154,6 +156,51 @@ export async function deleteObject(
       Key: key,
     }),
   );
+}
+
+export interface ListBucketsResult {
+  buckets: Array<{ name: string; createdAt: string }>;
+}
+
+export async function listBuckets(
+  endpointUrl: string,
+  credentials: AuroraS3Credentials,
+): Promise<ListBucketsResult> {
+  const s3 = new S3Client({
+    endpoint: endpointUrl,
+    region: 'auto',
+    credentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+    },
+    forcePathStyle: true,
+  });
+
+  const result = await s3.send(new ListBucketsCommand({}));
+  return {
+    buckets: (result.Buckets ?? []).map((b) => ({
+      name: b.Name!,
+      createdAt: b.CreationDate?.toISOString() ?? new Date().toISOString(),
+    })),
+  };
+}
+
+export async function deleteBucket(
+  endpointUrl: string,
+  credentials: AuroraS3Credentials,
+  bucket: string,
+): Promise<void> {
+  const s3 = new S3Client({
+    endpoint: endpointUrl,
+    region: 'auto',
+    credentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+    },
+    forcePathStyle: true,
+  });
+
+  await s3.send(new DeleteBucketCommand({ Bucket: bucket }));
 }
 
 export interface ListObjectsOptions {

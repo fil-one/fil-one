@@ -109,7 +109,7 @@ describe('createAuroraBucket', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('treats 409 Conflict as success', async () => {
+  it('throws BucketAlreadyExistsError on 409 Conflict', async () => {
     setupSsmMock();
     mockPostBucket.mockResolvedValue({
       error: { message: 'Bucket already exists' },
@@ -118,7 +118,7 @@ describe('createAuroraBucket', () => {
 
     await expect(
       createAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' }),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow('Bucket "my-bucket" already exists');
   });
 
   it('throws on non-409 API error', async () => {

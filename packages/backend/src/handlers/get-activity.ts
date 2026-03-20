@@ -6,14 +6,14 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ActivityResponse, RecentActivity, UsageDataPoint } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraS3Credentials, listObjects } from '../lib/aurora-s3-client.js';
+import { getAuroraS3Credentials, listBuckets, listObjects } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import type { AccessKeyRecord, BucketRecord } from '../lib/dynamo-records.js';
+import type { AccessKeyRecord } from '../lib/dynamo-records.js';
 import { getStorageSamples } from '../lib/aurora-backoffice.js';
 
 const dynamo = getDynamoClient();
@@ -27,32 +27,18 @@ function endOfDay(d: Date): Date {
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { userId, orgId } = getUserInfo(event);
+  const { orgId } = getUserInfo(event);
   const limit = Math.min(
     Math.max(parseInt(event.queryStringParameters?.limit ?? '10', 10) || 10, 1),
     50,
   );
   const period = event.queryStringParameters?.period === '30d' ? 30 : 7;
-  const uploadsTableName = Resource.UploadsTable.name;
   const userInfoTableName = Resource.UserInfoTable.name;
-
-  // Get all buckets
-  const bucketsResult = await dynamo.send(
-    new QueryCommand({
-      TableName: uploadsTableName,
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: `USER#${userId}` },
-        ':skPrefix': { S: 'BUCKET#' },
-      },
-    }),
-  );
-  const buckets = (bucketsResult.Items ?? []).map((item) => unmarshall(item) as BucketRecord);
 
   // Look up org profile for Aurora S3 credentials
   const { Item: orgProfile } = await dynamo.send(
     new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
+      TableName: userInfoTableName,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
     }),
   );
@@ -70,6 +56,9 @@ export async function baseHandler(
       ? await getAuroraS3Credentials(stage, auroraTenantId)
       : undefined;
 
+  // Get buckets from Aurora S3
+  const buckets = credentials ? (await listBuckets(gatewayUrl, credentials)).buckets : [];
+
   for (const bucket of buckets) {
     activities.push({
       id: `bucket-${bucket.name}`,
@@ -79,28 +68,26 @@ export async function baseHandler(
       timestamp: bucket.createdAt,
     });
 
-    if (credentials) {
-      let continuationToken: string | undefined;
-      do {
-        const result = await listObjects({
-          endpointUrl: gatewayUrl,
-          credentials,
-          bucket: bucket.name,
-          continuationToken,
+    let continuationToken: string | undefined;
+    do {
+      const result = await listObjects({
+        endpointUrl: gatewayUrl,
+        credentials: credentials!,
+        bucket: bucket.name,
+        continuationToken,
+      });
+      for (const obj of result.objects) {
+        activities.push({
+          id: `object-${bucket.name}-${obj.key}`,
+          action: 'object.uploaded',
+          resourceType: 'object',
+          resourceName: obj.key,
+          timestamp: obj.lastModified,
+          sizeBytes: obj.sizeBytes || undefined,
         });
-        for (const obj of result.objects) {
-          activities.push({
-            id: `object-${bucket.name}-${obj.key}`,
-            action: 'object.uploaded',
-            resourceType: 'object',
-            resourceName: obj.key,
-            timestamp: obj.lastModified,
-            sizeBytes: obj.sizeBytes || undefined,
-          });
-        }
-        continuationToken = result.nextToken;
-      } while (continuationToken);
-    }
+      }
+      continuationToken = result.nextToken;
+    } while (continuationToken);
   }
 
   // Get access keys

@@ -7,7 +7,7 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context,
 } from 'aws-lambda';
-import { ApiErrorCode, SubscriptionStatus } from '@filone/shared';
+import { ApiErrorCode, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import { Resource } from 'sst';
 import { createBillingTrial } from '../lib/create-billing-trial.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
@@ -23,9 +23,6 @@ export enum AccessLevel {
 export interface GuardInternal extends Record<string, unknown> {
   billingTrialPromise?: Promise<void>;
 }
-
-const TRIAL_GRACE_DAYS = 7;
-const _PAID_GRACE_DAYS = 30;
 
 const dynamo = getDynamoClient();
 
