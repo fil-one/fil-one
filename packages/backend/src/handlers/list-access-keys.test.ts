@@ -202,4 +202,102 @@ describe('list-access-keys baseHandler', () => {
       },
     });
   });
+
+  it('adds FilterExpression when bucket query param is provided', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { bucket: 'my-bucket' },
+    });
+    await baseHandler(event);
+
+    const calls = ddbMock.commandCalls(QueryCommand);
+    expect(calls).toHaveLength(1);
+    const input = calls[0].args[0].input;
+    expect(input).toStrictEqual({
+      TableName: 'UserInfoTable',
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+      FilterExpression: 'bucketScope = :all OR contains(buckets, :bucket)',
+      ExpressionAttributeValues: {
+        ':pk': { S: 'ORG#org-1' },
+        ':skPrefix': { S: 'ACCESSKEY#' },
+        ':all': { S: 'all' },
+        ':bucket': { S: 'my-bucket' },
+      },
+    });
+  });
+
+  it('does not add FilterExpression when no bucket query param', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    await baseHandler(event);
+
+    const calls = ddbMock.commandCalls(QueryCommand);
+    const input = calls[0].args[0].input;
+    expect(input.FilterExpression).toBeUndefined();
+    expect(input.ExpressionAttributeValues).toStrictEqual({
+      ':pk': { S: 'ORG#org-1' },
+      ':skPrefix': { S: 'ACCESSKEY#' },
+    });
+  });
+
+  it('returns mapped keys when bucket filter is applied', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        ddbItem({
+          id: 'key-1',
+          keyName: 'All Access',
+          accessKeyId: 'AKIA1111',
+          createdAt: '2026-01-01T00:00:00Z',
+          permissions: ['read', 'write'],
+          bucketScope: 'all',
+        }),
+        ddbItem({
+          id: 'key-2',
+          keyName: 'Scoped',
+          accessKeyId: 'AKIA2222',
+          createdAt: '2026-02-01T00:00:00Z',
+          permissions: ['read'],
+          bucketScope: 'specific',
+          buckets: ['target-bucket'],
+        }),
+      ],
+    });
+
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { bucket: 'target-bucket' },
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body!);
+    expect(body).toStrictEqual({
+      keys: [
+        {
+          id: 'key-1',
+          keyName: 'All Access',
+          accessKeyId: 'AKIA1111',
+          createdAt: '2026-01-01T00:00:00Z',
+          status: 'active',
+          permissions: ['read', 'write'],
+          bucketScope: 'all',
+          expiresAt: null,
+        },
+        {
+          id: 'key-2',
+          keyName: 'Scoped',
+          accessKeyId: 'AKIA2222',
+          createdAt: '2026-02-01T00:00:00Z',
+          status: 'active',
+          permissions: ['read'],
+          bucketScope: 'specific',
+          buckets: ['target-bucket'],
+          expiresAt: null,
+        },
+      ],
+    });
+  });
 });

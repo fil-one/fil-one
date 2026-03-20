@@ -42,6 +42,10 @@ export interface CreateBucketResponse {
   bucket: Bucket;
 }
 
+export interface GetBucketResponse {
+  bucket: Bucket;
+}
+
 export interface DeleteBucketRequest {
   bucketName: string;
 }

@@ -21,6 +21,7 @@ export type {
   ListBucketsResponse,
   CreateBucketRequest,
   CreateBucketResponse,
+  GetBucketResponse,
   DeleteBucketRequest,
 } from './api/buckets.js';
 

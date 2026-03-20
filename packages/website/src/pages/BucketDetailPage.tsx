@@ -32,7 +32,7 @@ import type {
   S3Object,
   AccessKey,
   ListObjectsResponse,
-  ListBucketsResponse,
+  GetBucketResponse,
   ListAccessKeysResponse,
   PresignUploadResponse,
 } from '@filone/shared';
@@ -161,13 +161,14 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
     let cancelled = false;
     async function fetchBucket() {
       try {
-        const data = await apiRequest<ListBucketsResponse>('/buckets');
+        const data = await apiRequest<GetBucketResponse>(
+          `/buckets/${encodeURIComponent(bucketName)}`,
+        );
         if (!cancelled) {
-          const found = data.buckets.find((b) => b.name === bucketName);
-          if (found) setBucket(found);
+          setBucket(data.bucket);
         }
-      } catch {
-        // non-critical — we still show the page
+      } catch (err) {
+        console.error('Failed to load bucket metadata:', err);
       }
     }
     void fetchBucket();
@@ -334,11 +335,19 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
     }
   }
 
-  function handleKeyAdded() {
-    // Refresh access keys
-    void apiRequest<ListAccessKeysResponse>(
-      `/access-keys?bucket=${encodeURIComponent(bucketName)}`,
-    ).then((data) => setAccessKeys(data.keys));
+  async function handleKeyAdded() {
+    setAccessKeysLoading(true);
+    try {
+      const data = await apiRequest<ListAccessKeysResponse>(
+        `/access-keys?bucket=${encodeURIComponent(bucketName)}`,
+      );
+      setAccessKeys(data.keys);
+    } catch (err) {
+      console.error('Failed to refresh access keys:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to refresh access keys');
+    } finally {
+      setAccessKeysLoading(false);
+    }
   }
 
   if (loading) {
