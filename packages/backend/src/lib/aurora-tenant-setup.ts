@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
-import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
+import { SSMClient, PutParameterCommand, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { getDynamoClient } from './ddb-client.js';
 import { Resource } from 'sst';
 import {
@@ -8,6 +8,8 @@ import {
   createAuroraTenantApiKey,
   setupAuroraTenant,
 } from './aurora-backoffice.js';
+import { ACCESS_KEY_PERMISSIONS } from '@filone/shared';
+import { createAuroraAccessKey } from './aurora-portal.js';
 import { OrgSetupStatus } from './org-setup-status.js';
 
 export { OrgSetupStatus };
@@ -35,13 +37,21 @@ export async function processTenantSetup(message: AuroraTenantSetupMessage): Pro
   const setupStatus = Item.setupStatus?.S;
 
   switch (setupStatus) {
-    case OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED:
+    case OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED:
       return;
+
+    case OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED: {
+      const auroraTenantId = Item.auroraTenantId?.S;
+      assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
+      await createAndStoreS3AccessKey(orgId, auroraTenantId, key);
+      return;
+    }
 
     case OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE: {
       const auroraTenantId = Item.auroraTenantId?.S;
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
       await createAndStoreApiKey(orgId, auroraTenantId, key);
+      await createAndStoreS3AccessKey(orgId, auroraTenantId, key);
       return;
     }
 
@@ -50,6 +60,7 @@ export async function processTenantSetup(message: AuroraTenantSetupMessage): Pro
       const auroraTenantId = await createTenant(orgId, orgName, key);
       await runSetup(orgId, auroraTenantId, key);
       await createAndStoreApiKey(orgId, auroraTenantId, key);
+      await createAndStoreS3AccessKey(orgId, auroraTenantId, key);
       return;
     }
 
@@ -58,6 +69,7 @@ export async function processTenantSetup(message: AuroraTenantSetupMessage): Pro
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
       await runSetup(orgId, auroraTenantId, key);
       await createAndStoreApiKey(orgId, auroraTenantId, key);
+      await createAndStoreS3AccessKey(orgId, auroraTenantId, key);
       return;
     }
 
@@ -145,6 +157,89 @@ async function createAndStoreApiKey(
       ExpressionAttributeValues: {
         ':status': { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         ':expected': { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
+        ':now': { S: new Date().toISOString() },
+      },
+    }),
+  );
+}
+
+async function createAndStoreS3AccessKey(
+  orgId: string,
+  auroraTenantId: string,
+  key: Record<string, { S: string }>,
+): Promise<void> {
+  const stage = process.env.FILONE_STAGE!;
+
+  let accessKeyId: string;
+  let accessKeySecret: string;
+  try {
+    const result = await createAuroraAccessKey({
+      tenantId: auroraTenantId,
+      keyName: 'filone-console',
+      permissions: [...ACCESS_KEY_PERMISSIONS],
+    });
+    accessKeyId = result.accessKeyId;
+    accessKeySecret = result.accessKeySecret;
+  } catch (err) {
+    if ((err as { name?: string }).name === 'DuplicateKeyNameError') {
+      console.log(
+        `Aurora S3 access key "filone-console" already exists for tenant ${auroraTenantId}, checking SSM`,
+      );
+
+      // Check if SSM already has the credentials from a previous successful attempt
+      const ssmName = `/filone/${stage}/aurora-s3/access-key/${auroraTenantId}`;
+      let ssmHasCredentials = false;
+      try {
+        await ssm.send(new GetParameterCommand({ Name: ssmName }));
+        ssmHasCredentials = true;
+      } catch (ssmErr) {
+        if ((ssmErr as { name?: string }).name !== 'ParameterNotFound') {
+          throw ssmErr;
+        }
+      }
+
+      if (!ssmHasCredentials) {
+        // Secret is lost — re-throw so the message goes to DLQ for manual investigation
+        throw err;
+      }
+
+      // Previous attempt succeeded fully — just advance status
+      await dynamo.send(
+        new UpdateItemCommand({
+          TableName: Resource.UserInfoTable.name,
+          Key: key,
+          UpdateExpression: 'SET setupStatus = :status, updatedAt = :now',
+          ConditionExpression: 'setupStatus = :expected',
+          ExpressionAttributeValues: {
+            ':status': { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
+            ':expected': { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+            ':now': { S: new Date().toISOString() },
+          },
+        }),
+      );
+      return;
+    }
+    throw err;
+  }
+
+  await ssm.send(
+    new PutParameterCommand({
+      Name: `/filone/${stage}/aurora-s3/access-key/${auroraTenantId}`,
+      Value: JSON.stringify({ accessKeyId, secretAccessKey: accessKeySecret }),
+      Type: 'SecureString',
+      Overwrite: true,
+    }),
+  );
+
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: key,
+      UpdateExpression: 'SET setupStatus = :status, updatedAt = :now',
+      ConditionExpression: 'setupStatus = :expected',
+      ExpressionAttributeValues: {
+        ':status': { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
+        ':expected': { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         ':now': { S: new Date().toISOString() },
       },
     }),

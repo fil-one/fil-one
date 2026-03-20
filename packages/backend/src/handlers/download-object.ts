@@ -1,12 +1,13 @@
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
-import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { FileStorageClient } from '../lib/file-storage-client.js';
+import { getAuroraS3Credentials, getPresignedGetObjectUrl } from '../lib/aurora-s3-client.js';
+import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -15,8 +16,11 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
 const dynamo = getDynamoClient();
+const PRESIGN_EXPIRY_SECONDS = 300;
 
-async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
+export async function baseHandler(
+  event: AuthenticatedEvent,
+): Promise<APIGatewayProxyStructuredResultV2> {
   const bucketName = event.pathParameters?.name;
   const objectKey = event.queryStringParameters?.key;
 
@@ -34,7 +38,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  const { userId } = getUserInfo(event);
+  const { userId, orgId } = getUserInfo(event);
   const tableName = Resource.UploadsTable.name;
 
   // Verify bucket ownership
@@ -52,29 +56,37 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  // Get object metadata to find s3Key
-  const objectRecord = await dynamo.send(
+  // Look up org profile to get auroraTenantId
+  const { Item: orgProfile } = await dynamo.send(
     new GetItemCommand({
-      TableName: tableName,
-      Key: marshall({
-        pk: `BUCKET#${userId}#${bucketName}`,
-        sk: `OBJECT#${objectKey}`,
-      }),
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
     }),
   );
 
-  if (!objectRecord.Item) {
+  const auroraTenantId = orgProfile?.auroraTenantId?.S;
+  const setupStatus = orgProfile?.setupStatus?.S;
+  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
+    console.error('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
     return new ResponseBuilder()
-      .status(404)
-      .body<ErrorResponse>({ message: 'Object not found' })
+      .status(503)
+      .body<ErrorResponse>({
+        message: 'Aurora tenant setup is not complete, please try again later',
+      })
       .build();
   }
 
-  const record = unmarshall(objectRecord.Item);
-  const s3Key = record.s3Key as string;
+  const stage = process.env.FILONE_STAGE!;
+  const gatewayUrl = process.env.AURORA_S3_GATEWAY_URL!;
 
-  const storage = new FileStorageClient(Resource.UserFilesBucket.name);
-  const url = await storage.getPresignedUrl(s3Key);
+  const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
+  const url = await getPresignedGetObjectUrl({
+    endpointUrl: gatewayUrl,
+    credentials,
+    bucket: bucketName,
+    key: objectKey,
+    expiresIn: PRESIGN_EXPIRY_SECONDS,
+  });
 
   return new ResponseBuilder().status(200).body({ url }).build();
 }

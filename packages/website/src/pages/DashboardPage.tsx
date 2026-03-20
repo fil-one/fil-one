@@ -498,11 +498,6 @@ export function DashboardPage() {
                   <p className="mt-0.5 text-[11px] text-[#677183]">
                     {activity.action.replace('.', ' ')}
                   </p>
-                  {activity.resourceType === 'object' && activity.cid && (
-                    <p className="mt-0.5 truncate font-mono text-[10px] text-[#677183]">
-                      {activity.cid}
-                    </p>
-                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-4">
                   {activity.resourceType === 'object' && activity.sizeBytes !== undefined && (

@@ -87,5 +87,9 @@ SELECTED=$(echo "$LABELS" | fzf --height=~20 --prompt="Select handler: " --no-mu
 LOG_GROUP=$(echo "$HANDLERS" | grep -F "$SELECTED" | head -1 | cut -f2)
 
 echo "" >&2
+echo "Endpoint: $SELECTED" >&2
 echo "Log group: $LOG_GROUP" >&2
+echo "" >&2
+echo "aws logs tail '$LOG_GROUP' ${EXTRA_ARGS[*]}" >&2
+echo "" >&2
 exec aws logs tail "$LOG_GROUP" "${EXTRA_ARGS[@]}"

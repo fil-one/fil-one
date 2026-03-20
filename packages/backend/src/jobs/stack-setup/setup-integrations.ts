@@ -42,6 +42,8 @@ const WEBHOOK_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
   'invoice.payment_failed',
 ];
 
+const PROTECTED_STAGES = new Set(['production', 'staging']);
+
 const ssm = new SSMClient({});
 
 function ssmParamName(stage: string): string {
@@ -101,6 +103,7 @@ async function setupStripeWebhook(
   if (existing && storedSecret) {
     await stripe.webhookEndpoints.update(existing.id, {
       enabled_events: WEBHOOK_EVENTS,
+      metadata: { app: 'filone', stage },
     });
     return { webhookSecret: storedSecret, webhookEndpointId: existing.id };
   }
@@ -109,15 +112,38 @@ async function setupStripeWebhook(
     await stripe.webhookEndpoints.del(existing.id);
   }
 
+  // Clean up disabled endpoints to stay under Stripe's 16-endpoint test limit.
+  // Endpoints are disabled by Stripe after repeated delivery failures (e.g. when
+  // a preview environment has been torn down but the endpoint wasn't deleted).
+  // Only clean up from non-production stages — production should never delete
+  // other endpoints.
+  if (stage !== 'production') {
+    const disabled = endpoints.data.filter(
+      (ep) => isOrphanedEphemeralEndpoint(ep) && ep.id !== existing?.id,
+    );
+    await Promise.all(disabled.map((ep) => stripe.webhookEndpoints.del(ep.id)));
+  }
+
   const newEndpoint = await stripe.webhookEndpoints.create({
     url: webhookUrl,
     enabled_events: WEBHOOK_EVENTS,
+    metadata: { app: 'filone', stage },
   });
 
   const secret = newEndpoint.secret!;
   await storeWebhookSecret(stage, secret);
 
   return { webhookSecret: secret, webhookEndpointId: newEndpoint.id };
+}
+
+function isOrphanedEphemeralEndpoint(ep: Stripe.WebhookEndpoint): boolean {
+  const stage = ep.metadata?.stage;
+  return (
+    ep.status === 'disabled' &&
+    ep.metadata?.app === 'filone' &&
+    !!stage &&
+    !PROTECTED_STAGES.has(stage)
+  );
 }
 
 async function teardownStripeWebhook(
@@ -206,7 +232,11 @@ function removeValue(existing: string[], value: string): string[] {
   return existing.filter((v) => v !== value);
 }
 
-async function setupAuth0Callbacks(domain: string, siteUrl: string): Promise<void> {
+async function setupAuth0Callbacks(
+  domain: string,
+  siteUrl: string,
+  isStagingOrProd: boolean,
+): Promise<void> {
   const token = await getAuth0ManagementToken(domain);
   const clientId = Resource.Auth0ClientId.value;
   const client = await getAuth0Client(domain, token, clientId);
@@ -214,18 +244,24 @@ async function setupAuth0Callbacks(domain: string, siteUrl: string): Promise<voi
   const callbackUrl = `${siteUrl}/api/auth/callback`;
   const loginUrl = `${siteUrl}/sign-in`;
 
-  await patchAuth0Client(domain, token, clientId, {
+  const patch: Partial<Auth0Client> = {
     callbacks: addUnique(client.callbacks ?? [], callbackUrl),
     allowed_logout_urls: addUnique(client.allowed_logout_urls ?? [], loginUrl),
     web_origins: addUnique(client.web_origins ?? [], siteUrl),
-    initiate_login_uri: addUnique(
-      (client.initiate_login_uri ?? '').split(',').filter(Boolean),
-      loginUrl,
-    ).join(','),
-  });
+  };
+
+  if (isStagingOrProd) {
+    patch.initiate_login_uri = loginUrl;
+  }
+
+  await patchAuth0Client(domain, token, clientId, patch);
 }
 
-async function teardownAuth0Callbacks(domain: string, siteUrl: string): Promise<void> {
+async function teardownAuth0Callbacks(
+  domain: string,
+  siteUrl: string,
+  isStagingOrProd: boolean,
+): Promise<void> {
   const token = await getAuth0ManagementToken(domain);
   const clientId = Resource.Auth0ClientId.value;
   const client = await getAuth0Client(domain, token, clientId);
@@ -239,11 +275,37 @@ async function teardownAuth0Callbacks(domain: string, siteUrl: string): Promise<
     web_origins: removeValue(client.web_origins ?? [], siteUrl),
   };
 
-  const loginUris = (client.initiate_login_uri ?? '').split(',').filter(Boolean);
-  const cleanedLoginUris = removeValue(loginUris, `${siteUrl}/sign-in`);
-  patch.initiate_login_uri = cleanedLoginUris.join(',');
+  if (isStagingOrProd) {
+    patch.initiate_login_uri = '';
+  }
 
   await patchAuth0Client(domain, token, clientId, patch);
+}
+
+// ── Auth0 email provider helper ───────────────────────────────────────
+
+async function setupAuth0EmailProvider(domain: string, isProduction: boolean): Promise<void> {
+  const token = await getAuth0ManagementToken(domain);
+  const fromAddress = isProduction ? 'no-reply@filone.ai' : 'no-reply+staging@filone.ai';
+
+  const resp = await fetch(`https://${domain}/api/v2/emails/provider`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: 'sendgrid',
+      enabled: true,
+      credentials: { api_key: Resource.SendGridApiKey.value },
+      default_from_address: fromAddress,
+    }),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`Auth0 email provider setup failed (${resp.status}): ${body}`);
+  }
 }
 
 // ── CloudFormation Custom Resource response ───────────────────────────
@@ -267,12 +329,14 @@ export async function handler(event: SetupEvent): Promise<void> {
     `filone-setup-${Stage}`;
 
   try {
+    const isStagingOrProd = Stage === 'staging' || Stage === 'production';
+
     if (event.RequestType === 'Delete') {
       const stripe = new Stripe(Resource.StripeSecretKey.value);
 
       await Promise.all([
         teardownStripeWebhook(stripe, siteUrl, Stage),
-        teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl),
+        teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
       ]);
 
       console.log('Teardown complete:', { siteUrl, stage: Stage });
@@ -296,14 +360,17 @@ export async function handler(event: SetupEvent): Promise<void> {
       if (oldUrl && oldUrl !== siteUrl) {
         await Promise.all([
           teardownStripeWebhook(stripe, oldUrl, Stage),
-          teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, oldUrl),
+          teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, oldUrl, isStagingOrProd),
         ]);
       }
     }
 
     const [stripeResult] = await Promise.all([
       setupStripeWebhook(stripe, siteUrl, Stage),
-      setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl),
+      setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
+      ...(isStagingOrProd
+        ? [setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production')]
+        : []),
     ]);
 
     console.log('Setup complete:', {

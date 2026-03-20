@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { OrgSetupStatus } from '../lib/org-setup-status.js';
+import { OrgSetupStatus, FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 import { ORG_NAME_MIN_LENGTH, ORG_NAME_MAX_LENGTH } from '../lib/org-name-validation.js';
 
 // ---------------------------------------------------------------------------
@@ -185,7 +185,7 @@ describe('POST /api/org/confirm handler', () => {
         sk: { S: 'PROFILE' },
         name: { S: 'Acme Corp' },
         orgConfirmed: { BOOL: true },
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+        setupStatus: { S: FINAL_SETUP_STATUS },
       },
     });
 

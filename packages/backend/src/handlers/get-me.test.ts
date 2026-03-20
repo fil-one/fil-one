@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -13,7 +13,6 @@ vi.mock('sst', () => ({
     Auth0ClientId: { value: 'test-client-id' },
     Auth0ClientSecret: { value: 'test-client-secret' },
     AuroraBackofficeToken: { value: 'test-aurora-token' },
-    AuroraTenantSetupQueue: { url: 'https://sqs.us-east-1.amazonaws.com/123/setup-queue' },
   },
 }));
 
@@ -24,6 +23,11 @@ vi.mock('../lib/auth-secrets.js', () => ({
   }),
 }));
 
+const mockTriggerTenantSetup = vi.fn();
+vi.mock('../lib/trigger-tenant-setup.js', () => ({
+  triggerTenantSetup: (...args: unknown[]) => mockTriggerTenantSetup(...args),
+}));
+
 const mockJwtVerify = vi.fn();
 vi.mock('jose', () => ({
   jwtVerify: (token: unknown, jwks: unknown, opts: unknown) => mockJwtVerify(token, jwks, opts),
@@ -32,7 +36,6 @@ vi.mock('jose', () => ({
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
-const sqsMock = mockClient(SQSClient);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
@@ -51,7 +54,7 @@ const MOCK_EMAIL = 'user@example.com';
 
 function authenticatedEvent() {
   return buildEvent({
-    cookies: [`hs_access_token=valid-token`],
+    cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
     userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, email: MOCK_EMAIL },
   });
 }
@@ -64,11 +67,10 @@ describe('GET /api/me handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    sqsMock.reset();
-    sqsMock.on(SendMessageCommand).resolves({});
+    mockTriggerTenantSetup.mockResolvedValue({});
 
     mockJwtVerify.mockResolvedValue({
-      payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
+      payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
     });
 
     // Auth middleware: resolve existing user
@@ -88,7 +90,7 @@ describe('GET /api/me handler', () => {
       });
   });
 
-  it('returns orgSetupComplete: true when setupStatus is AURORA_TENANT_API_KEY_CREATED', async () => {
+  it('returns orgSetupComplete: true when setupStatus is AURORA_S3_ACCESS_KEY_CREATED', async () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
@@ -100,7 +102,7 @@ describe('GET /api/me handler', () => {
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
           orgConfirmed: { BOOL: true },
-          setupStatus: { S: 'AURORA_TENANT_API_KEY_CREATED' },
+          setupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 
@@ -112,6 +114,7 @@ describe('GET /api/me handler', () => {
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
         orgConfirmed: true,
+        emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: true,
       }),
@@ -142,6 +145,7 @@ describe('GET /api/me handler', () => {
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
         orgConfirmed: true,
+        emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: false,
       }),
@@ -171,9 +175,109 @@ describe('GET /api/me handler', () => {
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
         orgConfirmed: true,
+        emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: false,
       }),
     });
+  });
+
+  it('triggers tenant setup when org is confirmed but setup is incomplete', async () => {
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          orgConfirmed: { BOOL: true },
+          setupStatus: { S: 'FILONE_ORG_CREATED' },
+        },
+      });
+
+    await handler(authenticatedEvent(), buildContext());
+
+    expect(mockTriggerTenantSetup).toHaveBeenCalledWith({
+      orgId: MOCK_ORG_ID,
+      orgName: 'Example Corp',
+    });
+  });
+
+  it('does not trigger tenant setup when setup is already complete', async () => {
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          orgConfirmed: { BOOL: true },
+          setupStatus: { S: FINAL_SETUP_STATUS },
+        },
+      });
+
+    await handler(authenticatedEvent(), buildContext());
+
+    expect(mockTriggerTenantSetup).not.toHaveBeenCalled();
+  });
+
+  it('returns success even when triggerTenantSetup fails', async () => {
+    mockTriggerTenantSetup.mockRejectedValue(new Error('SQS timeout'));
+
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          orgConfirmed: { BOOL: true },
+          setupStatus: { S: 'FILONE_ORG_CREATED' },
+        },
+      });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({
+        orgId: MOCK_ORG_ID,
+        orgName: 'Example Corp',
+        orgConfirmed: true,
+        emailVerified: true,
+        email: MOCK_EMAIL,
+        orgSetupComplete: false,
+      }),
+    });
+  });
+
+  it('does not trigger tenant setup when org is not confirmed', async () => {
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          orgConfirmed: { BOOL: false },
+          setupStatus: { S: 'FILONE_ORG_CREATED' },
+        },
+      });
+
+    await handler(authenticatedEvent(), buildContext());
+
+    expect(mockTriggerTenantSetup).not.toHaveBeenCalled();
   });
 });

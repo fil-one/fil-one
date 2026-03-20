@@ -6,7 +6,11 @@
     // esbuild handles bundling, so use Bundler resolution which resolves ESM-only
     // packages (like @middy/core) via their "import" condition rather than "require".
     "module": "ESNext",
-    "moduleResolution": "Bundler"
+    "moduleResolution": "Bundler",
+    // psl has types but doesn't expose them in its package.json "exports" field
+    "paths": {
+      "psl": ["./node_modules/psl/types/index.d.ts"]
+    }
   },
   "include": ["src", "sst-env.d.ts"]
 }

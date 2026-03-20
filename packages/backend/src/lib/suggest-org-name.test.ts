@@ -1,44 +1,50 @@
 import { describe, it, expect } from 'vitest';
 import { PUBLIC_EMAIL_DOMAINS, suggestOrgName } from './suggest-org-name.js';
 
-const userId = 'test-user-123';
-
 describe('suggestOrgName', () => {
-  it('returns capitalised domain name for a corporate email', () => {
-    expect(suggestOrgName('alice@acme.com', userId)).toBe('Acme');
+  describe('corporate emails — uses domain name', () => {
+    it.each([
+      ['alice@acme.com', 'Acme'],
+      ['bob@filecoin.io', 'Filecoin'],
+      ['user@ACME.COM', 'Acme'],
+      ['dev@eng.bigcorp.com', 'Bigcorp'],
+      ['dev@eng.bigcorp.co.uk', 'Bigcorp'],
+      ['ceo@startup.org', 'Startup'],
+      ['info@my-company.com', 'My Company'],
+      ['user@some-long-name.co.uk', 'Some Long Name'],
+      ['user@protocol.labs', 'Protocol'],
+    ])('%s → %s', (email, expected) => {
+      expect(suggestOrgName(email)).toBe(expected);
+    });
   });
 
-  it('capitalises only the first letter', () => {
-    expect(suggestOrgName('bob@filecoin.io', userId)).toBe('Filecoin');
+  describe('public email domains — uses local part', () => {
+    it.each([
+      ['alice@gmail.com', 'Alice'],
+      ['Bob.Smith@outlook.com', 'Bob.smith'],
+      ['JANE@yahoo.com', 'Jane'],
+      ['satoshi@protonmail.com', 'Satoshi'],
+      ['user123@icloud.com', 'User123'],
+      ['someone@hey.com', 'Someone'],
+    ])('%s → %s', (email, expected) => {
+      expect(suggestOrgName(email)).toBe(expected);
+    });
   });
 
-  it('returns undefined for undefined email', () => {
-    expect(suggestOrgName(undefined, userId)).toBeUndefined();
-  });
-
-  it('returns undefined for email without @ sign', () => {
-    expect(suggestOrgName('not-an-email', userId)).toBeUndefined();
-  });
-
-  it('returns undefined for email with empty domain', () => {
-    expect(suggestOrgName('user@', userId)).toBeUndefined();
-  });
-
-  it('handles subdomains by using the first part', () => {
-    expect(suggestOrgName('dev@eng.bigcorp.com', userId)).toBe('Eng');
-  });
-
-  it('is case-insensitive on the domain', () => {
-    expect(suggestOrgName('user@ACME.COM', userId)).toBe('Acme');
-  });
-
-  describe('public email providers return undefined', () => {
-    const publicDomains = PUBLIC_EMAIL_DOMAINS;
-
-    for (const domain of publicDomains) {
-      it(`returns undefined for ${domain}`, () => {
-        expect(suggestOrgName(`user@${domain}`, userId)).toBeUndefined();
+  describe('all public domains are handled', () => {
+    for (const domain of PUBLIC_EMAIL_DOMAINS) {
+      it(`returns local part for ${domain}`, () => {
+        expect(suggestOrgName(`testuser@${domain}`)).toBe('Testuser');
       });
     }
+  });
+
+  describe('edge cases — returns undefined', () => {
+    it.each([
+      ['no @ sign', 'not-an-email'],
+      ['empty domain', 'user@'],
+    ])('%s', (_label, email) => {
+      expect(suggestOrgName(email)).toBeUndefined();
+    });
   });
 });

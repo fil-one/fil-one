@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
+import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import type {
+  ModelStorageMetricsSample,
+  ModelOperationMetricsSample,
+  ModelsTenantWithMetricsManagementResponse,
+} from '../lib/aurora-backoffice.js';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -10,10 +15,17 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
-    UploadsTable: { name: 'UploadsTable' },
-    Auth0ClientId: { value: 'test-client-id' },
-    Auth0ClientSecret: { value: 'test-client-secret' },
   },
+}));
+
+const mockGetStorageSamples = vi.fn<() => Promise<ModelStorageMetricsSample[]>>();
+const mockGetOperationsSamples = vi.fn<() => Promise<ModelOperationMetricsSample[]>>();
+const mockGetTenantInfo = vi.fn<() => Promise<ModelsTenantWithMetricsManagementResponse | null>>();
+
+vi.mock('../lib/aurora-backoffice.js', () => ({
+  getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...(args as [])),
+  getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...(args as [])),
+  getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...(args as [])),
 }));
 
 vi.mock('../lib/auth-secrets.js', () => ({
@@ -30,10 +42,20 @@ vi.mock('jose', () => ({
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
 }));
 
-const ddbMock = mockClient(DynamoDBClient);
+const mockGetAuroraS3Credentials = vi.fn();
+const mockListObjects = vi.fn();
+
+vi.mock('../lib/aurora-s3-client.js', () => ({
+  getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
+  listObjects: (...args: unknown[]) => mockListObjects(...args),
+}));
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
+process.env.FILONE_STAGE = 'test';
+process.env.AURORA_S3_GATEWAY_URL = 'https://s3.dev.aur.lu';
+
+const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './get-usage.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
@@ -46,6 +68,7 @@ const MOCK_SUB = 'auth0|abc123';
 const MOCK_ORG_ID = 'org-1';
 const MOCK_USER_ID = 'user-1';
 const MOCK_EMAIL = 'user@example.com';
+const AURORA_TENANT_ID = 'aurora-tenant-1';
 
 function authenticatedEvent() {
   return buildEvent({
@@ -54,7 +77,6 @@ function authenticatedEvent() {
   });
 }
 
-/** Set up the auth middleware identity + org profile lookups. */
 function mockAuthIdentity() {
   ddbMock
     .on(GetItemCommand, {
@@ -71,7 +93,39 @@ function mockAuthIdentity() {
       },
     });
 
-  // Auth middleware also checks org profile for org-confirmed gate
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+    })
+    .resolves({
+      Item: {
+        pk: { S: `ORG#${MOCK_ORG_ID}` },
+        sk: { S: 'PROFILE' },
+        name: { S: 'Test Org' },
+        orgConfirmed: { BOOL: true },
+        auroraTenantId: { S: AURORA_TENANT_ID },
+        setupStatus: { S: FINAL_SETUP_STATUS },
+      },
+    });
+}
+
+function mockAuthIdentityWithoutTenant() {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+    })
+    .resolves({
+      Item: {
+        pk: { S: `SUB#${MOCK_SUB}` },
+        sk: { S: 'IDENTITY' },
+        userId: { S: MOCK_USER_ID },
+        orgId: { S: MOCK_ORG_ID },
+        email: { S: MOCK_EMAIL },
+      },
+    });
+
   ddbMock
     .on(GetItemCommand, {
       TableName: 'UserInfoTable',
@@ -87,61 +141,6 @@ function mockAuthIdentity() {
     });
 }
 
-/** Mock the buckets query to return the given bucket names. */
-function mockBuckets(bucketNames: string[]) {
-  ddbMock
-    .on(QueryCommand, {
-      TableName: 'UploadsTable',
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: `USER#${MOCK_USER_ID}` },
-        ':skPrefix': { S: 'BUCKET#' },
-      },
-    })
-    .resolves({
-      Items: bucketNames.map((name) =>
-        marshall({
-          pk: `USER#${MOCK_USER_ID}`,
-          sk: `BUCKET#${name}`,
-          name,
-          region: 'us-east-1',
-          createdAt: '2024-01-01T00:00:00Z',
-          isPublic: false,
-        }),
-      ),
-    });
-}
-
-/** Mock the objects query for a specific bucket. */
-function mockBucketObjects(bucketName: string, objects: { sizeBytes: number }[]) {
-  ddbMock
-    .on(QueryCommand, {
-      TableName: 'UploadsTable',
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: `BUCKET#${MOCK_USER_ID}#${bucketName}` },
-        ':skPrefix': { S: 'OBJECT#' },
-      },
-    })
-    .resolves({
-      Items: objects.map((obj) => marshall(obj)),
-    });
-}
-
-/** Mock the access keys count query. */
-function mockAccessKeys(count: number) {
-  ddbMock
-    .on(QueryCommand, {
-      TableName: 'UserInfoTable',
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: `ORG#${MOCK_ORG_ID}` },
-        ':skPrefix': { S: 'ACCESSKEY#' },
-      },
-    })
-    .resolves({ Count: count });
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -154,11 +153,62 @@ describe('GET /api/usage handler', () => {
       payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
     });
     mockAuthIdentity();
+    mockGetStorageSamples.mockResolvedValue([]);
+    mockGetOperationsSamples.mockResolvedValue([]);
+    mockGetTenantInfo.mockResolvedValue(null);
   });
 
-  it('returns usage data with no buckets and no keys', async () => {
-    mockBuckets([]);
-    mockAccessKeys(0);
+  it('returns usage data from Aurora APIs', async () => {
+    mockAuthIdentity();
+    mockGetStorageSamples.mockResolvedValue([
+      { timestamp: '2026-01-01T00:00:00Z', bytesUsed: 4000, objectCount: 3 },
+    ]);
+    mockGetOperationsSamples.mockResolvedValue([
+      { timestamp: '2026-01-01T00:00:00Z', rxBytes: 1500 },
+    ]);
+    mockGetTenantInfo.mockResolvedValue({
+      bucketCount: 2,
+      bucketQuantityLimit: 50,
+      keyCount: 3,
+      accessKeyQuantityLimit: 200,
+    });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({
+        storage: { usedBytes: 4000 },
+        egress: { usedBytes: 1500 },
+        buckets: { count: 2, limit: 50 },
+        objects: { count: 3 },
+        accessKeys: { count: 3, limit: 200 },
+      }),
+    });
+  });
+
+  it('returns zeros when auroraTenantId is missing', async () => {
+    mockAuthIdentityWithoutTenant();
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({
+        storage: { usedBytes: 0 },
+        egress: { usedBytes: 0 },
+        buckets: { count: 0, limit: 100 },
+        objects: { count: 0 },
+        accessKeys: { count: 0, limit: 300 },
+      }),
+    });
+    expect(mockGetStorageSamples).not.toHaveBeenCalled();
+    expect(mockGetOperationsSamples).not.toHaveBeenCalled();
+    expect(mockGetTenantInfo).not.toHaveBeenCalled();
+  });
+
+  it('returns zeros when Aurora returns empty samples', async () => {
+    mockAuthIdentity();
 
     const result = await handler(authenticatedEvent(), buildContext());
 
@@ -174,42 +224,17 @@ describe('GET /api/usage handler', () => {
     });
   });
 
-  it('sums storage across multiple buckets and objects', async () => {
-    mockBuckets(['photos', 'docs']);
-    mockBucketObjects('photos', [{ sizeBytes: 1000 }, { sizeBytes: 2500 }]);
-    mockBucketObjects('docs', [{ sizeBytes: 500 }]);
-    mockAccessKeys(3);
+  it('uses the last storage sample for aggregate values', async () => {
+    mockAuthIdentity();
+    mockGetStorageSamples.mockResolvedValue([
+      { timestamp: '2026-01-01T00:00:00Z', bytesUsed: 1000, objectCount: 2 },
+      { timestamp: '2026-01-15T00:00:00Z', bytesUsed: 5000, objectCount: 8 },
+    ]);
 
     const result = await handler(authenticatedEvent(), buildContext());
+    const body = JSON.parse(String((result as { body: string }).body));
 
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({
-        storage: { usedBytes: 4000 },
-        egress: { usedBytes: 0 },
-        buckets: { count: 2, limit: 100 },
-        objects: { count: 3 },
-        accessKeys: { count: 3, limit: 300 },
-      }),
-    });
-  });
-
-  it('handles a bucket with no objects', async () => {
-    mockBuckets(['empty-bucket']);
-    mockBucketObjects('empty-bucket', []);
-    mockAccessKeys(1);
-
-    const result = await handler(authenticatedEvent(), buildContext());
-
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({
-        storage: { usedBytes: 0 },
-        egress: { usedBytes: 0 },
-        buckets: { count: 1, limit: 100 },
-        objects: { count: 0 },
-        accessKeys: { count: 1, limit: 300 },
-      }),
-    });
+    expect(body.storage.usedBytes).toBe(5000);
+    expect(body.objects.count).toBe(8);
   });
 });

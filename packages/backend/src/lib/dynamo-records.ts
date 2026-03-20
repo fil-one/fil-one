@@ -10,21 +10,6 @@ export interface BucketRecord {
   isPublic: boolean;
 }
 
-/** UploadsTable — pk: BUCKET#{userId}#{bucketName}, sk: OBJECT#{key} */
-export interface ObjectRecord {
-  pk: string;
-  sk: string;
-  key: string;
-  fileName: string;
-  contentType: string;
-  sizeBytes: number;
-  uploadedAt: string;
-  etag: string;
-  s3Key: string;
-  description?: string;
-  cid?: string;
-}
-
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
 export interface AccessKeyRecord {
   pk: string;

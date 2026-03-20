@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -23,6 +24,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './create-bucket.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
+import { S3_REGION } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,7 +33,7 @@ import { buildEvent } from '../test/lambda-test-utilities.js';
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
 function validBody() {
-  return JSON.stringify({ name: 'my-bucket', region: 'us-east-1' });
+  return JSON.stringify({ name: 'my-bucket', region: S3_REGION });
 }
 
 function orgProfileWithTenant(tenantId: string) {
@@ -40,7 +42,7 @@ function orgProfileWithTenant(tenantId: string) {
       pk: { S: `ORG#${USER_INFO.orgId}` },
       sk: { S: 'PROFILE' },
       auroraTenantId: { S: tenantId },
-      setupStatus: { S: 'AURORA_TENANT_API_KEY_CREATED' },
+      setupStatus: { S: FINAL_SETUP_STATUS },
     },
   };
 }

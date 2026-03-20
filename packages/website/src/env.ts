@@ -4,13 +4,11 @@
  *
  * VITE_API_URL              - Base URL for the Fil.one REST API
  *                             (empty in production — relative paths via CloudFront)
- * VITE_S3_ENDPOINT          - S3-compatible endpoint shown to users in Connection Details
  * VITE_AUTH0_DOMAIN         - Auth0 tenant domain (e.g. "your-tenant.auth0.com")
  * VITE_AUTH0_CLIENT_ID      - Auth0 application client ID
  * VITE_AUTH0_AUDIENCE       - Auth0 API audience identifier
  */
 export const API_URL: string = import.meta.env['VITE_API_URL'] ?? '';
-export const S3_ENDPOINT: string = import.meta.env['VITE_S3_ENDPOINT'] ?? '';
 // TODO [Option D]: Replace default with custom domain (e.g. 'auth.fil.one')
 // once Auth0 paid plan + DNS CNAME is configured. No code changes needed.
 export const AUTH0_DOMAIN: string =

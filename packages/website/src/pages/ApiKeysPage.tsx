@@ -1,6 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from '@tanstack/react-router';
 
-import { KeyIcon, PlusIcon, PowerIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
+import {
+  CopySimpleIcon,
+  DotsThreeIcon,
+  KeyIcon,
+  PlusIcon,
+  TrashIcon,
+} from '@phosphor-icons/react/dist/ssr';
 
 import { Button } from '../components/Button';
 import { CodeBlock } from '../components/CodeBlock';
@@ -8,12 +15,11 @@ import { Spinner } from '../components/Spinner';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
 import { useToast } from '../components/Toast';
 
-import type { AccessKey, CreateAccessKeyResponse, ListAccessKeysResponse } from '@filone/shared';
+import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
 
+import { S3_ENDPOINT, S3_REGION } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
-import { S3_ENDPOINT } from '../env';
-import { CreateAccessKeyModal } from '../components/CreateAccessKeyModal';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -27,7 +33,6 @@ function StatusBadge({ status }: { status: AccessKey['status'] }) {
       </span>
     );
   }
-
   return (
     <span className="rounded-full border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
       Inactive
@@ -42,55 +47,114 @@ function StatusBadge({ status }: { status: AccessKey['status'] }) {
 type AccessKeysTabProps = {
   keys: AccessKey[];
   onCreateOpen: () => void;
-  onToggle: (id: string) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => Promise<void>;
 };
 
-function AccessKeysTab({ keys, onCreateOpen, onToggle, onDelete }: AccessKeysTabProps) {
+function ActionMenu({ onDelete }: { onDelete: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, right: 0 });
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  function handleOpen() {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    }
+    setOpen((o) => !o);
+  }
+
+  return (
+    <div className="relative inline-block">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={handleOpen}
+        className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+        aria-label="Key actions"
+      >
+        <DotsThreeIcon size={16} />
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          style={{ top: pos.top, right: pos.right }}
+          className="fixed z-50 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+          >
+            <TrashIcon size={14} />
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
   return (
     <>
-      {/* Action bar */}
       <div className="mt-4 mb-4 flex items-center justify-between">
-        <span className="text-sm text-zinc-600">{keys.length} keys</span>
+        <span className="text-sm text-zinc-600">
+          {keys.length === 1 ? '1 key' : `${keys.length} keys`}
+        </span>
         <Button variant="filled" icon={PlusIcon} onClick={onCreateOpen}>
-          Create access key
+          Create new key
         </Button>
       </div>
 
       {keys.length === 0 ? (
-        /* Empty state */
         <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white py-16">
           <KeyIcon size={40} className="mb-3 text-zinc-300" />
-          <p className="mb-1 text-sm font-medium text-zinc-900">No access keys</p>
-          <p className="mb-4 text-sm text-zinc-500">Create an access key to connect via S3 API</p>
+          <p className="mb-1 text-sm font-medium text-zinc-900">No API keys yet</p>
+          <p className="mb-4 text-sm text-zinc-500">
+            Generate credentials to connect your applications via S3-compatible API
+          </p>
           <Button variant="filled" icon={PlusIcon} onClick={onCreateOpen}>
-            Create access key
+            Create your first key
           </Button>
         </div>
       ) : (
-        /* Keys table */
-        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-          <table className="min-w-full">
+        <div className="rounded-lg border border-zinc-200 bg-white">
+          <table className="min-w-full overflow-hidden rounded-lg">
             <thead>
               <tr>
                 <th className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
                   Name
                 </th>
                 <th className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Access Key ID
-                </th>
-                <th className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Created
+                  Status
                 </th>
                 <th className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
                   Last Used
                 </th>
-                <th className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Status
-                </th>
-                <th className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Actions
-                </th>
+                <th
+                  className="border-b border-zinc-200 bg-zinc-50 px-4 py-3"
+                  aria-label="Actions"
+                />
               </tr>
             </thead>
             <tbody>
@@ -99,36 +163,18 @@ function AccessKeysTab({ keys, onCreateOpen, onToggle, onDelete }: AccessKeysTab
                   key={key.id}
                   className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50"
                 >
-                  <td className="px-4 py-3 text-sm font-medium text-zinc-900">{key.keyName}</td>
-                  <td className="px-4 py-3 font-mono text-sm text-zinc-700">{key.accessKeyId}</td>
-                  <td className="px-4 py-3 text-sm text-zinc-600">{formatDate(key.createdAt)}</td>
-                  <td className="px-4 py-3 text-sm text-zinc-600">
-                    {key.lastUsedAt ? formatDate(key.lastUsedAt) : 'Never'}
+                  <td className="px-4 py-3">
+                    <p className="text-sm font-medium text-zinc-900">{key.keyName}</p>
+                    <p className="font-mono text-xs text-zinc-500">{key.accessKeyId}</p>
                   </td>
-                  <td className="px-4 py-3 text-sm text-zinc-600">
+                  <td className="px-4 py-3">
                     <StatusBadge status={key.status} />
                   </td>
                   <td className="px-4 py-3 text-sm text-zinc-600">
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onToggle(key.id)}
-                        aria-label={key.status === 'active' ? 'Deactivate key' : 'Activate key'}
-                        className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
-                        title={key.status === 'active' ? 'Deactivate' : 'Activate'}
-                      >
-                        <PowerIcon size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onDelete(key.id)}
-                        aria-label="Delete key"
-                        className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-red-500"
-                        title="Delete"
-                      >
-                        <TrashIcon size={16} />
-                      </button>
-                    </div>
+                    {key.lastUsedAt ? formatDate(key.lastUsedAt) : 'Never'}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <ActionMenu onDelete={() => void onDelete(key.id)} />
                   </td>
                 </tr>
               ))}
@@ -144,41 +190,293 @@ function AccessKeysTab({ keys, onCreateOpen, onToggle, onDelete }: AccessKeysTab
 // Tab 2: Connection Details
 // ---------------------------------------------------------------------------
 
-function ConnectionDetailsTab() {
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    void navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
   return (
-    <div className="mt-4 flex flex-col gap-6">
-      {/* Endpoint */}
-      <div>
-        <h3 className="mb-2 text-sm font-semibold text-zinc-900">S3 Endpoint</h3>
-        <CodeBlock code={S3_ENDPOINT} language="URL" />
+    <button
+      type="button"
+      onClick={handleCopy}
+      title={copied ? 'Copied' : 'Copy'}
+      aria-label={copied ? 'Copied to clipboard' : 'Copy to clipboard'}
+      className="ml-2 shrink-0 rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+    >
+      <CopySimpleIcon size={14} />
+    </button>
+  );
+}
+
+function ConnectionDetailsTab() {
+  const [sdkTab, setSdkTab] = useState<'python' | 'nodejs' | 'go'>('python');
+
+  const pythonInstall = `pip install boto3`;
+  const pythonUpload = `import boto3
+
+s3 = boto3.client(
+    "s3",
+    endpoint_url="${S3_ENDPOINT}",
+    aws_access_key_id="YOUR_ACCESS_KEY",
+    aws_secret_access_key="YOUR_SECRET_KEY",
+    region_name="${S3_REGION}",
+)
+
+# Upload
+s3.upload_file("local-file.parquet", "my-bucket", "data/file.parquet")
+
+# Download
+s3.download_file("my-bucket", "data/file.parquet", "local-copy.parquet")
+
+# List objects
+for obj in s3.list_objects_v2(Bucket="my-bucket").get("Contents", []):
+    print(obj["Key"], obj["Size"])`;
+
+  const nodejsInstall = `npm install @aws-sdk/client-s3`;
+  const nodejsUpload = `import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { createReadStream } from "fs";
+
+const s3 = new S3Client({
+  endpoint: "${S3_ENDPOINT}",
+  region: "${S3_REGION}",
+  credentials: {
+    accessKeyId: "YOUR_ACCESS_KEY",
+    secretAccessKey: "YOUR_SECRET_KEY",
+  },
+  forcePathStyle: true,
+});
+
+await s3.send(new PutObjectCommand({
+  Bucket: "my-bucket",
+  Key: "data/file.parquet",
+  Body: createReadStream("./local-file.parquet"),
+}));`;
+
+  const goInstall = `go get github.com/aws/aws-sdk-go-v2/service/s3`;
+  const goUpload = `import (
+    "github.com/aws/aws-sdk-go-v2/aws"
+    "github.com/aws/aws-sdk-go-v2/config"
+    "github.com/aws/aws-sdk-go-v2/service/s3"
+)
+
+cfg, _ := config.LoadDefaultConfig(context.TODO(),
+    config.WithRegion("${S3_REGION}"),
+    config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+        "YOUR_ACCESS_KEY", "YOUR_SECRET_KEY", "",
+    )),
+)
+
+client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+    o.BaseEndpoint = aws.String("${S3_ENDPOINT}")
+    o.UsePathStyle = true
+})`;
+
+  const SDK_META = {
+    python: {
+      label: 'Python',
+      hint: 'Using boto3 (AWS SDK for Python)',
+      install: pythonInstall,
+      upload: pythonUpload,
+      lang: 'python',
+    },
+    nodejs: {
+      label: 'Node.js',
+      hint: 'Using @aws-sdk/client-s3',
+      install: nodejsInstall,
+      upload: nodejsUpload,
+      lang: 'javascript',
+    },
+    go: {
+      label: 'Go',
+      hint: 'Using aws-sdk-go-v2',
+      install: goInstall,
+      upload: goUpload,
+      lang: 'go',
+    },
+  } as const;
+
+  const active = SDK_META[sdkTab];
+
+  return (
+    <div className="mt-4 flex flex-col gap-8">
+      {/* Endpoint + Region card */}
+      <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+        <div className="flex items-center border-b border-zinc-100 px-4 py-3">
+          <span className="w-28 shrink-0 text-sm text-zinc-500">S3 Endpoint</span>
+          <span className="flex-1 font-mono text-sm text-zinc-900">{S3_ENDPOINT}</span>
+          <CopyButton value={S3_ENDPOINT} />
+        </div>
+        <div className="flex items-center px-4 py-3">
+          <span className="w-28 shrink-0 text-sm text-zinc-500">Region</span>
+          <span className="flex-1 font-mono text-sm text-zinc-900">{S3_REGION}</span>
+          <CopyButton value={S3_REGION} />
+        </div>
       </div>
 
-      {/* Region */}
+      {/* Quickstart CLI */}
       <div>
-        <h3 className="mb-2 text-sm font-semibold text-zinc-900">Region</h3>
-        {/* UNKNOWN: confirm whether us-east-1 is the correct/only region */}
-        <CodeBlock code="us-east-1" language="Region" />
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-zinc-900">Quickstart (AWS CLI)</h3>
+          <a
+            href="https://docs.fil.one"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs font-medium text-brand-600 hover:underline"
+          >
+            View docs ↗
+          </a>
+        </div>
+        <div className="flex flex-col gap-3">
+          {[
+            {
+              n: 1,
+              title: 'Configure your S3 client',
+              code: `aws configure set aws_access_key_id YOUR_ACCESS_KEY\naws configure set aws_secret_access_key YOUR_SECRET_KEY\naws configure set default.region ${S3_REGION}`,
+            },
+            {
+              n: 2,
+              title: 'Create a bucket',
+              code: `aws s3 mb s3://my-bucket --endpoint-url ${S3_ENDPOINT}`,
+            },
+            {
+              n: 3,
+              title: 'Upload a file',
+              code: `aws s3 cp ./my-file.parquet s3://my-bucket/ --endpoint-url ${S3_ENDPOINT}`,
+            },
+          ].map(({ n, title, code }) => (
+            <div key={n} className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+              <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-2.5">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">
+                  {n}
+                </span>
+                <span className="text-sm font-medium text-zinc-800">{title}</span>
+              </div>
+              <div className="px-4 py-3">
+                <CodeBlock language="sh" code={code} />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* AWS CLI config */}
+      {/* SDK Examples */}
       <div>
-        <h3 className="mb-2 text-sm font-semibold text-zinc-900">AWS CLI Configuration</h3>
-        <p className="mb-2 text-sm text-zinc-600">
-          Add to your <code className="rounded bg-zinc-100 px-1 text-xs">~/.aws/config</code>:
+        <h3 className="mb-4 text-sm font-semibold text-zinc-900">SDK examples</h3>
+        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+          {/* Tab bar */}
+          <div className="flex border-b border-zinc-200 bg-zinc-50">
+            {(['python', 'nodejs', 'go'] as const).map((lang) => (
+              <button
+                key={lang}
+                type="button"
+                onClick={() => setSdkTab(lang)}
+                className={`px-4 py-2.5 text-sm font-medium transition-colors ${
+                  sdkTab === lang
+                    ? 'border-b-2 border-brand-600 text-brand-700'
+                    : 'text-zinc-500 hover:text-zinc-700'
+                }`}
+              >
+                {SDK_META[lang].label}
+              </button>
+            ))}
+          </div>
+          {/* Content */}
+          <div className="flex flex-col gap-0">
+            <div className="border-b border-zinc-100 px-4 py-2.5">
+              <span className="text-xs text-zinc-500">Using </span>
+              <code className="text-xs font-medium text-zinc-700">
+                {active.hint.replace('Using ', '')}
+              </code>
+            </div>
+            <div className="overflow-hidden border-b border-zinc-100">
+              <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-2.5">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">
+                  1
+                </span>
+                <span className="text-sm font-medium text-zinc-800">Install</span>
+              </div>
+              <div className="px-4 py-3">
+                <CodeBlock language="sh" code={active.install} />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-2.5">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">
+                  2
+                </span>
+                <span className="text-sm font-medium text-zinc-800">Upload &amp; retrieve</span>
+              </div>
+              <div className="px-4 py-3">
+                <CodeBlock language={active.lang} code={active.upload} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Migrating from AWS S3 */}
+      <div>
+        <h3 className="mb-2 text-sm font-semibold text-zinc-900">Migrating from AWS S3</h3>
+        <p className="mb-4 text-sm text-zinc-600">
+          Fil One is fully S3-compatible. In most cases, you only need to change two settings in
+          your existing code.
         </p>
-        <CodeBlock
-          language="INI"
-          code={`[profile filone]\nendpoint_url = ${S3_ENDPOINT}\nregion = us-east-1`}
-        />
+        <div className="overflow-hidden rounded-lg border border-zinc-200">
+          <table className="w-full text-sm">
+            <tbody>
+              {[
+                {
+                  label: 'Endpoint URL',
+                  aws: 'https://s3.amazonaws.com',
+                  fil: S3_ENDPOINT,
+                  highlight: true,
+                },
+                {
+                  label: 'Credentials',
+                  aws: 'AWS IAM key + secret',
+                  fil: 'Fil One key + secret',
+                  highlight: true,
+                },
+                { label: 'Region', aws: 'Any AWS region', fil: S3_REGION, highlight: false },
+                {
+                  label: 'Path style',
+                  aws: 'Optional',
+                  fil: 'Required (forcePathStyle: true)',
+                  highlight: false,
+                },
+              ].map((row) => (
+                <tr key={row.label} className="border-b border-zinc-100 last:border-0">
+                  <td className="w-28 px-4 py-2.5 text-xs font-medium text-zinc-500">
+                    {row.label}
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-zinc-500 line-through">
+                    {row.aws}
+                  </td>
+                  <td
+                    className={`px-4 py-2.5 font-mono text-xs ${row.highlight ? 'rounded bg-brand-50 font-semibold text-brand-700' : 'text-zinc-700'}`}
+                  >
+                    {row.fil}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="border-t border-zinc-200 bg-zinc-50 px-4 py-2.5 text-xs text-zinc-600">
+            ✓ All S3 operations (PUT, GET, DELETE, multipart, presigned URLs) are supported
+          </div>
+        </div>
       </div>
 
-      {/* SDK example */}
-      <div>
-        <h3 className="mb-2 text-sm font-semibold text-zinc-900">JavaScript / AWS SDK v3</h3>
-        <CodeBlock
-          language="JavaScript"
-          code={`import { S3Client } from '@aws-sdk/client-s3'\n\nconst client = new S3Client({\n  endpoint: '${S3_ENDPOINT}',\n  region: 'us-east-1',\n  credentials: {\n    accessKeyId: 'YOUR_ACCESS_KEY_ID',\n    secretAccessKey: 'YOUR_SECRET_ACCESS_KEY',\n  },\n})`}
-        />
+      {/* Manage buckets */}
+      <div className="flex justify-center border-t border-zinc-100 pt-4">
+        <Link to="/buckets" className="text-sm font-medium text-zinc-500 hover:text-zinc-800">
+          Manage buckets →
+        </Link>
       </div>
     </div>
   );
@@ -190,15 +488,12 @@ function ConnectionDetailsTab() {
 
 export function ApiKeysPage() {
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const [keys, setKeys] = useState<AccessKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Create modal state
-  const [createOpen, setCreateOpen] = useState(false);
-
-  // Fetch access keys on mount
   useEffect(() => {
     let cancelled = false;
     async function fetchKeys() {
@@ -221,44 +516,15 @@ export function ApiKeysPage() {
     };
   }, []);
 
-  // -------------------------------------------------------------------------
-  // Handlers
-  // -------------------------------------------------------------------------
-
-  function handleOpenCreate() {
-    setCreateOpen(true);
+  async function handleDelete(id: string) {
+    try {
+      await apiRequest(`/access-keys/${id}`, { method: 'DELETE' });
+      setKeys((prev) => prev.filter((k) => k.id !== id));
+      toast.success('Access key deleted');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete key');
+    }
   }
-
-  function handleKeyCreated(response: CreateAccessKeyResponse) {
-    const newKey: AccessKey = {
-      id: response.id,
-      keyName: response.keyName,
-      accessKeyId: response.accessKeyId,
-      createdAt: response.createdAt,
-      lastUsedAt: undefined,
-      status: 'active',
-    };
-    setKeys((prev) => [...prev, newKey]);
-    setCreateOpen(false);
-  }
-
-  function handleToggle(id: string) {
-    setKeys((prev) =>
-      prev.map((k) =>
-        k.id === id ? { ...k, status: k.status === 'active' ? 'inactive' : 'active' } : k,
-      ),
-    );
-    toast.success('Access key updated');
-  }
-
-  function handleDelete(id: string) {
-    setKeys((prev) => prev.filter((k) => k.id !== id));
-    toast.success('Access key deleted');
-  }
-
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
 
   if (loading) {
     return (
@@ -280,35 +546,30 @@ export function ApiKeysPage() {
 
   return (
     <div className="p-8">
-      <h1 className="mb-6 text-2xl font-semibold text-zinc-900">API &amp; Keys</h1>
+      <h1 className="mb-1 text-2xl font-semibold text-zinc-900">API Keys</h1>
+      <p className="mb-6 text-sm text-zinc-500">
+        Manage credentials and connect via S3-compatible API
+      </p>
 
       <Tabs>
         <TabList>
-          <Tab>Access Keys</Tab>
-          <Tab>Connection Details</Tab>
+          <Tab>API keys {keys.length > 0 && `(${keys.length})`}</Tab>
+          <Tab>Connection details</Tab>
         </TabList>
 
         <TabPanels>
           <TabPanel>
             <AccessKeysTab
               keys={keys}
-              onCreateOpen={handleOpenCreate}
-              onToggle={handleToggle}
+              onCreateOpen={() => void navigate({ to: '/api-keys/create' })}
               onDelete={handleDelete}
             />
           </TabPanel>
-
           <TabPanel>
             <ConnectionDetailsTab />
           </TabPanel>
         </TabPanels>
       </Tabs>
-
-      <CreateAccessKeyModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onDone={handleKeyCreated}
-      />
     </div>
   );
 }

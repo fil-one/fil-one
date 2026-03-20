@@ -19,6 +19,9 @@ export const Route = createRoute({
       // Network error or 401 (handled by apiRequest) — let the app through
       return;
     }
+    if (!me.emailVerified) {
+      throw redirect({ to: '/verify-email' });
+    }
     if (!me.orgConfirmed) {
       throw redirect({ to: '/finish-sign-up' });
     }
