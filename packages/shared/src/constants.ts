@@ -21,6 +21,8 @@ export const TB_BYTES = 1_000_000_000_000;
 export const TRIAL_STORAGE_LIMIT = 1 * TB_BYTES;
 export const TRIAL_EGRESS_LIMIT = 2 * TB_BYTES;
 export const TRIAL_DURATION_DAYS = 30;
+export const TRIAL_GRACE_DAYS = 7;
+export const PAID_GRACE_DAYS = 30;
 export const UNLIMITED = -1;
 
 export interface UsageLimits {
