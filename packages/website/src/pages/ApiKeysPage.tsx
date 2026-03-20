@@ -6,6 +6,7 @@ import { CopySimpleIcon, PlusIcon } from '@phosphor-icons/react/dist/ssr';
 import { AccessKeysTable } from '../components/AccessKeysTable';
 import { Button } from '../components/Button';
 import { CodeBlock } from '../components/CodeBlock';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Spinner } from '../components/Spinner';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
 import { useToast } from '../components/Toast';
@@ -372,7 +373,15 @@ export function ApiKeysPage() {
     };
   }, []);
 
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+
   async function handleDelete(id: string) {
+    setConfirmDeleteKey(id);
+  }
+
+  async function confirmDeleteKeyAction() {
+    if (!confirmDeleteKey) return;
+    const id = confirmDeleteKey;
     try {
       await apiRequest(`/access-keys/${id}`, { method: 'DELETE' });
       setKeys((prev) => prev.filter((k) => k.id !== id));
@@ -426,6 +435,15 @@ export function ApiKeysPage() {
           </TabPanel>
         </TabPanels>
       </Tabs>
+
+      <ConfirmDialog
+        open={confirmDeleteKey !== null}
+        onClose={() => setConfirmDeleteKey(null)}
+        onConfirm={confirmDeleteKeyAction}
+        title="Delete access key"
+        description="This access key will be permanently revoked. Any applications using it will lose access immediately."
+        confirmLabel="Delete key"
+      />
     </div>
   );
 }

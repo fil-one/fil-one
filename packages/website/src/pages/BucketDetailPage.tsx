@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ArrowUpIcon,
@@ -16,6 +16,7 @@ import {
 
 import { AccessKeysTable } from '../components/AccessKeysTable';
 import { Button } from '../components/Button';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyableField } from '../components/CopyableField';
 import { Input } from '../components/Input';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/Modal';
@@ -34,10 +35,11 @@ import type {
   ListObjectsResponse,
   GetBucketResponse,
   ListAccessKeysResponse,
-  PresignUploadResponse,
 } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate, formatDateTime } from '../lib/time.js';
+import { useFileUpload } from '../lib/use-file-upload.js';
+import { useObjectActions } from '../lib/use-object-actions.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -70,12 +72,6 @@ function getEntriesAtPrefix(objects: S3Object[], prefix: string): BrowseEntry[] 
 
   return [...folderEntries, ...files];
 }
-
-// ---------------------------------------------------------------------------
-// Upload step type
-// ---------------------------------------------------------------------------
-
-type UploadStep = 'select' | 'uploading' | 'done';
 
 // ---------------------------------------------------------------------------
 // Stat card component
@@ -146,15 +142,31 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
   // Add key modal
   const [addKeyOpen, setAddKeyOpen] = useState(false);
 
+  // Confirm dialog state
+  const [confirmDeleteObject, setConfirmDeleteObject] = useState<string | null>(null);
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+
   // Upload modal state
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [uploadStep, setUploadStep] = useState<UploadStep>('select');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [objectName, setObjectName] = useState('');
-  const [objectDescription, setObjectDescription] = useState('');
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const userEditedName = useRef(false);
+
+  const upload = useFileUpload({
+    bucketName,
+    onSuccess: (key, file) => {
+      setObjects((prev) => [
+        {
+          key,
+          sizeBytes: file.size,
+          lastModified: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+    },
+  });
+
+  const objectActions = useObjectActions({
+    bucketName,
+    onDeleted: (key) => setObjects((prev) => prev.filter((o) => o.key !== key)),
+  });
 
   // Fetch bucket metadata
   useEffect(() => {
@@ -229,110 +241,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
 
   function handleCloseUploadModal() {
     setUploadOpen(false);
-    setUploadStep('select');
-    setSelectedFile(null);
-    setObjectName('');
-    setObjectDescription('');
-    setUploadProgress(0);
-    userEditedName.current = false;
-  }
-
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-      if (!userEditedName.current) {
-        setObjectName(file.name);
-      }
-    }
-  }
-
-  async function handleUpload() {
-    if (!selectedFile || !objectName.trim()) return;
-    setUploadStep('uploading');
-    setUploadProgress(0);
-
-    try {
-      const key = objectName.trim();
-      const contentType = selectedFile.type || 'application/octet-stream';
-
-      const description = objectDescription.trim() || undefined;
-      const presignData = await apiRequest<PresignUploadResponse>(
-        `/buckets/${encodeURIComponent(bucketName)}/objects/presign`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            key,
-            contentType,
-            fileName: selectedFile.name,
-            ...(description && { description }),
-          }),
-        },
-      );
-      setUploadProgress(1);
-
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            setUploadProgress(Math.max(1, Math.round((e.loaded / e.total) * 100)));
-          }
-        };
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve();
-          } else {
-            reject(new Error(`Upload failed with status ${xhr.status}`));
-          }
-        };
-        xhr.onerror = () => reject(new Error('Upload failed'));
-        xhr.open('PUT', presignData.url);
-        xhr.setRequestHeader('Content-Type', contentType);
-        xhr.send(selectedFile);
-      });
-
-      setUploadProgress(100);
-      setUploadStep('done');
-      setObjects((prev) => [
-        {
-          key: presignData.key,
-          sizeBytes: selectedFile.size,
-          lastModified: new Date().toISOString(),
-        },
-        ...prev,
-      ]);
-      toast.success(`${selectedFile.name} uploaded successfully`);
-    } catch (err) {
-      console.error('Upload failed:', err);
-      handleCloseUploadModal();
-      toast.error(err instanceof Error ? err.message : 'Upload failed');
-    }
-  }
-
-  async function handleDeleteObject(key: string) {
-    try {
-      await apiRequest(
-        `/buckets/${encodeURIComponent(bucketName)}/objects?key=${encodeURIComponent(key)}`,
-        { method: 'DELETE' },
-      );
-      setObjects((prev) => prev.filter((o) => o.key !== key));
-      toast.success('Object deleted');
-    } catch (err) {
-      console.error('Failed to delete object:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to delete object');
-    }
-  }
-
-  async function handleDownloadObject(key: string) {
-    try {
-      const data = await apiRequest<{ url: string }>(
-        `/buckets/${encodeURIComponent(bucketName)}/objects/download?key=${encodeURIComponent(key)}`,
-      );
-      window.open(data.url, '_blank');
-    } catch (err) {
-      console.error('Failed to get download URL:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to get download URL');
-    }
+    upload.reset();
   }
 
   async function handleKeyAdded() {
@@ -351,6 +260,12 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
   }
 
   async function handleDeleteKey(id: string) {
+    setConfirmDeleteKey(id);
+  }
+
+  async function confirmDeleteKeyAction() {
+    if (!confirmDeleteKey) return;
+    const id = confirmDeleteKey;
     try {
       await apiRequest(`/access-keys/${id}`, { method: 'DELETE' });
       setAccessKeys((prev) => prev.filter((k) => k.id !== id));
@@ -545,15 +460,22 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                                     <button
                                       type="button"
                                       aria-label={`Download ${entry.name}`}
-                                      onClick={() => handleDownloadObject(entry.object.key)}
-                                      className="text-zinc-400 hover:text-brand-600"
+                                      onClick={() =>
+                                        void objectActions.downloadObject(entry.object.key)
+                                      }
+                                      disabled={objectActions.downloading === entry.object.key}
+                                      className="text-zinc-400 hover:text-brand-600 disabled:opacity-50"
                                     >
-                                      <DownloadSimpleIcon size={16} aria-hidden="true" />
+                                      {objectActions.downloading === entry.object.key ? (
+                                        <Spinner ariaLabel="Downloading" size={16} />
+                                      ) : (
+                                        <DownloadSimpleIcon size={16} aria-hidden="true" />
+                                      )}
                                     </button>
                                     <button
                                       type="button"
                                       aria-label={`Delete ${entry.name}`}
-                                      onClick={() => handleDeleteObject(entry.object.key)}
+                                      onClick={() => setConfirmDeleteObject(entry.object.key)}
                                       className="text-zinc-400 hover:text-red-500"
                                     >
                                       <TrashIcon size={16} aria-hidden="true" />
@@ -621,17 +543,17 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
       <Modal open={uploadOpen} onClose={handleCloseUploadModal} size="md">
         <ModalHeader onClose={handleCloseUploadModal}>Upload object</ModalHeader>
 
-        {uploadStep === 'select' && (
+        {upload.uploadStep === 'idle' && (
           <>
             <ModalBody>
               <div
                 className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-zinc-300 p-8 text-center hover:border-brand-400"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => upload.fileInputRef.current?.click()}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
-                    fileInputRef.current?.click();
+                    upload.fileInputRef.current?.click();
                   }
                 }}
               >
@@ -641,18 +563,22 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                 </p>
                 <p className="mt-1 text-xs text-zinc-500">Any file type up to 5 GB</p>
                 <input
-                  ref={fileInputRef}
+                  ref={upload.fileInputRef}
                   type="file"
                   className="hidden"
-                  onChange={handleFileSelect}
+                  onChange={upload.handleFileSelect}
                 />
               </div>
 
-              {selectedFile && (
+              {upload.selectedFile && (
                 <div className="mt-3 flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
                   <FileIcon size={16} className="shrink-0 text-zinc-500" aria-hidden="true" />
-                  <span className="flex-1 truncate text-sm text-zinc-700">{selectedFile.name}</span>
-                  <span className="text-xs text-zinc-500">{formatBytes(selectedFile.size)}</span>
+                  <span className="flex-1 truncate text-sm text-zinc-700">
+                    {upload.selectedFile.name}
+                  </span>
+                  <span className="text-xs text-zinc-500">
+                    {formatBytes(upload.selectedFile.size)}
+                  </span>
                 </div>
               )}
 
@@ -662,11 +588,8 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                 </label>
                 <Input
                   id="object-name"
-                  value={objectName}
-                  onChange={(value) => {
-                    userEditedName.current = true;
-                    setObjectName(value);
-                  }}
+                  value={upload.objectName}
+                  onChange={upload.handleObjectNameChange}
                   placeholder="path/to/my-file.txt"
                   autoComplete="off"
                 />
@@ -682,8 +605,8 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                 </label>
                 <textarea
                   id="object-description"
-                  value={objectDescription}
-                  onChange={(e) => setObjectDescription(e.target.value)}
+                  value={upload.objectDescription}
+                  onChange={(e) => upload.setObjectDescription(e.target.value)}
                   placeholder="A short description of this object"
                   rows={2}
                   className="block w-full rounded-lg border border-zinc-200 p-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-2 focus:outline-brand-600"
@@ -697,8 +620,8 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                 </Button>
                 <Button
                   variant="filled"
-                  disabled={!selectedFile || !objectName.trim()}
-                  onClick={handleUpload}
+                  disabled={!upload.selectedFile || !upload.objectName.trim()}
+                  onClick={upload.handleUpload}
                 >
                   Upload
                 </Button>
@@ -707,24 +630,28 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
           </>
         )}
 
-        {uploadStep === 'uploading' && (
+        {upload.uploadStep === 'uploading' && (
           <ModalBody>
             <div className="flex flex-col items-center gap-4 py-4">
               <Spinner ariaLabel="Uploading file" size={40} />
-              <p className="text-sm text-zinc-700">Uploading {selectedFile?.name}...</p>
-              <ProgressBar value={uploadProgress} className="w-full" label="Upload progress" />
+              <p className="text-sm text-zinc-700">Uploading {upload.selectedFile?.name}...</p>
+              <ProgressBar
+                value={upload.uploadProgress}
+                className="w-full"
+                label="Upload progress"
+              />
             </div>
           </ModalBody>
         )}
 
-        {uploadStep === 'done' && (
+        {upload.uploadStep === 'done' && (
           <>
             <ModalBody>
               <div className="flex flex-col items-center gap-3 py-4">
                 <CheckCircleIcon size={40} className="text-green-500" aria-hidden="true" />
                 <p className="text-sm font-medium text-zinc-900">Upload complete.</p>
                 <p className="text-xs text-zinc-500">
-                  {selectedFile?.name} has been stored on Filecoin.
+                  {upload.selectedFile?.name} has been stored on Filecoin.
                 </p>
               </div>
             </ModalBody>
@@ -745,6 +672,29 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
         onClose={() => setAddKeyOpen(false)}
         bucketName={bucketName}
         onKeyAdded={handleKeyAdded}
+      />
+
+      {/* Delete object confirmation */}
+      <ConfirmDialog
+        open={confirmDeleteObject !== null}
+        onClose={() => setConfirmDeleteObject(null)}
+        onConfirm={() => {
+          if (!confirmDeleteObject) return Promise.resolve();
+          return objectActions.deleteObject(confirmDeleteObject);
+        }}
+        title="Delete object"
+        description="This object will be permanently deleted. This action cannot be undone."
+        confirmLabel="Delete object"
+      />
+
+      {/* Delete access key confirmation */}
+      <ConfirmDialog
+        open={confirmDeleteKey !== null}
+        onClose={() => setConfirmDeleteKey(null)}
+        onConfirm={confirmDeleteKeyAction}
+        title="Delete access key"
+        description="This access key will be permanently revoked. Any applications using it will lose access immediately."
+        confirmLabel="Delete key"
       />
     </div>
   );
