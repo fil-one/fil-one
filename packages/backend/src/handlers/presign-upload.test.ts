@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -10,7 +9,6 @@ import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 vi.mock('sst', () => ({
   Resource: {
-    UploadsTable: { name: 'UploadsTable' },
     UserInfoTable: { name: 'UserInfoTable' },
   },
 }));
@@ -41,12 +39,6 @@ function validBody() {
   return JSON.stringify({ key: 'photos/cat.jpg', contentType: 'image/jpeg', fileName: 'cat.jpg' });
 }
 
-function bucketRecord() {
-  return {
-    Item: marshall({ pk: `USER#${USER_INFO.userId}`, sk: 'BUCKET#my-bucket' }),
-  };
-}
-
 function orgProfileWithTenant(tenantId: string) {
   return {
     Item: {
@@ -69,10 +61,7 @@ describe('presign-upload baseHandler', () => {
   });
 
   it('returns 200 with presigned URL on success', async () => {
-    ddbMock.on(GetItemCommand, { TableName: 'UploadsTable' }).resolves(bucketRecord());
-    ddbMock
-      .on(GetItemCommand, { TableName: 'UserInfoTable' })
-      .resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetAuroraS3Credentials.mockResolvedValue({
       accessKeyId: 'AKIA_CONSOLE',
       secretAccessKey: 's3_secret',
@@ -110,7 +99,6 @@ describe('presign-upload baseHandler', () => {
 
   it('returns 400 when bucket name is missing from path', async () => {
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
-    // no pathParameters
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(400);
@@ -149,19 +137,8 @@ describe('presign-upload baseHandler', () => {
     expect(result.statusCode).toBe(400);
   });
 
-  it('returns 404 when bucket is not found', async () => {
-    ddbMock.on(GetItemCommand, { TableName: 'UploadsTable' }).resolves({ Item: undefined });
-
-    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
-    event.pathParameters = { name: 'no-bucket' };
-    const result = await baseHandler(event);
-
-    expect(result.statusCode).toBe(404);
-  });
-
   it('returns 503 when org setup is not complete', async () => {
-    ddbMock.on(GetItemCommand, { TableName: 'UploadsTable' }).resolves(bucketRecord());
-    ddbMock.on(GetItemCommand, { TableName: 'UserInfoTable' }).resolves({
+    ddbMock.on(GetItemCommand).resolves({
       Item: {
         pk: { S: `ORG#${USER_INFO.orgId}` },
         sk: { S: 'PROFILE' },

@@ -11,7 +11,6 @@ import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 vi.mock('sst', () => ({
   Resource: {
-    UploadsTable: { name: 'UploadsTable' },
     UserInfoTable: { name: 'UserInfoTable' },
   },
 }));
@@ -23,10 +22,12 @@ vi.mock('../lib/aurora-backoffice.js', () => ({
 }));
 
 const mockGetAuroraS3Credentials = vi.fn();
+const mockListBuckets = vi.fn();
 const mockListObjects = vi.fn();
 
 vi.mock('../lib/aurora-s3-client.js', () => ({
   getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
+  listBuckets: (...args: unknown[]) => mockListBuckets(...args),
   listObjects: (...args: unknown[]) => mockListObjects(...args),
 }));
 
@@ -37,7 +38,6 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './get-activity.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
-import { S3_REGION } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,17 +54,6 @@ function orgProfileItem(auroraTenantId?: string) {
       ? { auroraTenantId: { S: auroraTenantId }, setupStatus: { S: FINAL_SETUP_STATUS } }
       : {}),
   };
-}
-
-function bucketItem(name: string, createdAt: string) {
-  return marshall({
-    pk: `USER#${USER_INFO.userId}`,
-    sk: `BUCKET#${name}`,
-    name,
-    region: S3_REGION,
-    createdAt,
-    isPublic: false,
-  });
 }
 
 function keyItem(id: string, keyName: string, createdAt: string) {
@@ -116,6 +105,7 @@ describe('get-activity baseHandler', () => {
       accessKeyId: 'AKIA_CONSOLE',
       secretAccessKey: 's3_secret',
     });
+    mockListBuckets.mockResolvedValue({ buckets: [] });
     mockListObjects.mockResolvedValue({ objects: [], isTruncated: false });
     ddbMock.on(GetItemCommand, { TableName: 'UserInfoTable' }).resolves(orgProfileWithTenant());
   });
@@ -218,20 +208,12 @@ describe('get-activity baseHandler', () => {
   it('returns bucket and object activities sorted most-recent-first', async () => {
     mockOrgProfile(AURORA_TENANT_ID);
 
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
-      })
-      .resolves({
-        Items: [bucketItem('photos', '2026-01-01T00:00:00Z')],
-      });
+    mockListBuckets.mockResolvedValue({
+      buckets: [{ name: 'photos', createdAt: '2026-01-01T00:00:00Z' }],
+    });
 
     // Access keys query
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `ORG#${USER_INFO.orgId}` } },
-      })
-      .resolves({ Items: [] });
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     mockListObjects.mockResolvedValue({
       objects: [
@@ -283,19 +265,11 @@ describe('get-activity baseHandler', () => {
   it('respects the limit query parameter', async () => {
     mockOrgProfile(AURORA_TENANT_ID);
 
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
-      })
-      .resolves({
-        Items: [bucketItem('b1', '2026-01-01T00:00:00Z')],
-      });
+    mockListBuckets.mockResolvedValue({
+      buckets: [{ name: 'b1', createdAt: '2026-01-01T00:00:00Z' }],
+    });
 
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `ORG#${USER_INFO.orgId}` } },
-      })
-      .resolves({ Items: [] });
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     mockListObjects.mockResolvedValue({
       objects: [
@@ -342,19 +316,11 @@ describe('get-activity baseHandler', () => {
   it('defaults limit to 10 when limit is non-numeric', async () => {
     mockOrgProfile(AURORA_TENANT_ID);
 
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
-      })
-      .resolves({
-        Items: [bucketItem('b1', '2026-01-01T00:00:00Z')],
-      });
+    mockListBuckets.mockResolvedValue({
+      buckets: [{ name: 'b1', createdAt: '2026-01-01T00:00:00Z' }],
+    });
 
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `ORG#${USER_INFO.orgId}` } },
-      })
-      .resolves({ Items: [] });
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     mockListObjects.mockResolvedValue({
       objects: [
@@ -378,19 +344,11 @@ describe('get-activity baseHandler', () => {
   it('defaults limit to 10 when limit is negative', async () => {
     mockOrgProfile(AURORA_TENANT_ID);
 
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
-      })
-      .resolves({
-        Items: [bucketItem('b1', '2026-01-01T00:00:00Z')],
-      });
+    mockListBuckets.mockResolvedValue({
+      buckets: [{ name: 'b1', createdAt: '2026-01-01T00:00:00Z' }],
+    });
 
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `ORG#${USER_INFO.orgId}` } },
-      })
-      .resolves({ Items: [] });
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     mockListObjects.mockResolvedValue({
       objects: [
@@ -479,19 +437,11 @@ describe('get-activity baseHandler', () => {
     twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
     twoDaysAgo.setHours(12, 0, 0, 0);
 
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
-      })
-      .resolves({
-        Items: [bucketItem('data', '2025-01-01T00:00:00Z')],
-      });
+    mockListBuckets.mockResolvedValue({
+      buckets: [{ name: 'data', createdAt: '2025-01-01T00:00:00Z' }],
+    });
 
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `ORG#${USER_INFO.orgId}` } },
-      })
-      .resolves({ Items: [] });
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     mockListObjects.mockResolvedValue({
       objects: [
@@ -542,13 +492,9 @@ describe('get-activity baseHandler', () => {
   it('includes key activities sorted with buckets and objects', async () => {
     mockOrgProfile(AURORA_TENANT_ID);
 
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
-      })
-      .resolves({
-        Items: [bucketItem('b1', '2026-01-01T00:00:00Z')],
-      });
+    mockListBuckets.mockResolvedValue({
+      buckets: [{ name: 'b1', createdAt: '2026-01-01T00:00:00Z' }],
+    });
 
     ddbMock
       .on(QueryCommand, {
@@ -584,19 +530,11 @@ describe('get-activity baseHandler', () => {
   });
 
   it('includes sizeBytes on object activities when present', async () => {
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `USER#${USER_INFO.userId}` } },
-      })
-      .resolves({
-        Items: [bucketItem('b1', '2026-01-01T00:00:00Z')],
-      });
+    mockListBuckets.mockResolvedValue({
+      buckets: [{ name: 'b1', createdAt: '2026-01-01T00:00:00Z' }],
+    });
 
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: { ':pk': { S: `ORG#${USER_INFO.orgId}` } },
-      })
-      .resolves({ Items: [] });
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     mockListObjects.mockResolvedValue({
       objects: [{ key: 'file.dat', sizeBytes: 4096, lastModified: '2026-01-02T00:00:00.000Z' }],

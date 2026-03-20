@@ -498,6 +498,29 @@ describe('stripe-webhook handler', () => {
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
+    it('sets GracePeriod status with 7-day grace window for trialing subscriptions', async () => {
+      const futureTrialEnd = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60;
+      setupStripeEvent(
+        'customer.subscription.deleted',
+        mockSubscription({ trial_end: futureTrialEnd }),
+      );
+      setupCustomerRetrieve();
+
+      const before = Date.now();
+      const result = await handler(buildWebhookEvent('{}'));
+      const after = Date.now();
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+
+      const input = updateCalls[0].args[0].input;
+      const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();
+      const sevenDays = 7 * 24 * 60 * 60 * 1000;
+      expect(graceDate).toBeGreaterThanOrEqual(before + sevenDays - 5000);
+      expect(graceDate).toBeLessThanOrEqual(after + sevenDays + 5000);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
     it('skips when customer is deleted', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupDeletedCustomerRetrieve();
@@ -537,7 +560,7 @@ describe('stripe-webhook handler', () => {
   // 7. invoice.payment_succeeded
   // -----------------------------------------------------------------------
   describe('invoice.payment_succeeded', () => {
-    it('sets Active status, REMOVEs gracePeriodEndsAt', async () => {
+    it('sets Active status, REMOVEs gracePeriodEndsAt, lastPaymentFailedAt, and canceledAt', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
 
@@ -553,7 +576,7 @@ describe('stripe-webhook handler', () => {
           sk: { S: 'SUBSCRIPTION' },
         },
         UpdateExpression:
-          'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt',
+          'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt',
         ExpressionAttributeValues: {
           ':active': { S: SubscriptionStatus.Active },
           ':now': { S: expect.any(String) },
@@ -610,13 +633,11 @@ describe('stripe-webhook handler', () => {
   // 8. invoice.payment_failed
   // -----------------------------------------------------------------------
   describe('invoice.payment_failed', () => {
-    it('sets PastDue status with 30-day grace period', async () => {
+    it('sets PastDue status with lastPaymentFailedAt (no grace period)', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieve();
 
-      const before = Date.now();
       const result = await handler(buildWebhookEvent('{}'));
-      const after = Date.now();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -629,18 +650,16 @@ describe('stripe-webhook handler', () => {
           sk: { S: 'SUBSCRIPTION' },
         },
         UpdateExpression:
-          'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+          'SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now',
         ExpressionAttributeValues: {
           ':status': { S: SubscriptionStatus.PastDue },
-          ':grace': { S: expect.any(String) },
+          ':failedAt': { S: expect.any(String) },
           ':now': { S: expect.any(String) },
         },
       });
 
-      const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();
-      const thirtyDays = 30 * 24 * 60 * 60 * 1000;
-      expect(graceDate).toBeGreaterThanOrEqual(before + thirtyDays - 5000);
-      expect(graceDate).toBeLessThanOrEqual(after + thirtyDays + 5000);
+      // Must NOT set gracePeriodEndsAt — Stripe Smart Retries handle the retry window
+      expect(input.UpdateExpression).not.toContain('gracePeriodEndsAt');
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });

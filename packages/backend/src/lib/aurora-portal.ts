@@ -12,6 +12,13 @@ import type { AccessKeyPermission } from '@filone/shared';
 
 const ssm = new SSMClient({});
 
+export class BucketAlreadyExistsError extends Error {
+  constructor(bucketName: string) {
+    super(`Bucket "${bucketName}" already exists`);
+    this.name = 'BucketAlreadyExistsError';
+  }
+}
+
 export class DuplicateKeyNameError extends Error {
   constructor() {
     super('An access key with this name already exists');
@@ -53,10 +60,7 @@ export async function createAuroraBucket({
 
   if (error) {
     if (response?.status === 409) {
-      console.log(
-        `Aurora bucket "${bucketName}" already exists for tenant ${tenantId}, treating as success`,
-      );
-      return;
+      throw new BucketAlreadyExistsError(bucketName);
     }
     throw new Error(`Failed to create Aurora bucket "${bucketName}" for tenant ${tenantId}`, {
       cause: error,

@@ -2,8 +2,6 @@ export interface Bucket {
   name: string;
   region: string;
   createdAt: string;
-  objectCount: number;
-  sizeBytes: number;
   isPublic: boolean;
 }
 

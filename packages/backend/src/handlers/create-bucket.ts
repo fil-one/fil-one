@@ -1,12 +1,12 @@
-import { GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketRequest, CreateBucketResponse, ErrorResponse } from '@filone/shared';
+import { S3_REGION } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { createAuroraBucket } from '../lib/aurora-portal.js';
+import { createAuroraBucket, BucketAlreadyExistsError } from '../lib/aurora-portal.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -41,6 +41,13 @@ export async function baseHandler(
       .build();
   }
 
+  if (region !== S3_REGION) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: `Unsupported region. Supported: ${S3_REGION}` })
+      .build();
+  }
+
   if (!BUCKET_NAME_REGEX.test(name)) {
     return new ResponseBuilder()
       .status(400)
@@ -51,7 +58,7 @@ export async function baseHandler(
       .build();
   }
 
-  const { userId, orgId } = getUserInfo(event);
+  const { orgId } = getUserInfo(event);
 
   // Look up org profile to get auroraTenantId
   const { Item: orgProfile } = await dynamo.send(
@@ -73,34 +80,10 @@ export async function baseHandler(
       .build();
   }
 
-  // We create the Aurora bucket before the DynamoDB record so that:
-  // 1. If Aurora fails, we haven't written any state — clean failure.
-  // 2. If Aurora succeeds but DynamoDB fails, the user can safely retry:
-  //    Aurora returns 409 (treated as success), then DynamoDB insert succeeds.
-  // 3. If the bucket truly already exists (both Aurora and DynamoDB),
-  //    Aurora 409 is treated as success, then DynamoDB conditional check
-  //    catches the duplicate and we return 409 to the user.
-  await createAuroraBucket({ tenantId: auroraTenantId, bucketName: name });
-
-  const now = new Date().toISOString();
-
   try {
-    await dynamo.send(
-      new PutItemCommand({
-        TableName: Resource.UploadsTable.name,
-        Item: marshall({
-          pk: `USER#${userId}`,
-          sk: `BUCKET#${name}`,
-          name,
-          region,
-          createdAt: now,
-          isPublic: false,
-        }),
-        ConditionExpression: 'attribute_not_exists(pk) AND attribute_not_exists(sk)',
-      }),
-    );
+    await createAuroraBucket({ tenantId: auroraTenantId, bucketName: name });
   } catch (err) {
-    if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+    if (err instanceof BucketAlreadyExistsError) {
       return new ResponseBuilder()
         .status(409)
         .body<ErrorResponse>({ message: `Bucket "${name}" already exists` })
@@ -109,6 +92,8 @@ export async function baseHandler(
     throw err;
   }
 
+  const now = new Date().toISOString();
+
   return new ResponseBuilder()
     .status(201)
     .body<CreateBucketResponse>({
@@ -116,8 +101,6 @@ export async function baseHandler(
         name,
         region,
         createdAt: now,
-        objectCount: 0,
-        sizeBytes: 0,
         isPublic: false,
       },
     })

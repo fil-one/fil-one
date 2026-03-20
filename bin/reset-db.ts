@@ -33,7 +33,6 @@ console.log(`Resetting database for stage "${stage}"...`);
 const dynamo = new DynamoDBClient({});
 
 const tables: Array<{ name: string; tableName: string }> = [
-  { name: 'UploadsTable', tableName: Resource.UploadsTable.name },
   { name: 'BillingTable', tableName: Resource.BillingTable.name },
   { name: 'UserInfoTable', tableName: Resource.UserInfoTable.name },
 ];
