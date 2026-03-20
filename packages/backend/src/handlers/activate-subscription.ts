@@ -8,6 +8,7 @@ import type { ActivateSubscriptionResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
+import { updateTenantStatus } from '../lib/aurora-backoffice.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -18,7 +19,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 const dynamo = getDynamoClient();
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { userId } = getUserInfo(event);
+  const { userId, orgId } = getUserInfo(event);
   const tableName = Resource.BillingTable.name;
   const stripe = getStripeClient();
   const secrets = getBillingSecrets();
@@ -143,6 +144,30 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       },
     }),
   );
+
+  // Unlock Aurora tenant now that user has upgraded to paid
+  try {
+    const profileResult = await dynamo.send(
+      new GetItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: {
+          pk: { S: `ORG#${orgId}` },
+          sk: { S: 'PROFILE' },
+        },
+        ProjectionExpression: 'auroraTenantId',
+      }),
+    );
+    const auroraTenantId = profileResult.Item?.auroraTenantId?.S;
+    if (auroraTenantId) {
+      await updateTenantStatus({ tenantId: auroraTenantId, status: 'ACTIVE' });
+      console.log('[activate-subscription] Aurora tenant unlocked', { orgId, auroraTenantId });
+    }
+  } catch (error) {
+    console.error('[activate-subscription] Failed to unlock Aurora tenant', {
+      orgId,
+      error: (error as Error).message,
+    });
+  }
 
   const response: ActivateSubscriptionResponse = {
     subscription: {

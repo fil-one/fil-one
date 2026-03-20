@@ -7,8 +7,10 @@ import {
   postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens,
   postV1PartnersByPartnerIdTenants,
   postV1PartnersByPartnerIdTenantsByTenantIdSetup,
+  postV1PartnersByPartnerIdTenantsByTenantIdStatus,
   type ModelOperationMetricsSample,
   type ModelStorageMetricsSample,
+  type ModelsTenantStatus,
   type ModelsTenantWithMetricsManagementResponse,
 } from '@filone/aurora-backoffice-client';
 import { getAuroraBackofficeSecrets } from './auth-secrets.js';
@@ -16,6 +18,7 @@ import { getAuroraBackofficeSecrets } from './auth-secrets.js';
 export type {
   ModelOperationMetricsSample,
   ModelStorageMetricsSample,
+  ModelsTenantStatus,
   ModelsTenantWithMetricsManagementResponse,
 };
 
@@ -322,4 +325,34 @@ export async function getTenantInfo({
   }
 
   return data;
+}
+
+export async function updateTenantStatus({
+  tenantId,
+  status,
+}: {
+  tenantId: string;
+  status: ModelsTenantStatus;
+}): Promise<void> {
+  const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
+  const partnerId = process.env.AURORA_PARTNER_ID!;
+  const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
+
+  const client = createClient({
+    baseUrl,
+    headers: { 'X-Api-Key': token },
+  });
+
+  const { error } = await postV1PartnersByPartnerIdTenantsByTenantIdStatus({
+    client,
+    path: { partnerId, tenantId },
+    body: { status },
+    throwOnError: false,
+  });
+
+  if (error) {
+    throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
+      cause: error,
+    });
+  }
 }

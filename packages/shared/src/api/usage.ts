@@ -16,4 +16,5 @@ export interface UsageResponse {
     count: number;
     limit: number;
   };
+  tenantStatus?: 'DISABLED' | 'LOCKED' | 'WRITE_LOCKED' | 'ACTIVE';
 }
