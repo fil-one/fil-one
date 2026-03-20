@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { NoSuchBucket } from '@aws-sdk/client-s3';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -15,11 +14,11 @@ vi.mock('sst', () => ({
 }));
 
 const mockGetAuroraS3Credentials = vi.fn();
-const mockListObjects = vi.fn();
+const mockListBuckets = vi.fn();
 
 vi.mock('../lib/aurora-s3-client.js', () => ({
   getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
-  listObjects: (...args: unknown[]) => mockListObjects(...args),
+  listBuckets: (...args: unknown[]) => mockListBuckets(...args),
 }));
 
 process.env.FILONE_STAGE = 'test';
@@ -27,8 +26,9 @@ process.env.AURORA_S3_GATEWAY_URL = 'https://s3.dev.aur.lu';
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './list-objects.js';
+import { baseHandler } from './list-buckets.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
+import { S3_REGION } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -51,54 +51,67 @@ function orgProfileWithTenant(tenantId: string) {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('list-objects baseHandler', () => {
+describe('list-buckets baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
   });
 
-  it('returns 200 with objects from S3', async () => {
+  it('returns 200 with buckets from Aurora S3', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetAuroraS3Credentials.mockResolvedValue({
       accessKeyId: 'AKIA_CONSOLE',
       secretAccessKey: 's3_secret',
     });
-    mockListObjects.mockResolvedValue({
-      objects: [
-        { key: 'photos/cat.jpg', sizeBytes: 1024, lastModified: '2026-01-01T00:00:00.000Z' },
+    mockListBuckets.mockResolvedValue({
+      buckets: [
+        { name: 'my-bucket', createdAt: '2026-01-01T00:00:00.000Z' },
+        { name: 'other-bucket', createdAt: '2026-01-02T00:00:00.000Z' },
       ],
-      isTruncated: false,
     });
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(result.body as string);
     expect(body).toStrictEqual({
-      objects: [
-        { key: 'photos/cat.jpg', sizeBytes: 1024, lastModified: '2026-01-01T00:00:00.000Z' },
+      buckets: [
+        {
+          name: 'my-bucket',
+          region: S3_REGION,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          isPublic: false,
+        },
+        {
+          name: 'other-bucket',
+          region: S3_REGION,
+          createdAt: '2026-01-02T00:00:00.000Z',
+          isPublic: false,
+        },
       ],
-      isTruncated: false,
     });
 
-    expect(mockListObjects).toHaveBeenCalledWith({
-      endpointUrl: 'https://s3.dev.aur.lu',
-      credentials: { accessKeyId: 'AKIA_CONSOLE', secretAccessKey: 's3_secret' },
-      bucket: 'my-bucket',
-      prefix: undefined,
-      delimiter: undefined,
-      maxKeys: undefined,
-      continuationToken: undefined,
+    expect(mockGetAuroraS3Credentials).toHaveBeenCalledWith('test', 'aurora-t-1');
+    expect(mockListBuckets).toHaveBeenCalledWith('https://s3.dev.aur.lu', {
+      accessKeyId: 'AKIA_CONSOLE',
+      secretAccessKey: 's3_secret',
     });
   });
 
-  it('returns 400 when bucket name is missing from path', async () => {
+  it('returns 503 when auroraTenantId is missing', async () => {
+    ddbMock.on(GetItemCommand).resolves({
+      Item: {
+        pk: { S: `ORG#${USER_INFO.orgId}` },
+        sk: { S: 'PROFILE' },
+      },
+    });
+
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);
 
-    expect(result.statusCode).toBe(400);
+    expect(result.statusCode).toBe(503);
+    expect(mockListBuckets).not.toHaveBeenCalled();
   });
 
   it('returns 503 when org setup is not complete', async () => {
@@ -112,65 +125,25 @@ describe('list-objects baseHandler', () => {
     });
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(503);
-    expect(mockGetAuroraS3Credentials).not.toHaveBeenCalled();
+    expect(mockListBuckets).not.toHaveBeenCalled();
   });
 
-  it('returns 404 when S3 throws NoSuchBucket', async () => {
+  it('returns 200 with empty array when no buckets exist', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetAuroraS3Credentials.mockResolvedValue({
       accessKeyId: 'AKIA_CONSOLE',
       secretAccessKey: 's3_secret',
     });
-    mockListObjects.mockRejectedValue(
-      new NoSuchBucket({ message: 'The specified bucket does not exist', $metadata: {} }),
-    );
+    mockListBuckets.mockResolvedValue({ buckets: [] });
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { name: 'no-such-bucket' };
-    const result = await baseHandler(event);
-
-    expect(result.statusCode).toBe(404);
-    const body = JSON.parse(result.body as string);
-    expect(body).toStrictEqual({ message: 'Bucket not found' });
-  });
-
-  it('passes pagination parameters through to listObjects', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
-    mockListObjects.mockResolvedValue({
-      objects: [],
-      nextToken: 'next-page',
-      isTruncated: true,
-    });
-
-    const event = buildEvent({
-      userInfo: USER_INFO,
-      queryStringParameters: { prefix: 'photos/', maxKeys: '10', nextToken: 'token-1' },
-    });
-    event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(200);
-    expect(mockListObjects).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prefix: 'photos/',
-        maxKeys: 10,
-        continuationToken: 'token-1',
-      }),
-    );
-
     const body = JSON.parse(result.body as string);
-    expect(body).toStrictEqual({
-      objects: [],
-      nextToken: 'next-page',
-      isTruncated: true,
-    });
+    expect(body).toStrictEqual({ buckets: [] });
   });
 });
