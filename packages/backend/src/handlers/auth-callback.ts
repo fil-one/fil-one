@@ -1,4 +1,7 @@
-import middy from '@middy/core';
+// Must be the first import — registers the OTel TracerProvider before any other module loads.
+import '../lib/instrumentation.js';
+
+import { tracedHandler } from '../middleware/tracing.js';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from '@filone/shared';
@@ -93,4 +96,6 @@ async function baseHandler(
   return redirect(`${origin}/dashboard`, responseCookies);
 }
 
-export const handler = middy(baseHandler).use(httpHeaderNormalizer()).use(errorHandlerMiddleware());
+export const handler = tracedHandler(baseHandler)
+  .use(httpHeaderNormalizer())
+  .use(errorHandlerMiddleware());

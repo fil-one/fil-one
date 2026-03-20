@@ -1,9 +1,13 @@
+// Must be the first import — registers the OTel TracerProvider before any other module loads.
+import '../lib/instrumentation.js';
+
 import assert from 'node:assert';
 import type { SQSEvent, Context } from 'aws-lambda';
 import { processTenantSetup } from '../lib/aurora-tenant-setup.js';
 import type { AuroraTenantSetupMessage } from '../lib/aurora-tenant-setup.js';
+import { tracedHandler } from '../middleware/tracing.js';
 
-export async function handler(event: SQSEvent, _context: Context): Promise<void> {
+async function baseHandler(event: SQSEvent, _context: Context): Promise<void> {
   assert.equal(
     event.Records.length,
     1,
@@ -12,3 +16,5 @@ export async function handler(event: SQSEvent, _context: Context): Promise<void>
   const message: AuroraTenantSetupMessage = JSON.parse(event.Records[0].body);
   await processTenantSetup(message);
 }
+
+export const handler = tracedHandler(baseHandler);

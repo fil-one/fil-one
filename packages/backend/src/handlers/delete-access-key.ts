@@ -1,6 +1,9 @@
+// Must be the first import — registers the OTel TracerProvider before any other module loads.
+import '../lib/instrumentation.js';
+
 import { DeleteItemCommand, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import middy from '@middy/core';
+import { tracedHandler } from '../middleware/tracing.js';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
@@ -75,7 +78,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   return { statusCode: 204, body: '' };
 }
 
-export const handler = middy(baseHandler)
+export const handler = tracedHandler(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   .use(csrfMiddleware())

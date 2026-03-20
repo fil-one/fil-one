@@ -1,9 +1,13 @@
+// Must be the first import — registers the OTel TracerProvider before any other module loads.
+import '../lib/instrumentation.js';
+
 import { ScanCommand, GetItemCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { Resource } from 'sst';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
+import { tracedHandler } from '../middleware/tracing.js';
 
 const dynamo = getDynamoClient();
 const lambda = new LambdaClient({});
@@ -15,7 +19,7 @@ interface SubscriptionRecord {
   currentPeriodStart: string;
 }
 
-export async function handler(): Promise<void> {
+async function baseHandler(): Promise<void> {
   const billingTableName = Resource.BillingTable.name;
   const workerFunctionName = process.env.USAGE_WORKER_FUNCTION_NAME!;
   const reportDate = new Date().toISOString().split('T')[0];
@@ -162,3 +166,5 @@ export async function handler(): Promise<void> {
     skippedNoTenant,
   });
 }
+
+export const handler = tracedHandler(baseHandler);

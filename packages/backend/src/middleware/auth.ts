@@ -21,6 +21,7 @@ import {
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { getRootSpan } from '../middleware/tracing.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -136,14 +137,21 @@ async function attachIdentity({
   emailVerified: boolean;
 }): Promise<APIGatewayProxyStructuredResultV2 | null> {
   const resolved = await resolveUserAndOrg(sub, email);
-  (
-    event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
-  ).userInfo = {
+  const userInfo: UserInfo = {
     userId: resolved.userId,
     orgId: resolved.orgId,
     email: resolved.email ?? undefined,
     emailVerified,
   };
+  (
+    event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
+  ).userInfo = userInfo;
+
+  getRootSpan(event).setAttributes({
+    'filone.user_id': userInfo.userId,
+    'filone.org_id': userInfo.orgId,
+  });
+
   if (!resolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
     return orgNotConfirmedResponse();
   }

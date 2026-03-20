@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
+import { buildContext } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -37,6 +38,8 @@ import { handler } from './usage-reporting-worker.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
+const ctx = buildContext({ functionName: 'usage-reporting-worker' });
+
 const basePayload: UsageReportingWorkerPayload = {
   orgId: 'org-1',
   auroraTenantId: 'aurora-tenant-123',
@@ -60,7 +63,7 @@ describe('usage-reporting-worker', () => {
   it('calls getStorageSamples with auroraTenantId, not orgId', async () => {
     mockGetStorageSamples.mockResolvedValue([]);
 
-    await handler(basePayload);
+    await handler(basePayload, ctx);
 
     expect(mockGetStorageSamples).toHaveBeenCalledWith(
       expect.objectContaining({ tenantId: 'aurora-tenant-123' }),
@@ -75,7 +78,7 @@ describe('usage-reporting-worker', () => {
       { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
     ]);
 
-    await handler(basePayload);
+    await handler(basePayload, ctx);
 
     expect(mockMeterEventsCreate).toHaveBeenCalledOnce();
     expect(mockMeterEventsCreate).toHaveBeenCalledWith(
@@ -99,7 +102,7 @@ describe('usage-reporting-worker', () => {
   it('skips Stripe when usage is zero, still writes audit', async () => {
     mockGetStorageSamples.mockResolvedValue([]);
 
-    await handler(basePayload);
+    await handler(basePayload, ctx);
 
     expect(mockMeterEventsCreate).not.toHaveBeenCalled();
 
@@ -115,13 +118,13 @@ describe('usage-reporting-worker', () => {
     ]);
     mockMeterEventsCreate.mockRejectedValueOnce(new Error('Stripe error'));
 
-    await expect(handler(basePayload)).rejects.toThrow('Stripe error');
+    await expect(handler(basePayload, ctx)).rejects.toThrow('Stripe error');
   });
 
   it('propagates Aurora API failure', async () => {
     mockGetStorageSamples.mockRejectedValue(new Error('Aurora timeout'));
 
-    await expect(handler(basePayload)).rejects.toThrow('Aurora timeout');
+    await expect(handler(basePayload, ctx)).rejects.toThrow('Aurora timeout');
   });
 
   it('writes correct audit record fields', async () => {
@@ -130,7 +133,7 @@ describe('usage-reporting-worker', () => {
       { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1500 },
     ]);
 
-    await handler(basePayload);
+    await handler(basePayload, ctx);
 
     const putCalls = ddbMock.commandCalls(PutItemCommand);
     const item = putCalls[0].args[0].input.Item!;

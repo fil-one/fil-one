@@ -6,7 +6,7 @@ import {
   PutItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
 import { SubscriptionStatus } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -43,6 +43,8 @@ const MOCK_USER_ID = 'test-user-uuid';
 const MOCK_CUSTOMER_ID = 'cus_test_123';
 const MOCK_SUBSCRIPTION_ID = 'sub_test_456';
 const MOCK_EVENT_ID = 'evt_test_789';
+
+const ctx = buildContext({ functionName: 'stripe-webhook' });
 
 function buildWebhookEvent(body: string, opts?: { isBase64Encoded?: boolean }) {
   const evt = buildEvent();
@@ -122,7 +124,7 @@ describe('stripe-webhook handler', () => {
     it('returns 400 when stripe-signature header missing', async () => {
       const evt = buildEvent();
       // No stripe-signature header
-      const result = await handler(evt);
+      const result = await handler(evt, ctx);
       expect(result).toEqual({
         statusCode: 400,
         body: JSON.stringify({ message: 'Missing stripe-signature header' }),
@@ -135,7 +137,7 @@ describe('stripe-webhook handler', () => {
       });
 
       const evt = buildWebhookEvent('{}');
-      const result = await handler(evt);
+      const result = await handler(evt, ctx);
       expect(result).toEqual({
         statusCode: 400,
         body: JSON.stringify({ message: 'Invalid signature' }),
@@ -147,7 +149,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('unknown.event', {});
 
       const evt = buildWebhookEvent(rawBody, { isBase64Encoded: true });
-      await handler(evt);
+      await handler(evt, ctx);
 
       expect(mockConstructEvent).toHaveBeenCalledWith(rawBody, 'sig_test', 'whsec_test_fake');
     });
@@ -163,7 +165,7 @@ describe('stripe-webhook handler', () => {
       (condError as { name: string }).name = 'ConditionalCheckFailedException';
       ddbMock.on(PutItemCommand).rejects(condError);
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
 
       // Should NOT have called UpdateItemCommand
@@ -174,7 +176,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('unknown.event', {});
 
       const before = Math.floor(Date.now() / 1000);
-      await handler(buildWebhookEvent('{}'));
+      await handler(buildWebhookEvent('{}'), ctx);
       const after = Math.floor(Date.now() / 1000);
 
       const putCalls = ddbMock.commandCalls(PutItemCommand);
@@ -203,7 +205,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
       ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB error'));
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       expect(result).toEqual({
         statusCode: 500,
         body: JSON.stringify({ message: 'Processing error' }),
@@ -225,7 +227,7 @@ describe('stripe-webhook handler', () => {
       ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB error'));
       ddbMock.on(DeleteItemCommand).rejects(new Error('Delete failed'));
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       expect(result).toEqual({
         statusCode: 500,
         body: JSON.stringify({ message: 'Processing error' }),
@@ -240,7 +242,7 @@ describe('stripe-webhook handler', () => {
     it('updates billing record using subscription.metadata.userId', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -267,7 +269,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('customer.subscription.created', mockSubscription({ metadata: {} }));
       setupCustomerRetrieve('fallback-user');
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -287,7 +289,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('customer.subscription.created', mockSubscription({ metadata: {} }));
       setupDeletedCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
@@ -300,7 +302,7 @@ describe('stripe-webhook handler', () => {
         metadata: {},
       });
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
@@ -311,7 +313,7 @@ describe('stripe-webhook handler', () => {
         mockSubscription({ customer: 'cus_string_id' }),
       );
 
-      await handler(buildWebhookEvent('{}'));
+      await handler(buildWebhookEvent('{}'), ctx);
       // No error thrown, processed correctly
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
     });
@@ -324,7 +326,7 @@ describe('stripe-webhook handler', () => {
         }),
       );
 
-      await handler(buildWebhookEvent('{}'));
+      await handler(buildWebhookEvent('{}'), ctx);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
     });
 
@@ -338,7 +340,7 @@ describe('stripe-webhook handler', () => {
       );
       setupDeletedCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
@@ -346,7 +348,7 @@ describe('stripe-webhook handler', () => {
     it('passes through non-active subscription status', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription({ status: 'past_due' }));
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -367,7 +369,7 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieve('fallback-user');
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
 
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -391,7 +393,7 @@ describe('stripe-webhook handler', () => {
     it('processes same as created (UpdateItemCommand with correct key/values)', async () => {
       setupStripeEvent('customer.subscription.updated', mockSubscription());
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -422,7 +424,7 @@ describe('stripe-webhook handler', () => {
         }),
       );
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -444,7 +446,7 @@ describe('stripe-webhook handler', () => {
         }),
       );
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -468,7 +470,7 @@ describe('stripe-webhook handler', () => {
       setupCustomerRetrieve();
 
       const before = Date.now();
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       const after = Date.now();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -502,7 +504,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupDeletedCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await handler(buildWebhookEvent('{}'), ctx);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -514,7 +516,7 @@ describe('stripe-webhook handler', () => {
         metadata: {},
       });
 
-      await handler(buildWebhookEvent('{}'));
+      await handler(buildWebhookEvent('{}'), ctx);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
   });
@@ -526,7 +528,7 @@ describe('stripe-webhook handler', () => {
     it('logs only, no UpdateItemCommand, idempotency claimed upfront', async () => {
       setupStripeEvent('customer.subscription.trial_will_end', mockSubscription());
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
@@ -541,7 +543,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -566,7 +568,7 @@ describe('stripe-webhook handler', () => {
     it('skips when invoice.customer is null', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice({ customer: null }));
 
-      await handler(buildWebhookEvent('{}'));
+      await handler(buildWebhookEvent('{}'), ctx);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -574,7 +576,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupDeletedCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await handler(buildWebhookEvent('{}'), ctx);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -586,7 +588,7 @@ describe('stripe-webhook handler', () => {
         metadata: {},
       });
 
-      await handler(buildWebhookEvent('{}'));
+      await handler(buildWebhookEvent('{}'), ctx);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -599,7 +601,7 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
@@ -615,7 +617,7 @@ describe('stripe-webhook handler', () => {
       setupCustomerRetrieve();
 
       const before = Date.now();
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       const after = Date.now();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -648,7 +650,7 @@ describe('stripe-webhook handler', () => {
     it('skips when invoice.customer is null', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice({ customer: null }));
 
-      await handler(buildWebhookEvent('{}'));
+      await handler(buildWebhookEvent('{}'), ctx);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -656,7 +658,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupDeletedCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await handler(buildWebhookEvent('{}'), ctx);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -668,7 +670,7 @@ describe('stripe-webhook handler', () => {
         metadata: {},
       });
 
-      await handler(buildWebhookEvent('{}'));
+      await handler(buildWebhookEvent('{}'), ctx);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -681,7 +683,7 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
@@ -696,7 +698,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
       ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB update failed'));
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       expect(result).toEqual({
         statusCode: 500,
         body: JSON.stringify({ message: 'Processing error' }),
@@ -707,7 +709,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       mockCustomersRetrieve.mockRejectedValue(new Error('Stripe API error'));
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       expect(result).toEqual({
         statusCode: 500,
         body: JSON.stringify({ message: 'Processing error' }),
@@ -717,7 +719,7 @@ describe('stripe-webhook handler', () => {
     it('unhandled event type returns 200 and records idempotency', async () => {
       setupStripeEvent('some.unknown.event', {});
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
     });
@@ -726,7 +728,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
       ddbMock.on(PutItemCommand).rejects(new Error('DynamoDB put failed'));
 
-      const result = await handler(buildWebhookEvent('{}'));
+      const result = await handler(buildWebhookEvent('{}'), ctx);
       expect(result).toEqual({
         statusCode: 500,
         body: JSON.stringify({ message: 'Idempotency check error' }),

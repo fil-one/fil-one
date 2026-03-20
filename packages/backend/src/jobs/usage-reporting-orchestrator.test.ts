@@ -3,6 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, ScanCommand, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { marshall } from '@aws-sdk/util-dynamodb';
+import { buildContext } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -42,6 +43,8 @@ function subscriptionItem(orgId: string, extra: Record<string, unknown> = {}) {
   );
 }
 
+const ctx = buildContext({ functionName: 'usage-reporting-orchestrator' });
+
 function orgProfileItem(orgId: string, auroraTenantId?: string) {
   if (!auroraTenantId) return { Item: undefined };
   return {
@@ -74,7 +77,7 @@ describe('usage-reporting-orchestrator', () => {
   it('does nothing when no active subscriptions', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [] });
 
-    await handler();
+    await handler({}, ctx);
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
   });
@@ -84,7 +87,7 @@ describe('usage-reporting-orchestrator', () => {
     mockGetItemForOrgs(['org-1']);
     lambdaMock.on(InvokeCommand).resolves({});
 
-    await handler();
+    await handler({}, ctx);
 
     const invokeCalls = lambdaMock.commandCalls(InvokeCommand);
     expect(invokeCalls).toHaveLength(1);
@@ -103,7 +106,7 @@ describe('usage-reporting-orchestrator', () => {
     mockGetItemForOrgs(['org-1', 'org-2']);
     lambdaMock.on(InvokeCommand).resolves({});
 
-    await handler();
+    await handler({}, ctx);
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(2);
   });
@@ -121,7 +124,7 @@ describe('usage-reporting-orchestrator', () => {
     mockGetItemForOrgs(['org-1', 'org-2']);
     lambdaMock.on(InvokeCommand).resolves({});
 
-    await handler();
+    await handler({}, ctx);
 
     expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(2);
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(2);
@@ -133,7 +136,7 @@ describe('usage-reporting-orchestrator', () => {
     });
     lambdaMock.on(InvokeCommand).resolves({});
 
-    await handler();
+    await handler({}, ctx);
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
   });
@@ -144,7 +147,7 @@ describe('usage-reporting-orchestrator', () => {
     });
     lambdaMock.on(InvokeCommand).resolves({});
 
-    await handler();
+    await handler({}, ctx);
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
   });
@@ -156,7 +159,7 @@ describe('usage-reporting-orchestrator', () => {
     mockGetItemForOrgs(['org-1', 'org-2']);
     lambdaMock.on(InvokeCommand).rejectsOnce(new Error('invoke failed')).resolves({});
 
-    await handler();
+    await handler({}, ctx);
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(2);
   });
@@ -179,7 +182,7 @@ describe('usage-reporting-orchestrator', () => {
     mockGetItemForOrgs(['shared-org']);
     lambdaMock.on(InvokeCommand).resolves({});
 
-    await handler();
+    await handler({}, ctx);
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
     const payload = JSON.parse(
@@ -198,7 +201,7 @@ describe('usage-reporting-orchestrator', () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
     lambdaMock.on(InvokeCommand).resolves({});
 
-    await handler();
+    await handler({}, ctx);
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
   });
@@ -214,7 +217,7 @@ describe('usage-reporting-orchestrator', () => {
       .resolvesOnce(orgProfileItem('org-2', 'aurora-org-2'));
     lambdaMock.on(InvokeCommand).resolves({});
 
-    await handler();
+    await handler({}, ctx);
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
     const payload = JSON.parse(

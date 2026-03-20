@@ -1,3 +1,6 @@
+// Must be the first import — registers the OTel TracerProvider before any other module loads.
+import '../lib/instrumentation.js';
+
 import { DeleteItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
@@ -6,6 +9,7 @@ import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
+import { tracedHandler } from '../middleware/tracing.js';
 
 const dynamo = getDynamoClient();
 
@@ -13,7 +17,7 @@ const dynamo = getDynamoClient();
  * Stripe webhook handler — NO auth middleware.
  * Verifies Stripe signature, processes billing events, and writes to billing table.
  */
-export async function handler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+async function baseHandler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const tableName = Resource.BillingTable.name;
   const stripe = getStripeClient();
 
@@ -271,3 +275,5 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
     }),
   );
 }
+
+export const handler = tracedHandler(baseHandler);

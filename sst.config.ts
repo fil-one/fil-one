@@ -40,6 +40,8 @@ export default $config({
     const stripeSecretKey = new sst.Secret('StripeSecretKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
+    const grafanaOtlpAuth = new sst.Secret('GrafanaOtlpAuth');
+    const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const sendGridApiKey =
       $app.stage === 'staging' || $app.stage === 'production'
         ? new sst.Secret('SendGridApiKey')
@@ -83,6 +85,102 @@ export default $config({
       // Make visibility timeout longer than the Lambda timeout to avoid multiple retries
       visibilityTimeout: '90 seconds',
     });
+
+    // ── Firehose Log Pipeline (CloudWatch → Loki) ───────────────────
+    const firehoseBackupBucket = new sst.aws.Bucket('OtelFirehoseBackup', {
+      transform: {
+        bucket: { forceDestroy: true },
+      },
+    });
+
+    const firehoseRole = new aws.iam.Role('OtelFirehoseRole', {
+      assumeRolePolicy: aws.iam.getPolicyDocumentOutput({
+        statements: [
+          {
+            actions: ['sts:AssumeRole'],
+            principals: [{ type: 'Service', identifiers: ['firehose.amazonaws.com'] }],
+          },
+        ],
+      }).json,
+      inlinePolicies: [
+        {
+          name: 'firehose-s3',
+          policy: $jsonStringify({
+            Version: '2012-10-17',
+            Statement: [
+              {
+                Effect: 'Allow',
+                Action: ['s3:PutObject', 's3:GetObject', 's3:ListBucket'],
+                Resource: [firehoseBackupBucket.arn, $interpolate`${firehoseBackupBucket.arn}/*`],
+              },
+            ],
+          }),
+        },
+      ],
+    });
+
+    const firehose = new aws.kinesis.FirehoseDeliveryStream('OtelLogDelivery', {
+      destination: 'http_endpoint',
+      httpEndpointConfiguration: {
+        url: 'https://logs-prod-008.grafana.net/loki/api/v1/push',
+        name: 'Grafana Loki',
+        accessKey: grafanaLokiAuth.value,
+        bufferingInterval: 60,
+        bufferingSize: 1,
+        roleArn: firehoseRole.arn,
+        s3BackupMode: 'FailedDataOnly',
+        s3Configuration: {
+          bucketArn: firehoseBackupBucket.arn,
+          roleArn: firehoseRole.arn,
+        },
+        requestConfiguration: {
+          contentEncoding: 'GZIP',
+        },
+      },
+    });
+
+    const cwToFirehoseRole = new aws.iam.Role('CwToFirehoseRole', {
+      assumeRolePolicy: aws.iam.getPolicyDocumentOutput({
+        statements: [
+          {
+            actions: ['sts:AssumeRole'],
+            principals: [{ type: 'Service', identifiers: ['logs.amazonaws.com'] }],
+          },
+        ],
+      }).json,
+      inlinePolicies: [
+        {
+          name: 'cw-to-firehose',
+          policy: $jsonStringify({
+            Version: '2012-10-17',
+            Statement: [
+              {
+                Effect: 'Allow',
+                Action: ['firehose:PutRecord', 'firehose:PutRecordBatch'],
+                Resource: [firehose.arn],
+              },
+            ],
+          }),
+        },
+      ],
+    });
+
+    // Log groups must be created explicitly (not left to the Lambda runtime)
+    // because CloudWatch subscription filters require the log group to exist
+    // at deploy time. Lambda only creates implicit log groups on first invocation.
+    function addLogForwarding(fnName: string) {
+      const logGroupName = $interpolate`/aws/lambda/filone-${$app.stage}-${fnName}`;
+      new aws.cloudwatch.LogGroup(`${fnName}LogGroup`, {
+        name: logGroupName,
+        retentionInDays: 7,
+      });
+      new aws.cloudwatch.LogSubscriptionFilter(`${fnName}LogFwd`, {
+        logGroup: logGroupName,
+        filterPattern: '',
+        destinationArn: firehose.arn,
+        roleArn: cwToFirehoseRole.arn,
+      });
+    }
 
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
@@ -257,10 +355,20 @@ export default $config({
       auroraBackofficeToken,
     ];
 
+    const otelEnv: Record<string, $util.Input<string>> = {
+      OTEL_SERVICE_NAME: $interpolate`filone-${$app.stage}`,
+      OTEL_RESOURCE_ATTRIBUTES: $interpolate`deployment.environment.name=${$app.stage},service.namespace=filone`,
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otlp-gateway-prod-us-central-0.grafana.net/otlp',
+      OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
+      OTEL_EXPORTER_OTLP_HEADERS: $interpolate`Authorization=Basic ${grafanaOtlpAuth.value}`,
+      AWS_LAMBDA_LOG_FORMAT: 'JSON',
+    };
+
     const sharedEnv: Record<string, $util.Input<string>> = {
       FILONE_STAGE: $app.stage,
       AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
       AUTH0_AUDIENCE: 'https://staging.fil.one',
+      ...otelEnv,
     };
 
     if (isProduction) {
@@ -317,6 +425,8 @@ export default $config({
         runtime: 'nodejs24.x',
         timeout: '10 seconds',
       });
+
+      addLogForwarding(fnName);
     }
 
     // ── Data routes ──────────────────────────────────────────────────
@@ -442,6 +552,7 @@ export default $config({
     tenantSetupQueue.subscribe(
       {
         handler: 'packages/backend/src/handlers/aurora-tenant-setup.handler',
+        name: $interpolate`filone-${$app.stage}-AuroraTenantSetup`,
         link: [userInfoTable, auroraBackofficeToken],
         environment: {
           ...auroraEnv,
@@ -458,6 +569,8 @@ export default $config({
       },
       { batch: { size: 1 } },
     );
+
+    addLogForwarding('AuroraTenantSetup');
 
     // ── CloudWatch alarm on DLQ ──────────────────────────────────
     // TODO: Rework this alarm to trigger alert in Grafana IRM
@@ -477,8 +590,9 @@ export default $config({
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = new sst.aws.Function('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
+      name: $interpolate`filone-${$app.stage}-UsageReportingWorker`,
       link: [billingTable, stripeSecretKey, auroraBackofficeToken],
-      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'tibmonthmeter' },
+      environment: { ...auroraEnv, ...otelEnv, STRIPE_METER_EVENT_NAME: 'tibmonthmeter' },
       runtime: 'nodejs24.x',
       timeout: '60 seconds',
       memory: '256 MB',
@@ -486,8 +600,10 @@ export default $config({
 
     const usageOrchestrator = new sst.aws.Function('UsageReportingOrchestrator', {
       handler: 'packages/backend/src/jobs/usage-reporting-orchestrator.handler',
+      name: $interpolate`filone-${$app.stage}-UsageReportingOrchestrator`,
       link: [billingTable, userInfoTable],
       environment: {
+        ...otelEnv,
         USAGE_WORKER_FUNCTION_NAME: usageWorker.name,
         STRIPE_METER_EVENT_NAME: 'tibmonthmeter',
       },
@@ -501,6 +617,9 @@ export default $config({
         },
       ],
     });
+
+    addLogForwarding('UsageReportingWorker');
+    addLogForwarding('UsageReportingOrchestrator');
 
     new sst.aws.Cron('UsageReportingCron', {
       // run the Lambda every day at 6:00 AM UTC.

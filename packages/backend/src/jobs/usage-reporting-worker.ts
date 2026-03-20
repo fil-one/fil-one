@@ -1,3 +1,6 @@
+// Must be the first import — registers the OTel TracerProvider before any other module loads.
+import '../lib/instrumentation.js';
+
 import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
@@ -6,6 +9,7 @@ import { TB_BYTES } from '@filone/shared';
 import { getStripeClient } from '../lib/stripe-client.js';
 import { getStorageSamples } from '../lib/aurora-backoffice.js';
 import { calculateAverageUsage } from '../lib/usage-calculator.js';
+import { tracedHandler } from '../middleware/tracing.js';
 
 const dynamo = getDynamoClient();
 
@@ -18,7 +22,7 @@ export interface UsageReportingWorkerPayload {
   reportDate: string;
 }
 
-export async function handler(event: UsageReportingWorkerPayload): Promise<void> {
+async function baseHandler(event: UsageReportingWorkerPayload): Promise<void> {
   const {
     orgId,
     auroraTenantId,
@@ -87,3 +91,5 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
 
   console.log('[usage-worker] Audit record written', { orgId, reportDate });
 }
+
+export const handler = tracedHandler(baseHandler);
