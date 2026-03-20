@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { NoSuchBucket } from '@aws-sdk/client-s3';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -81,6 +82,28 @@ describe('delete-object baseHandler', () => {
       'my-bucket',
       'photos/cat.jpg',
     );
+  });
+
+  it('returns 404 when S3 throws NoSuchBucket', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetAuroraS3Credentials.mockResolvedValue({
+      accessKeyId: 'AKIA_CONSOLE',
+      secretAccessKey: 's3_secret',
+    });
+    mockDeleteObject.mockRejectedValue(
+      new NoSuchBucket({ message: 'The specified bucket does not exist', $metadata: {} }),
+    );
+
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { key: 'photos/cat.jpg' },
+    });
+    event.pathParameters = { name: 'no-such-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(404);
+    const body = JSON.parse(result.body as string);
+    expect(body).toStrictEqual({ message: 'Bucket not found' });
   });
 
   it('returns 400 when bucket name is missing from path', async () => {

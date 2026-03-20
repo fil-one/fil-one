@@ -7,6 +7,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getAuroraS3Credentials, listObjects } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
+import { isNoSuchBucketError } from '../lib/s3-errors.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -61,15 +62,26 @@ export async function baseHandler(
     : undefined;
   const nextToken = event.queryStringParameters?.nextToken;
 
-  const result = await listObjects({
-    endpointUrl: gatewayUrl,
-    credentials,
-    bucket: bucketName,
-    prefix,
-    delimiter,
-    maxKeys,
-    continuationToken: nextToken,
-  });
+  let result;
+  try {
+    result = await listObjects({
+      endpointUrl: gatewayUrl,
+      credentials,
+      bucket: bucketName,
+      prefix,
+      delimiter,
+      maxKeys,
+      continuationToken: nextToken,
+    });
+  } catch (err) {
+    if (isNoSuchBucketError(err)) {
+      return new ResponseBuilder()
+        .status(404)
+        .body<ErrorResponse>({ message: 'Bucket not found' })
+        .build();
+    }
+    throw err;
+  }
 
   return new ResponseBuilder()
     .status(200)

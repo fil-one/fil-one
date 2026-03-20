@@ -7,6 +7,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getAuroraS3Credentials, deleteObject } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
+import { isNoSuchBucketError } from '../lib/s3-errors.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -63,7 +64,17 @@ export async function baseHandler(
   const gatewayUrl = process.env.AURORA_S3_GATEWAY_URL!;
 
   const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
-  await deleteObject(gatewayUrl, credentials, bucketName, objectKey);
+  try {
+    await deleteObject(gatewayUrl, credentials, bucketName, objectKey);
+  } catch (err) {
+    if (isNoSuchBucketError(err)) {
+      return new ResponseBuilder()
+        .status(404)
+        .body<ErrorResponse>({ message: 'Bucket not found' })
+        .build();
+    }
+    throw err;
+  }
 
   return {
     statusCode: 204,
