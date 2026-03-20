@@ -7,7 +7,7 @@ import {
   waitForWebhook,
   getBillingRecord,
   deleteBillingRecord,
-  stripe,
+  getStripeClient,
 } from './helpers.js';
 
 describe('Past Due Recovery (invoice.payment_succeeded with canceledAt)', () => {
@@ -27,9 +27,7 @@ describe('Past Due Recovery (invoice.payment_succeeded with canceledAt)', () => 
   });
 
   afterAll(async () => {
-    await stripe()
-      .customers.del(cusId)
-      .catch(() => {});
+    await getStripeClient().customers.del(cusId);
     await deleteBillingRecord(userId);
   });
 
@@ -37,11 +35,14 @@ describe('Past Due Recovery (invoice.payment_succeeded with canceledAt)', () => 
     await createAndPayInvoice(cusId);
     await waitForWebhook(15);
     const record = await getBillingRecord(userId);
-    expect(record).not.toBeNull();
-    expect(record!.subscriptionStatus?.S).toBe('active');
-    expect(record!.lastPaymentAt?.S).toBeTruthy();
-    expect(record!.lastPaymentFailedAt).toBeUndefined();
-    expect(record!.canceledAt).toBeUndefined();
-    expect(record!.gracePeriodEndsAt).toBeUndefined();
+    expect(record).toStrictEqual({
+      pk: { S: `CUSTOMER#${userId}` },
+      sk: { S: 'SUBSCRIPTION' },
+      orgId: { S: 'test-org' },
+      stripeCustomerId: { S: cusId },
+      subscriptionStatus: { S: 'active' },
+      updatedAt: { S: expect.any(String) },
+      lastPaymentAt: { S: expect.any(String) },
+    });
   });
 });

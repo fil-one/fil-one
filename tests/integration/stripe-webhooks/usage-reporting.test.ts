@@ -3,7 +3,7 @@ import {
   createTestCustomer,
   attachValidCard,
   getStripePriceId,
-  stripe,
+  getStripeClient,
   waitForWebhook,
   pollTestClockReady,
   deleteBillingRecord,
@@ -17,7 +17,7 @@ describe('Usage Reporting (meter events via test clock)', () => {
 
   beforeAll(async () => {
     userId = `test-ur-${crypto.randomUUID()}`;
-    const s = stripe();
+    const s = getStripeClient();
     const priceId = getStripePriceId();
 
     // Create test clock anchored at now
@@ -48,20 +48,14 @@ describe('Usage Reporting (meter events via test clock)', () => {
   });
 
   afterAll(async () => {
-    await stripe()
-      .subscriptions.cancel(subId)
-      .catch(() => {});
-    await stripe()
-      .testHelpers.testClocks.del(clockId)
-      .catch(() => {});
-    await stripe()
-      .customers.del(cusId)
-      .catch(() => {});
+    await getStripeClient().subscriptions.cancel(subId);
+    await getStripeClient().testHelpers.testClocks.del(clockId);
+    await getStripeClient().customers.del(cusId);
     await deleteBillingRecord(userId);
   });
 
   it('should create an invoice with metered line item after clock advance', async () => {
-    const s = stripe();
+    const s = getStripeClient();
     const priceId = getStripePriceId();
 
     // Retrieve subscription to get period end

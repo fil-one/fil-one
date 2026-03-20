@@ -40,21 +40,6 @@ export function getStripePriceId(): string {
 }
 
 // =============================================================================
-// Shared clients (lazy singletons)
-// =============================================================================
-
-let _stripe: Stripe | undefined;
-let _dynamo: DynamoDBClient | undefined;
-
-export function stripe(): Stripe {
-  return (_stripe ??= getStripeClient());
-}
-
-export function dynamo(): DynamoDBClient {
-  return (_dynamo ??= getDynamoClient());
-}
-
-// =============================================================================
 // Utilities
 // =============================================================================
 function sleep(ms: number): Promise<void> {
@@ -81,7 +66,7 @@ export async function seedBillingRecord(
     ...extra,
   };
 
-  await dynamo().send(
+  await getDynamoClient().send(
     new PutItemCommand({
       TableName: getBillingTableName(),
       Item: item,
@@ -92,7 +77,7 @@ export async function seedBillingRecord(
 export async function getBillingRecord(
   userId: string,
 ): Promise<Record<string, AttributeValue> | null> {
-  const result = await dynamo().send(
+  const result = await getDynamoClient().send(
     new GetItemCommand({
       TableName: getBillingTableName(),
       Key: {
@@ -106,7 +91,7 @@ export async function getBillingRecord(
 
 export async function deleteBillingRecord(userId: string): Promise<void> {
   try {
-    await dynamo().send(
+    await getDynamoClient().send(
       new DeleteItemCommand({
         TableName: getBillingTableName(),
         Key: {
@@ -115,8 +100,8 @@ export async function deleteBillingRecord(userId: string): Promise<void> {
         },
       }),
     );
-  } catch {
-    // ignore
+  } catch (error) {
+    console.error('Failed to delete billing record:', error);
   }
 }
 
@@ -132,48 +117,48 @@ export async function createTestCustomer(userId: string, testClock?: string): Pr
   if (testClock) {
     params.test_clock = testClock;
   }
-  const customer = await stripe().customers.create(params);
+  const customer = await getStripeClient().customers.create(params);
   return customer.id;
 }
 
 export async function attachValidCard(customerId: string): Promise<string> {
-  const pm = await stripe().paymentMethods.attach('pm_card_visa', {
+  const pm = await getStripeClient().paymentMethods.attach('pm_card_visa', {
     customer: customerId,
   });
-  await stripe().customers.update(customerId, {
+  await getStripeClient().customers.update(customerId, {
     invoice_settings: { default_payment_method: pm.id },
   });
   return pm.id;
 }
 
 export async function attachDecliningCard(customerId: string): Promise<void> {
-  const pm = await stripe().paymentMethods.attach('pm_card_chargeCustomerFail', {
+  const pm = await getStripeClient().paymentMethods.attach('pm_card_chargeCustomerFail', {
     customer: customerId,
   });
-  await stripe().customers.update(customerId, {
+  await getStripeClient().customers.update(customerId, {
     invoice_settings: { default_payment_method: pm.id },
   });
 }
 
 export async function createAndPayInvoice(customerId: string): Promise<string> {
-  await stripe().invoiceItems.create({
+  await getStripeClient().invoiceItems.create({
     customer: customerId,
     amount: 500,
     currency: 'usd',
   });
 
-  const invoice = await stripe().invoices.create({
+  const invoice = await getStripeClient().invoices.create({
     customer: customerId,
     pending_invoice_items_behavior: 'include',
   });
 
   try {
-    await stripe().invoices.finalizeInvoice(invoice.id);
+    await getStripeClient().invoices.finalizeInvoice(invoice.id);
   } catch {
     /* ignore */
   }
   try {
-    await stripe().invoices.pay(invoice.id);
+    await getStripeClient().invoices.pay(invoice.id);
   } catch {
     /* ignore */
   }
@@ -182,25 +167,25 @@ export async function createAndPayInvoice(customerId: string): Promise<string> {
 }
 
 export async function createAndFailInvoice(customerId: string): Promise<string> {
-  await stripe().invoiceItems.create({
+  await getStripeClient().invoiceItems.create({
     customer: customerId,
     amount: 500,
     currency: 'usd',
   });
 
-  const invoice = await stripe().invoices.create({
+  const invoice = await getStripeClient().invoices.create({
     customer: customerId,
     pending_invoice_items_behavior: 'include',
     auto_advance: false,
   });
 
   try {
-    await stripe().invoices.finalizeInvoice(invoice.id);
+    await getStripeClient().invoices.finalizeInvoice(invoice.id);
   } catch {
     /* ignore */
   }
   try {
-    await stripe().invoices.pay(invoice.id);
+    await getStripeClient().invoices.pay(invoice.id);
   } catch {
     /* expected to fail */
   }
@@ -218,7 +203,7 @@ export async function waitForWebhook(seconds = 15): Promise<void> {
 
 export async function pollTestClockReady(clockId: string, timeoutSeconds = 120): Promise<void> {
   for (let elapsed = 0; elapsed < timeoutSeconds; elapsed += 5) {
-    const clockState = await stripe().testHelpers.testClocks.retrieve(clockId);
+    const clockState = await getStripeClient().testHelpers.testClocks.retrieve(clockId);
     if (clockState.status === 'ready') {
       return;
     }

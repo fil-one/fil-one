@@ -7,7 +7,7 @@ import {
   waitForWebhook,
   getBillingRecord,
   deleteBillingRecord,
-  stripe,
+  getStripeClient,
 } from './helpers.js';
 
 describe('Payment Failure (invoice.payment_failed)', () => {
@@ -22,9 +22,7 @@ describe('Payment Failure (invoice.payment_failed)', () => {
   });
 
   afterAll(async () => {
-    await stripe()
-      .customers.del(cusId)
-      .catch(() => {});
+    await getStripeClient().customers.del(cusId);
     await deleteBillingRecord(userId);
   });
 
@@ -32,9 +30,14 @@ describe('Payment Failure (invoice.payment_failed)', () => {
     await createAndFailInvoice(cusId);
     await waitForWebhook(15);
     const record = await getBillingRecord(userId);
-    expect(record).not.toBeNull();
-    expect(record!.subscriptionStatus?.S).toBe('past_due');
-    expect(record!.lastPaymentFailedAt?.S).toBeTruthy();
-    expect(record!.gracePeriodEndsAt).toBeUndefined();
+    expect(record).toStrictEqual({
+      pk: { S: `CUSTOMER#${userId}` },
+      sk: { S: 'SUBSCRIPTION' },
+      orgId: { S: 'test-org' },
+      stripeCustomerId: { S: cusId },
+      subscriptionStatus: { S: 'past_due' },
+      updatedAt: { S: expect.any(String) },
+      lastPaymentFailedAt: { S: expect.any(String) },
+    });
   });
 });

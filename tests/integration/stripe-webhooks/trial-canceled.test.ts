@@ -6,7 +6,7 @@ import {
   getBillingRecord,
   deleteBillingRecord,
   getStripePriceId,
-  stripe,
+  getStripeClient,
 } from './helpers.js';
 
 describe('Trial Canceled (customer.subscription.deleted)', () => {
@@ -21,15 +21,13 @@ describe('Trial Canceled (customer.subscription.deleted)', () => {
   });
 
   afterAll(async () => {
-    await stripe()
-      .customers.del(cusId)
-      .catch(() => {});
+    await getStripeClient().customers.del(cusId);
     await deleteBillingRecord(userId);
   });
 
   it('should set status to grace_period with ~7-day grace window', async () => {
     const trialEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
-    const sub = await stripe().subscriptions.create({
+    const sub = await getStripeClient().subscriptions.create({
       customer: cusId,
       items: [{ price: getStripePriceId() }],
       trial_end: trialEnd,
@@ -41,7 +39,7 @@ describe('Trial Canceled (customer.subscription.deleted)', () => {
     subId = sub.id;
 
     try {
-      await stripe().subscriptions.cancel(subId);
+      await getStripeClient().subscriptions.cancel(subId);
     } catch {
       /* ignore */
     }
@@ -49,10 +47,16 @@ describe('Trial Canceled (customer.subscription.deleted)', () => {
     await waitForWebhook(15);
 
     const record = await getBillingRecord(userId);
-    expect(record).not.toBeNull();
-    expect(record!.subscriptionStatus?.S).toBe('grace_period');
-    expect(record!.gracePeriodEndsAt?.S).toBeTruthy();
-    expect(record!.canceledAt?.S).toBeTruthy();
+    expect(record).toStrictEqual({
+      pk: { S: `CUSTOMER#${userId}` },
+      sk: { S: 'SUBSCRIPTION' },
+      orgId: { S: 'test-org' },
+      stripeCustomerId: { S: cusId },
+      subscriptionStatus: { S: 'grace_period' },
+      updatedAt: { S: expect.any(String) },
+      gracePeriodEndsAt: { S: expect.any(String) },
+      canceledAt: { S: expect.any(String) },
+    });
 
     // Verify grace period is ~7 days from now
     const graceEnd = new Date(record!.gracePeriodEndsAt!.S!).getTime();
