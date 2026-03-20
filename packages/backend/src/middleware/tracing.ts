@@ -93,9 +93,25 @@ const SPAN_KIND_MAP: Record<string, SpanKind> = {
 // Span creation + OTel context propagation is handled by tracedHandler's
 // outer wrapper via startActiveSpan(). The middleware reads the span from
 // the WeakMap and manages its lifecycle in after/onError hooks.
+//
+// Hook interaction with errorHandlerMiddleware:
+//
+// Middy v7 runs ALL onError hooks in reverse registration order, even after
+// one sets a response. The after hooks only run on the success path.
+//
+// tracingMiddleware is registered first (via tracedHandler), so its onError
+// hook runs LAST — after errorHandlerMiddleware has already recorded the
+// exception and set a 500 response. To avoid double-recording, onError
+// skips recordException when request.response is already set (meaning
+// another onError hook handled the error).
+//
+// For non-HTTP handlers without errorHandlerMiddleware, tracing.onError is
+// the only onError hook — it records the exception itself.
 // ---------------------------------------------------------------------------
 
 function tracingMiddleware(): MiddlewareObj {
+  // Runs on success path only. Middy does not call after hooks when an error
+  // occurred (even if an onError hook set a response).
   const after = async (request: Request): Promise<void> => {
     const span = getRootSpan(request.event as object);
 
@@ -110,15 +126,21 @@ function tracingMiddleware(): MiddlewareObj {
     await flushTraces();
   };
 
+  // Runs on error path. Middy calls ALL onError hooks even after one sets a
+  // response. This hook always runs last (registered first → executed last).
   const onError = async (request: Request): Promise<void> => {
     const span = getRootSpan(request.event as object);
 
-    if (request.error) {
+    const response = request.response as Record<string, unknown> | undefined;
+    const statusCode = response?.statusCode;
+
+    // Only record the exception if no other onError hook has handled it.
+    // errorHandlerMiddleware sets request.response and records the exception
+    // on the span itself — we skip here to avoid duplicate exception events.
+    if (!response && request.error) {
       span.recordException(request.error);
     }
 
-    const response = request.response as Record<string, unknown> | undefined;
-    const statusCode = response?.statusCode;
     if (typeof statusCode === 'number') {
       span.setAttribute('http.response.status_code', statusCode);
     }

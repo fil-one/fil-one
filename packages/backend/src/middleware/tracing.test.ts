@@ -160,12 +160,31 @@ describe('tracedHandler', () => {
     });
   });
 
+  // -----------------------------------------------------------------------
+  // Error handling interaction with errorHandlerMiddleware
+  //
+  // Middy v7 runs ALL onError hooks in reverse registration order, even
+  // after one sets a response. The after hooks never run on the error path.
+  //
+  // For HTTP handlers with errorHandlerMiddleware:
+  //   1. errorHandler.onError — records exception on span, sets 500 response
+  //   2. tracing.onError — sees response already set (error was handled),
+  //      skips recordException to avoid duplicates, sets ERROR status,
+  //      captures status code, ends span, flushes
+  //
+  // For non-HTTP handlers (SQS, jobs) without errorHandlerMiddleware:
+  //   1. tracing.onError — no response set, records exception, sets ERROR
+  //      status, ends span, flushes. Error propagates to Lambda for retry.
+  // -----------------------------------------------------------------------
+
   describe('error handler middleware integration', () => {
-    it('records exception and captures error response status code', async () => {
+    it('sets ERROR status and captures status code from errorHandler response', async () => {
       const handler = tracedHandler(async () => {
         throw new Error('unhandled error');
       }).use({
+        // Simulates errorHandlerMiddleware: records exception, sets response.
         onError: async (request) => {
+          getRootSpan(request.event as object).recordException(request.error as Error);
           request.response = { statusCode: 500, body: 'Internal Server Error' };
         },
       });
@@ -179,6 +198,8 @@ describe('tracedHandler', () => {
         message: 'unhandled error',
       });
       expect(spans[0].attributes['http.response.status_code']).toBe(500);
+      // Exception recorded once (by errorHandler), not twice
+      expect(spans[0].events.filter((e) => e.name === 'exception')).toHaveLength(1);
     });
   });
 
