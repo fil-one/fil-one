@@ -17,17 +17,29 @@ export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const { orgId } = getUserInfo(event);
+  const bucketFilter = event.queryStringParameters?.bucket;
 
-  const result = await getDynamoClient().send(
-    new QueryCommand({
-      TableName: Resource.UserInfoTable.name,
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: `ORG#${orgId}` },
-        ':skPrefix': { S: 'ACCESSKEY#' },
-      },
-    }),
-  );
+  const queryInput: ConstructorParameters<typeof QueryCommand>[0] = {
+    TableName: Resource.UserInfoTable.name,
+    KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
+    ExpressionAttributeValues: {
+      ':pk': { S: `ORG#${orgId}` },
+      ':skPrefix': { S: 'ACCESSKEY#' },
+    },
+  };
+
+  // When a bucket filter is provided, only return keys that have access to that bucket:
+  // either keys with bucketScope = 'all' or keys that include the bucket in their buckets list.
+  if (bucketFilter) {
+    queryInput.FilterExpression = 'bucketScope = :all OR contains(buckets, :bucket)';
+    queryInput.ExpressionAttributeValues = {
+      ...queryInput.ExpressionAttributeValues,
+      ':all': { S: 'all' },
+      ':bucket': { S: bucketFilter },
+    };
+  }
+
+  const result = await getDynamoClient().send(new QueryCommand(queryInput));
 
   const keys: AccessKey[] = (result.Items ?? []).map((item) => {
     const record = unmarshall(item);

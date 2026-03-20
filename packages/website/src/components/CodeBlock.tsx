@@ -1,7 +1,6 @@
-import { useState } from 'react';
-
 import { ClipboardIcon, CheckIcon } from '@phosphor-icons/react/dist/ssr';
 import { clsx } from 'clsx';
+import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 
 export type CodeBlockProps = {
   code: string;
@@ -9,21 +8,8 @@ export type CodeBlockProps = {
   className?: string;
 };
 
-const COPY_RESET_DELAY_MS = 2000;
-
 export function CodeBlock({ code, language, className }: CodeBlockProps) {
-  const [copied, setCopied] = useState(false);
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), COPY_RESET_DELAY_MS);
-    } catch {
-      // UNKNOWN: No design spec for copy-failure state. Silently failing is the
-      // most defensible default — avoids a disruptive error toast for a non-critical action.
-    }
-  }
+  const { copied, copy } = useCopyToClipboard();
 
   const CopyIcon = copied ? CheckIcon : ClipboardIcon;
 
@@ -39,7 +25,7 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
         {language ? <span className="text-xs text-zinc-500">{language}</span> : <span />}
         <button
           type="button"
-          onClick={handleCopy}
+          onClick={() => void copy(code)}
           aria-label={copied ? 'Copied!' : 'Copy code'}
           className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-1 focus:ring-offset-zinc-950"
         >

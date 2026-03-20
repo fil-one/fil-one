@@ -1,27 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link } from '@tanstack/react-router';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { PlusIcon, DatabaseIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Button } from '../components/Button';
-import { Input } from '../components/Input';
-import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/Modal';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { formatBytes, S3_REGION } from '@filone/shared';
+import { formatBytes } from '@filone/shared';
 
-import type {
-  Bucket,
-  CreateBucketRequest,
-  CreateBucketResponse,
-  ListBucketsResponse,
-} from '@filone/shared';
+import type { Bucket, ListBucketsResponse } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
-import { CreateAccessKeyModal } from '../components/CreateAccessKeyModal';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Component
@@ -29,21 +17,11 @@ import { CreateAccessKeyModal } from '../components/CreateAccessKeyModal';
 
 export function BucketsPage() {
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Create bucket modal state
-  const [createOpen, setCreateOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [name, setName] = useState('');
-  const [region, setRegion] = useState(S3_REGION);
-
-  // Create access key modal state (shown after bucket creation)
-  const [accessKeyOpen, setAccessKeyOpen] = useState(false);
-
-  const deleteBucket = useRef<string | null>(null);
 
   // Fetch buckets on mount
   useEffect(() => {
@@ -68,30 +46,7 @@ export function BucketsPage() {
     };
   }, []);
 
-  async function handleCreate() {
-    if (!name.trim()) return;
-    setCreating(true);
-    try {
-      const body: CreateBucketRequest = { name: name.trim(), region };
-      const data = await apiRequest<CreateBucketResponse>('/buckets', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
-      setBuckets((prev) => [data.bucket, ...prev]);
-      setCreateOpen(false);
-      setName('');
-      setRegion(S3_REGION);
-      toast.success('Bucket created successfully');
-      setAccessKeyOpen(true);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create bucket');
-    } finally {
-      setCreating(false);
-    }
-  }
-
   async function handleDeleteBucket(bucketName: string) {
-    deleteBucket.current = bucketName;
     try {
       await apiRequest(`/buckets/${encodeURIComponent(bucketName)}`, {
         method: 'DELETE',
@@ -123,19 +78,19 @@ export function BucketsPage() {
 
   return (
     <div className="p-6">
-      {/* ------------------------------------------------------------------ */}
       {/* Page header */}
-      {/* ------------------------------------------------------------------ */}
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-zinc-900">Buckets</h1>
-        <Button variant="filled" icon={PlusIcon} onClick={() => setCreateOpen(true)}>
+        <Button
+          variant="filled"
+          icon={PlusIcon}
+          onClick={() => navigate({ to: '/buckets/create' })}
+        >
           Create bucket
         </Button>
       </div>
 
-      {/* ------------------------------------------------------------------ */}
       {/* Content: empty state or table */}
-      {/* ------------------------------------------------------------------ */}
       {buckets.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
           <DatabaseIcon size={48} className="mb-4 text-zinc-300" aria-hidden="true" />
@@ -143,7 +98,11 @@ export function BucketsPage() {
           <p className="mb-6 text-sm text-zinc-500">
             Create your first bucket to start storing objects
           </p>
-          <Button variant="filled" icon={PlusIcon} onClick={() => setCreateOpen(true)}>
+          <Button
+            variant="filled"
+            icon={PlusIcon}
+            onClick={() => navigate({ to: '/buckets/create' })}
+          >
             Create bucket
           </Button>
         </div>
@@ -219,65 +178,6 @@ export function BucketsPage() {
           </table>
         </div>
       )}
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Create Bucket Modal */}
-      {/* ------------------------------------------------------------------ */}
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} size="sm">
-        <ModalHeader onClose={() => setCreateOpen(false)}>Create bucket</ModalHeader>
-        <ModalBody>
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="bucket-name" className="text-sm font-medium text-zinc-700">
-                Bucket name
-              </label>
-              <Input
-                id="bucket-name"
-                value={name}
-                onChange={setName}
-                placeholder="my-bucket-name"
-                autoComplete="off"
-              />
-              <p className="text-xs text-zinc-500">Lowercase letters, numbers, and hyphens only.</p>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="bucket-region" className="text-sm font-medium text-zinc-700">
-                Region
-              </label>
-              {/* UNKNOWN: no custom Select component found — using native <select> styled to match Input */}
-              <select
-                id="bucket-region"
-                value={region}
-                onChange={(e) => setRegion(e.target.value)}
-                className="block w-full rounded-lg border border-zinc-200 p-3 text-zinc-900 focus:outline-2 focus:outline-brand-600"
-              >
-                <option value={S3_REGION}>{S3_REGION}</option>
-                <option value="us-west-2">US West (Oregon)</option>
-                <option value="eu-west-1">Europe (Ireland)</option>
-              </select>
-            </div>
-          </div>
-        </ModalBody>
-        <ModalFooter>
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="filled" onClick={handleCreate} disabled={creating}>
-              {creating ? 'Creating...' : 'Create bucket'}
-            </Button>
-          </div>
-        </ModalFooter>
-      </Modal>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Create Access Key Modal (shown after bucket creation) */}
-      {/* ------------------------------------------------------------------ */}
-      <CreateAccessKeyModal
-        open={accessKeyOpen}
-        onClose={() => setAccessKeyOpen(false)}
-        onDone={() => setAccessKeyOpen(false)}
-      />
     </div>
   );
 }

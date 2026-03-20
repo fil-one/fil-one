@@ -20,6 +20,7 @@ import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
 import { S3_ENDPOINT, S3_REGION } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
+import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -191,19 +192,12 @@ function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
 // ---------------------------------------------------------------------------
 
 function CopyButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-
-  function handleCopy() {
-    void navigator.clipboard.writeText(value).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
+  const { copied, copy } = useCopyToClipboard();
 
   return (
     <button
       type="button"
-      onClick={handleCopy}
+      onClick={() => void copy(value)}
       title={copied ? 'Copied' : 'Copy'}
       aria-label={copied ? 'Copied to clipboard' : 'Copy to clipboard'}
       className="ml-2 shrink-0 rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"

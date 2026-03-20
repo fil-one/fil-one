@@ -10,6 +10,7 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal/index.js';
+import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 
 export type SaveCredentialsModalProps = {
   open: boolean;
@@ -21,16 +22,15 @@ export type SaveCredentialsModalProps = {
   };
 };
 
-const COPY_RESET_DELAY_MS = 2000;
-
 export function SaveCredentialsModal({
   open,
   onClose,
   onDone,
   credentials,
 }: SaveCredentialsModalProps) {
-  const [copiedField, setCopiedField] = useState<'accessKeyId' | 'secret' | null>(null);
   const [showSecret, setShowSecret] = useState(false);
+  const accessKeyIdCopy = useCopyToClipboard();
+  const secretCopy = useCopyToClipboard();
 
   function downloadBlob(content: string, filename: string, type: string) {
     const blob = new Blob([content], { type });
@@ -58,16 +58,6 @@ export function SaveCredentialsModal({
     downloadBlob(env, 'credentials.env', 'text/plain');
   }
 
-  async function handleCopy(value: string, field: 'accessKeyId' | 'secret') {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopiedField(field);
-      setTimeout(() => setCopiedField(null), COPY_RESET_DELAY_MS);
-    } catch {
-      // Silently fail — no design spec for copy-failure state
-    }
-  }
-
   return (
     <Modal open={open} onClose={onClose} size="md">
       <ModalHeader onClose={onClose}>Save your credentials</ModalHeader>
@@ -93,11 +83,11 @@ export function SaveCredentialsModal({
               </div>
               <button
                 type="button"
-                onClick={() => handleCopy(credentials.accessKeyId, 'accessKeyId')}
-                aria-label={copiedField === 'accessKeyId' ? 'Copied' : 'Copy Access Key ID'}
+                onClick={() => void accessKeyIdCopy.copy(credentials.accessKeyId)}
+                aria-label={accessKeyIdCopy.copied ? 'Copied' : 'Copy Access Key ID'}
                 className="flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:text-zinc-600"
               >
-                {copiedField === 'accessKeyId' ? (
+                {accessKeyIdCopy.copied ? (
                   <CheckCircle size={16} className="text-green-500" />
                 ) : (
                   <CopySimple size={16} />
@@ -125,11 +115,11 @@ export function SaveCredentialsModal({
               </button>
               <button
                 type="button"
-                onClick={() => handleCopy(credentials.secretAccessKey, 'secret')}
-                aria-label={copiedField === 'secret' ? 'Copied' : 'Copy Secret Access Key'}
+                onClick={() => void secretCopy.copy(credentials.secretAccessKey)}
+                aria-label={secretCopy.copied ? 'Copied' : 'Copy Secret Access Key'}
                 className="flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:text-zinc-600"
               >
-                {copiedField === 'secret' ? (
+                {secretCopy.copied ? (
                   <CheckCircle size={16} className="text-green-500" />
                 ) : (
                   <CopySimple size={16} />
