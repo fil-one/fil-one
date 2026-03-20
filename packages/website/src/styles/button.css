@@ -6,16 +6,13 @@
       @apply cursor-not-allowed;
     }
 
-    &.button--primary,
-    &.button--ghost {
+    &.button--primary {
       @apply rounded-full border-2 px-6 py-4;
 
       &:focus {
         @apply outline-2 outline-offset-0;
       }
-    }
 
-    &.button--primary {
       @apply border-brand-700;
 
       & .button-custom-icon {
@@ -75,66 +72,21 @@
     }
 
     &.button--ghost {
-      .light-section & {
-        @apply border-zinc-100 bg-zinc-100 text-zinc-950;
+      @apply rounded-md border border-zinc-200 bg-white px-4 py-2 text-zinc-700;
 
-        & .button-arrow-icon {
-          @apply text-zinc-500;
-        }
+      &:focus {
+        @apply outline-2 outline-offset-0;
+      }
 
-        &:not(:disabled) {
-          &:hover,
-          &:focus {
-            @apply border-zinc-200 bg-zinc-200;
-          }
-
-          &:focus {
-            @apply outline-zinc-400;
-          }
-        }
-
-        &:disabled {
-          @apply text-zinc-400;
-
-          .button-arrow-icon {
-            @apply text-zinc-400;
-          }
-
-          .button-custom-icon {
-            @apply text-zinc-300;
-          }
+      &:not(:disabled) {
+        &:hover,
+        &:focus {
+          @apply bg-zinc-50;
         }
       }
 
-      .dark-section & {
-        @apply border-zinc-800 bg-zinc-800 text-zinc-50;
-
-        & .button-custom-icon {
-          @apply text-zinc-400;
-        }
-
-        &:not(:disabled) {
-          &:hover,
-          &:focus {
-            @apply border-zinc-600 bg-zinc-600;
-          }
-
-          &:focus {
-            @apply outline-zinc-400;
-          }
-        }
-
-        &:disabled {
-          @apply text-zinc-500;
-
-          .button-arrow-icon {
-            @apply text-zinc-500;
-          }
-
-          .button-custom-icon {
-            @apply text-zinc-600;
-          }
-        }
+      &:disabled {
+        @apply text-zinc-400;
       }
     }
 

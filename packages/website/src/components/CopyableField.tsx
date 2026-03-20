@@ -10,10 +10,10 @@ export function CopyableField({ label, value }: CopyableFieldProps) {
   const { copied, copy } = useCopyToClipboard();
 
   return (
-    <div className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
-      <div>
-        <p className="text-xs text-zinc-500">{label}</p>
-        <p className="mt-0.5 font-mono text-sm text-zinc-900">{value}</p>
+    <div className="flex items-center gap-2">
+      <span className="w-24 shrink-0 text-[13px] text-zinc-500">{label}</span>
+      <div className="flex-1 overflow-hidden rounded-md bg-zinc-100 px-2.5 py-1.5">
+        <span className="font-mono text-xs text-zinc-900">{value}</span>
       </div>
       <button
         type="button"

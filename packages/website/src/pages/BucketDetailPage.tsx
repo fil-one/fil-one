@@ -14,6 +14,7 @@ import {
   HardDrivesIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
+import { AccessKeysTable } from '../components/AccessKeysTable';
 import { Button } from '../components/Button';
 import { CopyableField } from '../components/CopyableField';
 import { Input } from '../components/Input';
@@ -70,11 +71,6 @@ function getEntriesAtPrefix(objects: S3Object[], prefix: string): BrowseEntry[] 
   return [...folderEntries, ...files];
 }
 
-function maskAccessKeyId(id: string): string {
-  if (id.length <= 4) return id;
-  return `${id.slice(0, 4)}...XXXX`;
-}
-
 // ---------------------------------------------------------------------------
 // Upload step type
 // ---------------------------------------------------------------------------
@@ -104,18 +100,6 @@ function StatCard({
         <p className="text-xs text-zinc-500">{label}</p>
       </div>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Permission badge
-// ---------------------------------------------------------------------------
-
-function PermissionBadge({ permission }: { permission: string }) {
-  return (
-    <span className="rounded-full border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-[10px] font-medium uppercase text-zinc-600">
-      {permission}
-    </span>
   );
 }
 
@@ -594,80 +578,25 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                 <div className="flex items-center justify-center py-8">
                   <Spinner ariaLabel="Loading access keys" size={24} />
                 </div>
-              ) : accessKeys.length === 0 ? (
-                <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
-                  <KeyIcon size={48} className="mb-4 text-zinc-300" aria-hidden="true" />
-                  <p className="mb-1 text-base font-medium text-zinc-700">No access keys yet</p>
-                  <p className="text-sm text-zinc-500">
-                    Create an access key to connect via the S3 API
-                  </p>
-                </div>
               ) : (
-                <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-                  <table className="w-full text-sm">
-                    <thead className="border-b border-zinc-200 bg-zinc-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                          API Key
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                          Permissions
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                          Status
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                          Last Used
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {accessKeys.map((key) => (
-                        <tr
-                          key={key.id}
-                          className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50"
-                        >
-                          <td className="px-4 py-3">
-                            <p className="font-medium text-zinc-900">{key.keyName}</p>
-                            <p className="font-mono text-xs text-zinc-500">
-                              {maskAccessKeyId(key.accessKeyId)}
-                            </p>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-1">
-                              {key.permissions.map((p) => (
-                                <PermissionBadge key={p} permission={p} />
-                              ))}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            {key.status === 'active' ? (
-                              <span className="rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
-                                Active
-                              </span>
-                            ) : (
-                              <span className="rounded-full border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
-                                Inactive
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-zinc-600">
-                            {key.lastUsedAt ? formatDate(key.lastUsedAt) : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <AccessKeysTable
+                  keys={accessKeys}
+                  showPermissions
+                  onCreateOpen={() => setAddKeyOpen(true)}
+                  emptyTitle="No access keys yet"
+                  emptyDescription="Create an access key to connect via the S3 API"
+                />
               )}
 
               {/* Access endpoints section */}
               <div className="mt-8">
-                <h2 className="mb-4 text-base font-medium text-zinc-900">Access endpoints</h2>
-                <div className="flex flex-col gap-3">
-                  <CopyableField label="S3 Endpoint" value={S3_ENDPOINT} />
-                  <CopyableField label="S3 Path" value={`s3://${bucketName}`} />
-                  <CopyableField label="Region" value={bucketRegion} />
+                <h2 className="mb-3 text-[13px] font-medium text-zinc-900">Access endpoints</h2>
+                <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-col gap-3">
+                    <CopyableField label="S3 Endpoint" value={S3_ENDPOINT} />
+                    <CopyableField label="S3 Path" value={`s3://${bucketName}`} />
+                    <CopyableField label="Region" value={bucketRegion} />
+                  </div>
                 </div>
               </div>
             </div>

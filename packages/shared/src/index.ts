@@ -24,6 +24,13 @@ export type {
   DeleteBucketRequest,
 } from './api/buckets.js';
 
+export {
+  BUCKET_NAME_MIN_LENGTH,
+  BUCKET_NAME_MAX_LENGTH,
+  BUCKET_NAME_PATTERN,
+  CreateBucketSchema,
+} from './api/buckets.js';
+
 export type {
   S3Object,
   ListObjectsRequest,
