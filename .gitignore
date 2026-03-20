@@ -23,6 +23,9 @@ coverage/
 # OS
 .DS_Store
 
+# Claude Code
+.claude
+
 # Compiler files
 contracts/cache/
 contracts/out/

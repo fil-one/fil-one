@@ -1,3 +1,9 @@
+/** S3-compatible storage endpoint for Fil One. */
+export const S3_ENDPOINT = 'https://s3.fil.one';
+
+/** S3 region for Fil One. */
+export const S3_REGION = 'eu-west-1';
+
 /** Cookie name for the OAuth state parameter (CSRF protection for login flow). */
 export const OAUTH_STATE_COOKIE = 'hs_oauth_state';
 
@@ -14,6 +20,9 @@ export const TB_BYTES = 1_000_000_000_000;
 /** Trial: 1 TB storage, 2 TB egress. Paid: unlimited (-1). */
 export const TRIAL_STORAGE_LIMIT = 1 * TB_BYTES;
 export const TRIAL_EGRESS_LIMIT = 2 * TB_BYTES;
+export const TRIAL_DURATION_DAYS = 30;
+export const TRIAL_GRACE_DAYS = 7;
+export const PAID_GRACE_DAYS = 30;
 export const UNLIMITED = -1;
 
 export interface UsageLimits {

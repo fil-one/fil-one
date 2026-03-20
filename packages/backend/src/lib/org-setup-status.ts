@@ -3,8 +3,11 @@ export const OrgSetupStatus = {
   AURORA_TENANT_CREATED: 'AURORA_TENANT_CREATED',
   AURORA_TENANT_SETUP_COMPLETE: 'AURORA_TENANT_SETUP_COMPLETE',
   AURORA_TENANT_API_KEY_CREATED: 'AURORA_TENANT_API_KEY_CREATED',
+  AURORA_S3_ACCESS_KEY_CREATED: 'AURORA_S3_ACCESS_KEY_CREATED',
 } as const;
 
+export const FINAL_SETUP_STATUS = OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED;
+
 export function isOrgSetupComplete(status: string | undefined): boolean {
-  return status === OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED;
+  return status === FINAL_SETUP_STATUS;
 }

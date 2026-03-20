@@ -102,6 +102,7 @@ pnpx sst secret set Auth0MgmtClientSecret <value> [--stage <stage>]
 pnpx sst secret set StripeSecretKey <value> [--stage <stage>]
 pnpx sst secret set StripePriceId <value> [--stage <stage>]
 pnpx sst secret set AuroraBackofficeToken <value> [--stage <stage>]
+pnpx sst secret set SendGridApiKey <value> [--stage <stage>]
 ```
 
 Omit `--stage` to set for your personal dev stage (defaults to OS username).
@@ -274,6 +275,14 @@ The frontend needs the **publishable key** in its env:
 # packages/website/.env.local
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx
 ```
+
+## SendGrid (Transactional Email)
+
+Auth0 transactional emails (verification, password reset, etc.) are sent via SendGrid. The deploy-time setup Lambda configures Auth0 to use SendGrid automatically.
+
+API keys are managed at: https://app.sendgrid.com/settings/api_keys
+
+The `SendGridApiKey` SST secret should be a key with **Mail Send** permission only. See the "Set SST secrets" step above.
 
 ## Aurora API Clients
 

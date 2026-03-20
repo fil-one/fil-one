@@ -1,12 +1,13 @@
-import { DeleteItemCommand, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
-import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { FileStorageClient } from '../lib/file-storage-client.js';
+import { getAuroraS3Credentials, deleteObject } from '../lib/aurora-s3-client.js';
+import { isOrgSetupComplete } from '../lib/org-setup-status.js';
+import { isNoSuchBucketError } from '../lib/s3-errors.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -17,7 +18,9 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 
 const dynamo = getDynamoClient();
 
-async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
+export async function baseHandler(
+  event: AuthenticatedEvent,
+): Promise<APIGatewayProxyStructuredResultV2> {
   const bucketName = event.pathParameters?.name;
   const objectKey = event.queryStringParameters?.key;
 
@@ -35,59 +38,43 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  const { userId } = getUserInfo(event);
-  const tableName = Resource.UploadsTable.name;
+  const { orgId } = getUserInfo(event);
 
-  // Verify bucket ownership
-  const bucketRecord = await dynamo.send(
+  // Look up org profile to get auroraTenantId
+  const { Item: orgProfile } = await dynamo.send(
     new GetItemCommand({
-      TableName: tableName,
-      Key: marshall({ pk: `USER#${userId}`, sk: `BUCKET#${bucketName}` }),
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
     }),
   );
 
-  if (!bucketRecord.Item) {
+  const auroraTenantId = orgProfile?.auroraTenantId?.S;
+  const setupStatus = orgProfile?.setupStatus?.S;
+  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
+    console.error('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
     return new ResponseBuilder()
-      .status(404)
-      .body<ErrorResponse>({ message: 'Bucket not found' })
+      .status(503)
+      .body<ErrorResponse>({
+        message: 'Aurora tenant setup is not complete, please try again later',
+      })
       .build();
   }
 
-  // Get object metadata to find s3Key
-  const objectRecord = await dynamo.send(
-    new GetItemCommand({
-      TableName: tableName,
-      Key: marshall({
-        pk: `BUCKET#${userId}#${bucketName}`,
-        sk: `OBJECT#${objectKey}`,
-      }),
-    }),
-  );
+  const stage = process.env.FILONE_STAGE!;
+  const gatewayUrl = process.env.AURORA_S3_GATEWAY_URL!;
 
-  if (!objectRecord.Item) {
-    return new ResponseBuilder()
-      .status(404)
-      .body<ErrorResponse>({ message: 'Object not found' })
-      .build();
+  const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
+  try {
+    await deleteObject(gatewayUrl, credentials, bucketName, objectKey);
+  } catch (err) {
+    if (isNoSuchBucketError(err)) {
+      return new ResponseBuilder()
+        .status(404)
+        .body<ErrorResponse>({ message: 'Bucket not found' })
+        .build();
+    }
+    throw err;
   }
-
-  const record = unmarshall(objectRecord.Item);
-  const s3Key = record.s3Key as string;
-
-  // Delete from S3
-  const storage = new FileStorageClient(Resource.UserFilesBucket.name);
-  await storage.delete(s3Key);
-
-  // Delete from DynamoDB
-  await dynamo.send(
-    new DeleteItemCommand({
-      TableName: tableName,
-      Key: marshall({
-        pk: `BUCKET#${userId}#${bucketName}`,
-        sk: `OBJECT#${objectKey}`,
-      }),
-    }),
-  );
 
   return {
     statusCode: 204,

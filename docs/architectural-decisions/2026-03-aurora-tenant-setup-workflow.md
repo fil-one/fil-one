@@ -1,7 +1,8 @@
 # ADR: Aurora Tenant Setup Workflow
 
 **Status:** Accepted
-**Date:** 2026-03-06
+**Created:** 2026-03-06
+**Last updated:** 2026-03-18
 
 ## Context
 
@@ -27,9 +28,9 @@ Route Lambdas enqueue a message with `MessageGroupId` and `MessageDeduplicationI
 
 The FIFO queue guarantees exactly-once processing per deduplication ID within a 5-minute window, so even if multiple API routes fire simultaneously for the same org, only one setup execution runs.
 
-A consumer Lambda reads the tenant's current status from DynamoDB and resumes from whatever step is next. DynamoDB status values describe what has been completed so far: `FILONE_ORG_CREATED` → `AURORA_TENANT_CREATED` → `AURORA_TENANT_SETUP_COMPLETE`. This naming convention makes it straightforward to insert additional steps later (e.g. between `AURORA_TENANT_SETUP_COMPLETE` and a future final state).
+A consumer Lambda reads the tenant's current status from DynamoDB and resumes from whatever step is next. DynamoDB status values describe what has been completed so far: `FILONE_ORG_CREATED` → `AURORA_TENANT_CREATED` → `AURORA_TENANT_SETUP_COMPLETE` → `AURORA_TENANT_API_KEY_CREATED` → `AURORA_S3_ACCESS_KEY_CREATED`. This naming convention makes it straightforward to insert additional steps later.
 
-The frontend reads the `auroraTenantReady` boolean from the `/api/me` response (derived from the DynamoDB `setupStatus` field) to show setup progress.
+The frontend reads the `orgSetupComplete` boolean from the `/api/me` response (derived from the DynamoDB `setupStatus` field) to show setup progress.
 
 ## Consequences
 
@@ -37,4 +38,4 @@ The frontend reads the `auroraTenantReady` boolean from the `/api/me` response (
 - Retries are handled by SQS automatically; failed messages land in the DLQ according to the queue's redrive policy and trigger a CloudWatch alarm.
 - Resume-from-failure is handled by the DynamoDB status field — the consumer always checks where it left off.
 - No additional orchestration services are introduced; SQS and DynamoDB are already in our stack.
-- Access key creation is intentionally deferred and can be added as a third step later.
+- Self-healing: `GET /api/me` re-enqueues a setup message when an org is confirmed but setup is incomplete. This means adding new setup steps does not require a manual migration for existing orgs — they automatically catch up on the next page load.

@@ -1,9 +1,13 @@
 export {
+  S3_ENDPOINT,
+  S3_REGION,
   OAUTH_STATE_COOKIE,
   CSRF_COOKIE_NAME,
   TB_BYTES,
   TRIAL_STORAGE_LIMIT,
   TRIAL_EGRESS_LIMIT,
+  TRIAL_GRACE_DAYS,
+  PAID_GRACE_DAYS,
   UNLIMITED,
   getUsageLimits,
 } from './constants.js';
@@ -11,7 +15,6 @@ export type { UsageLimits } from './constants.js';
 export { formatBytes, formatBytesShort } from './formatBytes.js';
 export type { MeResponse, ConfirmOrgRequest, ConfirmOrgResponse } from './api/me.js';
 export { OrgRole } from './api/org.js';
-export type { UploadRequest, UploadResponse } from './api/upload.js';
 export { ApiErrorCode } from './api/coreInterfaces.js';
 export type { ErrorResponse } from './api/coreInterfaces.js';
 
@@ -27,20 +30,27 @@ export type {
   S3Object,
   ListObjectsRequest,
   ListObjectsResponse,
-  UploadObjectRequest,
-  UploadObjectResponse,
   DeleteObjectRequest,
+  PresignUploadRequest,
+  PresignUploadResponse,
 } from './api/objects.js';
 
+export {
+  ACCESS_KEY_PERMISSIONS,
+  ACCESS_KEY_BUCKET_SCOPES,
+  KEY_NAME_MAX_LENGTH,
+  KEY_NAME_PATTERN,
+  CreateAccessKeySchema,
+} from './api/access-keys.js';
 export type {
   AccessKeyStatus,
+  AccessKeyPermission,
+  AccessKeyBucketScope,
   AccessKey,
   ListAccessKeysResponse,
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
   DeleteAccessKeyRequest,
-  UpdateAccessKeyRequest,
-  UpdateAccessKeyResponse,
 } from './api/access-keys.js';
 
 export type {

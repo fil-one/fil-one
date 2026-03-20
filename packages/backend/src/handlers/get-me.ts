@@ -4,17 +4,18 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { MeResponse } from '@filone/shared';
 import { Resource } from 'sst';
+import { getDynamoClient } from '../lib/ddb-client.js';
+import { triggerTenantSetup } from '../lib/trigger-tenant-setup.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
+import { suggestOrgName } from '../lib/suggest-org-name.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { suggestOrgName } from '../lib/suggest-org-name.js';
-import { getDynamoClient } from '../lib/ddb-client.js';
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { userId, orgId, email } = getUserInfo(event);
+  const { orgId, email, emailVerified } = getUserInfo(event);
 
   const { Item } = await getDynamoClient().send(
     new GetItemCommand({
@@ -30,17 +31,26 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const orgName = Item?.name?.S ?? '';
   const orgConfirmed = Item?.orgConfirmed?.BOOL === true;
 
+  if (orgConfirmed && !isOrgSetupComplete(setupStatus)) {
+    try {
+      await triggerTenantSetup({ orgId, orgName });
+    } catch (error) {
+      console.error('[get-me] Failed to trigger tenant setup', { error, orgId });
+    }
+  }
+
   const body: MeResponse = {
     orgId,
     orgName,
     orgConfirmed,
+    emailVerified,
     email,
     orgSetupComplete: isOrgSetupComplete(setupStatus),
   };
 
   // Only include suggested name if org is not yet confirmed
-  if (!orgConfirmed) {
-    body.suggestedOrgName = suggestOrgName(email, userId);
+  if (!orgConfirmed && email) {
+    body.suggestedOrgName = suggestOrgName(email);
   }
 
   return new ResponseBuilder().status(200).body(body).build();

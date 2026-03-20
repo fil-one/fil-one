@@ -2,12 +2,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { OrgSetupStatus } from '../lib/org-setup-status.js';
+import { OrgSetupStatus, FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 import { ORG_NAME_MIN_LENGTH, ORG_NAME_MAX_LENGTH } from '../lib/org-name-validation.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
+
+const mockCreateBillingTrial = vi.fn();
+vi.mock('../lib/create-billing-trial.js', () => ({
+  createBillingTrial: (...args: unknown[]) => mockCreateBillingTrial(...args),
+}));
 
 vi.mock('sst', () => ({
   Resource: {
@@ -154,7 +159,7 @@ describe('POST /api/org/confirm handler', () => {
       ReturnValues: 'ALL_NEW',
     });
 
-    // Verify SQS enqueue
+    // Verify SQS enqueue (Aurora only)
     const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
     expect(sqsCalls).toHaveLength(1);
     expect(sqsCalls[0].args[0].input).toStrictEqual({
@@ -162,6 +167,13 @@ describe('POST /api/org/confirm handler', () => {
       MessageBody: JSON.stringify({ orgId: MOCK_ORG_ID, orgName: 'Acme Corp' }),
       MessageGroupId: MOCK_ORG_ID,
       MessageDeduplicationId: MOCK_ORG_ID,
+    });
+
+    // Verify billing trial created directly
+    expect(mockCreateBillingTrial).toHaveBeenCalledWith({
+      userId: MOCK_USER_ID,
+      orgId: MOCK_ORG_ID,
+      email: MOCK_EMAIL,
     });
   });
 
@@ -173,7 +185,7 @@ describe('POST /api/org/confirm handler', () => {
         sk: { S: 'PROFILE' },
         name: { S: 'Acme Corp' },
         orgConfirmed: { BOOL: true },
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+        setupStatus: { S: FINAL_SETUP_STATUS },
       },
     });
 
@@ -184,8 +196,16 @@ describe('POST /api/org/confirm handler', () => {
 
     expect(result).toMatchObject({ statusCode: 200 });
 
-    // Should NOT enqueue because setup is already complete
-    expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
+    // Aurora queue should be skipped
+    const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
+    expect(sqsCalls).toHaveLength(0);
+
+    // Billing trial should still be created directly
+    expect(mockCreateBillingTrial).toHaveBeenCalledWith({
+      userId: MOCK_USER_ID,
+      orgId: MOCK_ORG_ID,
+      email: MOCK_EMAIL,
+    });
   });
 
   it('returns 400 when orgName is missing', async () => {
@@ -199,9 +219,10 @@ describe('POST /api/org/confirm handler', () => {
       body: expect.stringContaining('Organization name must be a string'),
     });
 
-    // Should NOT update DDB or enqueue SQS
+    // Should NOT update DDB, enqueue SQS, or create billing trial
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(mockCreateBillingTrial).not.toHaveBeenCalled();
   });
 
   it('returns 400 when orgName is too short', async () => {
@@ -217,6 +238,7 @@ describe('POST /api/org/confirm handler', () => {
 
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(mockCreateBillingTrial).not.toHaveBeenCalled();
   });
 
   it('returns 400 when orgName exceeds max length', async () => {
@@ -232,6 +254,7 @@ describe('POST /api/org/confirm handler', () => {
 
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(mockCreateBillingTrial).not.toHaveBeenCalled();
   });
 
   it('returns 400 when orgName is not a string', async () => {
@@ -244,6 +267,7 @@ describe('POST /api/org/confirm handler', () => {
       statusCode: 400,
       body: expect.stringContaining('Organization name must be a string'),
     });
+    expect(mockCreateBillingTrial).not.toHaveBeenCalled();
   });
 
   it('sanitizes HTML in orgName', async () => {

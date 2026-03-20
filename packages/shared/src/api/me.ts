@@ -2,6 +2,7 @@ export interface MeResponse {
   orgId: string;
   orgName: string;
   orgConfirmed: boolean;
+  emailVerified: boolean;
   suggestedOrgName?: string;
   email?: string;
   orgSetupComplete: boolean;

@@ -31,7 +31,6 @@ export interface ObjectActivity extends BaseActivity {
   resourceType: 'object';
   action: 'object.uploaded' | 'object.deleted';
   sizeBytes?: number;
-  cid?: string;
 }
 
 export interface KeyActivity extends BaseActivity {

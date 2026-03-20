@@ -83,11 +83,16 @@ function orgNotConfirmedResponse(): APIGatewayProxyStructuredResultV2 {
  */
 const ORG_CONFIRM_BYPASS_ROUTES = new Set(['/api/me', '/api/org/confirm']);
 
+interface IdTokenClaims {
+  email: string | null;
+  emailVerified: boolean;
+}
+
 /**
- * Verify the ID token and extract the email claim.
- * Returns undefined if the token is missing or invalid (non-fatal).
+ * Verify the ID token and extract email + email_verified claims.
+ * Returns defaults if the token is missing or invalid (non-fatal).
  */
-async function extractEmailFromIdToken({
+async function extractIdTokenClaims({
   idToken,
   jwks,
   clientId,
@@ -97,16 +102,19 @@ async function extractEmailFromIdToken({
   jwks: ReturnType<typeof createRemoteJWKSet>;
   clientId: string;
   issuer: string;
-}): Promise<string | null> {
-  if (!idToken) return null;
+}): Promise<IdTokenClaims> {
+  if (!idToken) return { email: null, emailVerified: false };
   try {
     const { payload } = await jwtVerify(idToken, jwks, { audience: clientId, issuer });
-    return (payload.email as string) ?? null;
+    return {
+      email: (payload.email as string) ?? null,
+      emailVerified: (payload.email_verified as boolean) ?? false,
+    };
   } catch (err) {
     console.warn('[auth] ID token verification failed, continuing without email', {
       error: (err as Error).message,
     });
-    return null;
+    return { email: null, emailVerified: false };
   }
 }
 
@@ -120,10 +128,12 @@ async function attachIdentity({
   event,
   sub,
   email,
+  emailVerified,
 }: {
   event: APIGatewayProxyEventV2;
   sub: string;
   email: string | null;
+  emailVerified: boolean;
 }): Promise<APIGatewayProxyStructuredResultV2 | null> {
   const resolved = await resolveUserAndOrg(sub, email);
   (
@@ -132,6 +142,7 @@ async function attachIdentity({
     userId: resolved.userId,
     orgId: resolved.orgId,
     email: resolved.email ?? undefined,
+    emailVerified,
   };
   if (!resolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
     return orgNotConfirmedResponse();
@@ -290,13 +301,13 @@ export function authMiddleware() {
       try {
         const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
         const sub = payload.sub!;
-        const email = await extractEmailFromIdToken({
+        const { email, emailVerified } = await extractIdTokenClaims({
           idToken,
           jwks,
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
         });
-        const blocked = await attachIdentity({ event, sub, email });
+        const blocked = await attachIdentity({ event, sub, email, emailVerified });
         if (blocked) return blocked;
         return; // Valid — continue to handler
       } catch (err) {
@@ -334,14 +345,19 @@ export function authMiddleware() {
           } satisfies NewTokens;
           const refreshedPayload = decodeJwt(tokens.access_token);
           const refreshedSub = refreshedPayload.sub!;
-          const refreshedEmail = await extractEmailFromIdToken({
+          const refreshedClaims = await extractIdTokenClaims({
             idToken: tokens.id_token,
             jwks,
             clientId: secrets.AUTH0_CLIENT_ID,
             issuer,
           });
           console.warn('[auth] Token refresh succeeded');
-          const blocked = await attachIdentity({ event, sub: refreshedSub, email: refreshedEmail });
+          const blocked = await attachIdentity({
+            event,
+            sub: refreshedSub,
+            email: refreshedClaims.email,
+            emailVerified: refreshedClaims.emailVerified,
+          });
           if (blocked) return blocked;
           return; // Continue to handler
         }

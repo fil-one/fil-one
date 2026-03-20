@@ -7,10 +7,12 @@ type NormalizedHeaderEvent = {
   rawHeaders: Record<string, string>;
 };
 
+type BuildEventUserInfo = Omit<UserInfo, 'emailVerified'> & { emailVerified?: boolean };
+
 interface BuildEventProps {
   body?: string;
   cookies?: string[];
-  userInfo?: UserInfo;
+  userInfo?: BuildEventUserInfo;
   queryStringParameters?: Record<string, string>;
   requestContext?: Partial<APIGatewayProxyEventV2['requestContext']>;
   rawPath?: string;
@@ -18,7 +20,7 @@ interface BuildEventProps {
 }
 
 export function buildEvent(
-  props: BuildEventProps & { userInfo: UserInfo },
+  props: BuildEventProps & { userInfo: BuildEventUserInfo },
 ): AuthenticatedEvent & NormalizedHeaderEvent;
 export function buildEvent(props?: BuildEventProps): APIGatewayProxyEventV2 & NormalizedHeaderEvent;
 export function buildEvent(
@@ -52,7 +54,9 @@ export function buildEvent(
       stage: '$default',
       time: '01/Jan/2024:00:00:00 +0000',
       timeEpoch: 1704067200000,
-      ...(props?.userInfo ? { userInfo: props.userInfo } : {}),
+      ...(props?.userInfo
+        ? { userInfo: { ...props.userInfo, emailVerified: props.userInfo.emailVerified ?? true } }
+        : {}),
       ...props?.requestContext,
     },
     isBase64Encoded: false,

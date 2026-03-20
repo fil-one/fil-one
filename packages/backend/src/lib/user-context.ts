@@ -4,6 +4,7 @@ export interface UserInfo {
   userId: string;
   orgId: string;
   email?: string;
+  emailVerified: boolean;
 }
 
 export interface AuthenticatedEvent extends APIGatewayProxyEventV2 {

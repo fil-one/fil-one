@@ -26,8 +26,7 @@ import type {
   S3Object,
   AccessKey,
   ListObjectsResponse,
-  UploadObjectRequest,
-  UploadObjectResponse,
+  PresignUploadResponse,
 } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
@@ -44,6 +43,9 @@ const MOCK_ACCESS_KEYS: AccessKey[] = [
     createdAt: '2024-01-15T10:00:00Z',
     lastUsedAt: '2024-02-15T10:00:00Z',
     status: 'active',
+    permissions: ['read', 'write', 'list', 'delete'],
+    bucketScope: 'all',
+    expiresAt: null,
   },
 ];
 
@@ -89,19 +91,6 @@ function getEntriesAtPrefix(objects: S3Object[], prefix: string): BrowseEntry[] 
 function maskAccessKeyId(id: string): string {
   if (id.length <= 4) return id;
   return `${id.slice(0, 4)}...XXXX`;
-}
-
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const base64 = result.split(',')[1] ?? '';
-      resolve(base64);
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -157,9 +146,6 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
   // Track whether the user has manually edited the object name
   const userEditedName = useRef(false);
 
-  // Upload timer ref (for cleanup)
-  const uploadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   // Fetch objects on mount
   useEffect(() => {
     let cancelled = false;
@@ -193,10 +179,6 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
     setObjectDescription('');
     setUploadProgress(0);
     userEditedName.current = false;
-    if (uploadTimerRef.current) {
-      clearInterval(uploadTimerRef.current);
-      uploadTimerRef.current = null;
-    }
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -215,46 +197,63 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
     setUploadStep('uploading');
     setUploadProgress(0);
 
-    // Simulate progress while uploading
-    let progress = 0;
-    uploadTimerRef.current = setInterval(() => {
-      progress = Math.min(progress + 5, 90);
-      setUploadProgress(progress);
-    }, 100);
-
     try {
-      const fileBase64 = await readFileAsBase64(selectedFile);
-      const body: UploadObjectRequest = {
-        bucketName,
-        key: objectName.trim(),
-        fileBase64,
-        fileName: selectedFile.name,
-        contentType: selectedFile.type || 'application/octet-stream',
-        sizeBytes: selectedFile.size,
-        ...(objectDescription.trim() && { description: objectDescription.trim() }),
-      };
+      const key = objectName.trim();
+      const contentType = selectedFile.type || 'application/octet-stream';
 
-      const data = await apiRequest<UploadObjectResponse>(
-        `/buckets/${encodeURIComponent(bucketName)}/objects/upload`,
+      // Step 1: Get presigned URL
+      const description = objectDescription.trim() || undefined;
+      const presignData = await apiRequest<PresignUploadResponse>(
+        `/buckets/${encodeURIComponent(bucketName)}/objects/presign`,
         {
           method: 'POST',
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            key,
+            contentType,
+            fileName: selectedFile.name,
+            ...(description && { description }),
+          }),
         },
       );
+      setUploadProgress(1);
 
-      if (uploadTimerRef.current) {
-        clearInterval(uploadTimerRef.current);
-        uploadTimerRef.current = null;
-      }
+      // Step 2: Upload directly to Aurora S3 via XHR for real progress.
+      // We use XMLHttpRequest instead of fetch() because the Fetch API does not
+      // support upload progress tracking.
+      // See https://jakearchibald.com/2025/fetch-streams-not-for-progress/
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            // Never drop below 1% — we already showed progress for the presign step
+            setUploadProgress(Math.max(1, Math.round((e.loaded / e.total) * 100)));
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            reject(new Error(`Upload failed with status ${xhr.status}`));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Upload failed'));
+        xhr.open('PUT', presignData.url);
+        xhr.setRequestHeader('Content-Type', contentType);
+        xhr.send(selectedFile);
+      });
+
       setUploadProgress(100);
       setUploadStep('done');
-      setObjects((prev) => [data.object, ...prev]);
+      setObjects((prev) => [
+        {
+          key,
+          sizeBytes: selectedFile.size,
+          lastModified: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
       toast.success(`${selectedFile.name} uploaded successfully`);
     } catch (err) {
-      if (uploadTimerRef.current) {
-        clearInterval(uploadTimerRef.current);
-        uploadTimerRef.current = null;
-      }
       handleCloseUploadModal();
       toast.error(err instanceof Error ? err.message : 'Upload failed');
     }
@@ -397,13 +396,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                               Size
                             </th>
                             <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                              Content Type
-                            </th>
-                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
                               Last Modified
-                            </th>
-                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                              CID
                             </th>
                             <th className="px-4 py-3" aria-label="Actions" />
                           </tr>
@@ -426,8 +419,6 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                                     {entry.name}/
                                   </div>
                                 </td>
-                                <td className="px-4 py-3 text-zinc-400">—</td>
-                                <td className="px-4 py-3 text-zinc-400">—</td>
                                 <td className="px-4 py-3 text-zinc-400">—</td>
                                 <td className="px-4 py-3 text-zinc-400">—</td>
                                 <td className="px-4 py-3" />
@@ -454,22 +445,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                                   {formatBytes(entry.object.sizeBytes)}
                                 </td>
                                 <td className="px-4 py-3 text-zinc-600">
-                                  {entry.object.contentType}
-                                </td>
-                                <td className="px-4 py-3 text-zinc-600">
                                   {formatDate(entry.object.lastModified)}
-                                </td>
-                                <td className="px-4 py-3">
-                                  {entry.object.cid ? (
-                                    <span
-                                      className="font-mono text-xs text-zinc-600"
-                                      title={entry.object.cid}
-                                    >
-                                      {entry.object.cid.slice(0, 12)}...
-                                    </span>
-                                  ) : (
-                                    <span className="text-zinc-400">—</span>
-                                  )}
                                 </td>
                                 <td className="px-4 py-3">
                                   <div className="flex items-center justify-end gap-2">

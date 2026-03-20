@@ -40,17 +40,13 @@ export default $config({
     const stripeSecretKey = new sst.Secret('StripeSecretKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
+    const sendGridApiKey =
+      $app.stage === 'staging' || $app.stage === 'production'
+        ? new sst.Secret('SendGridApiKey')
+        : undefined;
     const AWS_CACHING_DISABLED_POLICY = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
-    const uploadsTable = new sst.aws.Dynamo('UploadsTable', {
-      fields: {
-        pk: 'string',
-        sk: 'string',
-      },
-      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
-    });
-
     const billingTable = new sst.aws.Dynamo('BillingTable', {
       fields: {
         pk: 'string',
@@ -86,6 +82,7 @@ export default $config({
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
     const isProduction = stage === 'production';
+    const isEphemeralStage = stage !== 'production' && stage !== 'staging';
 
     let domainName = 'staging.fil.one';
     let certArn: string | undefined;
@@ -186,7 +183,13 @@ export default $config({
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
     const setupFn = new sst.aws.Function('SetupIntegrations', {
       handler: 'packages/backend/src/jobs/stack-setup/setup-integrations.handler',
-      link: [stripeSecretKey, auth0MgmtClientId, auth0MgmtClientSecret, auth0ClientId],
+      link: [
+        stripeSecretKey,
+        auth0MgmtClientId,
+        auth0MgmtClientSecret,
+        auth0ClientId,
+        ...(sendGridApiKey ? [sendGridApiKey] : []),
+      ],
       environment: {
         AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
       },
@@ -197,10 +200,11 @@ export default $config({
         },
       ],
       runtime: 'nodejs24.x',
-      timeout: '30 seconds',
+      timeout: '10 seconds',
     });
 
     new aws.cloudformation.Stack('SetupStack', {
+      ...(isEphemeralStage && { onFailure: 'DELETE' }),
       templateBody: $jsonStringify({
         AWSTemplateFormatVersion: '2010-09-09',
         Resources: {
@@ -216,9 +220,23 @@ export default $config({
       }),
     });
 
+    // Ensure the Stripe webhook endpoint is removed when an ephemeral
+    // stage is torn down. The CloudFormation custom resource above may
+    // not fire its Delete event if the Lambda is destroyed first.
+    if (isEphemeralStage) {
+      new local.Command('TeardownStripeWebhook', {
+        create: 'echo "Teardown hook registered"',
+        delete: $interpolate`node packages/backend/src/scripts/teardown-stripe-webhook.ts`,
+        environment: {
+          STRIPE_SECRET_KEY: stripeSecretKey.value,
+          SITE_URL: siteUrl,
+          STAGE: $app.stage,
+        },
+      });
+    }
+
     // ── Shared function config ───────────────────────────────────────
     const allResources = [
-      uploadsTable,
       billingTable,
       userInfoTable,
       userFilesBucket,
@@ -227,6 +245,7 @@ export default $config({
       auth0ClientSecret,
       stripeSecretKey,
       stripePriceId,
+      auroraBackofficeToken,
     ];
 
     const sharedEnv: Record<string, $util.Input<string>> = {
@@ -249,7 +268,20 @@ export default $config({
       AURORA_REGION_ID: 'ff',
     };
 
+    const auroraS3GatewayUrl = 'https://s3.dev.aur.lu';
+
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
+    const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
+
+    const auroraS3GatewayEnv = {
+      AURORA_S3_GATEWAY_URL: auroraS3GatewayUrl,
+    };
+    const auroraS3GatewayPermissions: sst.aws.FunctionPermissionArgs[] = [
+      {
+        actions: ['ssm:GetParameter'],
+        resources: [auroraS3KeySsmArn],
+      },
+    ];
 
     function addRoute(
       method: string,
@@ -279,8 +311,7 @@ export default $config({
     }
 
     // ── Data routes ──────────────────────────────────────────────────
-    addRoute('POST', '/api/upload', 'upload');
-    addRoute('GET', '/api/buckets', 'list-buckets');
+    addRoute('GET', '/api/buckets', 'list-buckets', auroraS3GatewayEnv, auroraS3GatewayPermissions);
     addRoute(
       'POST',
       '/api/buckets',
@@ -295,7 +326,13 @@ export default $config({
         },
       ],
     );
-    addRoute('DELETE', '/api/buckets/{name}', 'delete-bucket');
+    addRoute(
+      'DELETE',
+      '/api/buckets/{name}',
+      'delete-bucket',
+      auroraS3GatewayEnv,
+      auroraS3GatewayPermissions,
+    );
     addRoute('GET', '/api/access-keys', 'list-access-keys');
     addRoute(
       'POST',
@@ -311,10 +348,41 @@ export default $config({
         },
       ],
     );
-    addRoute('GET', '/api/buckets/{name}/objects', 'list-objects');
-    addRoute('POST', '/api/buckets/{name}/objects/upload', 'upload-object');
-    addRoute('GET', '/api/buckets/{name}/objects/download', 'download-object');
-    addRoute('DELETE', '/api/buckets/{name}/objects', 'delete-object');
+    addRoute(
+      'DELETE',
+      '/api/access-keys/{keyId}',
+      'delete-access-key',
+      auroraS3GatewayEnv,
+      auroraS3GatewayPermissions,
+    );
+    addRoute(
+      'GET',
+      '/api/buckets/{name}/objects',
+      'list-objects',
+      auroraS3GatewayEnv,
+      auroraS3GatewayPermissions,
+    );
+    addRoute(
+      'POST',
+      '/api/buckets/{name}/objects/presign',
+      'presign-upload',
+      auroraS3GatewayEnv,
+      auroraS3GatewayPermissions,
+    );
+    addRoute(
+      'GET',
+      '/api/buckets/{name}/objects/download',
+      'download-object',
+      auroraS3GatewayEnv,
+      auroraS3GatewayPermissions,
+    );
+    addRoute(
+      'DELETE',
+      '/api/buckets/{name}/objects',
+      'delete-object',
+      auroraS3GatewayEnv,
+      auroraS3GatewayPermissions,
+    );
 
     // ── Auth routes ──────────────────────────────────────────────────
     const allowedRedirectOrigins = allowedOrigins.join(',');
@@ -334,8 +402,14 @@ export default $config({
     addRoute('POST', '/api/org/confirm', 'confirm-org');
 
     // ── Usage + Dashboard routes ─────────────────────────────────────
-    addRoute('GET', '/api/usage', 'get-usage');
-    addRoute('GET', '/api/activity', 'get-activity');
+    addRoute('GET', '/api/usage', 'get-usage', auroraEnv);
+    addRoute(
+      'GET',
+      '/api/activity',
+      'get-activity',
+      { ...auroraEnv, ...auroraS3GatewayEnv },
+      auroraS3GatewayPermissions,
+    );
 
     // ── Billing routes ───────────────────────────────────────────────
     addRoute('GET', '/api/billing', 'get-billing');
@@ -372,8 +446,8 @@ export default $config({
         },
         permissions: [
           {
-            actions: ['ssm:PutParameter'],
-            resources: [auroraApiKeySsmArn],
+            actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+            resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
           },
         ],
         runtime: 'nodejs24.x',

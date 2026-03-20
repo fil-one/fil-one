@@ -2,10 +2,7 @@ export interface S3Object {
   key: string;
   sizeBytes: number;
   lastModified: string;
-  etag: string;
-  contentType: string;
-  cid?: string;
-  description?: string;
+  etag?: string;
 }
 
 export interface ListObjectsRequest {
@@ -23,19 +20,16 @@ export interface ListObjectsResponse {
   isTruncated: boolean;
 }
 
-export interface UploadObjectRequest {
-  bucketName: string;
+export interface PresignUploadRequest {
   key: string;
-  fileBase64: string;
-  fileName: string;
   contentType: string;
-  sizeBytes: number;
+  fileName: string;
   description?: string;
 }
 
-export interface UploadObjectResponse {
-  uploadUrl: string;
-  object: S3Object;
+export interface PresignUploadResponse {
+  url: string;
+  key: string;
 }
 
 export interface DeleteObjectRequest {

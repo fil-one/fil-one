@@ -24,8 +24,11 @@ function FinishSignUpRoute() {
   useEffect(() => {
     getMe()
       .then((data) => {
+        if (!data.emailVerified) {
+          void navigate({ to: '/verify-email' });
+          return;
+        }
         if (data.orgConfirmed) {
-          // Already confirmed — go to dashboard
           void navigate({ to: '/dashboard' });
           return;
         }

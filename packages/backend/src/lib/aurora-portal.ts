@@ -2,18 +2,34 @@ import assert from 'node:assert';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import {
   createClient,
+  deleteV1TenantsByTenantIdAccessKeysByAccessKeyId,
   getV1TenantsByTenantIdAccessKeys,
   getV1TenantsByTenantIdAccessKeysByAccessKeyId,
   postV1TenantsByTenantIdAccessKeys,
   postV1TenantsByTenantIdBucket,
 } from '@filone/aurora-portal-client';
+import type { AccessKeyPermission } from '@filone/shared';
 
 const ssm = new SSMClient({});
+
+export class BucketAlreadyExistsError extends Error {
+  constructor(bucketName: string) {
+    super(`Bucket "${bucketName}" already exists`);
+    this.name = 'BucketAlreadyExistsError';
+  }
+}
 
 export class DuplicateKeyNameError extends Error {
   constructor() {
     super('An access key with this name already exists');
     this.name = 'DuplicateKeyNameError';
+  }
+}
+
+export class AuroraValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuroraValidationError';
   }
 }
 
@@ -44,10 +60,7 @@ export async function createAuroraBucket({
 
   if (error) {
     if (response?.status === 409) {
-      console.log(
-        `Aurora bucket "${bucketName}" already exists for tenant ${tenantId}, treating as success`,
-      );
-      return;
+      throw new BucketAlreadyExistsError(bucketName);
     }
     throw new Error(`Failed to create Aurora bucket "${bucketName}" for tenant ${tenantId}`, {
       cause: error,
@@ -57,9 +70,32 @@ export async function createAuroraBucket({
   console.log(`Aurora bucket "${bucketName}" created for tenant ${tenantId}`);
 }
 
+// Always-included Aurora access types required for Object Lock / versioning.
+const AURORA_ACCESS_ALWAYS: string[] = [
+  'Default',
+  'GetBucketVersioning',
+  'GetBucketObjectLockConfiguration',
+];
+
+// Maps our permission model to Aurora access type strings.
+const AURORA_ACCESS_MAP: Record<AccessKeyPermission, string[]> = {
+  read: ['Read', 'GetObjectVersion', 'GetObjectRetention', 'GetObjectLegalHold'],
+  write: ['Write', 'PutObjectRetention', 'PutObjectLegalHold'],
+  list: ['List', 'ListBucketVersions'],
+  delete: ['Delete', 'DeleteObjectVersion'],
+};
+
+export function buildAuroraAccessArray(permissions: AccessKeyPermission[]): string[] {
+  const extra = permissions.flatMap((p) => AURORA_ACCESS_MAP[p]);
+  return [...AURORA_ACCESS_ALWAYS, ...extra];
+}
+
 export interface CreateAuroraAccessKeyOptions {
   tenantId: string;
   keyName: string;
+  permissions: AccessKeyPermission[];
+  buckets?: string[];
+  expiresAt?: string | null;
 }
 export interface CreateAuroraAccessKeyResult {
   id: string;
@@ -71,6 +107,9 @@ export interface CreateAuroraAccessKeyResult {
 export async function createAuroraAccessKey({
   tenantId,
   keyName,
+  permissions,
+  buckets,
+  expiresAt,
 }: CreateAuroraAccessKeyOptions): Promise<CreateAuroraAccessKeyResult> {
   const baseUrl = process.env.AURORA_PORTAL_URL!;
   const stage = process.env.FILONE_STAGE!;
@@ -86,22 +125,9 @@ export async function createAuroraAccessKey({
     path: { tenantId },
     body: {
       name: keyName,
-      access: [
-        'Default',
-        'Read',
-        'Write',
-        'Delete',
-        'List',
-        'GetBucketVersioning',
-        'GetBucketObjectLockConfiguration',
-        'ListBucketVersions',
-        'GetObjectVersion',
-        'GetObjectRetention',
-        'GetObjectLegalHold',
-        'PutObjectRetention',
-        'PutObjectLegalHold',
-        'DeleteObjectVersion',
-      ],
+      access: buildAuroraAccessArray(permissions),
+      ...(buckets && buckets.length > 0 ? { buckets } : {}),
+      ...(expiresAt ? { expiration: expiresAt } : {}),
     },
     throwOnError: false,
   });
@@ -109,6 +135,15 @@ export async function createAuroraAccessKey({
   if (error) {
     if (response?.status === 409) {
       throw new DuplicateKeyNameError();
+    }
+    if (response?.status === 400) {
+      const detail =
+        typeof error === 'object' && error !== null && 'message' in error
+          ? String((error as { message: string }).message)
+          : undefined;
+      throw new AuroraValidationError(
+        detail ?? 'Invalid access key request. Check the key name and try again.',
+      );
     }
     console.error(
       `Aurora access key creation failed for tenant ${tenantId}:`,
@@ -157,7 +192,10 @@ export interface FindAuroraAccessKeyResult {
 export async function findAuroraAccessKeyByName({
   tenantId,
   keyName,
-}: CreateAuroraAccessKeyOptions): Promise<FindAuroraAccessKeyResult | undefined> {
+}: {
+  tenantId: string;
+  keyName: string;
+}): Promise<FindAuroraAccessKeyResult | undefined> {
   const baseUrl = process.env.AURORA_PORTAL_URL!;
   const stage = process.env.FILONE_STAGE!;
   const apiKey = await getAuroraPortalApiKey(stage, tenantId);
@@ -228,6 +266,44 @@ export async function findAuroraAccessKeyByName({
     accessKeyId: accessKey.accessKeyId,
     createdAt: accessKey.createdAt,
   };
+}
+
+export async function deleteAuroraAccessKey({
+  tenantId,
+  auroraKeyId,
+}: {
+  tenantId: string;
+  auroraKeyId: string;
+}): Promise<void> {
+  const baseUrl = process.env.AURORA_PORTAL_URL!;
+  const stage = process.env.FILONE_STAGE!;
+  const apiKey = await getAuroraPortalApiKey(stage, tenantId);
+
+  const client = createClient({
+    baseUrl,
+    headers: { 'X-Api-Key': apiKey },
+  });
+
+  const { error, response } = await deleteV1TenantsByTenantIdAccessKeysByAccessKeyId({
+    client,
+    path: { tenantId, accessKeyId: auroraKeyId },
+    throwOnError: false,
+  });
+
+  if (error) {
+    if (response?.status === 404) {
+      // Already deleted — treat as success
+      console.log(
+        `Aurora access key "${auroraKeyId}" not found for tenant ${tenantId}, treating as already deleted`,
+      );
+      return;
+    }
+    throw new Error(`Failed to delete Aurora access key "${auroraKeyId}" for tenant ${tenantId}`, {
+      cause: error,
+    });
+  }
+
+  console.log(`Aurora access key "${auroraKeyId}" deleted for tenant ${tenantId}`);
 }
 
 export async function getAuroraPortalApiKey(stage: string, tenantId: string): Promise<string> {

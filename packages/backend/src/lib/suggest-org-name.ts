@@ -5,6 +5,8 @@
  * It is best-effort only — the suggested name is never blocking.
  */
 
+import * as psl from 'psl';
+
 export const PUBLIC_EMAIL_DOMAINS = new Set([
   // Google
   'gmail.com',
@@ -49,24 +51,27 @@ export const PUBLIC_EMAIL_DOMAINS = new Set([
   '126.com',
 ]);
 
-export function suggestOrgName(email: string | undefined, userId: string): string | undefined {
-  if (!email) {
-    console.warn('[suggest-org-name] No email available for org name suggestion', { userId });
-    return undefined;
-  }
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
-  const domain = email.split('@')[1]?.toLowerCase();
-  if (!domain) return undefined;
+function kebabToTitleCase(s: string): string {
+  return s.split('-').map(capitalize).join(' ');
+}
+
+export function suggestOrgName(email: string): string | undefined {
+  const [localPart, rawDomain] = email.split('@');
+  const domain = rawDomain?.toLowerCase();
+  if (!domain || !localPart) return undefined;
 
   if (PUBLIC_EMAIL_DOMAINS.has(domain)) {
-    return undefined;
+    return capitalize(localPart.toLowerCase());
   }
 
-  // Use the domain without TLD as the suggestion, capitalised.
-  // e.g. "acme.com" → "Acme"
-  const parts = domain.split('.');
-  const name = parts[0];
-  if (!name) return undefined;
+  // Use psl to extract the second-level domain label.
+  // e.g. "eng.bigcorp.co.uk" → sld "bigcorp", "acme.com" → sld "acme"
+  const parsed = psl.parse(domain);
+  if ('error' in parsed || !parsed.sld) return undefined;
 
-  return name.charAt(0).toUpperCase() + name.slice(1);
+  return kebabToTitleCase(parsed.sld);
 }
