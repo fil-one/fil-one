@@ -146,6 +146,8 @@ const ORG_CONFIRM_BYPASS_ROUTES = new Set([
 interface IdTokenClaims {
   email: string | null;
   emailVerified: boolean;
+  name: string | null;
+  picture: string | null;
 }
 
 /**
@@ -163,18 +165,20 @@ async function extractIdTokenClaims({
   clientId: string;
   issuer: string;
 }): Promise<IdTokenClaims> {
-  if (!idToken) return { email: null, emailVerified: false };
+  if (!idToken) return { email: null, emailVerified: false, name: null, picture: null };
   try {
     const { payload } = await jwtVerify(idToken, jwks, { audience: clientId, issuer });
     return {
       email: (payload.email as string) ?? null,
       emailVerified: (payload.email_verified as boolean) ?? false,
+      name: (payload.name as string) ?? null,
+      picture: (payload.picture as string) ?? null,
     };
   } catch (err) {
     console.warn('[auth] ID token verification failed, continuing without email', {
       error: (err as Error).message,
     });
-    return { email: null, emailVerified: false };
+    return { email: null, emailVerified: false, name: null, picture: null };
   }
 }
 
@@ -189,11 +193,15 @@ async function attachIdentity({
   sub,
   email,
   emailVerified,
+  name,
+  picture,
 }: {
   event: APIGatewayProxyEventV2;
   sub: string;
   email: string | null;
   emailVerified: boolean;
+  name: string | null;
+  picture: string | null;
 }): Promise<APIGatewayProxyStructuredResultV2 | null> {
   const resolved = await resolveUserAndOrg(sub, email);
   (
@@ -204,6 +212,8 @@ async function attachIdentity({
     orgId: resolved.orgId,
     email: resolved.email ?? undefined,
     emailVerified,
+    name: name ?? undefined,
+    picture: picture ?? undefined,
   };
   if (!resolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
     return orgNotConfirmedResponse();
@@ -369,13 +379,20 @@ export function authMiddleware() {
       try {
         const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
         const sub = payload.sub!;
-        const { email, emailVerified } = await extractIdTokenClaims({
+        const idClaims = await extractIdTokenClaims({
           idToken,
           jwks,
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
         });
-        const blocked = await attachIdentity({ event, sub, email, emailVerified });
+        const blocked = await attachIdentity({
+          event,
+          sub,
+          email: idClaims.email,
+          emailVerified: idClaims.emailVerified,
+          name: idClaims.name,
+          picture: idClaims.picture,
+        });
         if (blocked) return blocked;
         return; // Valid — continue to handler
       } catch (err) {
@@ -404,6 +421,8 @@ export function authMiddleware() {
           sub: refreshedSub,
           email: refreshedClaims.email,
           emailVerified: refreshedClaims.emailVerified,
+          name: refreshedClaims.name,
+          picture: refreshedClaims.picture,
         });
         if (blocked) return blocked;
         return; // Continue to handler

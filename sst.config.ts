@@ -427,6 +427,8 @@ export default $config({
 
     // ── Me route ───────────────────────────────────────────────────
     addRoute('GET', '/api/me', 'get-me');
+    addRoute('PATCH', '/api/me/profile', 'update-profile');
+    addRoute('POST', '/api/me/change-password', 'change-password');
     addRoute('POST', '/api/me/resend-verification', 'resend-verification');
 
     // ── Org routes ──────────────────────────────────────────────────
