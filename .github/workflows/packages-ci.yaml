@@ -184,6 +184,44 @@ jobs:
           path: playwright-report/
           retention-days: 30
 
+  integration-tests:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [deploy-preview]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    concurrency:
+      group: preview-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      SST_STAGE: pr-${{ github.event.pull_request.number }}
+      AWS_REGION: us-east-2
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
+          aws-region: us-east-2
+
+      - name: Run integration tests
+        run: pnpm test:integration
+
   deploy-staging:
     if: github.ref == 'refs/heads/main'
     needs: [check-packages]
