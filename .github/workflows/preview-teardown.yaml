@@ -18,13 +18,13 @@ jobs:
       AWS_REGION: us-east-2
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - uses: pnpm/action-setup@3b1e0a8ff9e8cbbd91cce0ed6f246d1068188b1b
+      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm
