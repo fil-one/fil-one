@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
+import { NoSuchBucket } from '@aws-sdk/client-s3';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -10,7 +10,6 @@ import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 vi.mock('sst', () => ({
   Resource: {
-    UploadsTable: { name: 'UploadsTable' },
     UserInfoTable: { name: 'UserInfoTable' },
   },
 }));
@@ -37,12 +36,6 @@ import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
-function bucketRecord() {
-  return {
-    Item: marshall({ pk: `USER#${USER_INFO.userId}`, sk: 'BUCKET#my-bucket' }),
-  };
-}
-
 function orgProfileWithTenant(tenantId: string) {
   return {
     Item: {
@@ -65,10 +58,7 @@ describe('delete-object baseHandler', () => {
   });
 
   it('returns 204 after deleting via Aurora S3 Gateway', async () => {
-    ddbMock.on(GetItemCommand, { TableName: 'UploadsTable' }).resolves(bucketRecord());
-    ddbMock
-      .on(GetItemCommand, { TableName: 'UserInfoTable' })
-      .resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetAuroraS3Credentials.mockResolvedValue({
       accessKeyId: 'AKIA_CONSOLE',
       secretAccessKey: 's3_secret',
@@ -94,6 +84,28 @@ describe('delete-object baseHandler', () => {
     );
   });
 
+  it('returns 404 when S3 throws NoSuchBucket', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetAuroraS3Credentials.mockResolvedValue({
+      accessKeyId: 'AKIA_CONSOLE',
+      secretAccessKey: 's3_secret',
+    });
+    mockDeleteObject.mockRejectedValue(
+      new NoSuchBucket({ message: 'The specified bucket does not exist', $metadata: {} }),
+    );
+
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { key: 'photos/cat.jpg' },
+    });
+    event.pathParameters = { name: 'no-such-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(404);
+    const body = JSON.parse(result.body as string);
+    expect(body).toStrictEqual({ message: 'Bucket not found' });
+  });
+
   it('returns 400 when bucket name is missing from path', async () => {
     const event = buildEvent({ userInfo: USER_INFO, queryStringParameters: { key: 'test.txt' } });
     const result = await baseHandler(event);
@@ -109,22 +121,8 @@ describe('delete-object baseHandler', () => {
     expect(result.statusCode).toBe(400);
   });
 
-  it('returns 404 when bucket is not found', async () => {
-    ddbMock.on(GetItemCommand, { TableName: 'UploadsTable' }).resolves({ Item: undefined });
-
-    const event = buildEvent({
-      userInfo: USER_INFO,
-      queryStringParameters: { key: 'test.txt' },
-    });
-    event.pathParameters = { name: 'no-bucket' };
-    const result = await baseHandler(event);
-
-    expect(result.statusCode).toBe(404);
-  });
-
   it('returns 503 when org setup is not complete', async () => {
-    ddbMock.on(GetItemCommand, { TableName: 'UploadsTable' }).resolves(bucketRecord());
-    ddbMock.on(GetItemCommand, { TableName: 'UserInfoTable' }).resolves({
+    ddbMock.on(GetItemCommand).resolves({
       Item: {
         pk: { S: `ORG#${USER_INFO.orgId}` },
         sk: { S: 'PROFILE' },

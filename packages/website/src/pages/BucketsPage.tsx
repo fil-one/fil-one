@@ -7,7 +7,7 @@ import { Input } from '../components/Input';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/Modal';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { formatBytes, S3_REGION } from '@filone/shared';
+import { S3_REGION } from '@filone/shared';
 
 import type {
   Bucket,
@@ -159,12 +159,6 @@ export function BucketsPage() {
                   Region
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Objects
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Size
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
                   Created
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
@@ -189,8 +183,6 @@ export function BucketsPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-zinc-600">{bucket.region}</td>
-                  <td className="px-4 py-3 text-zinc-600">{bucket.objectCount.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-zinc-600">{formatBytes(bucket.sizeBytes)}</td>
                   <td className="px-4 py-3 text-zinc-600">{formatDate(bucket.createdAt)}</td>
                   <td className="px-4 py-3">
                     {bucket.isPublic ? (

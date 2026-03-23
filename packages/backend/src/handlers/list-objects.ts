@@ -2,7 +2,6 @@
 import '../lib/instrumentation.js';
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
 import { tracedHandler } from '../middleware/tracing.js';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
@@ -11,6 +10,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getAuroraS3Credentials, listObjects } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
+import { isNoSuchBucketError } from '../lib/s3-errors.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -31,23 +31,7 @@ export async function baseHandler(
       .build();
   }
 
-  const { userId, orgId } = getUserInfo(event);
-  const tableName = Resource.UploadsTable.name;
-
-  // Verify bucket ownership
-  const bucketRecord = await dynamo.send(
-    new GetItemCommand({
-      TableName: tableName,
-      Key: marshall({ pk: `USER#${userId}`, sk: `BUCKET#${bucketName}` }),
-    }),
-  );
-
-  if (!bucketRecord.Item) {
-    return new ResponseBuilder()
-      .status(404)
-      .body<ErrorResponse>({ message: 'Bucket not found' })
-      .build();
-  }
+  const { orgId } = getUserInfo(event);
 
   // Look up org profile to get auroraTenantId
   const { Item: orgProfile } = await dynamo.send(
@@ -81,15 +65,26 @@ export async function baseHandler(
     : undefined;
   const nextToken = event.queryStringParameters?.nextToken;
 
-  const result = await listObjects({
-    endpointUrl: gatewayUrl,
-    credentials,
-    bucket: bucketName,
-    prefix,
-    delimiter,
-    maxKeys,
-    continuationToken: nextToken,
-  });
+  let result;
+  try {
+    result = await listObjects({
+      endpointUrl: gatewayUrl,
+      credentials,
+      bucket: bucketName,
+      prefix,
+      delimiter,
+      maxKeys,
+      continuationToken: nextToken,
+    });
+  } catch (err) {
+    if (isNoSuchBucketError(err)) {
+      return new ResponseBuilder()
+        .status(404)
+        .body<ErrorResponse>({ message: 'Bucket not found' })
+        .build();
+    }
+    throw err;
+  }
 
   return new ResponseBuilder()
     .status(200)

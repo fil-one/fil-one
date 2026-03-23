@@ -5,7 +5,7 @@ import { DeleteItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/c
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
-import { SubscriptionStatus } from '@filone/shared';
+import { PAID_GRACE_DAYS, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
@@ -197,8 +197,10 @@ async function handleSubscriptionDeleted(
   const userId = customer.metadata?.userId;
   if (!userId) return;
 
+  const graceDays = subscription.trial_end ? TRIAL_GRACE_DAYS : PAID_GRACE_DAYS;
+
   const now = new Date();
-  const gracePeriodEndsAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  const gracePeriodEndsAt = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
 
   await dynamo.send(
     new UpdateItemCommand({
@@ -236,7 +238,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
         sk: { S: 'SUBSCRIPTION' },
       },
       UpdateExpression:
-        'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt',
+        'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt',
       ExpressionAttributeValues: {
         ':active': { S: SubscriptionStatus.Active },
         ':now': { S: new Date().toISOString() },
@@ -255,9 +257,10 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
   const userId = customer.metadata?.userId;
   if (!userId) return;
 
-  const now = new Date();
-  const gracePeriodEndsAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
-
+  // Set PastDue but do NOT start grace period — Stripe Smart Retries will
+  // continue attempting payment. Grace period only begins when Stripe cancels
+  // the subscription after all retries are exhausted.
+  const now = new Date().toISOString();
   await dynamo.send(
     new UpdateItemCommand({
       TableName: tableName,
@@ -266,11 +269,11 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
         sk: { S: 'SUBSCRIPTION' },
       },
       UpdateExpression:
-        'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+        'SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now',
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.PastDue },
-        ':grace': { S: gracePeriodEndsAt },
-        ':now': { S: now.toISOString() },
+        ':failedAt': { S: now },
+        ':now': { S: now },
       },
     }),
   );

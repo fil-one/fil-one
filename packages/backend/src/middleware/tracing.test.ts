@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
-import { trace, SpanKind, SpanStatusCode, context as otelContext } from '@opentelemetry/api';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import {
   NodeTracerProvider,
   SimpleSpanProcessor,
@@ -218,7 +218,7 @@ describe('tracedHandler', () => {
     it('sets the root span as active during handler execution', async () => {
       let activeSpanDuringHandler: unknown = null;
 
-      const handler = tracedHandler(async (event: unknown) => {
+      const handler = tracedHandler(async (_event: unknown) => {
         activeSpanDuringHandler = trace.getActiveSpan();
         return { statusCode: 200, body: 'ok' };
       });

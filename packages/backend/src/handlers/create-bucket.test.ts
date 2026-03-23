@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -9,20 +9,24 @@ import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 vi.mock('sst', () => ({
   Resource: {
-    UploadsTable: { name: 'UploadsTable' },
     UserInfoTable: { name: 'UserInfoTable' },
   },
 }));
 
 const mockCreateAuroraBucket = vi.fn();
 
-vi.mock('../lib/aurora-portal.js', () => ({
-  createAuroraBucket: (...args: unknown[]) => mockCreateAuroraBucket(...args),
-}));
+vi.mock('../lib/aurora-portal.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../lib/aurora-portal.js')>();
+  return {
+    ...original,
+    createAuroraBucket: (...args: unknown[]) => mockCreateAuroraBucket(...args),
+  };
+});
 
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './create-bucket.js';
+import { BucketAlreadyExistsError } from '../lib/aurora-portal.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 import { S3_REGION } from '@filone/shared';
 
@@ -68,7 +72,6 @@ describe('create-bucket baseHandler', () => {
 
   it('returns 201 and calls createAuroraBucket on success', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    ddbMock.on(PutItemCommand).resolves({});
     mockCreateAuroraBucket.mockResolvedValue(undefined);
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
@@ -89,7 +92,6 @@ describe('create-bucket baseHandler', () => {
 
     expect(result.statusCode).toBe(503);
     expect(mockCreateAuroraBucket).not.toHaveBeenCalled();
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
   });
 
   it('returns 503 when org setup is not complete', async () => {
@@ -107,7 +109,6 @@ describe('create-bucket baseHandler', () => {
 
     expect(result.statusCode).toBe(503);
     expect(mockCreateAuroraBucket).not.toHaveBeenCalled();
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
   });
 
   it('throws when Aurora Portal API fails', async () => {
@@ -117,17 +118,11 @@ describe('create-bucket baseHandler', () => {
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
 
     await expect(baseHandler(event)).rejects.toThrow('Aurora API error');
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
   });
 
-  it('returns 409 when DynamoDB bucket already exists', async () => {
+  it('returns 409 when Aurora bucket already exists', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    ddbMock.on(PutItemCommand).rejects(
-      Object.assign(new Error('Conditional check failed'), {
-        name: 'ConditionalCheckFailedException',
-      }),
-    );
-    mockCreateAuroraBucket.mockResolvedValue(undefined);
+    mockCreateAuroraBucket.mockRejectedValue(new BucketAlreadyExistsError('my-bucket'));
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -135,21 +130,18 @@ describe('create-bucket baseHandler', () => {
     expect(result.statusCode).toBe(409);
   });
 
-  it('calls Aurora before DynamoDB PutItem', async () => {
-    const callOrder: string[] = [];
-
-    mockCreateAuroraBucket.mockImplementation(async () => {
-      callOrder.push('aurora');
-    });
+  it('returns 400 when region is unsupported', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    ddbMock.on(PutItemCommand).callsFake(() => {
-      callOrder.push('dynamodb-put');
-      return {};
+
+    const event = buildEvent({
+      body: JSON.stringify({ name: 'my-bucket', region: 'us-west-2' }),
+      userInfo: USER_INFO,
     });
+    const result = await baseHandler(event);
 
-    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
-    await baseHandler(event);
-
-    expect(callOrder).toStrictEqual(['aurora', 'dynamodb-put']);
+    expect(result.statusCode).toBe(400);
+    const body = JSON.parse(result.body as string);
+    expect(body.message).toContain('Unsupported region');
+    expect(mockCreateAuroraBucket).not.toHaveBeenCalled();
   });
 });

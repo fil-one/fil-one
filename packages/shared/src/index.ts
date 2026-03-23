@@ -6,6 +6,8 @@ export {
   TB_BYTES,
   TRIAL_STORAGE_LIMIT,
   TRIAL_EGRESS_LIMIT,
+  TRIAL_GRACE_DAYS,
+  PAID_GRACE_DAYS,
   UNLIMITED,
   getUsageLimits,
 } from './constants.js';

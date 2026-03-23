@@ -1,15 +1,5 @@
 import type { SubscriptionStatus } from '@filone/shared';
 
-/** UploadsTable — pk: USER#{userId}, sk: BUCKET#{name} */
-export interface BucketRecord {
-  pk: string;
-  sk: string;
-  name: string;
-  region: string;
-  createdAt: string;
-  isPublic: boolean;
-}
-
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
 export interface AccessKeyRecord {
   pk: string;
@@ -31,6 +21,7 @@ export interface SubscriptionRecord {
   gracePeriodEndsAt?: string;
   currentPeriodEnd?: string;
   canceledAt?: string;
+  lastPaymentFailedAt?: string;
   paymentMethodId?: string;
   paymentMethodLast4?: string;
   paymentMethodBrand?: string;

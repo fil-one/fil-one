@@ -2,7 +2,6 @@
 import '../lib/instrumentation.js';
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
 import { tracedHandler } from '../middleware/tracing.js';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
@@ -41,23 +40,7 @@ export async function baseHandler(
       .build();
   }
 
-  const { userId, orgId } = getUserInfo(event);
-  const tableName = Resource.UploadsTable.name;
-
-  // Verify bucket ownership
-  const bucketRecord = await dynamo.send(
-    new GetItemCommand({
-      TableName: tableName,
-      Key: marshall({ pk: `USER#${userId}`, sk: `BUCKET#${bucketName}` }),
-    }),
-  );
-
-  if (!bucketRecord.Item) {
-    return new ResponseBuilder()
-      .status(404)
-      .body<ErrorResponse>({ message: 'Bucket not found' })
-      .build();
-  }
+  const { orgId } = getUserInfo(event);
 
   // Look up org profile to get auroraTenantId
   const { Item: orgProfile } = await dynamo.send(

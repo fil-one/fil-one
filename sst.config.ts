@@ -49,14 +49,6 @@ export default $config({
     const AWS_CACHING_DISABLED_POLICY = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
-    const uploadsTable = new sst.aws.Dynamo('UploadsTable', {
-      fields: {
-        pk: 'string',
-        sk: 'string',
-      },
-      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
-    });
-
     const billingTable = new sst.aws.Dynamo('BillingTable', {
       fields: {
         pk: 'string',
@@ -343,7 +335,6 @@ export default $config({
 
     // ── Shared function config ───────────────────────────────────────
     const allResources = [
-      uploadsTable,
       billingTable,
       userInfoTable,
       userFilesBucket,
@@ -430,7 +421,7 @@ export default $config({
     }
 
     // ── Data routes ──────────────────────────────────────────────────
-    addRoute('GET', '/api/buckets', 'list-buckets');
+    addRoute('GET', '/api/buckets', 'list-buckets', auroraS3GatewayEnv, auroraS3GatewayPermissions);
     addRoute(
       'POST',
       '/api/buckets',
@@ -445,7 +436,13 @@ export default $config({
         },
       ],
     );
-    addRoute('DELETE', '/api/buckets/{name}', 'delete-bucket');
+    addRoute(
+      'DELETE',
+      '/api/buckets/{name}',
+      'delete-bucket',
+      auroraS3GatewayEnv,
+      auroraS3GatewayPermissions,
+    );
     addRoute('GET', '/api/access-keys', 'list-access-keys');
     addRoute(
       'POST',

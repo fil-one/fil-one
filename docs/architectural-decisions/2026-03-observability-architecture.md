@@ -159,19 +159,19 @@ AWS_LAMBDA_LOG_FORMAT=JSON
 
 ## Alternatives Considered
 
-| Approach | Cold start | Wide events | Ops overhead | Verdict |
-|----------|-----------|-------------|-------------|---------|
-| **A. OTel Lambda Layers** | ~1000ms (two layers) | Full (span attrs) | High (collector YAML, decouple) | Implemented then replaced |
-| **Chosen: Manual OTel SDK** | ~30–80ms | Full (span attrs) | Low (no sidecar) | Accepted |
-| **B. ADOT Lambda Layers** | 200ms–4s | Full (span attrs) | High (same as A) | Rejected |
-| **C. Grafana OTel Extension** | 100–300ms + layer | Full (span attrs) | Medium (pre-configured) | Rejected |
-| **D. Firehose → Tempo** | N/A | N/A — protocol mismatch | High (translation layer) | Rejected |
-| **E. JSON logs → Loki** | Near-zero | Limited (scan-based) | Low | Rejected |
-| **F. X-Ray + CloudWatch** | Low (~50–100ms) | 50 annotations, 64KB limit | Low | Rejected |
-| **G. Powertools (X-Ray)** | Lowest (~50–100ms) | 50 annotations, 64KB limit | Lowest | Rejected |
-| **H. EMF + X-Ray + CW** | <5ms | Split across services | Zero | Rejected |
-| **I. CW OTLP endpoints** | Low | 50 annotations (X-Ray backend) | Low | Rejected |
-| **J. OTel → ClickHouse** | Same as chosen | Best (columnar) | High (self-managed cluster) | Deferred |
+| Approach                      | Cold start           | Wide events                    | Ops overhead                    | Verdict                   |
+| ----------------------------- | -------------------- | ------------------------------ | ------------------------------- | ------------------------- |
+| **A. OTel Lambda Layers**     | ~1000ms (two layers) | Full (span attrs)              | High (collector YAML, decouple) | Implemented then replaced |
+| **Chosen: Manual OTel SDK**   | ~30–80ms             | Full (span attrs)              | Low (no sidecar)                | Accepted                  |
+| **B. ADOT Lambda Layers**     | 200ms–4s             | Full (span attrs)              | High (same as A)                | Rejected                  |
+| **C. Grafana OTel Extension** | 100–300ms + layer    | Full (span attrs)              | Medium (pre-configured)         | Rejected                  |
+| **D. Firehose → Tempo**       | N/A                  | N/A — protocol mismatch        | High (translation layer)        | Rejected                  |
+| **E. JSON logs → Loki**       | Near-zero            | Limited (scan-based)           | Low                             | Rejected                  |
+| **F. X-Ray + CloudWatch**     | Low (~50–100ms)      | 50 annotations, 64KB limit     | Low                             | Rejected                  |
+| **G. Powertools (X-Ray)**     | Lowest (~50–100ms)   | 50 annotations, 64KB limit     | Lowest                          | Rejected                  |
+| **H. EMF + X-Ray + CW**       | <5ms                 | Split across services          | Zero                            | Rejected                  |
+| **I. CW OTLP endpoints**      | Low                  | 50 annotations (X-Ray backend) | Low                             | Rejected                  |
+| **J. OTel → ClickHouse**      | Same as chosen       | Best (columnar)                | High (self-managed cluster)     | Deferred                  |
 
 ### Alternative A: OTel Lambda Extension Layers (initially implemented, then replaced)
 
@@ -261,7 +261,7 @@ destination to push trace data to Tempo.
 - **Double cost.** Firehose ingestion per GB, plus translation compute, plus
   Tempo ingestion — when direct OTLP export eliminates the first two.
 
-Note: Firehose is excellent for *logs* — we use it for the Lambda → CloudWatch →
+Note: Firehose is excellent for _logs_ — we use it for the Lambda → CloudWatch →
 Firehose → Loki pipeline. The rejection applies only to using Firehose for trace
 data.
 
@@ -334,12 +334,12 @@ simplest setup with the lowest cold start overhead of any trace-capable option.
 - **Same X-Ray limitations as Alternative F** — 50-annotation limit, 64KB
   segment size, one-directional correlation, deprecation timeline.
 - **Log enrichment ≠ trace enrichment.** `appendPersistentKeys()` enriches
-  *log lines*, not trace spans. The Tracer's `putAnnotation()` (50 indexed) and
+  _log lines_, not trace spans. The Tracer's `putAnnotation()` (50 indexed) and
   `putMetadata()` (not indexed) are far more limited than OTel span attributes.
 - **No tail sampling path.** X-Ray supports head-based sampling only. The only
   cost control lever discards errors and successes at the same rate.
-- **Error capture is split across services.** X-Ray tells you *which requests
-  failed* (fault/error/throttle status); CloudWatch Logs tells you *why* (full
+- **Error capture is split across services.** X-Ray tells you _which requests
+  failed_ (fault/error/throttle status); CloudWatch Logs tells you _why_ (full
   stack traces, context). With the chosen approach, TraceQL answers both in a
   single query via `span.recordException()` events.
 
