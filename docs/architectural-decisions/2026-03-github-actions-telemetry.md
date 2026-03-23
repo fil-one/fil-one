@@ -1,4 +1,4 @@
-# GitHub Actions Telemetry via OpenTelemetry
+# ADR: GitHub Actions Telemetry via OpenTelemetry
 
 **Status:** Accepted
 **Date:** 2026-03-23
