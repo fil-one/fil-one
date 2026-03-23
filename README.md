@@ -159,7 +159,7 @@ pnpm exec playwright show-report
 
 Integration tests, located in tests/integration/, confirm that individual modules or services interact correctly with one another — for instance, ensuring Stripe webhook handlers produce the expected state transitions in DynamoDB — by running against real AWS and Stripe resources.
 
- While E2E tests (Playwright) cover full, business-critical user journeys spanning the entire system, integration tests focus more narrowly on backend logic at specific integration points.
+While E2E tests (Playwright) cover full, business-critical user journeys spanning the entire system, integration tests focus more narrowly on backend logic at specific integration points.
 
 **Run tests** (requires deployed SST stage):
 
