@@ -47,7 +47,7 @@ describe('Payment Method Update (customer.updated)', () => {
     const record = await getBillingRecord(userId);
     expect(record).toBeTruthy();
     expect(record!.paymentMethodId?.S).toBe(newPm.id);
-    expect(record!.paymentMethodLast4?.S).toBe('5556');
+    expect(record!.paymentMethodLast4?.S).toBe('4444');
     expect(record!.paymentMethodBrand?.S).toBe('mastercard');
   });
 });
