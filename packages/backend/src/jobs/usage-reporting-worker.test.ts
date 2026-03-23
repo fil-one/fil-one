@@ -23,8 +23,14 @@ vi.mock('../lib/stripe-client.js', () => ({
 }));
 
 const mockGetStorageSamples = vi.fn();
+const mockGetOperationsSamples = vi.fn().mockResolvedValue([]);
+const mockGetTenantInfo = vi.fn().mockResolvedValue({ status: 'ACTIVE' });
+const mockUpdateTenantStatus = vi.fn().mockResolvedValue(undefined);
 vi.mock('../lib/aurora-backoffice.js', () => ({
   getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
+  getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
+  getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...args),
+  updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -43,6 +49,7 @@ const basePayload: UsageReportingWorkerPayload = {
   subscriptionId: 'sub_123',
   stripeCustomerId: 'cus_123',
   currentPeriodStart: '2024-01-01T00:00:00Z',
+  subscriptionStatus: 'active',
   reportDate: '2024-01-15',
 };
 
@@ -83,7 +90,7 @@ describe('usage-reporting-worker', () => {
         event_name: 'storage_usage',
         payload: {
           stripe_customer_id: 'cus_123',
-          value: '1',
+          value: '1000',
         },
       }),
     );
@@ -140,5 +147,123 @@ describe('usage-reporting-worker', () => {
     expect(item.sampleCount).toEqual({ N: '2' });
     expect(item.averageStorageBytesUsed).toEqual({ N: '1000' });
     expect(item.ttl).toBeDefined();
+  });
+
+  it('paid user records lockAction as skipped:paid', async () => {
+    mockGetStorageSamples.mockResolvedValue([]);
+
+    await handler(basePayload);
+
+    expect(mockGetTenantInfo).not.toHaveBeenCalled();
+    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+    const putCalls = ddbMock.commandCalls(PutItemCommand);
+    const item = putCalls[0].args[0].input.Item!;
+    expect(item.lockAction).toEqual({ S: 'skipped:paid' });
+  });
+
+  describe('trial lock enforcement', () => {
+    const trialPayload: UsageReportingWorkerPayload = {
+      ...basePayload,
+      subscriptionStatus: 'trialing',
+    };
+
+    it('trial under limits — no status change', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500_000_000_000 }, // 500 GB
+      ]);
+      mockGetOperationsSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', rxBytes: 1_000_000_000_000 }, // 1 TB
+      ]);
+      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
+
+      await handler(trialPayload);
+
+      expect(mockGetTenantInfo).toHaveBeenCalledOnce();
+      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.lockAction).toEqual({ S: 'ACTIVE' });
+    });
+
+    it('trial storage exceeded — WRITE_LOCKED', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }, // 1.5 TB
+      ]);
+      mockGetOperationsSamples.mockResolvedValue([]);
+      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
+
+      await handler(trialPayload);
+
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: 'aurora-tenant-123',
+        status: 'WRITE_LOCKED',
+      });
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.lockAction).toEqual({ S: 'WRITE_LOCKED' });
+    });
+
+    it('trial egress exceeded — DISABLED', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 0 },
+      ]);
+      mockGetOperationsSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', rxBytes: 2_500_000_000_000 }, // 2.5 TB
+      ]);
+      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
+
+      await handler(trialPayload);
+
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: 'aurora-tenant-123',
+        status: 'DISABLED',
+      });
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.lockAction).toEqual({ S: 'DISABLED' });
+    });
+
+    it('trial both exceeded — DISABLED takes priority over WRITE_LOCKED', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }, // 1.5 TB
+      ]);
+      mockGetOperationsSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', rxBytes: 2_500_000_000_000 }, // 2.5 TB
+      ]);
+      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
+
+      await handler(trialPayload);
+
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: 'aurora-tenant-123',
+        status: 'DISABLED',
+      });
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.lockAction).toEqual({ S: 'DISABLED' });
+    });
+
+    it('audit record includes totalEgressBytes', async () => {
+      mockGetStorageSamples.mockResolvedValue([]);
+      mockGetOperationsSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', rxBytes: 500_000_000_000 }, // 500 GB
+      ]);
+      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
+
+      await handler(trialPayload);
+
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.totalEgressBytes).toEqual({ N: '500000000000' });
+    });
+
+    it('records error in lockAction when enforcement fails', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 },
+      ]);
+      mockGetOperationsSamples.mockResolvedValue([]);
+      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
+      mockUpdateTenantStatus.mockRejectedValueOnce(new Error('Aurora down'));
+
+      await handler(trialPayload);
+
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.lockAction).toEqual({ S: 'error:Aurora down' });
+    });
   });
 });

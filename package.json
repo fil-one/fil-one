@@ -21,12 +21,14 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "prepare": "husky",
     "test": "pnpm lint && pnpm --filter @filone/shared --filter @filone/backend --filter @filone/website test",
-    "test:e2e": "pnpm exec playwright test"
+    "test:e2e": "pnpm exec playwright test",
+    "test:integration": "pnpm --filter @filone/integration test"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@pulumi/aws": "^7.21.0",
     "@pulumi/command": "^1.2.1",
+    "@types/node": "^24",
     "aws-cdk-lib": "^2.241.0",
     "constructs": "^10.5.1",
     "husky": "^9.1.7",

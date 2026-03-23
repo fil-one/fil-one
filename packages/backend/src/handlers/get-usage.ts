@@ -79,6 +79,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     buckets: { count: bucketCount, limit: bucketLimit },
     objects: { count: objectCount },
     accessKeys: { count: accessKeyCount, limit: accessKeyLimit },
+    tenantStatus: tenantInfo?.status,
   };
 
   return new ResponseBuilder().status(200).body(response).build();

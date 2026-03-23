@@ -224,9 +224,16 @@ export default $config({
     // stage is torn down. The CloudFormation custom resource above may
     // not fire its Delete event if the Lambda is destroyed first.
     if (isEphemeralStage) {
+      const teardownScript = require('path').resolve(
+        $cli.paths.root,
+        'packages/backend/src/scripts/teardown-stripe-webhook.ts',
+      );
+      if (!require('fs').existsSync(teardownScript)) {
+        throw new Error(`Teardown script not found: ${teardownScript}`);
+      }
       new local.Command('TeardownStripeWebhook', {
         create: 'echo "Teardown hook registered"',
-        delete: $interpolate`node packages/backend/src/scripts/teardown-stripe-webhook.ts`,
+        delete: $interpolate`node "${teardownScript}"`,
         environment: {
           STRIPE_SECRET_KEY: stripeSecretKey.value,
           SITE_URL: siteUrl,
@@ -428,7 +435,7 @@ export default $config({
     // ── Billing routes ───────────────────────────────────────────────
     addRoute('GET', '/api/billing', 'get-billing');
     addRoute('POST', '/api/billing/setup-intent', 'create-setup-intent');
-    addRoute('POST', '/api/billing/activate', 'activate-subscription');
+    addRoute('POST', '/api/billing/activate', 'activate-subscription', auroraEnv);
     addRoute('POST', '/api/billing/portal', 'create-portal-session', {
       WEBSITE_URL: siteUrl,
     });
@@ -489,7 +496,7 @@ export default $config({
     const usageWorker = new sst.aws.Function('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
       link: [billingTable, stripeSecretKey, auroraBackofficeToken],
-      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'tibmonthmeter' },
+      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'gb_month_meter' },
       runtime: 'nodejs24.x',
       timeout: '60 seconds',
       memory: '256 MB',
@@ -500,7 +507,7 @@ export default $config({
       link: [billingTable, userInfoTable],
       environment: {
         USAGE_WORKER_FUNCTION_NAME: usageWorker.name,
-        STRIPE_METER_EVENT_NAME: 'tibmonthmeter',
+        STRIPE_METER_EVENT_NAME: 'gb_month_meter',
       },
       runtime: 'nodejs24.x',
       timeout: '300 seconds',
