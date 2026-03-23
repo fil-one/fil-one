@@ -9,6 +9,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
 import { updateTenantStatus } from '../lib/aurora-backoffice.js';
+import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -146,27 +147,29 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   );
 
   // Unlock Aurora tenant now that user has upgraded to paid
+  const { Item: orgProfile } = await dynamo.send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: {
+        pk: { S: `ORG#${orgId}` },
+        sk: { S: 'PROFILE' },
+      },
+    }),
+  );
+  const auroraTenantId = orgProfile?.auroraTenantId?.S;
+  const setupStatus = orgProfile?.setupStatus?.S;
+  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
+    throw new Error(`Aurora tenant setup is not complete for org ${orgId}`);
+  }
   try {
-    const profileResult = await dynamo.send(
-      new GetItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: {
-          pk: { S: `ORG#${orgId}` },
-          sk: { S: 'PROFILE' },
-        },
-        ProjectionExpression: 'auroraTenantId',
-      }),
-    );
-    const auroraTenantId = profileResult.Item?.auroraTenantId?.S;
-    if (auroraTenantId) {
-      await updateTenantStatus({ tenantId: auroraTenantId, status: 'ACTIVE' });
-      console.log('[activate-subscription] Aurora tenant unlocked', { orgId, auroraTenantId });
-    }
+    await updateTenantStatus({ tenantId: auroraTenantId, status: 'ACTIVE' });
+    console.log('[activate-subscription] Aurora tenant unlocked', { orgId, auroraTenantId });
   } catch (error) {
     console.error('[activate-subscription] Failed to unlock Aurora tenant', {
       orgId,
       error: (error as Error).message,
     });
+    throw error;
   }
 
   const response: ActivateSubscriptionResponse = {
