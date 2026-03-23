@@ -230,7 +230,7 @@ export default $config({
       );
       new local.Command('TeardownStripeWebhook', {
         create: 'echo "Teardown hook registered"',
-        delete: $interpolate`node ${teardownScript}`,
+        delete: $interpolate`node "${teardownScript}"`,
         environment: {
           STRIPE_SECRET_KEY: stripeSecretKey.value,
           SITE_URL: siteUrl,
