@@ -38,9 +38,9 @@ async function enforceTenantLocks({
 }): Promise<ModelsTenantStatus> {
   // Determine desired status (DISABLED > WRITE_LOCKED > ACTIVE)
   let desiredStatus: ModelsTenantStatus;
-  if (totalEgressBytes > TRIAL_EGRESS_LIMIT) {
+  if (totalEgressBytes >= TRIAL_EGRESS_LIMIT) {
     desiredStatus = 'DISABLED';
-  } else if (currentStorageBytes > TRIAL_STORAGE_LIMIT) {
+  } else if (currentStorageBytes >= TRIAL_STORAGE_LIMIT) {
     desiredStatus = 'WRITE_LOCKED';
   } else {
     desiredStatus = 'ACTIVE';
