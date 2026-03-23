@@ -9,7 +9,6 @@ import {
   ListBucketsCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
-import { HttpRequest, HttpResponse } from '@smithy/protocol-http';
 import type { S3Object } from '@filone/shared';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
@@ -75,7 +74,6 @@ export async function getPresignedPutObjectUrl(options: PresignPutObjectOptions)
     endpoint: endpointUrl,
     bucket,
     key,
-    accessKeyId: credentials.accessKeyId,
     expiresIn,
   });
 
@@ -116,7 +114,6 @@ export async function getPresignedGetObjectUrl(options: PresignGetObjectOptions)
     endpoint: endpointUrl,
     bucket,
     key,
-    accessKeyId: credentials.accessKeyId,
     expiresIn,
   });
 
@@ -150,7 +147,6 @@ export async function deleteObject(
     endpoint: endpointUrl,
     bucket,
     key,
-    accessKeyId: credentials.accessKeyId,
   });
 
   await s3.send(
@@ -290,8 +286,8 @@ export async function headObject(
   // X-Fil-Cid and X-Fil-Offload-Status headers in the response.
   s3.middlewareStack.add(
     (next) => async (args) => {
-      const { request } = args;
-      if (HttpRequest.isInstance(request)) {
+      const request = args.request as { query?: Record<string, string> };
+      if (request.query) {
         request.query['fil-include-meta'] = '1';
       }
       return next(args);
@@ -305,8 +301,8 @@ export async function headObject(
   s3.middlewareStack.add(
     (next) => async (args) => {
       const result = await next(args);
-      const { response } = result;
-      if (HttpResponse.isInstance(response)) {
+      const response = result.response as { headers?: Record<string, string> };
+      if (response.headers) {
         filCid = response.headers['x-fil-cid'];
       }
       return result;
@@ -318,7 +314,6 @@ export async function headObject(
     endpoint: endpointUrl,
     bucket: bucketName,
     key,
-    accessKeyId: credentials.accessKeyId,
   });
 
   const result = await s3.send(

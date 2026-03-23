@@ -214,7 +214,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
               <button
                 type="button"
                 onClick={() => handleMenuAction(() => setConfirmDeleteOpen(true))}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-red-600 opacity-50 hover:bg-red-50"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-red-600 hover:bg-red-50"
               >
                 <TrashIcon size={14} />
                 Delete

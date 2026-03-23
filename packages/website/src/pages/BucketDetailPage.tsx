@@ -430,8 +430,9 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                                 className="border-b border-zinc-100 last:border-0 cursor-pointer hover:bg-zinc-50"
                                 onClick={() =>
                                   void navigate({
-                                    to: '/buckets/$bucketName/objects/$objectKey',
-                                    params: { bucketName, objectKey: entry.object.key },
+                                    to: '/buckets/$bucketName/objects',
+                                    params: { bucketName },
+                                    search: { key: entry.object.key },
                                   })
                                 }
                               >

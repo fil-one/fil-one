@@ -8,7 +8,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getAuroraS3Credentials, headObject, getObjectRetention } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
-import { isNoSuchBucketError } from '../lib/s3-errors.js';
+import { isNoSuchBucketError, isNotFoundError } from '../lib/s3-errors.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -88,6 +88,12 @@ export async function baseHandler(
       return new ResponseBuilder()
         .status(404)
         .body<ErrorResponse>({ message: 'Bucket not found' })
+        .build();
+    }
+    if (isNotFoundError(err)) {
+      return new ResponseBuilder()
+        .status(404)
+        .body<ErrorResponse>({ message: 'Object not found' })
         .build();
     }
     throw err;
