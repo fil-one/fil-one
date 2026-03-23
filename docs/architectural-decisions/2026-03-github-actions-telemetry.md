@@ -30,7 +30,6 @@ Key reasons:
 
 **Grafana CI OTel Collector + `githubactionsreceiver`** (~30 stars) — A standalone OTel Collector receiving GitHub webhook events. Real-time traces with zero runner cost, but requires deploying and exposing a collector instance to the internet. Rejected as overkill for starting out.
 
-
 ## Consequences
 
 - A dedicated telemetry job consumes billable runner minutes on each workflow run.
