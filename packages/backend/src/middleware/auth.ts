@@ -81,7 +81,11 @@ function orgNotConfirmedResponse(): APIGatewayProxyStructuredResultV2 {
  * Routes that are allowed through even when the user's org is not yet confirmed.
  * All other authenticated routes will return 403 ORG_NOT_CONFIRMED.
  */
-const ORG_CONFIRM_BYPASS_ROUTES = new Set(['/api/me', '/api/org/confirm']);
+const ORG_CONFIRM_BYPASS_ROUTES = new Set([
+  '/api/me',
+  '/api/org/confirm',
+  '/api/me/resend-verification',
+]);
 
 interface IdTokenClaims {
   email: string | null;
@@ -139,6 +143,7 @@ async function attachIdentity({
   (
     event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
   ).userInfo = {
+    sub,
     userId: resolved.userId,
     orgId: resolved.orgId,
     email: resolved.email ?? undefined,

@@ -250,6 +250,8 @@ export default $config({
       tenantSetupQueue,
       auth0ClientId,
       auth0ClientSecret,
+      auth0MgmtClientId,
+      auth0MgmtClientSecret,
       stripeSecretKey,
       stripePriceId,
       auroraBackofficeToken,
@@ -425,6 +427,7 @@ export default $config({
 
     // ── Me route ───────────────────────────────────────────────────
     addRoute('GET', '/api/me', 'get-me');
+    addRoute('POST', '/api/me/resend-verification', 'resend-verification');
 
     // ── Org routes ──────────────────────────────────────────────────
     addRoute('POST', '/api/org/confirm', 'confirm-org');

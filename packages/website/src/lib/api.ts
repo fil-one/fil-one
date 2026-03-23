@@ -121,6 +121,10 @@ export function confirmOrg(orgName: string): Promise<ConfirmOrgResponse> {
   });
 }
 
+export function resendVerificationEmail(): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>('/me/resend-verification', { method: 'POST' });
+}
+
 // ── Usage API ────────────────────────────────────────────────────────────
 
 import type { UsageResponse, ActivityResponse } from '@filone/shared';
