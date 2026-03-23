@@ -27,12 +27,16 @@ jobs:
           # workflow_run.workflow_id refers to the observed workflow (e.g. CI [packages]),
           # not the telemetry workflow that runs this step.
           count=$(gh api \
-            "/repos/${{ github.repository }}/actions/workflows/${{ github.event.workflow_run.workflow_id }}/runs?branch=${{ github.event.workflow_run.head_branch }}&status=completed" \
-            --jq '.total_count')
-          if [[ "$count" -le 1 ]]; then
-            echo "value=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=false" >> "$GITHUB_OUTPUT"
+            "/repos/${{ github.repository }}/actions/workflows/${{ github.event.workflow_run.workflow_id }}/runs?branch=${{ github.event.workflow_run.head_branch }}&status=completed&per_page=1" \
+            --jq '.total_count') || true
+
+          # Leave the output empty if the API call failed.
+          if [[ -n "$count" ]]; then
+            if [[ "$count" -le 1 ]]; then
+              echo "value=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "value=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Export OpenTelemetry data
