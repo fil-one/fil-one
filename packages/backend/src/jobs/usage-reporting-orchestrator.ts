@@ -13,6 +13,7 @@ interface SubscriptionRecord {
   subscriptionId: string;
   stripeCustomerId: string;
   currentPeriodStart: string;
+  subscriptionStatus: string;
 }
 
 export async function handler(): Promise<void> {
@@ -55,11 +56,19 @@ export async function handler(): Promise<void> {
         continue;
       }
 
+      if (!record.subscriptionStatus) {
+        console.warn('[usage-orchestrator] Missing subscriptionStatus, skipping', {
+          orgId: record.orgId,
+        });
+        continue;
+      }
+
       records.push({
         orgId: record.orgId,
         subscriptionId: record.subscriptionId,
         stripeCustomerId: record.stripeCustomerId,
         currentPeriodStart: record.currentPeriodStart,
+        subscriptionStatus: record.subscriptionStatus,
       });
     }
 
@@ -132,6 +141,7 @@ export async function handler(): Promise<void> {
       subscriptionId: record.subscriptionId,
       stripeCustomerId: record.stripeCustomerId,
       currentPeriodStart: record.currentPeriodStart,
+      subscriptionStatus: record.subscriptionStatus,
       reportDate,
     };
 

@@ -414,7 +414,7 @@ export default $config({
     // ── Billing routes ───────────────────────────────────────────────
     addRoute('GET', '/api/billing', 'get-billing');
     addRoute('POST', '/api/billing/setup-intent', 'create-setup-intent');
-    addRoute('POST', '/api/billing/activate', 'activate-subscription');
+    addRoute('POST', '/api/billing/activate', 'activate-subscription', auroraEnv);
     addRoute('POST', '/api/billing/portal', 'create-portal-session', {
       WEBSITE_URL: siteUrl,
     });
@@ -475,7 +475,7 @@ export default $config({
     const usageWorker = new sst.aws.Function('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
       link: [billingTable, stripeSecretKey, auroraBackofficeToken],
-      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'tibmonthmeter' },
+      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'gb_month_meter' },
       runtime: 'nodejs24.x',
       timeout: '60 seconds',
       memory: '256 MB',
@@ -486,7 +486,7 @@ export default $config({
       link: [billingTable, userInfoTable],
       environment: {
         USAGE_WORKER_FUNCTION_NAME: usageWorker.name,
-        STRIPE_METER_EVENT_NAME: 'tibmonthmeter',
+        STRIPE_METER_EVENT_NAME: 'gb_month_meter',
       },
       runtime: 'nodejs24.x',
       timeout: '300 seconds',

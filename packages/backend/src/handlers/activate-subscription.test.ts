@@ -3,6 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -16,9 +17,15 @@ const mockSubscriptionsUpdate = vi.fn();
 vi.mock('sst', () => ({
   Resource: {
     BillingTable: { name: 'BillingTable' },
+    UserInfoTable: { name: 'UserInfoTable' },
     StripeSecretKey: { value: 'sk_test_fake' },
     StripePriceId: { value: 'price_test_fake' },
   },
+}));
+
+const mockUpdateTenantStatus = vi.fn();
+vi.mock('../lib/aurora-backoffice.js', () => ({
+  updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
 }));
 
 vi.mock('../lib/stripe-client.js', () => ({
@@ -68,6 +75,17 @@ function buildBillingRecord(overrides?: Record<string, unknown>) {
   });
 }
 
+function orgProfileWithTenant(tenantId: string) {
+  return {
+    Item: {
+      pk: { S: 'ORG#org-1' },
+      sk: { S: 'PROFILE' },
+      auroraTenantId: { S: tenantId },
+      setupStatus: { S: FINAL_SETUP_STATUS },
+    },
+  };
+}
+
 function mockSubscriptionResponse(overrides?: Record<string, unknown>) {
   return {
     id: 'sub_test_456',
@@ -91,17 +109,20 @@ describe('activate-subscription handler', () => {
     mockSetupIntentsList.mockReset();
     mockSubscriptionsCreate.mockReset();
     mockSubscriptionsUpdate.mockReset();
+    mockUpdateTenantStatus.mockReset();
 
     mockSetupIntentsList.mockResolvedValue({
       data: [{ status: 'succeeded', payment_method: 'pm_test_789' }],
     });
+    mockUpdateTenantStatus.mockResolvedValue({});
   });
 
   it('updates existing trial subscription when subscriptionId exists', async () => {
     // Record has subscriptionId from billing-trial-setup
-    ddbMock.on(GetItemCommand).resolves({
-      Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }),
-    });
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
+      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -125,9 +146,10 @@ describe('activate-subscription handler', () => {
     // This test covers a bug where sending trial_end and default_payment_method
     // in a single call caused Stripe's missing_payment_method:'cancel' behavior
     // to fire before the payment method was fully attached, canceling the subscription.
-    ddbMock.on(GetItemCommand).resolves({
-      Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }),
-    });
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
+      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -153,9 +175,10 @@ describe('activate-subscription handler', () => {
 
   it('creates new subscription when no subscriptionId exists (legacy path)', async () => {
     // Record without subscriptionId (legacy)
-    ddbMock.on(GetItemCommand).resolves({
-      Item: buildBillingRecord(),
-    });
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord() })
+      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -181,9 +204,10 @@ describe('activate-subscription handler', () => {
   });
 
   it('removes trialEndsAt when updating trial subscription (trial_end: now)', async () => {
-    ddbMock.on(GetItemCommand).resolves({
-      Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }),
-    });
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
+      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -203,9 +227,10 @@ describe('activate-subscription handler', () => {
   });
 
   it('removes trialEndsAt when subscription is active', async () => {
-    ddbMock.on(GetItemCommand).resolves({
-      Item: buildBillingRecord(),
-    });
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord() })
+      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
     mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
@@ -221,5 +246,83 @@ describe('activate-subscription handler', () => {
     expect(updateCalls).toHaveLength(1);
     const updateExpr = updateCalls[0].args[0].input.UpdateExpression as string;
     expect(updateExpr).toContain('REMOVE trialEndsAt');
+  });
+
+  it('returns 500 when Aurora org setup is incomplete', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
+      .resolvesOnce({
+        Item: {
+          pk: { S: 'ORG#org-1' },
+          sk: { S: 'PROFILE' },
+          auroraTenantId: { S: 'aurora-t-1' },
+          setupStatus: { S: 'AURORA_TENANT_CREATED' },
+        },
+      });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    const result = await handler(event, {} as never);
+    expect((result as { statusCode: number }).statusCode).toBe(500);
+  });
+
+  it('returns 500 when auroraTenantId is missing from profile', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
+      .resolvesOnce({
+        Item: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+      });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    const result = await handler(event, {} as never);
+    expect((result as { statusCode: number }).statusCode).toBe(500);
+  });
+
+  it('returns 500 when profile DynamoDB lookup fails', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
+      .rejectsOnce(new Error('DynamoDB error'));
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    const result = await handler(event, {} as never);
+    expect((result as { statusCode: number }).statusCode).toBe(500);
+  });
+
+  it('returns 500 when updateTenantStatus fails', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
+      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+    mockUpdateTenantStatus.mockRejectedValue(new Error('Aurora down'));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    const result = await handler(event, {} as never);
+    expect((result as { statusCode: number }).statusCode).toBe(500);
   });
 });
