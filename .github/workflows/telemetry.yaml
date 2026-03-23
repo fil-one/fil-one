@@ -1,50 +1,44 @@
 name: GHA Workflow Telemetry
 
 on:
-  # NOTE: workflow_run requires an explicit list — wildcards are not supported.
-  # Update this list when adding or renaming workflows.
-  workflow_run:
-    workflows:
-      - 'CI [packages]'
-      - 'CI [contracts]'
-      - 'Preview Teardown'
-    types:
-      - completed
+  repository_dispatch:
+    types: [workflow-telemetry]
 
 permissions:
   actions: read
 
 jobs:
   send-telemetry:
-    if: ${{ github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
     steps:
-      - name: Debug — log trigger and workflow run details
+      - name: Fetch workflow run details
+        id: run_info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "## Trigger details" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Event:** \`${{ github.event_name }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Trigger actor:** ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          RUN_ID="${{ github.event.client_payload.run_id }}"
+          run_data=$(gh api "/repos/${{ github.repository }}/actions/runs/${RUN_ID}" \
+            --jq '{workflow_id, head_branch, name}')
+          WORKFLOW_ID=$(echo "$run_data" | jq -r '.workflow_id')
+          HEAD_BRANCH=$(echo "$run_data" | jq -r '.head_branch')
+          WORKFLOW_NAME=$(echo "$run_data" | jq -r '.name')
+
+          echo "workflow_id=${WORKFLOW_ID}" >> "$GITHUB_OUTPUT"
+          echo "head_branch=${HEAD_BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "workflow_name=${WORKFLOW_NAME}" >> "$GITHUB_OUTPUT"
+
           echo "## Observed workflow run" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Workflow:** ${{ github.event.workflow_run.name }} (id: ${{ github.event.workflow_run.workflow_id }})" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Run:** #${{ github.event.workflow_run.run_number }} (id: ${{ github.event.workflow_run.id }})" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **URL:** ${{ github.event.workflow_run.html_url }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Status:** ${{ github.event.workflow_run.status }} / ${{ github.event.workflow_run.conclusion }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Branch:** ${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Commit:** ${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Head repo:** ${{ github.event.workflow_run.head_repository.full_name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Run ID:** ${RUN_ID}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Workflow:** ${WORKFLOW_NAME} (id: ${WORKFLOW_ID})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Branch:** ${HEAD_BRANCH}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check if first run for this workflow+branch
         id: is_first_run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # workflow_run.workflow_id refers to the observed workflow (e.g. CI [packages]),
-          # not the telemetry workflow that runs this step.
-          api_path="/repos/${{ github.repository }}/actions/workflows/${{ github.event.workflow_run.workflow_id }}/runs"
-          branch="${{ github.event.workflow_run.head_branch }}"
-          echo "::debug::API query path: $api_path"
-          echo "::debug::API query branch: $branch"
+          api_path="/repos/${{ github.repository }}/actions/workflows/${{ steps.run_info.outputs.workflow_id }}/runs"
+          branch="${{ steps.run_info.outputs.head_branch }}"
           count=$(gh api "$api_path" -f "branch=$branch" -f status=completed -f per_page=1 --jq '.total_count') || true
           echo "Completed runs count: ${count:-(empty/failed)}"
 
@@ -57,29 +51,17 @@ jobs:
             fi
           fi
 
-      - name: Debug — log first-run result and resource attributes
-        run: |
-          echo "## First-run detection" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **is_first_run:** \`${{ steps.is_first_run.outputs.value || '(empty — API may have failed)' }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "## OTEL resource attributes" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "deployment.environment=ci" >> "$GITHUB_STEP_SUMMARY"
-          echo "vcs.repository.ref.name=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "ci.pipeline.name=${{ github.event.workflow_run.name }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "ci.pipeline.first_run=${{ steps.is_first_run.outputs.value }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Export OpenTelemetry data
         uses: paper2/github-actions-opentelemetry@e1027e95ff4cc4022e36a0fc03c44f402430bee6 # v0.10.0
         env:
+          WORKFLOW_RUN_ID: ${{ github.event.client_payload.run_id }}
           OTEL_SERVICE_NAME: filone-ci
           OTEL_EXPORTER_OTLP_ENDPOINT: https://otlp-gateway-prod-us-central-0.grafana.net/otlp
           OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
           OTEL_RESOURCE_ATTRIBUTES: >-
             deployment.environment=ci,
-            vcs.repository.ref.name=${{ github.event.workflow_run.head_branch }},
-            ci.pipeline.name=${{ github.event.workflow_run.name }},
+            vcs.repository.ref.name=${{ steps.run_info.outputs.head_branch }},
+            ci.pipeline.name=${{ steps.run_info.outputs.workflow_name }},
             ci.pipeline.first_run=${{ steps.is_first_run.outputs.value }}
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

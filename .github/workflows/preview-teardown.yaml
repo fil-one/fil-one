@@ -69,3 +69,21 @@ jobs:
                 }
               ]
             }
+
+  dispatch-telemetry:
+    needs: [teardown]
+    if: >-
+      always() &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Dispatch telemetry event
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/dispatches" \
+            --method POST \
+            -f event_type=workflow-telemetry \
+            -f "client_payload[run_id]=${{ github.run_id }}"
