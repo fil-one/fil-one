@@ -19,6 +19,21 @@ jobs:
     if: ${{ github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
     steps:
+      - name: Debug — log trigger and workflow run details
+        run: |
+          echo "## Trigger details" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Event:** \`${{ github.event_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Trigger actor:** ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Observed workflow run" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Workflow:** ${{ github.event.workflow_run.name }} (id: ${{ github.event.workflow_run.workflow_id }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Run:** #${{ github.event.workflow_run.run_number }} (id: ${{ github.event.workflow_run.id }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **URL:** ${{ github.event.workflow_run.html_url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Status:** ${{ github.event.workflow_run.status }} / ${{ github.event.workflow_run.conclusion }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Branch:** ${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Commit:** ${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Head repo:** ${{ github.event.workflow_run.head_repository.full_name }}" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Check if first run for this workflow+branch
         id: is_first_run
         env:
@@ -26,9 +41,10 @@ jobs:
         run: |
           # workflow_run.workflow_id refers to the observed workflow (e.g. CI [packages]),
           # not the telemetry workflow that runs this step.
-          count=$(gh api \
-            "/repos/${{ github.repository }}/actions/workflows/${{ github.event.workflow_run.workflow_id }}/runs?branch=${{ github.event.workflow_run.head_branch }}&status=completed&per_page=1" \
-            --jq '.total_count') || true
+          api_path="/repos/${{ github.repository }}/actions/workflows/${{ github.event.workflow_run.workflow_id }}/runs?branch=${{ github.event.workflow_run.head_branch }}&status=completed&per_page=1"
+          echo "::debug::API query: $api_path"
+          count=$(gh api "$api_path" --jq '.total_count') || true
+          echo "Completed runs count: ${count:-(empty/failed)}"
 
           # Leave the output empty if the API call failed.
           if [[ -n "$count" ]]; then
@@ -38,6 +54,19 @@ jobs:
               echo "value=false" >> "$GITHUB_OUTPUT"
             fi
           fi
+
+      - name: Debug — log first-run result and resource attributes
+        run: |
+          echo "## First-run detection" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **is_first_run:** \`${{ steps.is_first_run.outputs.value || '(empty — API may have failed)' }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## OTEL resource attributes" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "deployment.environment=ci" >> "$GITHUB_STEP_SUMMARY"
+          echo "vcs.repository.ref.name=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "ci.pipeline.name=${{ github.event.workflow_run.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "ci.pipeline.first_run=${{ steps.is_first_run.outputs.value }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Export OpenTelemetry data
         uses: paper2/github-actions-opentelemetry@e1027e95ff4cc4022e36a0fc03c44f402430bee6 # v0.10.0
