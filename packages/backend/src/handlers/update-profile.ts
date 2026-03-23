@@ -7,7 +7,7 @@ import { UpdateProfileSchema, isSocialConnection } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
-import { validateOrgName } from '../lib/org-name-validation.js';
+import { sanitizeOrgName } from '../lib/org-name-validation.js';
 import {
   updateAuth0User,
   sendVerificationEmail,
@@ -63,13 +63,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   }
 
   if (parsed.data.orgName !== undefined) {
-    const result = validateOrgName(parsed.data.orgName);
-    if (!result.valid) {
-      return new ResponseBuilder()
-        .status(400)
-        .body<ErrorResponse>({ message: result.error! })
-        .build();
-    }
+    const sanitized = sanitizeOrgName(parsed.data.orgName);
 
     await getDynamoClient().send(
       new UpdateItemCommand({
@@ -82,11 +76,11 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
         ConditionExpression: 'attribute_exists(pk)',
         ExpressionAttributeNames: { '#name': 'name' },
         ExpressionAttributeValues: {
-          ':name': { S: result.sanitized },
+          ':name': { S: sanitized },
         },
       }),
     );
-    response.orgName = result.sanitized;
+    response.orgName = sanitized;
   }
 
   if (response.name !== undefined || response.email !== undefined) {

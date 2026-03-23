@@ -361,7 +361,7 @@ describe('authMiddleware', () => {
         sub: MOCK_SUB,
         userId: existingUserId,
         orgId: existingOrgId,
-        email: MOCK_EMAIL,
+        email: undefined,
         emailVerified: false,
         name: undefined,
       });
@@ -388,10 +388,12 @@ describe('authMiddleware', () => {
 
       expect(result).toBeUndefined();
       expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
         userId: MOCK_USER_ID,
         orgId: MOCK_ORG_ID,
         email: MOCK_EMAIL,
         emailVerified: false,
+        name: undefined,
       });
 
       const transactCalls = ddbMock.commandCalls(TransactWriteItemsCommand);

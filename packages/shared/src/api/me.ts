@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { OrgNameSchema } from './org.js';
 
 export interface MeResponse {
   orgId: string;
@@ -23,12 +24,7 @@ export const UpdateProfileSchema = z
       .max(PROFILE_NAME_MAX_LENGTH, `Name must be at most ${PROFILE_NAME_MAX_LENGTH} characters`)
       .optional(),
     email: z.string().trim().email('Please provide a valid email address').optional(),
-    orgName: z
-      .string()
-      .trim()
-      .min(2, 'Company name must be at least 2 characters')
-      .max(100, 'Company name must be at most 100 characters')
-      .optional(),
+    orgName: OrgNameSchema.optional(),
   })
   .refine((data) => data.name || data.email || data.orgName, {
     message: 'At least one field is required.',

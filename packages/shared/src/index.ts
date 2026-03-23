@@ -25,7 +25,13 @@ export { UpdateProfileSchema } from './api/me.js';
 
 export { getProvider, isSocialConnection } from './connection-providers.js';
 export type { ConnectionProvider } from './connection-providers.js';
-export { OrgRole } from './api/org.js';
+export {
+  OrgRole,
+  OrgNameSchema,
+  ConfirmOrgSchema,
+  ORG_NAME_MIN_LENGTH,
+  ORG_NAME_MAX_LENGTH,
+} from './api/org.js';
 export { ApiErrorCode } from './api/coreInterfaces.js';
 export type { ErrorResponse } from './api/coreInterfaces.js';
 
