@@ -175,7 +175,6 @@ describe('authMiddleware', () => {
         email: MOCK_EMAIL,
         emailVerified: false,
         name: undefined,
-        picture: undefined,
       });
     });
 
@@ -230,7 +229,6 @@ describe('authMiddleware', () => {
         email: undefined,
         emailVerified: false,
         name: undefined,
-        picture: undefined,
       });
     });
 
@@ -260,7 +258,6 @@ describe('authMiddleware', () => {
         email: undefined,
         emailVerified: false,
         name: undefined,
-        picture: undefined,
       });
     });
 
@@ -367,7 +364,6 @@ describe('authMiddleware', () => {
         email: MOCK_EMAIL,
         emailVerified: false,
         name: undefined,
-        picture: undefined,
       });
     });
 
@@ -521,7 +517,6 @@ describe('authMiddleware', () => {
         email: MOCK_EMAIL,
         emailVerified: false,
         name: undefined,
-        picture: undefined,
       });
       expect(request.internal.newTokens).toEqual({
         access_token: 'new-access-token',
