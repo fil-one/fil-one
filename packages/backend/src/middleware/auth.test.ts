@@ -169,10 +169,13 @@ describe('authMiddleware', () => {
         issuer: `https://${process.env.AUTH0_DOMAIN}/`,
       });
       expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
         userId: existingUserId,
         orgId: existingOrgId,
         email: MOCK_EMAIL,
         emailVerified: false,
+        name: undefined,
+        picture: undefined,
       });
     });
 
@@ -219,12 +222,15 @@ describe('authMiddleware', () => {
       const result = await before(request);
 
       expect(result).toBeUndefined();
-      // Falls back to DDB-stored email since ID token verification failed
+      // Email comes from JWT only — no DB fallback. ID token failed so email is undefined.
       expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
         userId: existingUserId,
         orgId: existingOrgId,
-        email: 'stored@example.com',
+        email: undefined,
         emailVerified: false,
+        name: undefined,
+        picture: undefined,
       });
     });
 
@@ -248,10 +254,13 @@ describe('authMiddleware', () => {
       // Only one jwtVerify call (access token), no second call for ID token
       expect(mockJwtVerify).toHaveBeenCalledTimes(1);
       expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
         userId: MOCK_USER_ID,
         orgId: MOCK_ORG_ID,
         email: undefined,
         emailVerified: false,
+        name: undefined,
+        picture: undefined,
       });
     });
 
@@ -352,10 +361,13 @@ describe('authMiddleware', () => {
 
       expect(result).toBeUndefined();
       expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
         userId: existingUserId,
         orgId: existingOrgId,
         email: MOCK_EMAIL,
         emailVerified: false,
+        name: undefined,
+        picture: undefined,
       });
     });
 
@@ -398,7 +410,6 @@ describe('authMiddleware', () => {
               sk: { S: 'IDENTITY' },
               userId: { S: MOCK_USER_ID },
               orgId: { S: MOCK_ORG_ID },
-              email: { S: MOCK_EMAIL },
               createdAt: { S: expect.any(String) },
             },
             ConditionExpression: 'attribute_not_exists(pk)',
@@ -413,7 +424,6 @@ describe('authMiddleware', () => {
               sk: { S: 'PROFILE' },
               sub: { S: MOCK_SUB },
               orgId: { S: MOCK_ORG_ID },
-              email: { S: MOCK_EMAIL },
               createdAt: { S: expect.any(String) },
             },
           },
@@ -441,7 +451,6 @@ describe('authMiddleware', () => {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: `MEMBER#${MOCK_USER_ID}` },
               role: { S: OrgRole.Admin },
-              email: { S: MOCK_EMAIL },
               joinedAt: { S: expect.any(String) },
             },
           },
@@ -506,10 +515,13 @@ describe('authMiddleware', () => {
 
       expect(result).toBeUndefined();
       expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
         userId: existingUserId,
         orgId: existingOrgId,
         email: MOCK_EMAIL,
         emailVerified: false,
+        name: undefined,
+        picture: undefined,
       });
       expect(request.internal.newTokens).toEqual({
         access_token: 'new-access-token',

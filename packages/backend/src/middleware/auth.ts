@@ -252,8 +252,7 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
     const userId = result.Item.userId.S;
     const orgId = result.Item.orgId.S;
-    // Prefer stored email from identity record, fall back to JWT email
-    const resolvedEmail = result.Item.email?.S ?? email;
+    const resolvedEmail = email;
 
     const { Item: orgItem } = await getDynamoClient().send(
       new GetItemCommand({
@@ -283,7 +282,6 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
               sk: { S: 'IDENTITY' },
               userId: { S: userId },
               orgId: { S: orgId },
-              ...(email ? { email: { S: email } } : {}),
               createdAt: { S: now },
             },
             ConditionExpression: 'attribute_not_exists(pk)',
@@ -297,7 +295,6 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
               sk: { S: 'PROFILE' },
               sub: { S: sub },
               orgId: { S: orgId },
-              ...(email ? { email: { S: email } } : {}),
               createdAt: { S: now },
             },
           },
@@ -323,7 +320,6 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
               pk: { S: `ORG#${orgId}` },
               sk: { S: `MEMBER#${userId}` },
               role: { S: OrgRole.Admin },
-              ...(email ? { email: { S: email } } : {}),
               joinedAt: { S: now },
             },
           },

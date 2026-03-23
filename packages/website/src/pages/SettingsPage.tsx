@@ -157,7 +157,7 @@ export function SettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const social = isSocialConnection(me?.connectionType);
   const provider = getProvider(me?.connectionType);
