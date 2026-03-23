@@ -224,9 +224,16 @@ export default $config({
     // stage is torn down. The CloudFormation custom resource above may
     // not fire its Delete event if the Lambda is destroyed first.
     if (isEphemeralStage) {
+      const teardownScript = require('path').resolve(
+        $cli.paths.root,
+        'packages/backend/src/scripts/teardown-stripe-webhook.ts',
+      );
+      if (!require('fs').existsSync(teardownScript)) {
+        throw new Error(`Teardown script not found: ${teardownScript}`);
+      }
       new local.Command('TeardownStripeWebhook', {
         create: 'echo "Teardown hook registered"',
-        delete: $interpolate`node packages/backend/src/scripts/teardown-stripe-webhook.ts`,
+        delete: $interpolate`node "${teardownScript}"`,
         environment: {
           STRIPE_SECRET_KEY: stripeSecretKey.value,
           SITE_URL: siteUrl,
