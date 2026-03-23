@@ -92,3 +92,68 @@ export function getConnectionType(sub: string): string {
   if (pipeIndex === -1) return 'unknown';
   return sub.substring(0, pipeIndex);
 }
+
+// ── MFA Management ──────────────────────────────────────────────────────
+
+interface Auth0Authenticator {
+  id: string;
+  authenticator_type: string;
+  active: boolean;
+}
+
+/**
+ * Check whether the user has any active MFA authenticators enrolled.
+ * Auth0's "If supported" policy uses this same enrollment state to decide
+ * whether to challenge — no app_metadata flags needed.
+ */
+export async function getMfaStatus(sub: string): Promise<boolean> {
+  const domain = getDomain();
+  const token = await getManagementToken();
+  const resp = await fetch(
+    `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/authentication-methods`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`Auth0 list authenticators failed (${resp.status}): ${body}`);
+  }
+
+  const authenticators = (await resp.json()) as Auth0Authenticator[];
+  return authenticators.some((a) => a.active);
+}
+
+/**
+ * Delete all MFA authenticators for a user.
+ * With Auth0 policy set to "If supported", removing authenticators
+ * means the next login will skip MFA automatically.
+ */
+export async function deleteAllAuthenticators(sub: string): Promise<void> {
+  const domain = getDomain();
+  const token = await getManagementToken();
+  const listResp = await fetch(
+    `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/authentication-methods`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (!listResp.ok) {
+    const body = await listResp.text();
+    throw new Error(`Auth0 list authenticators failed (${listResp.status}): ${body}`);
+  }
+
+  const authenticators = (await listResp.json()) as Auth0Authenticator[];
+  for (const auth of authenticators) {
+    const delResp = await fetch(
+      `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/authentication-methods/${auth.id}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+
+    if (!delResp.ok) {
+      const body = await delResp.text();
+      throw new Error(`Auth0 delete authenticator failed (${delResp.status}): ${body}`);
+    }
+  }
+}

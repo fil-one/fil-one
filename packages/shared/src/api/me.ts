@@ -11,6 +11,7 @@ export interface MeResponse {
   orgSetupComplete: boolean;
   name?: string;
   connectionType?: string;
+  mfaEnabled: boolean;
 }
 
 export const PROFILE_NAME_MAX_LENGTH = 200;

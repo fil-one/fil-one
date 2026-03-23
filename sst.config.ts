@@ -431,6 +431,10 @@ export default $config({
     addRoute('POST', '/api/me/change-password', 'change-password');
     addRoute('POST', '/api/me/resend-verification', 'resend-verification');
 
+    // ── MFA routes ──────────────────────────────────────────────────
+    addRoute('POST', '/api/mfa/enroll', 'enroll-mfa');
+    addRoute('POST', '/api/mfa/disable', 'disable-mfa');
+
     // ── Org routes ──────────────────────────────────────────────────
     addRoute('POST', '/api/org/confirm', 'confirm-org');
 

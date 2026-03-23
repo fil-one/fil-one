@@ -7,7 +7,7 @@ import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { getMe, updateProfile, changePassword } from '../lib/api.js';
+import { getMe, updateProfile, changePassword, enrollMfa, disableMfa } from '../lib/api.js';
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 
@@ -133,12 +133,14 @@ export function SettingsPage() {
   const [orgName, setOrgName] = useState('');
   const [saving, setSaving] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [enrollingMfa, setEnrollingMfa] = useState(false);
+  const [disablingMfa, setDisablingMfa] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     async function fetch() {
       try {
-        const data = await getMe();
+        const data = await getMe({ include: 'mfa' });
         if (!cancelled) {
           setMe(data);
           setName(data.name ?? '');
@@ -218,6 +220,30 @@ export function SettingsPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to send password reset email');
     } finally {
       setChangingPassword(false);
+    }
+  }
+
+  async function handleEnrollMfa() {
+    setEnrollingMfa(true);
+    try {
+      await enrollMfa();
+      // enrollMfa() redirects to Auth0 for enrollment — page will navigate away
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start MFA enrollment');
+      setEnrollingMfa(false);
+    }
+  }
+
+  async function handleDisableMfa() {
+    setDisablingMfa(true);
+    try {
+      await disableMfa();
+      setMe((prev) => (prev ? { ...prev, mfaEnabled: false } : prev));
+      toast.success('Two-factor authentication disabled');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to disable MFA');
+    } finally {
+      setDisablingMfa(false);
     }
   }
 
@@ -346,23 +372,37 @@ export function SettingsPage() {
           description="Manage your account security"
         >
           <div className="flex flex-col gap-3">
-            {!social && (
-              <>
-                <SettingRow
-                  label="Two-factor authentication"
-                  description="Add an extra layer of security to your account"
-                  action={
-                    <Button variant="ghost" size="compact" disabled>
-                      Enable
-                    </Button>
-                  }
-                />
-                <p className="text-[11px] text-zinc-400 -mt-1">
-                  Requires Auth0 MFA configuration. Coming soon.
-                </p>
-                <div className="h-px bg-[#e1e4ea]" />
-              </>
-            )}
+            <SettingRow
+              label="Two-factor authentication"
+              description={
+                me?.mfaEnabled
+                  ? 'Your account is protected with two-factor authentication'
+                  : 'Add an extra layer of security to your account'
+              }
+              action={
+                me?.mfaEnabled ? (
+                  <Button
+                    variant="ghost"
+                    size="compact"
+                    onClick={handleDisableMfa}
+                    disabled={disablingMfa}
+                  >
+                    {disablingMfa ? 'Disabling...' : 'Disable'}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="compact"
+                    onClick={handleEnrollMfa}
+                    disabled={enrollingMfa}
+                  >
+                    {enrollingMfa ? 'Redirecting...' : 'Enable'}
+                  </Button>
+                )
+              }
+            />
+            {me?.mfaEnabled && <p className="text-[11px] text-green-600 -mt-1">Enabled</p>}
+            <div className="h-px bg-[#e1e4ea]" />
             {!social && (
               <SettingRow
                 label="Password"
@@ -381,7 +421,7 @@ export function SettingsPage() {
             )}
             {social && provider && (
               <p className="text-xs text-zinc-500">
-                Security settings are managed by {provider.label}.{' '}
+                Password is managed by {provider.label}.{' '}
                 <a
                   href={provider.profileUrl}
                   target="_blank"

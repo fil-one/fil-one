@@ -229,6 +229,33 @@ Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecre
 - **Identifier (audience)**: `console.fil.one` (prod) — this must match `AUTH0_AUDIENCE` in `sst.config.ts` and website env. It's what makes Auth0 issue a JWT access token (instead of an opaque one) and is the `aud` claim the middleware validates.
 - Under the API's **Machine to Machine Applications** tab, authorize your application so it can exchange tokens.
 
+### Auth0 MFA Setup
+
+MFA is opt-in per user (database and social connections). Auth0 handles enrollment and challenge via Universal Login.
+
+**1. Enable MFA factors** (Security > Multi-factor Auth) — manual, one-time:
+
+- Enable **One-time Password** (authenticator apps)
+- Enable **WebAuthn with FIDO Security Keys** (passkeys/security keys)
+- Enable **Email** (one-time code)
+- Set policy to **"If supported"**
+
+**2. Post-Login Action** — automated on deploy:
+
+The deploy-time setup Lambda (`setup-integrations`) automatically creates, deploys, and binds an `MFA Enrollment Trigger` Action to the Login flow. This Action triggers MFA enrollment when the frontend requests it via `acr_values`. No manual Action setup is needed.
+
+**3. Grant M2M scopes** (Applications > M2M app > APIs > Auth0 Management API):
+
+The following scopes are required for MFA (in addition to existing scopes):
+
+- `read:authentication_methods` — check if user has enrolled MFA factors
+- `delete:authentication_methods` — remove factors when user disables MFA
+- `create:actions` — deploy-time setup creates the MFA Post-Login Action
+- `read:actions` — deploy-time setup checks if the Action already exists
+- `update:actions` — deploy-time setup updates the Action code if changed
+- `read:triggers` — deploy-time setup reads the Login flow bindings
+- `update:triggers` — deploy-time setup binds the Action to the Login flow
+
 ### Auth0 Machine-to-Machine (M2M) Application
 
 The deploy automation uses an M2M application to update Auth0 settings programmatically.
@@ -239,7 +266,7 @@ The deploy automation uses an M2M application to update Auth0 settings programma
 2. Choose **Machine to Machine Applications**
 3. Name it something like `Fil.one Deploy Automation`
 4. Authorize it for the **Auth0 Management API** (`https://<tenant>.us.auth0.com/api/v2/`)
-5. Grant these scopes: `read:clients`, `update:clients`
+5. Grant these scopes: `read:clients`, `update:clients`, `read:users`, `update:users`, `update:users_app_metadata`, `create:user_tickets`, `delete:users`, `read:authentication_methods`, `delete:authentication_methods`, `create:actions`, `read:actions`, `update:actions`, `read:triggers`, `update:triggers`
 6. Copy the **Client ID** and **Client Secret**
 
 Set these as SST secrets:

@@ -308,6 +308,136 @@ async function setupAuth0EmailProvider(domain: string, isProduction: boolean): P
   }
 }
 
+// ── Auth0 MFA Action helper ──────────────────────────────────────────
+
+const MFA_ACTION_NAME = 'MFA Enrollment Trigger';
+
+const MFA_ACTION_CODE = `
+exports.onExecutePostLogin = async (event, api) => {
+  const requestedMfa = event.transaction?.acr_values?.includes(
+    'http://schemas.openid.net/pape/policies/2007/06/multi-factor'
+  );
+  if (!requestedMfa) return;
+
+  const enrolled = event.user.enrolledFactors || [];
+  if (enrolled.length === 0) {
+    api.authentication.enrollWith([{ type: 'otp' }, { type: 'webauthn-roaming' }]);
+  } else {
+    api.authentication.challengeWith([{ type: 'otp' }, { type: 'webauthn-roaming' }, { type: 'email' }]);
+  }
+};
+`.trim();
+
+interface Auth0Action {
+  id: string;
+  name: string;
+  code: string;
+}
+
+interface Auth0Trigger {
+  bindings: { ref: { type: string; value: string }; display_name: string }[];
+}
+
+async function setupAuth0MfaAction(domain: string): Promise<void> {
+  const token = await getAuth0ManagementToken(domain);
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+
+  // Check if the action already exists
+  const listResp = await fetch(
+    `https://${domain}/api/v2/actions/actions?actionName=${encodeURIComponent(MFA_ACTION_NAME)}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+
+  if (!listResp.ok) {
+    const body = await listResp.text();
+    throw new Error(`Auth0 list actions failed (${listResp.status}): ${body}`);
+  }
+
+  const { actions } = (await listResp.json()) as { actions: Auth0Action[] };
+  const existing = actions.find((a) => a.name === MFA_ACTION_NAME);
+
+  let actionId: string;
+
+  if (existing) {
+    // Update if code has changed
+    if (existing.code.trim() !== MFA_ACTION_CODE) {
+      const updateResp = await fetch(`https://${domain}/api/v2/actions/actions/${existing.id}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ code: MFA_ACTION_CODE }),
+      });
+      if (!updateResp.ok) {
+        const body = await updateResp.text();
+        throw new Error(`Auth0 update action failed (${updateResp.status}): ${body}`);
+      }
+    }
+    actionId = existing.id;
+  } else {
+    // Create the action
+    const createResp = await fetch(`https://${domain}/api/v2/actions/actions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        name: MFA_ACTION_NAME,
+        supported_triggers: [{ id: 'post-login', version: 'v3' }],
+        code: MFA_ACTION_CODE,
+      }),
+    });
+    if (!createResp.ok) {
+      const body = await createResp.text();
+      throw new Error(`Auth0 create action failed (${createResp.status}): ${body}`);
+    }
+    const created = (await createResp.json()) as Auth0Action;
+    actionId = created.id;
+  }
+
+  // Deploy the action
+  const deployResp = await fetch(`https://${domain}/api/v2/actions/actions/${actionId}/deploy`, {
+    method: 'POST',
+    headers,
+  });
+  if (!deployResp.ok) {
+    const body = await deployResp.text();
+    throw new Error(`Auth0 deploy action failed (${deployResp.status}): ${body}`);
+  }
+
+  // Ensure the action is bound to the post-login trigger
+  const triggerResp = await fetch(`https://${domain}/api/v2/actions/triggers/post-login/bindings`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!triggerResp.ok) {
+    const body = await triggerResp.text();
+    throw new Error(`Auth0 get trigger bindings failed (${triggerResp.status}): ${body}`);
+  }
+
+  const trigger = (await triggerResp.json()) as Auth0Trigger;
+  const alreadyBound = trigger.bindings.some(
+    (b) => b.ref.type === 'action_id' && b.ref.value === actionId,
+  );
+
+  if (!alreadyBound) {
+    const newBindings = [
+      ...trigger.bindings.map((b) => ({ ref: b.ref, display_name: b.display_name })),
+      { ref: { type: 'action_id' as const, value: actionId }, display_name: MFA_ACTION_NAME },
+    ];
+
+    const bindResp = await fetch(`https://${domain}/api/v2/actions/triggers/post-login/bindings`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ bindings: newBindings }),
+    });
+    if (!bindResp.ok) {
+      const body = await bindResp.text();
+      throw new Error(`Auth0 update trigger bindings failed (${bindResp.status}): ${body}`);
+    }
+  }
+}
+
 // ── CloudFormation Custom Resource response ───────────────────────────
 
 async function sendCfnResponse(event: SetupEvent, response: SetupResponse): Promise<void> {
@@ -369,7 +499,10 @@ export async function handler(event: SetupEvent): Promise<void> {
       setupStripeWebhook(stripe, siteUrl, Stage),
       setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
       ...(isStagingOrProd
-        ? [setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production')]
+        ? [
+            setupAuth0MfaAction(process.env.AUTH0_DOMAIN!),
+            setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production'),
+          ]
         : []),
     ]);
 

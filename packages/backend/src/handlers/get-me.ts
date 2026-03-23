@@ -9,7 +9,7 @@ import { triggerTenantSetup } from '../lib/trigger-tenant-setup.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { suggestOrgName } from '../lib/suggest-org-name.js';
-import { getConnectionType } from '../lib/auth0-management.js';
+import { getConnectionType, getMfaStatus } from '../lib/auth0-management.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -40,6 +40,11 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     }
   }
 
+  const connectionType = getConnectionType(sub);
+
+  const includeMfa = event.queryStringParameters?.include === 'mfa';
+  const mfaEnabled = includeMfa ? await getMfaStatus(sub) : false;
+
   const body: MeResponse = {
     orgId,
     orgName,
@@ -48,7 +53,8 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     email,
     orgSetupComplete: isOrgSetupComplete(setupStatus),
     name,
-    connectionType: getConnectionType(sub),
+    connectionType,
+    mfaEnabled,
   };
 
   // Only include suggested name if org is not yet confirmed

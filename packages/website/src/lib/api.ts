@@ -16,6 +16,10 @@ interface LoginOptions {
   screenHint?: 'signup';
   /** Auth0 connection name (e.g. 'google-oauth2', 'github') to skip Universal Login and go directly to a social provider. */
   connection?: string;
+  /** Force a fresh login (e.g. 'login' to trigger MFA enrollment). */
+  prompt?: 'login';
+  /** Request MFA authentication (triggers enrollment if no factor is enrolled). */
+  acrValues?: string;
 }
 
 // TODO [Option D]: When we move to a custom domain (e.g. auth.fil.one),
@@ -36,6 +40,8 @@ function buildAuth0LoginUrl(options?: LoginOptions): string {
   if (options?.loginHint) params.set('login_hint', options.loginHint);
   if (options?.screenHint) params.set('screen_hint', options.screenHint);
   if (options?.connection) params.set('connection', options.connection);
+  if (options?.prompt) params.set('prompt', options.prompt);
+  if (options?.acrValues) params.set('acr_values', options.acrValues);
   return `https://${AUTH0_DOMAIN}/authorize?${params.toString()}`;
 }
 
@@ -115,9 +121,12 @@ import type {
   UpdateProfileResponse,
 } from '@filone/shared';
 
-export function getMe(options?: { forceRefresh?: boolean }): Promise<MeResponse> {
-  const qs = options?.forceRefresh ? '?forceRefresh=1' : '';
-  return apiRequest<MeResponse>(`/me${qs}`);
+export function getMe(options?: { forceRefresh?: boolean; include?: 'mfa' }): Promise<MeResponse> {
+  const params = new URLSearchParams();
+  if (options?.forceRefresh) params.set('forceRefresh', '1');
+  if (options?.include) params.set('include', options.include);
+  const qs = params.toString();
+  return apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
 }
 
 export function confirmOrg(orgName: string): Promise<ConfirmOrgResponse> {
@@ -140,6 +149,22 @@ export function changePassword(): Promise<{ message: string }> {
 
 export function resendVerificationEmail(): Promise<{ message: string }> {
   return apiRequest<{ message: string }>('/me/resend-verification', { method: 'POST' });
+}
+
+// ── MFA API ──────────────────────────────────────────────────────────────
+
+export async function enrollMfa(): Promise<void> {
+  await apiRequest<{ message: string }>('/mfa/enroll', { method: 'POST' });
+  // Force a fresh login with acr_values requesting MFA.
+  // Auth0 sees no enrolled factor and presents the enrollment screen.
+  redirectToLogin({
+    prompt: 'login',
+    acrValues: 'http://schemas.openid.net/pape/policies/2007/06/multi-factor',
+  });
+}
+
+export function disableMfa(): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>('/mfa/disable', { method: 'POST' });
 }
 
 // ── Usage API ────────────────────────────────────────────────────────────
