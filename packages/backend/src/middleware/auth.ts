@@ -34,6 +34,8 @@ interface NewTokens {
 
 export interface AuthInternal extends Record<string, unknown> {
   newTokens?: NewTokens;
+  /** Stashed by the before hook so the after hook can force-refresh if needed. */
+  refreshToken?: string;
 }
 
 type AuthMiddlewareRequest = Request<
@@ -75,6 +77,60 @@ function orgNotConfirmedResponse(): APIGatewayProxyStructuredResultV2 {
       code: ApiErrorCode.ORG_NOT_CONFIRMED,
     })
     .build();
+}
+
+/**
+ * Exchange a refresh token for fresh access/id/refresh tokens.
+ * Returns null if the refresh fails for any reason.
+ */
+async function exchangeRefreshToken(refreshToken: string): Promise<NewTokens | null> {
+  const domain = process.env.AUTH0_DOMAIN!;
+  const secrets = getAuthSecrets();
+  try {
+    const res = await fetch(`https://${domain}/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: secrets.AUTH0_CLIENT_ID,
+        client_secret: secrets.AUTH0_CLIENT_SECRET,
+        refresh_token: refreshToken,
+      }).toString(),
+    });
+
+    if (res.ok) {
+      const tokens = (await res.json()) as {
+        access_token: string;
+        id_token: string;
+        refresh_token?: string;
+      };
+      return {
+        access_token: tokens.access_token,
+        id_token: tokens.id_token,
+        refresh_token: tokens.refresh_token ?? refreshToken,
+      };
+    }
+    const body = await res.text().catch(() => '');
+    console.warn('[auth] Token refresh failed', { status: res.status, body });
+  } catch (err) {
+    console.warn('[auth] Token refresh threw', { error: (err as Error).message });
+  }
+  return null;
+}
+
+function setCookiesFromTokens(
+  response: APIGatewayProxyStructuredResultV2,
+  tokens: NewTokens,
+): void {
+  const csrfToken = crypto.randomUUID();
+  response.cookies = [
+    ...(response.cookies ?? []),
+    makeCookieHeader(COOKIE_NAMES.ACCESS_TOKEN, tokens.access_token, TOKEN_MAX_AGE.ACCESS),
+    makeCookieHeader(COOKIE_NAMES.ID_TOKEN, tokens.id_token, TOKEN_MAX_AGE.ACCESS),
+    makeCookieHeader(COOKIE_NAMES.REFRESH_TOKEN, tokens.refresh_token, TOKEN_MAX_AGE.REFRESH),
+    makeHintCookieHeader(COOKIE_NAMES.LOGGED_IN, '1', TOKEN_MAX_AGE.REFRESH),
+    makeHintCookieHeader(CSRF_COOKIE_NAME, csrfToken, TOKEN_MAX_AGE.ACCESS),
+  ];
 }
 
 /**
@@ -301,8 +357,15 @@ export function authMiddleware() {
     };
     console.warn('[auth] Starting auth check', { hasCookies });
 
-    // Step 1: Validate existing access token
-    if (accessToken) {
+    // Stash refresh token so the after hook can force-refresh if a handler requests it
+    if (refreshToken) {
+      request.internal.refreshToken = refreshToken;
+    }
+
+    const forceRefresh = event.queryStringParameters?.forceRefresh === '1';
+
+    // Step 1: Validate existing access token (skip if forceRefresh — we need fresh claims)
+    if (accessToken && !forceRefresh) {
       try {
         const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
         const sub = payload.sub!;
@@ -321,56 +384,29 @@ export function authMiddleware() {
       }
     }
 
-    // Step 2: Attempt token refresh
+    // Step 2: Attempt token refresh (always runs when forceRefresh=1)
     if (refreshToken) {
-      try {
-        const tokenRes = await fetch(`https://${domain}/oauth/token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            grant_type: 'refresh_token',
-            client_id: secrets.AUTH0_CLIENT_ID,
-            client_secret: secrets.AUTH0_CLIENT_SECRET,
-            refresh_token: refreshToken,
-          }).toString(),
+      const tokens = await exchangeRefreshToken(refreshToken);
+      if (tokens) {
+        request.internal.newTokens = tokens;
+        request.internal.refreshToken = tokens.refresh_token;
+        const refreshedPayload = decodeJwt(tokens.access_token);
+        const refreshedSub = refreshedPayload.sub!;
+        const refreshedClaims = await extractIdTokenClaims({
+          idToken: tokens.id_token,
+          jwks,
+          clientId: secrets.AUTH0_CLIENT_ID,
+          issuer,
         });
-
-        if (tokenRes.ok) {
-          const tokens = (await tokenRes.json()) as {
-            access_token: string;
-            id_token: string;
-            refresh_token?: string;
-          };
-          // Stash new tokens — the after hook attaches them as Set-Cookie headers
-          request.internal.newTokens = {
-            access_token: tokens.access_token,
-            id_token: tokens.id_token,
-            // Use the rotated token if Auth0 returned one, otherwise reuse the old one
-            refresh_token: tokens.refresh_token ?? refreshToken,
-          } satisfies NewTokens;
-          const refreshedPayload = decodeJwt(tokens.access_token);
-          const refreshedSub = refreshedPayload.sub!;
-          const refreshedClaims = await extractIdTokenClaims({
-            idToken: tokens.id_token,
-            jwks,
-            clientId: secrets.AUTH0_CLIENT_ID,
-            issuer,
-          });
-          console.warn('[auth] Token refresh succeeded');
-          const blocked = await attachIdentity({
-            event,
-            sub: refreshedSub,
-            email: refreshedClaims.email,
-            emailVerified: refreshedClaims.emailVerified,
-          });
-          if (blocked) return blocked;
-          return; // Continue to handler
-        }
-        const refreshBody = await tokenRes.text().catch(() => '');
-        console.warn('[auth] Token refresh failed', { status: tokenRes.status, body: refreshBody });
-      } catch (err) {
-        // Refresh failed — fall through
-        console.warn('[auth] Token refresh threw', { error: (err as Error).message });
+        console.warn('[auth] Token refresh succeeded');
+        const blocked = await attachIdentity({
+          event,
+          sub: refreshedSub,
+          email: refreshedClaims.email,
+          emailVerified: refreshedClaims.emailVerified,
+        });
+        if (blocked) return blocked;
+        return; // Continue to handler
       }
     }
 
@@ -379,20 +415,30 @@ export function authMiddleware() {
   };
 
   const after = async (request: AuthMiddlewareRequest): Promise<void> => {
-    const { newTokens } = request.internal;
-    // Narrow to structured result — the string form has no cookies field
+    const { event } = request;
+    let { newTokens } = request.internal;
     const response = request.response as APIGatewayProxyStructuredResultV2 | undefined;
-    if (!newTokens || !response) return;
+    if (!response) return;
 
-    const csrfToken = crypto.randomUUID();
-    response.cookies = [
-      ...(response.cookies ?? []),
-      makeCookieHeader(COOKIE_NAMES.ACCESS_TOKEN, newTokens.access_token, TOKEN_MAX_AGE.ACCESS),
-      makeCookieHeader(COOKIE_NAMES.ID_TOKEN, newTokens.id_token, TOKEN_MAX_AGE.ACCESS),
-      makeCookieHeader(COOKIE_NAMES.REFRESH_TOKEN, newTokens.refresh_token, TOKEN_MAX_AGE.REFRESH),
-      makeHintCookieHeader(COOKIE_NAMES.LOGGED_IN, '1', TOKEN_MAX_AGE.REFRESH),
-      makeHintCookieHeader(CSRF_COOKIE_NAME, csrfToken, TOKEN_MAX_AGE.ACCESS),
-    ];
+    // If a handler called requestTokenRefresh() and we don't already have fresh tokens,
+    // perform a refresh so the response includes updated ID token claims.
+    const forceRefresh = (
+      event.requestContext as APIGatewayProxyEventV2['requestContext'] & {
+        _forceTokenRefresh?: boolean;
+      }
+    )._forceTokenRefresh;
+
+    if (forceRefresh && !newTokens && request.internal.refreshToken) {
+      const refreshed = await exchangeRefreshToken(request.internal.refreshToken);
+      if (refreshed) {
+        newTokens = refreshed;
+        console.warn('[auth] Force token refresh succeeded');
+      }
+    }
+
+    if (newTokens) {
+      setCookiesFromTokens(response, newTokens);
+    }
   };
 
   return { before, after } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;

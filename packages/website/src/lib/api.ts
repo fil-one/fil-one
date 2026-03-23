@@ -110,8 +110,9 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
 import type { MeResponse, ConfirmOrgResponse } from '@filone/shared';
 
-export function getMe(): Promise<MeResponse> {
-  return apiRequest<MeResponse>('/me');
+export function getMe(options?: { forceRefresh?: boolean }): Promise<MeResponse> {
+  const qs = options?.forceRefresh ? '?forceRefresh=1' : '';
+  return apiRequest<MeResponse>(`/me${qs}`);
 }
 
 export function confirmOrg(orgName: string): Promise<ConfirmOrgResponse> {

@@ -17,3 +17,16 @@ export interface AuthenticatedEvent extends APIGatewayProxyEventV2 {
 export function getUserInfo(event: AuthenticatedEvent): UserInfo {
   return event.requestContext.userInfo;
 }
+
+/**
+ * Signal the auth middleware to force a token refresh after the handler completes.
+ * Use this when a handler modifies Auth0 user data (name, email, etc.) so the
+ * response includes fresh cookies with updated ID token claims.
+ */
+export function requestTokenRefresh(event: AuthenticatedEvent): void {
+  (
+    event.requestContext as AuthenticatedEvent['requestContext'] & {
+      _forceTokenRefresh?: boolean;
+    }
+  )._forceTokenRefresh = true;
+}

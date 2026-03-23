@@ -26,7 +26,8 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
     setError('');
     setChecking(true);
     try {
-      const updated = await getMe();
+      // Force a token refresh so we pick up the latest email_verified claim from Auth0
+      const updated = await getMe({ forceRefresh: true });
       if (updated.emailVerified) {
         onVerified();
       } else {
