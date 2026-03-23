@@ -4,7 +4,7 @@ import {
   attachValidCard,
   seedBillingRecord,
   createAndPayInvoice,
-  waitForWebhook,
+  sleep,
   getBillingRecord,
   deleteBillingRecord,
   getStripeClient,
@@ -33,7 +33,7 @@ describe('Past Due Recovery (invoice.payment_succeeded with canceledAt)', () => 
 
   it('should restore status to active and clear all failure/cancel fields', async () => {
     await createAndPayInvoice(cusId);
-    await waitForWebhook(15);
+    await sleep(15 * 1000);
     const record = await getBillingRecord(userId);
     expect(record).toStrictEqual({
       pk: { S: `CUSTOMER#${userId}` },

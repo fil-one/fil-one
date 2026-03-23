@@ -4,7 +4,7 @@ import {
   attachDecliningCard,
   seedBillingRecord,
   createAndFailInvoice,
-  waitForWebhook,
+  sleep,
   getBillingRecord,
   deleteBillingRecord,
   getStripeClient,
@@ -28,7 +28,7 @@ describe('Payment Failure (invoice.payment_failed)', () => {
 
   it('should set status to past_due and record failure timestamp', async () => {
     await createAndFailInvoice(cusId);
-    await waitForWebhook(15);
+    await sleep(15 * 1000);
     const record = await getBillingRecord(userId);
     expect(record).toStrictEqual({
       pk: { S: `CUSTOMER#${userId}` },

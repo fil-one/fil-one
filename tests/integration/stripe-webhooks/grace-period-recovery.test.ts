@@ -4,7 +4,7 @@ import {
   attachValidCard,
   seedBillingRecord,
   createAndPayInvoice,
-  waitForWebhook,
+  sleep,
   getBillingRecord,
   deleteBillingRecord,
   getStripeClient,
@@ -34,7 +34,7 @@ describe('Grace Period Recovery (invoice.payment_succeeded)', () => {
 
   it('should restore status to active and clear grace period fields', async () => {
     await createAndPayInvoice(cusId);
-    await waitForWebhook(15);
+    await sleep(15 * 1000);
     const record = await getBillingRecord(userId);
     expect(record).toStrictEqual({
       pk: { S: `CUSTOMER#${userId}` },

@@ -4,7 +4,7 @@ import {
   attachValidCard,
   seedBillingRecord,
   createAndPayInvoice,
-  waitForWebhook,
+  sleep,
   getBillingRecord,
   deleteBillingRecord,
   getStripeClient,
@@ -30,7 +30,7 @@ describe('Invoice Creation (invoice.payment_succeeded)', () => {
 
   it('should set status to active and clear failure fields', async () => {
     await createAndPayInvoice(cusId);
-    await waitForWebhook(15);
+    await sleep(15 * 1000);
     const record = await getBillingRecord(userId);
     expect(record).toStrictEqual({
       pk: { S: `CUSTOMER#${userId}` },

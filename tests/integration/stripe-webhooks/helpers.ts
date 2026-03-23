@@ -42,7 +42,7 @@ export function getStripePriceId(): string {
 // =============================================================================
 // Utilities
 // =============================================================================
-function sleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -141,53 +141,43 @@ export async function attachDecliningCard(customerId: string): Promise<void> {
 }
 
 export async function createAndPayInvoice(customerId: string): Promise<string> {
-  await getStripeClient().invoiceItems.create({
+  const stripeClient = getStripeClient();
+  await stripeClient.invoiceItems.create({
     customer: customerId,
     amount: 500,
     currency: 'usd',
   });
 
-  const invoice = await getStripeClient().invoices.create({
+  const invoice = await stripeClient.invoices.create({
     customer: customerId,
     pending_invoice_items_behavior: 'include',
   });
 
-  try {
-    await getStripeClient().invoices.finalizeInvoice(invoice.id);
-  } catch {
-    /* ignore */
-  }
-  try {
-    await getStripeClient().invoices.pay(invoice.id);
-  } catch {
-    /* ignore */
-  }
+  await stripeClient.invoices.finalizeInvoice(invoice.id);
+  await stripeClient.invoices.pay(invoice.id);
 
   return invoice.id;
 }
 
 export async function createAndFailInvoice(customerId: string): Promise<string> {
-  await getStripeClient().invoiceItems.create({
+  const stripeClient = getStripeClient();
+  await stripeClient.invoiceItems.create({
     customer: customerId,
     amount: 500,
     currency: 'usd',
   });
 
-  const invoice = await getStripeClient().invoices.create({
+  const invoice = await stripeClient.invoices.create({
     customer: customerId,
     pending_invoice_items_behavior: 'include',
     auto_advance: false,
   });
 
-  try {
-    await getStripeClient().invoices.finalizeInvoice(invoice.id);
-  } catch {
-    /* ignore */
-  }
+  await stripeClient.invoices.finalizeInvoice(invoice.id);
   try {
     await getStripeClient().invoices.pay(invoice.id);
   } catch {
-    /* expected to fail */
+    console.debug('Expected invoice payment failure');
   }
 
   return invoice.id;
@@ -196,11 +186,6 @@ export async function createAndFailInvoice(customerId: string): Promise<string> 
 // =============================================================================
 // Waiting
 // =============================================================================
-
-export async function waitForWebhook(seconds = 15): Promise<void> {
-  await sleep(seconds * 1000);
-}
-
 export async function pollTestClockReady(clockId: string, timeoutSeconds = 120): Promise<void> {
   const timeoutMs = timeoutSeconds * 1000;
   let elapsed = 0;

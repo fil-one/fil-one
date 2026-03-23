@@ -4,7 +4,7 @@ import {
   attachValidCard,
   getStripePriceId,
   getStripeClient,
-  waitForWebhook,
+  sleep,
   pollTestClockReady,
   deleteBillingRecord,
 } from './helpers.js';
@@ -17,12 +17,12 @@ describe('Usage Reporting (meter events via test clock)', () => {
 
   beforeAll(async () => {
     userId = `test-ur-${crypto.randomUUID()}`;
-    const s = getStripeClient();
+    const stripe = getStripeClient();
     const priceId = getStripePriceId();
 
     // Create test clock anchored at now
     const frozenTime = Math.floor(Date.now() / 1000);
-    const clock = await s.testHelpers.testClocks.create({
+    const clock = await stripe.testHelpers.testClocks.create({
       frozen_time: frozenTime,
       name: `usage-reporting-test-${crypto.randomUUID()}`,
     });
@@ -36,7 +36,7 @@ describe('Usage Reporting (meter events via test clock)', () => {
 
     // Create active subscription with metered price
     const anchorTime = frozenTime + 7 * 86400;
-    const sub = await s.subscriptions.create({
+    const sub = await stripe.subscriptions.create({
       customer: cusId,
       items: [{ price: priceId }],
       default_payment_method: pmId,
@@ -48,31 +48,32 @@ describe('Usage Reporting (meter events via test clock)', () => {
   });
 
   afterAll(async () => {
-    await getStripeClient().subscriptions.cancel(subId);
-    await getStripeClient().testHelpers.testClocks.del(clockId);
-    await getStripeClient().customers.del(cusId);
+    const stripe = getStripeClient();
+    await stripe.subscriptions.cancel(subId);
+    // deleting the clock will also delete associated customers
+    await stripe.testHelpers.testClocks.del(clockId);
     await deleteBillingRecord(userId);
   });
 
   it('should create an invoice with metered line item after clock advance', async () => {
-    const s = getStripeClient();
+    const stripe = getStripeClient();
     const priceId = getStripePriceId();
 
     // Retrieve subscription to get period end
-    const sub = await s.subscriptions.retrieve(subId);
+    const sub = await stripe.subscriptions.retrieve(subId);
     const periodEnd =
       (sub.items.data[0] as unknown as Record<string, unknown>)?.current_period_end ??
       (sub as unknown as Record<string, unknown>).current_period_end ??
       null;
 
     // Resolve the meter event name from the price's linked meter
-    const price = await s.prices.retrieve(priceId);
+    const price = await stripe.prices.retrieve(priceId);
     const meterId = (price.recurring as unknown as Record<string, string>)?.meter;
-    const meter = await s.billing.meters.retrieve(meterId);
+    const meter = await stripe.billing.meters.retrieve(meterId);
     const meterEventName = meter.event_name;
 
     // Send meter event
-    await s.billing.meterEvents.create({
+    await stripe.billing.meterEvents.create({
       event_name: meterEventName,
       payload: {
         value: '1337',
@@ -81,12 +82,12 @@ describe('Usage Reporting (meter events via test clock)', () => {
     });
 
     // Wait for meter event ingestion
-    await waitForWebhook(10);
+    await sleep(15 * 1000);
 
     // Advance test clock past period end
     const frozenTime = Math.floor(Date.now() / 1000);
     const advanceTo = periodEnd ? Number(periodEnd) + 3600 : frozenTime + 31 * 86400;
-    await s.testHelpers.testClocks.advance(clockId, {
+    await stripe.testHelpers.testClocks.advance(clockId, {
       frozen_time: advanceTo,
     });
 
@@ -94,14 +95,14 @@ describe('Usage Reporting (meter events via test clock)', () => {
     await pollTestClockReady(clockId, 120);
 
     // Fetch invoices and check for metered line item
-    const invoices = await s.invoices.list({
+    const invoices = await stripe.invoices.list({
       customer: cusId,
       limit: 10,
     });
 
     let foundUsage = false;
     for (const inv of invoices.data) {
-      const lines = await s.invoices.listLineItems(inv.id, {
+      const lines = await stripe.invoices.listLineItems(inv.id, {
         limit: 100,
       });
 

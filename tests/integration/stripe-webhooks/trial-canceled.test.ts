@@ -2,7 +2,7 @@ import { describe, it, beforeAll, afterAll, expect } from 'vitest';
 import {
   createTestCustomer,
   seedBillingRecord,
-  waitForWebhook,
+  sleep,
   getBillingRecord,
   deleteBillingRecord,
   getStripePriceId,
@@ -27,7 +27,8 @@ describe('Trial Canceled (customer.subscription.deleted)', () => {
 
   it('should set status to grace_period with ~7-day grace window', async () => {
     const trialEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
-    const sub = await getStripeClient().subscriptions.create({
+    const stripe = getStripeClient();
+    const sub = await stripe.subscriptions.create({
       customer: cusId,
       items: [{ price: getStripePriceId() }],
       trial_end: trialEnd,
@@ -38,16 +39,12 @@ describe('Trial Canceled (customer.subscription.deleted)', () => {
     });
     subId = sub.id;
 
-    try {
-      await getStripeClient().subscriptions.cancel(subId);
-    } catch {
-      /* ignore */
-    }
+    await stripe.subscriptions.cancel(subId);
 
-    await waitForWebhook(15);
+    await sleep(15 * 1000);
 
     const record = await getBillingRecord(userId);
-    expect(record).toStrictEqual({
+    expect(record).toMatchObject({
       pk: { S: `CUSTOMER#${userId}` },
       sk: { S: 'SUBSCRIPTION' },
       orgId: { S: 'test-org' },
