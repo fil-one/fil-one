@@ -159,6 +159,7 @@ describe('setup-integrations', () => {
       expect(mockStripeWebhookEndpoints.create).toHaveBeenCalledWith({
         url: 'https://app.example.com/api/stripe/webhook',
         enabled_events: [
+          'customer.updated',
           'customer.subscription.created',
           'customer.subscription.updated',
           'customer.subscription.deleted',
