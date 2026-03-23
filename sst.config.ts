@@ -136,7 +136,7 @@ export default $config({
     const firehose = new aws.kinesis.FirehoseDeliveryStream('OtelLogDelivery', {
       destination: 'http_endpoint',
       httpEndpointConfiguration: {
-        url: 'https://logs-prod-008.grafana.net/loki/api/v1/push',
+        url: 'https://aws-logs-prod-008.grafana.net/aws-logs/api/v1/push',
         name: 'Grafana Loki',
         accessKey: grafanaLokiAuth.value,
         bufferingInterval: 60,
