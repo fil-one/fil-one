@@ -58,8 +58,10 @@ function getEntriesAtPrefix(objects: S3Object[], prefix: string): BrowseEntry[] 
     const remainder = obj.key.slice(prefix.length);
     const slashIdx = remainder.indexOf('/');
     if (slashIdx === -1) {
+      // Direct file at this level
       files.push({ kind: 'object', name: remainder, object: obj });
     } else {
+      // There's a deeper path — extract the folder name
       folders.add(remainder.slice(0, slashIdx));
     }
   }

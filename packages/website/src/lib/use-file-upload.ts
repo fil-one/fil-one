@@ -73,6 +73,7 @@ export function useFileUpload({ bucketName, onSuccess }: UseFileUploadOptions) {
         const xhr = new XMLHttpRequest();
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
+            // Never drop below 1% — we already showed progress for the presign step
             setUploadProgress(Math.max(1, Math.round((e.loaded / e.total) * 100)));
           }
         };

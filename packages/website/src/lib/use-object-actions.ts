@@ -39,7 +39,7 @@ export function useObjectActions({ bucketName, onDeleted }: UseObjectActionsOpti
         const data = await apiRequest<{ url: string }>(
           `/buckets/${encodeURIComponent(bucketName)}/objects/download?key=${encodeURIComponent(key)}`,
         );
-        window.open(data.url, '_blank');
+        window.open(data.url, '_blank', 'noopener,noreferrer');
         toast.success('Download started');
       } catch (err) {
         console.error('Failed to get download URL:', err);
