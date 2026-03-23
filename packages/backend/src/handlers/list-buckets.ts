@@ -2,11 +2,12 @@ import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { Bucket, ListBucketsResponse } from '@filone/shared';
+import type { Bucket, ListBucketsResponse, ErrorResponse } from '@filone/shared';
 import { S3_REGION } from '@filone/shared';
 import { Resource } from 'sst';
+import { createClient, getV1TenantsByTenantIdBucket } from '@filone/aurora-portal-client';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraS3Credentials, listBuckets } from '../lib/aurora-s3-client.js';
+import { getAuroraPortalApiKey } from '../lib/aurora-portal.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -14,7 +15,6 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
-import type { ErrorResponse } from '@filone/shared';
 
 const dynamo = getDynamoClient();
 
@@ -43,18 +43,35 @@ export async function baseHandler(
       .build();
   }
 
+  const baseUrl = process.env.AURORA_PORTAL_URL!;
   const stage = process.env.FILONE_STAGE!;
-  const gatewayUrl = process.env.AURORA_S3_GATEWAY_URL!;
+  const apiKey = await getAuroraPortalApiKey(stage, auroraTenantId);
 
-  const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
-  const result = await listBuckets(gatewayUrl, credentials);
+  const client = createClient({
+    baseUrl,
+    headers: { 'X-Api-Key': apiKey },
+  });
 
-  const buckets: Bucket[] = result.buckets.map((b) => ({
-    name: b.name,
-    region: S3_REGION,
-    createdAt: b.createdAt,
-    isPublic: false,
-  }));
+  const { data, error } = await getV1TenantsByTenantIdBucket({
+    client,
+    path: { tenantId: auroraTenantId },
+    throwOnError: false,
+  });
+
+  if (error) {
+    throw new Error(`Failed to list buckets from Aurora for tenant ${auroraTenantId}`, {
+      cause: error,
+    });
+  }
+
+  const buckets: Bucket[] = (data?.buckets ?? [])
+    .filter((b): b is typeof b & { name: string; createdAt: string } => !!b.name && !!b.createdAt)
+    .map((b) => ({
+      name: b.name,
+      region: S3_REGION,
+      createdAt: b.createdAt,
+      isPublic: false,
+    }));
 
   return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets }).build();
 }

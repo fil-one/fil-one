@@ -13,16 +13,19 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockGetAuroraS3Credentials = vi.fn();
-const mockListBuckets = vi.fn();
-
-vi.mock('../lib/aurora-s3-client.js', () => ({
-  getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
-  listBuckets: (...args: unknown[]) => mockListBuckets(...args),
+const mockGetAuroraPortalApiKey = vi.fn();
+vi.mock('../lib/aurora-portal.js', () => ({
+  getAuroraPortalApiKey: (...args: unknown[]) => mockGetAuroraPortalApiKey(...args),
 }));
 
+const mockListBuckets = vi.fn();
+vi.mock('@filone/aurora-portal-client', () => ({
+  createClient: () => 'mock-client',
+  getV1TenantsByTenantIdBucket: (...args: unknown[]) => mockListBuckets(...args),
+}));
+
+process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu';
 process.env.FILONE_STAGE = 'test';
-process.env.AURORA_S3_GATEWAY_URL = 'https://s3.dev.aur.lu';
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -57,17 +60,17 @@ describe('list-buckets baseHandler', () => {
     ddbMock.reset();
   });
 
-  it('returns 200 with buckets from Aurora S3', async () => {
+  it('returns 200 with buckets from Aurora Portal', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
+    mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
     mockListBuckets.mockResolvedValue({
-      buckets: [
-        { name: 'my-bucket', createdAt: '2026-01-01T00:00:00.000Z' },
-        { name: 'other-bucket', createdAt: '2026-01-02T00:00:00.000Z' },
-      ],
+      data: {
+        buckets: [
+          { name: 'my-bucket', createdAt: '2026-01-01T00:00:00.000Z' },
+          { name: 'other-bucket', createdAt: '2026-01-02T00:00:00.000Z' },
+        ],
+      },
+      error: undefined,
     });
 
     const event = buildEvent({ userInfo: USER_INFO });
@@ -91,12 +94,40 @@ describe('list-buckets baseHandler', () => {
         },
       ],
     });
+  });
 
-    expect(mockGetAuroraS3Credentials).toHaveBeenCalledWith('test', 'aurora-t-1');
-    expect(mockListBuckets).toHaveBeenCalledWith('https://s3.dev.aur.lu', {
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
+  it('calls Aurora Portal API with correct params', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
+    mockListBuckets.mockResolvedValue({
+      data: { buckets: [] },
+      error: undefined,
     });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    await baseHandler(event);
+
+    expect(mockGetAuroraPortalApiKey).toHaveBeenCalledWith('test', 'aurora-t-1');
+    expect(mockListBuckets).toHaveBeenCalledWith({
+      client: 'mock-client',
+      path: { tenantId: 'aurora-t-1' },
+      throwOnError: false,
+    });
+  });
+
+  it('throws when Aurora returns an error', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
+    mockListBuckets.mockResolvedValue({
+      data: undefined,
+      error: { message: 'Internal error' },
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+
+    await expect(baseHandler(event)).rejects.toThrow(
+      'Failed to list buckets from Aurora for tenant aurora-t-1',
+    );
   });
 
   it('returns 503 when auroraTenantId is missing', async () => {
@@ -133,11 +164,11 @@ describe('list-buckets baseHandler', () => {
 
   it('returns 200 with empty array when no buckets exist', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
+    mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
+    mockListBuckets.mockResolvedValue({
+      data: { buckets: [] },
+      error: undefined,
     });
-    mockListBuckets.mockResolvedValue({ buckets: [] });
 
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);

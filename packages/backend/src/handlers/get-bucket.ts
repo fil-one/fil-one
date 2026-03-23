@@ -78,10 +78,16 @@ export async function baseHandler(
     );
   }
 
+  if (!data?.createdAt) {
+    throw new Error(
+      `Aurora returned incomplete data for bucket "${bucketName}" (tenant ${auroraTenantId})`,
+    );
+  }
+
   const bucket: Bucket = {
-    name: data?.name ?? bucketName,
+    name: data.name ?? bucketName,
     region: S3_REGION,
-    createdAt: data?.createdAt ?? new Date().toISOString(),
+    createdAt: data.createdAt,
     isPublic: false,
   };
 
