@@ -22,15 +22,6 @@
       },
       "type": "object"
     },
-    "bucket.BucketListResponse": {
-      "properties": {
-        "buckets": {
-          "items": { "$ref": "#/definitions/bucket.BaseBucketListResponse" },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
     "bucket.BucketResponse": {
       "properties": {
         "createdAt": { "type": "string" },
@@ -68,6 +59,18 @@
         "key": { "type": "string" },
         "size": { "type": "integer" },
         "versionId": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "bucket.PaginatedBucketListResponse": {
+      "properties": {
+        "items": {
+          "items": { "$ref": "#/definitions/bucket.BaseBucketListResponse" },
+          "type": "array"
+        },
+        "page": { "type": "integer" },
+        "pageSize": { "type": "integer" },
+        "totalCount": { "type": "integer" }
       },
       "type": "object"
     },
@@ -232,6 +235,7 @@
     },
     "models.ClientEnvironmentResponse": {
       "properties": {
+        "apiUrl": { "type": "string" },
         "auth0Audience": { "type": "string" },
         "auth0ClientId": { "type": "string" },
         "auth0Connection": { "type": "string" },
@@ -245,9 +249,11 @@
       },
       "type": "object"
     },
-    "models.ListKeysResponse": {
+    "models.CreateTokenPortalRequest": {
       "properties": {
-        "accessKeys": { "items": { "$ref": "#/definitions/models.AccessKeyBase" }, "type": "array" }
+        "description": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "name": { "type": "string" }
       },
       "type": "object"
     },
@@ -259,6 +265,15 @@
         "keyLimit": { "type": "integer" },
         "maxBucketSize": { "type": "integer" },
         "tenantName": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "models.PaginatedListKeysResponse": {
+      "properties": {
+        "items": { "items": { "$ref": "#/definitions/models.AccessKeyBase" }, "type": "array" },
+        "page": { "type": "integer" },
+        "pageSize": { "type": "integer" },
+        "totalCount": { "type": "integer" }
       },
       "type": "object"
     },
@@ -301,9 +316,42 @@
         "tenants": { "items": { "$ref": "#/definitions/models.TenantBase" }, "type": "array" }
       },
       "type": "object"
+    },
+    "models.TokenCreatePortalResponse": {
+      "properties": {
+        "createdAt": { "type": "string" },
+        "description": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "token": { "type": "string" }
+      },
+      "type": "object"
+    },
+    "models.TokenListPortalResponse": {
+      "properties": {
+        "items": {
+          "items": { "$ref": "#/definitions/models.TokenPortalResponse" },
+          "type": "array"
+        },
+        "page": { "type": "integer" },
+        "pageSize": { "type": "integer" },
+        "totalCount": { "type": "integer" }
+      },
+      "type": "object"
+    },
+    "models.TokenPortalResponse": {
+      "properties": {
+        "createdAt": { "type": "string" },
+        "description": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "type": "object"
     }
   },
-  "host": "",
+  "host": "api.portal.dev.aur.lu",
   "info": {
     "contact": {},
     "description": "This is Aurora Portal API.",
@@ -311,9 +359,10 @@
     "version": "1.0"
   },
   "paths": {
-    "/analytics/v1/operations/bucket/{bucketName}": {
+    "/analytics/v1/operations/buckets/{bucketName}": {
       "get": {
         "description": "Returns S3 operation metrics for a bucket, optionally filtered by requester tenant and grouped by tags",
+        "operationId": "GetBucketOperationMetrics",
         "parameters": [
           {
             "description": "Bucket name",
@@ -378,6 +427,7 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Get bucket operation metrics",
         "tags": ["Operations"]
       }
@@ -385,6 +435,7 @@
     "/analytics/v1/operations/myorg": {
       "get": {
         "description": "Returns S3 operation metrics for the authenticated tenant in the given time range, optionally resampled by window duration and grouped by tags",
+        "operationId": "GetTenantOperationMetrics",
         "parameters": [
           {
             "description": "Start of time range (RFC3339)",
@@ -432,13 +483,15 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Get tenant operation metrics",
         "tags": ["Operations"]
       }
     },
-    "/analytics/v1/storage/bucket/{bucketName}": {
+    "/analytics/v1/storage/buckets/{bucketName}": {
       "get": {
         "description": "Returns storage metrics for a bucket owned by the authenticated tenant",
+        "operationId": "GetBucketStorageMetrics",
         "parameters": [
           {
             "description": "Bucket name",
@@ -491,6 +544,7 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Get bucket storage metrics",
         "tags": ["Storage"]
       }
@@ -498,6 +552,7 @@
     "/analytics/v1/storage/myorg": {
       "get": {
         "description": "Returns storage metrics for the authenticated tenant in the given time range, optionally resampled by window duration",
+        "operationId": "GetTenantStorageMetrics",
         "parameters": [
           {
             "description": "Start of time range (RFC3339)",
@@ -539,13 +594,175 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Get tenant storage metrics",
         "tags": ["Storage"]
+      }
+    },
+    "/auth/v1/tenants/{tenantId}/tokens": {
+      "get": {
+        "description": "Returns a list of all tokens for a tenant",
+        "operationId": "ListTokens",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "List of tenant tokens",
+            "schema": { "$ref": "#/definitions/models.TokenListPortalResponse" }
+          },
+          "500": {
+            "description": "Error getting tokens",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "security": [{ "ApiKeyAuth": [] }],
+        "summary": "List tokens",
+        "tags": ["Token"]
+      },
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a new token for a tenant",
+        "operationId": "CreateToken",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Token creation request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": { "$ref": "#/definitions/models.CreateTokenPortalRequest" }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "201": {
+            "description": "Token created",
+            "schema": { "$ref": "#/definitions/models.TokenCreatePortalResponse" }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "409": {
+            "description": "Token with this name already exists",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Error while creating token",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "security": [{ "ApiKeyAuth": [] }],
+        "summary": "Create token",
+        "tags": ["Token"]
+      }
+    },
+    "/auth/v1/tenants/{tenantId}/tokens/{tokenId}": {
+      "delete": {
+        "description": "Deletes a tenant token by ID",
+        "operationId": "DeleteToken",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Token ID",
+            "in": "path",
+            "name": "tokenId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "204": { "description": "Token deleted" },
+          "404": {
+            "description": "Token not found",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Error deleting token",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "security": [{ "ApiKeyAuth": [] }],
+        "summary": "Delete token",
+        "tags": ["Token"]
+      },
+      "get": {
+        "description": "Returns a tenant token by ID",
+        "operationId": "GetToken",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Token ID",
+            "in": "path",
+            "name": "tokenId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Tenant token details",
+            "schema": { "$ref": "#/definitions/models.TokenPortalResponse" }
+          },
+          "404": {
+            "description": "Token not found",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          },
+          "500": {
+            "description": "Error getting token",
+            "schema": { "$ref": "#/definitions/common.ReturnMessage" }
+          }
+        },
+        "security": [{ "ApiKeyAuth": [] }],
+        "summary": "Get token",
+        "tags": ["Token"]
       }
     },
     "/v1/environment": {
       "get": {
         "description": "Returns environment configuration for the portal web application, including Auth0 settings",
+        "operationId": "GetEnvironment",
         "produces": ["application/json"],
         "responses": {
           "200": {
@@ -572,6 +789,7 @@
     "/v1/tenants": {
       "get": {
         "description": "Returns the list of active tenants for the authenticated organization",
+        "operationId": "ListTenants",
         "produces": ["application/json"],
         "responses": {
           "200": {
@@ -583,6 +801,7 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "List tenants",
         "tags": ["Tenants"]
       }
@@ -590,6 +809,7 @@
     "/v1/tenants/{tenantId}": {
       "get": {
         "description": "Returns tenant details for the given tenant ID",
+        "operationId": "GetTenant",
         "parameters": [
           {
             "description": "Tenant ID",
@@ -614,13 +834,15 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Get tenant",
         "tags": ["Tenants"]
       }
     },
     "/v1/tenants/{tenantId}/access_keys": {
       "get": {
-        "description": "Returns the list of access keys for the given tenant",
+        "description": "Returns the list of S3 access keys for the given tenant",
+        "operationId": "ListS3AccessKeys",
         "parameters": [
           {
             "description": "Tenant ID",
@@ -628,25 +850,41 @@
             "name": "tenantId",
             "required": true,
             "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
           }
         ],
         "produces": ["application/json"],
         "responses": {
           "200": {
             "description": "Access keys",
-            "schema": { "$ref": "#/definitions/models.ListKeysResponse" }
+            "schema": { "$ref": "#/definitions/models.PaginatedListKeysResponse" }
           },
           "500": {
             "description": "Internal server error",
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
-        "summary": "List access keys",
+        "security": [{ "ApiKeyAuth": [] }],
+        "summary": "List S3 access keys",
         "tags": ["Access Keys"]
       },
       "post": {
         "consumes": ["application/json"],
-        "description": "Creates a new access key for the given tenant",
+        "description": "Creates a new S3 access key for the given tenant",
+        "operationId": "CreateS3AccessKey",
         "parameters": [
           {
             "description": "Tenant ID",
@@ -682,13 +920,15 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
-        "summary": "Create access key",
+        "security": [{ "ApiKeyAuth": [] }],
+        "summary": "Create S3 access key",
         "tags": ["Access Keys"]
       }
     },
     "/v1/tenants/{tenantId}/access_keys/{accessKeyId}": {
       "delete": {
-        "description": "Deletes an access key for the given tenant",
+        "description": "Deletes an S3 access key for the given tenant",
+        "operationId": "DeleteS3AccessKey",
         "parameters": [
           {
             "description": "Tenant ID",
@@ -716,11 +956,13 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
-        "summary": "Delete access key",
+        "security": [{ "ApiKeyAuth": [] }],
+        "summary": "Delete S3 access key",
         "tags": ["Access Keys"]
       },
       "get": {
-        "description": "Returns a single access key for the given tenant",
+        "description": "Returns a single S3 access key for the given tenant",
+        "operationId": "GetS3AccessKey",
         "parameters": [
           {
             "description": "Tenant ID",
@@ -752,13 +994,15 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
-        "summary": "Get access key",
+        "security": [{ "ApiKeyAuth": [] }],
+        "summary": "Get S3 access key",
         "tags": ["Access Keys"]
       }
     },
-    "/v1/tenants/{tenantId}/bucket": {
+    "/v1/tenants/{tenantId}/buckets": {
       "get": {
         "description": "Returns the list of active buckets for the given tenant",
+        "operationId": "ListBuckets",
         "parameters": [
           {
             "description": "Tenant ID",
@@ -766,25 +1010,41 @@
             "name": "tenantId",
             "required": true,
             "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
           }
         ],
         "produces": ["application/json"],
         "responses": {
           "200": {
             "description": "Bucket list",
-            "schema": { "$ref": "#/definitions/bucket.BucketListResponse" }
+            "schema": { "$ref": "#/definitions/bucket.PaginatedBucketListResponse" }
           },
           "500": {
             "description": "Internal server error",
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "List buckets",
         "tags": ["Buckets"]
       },
       "post": {
         "consumes": ["application/json"],
         "description": "Creates a new bucket for the given tenant",
+        "operationId": "CreateBucket",
         "parameters": [
           {
             "description": "Tenant ID",
@@ -820,13 +1080,15 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Create bucket",
         "tags": ["Buckets"]
       }
     },
-    "/v1/tenants/{tenantId}/bucket/{bucketName}": {
+    "/v1/tenants/{tenantId}/buckets/{bucketName}": {
       "get": {
         "description": "Returns bucket details for the given tenant and bucket name",
+        "operationId": "GetBucketInfo",
         "parameters": [
           {
             "description": "Tenant ID",
@@ -858,12 +1120,14 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Get bucket",
         "tags": ["Buckets"]
       },
       "put": {
         "consumes": ["application/json"],
         "description": "Updates bucket configuration (currently only default retention for object lock buckets)",
+        "operationId": "EditBucket",
         "parameters": [
           {
             "description": "Tenant ID",
@@ -906,14 +1170,16 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Edit bucket",
         "tags": ["Buckets"]
       }
     },
-    "/v1/tenants/{tenantId}/bucket/{bucketName}/clone_object": {
+    "/v1/tenants/{tenantId}/buckets/{bucketName}/clone_object": {
       "post": {
         "consumes": ["application/json"],
         "description": "Creates a server-side clone of an object in the given bucket",
+        "operationId": "CloneObject",
         "parameters": [
           {
             "description": "Tenant ID",
@@ -956,6 +1222,7 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Clone object",
         "tags": ["Buckets"]
       }
@@ -963,6 +1230,7 @@
     "/v1/tenants/{tenantId}/metrics": {
       "get": {
         "description": "Returns summary metrics for the given tenant",
+        "operationId": "GetTenantMetrics",
         "parameters": [
           {
             "description": "Tenant ID",
@@ -987,6 +1255,7 @@
             "schema": { "$ref": "#/definitions/common.ReturnMessage" }
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Get tenant metrics",
         "tags": ["Metrics"]
       }
@@ -994,10 +1263,10 @@
   },
   "schemes": [],
   "securityDefinitions": {
-    "Bearer": {
-      "description": "Type \"Bearer\" followed by a space and then your token.",
+    "ApiKeyAuth": {
+      "description": "API Key Authentication",
       "in": "header",
-      "name": "Authorization",
+      "name": "X-Api-Key",
       "type": "apiKey"
     }
   },

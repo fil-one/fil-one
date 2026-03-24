@@ -2,11 +2,11 @@ import assert from 'node:assert';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import {
   createClient,
-  deleteV1TenantsByTenantIdAccessKeysByAccessKeyId,
-  getV1TenantsByTenantIdAccessKeys,
-  getV1TenantsByTenantIdAccessKeysByAccessKeyId,
-  postV1TenantsByTenantIdAccessKeys,
-  postV1TenantsByTenantIdBucket,
+  createBucket,
+  createS3AccessKey,
+  deleteS3AccessKey,
+  getS3AccessKey,
+  listS3AccessKeys,
 } from '@filone/aurora-portal-client';
 import type { AccessKeyPermission } from '@filone/shared';
 
@@ -51,7 +51,7 @@ export async function createAuroraBucket({
     headers: { 'X-Api-Key': apiKey },
   });
 
-  const { error, response } = await postV1TenantsByTenantIdBucket({
+  const { error, response } = await createBucket({
     client,
     path: { tenantId },
     body: { name: bucketName },
@@ -120,7 +120,7 @@ export async function createAuroraAccessKey({
     headers: { 'X-Api-Key': apiKey },
   });
 
-  const { data, error, response } = await postV1TenantsByTenantIdAccessKeys({
+  const { data, error, response } = await createS3AccessKey({
     client,
     path: { tenantId },
     body: {
@@ -206,7 +206,7 @@ export async function findAuroraAccessKeyByName({
   });
 
   // Step 1: List all access keys and find by name
-  const { data: listData, error: listError } = await getV1TenantsByTenantIdAccessKeys({
+  const { data: listData, error: listError } = await listS3AccessKeys({
     client,
     path: { tenantId },
     throwOnError: false,
@@ -218,7 +218,7 @@ export async function findAuroraAccessKeyByName({
     });
   }
 
-  const keys = listData?.accessKeys ?? [];
+  const keys = listData?.items ?? [];
   const match = keys.find((k: { name?: string }) => k.name === keyName);
   if (!match) {
     return undefined;
@@ -230,12 +230,11 @@ export async function findAuroraAccessKeyByName({
   );
 
   // Step 2: Get full details by internal ID (list doesn't include accessKeyId)
-  const { data: detailData, error: detailError } =
-    await getV1TenantsByTenantIdAccessKeysByAccessKeyId({
-      client,
-      path: { tenantId, accessKeyId: match.id },
-      throwOnError: false,
-    });
+  const { data: detailData, error: detailError } = await getS3AccessKey({
+    client,
+    path: { tenantId, accessKeyId: match.id },
+    throwOnError: false,
+  });
 
   if (detailError) {
     throw new Error(`Failed to get Aurora access key "${match.id}" for tenant ${tenantId}`, {
@@ -284,7 +283,7 @@ export async function deleteAuroraAccessKey({
     headers: { 'X-Api-Key': apiKey },
   });
 
-  const { error, response } = await deleteV1TenantsByTenantIdAccessKeysByAccessKeyId({
+  const { error, response } = await deleteS3AccessKey({
     client,
     path: { tenantId, accessKeyId: auroraKeyId },
     throwOnError: false,
