@@ -131,14 +131,12 @@ function getCustomerIdString(customer: string | Stripe.Customer | Stripe.Deleted
 async function handleCustomerUpdated(tableName: string, customer: Stripe.Customer): Promise<void> {
   const userId = customer.metadata?.userId;
   if (!userId) {
-    console.warn('[stripe-webhook] No userId in metadata for customer:', customer.id);
-    return;
+    throw new Error(`[stripe-webhook] No userId in metadata for customer: ${customer.id}`);
   }
 
   const defaultPm = customer.invoice_settings?.default_payment_method;
   if (!defaultPm) {
-    console.log('[stripe-webhook] No default_payment_method on customer.updated, skipping');
-    return;
+    throw new Error('[stripe-webhook] No default_payment_method on customer.updated');
   }
 
   const stripe = getStripeClient();

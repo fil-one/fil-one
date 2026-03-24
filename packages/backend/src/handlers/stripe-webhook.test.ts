@@ -552,15 +552,21 @@ describe('stripe-webhook handler', () => {
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
-    it('skips when customer has no userId in metadata', async () => {
+    it('throws when customer has no userId in metadata', async () => {
       setupStripeEvent('customer.updated', mockCustomerObject({ metadata: {} }));
 
       const result = await handler(buildWebhookEvent('{}'));
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
+
+      const deleteCalls = ddbMock.commandCalls(DeleteItemCommand);
+      expect(deleteCalls).toHaveLength(1);
     });
 
-    it('skips when invoice_settings.default_payment_method is null', async () => {
+    it('throws when invoice_settings.default_payment_method is null', async () => {
       setupStripeEvent(
         'customer.updated',
         mockCustomerObject({
@@ -570,7 +576,13 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
+
+      const deleteCalls = ddbMock.commandCalls(DeleteItemCommand);
+      expect(deleteCalls).toHaveLength(1);
     });
   });
 
