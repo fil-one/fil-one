@@ -21,6 +21,7 @@ import {
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { suggestOrgName } from '../lib/suggest-org-name.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -175,8 +176,7 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
     }),
   );
 
-  // TODO: Improve the org display name (e.g. use the user's organization name from Auth0)
-  const orgName = (email && email.split('@')[1]) ?? 'My Organization';
+  const orgName = (email && suggestOrgName(email)) ?? 'My Organization';
 
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
     const userId = result.Item.userId.S;
@@ -351,7 +351,6 @@ export function authMiddleware() {
             clientId: secrets.AUTH0_CLIENT_ID,
             issuer,
           });
-          console.warn('[auth] Token refresh succeeded');
           const blocked = await attachIdentity({
             event,
             sub: refreshedSub,
