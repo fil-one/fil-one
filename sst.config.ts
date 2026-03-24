@@ -216,7 +216,7 @@ export default $config({
               Stage: $app.stage,
               // Bump this to force the setup Lambda to re-run on next deploy.
               // CloudFormation only invokes custom resources when properties change.
-              SetupVersion: '2.4',
+              SetupVersion: '2.0',
             },
           },
         },
