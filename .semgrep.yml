@@ -67,7 +67,7 @@ rules:
   - id: filone-presigned-url-expiry
     patterns:
       - pattern: getSignedUrl($CLIENT, $CMD)
-      - pattern-not: "getSignedUrl($CLIENT, $CMD, { ..., expiresIn: $EXPIRY, ... })"
+      - pattern-not: 'getSignedUrl($CLIENT, $CMD, { ..., expiresIn: $EXPIRY, ... })'
     paths:
       include:
         - packages/backend/src/
