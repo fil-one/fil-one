@@ -246,22 +246,32 @@ export default $config({
       timeout: '10 seconds',
     });
 
-    new aws.cloudformation.Stack('SetupStack', {
-      ...(isEphemeralStage && { onFailure: 'DELETE' }),
-      templateBody: $jsonStringify({
-        AWSTemplateFormatVersion: '2010-09-09',
-        Resources: {
-          Setup: {
-            Type: 'Custom::FiloneSetup',
-            Properties: {
-              ServiceToken: setupFn.arn,
-              SiteUrl: siteUrl,
-              Stage: $app.stage,
+    new aws.cloudformation.Stack(
+      'SetupStack',
+      {
+        ...(isEphemeralStage && { onFailure: 'DELETE' }),
+        templateBody: $jsonStringify({
+          AWSTemplateFormatVersion: '2010-09-09',
+          Resources: {
+            Setup: {
+              Type: 'Custom::FiloneSetup',
+              Properties: {
+                ServiceToken: setupFn.arn,
+                SiteUrl: siteUrl,
+                Stage: $app.stage,
+              },
             },
           },
-        },
-      }),
-    });
+        }),
+      },
+      {
+        // CloudFormation does not allow modifying ServiceToken on custom
+        // resources. Force replacement when the template changes (e.g. when
+        // the Lambda ARN changes due to migration to createFn()).
+        deleteBeforeReplace: true,
+        replaceOnChanges: ['templateBody'],
+      },
+    );
 
     // Ensure the Stripe webhook endpoint is removed when an ephemeral
     // stage is torn down. The CloudFormation custom resource above may
