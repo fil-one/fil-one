@@ -32,6 +32,9 @@ export default $config({
     };
   },
   async run() {
+    // ⚠️  All Lambda functions MUST be created via createFunction() to ensure
+    //     log forwarding is set up. Never use `new sst.aws.Function()` directly.
+
     // ── Secrets (set via: pnpx sst secret set <Name> <value>) ─────────
     const auth0ClientId = new sst.Secret('Auth0ClientId');
     const auth0ClientSecret = new sst.Secret('Auth0ClientSecret');
@@ -40,11 +43,42 @@ export default $config({
     const stripeSecretKey = new sst.Secret('StripeSecretKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
+    const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const sendGridApiKey =
       $app.stage === 'staging' || $app.stage === 'production'
         ? new sst.Secret('SendGridApiKey')
         : undefined;
     const AWS_CACHING_DISABLED_POLICY = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
+
+    // ── Global Lambda defaults ────────────────────────────────────────
+    $transform(sst.aws.Function, (args) => {
+      args.runtime = args.runtime ?? 'nodejs24.x';
+    });
+
+    // Discover log groups that already exist in AWS (e.g. auto-created by Lambda runtime
+    // on previous deployments). These must be imported into Pulumi state rather than
+    // created from scratch, to avoid ResourceAlreadyExistsException.
+    const existingLogGroups = await aws.cloudwatch
+      .getLogGroups({
+        logGroupNamePrefix: `/aws/lambda/filone-${$app.stage}-`,
+      })
+      .then((r) => new Set(r.logGroupNames));
+
+    // Discover Lambda functions that already exist in AWS.
+    // Used to import functions that moved from api.route() children
+    // to standalone createFunction() resources.
+    const existingFunctions = await aws.lambda
+      .getFunctions()
+      .then((r) => new Set(r.functionNames.filter((n) => n.startsWith(`filone-${$app.stage}-`))));
+
+    // Retain Lambda functions on delete during migration: when functions move
+    // from inline api.route() to standalone createFunction(), Pulumi sees two
+    // different resources with the same physical name. Without retainOnDelete,
+    // removing the old resource would destroy the Lambda that was just imported
+    // into the new resource. Safe to remove after first successful deploy.
+    $transform(aws.lambda.Function, (_args, opts) => {
+      opts.retainOnDelete = true;
+    });
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
     const billingTable = new sst.aws.Dynamo('BillingTable', {
@@ -75,6 +109,145 @@ export default $config({
       // Make visibility timeout longer than the Lambda timeout to avoid multiple retries
       visibilityTimeout: '90 seconds',
     });
+
+    // ── Firehose Log Pipeline (CloudWatch → Loki) ───────────────────
+    const firehoseBackupBucket = new sst.aws.Bucket('OtelFirehoseBackup', {
+      transform: {
+        bucket: { forceDestroy: true },
+      },
+    });
+
+    const firehoseLogGroup = new aws.cloudwatch.LogGroup('OtelFirehoseLogGroup', {
+      retentionInDays: 7,
+    });
+    const firehoseLogStream = new aws.cloudwatch.LogStream('OtelFirehoseLogStream', {
+      logGroupName: firehoseLogGroup.name,
+    });
+
+    const firehoseRole = new aws.iam.Role('OtelFirehoseRole', {
+      assumeRolePolicy: aws.iam.getPolicyDocumentOutput({
+        statements: [
+          {
+            actions: ['sts:AssumeRole'],
+            principals: [{ type: 'Service', identifiers: ['firehose.amazonaws.com'] }],
+          },
+        ],
+      }).json,
+      inlinePolicies: [
+        {
+          name: 'firehose-s3',
+          policy: $jsonStringify({
+            Version: '2012-10-17',
+            Statement: [
+              {
+                Effect: 'Allow',
+                Action: ['s3:PutObject', 's3:GetObject', 's3:ListBucket'],
+                Resource: [firehoseBackupBucket.arn, $interpolate`${firehoseBackupBucket.arn}/*`],
+              },
+              {
+                Effect: 'Allow',
+                Action: ['logs:PutLogEvents'],
+                Resource: [$interpolate`${firehoseLogGroup.arn}:*`],
+              },
+            ],
+          }),
+        },
+      ],
+    });
+
+    const firehose = new aws.kinesis.FirehoseDeliveryStream('OtelLogDelivery', {
+      destination: 'http_endpoint',
+      httpEndpointConfiguration: {
+        url: 'https://aws-logs-prod3.grafana.net/aws-logs/api/v1/push',
+        name: 'grafanacloud-filecoinfoundation-logs',
+        accessKey: grafanaLokiAuth.value,
+        bufferingInterval: 60,
+        bufferingSize: 1,
+        roleArn: firehoseRole.arn,
+        cloudwatchLoggingOptions: {
+          enabled: true,
+          logGroupName: firehoseLogGroup.name,
+          logStreamName: firehoseLogStream.name,
+        },
+        s3BackupMode: 'FailedDataOnly',
+        s3Configuration: {
+          bucketArn: firehoseBackupBucket.arn,
+          roleArn: firehoseRole.arn,
+        },
+        requestConfiguration: {
+          contentEncoding: 'GZIP',
+          commonAttributes: [
+            { name: 'lbl_environment', value: $app.stage },
+            { name: 'lbl_service', value: $interpolate`filone-${$app.stage}` },
+          ],
+        },
+      },
+    });
+
+    const cwToFirehoseRole = new aws.iam.Role('CwToFirehoseRole', {
+      assumeRolePolicy: aws.iam.getPolicyDocumentOutput({
+        statements: [
+          {
+            actions: ['sts:AssumeRole'],
+            principals: [{ type: 'Service', identifiers: ['logs.amazonaws.com'] }],
+          },
+        ],
+      }).json,
+      inlinePolicies: [
+        {
+          name: 'cw-to-firehose',
+          policy: $jsonStringify({
+            Version: '2012-10-17',
+            Statement: [
+              {
+                Effect: 'Allow',
+                Action: ['firehose:PutRecord', 'firehose:PutRecordBatch'],
+                Resource: [firehose.arn],
+              },
+            ],
+          }),
+        },
+      ],
+    });
+
+    function createFunction(fnName: string, args: sst.aws.FunctionArgs): sst.aws.Function {
+      const functionName = `filone-${$app.stage}-${fnName}`;
+      const logGroupName = `/aws/lambda/${functionName}`;
+
+      const fn = new sst.aws.Function(fnName, {
+        name: $interpolate`filone-${$app.stage}-${fnName}`,
+        ...args,
+        logging: { retention: '1 week', format: 'json' },
+        transform: {
+          function: (_fnArgs, opts) => {
+            if (existingFunctions.has(functionName)) {
+              opts.import = functionName;
+            }
+          },
+          logGroup: (_logGroupArgs, opts) => {
+            if (existingLogGroups.has(logGroupName)) {
+              opts.import = logGroupName;
+            }
+          },
+        },
+      });
+
+      // Use the LogGroup resource reference (not a plain string) to ensure
+      // Pulumi creates the log group before the subscription filter.
+      const logGroup = fn.nodes.logGroup.apply((lg) => {
+        if (!lg) throw new Error(`LogGroup not created for function ${fnName}`);
+        return lg;
+      });
+
+      new aws.cloudwatch.LogSubscriptionFilter(`${fnName}LogFwd`, {
+        logGroup: logGroup.name,
+        filterPattern: '',
+        destinationArn: firehose.arn,
+        roleArn: cwToFirehoseRole.arn,
+      });
+
+      return fn;
+    }
 
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
@@ -181,7 +354,7 @@ export default $config({
     const siteUrl = router.url;
 
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
-    const setupFn = new sst.aws.Function('SetupIntegrations', {
+    const setupFn = createFunction('SetupIntegrations', {
       handler: 'packages/backend/src/jobs/stack-setup/setup-integrations.handler',
       link: [
         stripeSecretKey,
@@ -199,7 +372,6 @@ export default $config({
           resources: [$interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/*`],
         },
       ],
-      runtime: 'nodejs24.x',
       timeout: '10 seconds',
     });
 
@@ -303,17 +475,27 @@ export default $config({
         .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
         .join('');
 
-      api.route(`${method} ${routePath}`, {
+      const fn = createFunction(fnName, {
         handler: `packages/backend/src/handlers/${handler}.handler`,
-        name: $interpolate`filone-${$app.stage}-${fnName}`,
         link: allResources,
         environment: {
           ...sharedEnv,
           ...extraEnv,
         },
         permissions,
-        runtime: 'nodejs24.x',
         timeout: '10 seconds',
+      });
+
+      api.route(`${method} ${routePath}`, fn.arn);
+
+      // SST's api.route() with an ARN creates lambda.Permission with
+      // qualifier: "" (from undefined), which doesn't actually grant
+      // API Gateway invoke access. Add an explicit permission.
+      new aws.lambda.Permission(`${fnName}ApiPermission`, {
+        action: 'lambda:InvokeFunction',
+        function: fn.nodes.function.name,
+        principal: 'apigateway.amazonaws.com',
+        sourceArn: $interpolate`${api.nodes.api.executionArn}/*`,
       });
     }
 
@@ -457,25 +639,35 @@ export default $config({
     );
 
     // ── Tenant setup consumer ──────────────────────────────────────
-    tenantSetupQueue.subscribe(
-      {
-        handler: 'packages/backend/src/handlers/aurora-tenant-setup.handler',
-        link: [userInfoTable, auroraBackofficeToken],
-        environment: {
-          ...auroraEnv,
-          ...sharedEnv,
-        },
-        permissions: [
-          {
-            actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-            resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
-          },
-        ],
-        runtime: 'nodejs24.x',
-        timeout: '60 seconds',
+    const tenantSetupFn = createFunction('AuroraTenantSetup', {
+      handler: 'packages/backend/src/handlers/aurora-tenant-setup.handler',
+      link: [userInfoTable, auroraBackofficeToken],
+      environment: {
+        ...auroraEnv,
+        ...sharedEnv,
       },
-      { batch: { size: 1 } },
-    );
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+        },
+        // queue.subscribe(fn.arn) passes an ARN, so SST skips attaching
+        // SQS permissions automatically — we must add them here.
+        {
+          actions: [
+            'sqs:ChangeMessageVisibility',
+            'sqs:DeleteMessage',
+            'sqs:GetQueueAttributes',
+            'sqs:GetQueueUrl',
+            'sqs:ReceiveMessage',
+          ],
+          resources: [tenantSetupQueue.arn],
+        },
+      ],
+      timeout: '60 seconds',
+    });
+
+    tenantSetupQueue.subscribe(tenantSetupFn.arn, { batch: { size: 1 } });
 
     // ── CloudWatch alarm on DLQ ──────────────────────────────────
     // TODO: Rework this alarm to trigger alert in Grafana IRM
@@ -493,23 +685,21 @@ export default $config({
     });
 
     // ── Usage reporting (cron-based) ────────────────────────────────
-    const usageWorker = new sst.aws.Function('UsageReportingWorker', {
+    const usageWorker = createFunction('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
       link: [billingTable, stripeSecretKey, auroraBackofficeToken],
       environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'gb_month_meter' },
-      runtime: 'nodejs24.x',
       timeout: '60 seconds',
       memory: '256 MB',
     });
 
-    const usageOrchestrator = new sst.aws.Function('UsageReportingOrchestrator', {
+    const usageOrchestrator = createFunction('UsageReportingOrchestrator', {
       handler: 'packages/backend/src/jobs/usage-reporting-orchestrator.handler',
       link: [billingTable, userInfoTable],
       environment: {
         USAGE_WORKER_FUNCTION_NAME: usageWorker.name,
         STRIPE_METER_EVENT_NAME: 'gb_month_meter',
       },
-      runtime: 'nodejs24.x',
       timeout: '300 seconds',
       memory: '256 MB',
       permissions: [
