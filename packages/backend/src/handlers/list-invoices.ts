@@ -50,9 +50,9 @@ export async function baseHandler(
 
   const invoices: Invoice[] = stripeInvoices.data.map((inv) => ({
     id: inv.id,
-    amountDue: inv.amount_due,
+    amountDueInCents: inv.amount_due,
     status: inv.status ?? 'unknown',
-    created: inv.created,
+    createdAt: new Date(inv.created * 1000).toISOString(),
     invoicePdfUrl: inv.invoice_pdf ?? null,
   }));
 

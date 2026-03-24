@@ -121,16 +121,16 @@ describe('list-invoices baseHandler', () => {
       invoices: [
         {
           id: 'inv_1',
-          amountDue: 499,
+          amountDueInCents: 499,
           status: 'paid',
-          created: 1711900800,
+          createdAt: new Date(1711900800 * 1000).toISOString(),
           invoicePdfUrl: 'https://stripe.com/invoice.pdf',
         },
         {
           id: 'inv_2',
-          amountDue: 998,
+          amountDueInCents: 998,
           status: 'paid',
-          created: 1709222400,
+          createdAt: new Date(1709222400 * 1000).toISOString(),
           invoicePdfUrl: null,
         },
       ],

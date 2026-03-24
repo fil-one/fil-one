@@ -56,9 +56,9 @@ export interface CreatePortalSessionResponse {
 
 export interface Invoice {
   id: string;
-  amountDue: number; // cents
-  status: string; // 'paid' | 'open' | 'void' | 'draft' | 'uncollectible'
-  created: number; // Unix timestamp (seconds)
+  amountDueInCents: number;
+  status: 'paid' | 'open' | 'void' | 'draft' | 'uncollectible' | 'unknown';
+  createdAt: string;
   invoicePdfUrl: string | null;
 }
 

@@ -23,7 +23,7 @@ import type {
 } from '@filone/shared';
 
 import { apiRequest, getUsage, getInvoices } from '../lib/api.js';
-import { daysUntil } from '../lib/time.js';
+import { daysUntil, formatDate } from '../lib/time.js';
 import { ChoosePlanDialog } from '../components/billing/ChoosePlanDialog.js';
 import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
 
@@ -33,12 +33,6 @@ import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
 
 function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
-}
-
-function formatInvoiceDate(unixTimestamp: number): string {
-  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(
-    new Date(unixTimestamp * 1000),
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -502,13 +496,13 @@ export function BillingPage() {
                   >
                     <div className="flex flex-col">
                       <span className="text-[13px] font-medium text-[#14181f]">
-                        {formatInvoiceDate(inv.created)}
+                        {formatDate(inv.createdAt)}
                       </span>
                       <span className="text-[11px] text-[#99a0ae] capitalize">{inv.status}</span>
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-[14px] font-semibold text-[#14181f]">
-                        {formatCents(inv.amountDue)}
+                        {formatCents(inv.amountDueInCents)}
                       </span>
                       {inv.invoicePdfUrl && (
                         <a
