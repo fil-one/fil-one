@@ -9,7 +9,7 @@ import { triggerTenantSetup } from '../lib/trigger-tenant-setup.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { suggestOrgName } from '../lib/suggest-org-name.js';
-import { getConnectionType, getMfaStatus } from '../lib/auth0-management.js';
+import { getConnectionType, getMfaEnrollments } from '../lib/auth0-management.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -43,7 +43,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const connectionType = getConnectionType(sub);
 
   const includeMfa = event.queryStringParameters?.include === 'mfa';
-  const mfaEnabled = includeMfa ? await getMfaStatus(sub) : false;
+  const enrollments = includeMfa ? await getMfaEnrollments(sub) : [];
 
   const body: MeResponse = {
     orgId,
@@ -54,7 +54,12 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     orgSetupComplete: isOrgSetupComplete(setupStatus),
     name,
     connectionType,
-    mfaEnabled,
+    mfaEnrollments: enrollments.map((e) => ({
+      id: e.id,
+      type: e.type as 'authenticator' | 'webauthn-roaming' | 'webauthn-platform',
+      name: e.name,
+      createdAt: e.enrolled_at ?? '',
+    })),
   };
 
   // Only include suggested name if org is not yet confirmed

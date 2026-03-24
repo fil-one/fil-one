@@ -144,6 +144,13 @@ function stubAuth0Fetch(
         status: 201,
       });
     }
+    if (
+      urlStr.includes('/api/v2/actions/actions/action-123') &&
+      !urlStr.includes('actionName') &&
+      (!init?.method || init.method === 'GET')
+    ) {
+      return new Response(JSON.stringify({ id: 'action-123', status: 'built' }), { status: 200 });
+    }
     if (urlStr.includes('/deploy') && init?.method === 'POST') {
       return new Response('{}', { status: 200 });
     }
@@ -720,7 +727,7 @@ describe('setup-integrations', () => {
       expect(capturedEmailProviderBody).toBeUndefined();
     });
 
-    it('sends FAILED CFN response when email provider setup fails', async () => {
+    it('succeeds with warning when email provider setup fails (non-fatal)', async () => {
       ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
       ssmMock.on(PutParameterCommand).resolves({});
       mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
@@ -742,11 +749,9 @@ describe('setup-integrations', () => {
         }),
       );
 
-      expect(capturedCfnBody).toEqual({
-        Status: 'FAILED',
-        Reason: 'Auth0 email provider setup failed (422): Provider config error',
+      expect(capturedCfnBody).toMatchObject({
+        Status: 'SUCCESS',
         PhysicalResourceId: 'filone-setup-staging',
-        ...BASE_CFN_FIELDS,
       });
     });
 
@@ -787,7 +792,7 @@ describe('setup-integrations', () => {
   // ── Auth0 MFA Action ───────────────────────────────────────────────
 
   describe('Auth0 MFA Action', () => {
-    it('creates MFA action, deploys it, and binds to post-login trigger on Create', async () => {
+    it('creates MFA action, deploys it, and binds to post-login trigger on Create for staging', async () => {
       ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
       ssmMock.on(PutParameterCommand).resolves({});
       mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
@@ -796,7 +801,16 @@ describe('setup-integrations', () => {
         secret: 'whsec_1',
       });
 
-      await handler(buildCfnEvent({ RequestType: 'Create' }));
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://staging.fil.one',
+            Stage: 'staging',
+          },
+        }),
+      );
 
       expect(capturedMfaActionBody).toMatchObject({
         name: 'MFA Enrollment Trigger',
@@ -810,6 +824,20 @@ describe('setup-integrations', () => {
           },
         ],
       });
+    });
+
+    it('does not create MFA action for dev stages', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      await handler(buildCfnEvent({ RequestType: 'Create' }));
+
+      expect(capturedMfaActionBody).toBeUndefined();
     });
 
     it('does not create MFA action on Delete', async () => {

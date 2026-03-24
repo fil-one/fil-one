@@ -28,12 +28,12 @@ vi.mock('../lib/trigger-tenant-setup.js', () => ({
   triggerTenantSetup: (...args: unknown[]) => mockTriggerTenantSetup(...args),
 }));
 
-const mockGetMfaStatus = vi.fn();
+const mockGetMfaEnrollments = vi.fn();
 vi.mock('../lib/auth0-management.js', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    getMfaStatus: (...args: unknown[]) => mockGetMfaStatus(...args),
+    getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
   };
 });
 
@@ -83,7 +83,7 @@ describe('GET /api/me handler', () => {
       payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
     });
 
-    mockGetMfaStatus.mockResolvedValue(false);
+    mockGetMfaEnrollments.mockResolvedValue([]);
 
     // Auth middleware: resolve existing user
     ddbMock
@@ -130,7 +130,7 @@ describe('GET /api/me handler', () => {
         email: MOCK_EMAIL,
         orgSetupComplete: true,
         connectionType: 'auth0',
-        mfaEnabled: false,
+        mfaEnrollments: [],
       }),
     });
   });
@@ -163,7 +163,7 @@ describe('GET /api/me handler', () => {
         email: MOCK_EMAIL,
         orgSetupComplete: false,
         connectionType: 'auth0',
-        mfaEnabled: false,
+        mfaEnrollments: [],
       }),
     });
   });
@@ -195,7 +195,7 @@ describe('GET /api/me handler', () => {
         email: MOCK_EMAIL,
         orgSetupComplete: false,
         connectionType: 'auth0',
-        mfaEnabled: false,
+        mfaEnrollments: [],
       }),
     });
   });
@@ -275,7 +275,7 @@ describe('GET /api/me handler', () => {
         email: MOCK_EMAIL,
         orgSetupComplete: false,
         connectionType: 'auth0',
-        mfaEnabled: false,
+        mfaEnrollments: [],
       }),
     });
   });
@@ -301,7 +301,7 @@ describe('GET /api/me handler', () => {
     expect(mockTriggerTenantSetup).not.toHaveBeenCalled();
   });
 
-  it('does not call getMfaStatus when include=mfa is absent', async () => {
+  it('does not call getMfaEnrollments when include=mfa is absent', async () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
@@ -319,15 +319,23 @@ describe('GET /api/me handler', () => {
 
     const result = await handler(authenticatedEvent(), buildContext());
 
-    expect(mockGetMfaStatus).not.toHaveBeenCalled();
+    expect(mockGetMfaEnrollments).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       statusCode: 200,
-      body: expect.stringContaining('"mfaEnabled":false'),
+      body: expect.stringContaining('"mfaEnrollments":[]'),
     });
   });
 
-  it('calls getMfaStatus and returns true when include=mfa is set', async () => {
-    mockGetMfaStatus.mockResolvedValue(true);
+  it('returns enrollments when include=mfa is set', async () => {
+    mockGetMfaEnrollments.mockResolvedValue([
+      {
+        id: 'webauthn-roaming|dev_abc',
+        type: 'webauthn-roaming',
+        status: 'confirmed',
+        name: 'My key',
+        enrolled_at: '2026-03-24T00:20:17.000Z',
+      },
+    ]);
 
     ddbMock
       .on(GetItemCommand, {
@@ -346,7 +354,7 @@ describe('GET /api/me handler', () => {
 
     const result = await handler(authenticatedEvent({ include: 'mfa' }), buildContext());
 
-    expect(mockGetMfaStatus).toHaveBeenCalledWith(MOCK_SUB);
+    expect(mockGetMfaEnrollments).toHaveBeenCalledWith(MOCK_SUB);
     expect(result).toMatchObject({
       statusCode: 200,
       body: JSON.stringify({
@@ -357,7 +365,14 @@ describe('GET /api/me handler', () => {
         email: MOCK_EMAIL,
         orgSetupComplete: true,
         connectionType: 'auth0',
-        mfaEnabled: true,
+        mfaEnrollments: [
+          {
+            id: 'webauthn-roaming|dev_abc',
+            type: 'webauthn-roaming',
+            name: 'My key',
+            createdAt: '2026-03-24T00:20:17.000Z',
+          },
+        ],
       }),
     });
   });

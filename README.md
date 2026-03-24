@@ -200,6 +200,51 @@ pnpx sst dev
 
 Runs Lambda functions locally with live reload. Changes to handler code take effect immediately without redeploying.
 
+### Troubleshooting: CloudFormation Stack Stuck in Rollback
+
+The deploy-time setup Lambda (`setup-integrations`) runs as a CloudFormation custom resource. If it fails (e.g., missing Auth0 scopes, API errors), the CloudFormation stack enters `UPDATE_ROLLBACK_FAILED` state and blocks all future deploys.
+
+**To unblock:**
+
+1. Force the rollback to complete, skipping the failed resource:
+
+```bash
+aws cloudformation continue-update-rollback \
+  --stack-name <stack-name> \
+  --region us-east-2 \
+  --resources-to-skip Setup
+```
+
+The stack name is in the error output (e.g., `SetupStack-efd549a`).
+
+2. Wait for the stack to reach `UPDATE_ROLLBACK_COMPLETE`:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name <stack-name> \
+  --region us-east-2 \
+  --query 'Stacks[0].StackStatus'
+```
+
+3. Fix the underlying issue (grant missing scopes, etc.), then redeploy.
+
+### Troubleshooting: Auth0 Action / Login Issues
+
+If MFA enrollment or login flows aren't working as expected, check the Auth0 logs:
+
+1. Go to **Auth0 Dashboard > Monitoring > Logs**
+2. Look for recent login events — failed logins show as type `f` (Failed Login) or `fp` (Failed Login - Password)
+3. Expand the event to see:
+   - `description` — the error message (e.g., Action returned invalid data)
+   - `details.actions.executions` — confirms whether the Post-Login Action ran
+   - `details.error.message` — the specific failure reason
+
+Common issues:
+
+- **"Invalid MFA command"** — the `enrollWith()` / `challengeWith()` call signature is wrong. Auth0's Action runtime expects a single object (e.g., `{ type: 'otp' }`), not an array.
+- **Action not executing** — verify the Action is in the Login flow: **Actions > Triggers > Login**. Being in the Library is not enough — it must be dragged into the flow and **Apply** must be clicked.
+- **`mfa_enrolling` flag not set** — check the user's `app_metadata` in **User Management > Users > (user) > app_metadata**. The backend sets this when `POST /api/mfa/enroll` is called.
+
 ## ACM Certificate Provisioning & DNS Setup
 
 Custom domains require an ACM certificate in **us-east-1** (CloudFront requirement):
@@ -238,23 +283,25 @@ MFA is opt-in per user (database and social connections). Auth0 handles enrollme
 - Enable **One-time Password** (authenticator apps)
 - Enable **WebAuthn with FIDO Security Keys** (passkeys/security keys)
 - Enable **Email** (one-time code)
-- Set policy to **"If supported"**
+- Set policy to **"Never"** (MFA is controlled entirely by the Post-Login Action)
+- Under additional settings, enable **"Customize MFA Factors using Actions"**
 
 **2. Post-Login Action** — automated on deploy:
 
-The deploy-time setup Lambda (`setup-integrations`) automatically creates, deploys, and binds an `MFA Enrollment Trigger` Action to the Login flow. This Action triggers MFA enrollment when the frontend requests it via `acr_values`. No manual Action setup is needed.
+The deploy-time setup Lambda (`setup-integrations`) automatically creates, deploys, and binds an `MFA Enrollment Trigger` Action to the Login flow (staging/production only). This Action checks `app_metadata.mfa_enrolling` on each login — when `true`, it triggers MFA enrollment via Universal Login and clears the flag after success. No manual Action setup is needed.
 
 **3. Grant M2M scopes** (Applications > M2M app > APIs > Auth0 Management API):
 
 The following scopes are required for MFA (in addition to existing scopes):
 
-- `read:authentication_methods` — check if user has enrolled MFA factors
-- `delete:authentication_methods` — remove factors when user disables MFA
+- `delete:guardian_enrollments` — remove MFA factors when user disables MFA
 - `create:actions` — deploy-time setup creates the MFA Post-Login Action
 - `read:actions` — deploy-time setup checks if the Action already exists
 - `update:actions` — deploy-time setup updates the Action code if changed
 - `read:triggers` — deploy-time setup reads the Login flow bindings
 - `update:triggers` — deploy-time setup binds the Action to the Login flow
+
+Note: `read:users` (already granted) covers reading Guardian enrollments. `update:users_app_metadata` (already granted) covers setting the `mfa_enrolling` flag.
 
 ### Auth0 Machine-to-Machine (M2M) Application
 
@@ -266,7 +313,7 @@ The deploy automation uses an M2M application to update Auth0 settings programma
 2. Choose **Machine to Machine Applications**
 3. Name it something like `Fil.one Deploy Automation`
 4. Authorize it for the **Auth0 Management API** (`https://<tenant>.us.auth0.com/api/v2/`)
-5. Grant these scopes: `read:clients`, `update:clients`, `read:users`, `update:users`, `update:users_app_metadata`, `create:user_tickets`, `delete:users`, `read:authentication_methods`, `delete:authentication_methods`, `create:actions`, `read:actions`, `update:actions`, `read:triggers`, `update:triggers`
+5. Grant these scopes: `read:clients`, `update:clients`, `read:users`, `update:users`, `update:users_app_metadata`, `create:user_tickets`, `delete:users`, `delete:guardian_enrollments`, `create:actions`, `read:actions`, `update:actions`, `read:triggers`, `update:triggers`
 6. Copy the **Client ID** and **Client Secret**
 
 Set these as SST secrets:

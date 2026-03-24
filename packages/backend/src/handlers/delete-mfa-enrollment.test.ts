@@ -7,11 +7,14 @@ import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 // ---------------------------------------------------------------------------
 
 const mockGetMfaEnrollments = vi.fn();
-const mockFlagMfaEnrollment = vi.fn();
+const mockDeleteGuardianEnrollment = vi.fn();
+const mockUpdateAuth0User = vi.fn();
 vi.mock('../lib/auth0-management.js', () => ({
   getConnectionType: (sub: string) => sub.split('|')[0] ?? 'unknown',
   getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
-  flagMfaEnrollment: (...args: unknown[]) => mockFlagMfaEnrollment(...args),
+  deleteGuardianEnrollment: (...args: unknown[]) => mockDeleteGuardianEnrollment(...args),
+  updateAuth0User: (...args: unknown[]) => mockUpdateAuth0User(...args),
+  MFA_GUARDIAN_TYPES: new Set(['authenticator', 'webauthn-roaming', 'webauthn-platform']),
 }));
 
 vi.mock('sst', () => ({
@@ -44,7 +47,7 @@ const ddbMock = mockClient(DynamoDBClient);
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
-import { handler } from './enroll-mfa.js';
+import { handler } from './delete-mfa-enrollment.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -52,36 +55,37 @@ import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
 // ---------------------------------------------------------------------------
 
 const MOCK_SUB = 'auth0|abc123';
-const MOCK_SOCIAL_SUB = 'google-oauth2|abc123';
 const MOCK_ORG_ID = 'org-1';
 const MOCK_USER_ID = 'user-1';
 const MOCK_EMAIL = 'user@example.com';
 const MOCK_CSRF_TOKEN = 'csrf-token-value';
+const MOCK_ENROLLMENT_ID = 'webauthn-roaming|dev_abc';
 
-function enrollMfaEvent(sub: string = MOCK_SUB) {
+function deleteEnrollmentEvent(enrollmentId: string = MOCK_ENROLLMENT_ID) {
   const event = buildEvent({
     cookies: [
       `hs_access_token=valid-token`,
       `hs_id_token=id-token`,
       `hs_csrf_token=${MOCK_CSRF_TOKEN}`,
     ],
-    userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, email: MOCK_EMAIL, sub },
-    method: 'POST',
-    rawPath: '/api/mfa/enroll',
+    userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, email: MOCK_EMAIL, sub: MOCK_SUB },
+    method: 'DELETE',
+    rawPath: `/api/mfa/enrollments/${enrollmentId}`,
   });
   event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
+  (event as unknown as Record<string, unknown>).pathParameters = { enrollmentId };
   return event;
 }
 
-function setupAuthMocks(sub: string = MOCK_SUB) {
+function setupAuthMocks() {
   mockJwtVerify
-    .mockResolvedValueOnce({ payload: { sub } })
+    .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
     .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
 
   ddbMock
     .on(GetItemCommand, {
       TableName: 'UserInfoTable',
-      Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
+      Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
     })
     .resolves({
       Item: {
@@ -107,52 +111,75 @@ function setupAuthMocks(sub: string = MOCK_SUB) {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('POST /api/mfa/enroll handler', () => {
+describe('DELETE /api/mfa/enrollments/{enrollmentId} handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
   });
 
-  it('flags user for enrollment and returns 200 for database connection users', async () => {
-    setupAuthMocks();
-    mockGetMfaEnrollments.mockResolvedValue([]);
-    mockFlagMfaEnrollment.mockResolvedValue(undefined);
-
-    const result = await handler(enrollMfaEvent(), buildContext());
-
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({ message: 'Redirect to Auth0 to complete MFA enrollment.' }),
-    });
-    expect(mockFlagMfaEnrollment).toHaveBeenCalledWith(MOCK_SUB);
-  });
-
-  it('flags user for enrollment and returns 200 for social login users', async () => {
-    setupAuthMocks(MOCK_SOCIAL_SUB);
-    mockGetMfaEnrollments.mockResolvedValue([]);
-    mockFlagMfaEnrollment.mockResolvedValue(undefined);
-
-    const result = await handler(enrollMfaEvent(MOCK_SOCIAL_SUB), buildContext());
-
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({ message: 'Redirect to Auth0 to complete MFA enrollment.' }),
-    });
-    expect(mockFlagMfaEnrollment).toHaveBeenCalledWith(MOCK_SOCIAL_SUB);
-  });
-
-  it('returns 400 and does not flag enrollment when MFA is already enabled', async () => {
+  it('deletes enrollment and does not clear flag when other enrollments remain', async () => {
     setupAuthMocks();
     mockGetMfaEnrollments.mockResolvedValue([
-      { id: 'test', type: 'authenticator', status: 'confirmed' },
+      { id: MOCK_ENROLLMENT_ID, type: 'webauthn-roaming', status: 'confirmed' },
+      { id: 'authenticator|dev_xyz', type: 'authenticator', status: 'confirmed' },
     ]);
+    mockDeleteGuardianEnrollment.mockResolvedValue(undefined);
 
-    const result = await handler(enrollMfaEvent(), buildContext());
+    const result = await handler(deleteEnrollmentEvent(), buildContext());
 
     expect(result).toMatchObject({
-      statusCode: 400,
-      body: JSON.stringify({ message: 'MFA is already enabled.' }),
+      statusCode: 200,
+      body: JSON.stringify({ message: 'MFA enrollment removed.' }),
     });
-    expect(mockFlagMfaEnrollment).not.toHaveBeenCalled();
+    expect(mockDeleteGuardianEnrollment).toHaveBeenCalledWith(MOCK_ENROLLMENT_ID);
+    expect(mockUpdateAuth0User).not.toHaveBeenCalled();
+  });
+
+  it('deletes enrollment and clears mfa_enrolling flag when last enrollment removed', async () => {
+    setupAuthMocks();
+    mockGetMfaEnrollments.mockResolvedValue([
+      { id: MOCK_ENROLLMENT_ID, type: 'webauthn-roaming', status: 'confirmed' },
+    ]);
+    mockDeleteGuardianEnrollment.mockResolvedValue(undefined);
+    mockUpdateAuth0User.mockResolvedValue(undefined);
+
+    const result = await handler(deleteEnrollmentEvent(), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({ message: 'MFA enrollment removed.' }),
+    });
+    expect(mockDeleteGuardianEnrollment).toHaveBeenCalledWith(MOCK_ENROLLMENT_ID);
+    expect(mockUpdateAuth0User).toHaveBeenCalledWith(MOCK_SUB, {
+      app_metadata: { mfa_enrolling: false },
+    });
+  });
+
+  it('returns 404 when enrollment does not belong to user', async () => {
+    setupAuthMocks();
+    mockGetMfaEnrollments.mockResolvedValue([
+      { id: 'authenticator|dev_other', type: 'authenticator', status: 'confirmed' },
+    ]);
+
+    const result = await handler(deleteEnrollmentEvent(), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 404,
+      body: JSON.stringify({ message: 'Enrollment not found.' }),
+    });
+    expect(mockDeleteGuardianEnrollment).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when user has no enrollments', async () => {
+    setupAuthMocks();
+    mockGetMfaEnrollments.mockResolvedValue([]);
+
+    const result = await handler(deleteEnrollmentEvent(), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 404,
+      body: JSON.stringify({ message: 'Enrollment not found.' }),
+    });
+    expect(mockDeleteGuardianEnrollment).not.toHaveBeenCalled();
   });
 });

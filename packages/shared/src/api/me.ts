@@ -11,7 +11,14 @@ export interface MeResponse {
   orgSetupComplete: boolean;
   name?: string;
   connectionType?: string;
-  mfaEnabled: boolean;
+  mfaEnrollments: MfaEnrollment[];
+}
+
+export interface MfaEnrollment {
+  id: string;
+  type: 'authenticator' | 'webauthn-roaming' | 'webauthn-platform';
+  name?: string;
+  createdAt: string;
 }
 
 export const PROFILE_NAME_MAX_LENGTH = 200;

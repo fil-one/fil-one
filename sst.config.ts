@@ -200,7 +200,7 @@ export default $config({
         },
       ],
       runtime: 'nodejs24.x',
-      timeout: '10 seconds',
+      timeout: '30 seconds',
     });
 
     new aws.cloudformation.Stack('SetupStack', {
@@ -214,6 +214,9 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
+              // Bump this to force the setup Lambda to re-run on next deploy.
+              // CloudFormation only invokes custom resources when properties change.
+              SetupVersion: '2.4',
             },
           },
         },
@@ -434,6 +437,7 @@ export default $config({
     // ── MFA routes ──────────────────────────────────────────────────
     addRoute('POST', '/api/mfa/enroll', 'enroll-mfa');
     addRoute('POST', '/api/mfa/disable', 'disable-mfa');
+    addRoute('DELETE', '/api/mfa/enrollments/{enrollmentId}', 'delete-mfa-enrollment');
 
     // ── Org routes ──────────────────────────────────────────────────
     addRoute('POST', '/api/org/confirm', 'confirm-org');

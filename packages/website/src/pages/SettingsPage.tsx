@@ -7,9 +7,16 @@ import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { getMe, updateProfile, changePassword, enrollMfa, disableMfa } from '../lib/api.js';
+import {
+  getMe,
+  updateProfile,
+  changePassword,
+  enrollMfa,
+  disableMfa,
+  deleteMfaEnrollment,
+} from '../lib/api.js';
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
-import type { MeResponse } from '@filone/shared';
+import type { MeResponse, MfaEnrollment } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Section card wrapper
@@ -116,6 +123,23 @@ function SettingRow({
       {action}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// MFA helpers
+// ---------------------------------------------------------------------------
+
+function formatEnrollmentType(type: MfaEnrollment['type']): string {
+  switch (type) {
+    case 'authenticator':
+      return 'Authenticator app (OTP)';
+    case 'webauthn-roaming':
+      return 'Security key';
+    case 'webauthn-platform':
+      return 'Device biometrics';
+    default:
+      return type;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +250,7 @@ export function SettingsPage() {
   async function handleEnrollMfa() {
     setEnrollingMfa(true);
     try {
-      await enrollMfa();
+      await enrollMfa(me?.email);
       // enrollMfa() redirects to Auth0 for enrollment — page will navigate away
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to start MFA enrollment');
@@ -238,12 +262,26 @@ export function SettingsPage() {
     setDisablingMfa(true);
     try {
       await disableMfa();
-      setMe((prev) => (prev ? { ...prev, mfaEnabled: false } : prev));
+      setMe((prev) => (prev ? { ...prev, mfaEnrollments: [] } : prev));
       toast.success('Two-factor authentication disabled');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to disable MFA');
     } finally {
       setDisablingMfa(false);
+    }
+  }
+
+  async function handleDeleteEnrollment(enrollment: MfaEnrollment) {
+    try {
+      await deleteMfaEnrollment(enrollment.id);
+      setMe((prev) => {
+        if (!prev) return prev;
+        const remaining = prev.mfaEnrollments.filter((e) => e.id !== enrollment.id);
+        return { ...prev, mfaEnrollments: remaining };
+      });
+      toast.success(`Removed ${formatEnrollmentType(enrollment.type)}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove enrollment');
     }
   }
 
@@ -375,33 +413,61 @@ export function SettingsPage() {
             <SettingRow
               label="Two-factor authentication"
               description={
-                me?.mfaEnabled
+                me?.mfaEnrollments && me.mfaEnrollments.length > 0
                   ? 'Your account is protected with two-factor authentication'
                   : 'Add an extra layer of security to your account'
               }
               action={
-                me?.mfaEnabled ? (
-                  <Button
-                    variant="ghost"
-                    size="compact"
+                <Button
+                  variant="ghost"
+                  size="compact"
+                  onClick={handleEnrollMfa}
+                  disabled={enrollingMfa}
+                >
+                  {enrollingMfa
+                    ? 'Redirecting...'
+                    : me?.mfaEnrollments && me.mfaEnrollments.length > 0
+                      ? 'Add another'
+                      : 'Enable'}
+                </Button>
+              }
+            />
+            {me?.mfaEnrollments && me.mfaEnrollments.length > 0 && (
+              <div className="flex flex-col gap-2 ml-0.5">
+                {me.mfaEnrollments.map((enrollment) => (
+                  <div
+                    key={enrollment.id}
+                    className="flex items-center justify-between rounded-md border border-[#e1e4ea] bg-zinc-50 px-3 py-2"
+                  >
+                    <div>
+                      <p className="text-[13px] font-medium text-zinc-900">
+                        {formatEnrollmentType(enrollment.type)}
+                      </p>
+                      <p className="text-[11px] text-zinc-500">
+                        {enrollment.name ? `${enrollment.name} — ` : ''}
+                        Added {new Date(enrollment.createdAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="compact"
+                      onClick={() => handleDeleteEnrollment(enrollment)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+                {me.mfaEnrollments.length > 0 && (
+                  <button
+                    className="text-[11px] text-red-500 hover:text-red-700 self-start"
                     onClick={handleDisableMfa}
                     disabled={disablingMfa}
                   >
-                    {disablingMfa ? 'Disabling...' : 'Disable'}
-                  </Button>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="compact"
-                    onClick={handleEnrollMfa}
-                    disabled={enrollingMfa}
-                  >
-                    {enrollingMfa ? 'Redirecting...' : 'Enable'}
-                  </Button>
-                )
-              }
-            />
-            {me?.mfaEnabled && <p className="text-[11px] text-green-600 -mt-1">Enabled</p>}
+                    {disablingMfa ? 'Removing all...' : 'Remove all MFA methods'}
+                  </button>
+                )}
+              </div>
+            )}
             <div className="h-px bg-[#e1e4ea]" />
             {!social && (
               <SettingRow

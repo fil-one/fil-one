@@ -153,18 +153,21 @@ export function resendVerificationEmail(): Promise<{ message: string }> {
 
 // ── MFA API ──────────────────────────────────────────────────────────────
 
-export async function enrollMfa(): Promise<void> {
+export async function enrollMfa(email?: string): Promise<void> {
   await apiRequest<{ message: string }>('/mfa/enroll', { method: 'POST' });
-  // Force a fresh login with acr_values requesting MFA.
-  // Auth0 sees no enrolled factor and presents the enrollment screen.
-  redirectToLogin({
-    prompt: 'login',
-    acrValues: 'http://schemas.openid.net/pape/policies/2007/06/multi-factor',
-  });
+  // Force a fresh login. The backend has set app_metadata.mfa_enrolling = true,
+  // so the Post-Login Action will trigger MFA enrollment via Universal Login.
+  redirectToLogin({ prompt: 'login', loginHint: email });
 }
 
 export function disableMfa(): Promise<{ message: string }> {
   return apiRequest<{ message: string }>('/mfa/disable', { method: 'POST' });
+}
+
+export function deleteMfaEnrollment(enrollmentId: string): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>(`/mfa/enrollments/${encodeURIComponent(enrollmentId)}`, {
+    method: 'DELETE',
+  });
 }
 
 // ── Usage API ────────────────────────────────────────────────────────────

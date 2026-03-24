@@ -314,17 +314,25 @@ const MFA_ACTION_NAME = 'MFA Enrollment Trigger';
 
 const MFA_ACTION_CODE = `
 exports.onExecutePostLogin = async (event, api) => {
-  const requestedMfa = event.transaction?.acr_values?.includes(
-    'http://schemas.openid.net/pape/policies/2007/06/multi-factor'
+  const mfaFactors = (event.user.enrolledFactors || []).filter(
+    (f) => f.type === 'otp' || f.type === 'webauthn-roaming' || f.type === 'recovery-code'
   );
-  if (!requestedMfa) return;
+  const hasMfa = mfaFactors.length > 0;
+  const mfaEnrolling = event.user.app_metadata?.mfa_enrolling === true;
 
-  const enrolled = event.user.enrolledFactors || [];
-  if (enrolled.length === 0) {
-    api.authentication.enrollWith([{ type: 'otp' }, { type: 'webauthn-roaming' }]);
-  } else {
-    api.authentication.challengeWith([{ type: 'otp' }, { type: 'webauthn-roaming' }, { type: 'email' }]);
+  if (mfaEnrolling && !hasMfa) {
+    // User clicked "Enable" — let them choose OTP or WebAuthn.
+    // Email is not supported for enrollment via Actions.
+    api.authentication.enrollWithAny([{ type: 'otp' }, { type: 'webauthn-roaming' }]);
+  } else if (mfaEnrolling && hasMfa) {
+    // Already enrolled (e.g. re-login after enrolling). Clear the flag and challenge.
+    api.user.setAppMetadata('mfa_enrolling', false);
+    api.authentication.challengeWithAny([{ type: 'otp' }, { type: 'webauthn-roaming' }, { type: 'email' }]);
+  } else if (hasMfa) {
+    // Normal login for enrolled user — challenge with any enrolled factor.
+    api.authentication.challengeWithAny([{ type: 'otp' }, { type: 'webauthn-roaming' }, { type: 'email' }]);
   }
+  // No MFA enrolled and not enrolling — skip MFA.
 };
 `.trim();
 
@@ -396,6 +404,26 @@ async function setupAuth0MfaAction(domain: string): Promise<void> {
     actionId = created.id;
   }
 
+  // Wait for the action to be built before deploying.
+  // Auth0 compiles actions asynchronously after create/update.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const statusResp = await fetch(`https://${domain}/api/v2/actions/actions/${actionId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!statusResp.ok) {
+      const body = await statusResp.text();
+      throw new Error(`Auth0 get action status failed (${statusResp.status}): ${body}`);
+    }
+    const action = (await statusResp.json()) as Auth0Action & { status: string };
+    if (action.status === 'built') break;
+    if (attempt === 9) {
+      throw new Error(
+        `Auth0 action did not reach 'built' state after 10 attempts (status: ${action.status})`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
   // Deploy the action
   const deployResp = await fetch(`https://${domain}/api/v2/actions/actions/${actionId}/deploy`, {
     method: 'POST',
@@ -416,13 +444,18 @@ async function setupAuth0MfaAction(domain: string): Promise<void> {
   }
 
   const trigger = (await triggerResp.json()) as Auth0Trigger;
-  const alreadyBound = trigger.bindings.some(
-    (b) => b.ref.type === 'action_id' && b.ref.value === actionId,
+  const bindings = trigger.bindings ?? [];
+  const alreadyBound = bindings.some(
+    (b) => b.ref?.type === 'action_id' && b.ref?.value === actionId,
   );
 
   if (!alreadyBound) {
+    // Preserve existing bindings, filtering out any with missing refs
+    const existingBindings = bindings
+      .filter((b) => b.ref && b.display_name)
+      .map((b) => ({ ref: b.ref, display_name: b.display_name }));
     const newBindings = [
-      ...trigger.bindings.map((b) => ({ ref: b.ref, display_name: b.display_name })),
+      ...existingBindings,
       { ref: { type: 'action_id' as const, value: actionId }, display_name: MFA_ACTION_NAME },
     ];
 
@@ -501,7 +534,9 @@ export async function handler(event: SetupEvent): Promise<void> {
       ...(isStagingOrProd
         ? [
             setupAuth0MfaAction(process.env.AUTH0_DOMAIN!),
-            setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production'),
+            setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production').catch(
+              (err) => console.error('[setup] Email provider setup failed (non-fatal):', err),
+            ),
           ]
         : []),
     ]);

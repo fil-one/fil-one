@@ -6,11 +6,11 @@ import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockGetMfaStatus = vi.fn();
+const mockGetMfaEnrollments = vi.fn();
 const mockDeleteAllAuthenticators = vi.fn();
 vi.mock('../lib/auth0-management.js', () => ({
   getConnectionType: (sub: string) => sub.split('|')[0] ?? 'unknown',
-  getMfaStatus: (...args: unknown[]) => mockGetMfaStatus(...args),
+  getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
   deleteAllAuthenticators: (...args: unknown[]) => mockDeleteAllAuthenticators(...args),
 }));
 
@@ -115,7 +115,9 @@ describe('POST /api/mfa/disable handler', () => {
 
   it('disables MFA and deletes authenticators for database connection users', async () => {
     setupAuthMocks();
-    mockGetMfaStatus.mockResolvedValue(true);
+    mockGetMfaEnrollments.mockResolvedValue([
+      { id: 'test', type: 'authenticator', status: 'confirmed' },
+    ]);
     mockDeleteAllAuthenticators.mockResolvedValue(undefined);
 
     const result = await handler(disableMfaEvent(), buildContext());
@@ -129,7 +131,9 @@ describe('POST /api/mfa/disable handler', () => {
 
   it('disables MFA for social login users', async () => {
     setupAuthMocks(MOCK_SOCIAL_SUB);
-    mockGetMfaStatus.mockResolvedValue(true);
+    mockGetMfaEnrollments.mockResolvedValue([
+      { id: 'test', type: 'authenticator', status: 'confirmed' },
+    ]);
     mockDeleteAllAuthenticators.mockResolvedValue(undefined);
 
     const result = await handler(disableMfaEvent(MOCK_SOCIAL_SUB), buildContext());
@@ -143,7 +147,7 @@ describe('POST /api/mfa/disable handler', () => {
 
   it('returns 400 when MFA is not currently enabled', async () => {
     setupAuthMocks();
-    mockGetMfaStatus.mockResolvedValue(false);
+    mockGetMfaEnrollments.mockResolvedValue([]);
 
     const result = await handler(disableMfaEvent(), buildContext());
 

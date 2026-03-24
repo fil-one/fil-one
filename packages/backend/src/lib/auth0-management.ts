@@ -95,65 +95,103 @@ export function getConnectionType(sub: string): string {
 
 // ── MFA Management ──────────────────────────────────────────────────────
 
-interface Auth0Authenticator {
-  id: string;
-  authenticator_type: string;
-  active: boolean;
+/**
+ * Set app_metadata.mfa_enrolling = true so the Post-Login Action
+ * triggers enrollment on the next login. The Action clears this
+ * flag after successful enrollment.
+ */
+export async function flagMfaEnrollment(sub: string): Promise<void> {
+  await updateAuth0User(sub, {
+    app_metadata: { mfa_enrolling: true },
+  });
 }
 
+export interface GuardianEnrollment {
+  id: string;
+  type: string;
+  status: string;
+  name?: string;
+  enrolled_at?: string;
+}
+
+// Guardian enrollment types that count as MFA (excludes auto-enrolled email)
+export const MFA_GUARDIAN_TYPES = new Set([
+  'authenticator',
+  'webauthn-roaming',
+  'webauthn-platform',
+]);
+
 /**
- * Check whether the user has any active MFA authenticators enrolled.
- * Auth0's "If supported" policy uses this same enrollment state to decide
- * whether to challenge — no app_metadata flags needed.
+ * List MFA Guardian enrollments for a user.
+ * Uses /api/v2/users/{id}/enrollments — the only endpoint that returns
+ * Guardian-enrolled factors. The /authentication-methods endpoint does NOT
+ * reflect Guardian enrollments, and guardian_authenticators is not returned
+ * by the Management API (only visible in the Dashboard UI).
+ * Filters to OTP and WebAuthn — excludes auto-enrolled email.
  */
-export async function getMfaStatus(sub: string): Promise<boolean> {
+export async function getMfaEnrollments(sub: string): Promise<GuardianEnrollment[]> {
   const domain = getDomain();
   const token = await getManagementToken();
   const resp = await fetch(
-    `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/authentication-methods`,
+    `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/enrollments`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
 
   if (!resp.ok) {
     const body = await resp.text();
-    throw new Error(`Auth0 list authenticators failed (${resp.status}): ${body}`);
+    throw new Error(`Auth0 list enrollments failed (${resp.status}): ${body}`);
   }
 
-  const authenticators = (await resp.json()) as Auth0Authenticator[];
-  return authenticators.some((a) => a.active);
+  const enrollments = (await resp.json()) as GuardianEnrollment[];
+  return enrollments.filter((e) => e.status === 'confirmed' && MFA_GUARDIAN_TYPES.has(e.type));
 }
 
 /**
- * Delete all MFA authenticators for a user.
- * With Auth0 policy set to "If supported", removing authenticators
- * means the next login will skip MFA automatically.
+ * Delete a single Guardian enrollment by ID.
  */
-export async function deleteAllAuthenticators(sub: string): Promise<void> {
+export async function deleteGuardianEnrollment(enrollmentId: string): Promise<void> {
   const domain = getDomain();
   const token = await getManagementToken();
-  const listResp = await fetch(
-    `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/authentication-methods`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
+  const resp = await fetch(`https://${domain}/api/v2/guardian/enrollments/${enrollmentId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
 
-  if (!listResp.ok) {
-    const body = await listResp.text();
-    throw new Error(`Auth0 list authenticators failed (${listResp.status}): ${body}`);
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`Auth0 delete enrollment failed (${resp.status}): ${body}`);
   }
+}
 
-  const authenticators = (await listResp.json()) as Auth0Authenticator[];
-  for (const auth of authenticators) {
-    const delResp = await fetch(
-      `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/authentication-methods/${auth.id}`,
-      {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      },
-    );
+/**
+ * Delete all MFA Guardian enrollments for a user, then clear the
+ * mfa_enrolling flag. The Post-Login Action will no longer challenge.
+ */
+export async function deleteAllAuthenticators(sub: string): Promise<void> {
+  const enrollments = await getMfaEnrollments(sub);
+  const domain = getDomain();
+  const token = await getManagementToken();
 
-    if (!delResp.ok) {
-      const body = await delResp.text();
-      throw new Error(`Auth0 delete authenticator failed (${delResp.status}): ${body}`);
+  // Delete MFA enrollments only (skip auto-enrolled email)
+  for (const enrollment of enrollments) {
+    if (MFA_GUARDIAN_TYPES.has(enrollment.type)) {
+      const delResp = await fetch(
+        `https://${domain}/api/v2/guardian/enrollments/${enrollment.id}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      if (!delResp.ok) {
+        const body = await delResp.text();
+        throw new Error(`Auth0 delete enrollment failed (${delResp.status}): ${body}`);
+      }
     }
   }
+
+  // Clear the enrolling flag
+  await updateAuth0User(sub, {
+    app_metadata: { mfa_enrolling: false },
+  });
 }

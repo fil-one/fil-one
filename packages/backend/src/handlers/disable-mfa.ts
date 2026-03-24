@@ -3,7 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.js';
-import { deleteAllAuthenticators, getMfaStatus } from '../lib/auth0-management.js';
+import { deleteAllAuthenticators, getMfaEnrollments } from '../lib/auth0-management.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -13,8 +13,8 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { sub } = getUserInfo(event);
 
-  const mfaEnabled = await getMfaStatus(sub);
-  if (!mfaEnabled) {
+  const enrollments = await getMfaEnrollments(sub);
+  if (enrollments.length === 0) {
     return new ResponseBuilder()
       .status(400)
       .body<ErrorResponse>({ message: 'MFA is not currently enabled.' })
