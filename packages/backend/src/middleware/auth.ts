@@ -281,20 +281,11 @@ export function authMiddleware() {
     const idToken = cookies[COOKIE_NAMES.ID_TOKEN];
     const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
 
-    // TODO [Option D]: AUTH0_DOMAIN env var will change to custom domain
-    // (e.g. auth.fil.one). JWKS, issuer, and token endpoints use the same domain.
     const domain = process.env.AUTH0_DOMAIN!;
     const audience = process.env.AUTH0_AUDIENCE!;
     const issuer = `https://${domain}/`;
     const secrets = getAuthSecrets();
     const jwks = getJWKS(domain);
-
-    const hasCookies = {
-      accessToken: !!accessToken,
-      idToken: !!idToken,
-      refreshToken: !!refreshToken,
-    };
-    console.warn('[auth] Starting auth check', { hasCookies });
 
     // Step 1: Validate existing access token
     if (accessToken) {
