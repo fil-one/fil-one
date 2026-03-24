@@ -495,7 +495,7 @@ export default $config({
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = new sst.aws.Function('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
-      link: [billingTable, stripeSecretKey, auroraBackofficeToken],
+      link: [billingTable, stripeSecretKey, stripePriceId, auroraBackofficeToken],
       environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'gb_month_meter' },
       runtime: 'nodejs24.x',
       timeout: '60 seconds',
