@@ -640,6 +640,7 @@ function setupFirehoseLogPipeline(grafanaLokiAuth: sst.Secret) {
   });
 
   const firehose = new aws.kinesis.FirehoseDeliveryStream('OtelLogDelivery', {
+    name: $interpolate`filone-${$app.stage}-OtelLogDelivery`,
     destination: 'http_endpoint',
     httpEndpointConfiguration: {
       url: 'https://aws-logs-prod3.grafana.net/aws-logs/api/v1/push',
