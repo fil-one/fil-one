@@ -30,6 +30,24 @@ description = "SST secret set inline"
 regex = '''sst\s+secret\s+set\s+\S+\s+['"]?([^'"\s]{16,})['"]?'''
 tags = ["sst", "secret"]
 
+[[rules]]
+id = "stripe-secret-key"
+description = "Stripe secret key"
+regex = '''(?i)stripe[_-]?secret[_-]?key\s*[:=]\s*['"]?([a-zA-Z0-9_\-]{16,})['"]?'''
+tags = ["stripe", "secret"]
+
+[[rules]]
+id = "auth0-mgmt-client-secret"
+description = "Auth0 management client secret"
+regex = '''(?i)auth0[_-]?mgmt[_-]?client[_-]?secret\s*[:=]\s*['"]?([a-zA-Z0-9_\-]{16,})['"]?'''
+tags = ["auth0", "secret"]
+
+[[rules]]
+id = "sendgrid-api-key"
+description = "SendGrid API key"
+regex = '''(?i)sendgrid[_-]?api[_-]?key\s*[:=]\s*['"]?([a-zA-Z0-9_\.\-]{16,})['"]?'''
+tags = ["sendgrid", "api-key"]
+
 # ── Allowlists ──
 
 [allowlist]

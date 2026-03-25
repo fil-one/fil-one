@@ -242,5 +242,5 @@ jobs:
           format: table
           scanners: license
           severity: CRITICAL,HIGH
-          skip-dirs: packages/ui,packages/aurora-backoffice-client,packages/aurora-portal-client,contracts/lib,.sst,node_modules
+          skip-dirs: packages/aurora-backoffice-client,packages/aurora-portal-client,contracts/lib,.sst,node_modules
         continue-on-error: true # Advisory — review output before blocking
