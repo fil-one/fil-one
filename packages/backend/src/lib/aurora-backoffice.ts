@@ -9,6 +9,7 @@ import {
   setTenantStatus,
   setupTenant,
   type ModelsComponentsStatus,
+  type ModelsSetupStep,
   type ModelOperationMetricsSample,
   type ModelStorageMetricsSample,
   type ModelsTenantStatus,
@@ -124,7 +125,7 @@ export interface SetupAuroraTenantOptions {
 
 export interface SetupAuroraTenantResult {
   id: string;
-  lastSetupStep: string;
+  lastSetupStep: ModelsSetupStep;
 }
 
 export async function setupAuroraTenant({
@@ -169,7 +170,7 @@ export async function setupAuroraTenant({
   return { id: data.id!, lastSetupStep };
 }
 
-function deriveOverallSetupStep(components: ModelsComponentsStatus | undefined): string {
+function deriveOverallSetupStep(components: ModelsComponentsStatus | undefined): ModelsSetupStep {
   if (!components) return 'NOT_STARTED';
   // Only check auth & s3 — compute is not set up yet
   const steps = [components.auth, components.s3]
