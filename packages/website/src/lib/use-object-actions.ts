@@ -51,5 +51,33 @@ export function useObjectActions({ bucketName, onDeleted }: UseObjectActionsOpti
     [bucketName, toast],
   );
 
-  return { deleteObject, downloadObject, deleting, downloading };
+  const [generatingUrl, setGeneratingUrl] = useState(false);
+
+  const generatePresignedUrl = useCallback(
+    async (key: string) => {
+      setGeneratingUrl(true);
+      try {
+        const data = await apiRequest<{ url: string }>(
+          `/buckets/${encodeURIComponent(bucketName)}/objects/download?key=${encodeURIComponent(key)}`,
+        );
+        await navigator.clipboard.writeText(data.url);
+        toast.success('Presigned URL copied to clipboard');
+      } catch (err) {
+        console.error('Failed to generate presigned URL:', err);
+        toast.error(err instanceof Error ? err.message : 'Failed to generate presigned URL');
+      } finally {
+        setGeneratingUrl(false);
+      }
+    },
+    [bucketName, toast],
+  );
+
+  return {
+    deleteObject,
+    downloadObject,
+    generatePresignedUrl,
+    deleting,
+    downloading,
+    generatingUrl,
+  };
 }

@@ -7,7 +7,6 @@ import {
   DownloadSimpleIcon,
   FileIcon,
   FolderIcon,
-  CheckCircleIcon,
   PlusIcon,
   KeyIcon,
   CubeIcon,
@@ -18,12 +17,9 @@ import { AccessKeysTable } from '../components/AccessKeysTable';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyableField } from '../components/CopyableField';
-import { Input } from '../components/Input';
-import { Modal, ModalHeader, ModalBody, ModalFooter } from '../components/Modal';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from '../components/Tabs';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Spinner } from '../components/Spinner';
-import { ProgressBar } from '../components/ProgressBar';
 import { useToast } from '../components/Toast';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { formatBytes, S3_ENDPOINT, S3_REGION } from '@filone/shared';
@@ -38,7 +34,6 @@ import type {
 } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate, formatDateTime } from '../lib/time.js';
-import { useFileUpload } from '../lib/use-file-upload.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 
 // ---------------------------------------------------------------------------
@@ -148,23 +143,6 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
   const [confirmDeleteObject, setConfirmDeleteObject] = useState<string | null>(null);
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
 
-  // Upload modal state
-  const [uploadOpen, setUploadOpen] = useState(false);
-
-  const upload = useFileUpload({
-    bucketName,
-    onSuccess: (key, file) => {
-      setObjects((prev) => [
-        {
-          key,
-          sizeBytes: file.size,
-          lastModified: new Date().toISOString(),
-        },
-        ...prev,
-      ]);
-    },
-  });
-
   const objectActions = useObjectActions({
     bucketName,
     onDeleted: (key) => setObjects((prev) => prev.filter((o) => o.key !== key)),
@@ -241,11 +219,6 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
     };
   }, [bucketName]);
 
-  function handleCloseUploadModal() {
-    setUploadOpen(false);
-    upload.reset();
-  }
-
   async function handleKeyAdded() {
     setAccessKeysLoading(true);
     try {
@@ -306,7 +279,16 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
       {/* Page header */}
       <div className="mt-2 mb-2 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-zinc-900">{bucketName}</h1>
-        <Button variant="filled" icon={ArrowUpIcon} onClick={() => setUploadOpen(true)}>
+        <Button
+          variant="filled"
+          icon={ArrowUpIcon}
+          onClick={() =>
+            void navigate({
+              to: '/buckets/$bucketName/upload',
+              params: { bucketName },
+            })
+          }
+        >
           Upload object
         </Button>
       </div>
@@ -347,7 +329,16 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                 <p className="mb-6 text-sm text-zinc-500">
                   Upload your first object to this bucket
                 </p>
-                <Button variant="filled" icon={ArrowUpIcon} onClick={() => setUploadOpen(true)}>
+                <Button
+                  variant="filled"
+                  icon={ArrowUpIcon}
+                  onClick={() =>
+                    void navigate({
+                      to: '/buckets/$bucketName/upload',
+                      params: { bucketName },
+                    })
+                  }
+                >
                   Upload object
                 </Button>
               </div>
@@ -436,7 +427,25 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                             ) : (
                               <tr
                                 key={`object:${entry.object.key}`}
-                                className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50"
+                                className="border-b border-zinc-100 last:border-0 cursor-pointer hover:bg-zinc-50"
+                                role="button"
+                                tabIndex={0}
+                                onClick={() =>
+                                  void navigate({
+                                    to: '/buckets/$bucketName/objects',
+                                    params: { bucketName },
+                                    search: { key: entry.object.key },
+                                  })
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    void navigate({
+                                      to: '/buckets/$bucketName/objects',
+                                      params: { bucketName },
+                                      search: { key: entry.object.key },
+                                    });
+                                  }
+                                }}
                               >
                                 <td className="px-4 py-3">
                                   <div
@@ -457,7 +466,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                                 <td className="px-4 py-3 text-zinc-600">
                                   {formatDate(entry.object.lastModified)}
                                 </td>
-                                <td className="px-4 py-3">
+                                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                                   <div className="flex items-center justify-end gap-2">
                                     <button
                                       type="button"
@@ -540,133 +549,6 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
           </TabPanel>
         </TabPanels>
       </Tabs>
-
-      {/* Upload Object Modal */}
-      <Modal open={uploadOpen} onClose={handleCloseUploadModal} size="md">
-        <ModalHeader onClose={handleCloseUploadModal}>Upload object</ModalHeader>
-
-        {upload.uploadStep === 'idle' && (
-          <>
-            <ModalBody>
-              <div
-                className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-zinc-300 p-8 text-center hover:border-brand-400"
-                onClick={() => upload.fileInputRef.current?.click()}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    upload.fileInputRef.current?.click();
-                  }
-                }}
-              >
-                <CloudArrowUpIcon size={32} className="mb-2 text-zinc-400" aria-hidden="true" />
-                <p className="text-sm font-medium text-zinc-700">
-                  Drop files here or click to browse
-                </p>
-                <p className="mt-1 text-xs text-zinc-500">Any file type up to 5 GB</p>
-                <input
-                  ref={upload.fileInputRef}
-                  type="file"
-                  className="hidden"
-                  onChange={upload.handleFileSelect}
-                />
-              </div>
-
-              {upload.selectedFile && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                  <FileIcon size={16} className="shrink-0 text-zinc-500" aria-hidden="true" />
-                  <span className="flex-1 truncate text-sm text-zinc-700">
-                    {upload.selectedFile.name}
-                  </span>
-                  <span className="text-xs text-zinc-500">
-                    {formatBytes(upload.selectedFile.size)}
-                  </span>
-                </div>
-              )}
-
-              <div className="mt-4 flex flex-col gap-1.5">
-                <label htmlFor="object-name" className="text-sm font-medium text-zinc-700">
-                  Object name
-                </label>
-                <Input
-                  id="object-name"
-                  value={upload.objectName}
-                  onChange={upload.handleObjectNameChange}
-                  placeholder="path/to/my-file.txt"
-                  autoComplete="off"
-                />
-                <p className="text-xs text-zinc-500">
-                  Can include slashes to create a folder-like path, e.g.{' '}
-                  <code>images/photo.png</code>
-                </p>
-              </div>
-
-              <div className="mt-4 flex flex-col gap-1.5">
-                <label htmlFor="object-description" className="text-sm font-medium text-zinc-700">
-                  Description <span className="font-normal text-zinc-400">(optional)</span>
-                </label>
-                <textarea
-                  id="object-description"
-                  value={upload.objectDescription}
-                  onChange={(e) => upload.setObjectDescription(e.target.value)}
-                  placeholder="A short description of this object"
-                  rows={2}
-                  className="block w-full rounded-lg border border-zinc-200 p-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-2 focus:outline-brand-600"
-                />
-              </div>
-            </ModalBody>
-            <ModalFooter>
-              <div className="flex justify-end gap-2">
-                <Button variant="ghost" onClick={handleCloseUploadModal}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="filled"
-                  disabled={!upload.selectedFile || !upload.objectName.trim()}
-                  onClick={upload.handleUpload}
-                >
-                  Upload
-                </Button>
-              </div>
-            </ModalFooter>
-          </>
-        )}
-
-        {upload.uploadStep === 'uploading' && (
-          <ModalBody>
-            <div className="flex flex-col items-center gap-4 py-4">
-              <Spinner ariaLabel="Uploading file" size={40} />
-              <p className="text-sm text-zinc-700">Uploading {upload.selectedFile?.name}...</p>
-              <ProgressBar
-                value={upload.uploadProgress}
-                className="w-full"
-                label="Upload progress"
-              />
-            </div>
-          </ModalBody>
-        )}
-
-        {upload.uploadStep === 'done' && (
-          <>
-            <ModalBody>
-              <div className="flex flex-col items-center gap-3 py-4">
-                <CheckCircleIcon size={40} className="text-green-500" aria-hidden="true" />
-                <p className="text-sm font-medium text-zinc-900">Upload complete.</p>
-                <p className="text-xs text-zinc-500">
-                  {upload.selectedFile?.name} has been stored on Filecoin.
-                </p>
-              </div>
-            </ModalBody>
-            <ModalFooter>
-              <div className="flex justify-end">
-                <Button variant="filled" onClick={handleCloseUploadModal}>
-                  Done
-                </Button>
-              </div>
-            </ModalFooter>
-          </>
-        )}
-      </Modal>
 
       {/* Add key modal */}
       <AddBucketKeyModal
