@@ -102,9 +102,9 @@ in a separate ADR or update to this one once implemented.
 
 ### Lambda configuration
 
-JSON log formatting is configured via SST's `logging: { format: 'json' }` in
-the `$transform(sst.aws.Function, ...)` in `sst.config.ts` — individual
-function definitions do not need to set it.
+JSON log formatting is configured per Lambda via our `createFunction` helper in
+`sst.config.ts`, which sets `logging: { format: 'json' }` on each function
+definition.
 
 ---
 
