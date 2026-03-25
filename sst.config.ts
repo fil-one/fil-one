@@ -610,7 +610,7 @@ async function setupLambdaFactory(grafanaLokiAuth: sst.Secret) {
 
   const { firehose, cwToFirehoseRole } = setupFirehoseLogPipeline(grafanaLokiAuth);
 
-  return (fnName: string, args: sst.aws.FunctionArgs) =>
+  return (fnName: string, args: Exclude<sst.aws.FunctionArgs, 'name'>) =>
     createFunction(fnName, args, {
       existingFunctions,
       existingLogGroups,
@@ -622,7 +622,7 @@ async function setupLambdaFactory(grafanaLokiAuth: sst.Secret) {
 // ── Single Lambda + log subscription ────────────────────────────
 function createFunction(
   fnName: string,
-  args: sst.aws.FunctionArgs,
+  args: Exclude<sst.aws.FunctionArgs, 'name'>,
   ctx: {
     existingFunctions: Set<string>;
     existingLogGroups: Set<string>;
@@ -632,6 +632,10 @@ function createFunction(
 ): sst.aws.Function {
   const functionName = `filone-${$app.stage}-${fnName}`;
   const logGroupName = `/aws/lambda/${functionName}`;
+
+  if ('name' in args) {
+    throw new Error(`createFunction does not allow overriding 'name' (got fnName="${fnName}")`);
+  }
 
   const fn = new sst.aws.Function(fnName, {
     name: $interpolate`filone-${$app.stage}-${fnName}`,
@@ -689,6 +693,13 @@ function setupFirehoseLogPipeline(grafanaLokiAuth: sst.Secret) {
         {
           actions: ['sts:AssumeRole'],
           principals: [{ type: 'Service', identifiers: ['firehose.amazonaws.com'] }],
+          conditions: [
+            {
+              test: 'StringEquals',
+              variable: 'aws:SourceAccount',
+              values: [aws.getCallerIdentityOutput({}).accountId],
+            },
+          ],
         },
       ],
     }).json,
@@ -700,8 +711,13 @@ function setupFirehoseLogPipeline(grafanaLokiAuth: sst.Secret) {
           Statement: [
             {
               Effect: 'Allow',
-              Action: ['s3:PutObject', 's3:GetObject', 's3:ListBucket'],
-              Resource: [firehoseBackupBucket.arn, $interpolate`${firehoseBackupBucket.arn}/*`],
+              Action: ['s3:GetBucketLocation', 's3:ListBucket', 's3:ListBucketMultipartUploads'],
+              Resource: [firehoseBackupBucket.arn],
+            },
+            {
+              Effect: 'Allow',
+              Action: ['s3:PutObject', 's3:GetObject', 's3:AbortMultipartUpload'],
+              Resource: [$interpolate`${firehoseBackupBucket.arn}/*`],
             },
             {
               Effect: 'Allow',
@@ -750,6 +766,13 @@ function setupFirehoseLogPipeline(grafanaLokiAuth: sst.Secret) {
         {
           actions: ['sts:AssumeRole'],
           principals: [{ type: 'Service', identifiers: ['logs.amazonaws.com'] }],
+          conditions: [
+            {
+              test: 'StringEquals',
+              variable: 'aws:SourceAccount',
+              values: [aws.getCallerIdentityOutput({}).accountId],
+            },
+          ],
         },
       ],
     }).json,
