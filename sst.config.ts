@@ -584,7 +584,7 @@ export default $config({
 // ── Single Lambda + log subscription ────────────────────────────
 function createFunction(
   fnName: string,
-  args: Exclude<sst.aws.FunctionArgs, 'name'>,
+  args: Omit<sst.aws.FunctionArgs, 'name'>,
   ctx: {
     firehose: aws.kinesis.FirehoseDeliveryStream;
     cwToFirehoseRole: aws.iam.Role;
