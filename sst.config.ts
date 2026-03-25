@@ -474,6 +474,7 @@ export default $config({
     addRoute('GET', '/api/billing', 'get-billing');
     addRoute('POST', '/api/billing/setup-intent', 'create-setup-intent');
     addRoute('POST', '/api/billing/activate', 'activate-subscription', auroraEnv);
+    addRoute('GET', '/api/billing/invoices', 'list-invoices');
     addRoute('POST', '/api/billing/portal', 'create-portal-session', {
       WEBSITE_URL: siteUrl,
     });
