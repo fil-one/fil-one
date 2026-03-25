@@ -126,6 +126,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "ListInvoices": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "ListObjects": {
       "name": string
       "type": "sst.aws.Function"
