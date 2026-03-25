@@ -16,7 +16,7 @@ import {
 const AWS_REGION = process.env.AWS_REGION ?? 'us-east-1';
 const lambda = new LambdaClient({ region: AWS_REGION });
 
-export const AURORA_TEST_TENANT_ID = 'e437e59d-fb0c-40cd-be45-87cf6fdc52df';
+export const AURORA_TEST_TENANT_ID = '1ab311c9-b6ad-4d4d-b707-c07d8404eaa2';
 
 // =============================================================================
 // Lambda invocation helpers

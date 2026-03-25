@@ -49,7 +49,7 @@ describe('Usage Reporting Worker (direct Lambda invoke)', () => {
       averageStorageGbUsed: { N: expect.any(String) },
       totalEgressBytes: { N: expect.any(String) },
       sampleCount: { N: expect.any(String) },
-      reportedToStripe: { BOOL: expect.any(Boolean) },
+      reportedToStripe: { BOOL: true },
       lockAction: { S: 'skipped:paid' },
       createdAt: { S: expect.any(String) },
       ttl: { N: expect.any(String) },
