@@ -303,7 +303,9 @@ export default $config({
       },
     ];
 
-    const createFn = await setupLambdaFactory(grafanaLokiAuth);
+    const { firehose, cwToFirehoseRole } = setupFirehoseLogPipeline(grafanaLokiAuth);
+    const createFn = (fnName: string, args: Omit<sst.aws.FunctionArgs, 'name'>) =>
+      createFunction(fnName, args, { firehose, cwToFirehoseRole });
 
     function addRoute(
       method: string,
@@ -579,60 +581,15 @@ export default $config({
   },
 });
 
-// ── Lambda factory ───────────────────────────────────────────────
-async function setupLambdaFactory(grafanaLokiAuth: sst.Secret) {
-  // Discover log groups that already exist in AWS (e.g. auto-created by Lambda runtime
-  // on previous deployments). These must be imported into Pulumi state rather than
-  // created from scratch, to avoid ResourceAlreadyExistsException.
-  const existingLogGroups = await aws.cloudwatch
-    .getLogGroups({
-      logGroupNamePrefix: `/aws/lambda/filone-${$app.stage}-`,
-    })
-    .then((r) => new Set(r.logGroupNames));
-
-  // Discover Lambda functions that already exist in AWS.
-  // Used to import functions that moved from api.route() children
-  // to standalone createFn() resources.
-  const existingFunctions = await aws.lambda
-    .getFunctions()
-    .then((r) => new Set(r.functionNames.filter((n) => n.startsWith(`filone-${$app.stage}-`))));
-
-  // Retain Lambda functions on delete during migration: when functions move
-  // from inline api.route() to standalone createFn(), Pulumi sees two
-  // different resources with the same physical name. Without retainOnDelete,
-  // removing the old resource would destroy the Lambda that was just imported
-  // into the new resource. Safe to remove after first successful deploy.
-  // TODO: remove this transform after we upgrade all existing SST stacks
-  // https://linear.app/filecoin-foundation/issue/FIL-134/clean-up-after-all-sst-stacks-are-upgraded
-  $transform(aws.lambda.Function, (_args, opts) => {
-    opts.retainOnDelete = true;
-  });
-
-  const { firehose, cwToFirehoseRole } = setupFirehoseLogPipeline(grafanaLokiAuth);
-
-  return (fnName: string, args: Exclude<sst.aws.FunctionArgs, 'name'>) =>
-    createFunction(fnName, args, {
-      existingFunctions,
-      existingLogGroups,
-      firehose,
-      cwToFirehoseRole,
-    });
-}
-
 // ── Single Lambda + log subscription ────────────────────────────
 function createFunction(
   fnName: string,
-  args: Exclude<sst.aws.FunctionArgs, 'name'>,
+  args: Omit<sst.aws.FunctionArgs, 'name'>,
   ctx: {
-    existingFunctions: Set<string>;
-    existingLogGroups: Set<string>;
     firehose: aws.kinesis.FirehoseDeliveryStream;
     cwToFirehoseRole: aws.iam.Role;
   },
 ): sst.aws.Function {
-  const functionName = `filone-${$app.stage}-${fnName}`;
-  const logGroupName = `/aws/lambda/${functionName}`;
-
   if ('name' in args) {
     throw new Error(`createFunction does not allow overriding 'name' (got fnName="${fnName}")`);
   }
@@ -641,18 +598,6 @@ function createFunction(
     name: $interpolate`filone-${$app.stage}-${fnName}`,
     ...args,
     logging: { retention: '1 week', format: 'json' },
-    transform: {
-      function: (_fnArgs, opts) => {
-        if (ctx.existingFunctions.has(functionName)) {
-          opts.import = functionName;
-        }
-      },
-      logGroup: (_logGroupArgs, opts) => {
-        if (ctx.existingLogGroups.has(logGroupName)) {
-          opts.import = logGroupName;
-        }
-      },
-    },
   });
 
   // Use the LogGroup resource reference (not a plain string) to ensure
