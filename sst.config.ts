@@ -31,7 +31,11 @@ export default $config({
       },
     };
   },
+
   async run() {
+    // ⚠️  All Lambda functions MUST be created via createFn() to ensure
+    //     log forwarding is set up. Never use `new sst.aws.Function()` directly.
+
     // ── Secrets (set via: pnpx sst secret set <Name> <value>) ─────────
     const auth0ClientId = new sst.Secret('Auth0ClientId');
     const auth0ClientSecret = new sst.Secret('Auth0ClientSecret');
@@ -40,11 +44,17 @@ export default $config({
     const stripeSecretKey = new sst.Secret('StripeSecretKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
+    const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const sendGridApiKey =
       $app.stage === 'staging' || $app.stage === 'production'
         ? new sst.Secret('SendGridApiKey')
         : undefined;
     const AWS_CACHING_DISABLED_POLICY = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
+
+    // ── Global Function settings ────────────────────────────
+    $transform(sst.aws.Function, (args) => {
+      args.runtime = args.runtime ?? 'nodejs24.x';
+    });
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
     const billingTable = new sst.aws.Dynamo('BillingTable', {
@@ -178,6 +188,10 @@ export default $config({
     const siteUrl = router.url;
 
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
+    // This Lambda is intentionally NOT created via createFn(). Its ARN is embedded in the
+    // CloudFormation SetupStack template; changing the ARN (e.g. by migrating to createFn) would
+    // require replacing the CF stack, which triggers unwanted teardown/recreation of the custom
+    // resource.
     const setupFn = new sst.aws.Function('SetupIntegrations', {
       handler: 'packages/backend/src/jobs/stack-setup/setup-integrations.handler',
       link: [
@@ -196,7 +210,6 @@ export default $config({
           resources: [$interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/*`],
         },
       ],
-      runtime: 'nodejs24.x',
       timeout: '10 seconds',
     });
 
@@ -284,6 +297,10 @@ export default $config({
       },
     ];
 
+    const { firehose, cwToFirehoseRole } = setupFirehoseLogPipeline(grafanaLokiAuth);
+    const createFn = (fnName: string, args: Omit<sst.aws.FunctionArgs, 'name'>) =>
+      createFunction(fnName, args, { firehose, cwToFirehoseRole });
+
     function addRoute(
       method: string,
       routePath: string,
@@ -297,22 +314,45 @@ export default $config({
         .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
         .join('');
 
-      api.route(`${method} ${routePath}`, {
+      const fn = createFn(fnName, {
         handler: `packages/backend/src/handlers/${handler}.handler`,
-        name: $interpolate`filone-${$app.stage}-${fnName}`,
         link: allResources,
         environment: {
           ...sharedEnv,
           ...extraEnv,
         },
         permissions,
-        runtime: 'nodejs24.x',
         timeout: '10 seconds',
+      });
+
+      api.route(`${method} ${routePath}`, fn.arn);
+
+      // SST's api.route() with an ARN creates lambda.Permission with
+      // qualifier: "" (from undefined), which doesn't actually grant
+      // API Gateway invoke access. Add an explicit permission.
+      new aws.lambda.Permission(`${fnName}ApiPermission`, {
+        action: 'lambda:InvokeFunction',
+        function: fn.nodes.function.name,
+        principal: 'apigateway.amazonaws.com',
+        sourceArn: $interpolate`${api.nodes.api.executionArn}/*`,
       });
     }
 
     // ── Data routes ──────────────────────────────────────────────────
-    addRoute('GET', '/api/buckets', 'list-buckets', auroraS3GatewayEnv, auroraS3GatewayPermissions);
+    addRoute(
+      'GET',
+      '/api/buckets',
+      'list-buckets',
+      {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+      },
+      [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [auroraApiKeySsmArn],
+        },
+      ],
+    );
     addRoute(
       'POST',
       '/api/buckets',
@@ -430,6 +470,7 @@ export default $config({
     addRoute('GET', '/api/billing', 'get-billing');
     addRoute('POST', '/api/billing/setup-intent', 'create-setup-intent');
     addRoute('POST', '/api/billing/activate', 'activate-subscription', auroraEnv);
+    addRoute('GET', '/api/billing/invoices', 'list-invoices');
     addRoute('POST', '/api/billing/portal', 'create-portal-session', {
       WEBSITE_URL: siteUrl,
     });
@@ -451,25 +492,35 @@ export default $config({
     );
 
     // ── Tenant setup consumer ──────────────────────────────────────
-    tenantSetupQueue.subscribe(
-      {
-        handler: 'packages/backend/src/handlers/aurora-tenant-setup.handler',
-        link: [userInfoTable, auroraBackofficeToken],
-        environment: {
-          ...auroraEnv,
-          ...sharedEnv,
-        },
-        permissions: [
-          {
-            actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-            resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
-          },
-        ],
-        runtime: 'nodejs24.x',
-        timeout: '60 seconds',
+    const tenantSetupFn = createFn('AuroraTenantSetup', {
+      handler: 'packages/backend/src/handlers/aurora-tenant-setup.handler',
+      link: [userInfoTable, auroraBackofficeToken],
+      environment: {
+        ...auroraEnv,
+        ...sharedEnv,
       },
-      { batch: { size: 1 } },
-    );
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+        },
+        // queue.subscribe(fn.arn) passes an ARN, so SST skips attaching
+        // SQS permissions automatically — we must add them here.
+        {
+          actions: [
+            'sqs:ChangeMessageVisibility',
+            'sqs:DeleteMessage',
+            'sqs:GetQueueAttributes',
+            'sqs:GetQueueUrl',
+            'sqs:ReceiveMessage',
+          ],
+          resources: [tenantSetupQueue.arn],
+        },
+      ],
+      timeout: '60 seconds',
+    });
+
+    tenantSetupQueue.subscribe(tenantSetupFn.arn, { batch: { size: 1 } });
 
     // ── CloudWatch alarm on DLQ ──────────────────────────────────
     // TODO: Rework this alarm to trigger alert in Grafana IRM
@@ -487,23 +538,21 @@ export default $config({
     });
 
     // ── Usage reporting (cron-based) ────────────────────────────────
-    const usageWorker = new sst.aws.Function('UsageReportingWorker', {
+    const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
       link: [billingTable, stripeSecretKey, stripePriceId, auroraBackofficeToken],
       environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'gb_month_meter' },
-      runtime: 'nodejs24.x',
       timeout: '60 seconds',
       memory: '256 MB',
     });
 
-    const usageOrchestrator = new sst.aws.Function('UsageReportingOrchestrator', {
+    const usageOrchestrator = createFn('UsageReportingOrchestrator', {
       handler: 'packages/backend/src/jobs/usage-reporting-orchestrator.handler',
       link: [billingTable, userInfoTable],
       environment: {
         USAGE_WORKER_FUNCTION_NAME: usageWorker.name,
         STRIPE_METER_EVENT_NAME: 'gb_month_meter',
       },
-      runtime: 'nodejs24.x',
       timeout: '300 seconds',
       memory: '256 MB',
       permissions: [
@@ -525,3 +574,163 @@ export default $config({
     };
   },
 });
+
+// ── Single Lambda + log subscription ────────────────────────────
+function createFunction(
+  fnName: string,
+  args: Omit<sst.aws.FunctionArgs, 'name'>,
+  ctx: {
+    firehose: aws.kinesis.FirehoseDeliveryStream;
+    cwToFirehoseRole: aws.iam.Role;
+  },
+): sst.aws.Function {
+  if ('name' in args) {
+    throw new Error(`createFunction does not allow overriding 'name' (got fnName="${fnName}")`);
+  }
+
+  const fn = new sst.aws.Function(fnName, {
+    name: $interpolate`filone-${$app.stage}-${fnName}`,
+    ...args,
+    logging: { retention: '1 week', format: 'json' },
+  });
+
+  // Use the LogGroup resource reference (not a plain string) to ensure
+  // Pulumi creates the log group before the subscription filter.
+  const logGroup = fn.nodes.logGroup.apply((lg) => {
+    if (!lg) throw new Error(`LogGroup not created for function ${fnName}`);
+    return lg;
+  });
+
+  new aws.cloudwatch.LogSubscriptionFilter(`${fnName}LogFwd`, {
+    logGroup: logGroup.name,
+    filterPattern: '',
+    destinationArn: ctx.firehose.arn,
+    roleArn: ctx.cwToFirehoseRole.arn,
+  });
+
+  return fn;
+}
+
+// ── Firehose Log Pipeline (CloudWatch → Loki) ───────────────────
+function setupFirehoseLogPipeline(grafanaLokiAuth: sst.Secret) {
+  const firehoseBackupBucket = new sst.aws.Bucket('OtelFirehoseBackup', {
+    transform: {
+      bucket: { forceDestroy: true },
+    },
+  });
+
+  const firehoseLogGroup = new aws.cloudwatch.LogGroup('OtelFirehoseLogGroup', {
+    retentionInDays: 7,
+  });
+  const firehoseLogStream = new aws.cloudwatch.LogStream('OtelFirehoseLogStream', {
+    logGroupName: firehoseLogGroup.name,
+  });
+
+  const firehoseRole = new aws.iam.Role('OtelFirehoseRole', {
+    assumeRolePolicy: aws.iam.getPolicyDocumentOutput({
+      statements: [
+        {
+          actions: ['sts:AssumeRole'],
+          principals: [{ type: 'Service', identifiers: ['firehose.amazonaws.com'] }],
+          conditions: [
+            {
+              test: 'StringEquals',
+              variable: 'aws:SourceAccount',
+              values: [aws.getCallerIdentityOutput({}).accountId],
+            },
+          ],
+        },
+      ],
+    }).json,
+    inlinePolicies: [
+      {
+        name: 'firehose-s3',
+        policy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Action: ['s3:GetBucketLocation', 's3:ListBucket', 's3:ListBucketMultipartUploads'],
+              Resource: [firehoseBackupBucket.arn],
+            },
+            {
+              Effect: 'Allow',
+              Action: ['s3:PutObject', 's3:GetObject', 's3:AbortMultipartUpload'],
+              Resource: [$interpolate`${firehoseBackupBucket.arn}/*`],
+            },
+            {
+              Effect: 'Allow',
+              Action: ['logs:PutLogEvents'],
+              Resource: [$interpolate`${firehoseLogGroup.arn}:*`],
+            },
+          ],
+        }),
+      },
+    ],
+  });
+
+  const firehose = new aws.kinesis.FirehoseDeliveryStream('OtelLogDelivery', {
+    name: $interpolate`filone-${$app.stage}-OtelLogDelivery`,
+    destination: 'http_endpoint',
+    httpEndpointConfiguration: {
+      url: 'https://aws-logs-prod3.grafana.net/aws-logs/api/v1/push',
+      name: 'grafanacloud-filecoinfoundation-logs',
+      accessKey: grafanaLokiAuth.value,
+      bufferingInterval: 60,
+      bufferingSize: 1,
+      roleArn: firehoseRole.arn,
+      cloudwatchLoggingOptions: {
+        enabled: true,
+        logGroupName: firehoseLogGroup.name,
+        logStreamName: firehoseLogStream.name,
+      },
+      s3BackupMode: 'FailedDataOnly',
+      s3Configuration: {
+        bucketArn: firehoseBackupBucket.arn,
+        roleArn: firehoseRole.arn,
+      },
+      requestConfiguration: {
+        contentEncoding: 'GZIP',
+        commonAttributes: [
+          { name: 'lbl_environment', value: $app.stage },
+          { name: 'lbl_service', value: $interpolate`filone-${$app.stage}` },
+        ],
+      },
+    },
+  });
+
+  const cwToFirehoseRole = new aws.iam.Role('CwToFirehoseRole', {
+    assumeRolePolicy: aws.iam.getPolicyDocumentOutput({
+      statements: [
+        {
+          actions: ['sts:AssumeRole'],
+          principals: [{ type: 'Service', identifiers: ['logs.amazonaws.com'] }],
+          conditions: [
+            {
+              test: 'StringEquals',
+              variable: 'aws:SourceAccount',
+              values: [aws.getCallerIdentityOutput({}).accountId],
+            },
+          ],
+        },
+      ],
+    }).json,
+    inlinePolicies: [
+      {
+        name: 'cw-to-firehose',
+        policy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Action: ['firehose:PutRecord', 'firehose:PutRecordBatch'],
+              Resource: [firehose.arn],
+            },
+          ],
+        }),
+      },
+    ],
+  });
+
+  return { firehose, cwToFirehoseRole };
+}
