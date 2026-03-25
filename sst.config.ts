@@ -225,7 +225,11 @@ export default $config({
     const siteUrl = router.url;
 
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
-    const setupFn = createFn('SetupIntegrations', {
+    // This Lambda is intentionally NOT created via createFn(). Its ARN is embedded in the
+    // CloudFormation SetupStack template; changing the ARN (e.g. by migrating to createFn) would
+    // require replacing the CF stack, which triggers unwanted teardown/recreation of the custom
+    // resource.
+    const setupFn = new sst.aws.Function('SetupIntegrations', {
       handler: 'packages/backend/src/jobs/stack-setup/setup-integrations.handler',
       link: [
         stripeSecretKey,
