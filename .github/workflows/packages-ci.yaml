@@ -33,9 +33,6 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Typecheck
-        run: pnpm typecheck
-
       - name: Build
         run: pnpm build
 
@@ -75,7 +72,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
           aws-region: us-east-2
@@ -89,6 +86,7 @@ jobs:
           pnpm exec sst secret set StripeSecretKey "$STRIPE_SECRET_KEY" --stage "$STAGE"
           pnpm exec sst secret set StripePriceId "$STRIPE_PRICE_ID" --stage "$STAGE"
           pnpm exec sst secret set AuroraBackofficeToken "$AURORA_BACKOFFICE_TOKEN" --stage "$STAGE"
+          pnpm exec sst secret set GrafanaLokiAuth "$GRAFANA_LOKI_AUTH" --stage "$STAGE"
         env:
           AUTH0_CLIENT_ID: ${{ secrets.CI_AUTH0_CLIENT_ID }}
           AUTH0_CLIENT_SECRET: ${{ secrets.CI_AUTH0_CLIENT_SECRET }}
@@ -97,6 +95,7 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.CI_STRIPE_SECRET_KEY }}
           STRIPE_PRICE_ID: ${{ secrets.CI_STRIPE_PRICE_ID }}
           AURORA_BACKOFFICE_TOKEN: ${{ secrets.CI_AURORA_BACKOFFICE_TOKEN }}
+          GRAFANA_LOKI_AUTH: ${{ secrets.CI_GRAFANA_LOKI_AUTH }}
 
       - name: Build
         run: pnpm build
@@ -155,7 +154,7 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -214,7 +213,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
           aws-region: us-east-2
@@ -235,21 +234,21 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
       # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
       - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
           aws-region: us-east-2

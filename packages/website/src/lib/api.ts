@@ -195,6 +195,7 @@ import type {
   CreateSetupIntentResponse,
   ActivateSubscriptionResponse,
   CreatePortalSessionResponse,
+  ListInvoicesResponse,
 } from '@filone/shared';
 
 export function getBilling(): Promise<BillingInfo> {
@@ -211,4 +212,8 @@ export function activateSubscription(): Promise<ActivateSubscriptionResponse> {
 
 export function createPortalSession(): Promise<CreatePortalSessionResponse> {
   return apiRequest<CreatePortalSessionResponse>('/billing/portal', { method: 'POST' });
+}
+
+export function getInvoices(): Promise<ListInvoicesResponse> {
+  return apiRequest<ListInvoicesResponse>('/billing/invoices');
 }

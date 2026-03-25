@@ -3,57 +3,69 @@
 import { client } from './client.gen.ts';
 import type { Client, Options as Options2, TDataShape } from './client/index.ts';
 import type {
-  DeleteV1TenantsByTenantIdAccessKeysByAccessKeyIdData,
-  DeleteV1TenantsByTenantIdAccessKeysByAccessKeyIdErrors,
-  DeleteV1TenantsByTenantIdAccessKeysByAccessKeyIdResponses,
-  GetAnalyticsV1OperationsBucketByBucketNameData,
-  GetAnalyticsV1OperationsBucketByBucketNameErrors,
-  GetAnalyticsV1OperationsBucketByBucketNameResponses,
-  GetAnalyticsV1OperationsMyorgData,
-  GetAnalyticsV1OperationsMyorgErrors,
-  GetAnalyticsV1OperationsMyorgResponses,
-  GetAnalyticsV1StorageBucketByBucketNameData,
-  GetAnalyticsV1StorageBucketByBucketNameErrors,
-  GetAnalyticsV1StorageBucketByBucketNameResponses,
-  GetAnalyticsV1StorageMyorgData,
-  GetAnalyticsV1StorageMyorgErrors,
-  GetAnalyticsV1StorageMyorgResponses,
-  GetV1EnvironmentData,
-  GetV1EnvironmentErrors,
-  GetV1EnvironmentResponses,
-  GetV1TenantsByTenantIdAccessKeysByAccessKeyIdData,
-  GetV1TenantsByTenantIdAccessKeysByAccessKeyIdErrors,
-  GetV1TenantsByTenantIdAccessKeysByAccessKeyIdResponses,
-  GetV1TenantsByTenantIdAccessKeysData,
-  GetV1TenantsByTenantIdAccessKeysErrors,
-  GetV1TenantsByTenantIdAccessKeysResponses,
-  GetV1TenantsByTenantIdBucketByBucketNameData,
-  GetV1TenantsByTenantIdBucketByBucketNameErrors,
-  GetV1TenantsByTenantIdBucketByBucketNameResponses,
-  GetV1TenantsByTenantIdBucketData,
-  GetV1TenantsByTenantIdBucketErrors,
-  GetV1TenantsByTenantIdBucketResponses,
-  GetV1TenantsByTenantIdData,
-  GetV1TenantsByTenantIdErrors,
-  GetV1TenantsByTenantIdMetricsData,
-  GetV1TenantsByTenantIdMetricsErrors,
-  GetV1TenantsByTenantIdMetricsResponses,
-  GetV1TenantsByTenantIdResponses,
-  GetV1TenantsData,
-  GetV1TenantsErrors,
-  GetV1TenantsResponses,
-  PostV1TenantsByTenantIdAccessKeysData,
-  PostV1TenantsByTenantIdAccessKeysErrors,
-  PostV1TenantsByTenantIdAccessKeysResponses,
-  PostV1TenantsByTenantIdBucketByBucketNameCloneObjectData,
-  PostV1TenantsByTenantIdBucketByBucketNameCloneObjectErrors,
-  PostV1TenantsByTenantIdBucketByBucketNameCloneObjectResponses,
-  PostV1TenantsByTenantIdBucketData,
-  PostV1TenantsByTenantIdBucketErrors,
-  PostV1TenantsByTenantIdBucketResponses,
-  PutV1TenantsByTenantIdBucketByBucketNameData,
-  PutV1TenantsByTenantIdBucketByBucketNameErrors,
-  PutV1TenantsByTenantIdBucketByBucketNameResponses,
+  CloneObjectData,
+  CloneObjectErrors,
+  CloneObjectResponses,
+  CreateBucketData,
+  CreateBucketErrors,
+  CreateBucketResponses,
+  CreateS3AccessKeyData,
+  CreateS3AccessKeyErrors,
+  CreateS3AccessKeyResponses,
+  CreateTokenData,
+  CreateTokenErrors,
+  CreateTokenResponses,
+  DeleteS3AccessKeyData,
+  DeleteS3AccessKeyErrors,
+  DeleteS3AccessKeyResponses,
+  DeleteTokenData,
+  DeleteTokenErrors,
+  DeleteTokenResponses,
+  EditBucketData,
+  EditBucketErrors,
+  EditBucketResponses,
+  GetBucketInfoData,
+  GetBucketInfoErrors,
+  GetBucketInfoResponses,
+  GetBucketOperationMetricsData,
+  GetBucketOperationMetricsErrors,
+  GetBucketOperationMetricsResponses,
+  GetBucketStorageMetricsData,
+  GetBucketStorageMetricsErrors,
+  GetBucketStorageMetricsResponses,
+  GetEnvironmentData,
+  GetEnvironmentErrors,
+  GetEnvironmentResponses,
+  GetS3AccessKeyData,
+  GetS3AccessKeyErrors,
+  GetS3AccessKeyResponses,
+  GetTenantData,
+  GetTenantErrors,
+  GetTenantMetricsData,
+  GetTenantMetricsErrors,
+  GetTenantMetricsResponses,
+  GetTenantOperationMetricsData,
+  GetTenantOperationMetricsErrors,
+  GetTenantOperationMetricsResponses,
+  GetTenantResponses,
+  GetTenantStorageMetricsData,
+  GetTenantStorageMetricsErrors,
+  GetTenantStorageMetricsResponses,
+  GetTokenData,
+  GetTokenErrors,
+  GetTokenResponses,
+  ListBucketsData,
+  ListBucketsErrors,
+  ListBucketsResponses,
+  ListS3AccessKeysData,
+  ListS3AccessKeysErrors,
+  ListS3AccessKeysResponses,
+  ListTenantsData,
+  ListTenantsErrors,
+  ListTenantsResponses,
+  ListTokensData,
+  ListTokensErrors,
+  ListTokensResponses,
 } from './types.gen.ts';
 
 export type Options<
@@ -78,66 +90,142 @@ export type Options<
  *
  * Returns S3 operation metrics for a bucket, optionally filtered by requester tenant and grouped by tags
  */
-export const getAnalyticsV1OperationsBucketByBucketName = <ThrowOnError extends boolean = false>(
-  options: Options<GetAnalyticsV1OperationsBucketByBucketNameData, ThrowOnError>,
+export const getBucketOperationMetrics = <ThrowOnError extends boolean = false>(
+  options: Options<GetBucketOperationMetricsData, ThrowOnError>,
 ) =>
   (options.client ?? client).get<
-    GetAnalyticsV1OperationsBucketByBucketNameResponses,
-    GetAnalyticsV1OperationsBucketByBucketNameErrors,
+    GetBucketOperationMetricsResponses,
+    GetBucketOperationMetricsErrors,
     ThrowOnError
-  >({ url: '/analytics/v1/operations/bucket/{bucketName}', ...options });
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/analytics/v1/operations/buckets/{bucketName}',
+    ...options,
+  });
 
 /**
  * Get tenant operation metrics
  *
  * Returns S3 operation metrics for the authenticated tenant in the given time range, optionally resampled by window duration and grouped by tags
  */
-export const getAnalyticsV1OperationsMyorg = <ThrowOnError extends boolean = false>(
-  options: Options<GetAnalyticsV1OperationsMyorgData, ThrowOnError>,
+export const getTenantOperationMetrics = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantOperationMetricsData, ThrowOnError>,
 ) =>
   (options.client ?? client).get<
-    GetAnalyticsV1OperationsMyorgResponses,
-    GetAnalyticsV1OperationsMyorgErrors,
+    GetTenantOperationMetricsResponses,
+    GetTenantOperationMetricsErrors,
     ThrowOnError
-  >({ url: '/analytics/v1/operations/myorg', ...options });
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/analytics/v1/operations/myorg',
+    ...options,
+  });
 
 /**
  * Get bucket storage metrics
  *
  * Returns storage metrics for a bucket owned by the authenticated tenant
  */
-export const getAnalyticsV1StorageBucketByBucketName = <ThrowOnError extends boolean = false>(
-  options: Options<GetAnalyticsV1StorageBucketByBucketNameData, ThrowOnError>,
+export const getBucketStorageMetrics = <ThrowOnError extends boolean = false>(
+  options: Options<GetBucketStorageMetricsData, ThrowOnError>,
 ) =>
   (options.client ?? client).get<
-    GetAnalyticsV1StorageBucketByBucketNameResponses,
-    GetAnalyticsV1StorageBucketByBucketNameErrors,
+    GetBucketStorageMetricsResponses,
+    GetBucketStorageMetricsErrors,
     ThrowOnError
-  >({ url: '/analytics/v1/storage/bucket/{bucketName}', ...options });
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/analytics/v1/storage/buckets/{bucketName}',
+    ...options,
+  });
 
 /**
  * Get tenant storage metrics
  *
  * Returns storage metrics for the authenticated tenant in the given time range, optionally resampled by window duration
  */
-export const getAnalyticsV1StorageMyorg = <ThrowOnError extends boolean = false>(
-  options: Options<GetAnalyticsV1StorageMyorgData, ThrowOnError>,
+export const getTenantStorageMetrics = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantStorageMetricsData, ThrowOnError>,
 ) =>
   (options.client ?? client).get<
-    GetAnalyticsV1StorageMyorgResponses,
-    GetAnalyticsV1StorageMyorgErrors,
+    GetTenantStorageMetricsResponses,
+    GetTenantStorageMetricsErrors,
     ThrowOnError
-  >({ url: '/analytics/v1/storage/myorg', ...options });
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/analytics/v1/storage/myorg',
+    ...options,
+  });
+
+/**
+ * List tokens
+ *
+ * Returns a list of all tokens for a tenant
+ */
+export const listTokens = <ThrowOnError extends boolean = false>(
+  options: Options<ListTokensData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListTokensResponses, ListTokensErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/auth/v1/tenants/{tenantId}/tokens',
+    ...options,
+  });
+
+/**
+ * Create token
+ *
+ * Creates a new token for a tenant
+ */
+export const createToken = <ThrowOnError extends boolean = false>(
+  options: Options<CreateTokenData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<CreateTokenResponses, CreateTokenErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/auth/v1/tenants/{tenantId}/tokens',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * Delete token
+ *
+ * Deletes a tenant token by ID
+ */
+export const deleteToken = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteTokenData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<DeleteTokenResponses, DeleteTokenErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/auth/v1/tenants/{tenantId}/tokens/{tokenId}',
+    ...options,
+  });
+
+/**
+ * Get token
+ *
+ * Returns a tenant token by ID
+ */
+export const getToken = <ThrowOnError extends boolean = false>(
+  options: Options<GetTokenData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<GetTokenResponses, GetTokenErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/auth/v1/tenants/{tenantId}/tokens/{tokenId}',
+    ...options,
+  });
 
 /**
  * Get portal environment configuration
  *
  * Returns environment configuration for the portal web application, including Auth0 settings
  */
-export const getV1Environment = <ThrowOnError extends boolean = false>(
-  options?: Options<GetV1EnvironmentData, ThrowOnError>,
+export const getEnvironment = <ThrowOnError extends boolean = false>(
+  options?: Options<GetEnvironmentData, ThrowOnError>,
 ) =>
-  (options?.client ?? client).get<GetV1EnvironmentResponses, GetV1EnvironmentErrors, ThrowOnError>({
+  (options?.client ?? client).get<GetEnvironmentResponses, GetEnvironmentErrors, ThrowOnError>({
     url: '/v1/environment',
     ...options,
   });
@@ -147,10 +235,11 @@ export const getV1Environment = <ThrowOnError extends boolean = false>(
  *
  * Returns the list of active tenants for the authenticated organization
  */
-export const getV1Tenants = <ThrowOnError extends boolean = false>(
-  options?: Options<GetV1TenantsData, ThrowOnError>,
+export const listTenants = <ThrowOnError extends boolean = false>(
+  options?: Options<ListTenantsData, ThrowOnError>,
 ) =>
-  (options?.client ?? client).get<GetV1TenantsResponses, GetV1TenantsErrors, ThrowOnError>({
+  (options?.client ?? client).get<ListTenantsResponses, ListTenantsErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
     url: '/v1/tenants',
     ...options,
   });
@@ -160,42 +249,43 @@ export const getV1Tenants = <ThrowOnError extends boolean = false>(
  *
  * Returns tenant details for the given tenant ID
  */
-export const getV1TenantsByTenantId = <ThrowOnError extends boolean = false>(
-  options: Options<GetV1TenantsByTenantIdData, ThrowOnError>,
+export const getTenant = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantData, ThrowOnError>,
 ) =>
-  (options.client ?? client).get<
-    GetV1TenantsByTenantIdResponses,
-    GetV1TenantsByTenantIdErrors,
-    ThrowOnError
-  >({ url: '/v1/tenants/{tenantId}', ...options });
+  (options.client ?? client).get<GetTenantResponses, GetTenantErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}',
+    ...options,
+  });
 
 /**
- * List access keys
+ * List S3 access keys
  *
- * Returns the list of access keys for the given tenant
+ * Returns the list of S3 access keys for the given tenant
  */
-export const getV1TenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = false>(
-  options: Options<GetV1TenantsByTenantIdAccessKeysData, ThrowOnError>,
+export const listS3AccessKeys = <ThrowOnError extends boolean = false>(
+  options: Options<ListS3AccessKeysData, ThrowOnError>,
 ) =>
-  (options.client ?? client).get<
-    GetV1TenantsByTenantIdAccessKeysResponses,
-    GetV1TenantsByTenantIdAccessKeysErrors,
-    ThrowOnError
-  >({ url: '/v1/tenants/{tenantId}/access_keys', ...options });
+  (options.client ?? client).get<ListS3AccessKeysResponses, ListS3AccessKeysErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}/access_keys',
+    ...options,
+  });
 
 /**
- * Create access key
+ * Create S3 access key
  *
- * Creates a new access key for the given tenant
+ * Creates a new S3 access key for the given tenant
  */
-export const postV1TenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = false>(
-  options: Options<PostV1TenantsByTenantIdAccessKeysData, ThrowOnError>,
+export const createS3AccessKey = <ThrowOnError extends boolean = false>(
+  options: Options<CreateS3AccessKeyData, ThrowOnError>,
 ) =>
   (options.client ?? client).post<
-    PostV1TenantsByTenantIdAccessKeysResponses,
-    PostV1TenantsByTenantIdAccessKeysErrors,
+    CreateS3AccessKeyResponses,
+    CreateS3AccessKeyErrors,
     ThrowOnError
   >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
     url: '/v1/tenants/{tenantId}/access_keys',
     ...options,
     headers: {
@@ -205,63 +295,62 @@ export const postV1TenantsByTenantIdAccessKeys = <ThrowOnError extends boolean =
   });
 
 /**
- * Delete access key
+ * Delete S3 access key
  *
- * Deletes an access key for the given tenant
+ * Deletes an S3 access key for the given tenant
  */
-export const deleteV1TenantsByTenantIdAccessKeysByAccessKeyId = <
-  ThrowOnError extends boolean = false,
->(
-  options: Options<DeleteV1TenantsByTenantIdAccessKeysByAccessKeyIdData, ThrowOnError>,
+export const deleteS3AccessKey = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteS3AccessKeyData, ThrowOnError>,
 ) =>
   (options.client ?? client).delete<
-    DeleteV1TenantsByTenantIdAccessKeysByAccessKeyIdResponses,
-    DeleteV1TenantsByTenantIdAccessKeysByAccessKeyIdErrors,
+    DeleteS3AccessKeyResponses,
+    DeleteS3AccessKeyErrors,
     ThrowOnError
-  >({ url: '/v1/tenants/{tenantId}/access_keys/{accessKeyId}', ...options });
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}/access_keys/{accessKeyId}',
+    ...options,
+  });
 
 /**
- * Get access key
+ * Get S3 access key
  *
- * Returns a single access key for the given tenant
+ * Returns a single S3 access key for the given tenant
  */
-export const getV1TenantsByTenantIdAccessKeysByAccessKeyId = <ThrowOnError extends boolean = false>(
-  options: Options<GetV1TenantsByTenantIdAccessKeysByAccessKeyIdData, ThrowOnError>,
+export const getS3AccessKey = <ThrowOnError extends boolean = false>(
+  options: Options<GetS3AccessKeyData, ThrowOnError>,
 ) =>
-  (options.client ?? client).get<
-    GetV1TenantsByTenantIdAccessKeysByAccessKeyIdResponses,
-    GetV1TenantsByTenantIdAccessKeysByAccessKeyIdErrors,
-    ThrowOnError
-  >({ url: '/v1/tenants/{tenantId}/access_keys/{accessKeyId}', ...options });
+  (options.client ?? client).get<GetS3AccessKeyResponses, GetS3AccessKeyErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}/access_keys/{accessKeyId}',
+    ...options,
+  });
 
 /**
  * List buckets
  *
  * Returns the list of active buckets for the given tenant
  */
-export const getV1TenantsByTenantIdBucket = <ThrowOnError extends boolean = false>(
-  options: Options<GetV1TenantsByTenantIdBucketData, ThrowOnError>,
+export const listBuckets = <ThrowOnError extends boolean = false>(
+  options: Options<ListBucketsData, ThrowOnError>,
 ) =>
-  (options.client ?? client).get<
-    GetV1TenantsByTenantIdBucketResponses,
-    GetV1TenantsByTenantIdBucketErrors,
-    ThrowOnError
-  >({ url: '/v1/tenants/{tenantId}/bucket', ...options });
+  (options.client ?? client).get<ListBucketsResponses, ListBucketsErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}/buckets',
+    ...options,
+  });
 
 /**
  * Create bucket
  *
  * Creates a new bucket for the given tenant
  */
-export const postV1TenantsByTenantIdBucket = <ThrowOnError extends boolean = false>(
-  options: Options<PostV1TenantsByTenantIdBucketData, ThrowOnError>,
+export const createBucket = <ThrowOnError extends boolean = false>(
+  options: Options<CreateBucketData, ThrowOnError>,
 ) =>
-  (options.client ?? client).post<
-    PostV1TenantsByTenantIdBucketResponses,
-    PostV1TenantsByTenantIdBucketErrors,
-    ThrowOnError
-  >({
-    url: '/v1/tenants/{tenantId}/bucket',
+  (options.client ?? client).post<CreateBucketResponses, CreateBucketErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}/buckets',
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -274,29 +363,26 @@ export const postV1TenantsByTenantIdBucket = <ThrowOnError extends boolean = fal
  *
  * Returns bucket details for the given tenant and bucket name
  */
-export const getV1TenantsByTenantIdBucketByBucketName = <ThrowOnError extends boolean = false>(
-  options: Options<GetV1TenantsByTenantIdBucketByBucketNameData, ThrowOnError>,
+export const getBucketInfo = <ThrowOnError extends boolean = false>(
+  options: Options<GetBucketInfoData, ThrowOnError>,
 ) =>
-  (options.client ?? client).get<
-    GetV1TenantsByTenantIdBucketByBucketNameResponses,
-    GetV1TenantsByTenantIdBucketByBucketNameErrors,
-    ThrowOnError
-  >({ url: '/v1/tenants/{tenantId}/bucket/{bucketName}', ...options });
+  (options.client ?? client).get<GetBucketInfoResponses, GetBucketInfoErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}/buckets/{bucketName}',
+    ...options,
+  });
 
 /**
  * Edit bucket
  *
  * Updates bucket configuration (currently only default retention for object lock buckets)
  */
-export const putV1TenantsByTenantIdBucketByBucketName = <ThrowOnError extends boolean = false>(
-  options: Options<PutV1TenantsByTenantIdBucketByBucketNameData, ThrowOnError>,
+export const editBucket = <ThrowOnError extends boolean = false>(
+  options: Options<EditBucketData, ThrowOnError>,
 ) =>
-  (options.client ?? client).put<
-    PutV1TenantsByTenantIdBucketByBucketNameResponses,
-    PutV1TenantsByTenantIdBucketByBucketNameErrors,
-    ThrowOnError
-  >({
-    url: '/v1/tenants/{tenantId}/bucket/{bucketName}',
+  (options.client ?? client).put<EditBucketResponses, EditBucketErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}/buckets/{bucketName}',
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -309,17 +395,12 @@ export const putV1TenantsByTenantIdBucketByBucketName = <ThrowOnError extends bo
  *
  * Creates a server-side clone of an object in the given bucket
  */
-export const postV1TenantsByTenantIdBucketByBucketNameCloneObject = <
-  ThrowOnError extends boolean = false,
->(
-  options: Options<PostV1TenantsByTenantIdBucketByBucketNameCloneObjectData, ThrowOnError>,
+export const cloneObject = <ThrowOnError extends boolean = false>(
+  options: Options<CloneObjectData, ThrowOnError>,
 ) =>
-  (options.client ?? client).post<
-    PostV1TenantsByTenantIdBucketByBucketNameCloneObjectResponses,
-    PostV1TenantsByTenantIdBucketByBucketNameCloneObjectErrors,
-    ThrowOnError
-  >({
-    url: '/v1/tenants/{tenantId}/bucket/{bucketName}/clone_object',
+  (options.client ?? client).post<CloneObjectResponses, CloneObjectErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}/buckets/{bucketName}/clone_object',
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -332,11 +413,11 @@ export const postV1TenantsByTenantIdBucketByBucketNameCloneObject = <
  *
  * Returns summary metrics for the given tenant
  */
-export const getV1TenantsByTenantIdMetrics = <ThrowOnError extends boolean = false>(
-  options: Options<GetV1TenantsByTenantIdMetricsData, ThrowOnError>,
+export const getTenantMetrics = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantMetricsData, ThrowOnError>,
 ) =>
-  (options.client ?? client).get<
-    GetV1TenantsByTenantIdMetricsResponses,
-    GetV1TenantsByTenantIdMetricsErrors,
-    ThrowOnError
-  >({ url: '/v1/tenants/{tenantId}/metrics', ...options });
+  (options.client ?? client).get<GetTenantMetricsResponses, GetTenantMetricsErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/tenants/{tenantId}/metrics',
+    ...options,
+  });

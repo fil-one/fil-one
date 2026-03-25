@@ -41,6 +41,26 @@
       },
       "type": "object"
     },
+    "buckets.PaginatedListBucketsResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/buckets.ListBucketsResponse"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "common.ReturnMessage": {
       "properties": {
         "message": {
@@ -225,6 +245,9 @@
     },
     "models.BackofficeEnvironmentResponse": {
       "properties": {
+        "apiUrl": {
+          "type": "string"
+        },
         "auth0Audience": {
           "type": "string"
         },
@@ -239,6 +262,28 @@
         },
         "tracingUrl": {
           "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "models.ComponentSetupStatus": {
+      "properties": {
+        "lastSetupStep": {
+          "$ref": "#/definitions/models.SetupStep"
+        }
+      },
+      "type": "object"
+    },
+    "models.ComponentsStatus": {
+      "properties": {
+        "auth": {
+          "$ref": "#/definitions/models.ComponentSetupStatus"
+        },
+        "compute": {
+          "$ref": "#/definitions/models.ComponentSetupStatus"
+        },
+        "s3": {
+          "$ref": "#/definitions/models.ComponentSetupStatus"
         }
       },
       "type": "object"
@@ -367,17 +412,17 @@
     },
     "models.PaginatedPartnerListResponse": {
       "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/models.PartnerBaseResponse"
+          },
+          "type": "array"
+        },
         "page": {
           "type": "integer"
         },
         "pageSize": {
           "type": "integer"
-        },
-        "partners": {
-          "items": {
-            "$ref": "#/definitions/models.PartnerBaseResponse"
-          },
-          "type": "array"
         },
         "totalCount": {
           "type": "integer"
@@ -387,17 +432,17 @@
     },
     "models.PaginatedS3CredentialResponse": {
       "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/models.S3CredentialBase"
+          },
+          "type": "array"
+        },
         "page": {
           "type": "integer"
         },
         "pageSize": {
           "type": "integer"
-        },
-        "s3Credentials": {
-          "items": {
-            "$ref": "#/definitions/models.S3CredentialBase"
-          },
-          "type": "array"
         },
         "totalCount": {
           "type": "integer"
@@ -407,17 +452,17 @@
     },
     "models.PaginatedTenantsResponse": {
       "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/models.TenantWithMetricsManagementResponse"
+          },
+          "type": "array"
+        },
         "page": {
           "type": "integer"
         },
         "pageSize": {
           "type": "integer"
-        },
-        "tenants": {
-          "items": {
-            "$ref": "#/definitions/models.TenantWithMetricsManagementResponse"
-          },
-          "type": "array"
         },
         "totalCount": {
           "type": "integer"
@@ -427,6 +472,12 @@
     },
     "models.PaginatedUserResponse": {
       "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/models.UserResponse"
+          },
+          "type": "array"
+        },
         "page": {
           "type": "integer"
         },
@@ -435,18 +486,18 @@
         },
         "totalCount": {
           "type": "integer"
-        },
-        "users": {
-          "items": {
-            "$ref": "#/definitions/models.UserResponse"
-          },
-          "type": "array"
         }
       },
       "type": "object"
     },
     "models.PaginatedWarmTierCredentialResponse": {
       "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/models.WarmTierCredentialBase"
+          },
+          "type": "array"
+        },
         "page": {
           "type": "integer"
         },
@@ -455,12 +506,6 @@
         },
         "totalCount": {
           "type": "integer"
-        },
-        "warmTierCredentials": {
-          "items": {
-            "$ref": "#/definitions/models.WarmTierCredentialBase"
-          },
-          "type": "array"
         }
       },
       "type": "object"
@@ -531,11 +576,20 @@
     },
     "models.RegionListResponse": {
       "properties": {
-        "regions": {
+        "items": {
           "items": {
             "$ref": "#/definitions/models.RegionListBase"
           },
           "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
         }
       },
       "type": "object"
@@ -605,14 +659,14 @@
         "bucketSizeLimit": {
           "type": "integer"
         },
+        "components": {
+          "$ref": "#/definitions/models.ComponentsStatus"
+        },
         "createdAt": {
           "type": "string"
         },
         "id": {
           "type": "string"
-        },
-        "lastSetupStep": {
-          "$ref": "#/definitions/models.SetupStep"
         },
         "name": {
           "type": "string"
@@ -637,11 +691,11 @@
     },
     "models.TenantSetupResponse": {
       "properties": {
+        "components": {
+          "$ref": "#/definitions/models.ComponentsStatus"
+        },
         "id": {
           "type": "string"
-        },
-        "lastSetupStep": {
-          "$ref": "#/definitions/models.SetupStep"
         }
       },
       "type": "object"
@@ -677,6 +731,9 @@
         "bucketSizeLimit": {
           "type": "integer"
         },
+        "components": {
+          "$ref": "#/definitions/models.ComponentsStatus"
+        },
         "createdAt": {
           "type": "string"
         },
@@ -685,9 +742,6 @@
         },
         "keyCount": {
           "type": "integer"
-        },
-        "lastSetupStep": {
-          "$ref": "#/definitions/models.SetupStep"
         },
         "name": {
           "type": "string"
@@ -732,11 +786,20 @@
     },
     "models.ThemeListResponse": {
       "properties": {
-        "themes": {
+        "items": {
           "items": {
             "$ref": "#/definitions/models.ThemeResponseBase"
           },
           "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
         }
       },
       "type": "object"
@@ -884,22 +947,40 @@
     },
     "models.TokenListBackOfficeResponse": {
       "properties": {
-        "tokens": {
+        "items": {
           "items": {
             "$ref": "#/definitions/models.TokenBackOfficeResponseBase"
           },
           "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
         }
       },
       "type": "object"
     },
     "models.TokenListPortalResponse": {
       "properties": {
-        "tokens": {
+        "items": {
           "items": {
             "$ref": "#/definitions/models.TokenPortalResponse"
           },
           "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
         }
       },
       "type": "object"
@@ -1014,17 +1095,17 @@
     },
     "roles.PaginatedRoleResponse": {
       "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/roles.RoleResponse"
+          },
+          "type": "array"
+        },
         "page": {
           "type": "integer"
         },
         "pageSize": {
           "type": "integer"
-        },
-        "roles": {
-          "items": {
-            "$ref": "#/definitions/roles.RoleResponse"
-          },
-          "type": "array"
         },
         "totalCount": {
           "type": "integer"
@@ -1068,6 +1149,26 @@
       },
       "type": "object"
     },
+    "users.PaginatedMemberListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/users.MemberResponse"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "users.RegisterParams": {
       "properties": {
         "email": {
@@ -1094,6 +1195,7 @@
     "/analytics/v1/{partnerId}/buckets/{bucketName}/operations": {
       "get": {
         "description": "Returns S3 operation metrics for a bucket in the given time range, optionally resampled by window duration and grouped by tags",
+        "operationId": "GetBucketOperationMetrics",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1170,7 +1272,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get bucket operation metrics",
@@ -1180,6 +1282,7 @@
     "/analytics/v1/{partnerId}/buckets/{bucketName}/storage": {
       "get": {
         "description": "Returns storage metrics for a bucket in the given time range, optionally resampled by window duration",
+        "operationId": "GetBucketStorageMetrics",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1244,7 +1347,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get bucket storage metrics",
@@ -1254,6 +1357,7 @@
     "/analytics/v1/{partnerId}/tenants/{tenantId}/operations": {
       "get": {
         "description": "Returns S3 operation metrics for a tenant in the given time range, optionally resampled by window duration and grouped by tags",
+        "operationId": "GetTenantOperationMetrics",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1324,7 +1428,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get tenant operation metrics",
@@ -1334,6 +1438,7 @@
     "/analytics/v1/{partnerId}/tenants/{tenantId}/storage": {
       "get": {
         "description": "Returns storage metrics for a tenant in the given time range, optionally resampled by window duration",
+        "operationId": "GetTenantStorageMetrics",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1398,7 +1503,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get tenant storage metrics",
@@ -1408,6 +1513,7 @@
     "/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens": {
       "get": {
         "description": "Returns a list of all tokens for a tenant",
+        "operationId": "ListTenantTokens",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1422,6 +1528,20 @@
             "name": "tenantId",
             "required": true,
             "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
           }
         ],
         "produces": ["application/json"],
@@ -1441,7 +1561,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List tenant tokens",
@@ -1450,6 +1570,7 @@
       "post": {
         "consumes": ["application/json"],
         "description": "Creates a new token for a tenant",
+        "operationId": "CreateTenantToken",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1489,6 +1610,12 @@
               "$ref": "#/definitions/common.ReturnMessage"
             }
           },
+          "409": {
+            "description": "Token with this name already exists",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
           "500": {
             "description": "Error while creating token",
             "schema": {
@@ -1498,7 +1625,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Create tenant token",
@@ -1508,6 +1635,7 @@
     "/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens/{tokenId}": {
       "delete": {
         "description": "Deletes a tenant token by ID",
+        "operationId": "DeleteTenantToken",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1550,7 +1678,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Delete tenant token",
@@ -1558,6 +1686,7 @@
       },
       "get": {
         "description": "Returns a tenant token by ID",
+        "operationId": "GetTenantToken",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1604,7 +1733,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get tenant token",
@@ -1614,6 +1743,7 @@
     "/auth/v1/partners/{partnerId}/tokens": {
       "get": {
         "description": "Returns a list of all tokens for a partner",
+        "operationId": "ListTokens",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1621,6 +1751,20 @@
             "name": "partnerId",
             "required": true,
             "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
           }
         ],
         "produces": ["application/json"],
@@ -1640,7 +1784,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List tokens",
@@ -1649,6 +1793,7 @@
       "post": {
         "consumes": ["application/json"],
         "description": "Creates a new token for a partner",
+        "operationId": "CreateToken",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1696,7 +1841,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Create token",
@@ -1706,6 +1851,7 @@
     "/auth/v1/partners/{partnerId}/tokens/{tokenId}": {
       "delete": {
         "description": "Deletes a token by ID for a partner",
+        "operationId": "DeleteToken",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1741,7 +1887,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Delete token",
@@ -1749,6 +1895,7 @@
       },
       "get": {
         "description": "Returns a token by ID for a partner",
+        "operationId": "GetToken",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1788,7 +1935,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get token",
@@ -1798,6 +1945,7 @@
     "/partners/{partnerId}/regions": {
       "get": {
         "description": "Returns a list of regions for the partner",
+        "operationId": "ListPartnerRegions",
         "parameters": [
           {
             "description": "Partner ID",
@@ -1805,6 +1953,20 @@
             "name": "partnerId",
             "required": true,
             "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
           }
         ],
         "produces": ["application/json"],
@@ -1824,7 +1986,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List partner regions",
@@ -1834,6 +1996,23 @@
     "/regions": {
       "get": {
         "description": "Returns a list of all regions (bypasses partner scoping)",
+        "operationId": "ListAllRegions",
+        "parameters": [
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
+          }
+        ],
         "produces": ["application/json"],
         "responses": {
           "200": {
@@ -1851,7 +2030,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List all regions",
@@ -1861,6 +2040,7 @@
     "/v1/buckets/{bucketName}/owner": {
       "get": {
         "description": "Returns the owner information for a specific bucket",
+        "operationId": "GetBucketOwner",
         "parameters": [
           {
             "description": "Bucket name",
@@ -1899,7 +2079,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get bucket owner",
@@ -1909,6 +2089,7 @@
     "/v1/environment": {
       "get": {
         "description": "Returns environment configuration for the backoffice web application, including Auth0 settings",
+        "operationId": "GetEnvironment",
         "produces": ["application/json"],
         "responses": {
           "200": {
@@ -1925,6 +2106,7 @@
     "/v1/partner": {
       "get": {
         "description": "Returns details of the authenticated partner",
+        "operationId": "GetMyPartner",
         "produces": ["application/json"],
         "responses": {
           "200": {
@@ -1948,7 +2130,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get current partner",
@@ -1958,6 +2140,7 @@
     "/v1/partners": {
       "get": {
         "description": "Returns a paginated list of all partners",
+        "operationId": "ListPartners",
         "parameters": [
           {
             "default": 1,
@@ -1967,7 +2150,7 @@
             "type": "integer"
           },
           {
-            "default": 10,
+            "default": 20,
             "description": "Page size",
             "in": "query",
             "name": "pageSize",
@@ -1991,7 +2174,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List partners",
@@ -2001,6 +2184,7 @@
     "/v1/partners/{partnerId}": {
       "get": {
         "description": "Returns details of a specific partner by ID",
+        "operationId": "GetPartner",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2033,7 +2217,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get partner",
@@ -2043,6 +2227,7 @@
     "/v1/partners/{partnerId}/config": {
       "get": {
         "description": "Returns the configuration for the partner",
+        "operationId": "GetConfig",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2069,7 +2254,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get partner config",
@@ -2078,6 +2263,7 @@
       "put": {
         "consumes": ["application/json"],
         "description": "Updates the configuration for the partner",
+        "operationId": "UpdateConfig",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2121,7 +2307,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Update partner config",
@@ -2131,6 +2317,7 @@
     "/v1/partners/{partnerId}/regions/{regionId}": {
       "get": {
         "description": "Returns details of a specific region by ID",
+        "operationId": "GetRegion",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2170,7 +2357,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get region",
@@ -2180,6 +2367,7 @@
     "/v1/partners/{partnerId}/tenants": {
       "get": {
         "description": "Returns a paginated list of tenants for the partner",
+        "operationId": "ListTenants",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2196,7 +2384,7 @@
             "type": "integer"
           },
           {
-            "default": 10,
+            "default": 20,
             "description": "Page size",
             "in": "query",
             "name": "pageSize",
@@ -2220,7 +2408,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List partner tenants",
@@ -2229,6 +2417,7 @@
       "post": {
         "consumes": ["application/json"],
         "description": "Creates a new tenant for the partner. Created tenant must be initialized with the Setup endpoint before it's ready to use.",
+        "operationId": "CreateTenant",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2276,7 +2465,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Create tenant",
@@ -2286,6 +2475,7 @@
     "/v1/partners/{partnerId}/tenants/{tenantId}": {
       "get": {
         "description": "Returns details of a specific tenant by ID",
+        "operationId": "GetTenant",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2325,7 +2515,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get tenant",
@@ -2334,6 +2524,7 @@
     },
     "/v1/partners/{partnerId}/tenants/{tenantId}/buckets": {
       "get": {
+        "operationId": "ListBuckets",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2348,16 +2539,27 @@
             "name": "tenantId",
             "required": true,
             "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
           }
         ],
         "responses": {
           "200": {
             "description": "Tenant buckets",
             "schema": {
-              "items": {
-                "$ref": "#/definitions/buckets.ListBucketsResponse"
-              },
-              "type": "array"
+              "$ref": "#/definitions/buckets.PaginatedListBucketsResponse"
             }
           },
           "500": {
@@ -2369,7 +2571,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List buckets of given tenant",
@@ -2379,6 +2581,7 @@
     "/v1/partners/{partnerId}/tenants/{tenantId}/members": {
       "get": {
         "description": "Returns users that are members of given org",
+        "operationId": "ListTenantMembers",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2393,16 +2596,27 @@
             "name": "tenantId",
             "required": true,
             "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
           }
         ],
         "responses": {
           "200": {
             "description": "Tenant members",
             "schema": {
-              "items": {
-                "$ref": "#/definitions/users.MemberResponse"
-              },
-              "type": "array"
+              "$ref": "#/definitions/users.PaginatedMemberListResponse"
             }
           },
           "404": {
@@ -2426,7 +2640,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List tenant members",
@@ -2436,6 +2650,7 @@
     "/v1/partners/{partnerId}/tenants/{tenantId}/setup": {
       "post": {
         "description": "Initiates the setup process for a tenant",
+        "operationId": "SetupTenant",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2475,7 +2690,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Setup tenant",
@@ -2486,6 +2701,7 @@
       "post": {
         "consumes": ["application/json"],
         "description": "Updates the status of a tenant",
+        "operationId": "SetTenantStatus",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2531,7 +2747,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Update tenant status",
@@ -2541,6 +2757,7 @@
     "/v1/partners/{partnerId}/themes": {
       "get": {
         "description": "Returns a list of themes for the partner",
+        "operationId": "ListThemes",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2548,6 +2765,20 @@
             "name": "partnerId",
             "required": true,
             "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
           }
         ],
         "produces": ["application/json"],
@@ -2567,7 +2798,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List themes",
@@ -2576,6 +2807,7 @@
       "post": {
         "consumes": ["application/json"],
         "description": "Creates a new Aurora Portal theme for the partner",
+        "operationId": "CreateTheme",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2623,7 +2855,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Create theme",
@@ -2633,6 +2865,7 @@
     "/v1/partners/{partnerId}/themes/{themeId}": {
       "delete": {
         "description": "Deletes a theme by ID",
+        "operationId": "DeleteTheme",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2674,7 +2907,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Delete theme",
@@ -2682,6 +2915,7 @@
       },
       "get": {
         "description": "Returns details of a specific theme by ID",
+        "operationId": "GetTheme",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2721,7 +2955,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get theme",
@@ -2730,6 +2964,7 @@
       "put": {
         "consumes": ["application/json"],
         "description": "Updates an Aurora Portal theme for the partner",
+        "operationId": "UpdateTheme",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2790,7 +3025,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Update theme",
@@ -2800,6 +3035,7 @@
     "/v1/partners/{partnerId}/users": {
       "get": {
         "description": "Returns a paginated list of users for the partner",
+        "operationId": "ListUsers",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2816,7 +3052,7 @@
             "type": "integer"
           },
           {
-            "default": 10,
+            "default": 20,
             "description": "Page size",
             "in": "query",
             "name": "pageSize",
@@ -2846,7 +3082,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List users",
@@ -2855,6 +3091,7 @@
       "post": {
         "consumes": ["application/json"],
         "description": "Creates a new user and assigns them to a tenant. If a user with provided email already exists, creation will be skipped and that user will be assigned to a tenant.",
+        "operationId": "CreateUser",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2902,7 +3139,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Create user",
@@ -2912,6 +3149,7 @@
     "/v1/partners/{partnerId}/users/{userId}": {
       "get": {
         "description": "Returns details of a specific user including tenants and roles",
+        "operationId": "GetUser",
         "parameters": [
           {
             "description": "Partner ID",
@@ -2951,7 +3189,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get user",
@@ -2961,6 +3199,7 @@
     "/v1/roles": {
       "get": {
         "description": "Returns a paginated list of all Aurora Portal roles",
+        "operationId": "ListPortalRoles",
         "parameters": [
           {
             "default": 1,
@@ -2970,7 +3209,7 @@
             "type": "integer"
           },
           {
-            "default": 10,
+            "default": 20,
             "description": "Page size",
             "in": "query",
             "name": "pageSize",
@@ -2994,7 +3233,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List roles",
@@ -3004,6 +3243,7 @@
     "/v1/s3_credentials": {
       "get": {
         "description": "Returns a paginated list of all S3 credentials",
+        "operationId": "ListS3Credentials",
         "parameters": [
           {
             "default": 1,
@@ -3013,7 +3253,7 @@
             "type": "integer"
           },
           {
-            "default": 10,
+            "default": 20,
             "description": "Page size",
             "in": "query",
             "name": "pageSize",
@@ -3037,7 +3277,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List S3 credentials",
@@ -3047,6 +3287,7 @@
     "/v1/s3_credentials/{s3CredentialId}": {
       "get": {
         "description": "Returns details of a specific S3 credential by ID",
+        "operationId": "GetS3Credential",
         "parameters": [
           {
             "description": "S3 Credential ID",
@@ -3079,7 +3320,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get S3 credential",
@@ -3089,6 +3330,7 @@
     "/v1/warm_tier_credentials": {
       "get": {
         "description": "Returns a paginated list of all warm tier credentials",
+        "operationId": "ListWarmTierCredentials",
         "parameters": [
           {
             "default": 1,
@@ -3098,7 +3340,7 @@
             "type": "integer"
           },
           {
-            "default": 10,
+            "default": 20,
             "description": "Page size",
             "in": "query",
             "name": "pageSize",
@@ -3122,7 +3364,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "List warm tier credentials",
@@ -3132,6 +3374,7 @@
     "/v1/warm_tier_credentials/{warmTierCredentialId}": {
       "get": {
         "description": "Returns details of a specific warm tier credential by ID",
+        "operationId": "GetWarmTierCredential",
         "parameters": [
           {
             "description": "Warm Tier Credential ID",
@@ -3164,7 +3407,7 @@
         },
         "security": [
           {
-            "Bearer": []
+            "ApiKeyAuth": []
           }
         ],
         "summary": "Get warm tier credential",
@@ -3174,10 +3417,10 @@
   },
   "schemes": [],
   "securityDefinitions": {
-    "Bearer": {
-      "description": "Type \"Bearer\" followed by a space and then your token.",
+    "ApiKeyAuth": {
+      "description": "API Key Authentication",
       "in": "header",
-      "name": "Authorization",
+      "name": "X-Api-Key",
       "type": "apiKey"
     }
   },

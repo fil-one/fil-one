@@ -3,7 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.js';
-import { getConnectionType } from '../lib/auth0-management.js';
+import { getConnectionType, initiatePasswordReset } from '../lib/auth0-management.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -31,25 +31,12 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  const domain = process.env.AUTH0_DOMAIN!;
   const secrets = getAuthSecrets();
 
-  const resp = await fetch(`https://${domain}/dbconnections/change_password`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id: secrets.AUTH0_CLIENT_ID,
-      email,
-      connection: 'Username-Password-Authentication',
-    }),
-  });
-
-  if (!resp.ok) {
-    const body = await resp.text();
-    console.error('[change-password] Auth0 change_password failed', {
-      status: resp.status,
-      body,
-    });
+  try {
+    await initiatePasswordReset(email, secrets.AUTH0_CLIENT_ID);
+  } catch (error) {
+    console.error('[change-password] Auth0 change_password failed', { error });
     return new ResponseBuilder()
       .status(502)
       .body<ErrorResponse>({ message: 'Failed to initiate password change.' })

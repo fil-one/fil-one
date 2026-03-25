@@ -19,8 +19,8 @@ vi.mock('sst', () => ({
     UserInfoTable: { name: 'UserInfoTable' },
     Auth0ClientId: { value: 'test-client-id' },
     Auth0ClientSecret: { value: 'test-client-secret' },
-    Auth0MgmtClientId: { value: 'test-mgmt-client-id' },
-    Auth0MgmtClientSecret: { value: 'test-mgmt-client-secret' },
+    Auth0MgmtRuntimeClientId: { value: 'test-mgmt-runtime-client-id' },
+    Auth0MgmtRuntimeClientSecret: { value: 'test-mgmt-runtime-client-secret' },
     AuroraBackofficeToken: { value: 'test-aurora-token' },
   },
 }));
@@ -240,5 +240,35 @@ describe('PATCH /api/me/profile handler', () => {
     const result = await handler(profileEvent({ orgName: 'A' }), buildContext());
 
     expect(result).toMatchObject({ statusCode: 400 });
+  });
+
+  it('returns 400 for invalid JSON body', async () => {
+    const event = buildEvent({
+      cookies: [`hs_access_token=valid-token`, `hs_csrf_token=${MOCK_CSRF_TOKEN}`],
+      userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, email: MOCK_EMAIL },
+      body: 'not-json{',
+      method: 'PATCH',
+      rawPath: '/api/me/profile',
+    });
+    event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
+
+    const result = await handler(event, buildContext());
+
+    expect(result).toMatchObject({ statusCode: 400 });
+  });
+
+  it('still returns 200 when email is updated but sendVerificationEmail fails', async () => {
+    mockSendVerificationEmail.mockRejectedValue(new Error('Auth0 verification email failed'));
+
+    const result = await handler(profileEvent({ email: 'new@example.com' }), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({ email: 'new@example.com' }),
+    });
+    expect(mockUpdateAuth0User).toHaveBeenCalledWith(MOCK_SUB, {
+      email: 'new@example.com',
+      email_verified: false,
+    });
   });
 });

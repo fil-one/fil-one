@@ -6,8 +6,10 @@ import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 // Mocks
 // ---------------------------------------------------------------------------
 
+const mockInitiatePasswordReset = vi.fn();
 vi.mock('../lib/auth0-management.js', () => ({
   getConnectionType: (sub: string) => sub.split('|')[0] ?? 'unknown',
+  initiatePasswordReset: (...args: unknown[]) => mockInitiatePasswordReset(...args),
 }));
 
 vi.mock('sst', () => ({
@@ -15,8 +17,8 @@ vi.mock('sst', () => ({
     UserInfoTable: { name: 'UserInfoTable' },
     Auth0ClientId: { value: 'test-client-id' },
     Auth0ClientSecret: { value: 'test-client-secret' },
-    Auth0MgmtClientId: { value: 'test-mgmt-client-id' },
-    Auth0MgmtClientSecret: { value: 'test-mgmt-client-secret' },
+    Auth0MgmtRuntimeClientId: { value: 'test-mgmt-runtime-client-id' },
+    Auth0MgmtRuntimeClientSecret: { value: 'test-mgmt-runtime-client-secret' },
     AuroraBackofficeToken: { value: 'test-aurora-token' },
   },
 }));
@@ -34,9 +36,6 @@ vi.mock('jose', () => ({
   decodeJwt: vi.fn(),
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
 }));
-
-const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -110,12 +109,11 @@ describe('POST /api/me/change-password handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    mockFetch.mockReset();
+    mockInitiatePasswordReset.mockResolvedValue(undefined);
   });
 
   it('sends password reset email for database connection users', async () => {
     setupAuthMocks();
-    mockFetch.mockResolvedValue({ ok: true, text: () => Promise.resolve('') });
 
     const result = await handler(changePasswordEvent(), buildContext());
 
@@ -123,19 +121,7 @@ describe('POST /api/me/change-password handler', () => {
       statusCode: 200,
       body: JSON.stringify({ message: 'Password reset email sent.' }),
     });
-
-    // Verify the Auth0 change_password endpoint was called
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://test.auth0.com/dbconnections/change_password',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({
-          client_id: 'test-client-id',
-          email: MOCK_EMAIL,
-          connection: 'Username-Password-Authentication',
-        }),
-      }),
-    );
+    expect(mockInitiatePasswordReset).toHaveBeenCalledWith(MOCK_EMAIL, 'test-client-id');
   });
 
   it('returns 400 for social login users', async () => {
@@ -144,16 +130,12 @@ describe('POST /api/me/change-password handler', () => {
     const result = await handler(changePasswordEvent(MOCK_SOCIAL_SUB), buildContext());
 
     expect(result).toMatchObject({ statusCode: 400 });
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockInitiatePasswordReset).not.toHaveBeenCalled();
   });
 
   it('returns 502 when Auth0 change_password fails', async () => {
     setupAuthMocks();
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 500,
-      text: () => Promise.resolve('Internal Server Error'),
-    });
+    mockInitiatePasswordReset.mockRejectedValue(new Error('Auth0 change_password failed (500)'));
 
     const result = await handler(changePasswordEvent(), buildContext());
 

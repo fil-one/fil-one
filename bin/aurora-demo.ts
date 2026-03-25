@@ -1,8 +1,8 @@
 import {
   createClient as createPortalClient,
-  getV1TenantsByTenantIdAccessKeys,
-  getV1TenantsByTenantIdAccessKeysByAccessKeyId,
-  postV1TenantsByTenantIdAccessKeys,
+  createS3AccessKey,
+  getS3AccessKey,
+  listS3AccessKeys,
 } from '../packages/aurora-portal-client/src/index.ts';
 
 const tenantId = requireEnv('AURORA_TENANT_ID');
@@ -57,7 +57,7 @@ const {
   data: data1,
   error: error1,
   response: response1,
-} = await postV1TenantsByTenantIdAccessKeys({
+} = await createS3AccessKey({
   client,
   path: { tenantId },
   body: accessBody,
@@ -74,7 +74,7 @@ console.log('First key created:', JSON.stringify(data1, null, 2));
 // ── Step 2a: List all access keys ────────────────────────────────────
 
 console.log('\n=== Listing access keys ===');
-const { data: listData } = await getV1TenantsByTenantIdAccessKeys({
+const { data: listData } = await listS3AccessKeys({
   client,
   path: { tenantId },
   throwOnError: false,
@@ -85,12 +85,11 @@ console.log('List response:', JSON.stringify(listData, null, 2));
 
 const auroraKeyId = data1?.accessKey?.id;
 console.log('\n=== Get key by internal id:', auroraKeyId, '===');
-const { data: getById, response: getByIdResp } =
-  await getV1TenantsByTenantIdAccessKeysByAccessKeyId({
-    client,
-    path: { tenantId, accessKeyId: auroraKeyId! },
-    throwOnError: false,
-  });
+const { data: getById, response: getByIdResp } = await getS3AccessKey({
+  client,
+  path: { tenantId, accessKeyId: auroraKeyId! },
+  throwOnError: false,
+});
 console.log('Status:', getByIdResp.status);
 console.log('Response:', JSON.stringify(getById, null, 2));
 
@@ -98,12 +97,11 @@ console.log('Response:', JSON.stringify(getById, null, 2));
 
 const s3KeyId = data1?.accessKey?.accessKeyId;
 console.log('\n=== Get key by S3 accessKeyId:', s3KeyId, '===');
-const { data: getByS3, response: getByS3Resp } =
-  await getV1TenantsByTenantIdAccessKeysByAccessKeyId({
-    client,
-    path: { tenantId, accessKeyId: s3KeyId! },
-    throwOnError: false,
-  });
+const { data: getByS3, response: getByS3Resp } = await getS3AccessKey({
+  client,
+  path: { tenantId, accessKeyId: s3KeyId! },
+  throwOnError: false,
+});
 console.log('Status:', getByS3Resp.status);
 console.log('Response:', JSON.stringify(getByS3, null, 2));
 
@@ -114,7 +112,7 @@ const {
   data: data2,
   error: error2,
   response: response2,
-} = await postV1TenantsByTenantIdAccessKeys({
+} = await createS3AccessKey({
   client,
   path: { tenantId },
   body: accessBody,

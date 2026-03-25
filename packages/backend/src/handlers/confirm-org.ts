@@ -3,13 +3,12 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { ConfirmOrgResponse, ErrorResponse } from '@filone/shared';
-import { ConfirmOrgSchema } from '@filone/shared';
 import { Resource } from 'sst';
 import { createBillingTrial } from '../lib/create-billing-trial.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { triggerTenantSetup } from '../lib/trigger-tenant-setup.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
-import { sanitizeOrgName } from '../lib/org-name-validation.js';
+import { ConfirmOrgBackendSchema } from '../lib/org-name-validation.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -19,9 +18,17 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId, userId, email } = getUserInfo(event);
-  const body = JSON.parse(event.body ?? '{}') as unknown;
+  let body: unknown;
+  try {
+    body = JSON.parse(event.body ?? '{}');
+  } catch {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: 'Invalid JSON body' })
+      .build();
+  }
 
-  const parsed = ConfirmOrgSchema.safeParse(body);
+  const parsed = ConfirmOrgBackendSchema.safeParse(body);
   if (!parsed.success) {
     return new ResponseBuilder()
       .status(400)
@@ -29,7 +36,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  const sanitized = sanitizeOrgName(parsed.data.orgName);
+  const sanitized = parsed.data.orgName;
 
   // Update org profile: set name and mark as confirmed; return all attributes.
   // ConditionExpression ensures we don't accidentally upsert a missing org record.

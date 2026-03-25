@@ -21,7 +21,7 @@ vi.mock('../lib/aurora-portal.js', () => ({
 const mockGetBucket = vi.fn();
 vi.mock('@filone/aurora-portal-client', () => ({
   createClient: () => 'mock-client',
-  getV1TenantsByTenantIdBucketByBucketName: (...args: unknown[]) => mockGetBucket(...args),
+  getBucketInfo: (...args: unknown[]) => mockGetBucket(...args),
 }));
 
 process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu';

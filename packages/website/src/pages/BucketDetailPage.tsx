@@ -428,6 +428,8 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                               <tr
                                 key={`object:${entry.object.key}`}
                                 className="border-b border-zinc-100 last:border-0 cursor-pointer hover:bg-zinc-50"
+                                role="button"
+                                tabIndex={0}
                                 onClick={() =>
                                   void navigate({
                                     to: '/buckets/$bucketName/objects',
@@ -435,6 +437,15 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                                     search: { key: entry.object.key },
                                   })
                                 }
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    void navigate({
+                                      to: '/buckets/$bucketName/objects',
+                                      params: { bucketName },
+                                      search: { key: entry.object.key },
+                                    });
+                                  }
+                                }}
                               >
                                 <td className="px-4 py-3">
                                   <div

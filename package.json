@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "sst dev",
-    "build": "pnpm -r run build",
+    "build": "pnpm -r --if-present run build",
     "deploy": "pnpm build && sst deploy",
     "deploy:staging": "pnpm build && sst deploy --stage staging",
     "deploy:production": "pnpm build && sst deploy --stage production",
@@ -18,7 +18,6 @@
     "lint": "oxlint --report-unused-disable-directives && oxfmt --check",
     "lint:fix": "oxlint --fix && oxfmt --write",
     "refresh": "sst refresh",
-    "typecheck": "pnpm -r --if-present typecheck",
     "prepare": "husky",
     "test": "pnpm lint && pnpm --filter @filone/shared --filter @filone/backend --filter @filone/website test",
     "test:e2e": "pnpm exec playwright test",

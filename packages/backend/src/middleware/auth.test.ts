@@ -221,7 +221,7 @@ describe('authMiddleware', () => {
       const result = await before(request);
 
       expect(result).toBeUndefined();
-      // Email comes from JWT only — no DB fallback. ID token failed so email is undefined.
+      // ID token failed so email is null/undefined — email comes from claims only, not DB.
       expect(getUserInfoFromEvent(event)).toStrictEqual({
         sub: MOCK_SUB,
         userId: existingUserId,
@@ -527,6 +527,96 @@ describe('authMiddleware', () => {
       });
     });
 
+    it('forceRefresh=1 falls back to existing access token when refresh exchange fails', async () => {
+      const existingUserId = 'fallback-user-uuid';
+      const existingOrgId = 'fallback-org-uuid';
+
+      // Access token verify succeeds (used in fallback path); no ID token cookie so
+      // extractIdTokenClaims returns early without calling jwtVerify
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } });
+
+      // Refresh exchange fails
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        text: async () => 'invalid_grant',
+      });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+          },
+        });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({
+          Item: {
+            orgConfirmed: { BOOL: true },
+            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+          },
+        });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_refresh_token=bad-refresh`],
+        queryStringParameters: { forceRefresh: '1' },
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toMatchObject({
+        sub: MOCK_SUB,
+        userId: existingUserId,
+        orgId: existingOrgId,
+      });
+    });
+
+    it('forceRefresh=1 falls back to existing access token when no refresh token present', async () => {
+      const existingUserId = 'fallback-user-uuid';
+      const existingOrgId = 'fallback-org-uuid';
+
+      // Access token verify succeeds (fallback); no ID token so extractIdTokenClaims returns defaults
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } });
+      mockFetch.mockResolvedValue({ ok: false, status: 401, text: async () => '' });
+
+      // Use call-order mocking: first GetItem is IDENTITY lookup, second is ORG PROFILE lookup
+      ddbMock
+        .on(GetItemCommand)
+        .resolvesOnce({ Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } } })
+        .resolvesOnce({
+          Item: {
+            orgConfirmed: { BOOL: true },
+            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+          },
+        });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`],
+        queryStringParameters: { forceRefresh: '1' },
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toMatchObject({
+        sub: MOCK_SUB,
+        userId: existingUserId,
+        orgId: existingOrgId,
+      });
+    });
+
     it('returns 401 when access token expired and refresh fails', async () => {
       mockJwtVerify.mockRejectedValue(new Error('token expired'));
 
@@ -644,6 +734,51 @@ describe('authMiddleware', () => {
       expect(cookies[4]).toMatch(
         /^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/,
       );
+    });
+
+    it('always refreshes when _forceTokenRefresh is set, even when before-hook already set newTokens', async () => {
+      const { after } = authMiddleware();
+      const response: APIGatewayProxyStructuredResultV2 = { statusCode: 200, body: '{}' };
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: 'post-handler-at',
+          id_token: 'post-handler-it',
+          refresh_token: 'post-handler-rt',
+        }),
+      });
+      mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
+
+      const event = buildEvent();
+      (
+        event.requestContext as APIGatewayProxyEventV2['requestContext'] & {
+          _forceTokenRefresh?: boolean;
+        }
+      )._forceTokenRefresh = true;
+
+      const request: AuthRequest = {
+        event,
+        context: {} as Context,
+        response,
+        error: undefined,
+        internal: {
+          // Before-hook already produced tokens (e.g. access token was expired and refreshed)
+          newTokens: {
+            access_token: 'before-hook-at',
+            id_token: 'before-hook-it',
+            refresh_token: 'before-hook-rt',
+          },
+          refreshToken: 'before-hook-rt',
+        },
+      };
+
+      await after(request);
+
+      // Cookies should reflect the post-handler refresh, not the before-hook tokens
+      const cookies = response.cookies ?? [];
+      expect(cookies[0]).toContain('post-handler-at');
+      expect(cookies[1]).toContain('post-handler-it');
     });
 
     it('does not modify response when no newTokens', async () => {

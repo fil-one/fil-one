@@ -21,7 +21,7 @@ vi.mock('../lib/aurora-portal.js', () => ({
 const mockListBuckets = vi.fn();
 vi.mock('@filone/aurora-portal-client', () => ({
   createClient: () => 'mock-client',
-  getV1TenantsByTenantIdBucket: (...args: unknown[]) => mockListBuckets(...args),
+  listBuckets: (...args: unknown[]) => mockListBuckets(...args),
 }));
 
 process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu';
@@ -65,7 +65,7 @@ describe('list-buckets baseHandler', () => {
     mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
     mockListBuckets.mockResolvedValue({
       data: {
-        buckets: [
+        items: [
           { name: 'my-bucket', createdAt: '2026-01-01T00:00:00.000Z' },
           { name: 'other-bucket', createdAt: '2026-01-02T00:00:00.000Z' },
         ],
@@ -100,7 +100,7 @@ describe('list-buckets baseHandler', () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
     mockListBuckets.mockResolvedValue({
-      data: { buckets: [] },
+      data: { items: [] },
       error: undefined,
     });
 
@@ -166,7 +166,7 @@ describe('list-buckets baseHandler', () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
     mockListBuckets.mockResolvedValue({
-      data: { buckets: [] },
+      data: { items: [] },
       error: undefined,
     });
 

@@ -99,15 +99,18 @@ pnpx sst secret set Auth0ClientId <value> [--stage <stage>]
 pnpx sst secret set Auth0ClientSecret <value> [--stage <stage>]
 pnpx sst secret set Auth0MgmtClientId <value> [--stage <stage>]
 pnpx sst secret set Auth0MgmtClientSecret <value> [--stage <stage>]
+pnpx sst secret set Auth0MgmtRuntimeClientId <value> [--stage <stage>]
+pnpx sst secret set Auth0MgmtRuntimeClientSecret <value> [--stage <stage>]
 pnpx sst secret set StripeSecretKey <value> [--stage <stage>]
 pnpx sst secret set StripePriceId <value> [--stage <stage>]
 pnpx sst secret set AuroraBackofficeToken <value> [--stage <stage>]
 pnpx sst secret set SendGridApiKey <value> [--stage <stage>]
+pnpx sst secret set GrafanaLokiAuth '<instanceId>:<apiKey>' [--stage <stage>]
 ```
 
 Omit `--stage` to set for your personal dev stage (defaults to OS username).
 
-The `Auth0MgmtClientId` and `Auth0MgmtClientSecret` are from a **Machine-to-Machine (M2M) application** in Auth0 — see the [Auth0 M2M Setup](#auth0-machine-to-machine-m2m-application) section below. The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below.
+There are two Auth0 M2M credentials with different scopes — see the [Auth0 M2M Setup](#auth0-machine-to-machine-m2m-application) section below. The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below. The `GrafanaLokiAuth` secret is from Grafana Cloud — see the [Observability](#observability) section below.
 
 ## Commands
 
@@ -119,9 +122,8 @@ pnpm run deploy:production      # Deploy to console.fil.one
 pnpm run deploy:infra:staging   # Deploy base infra (OIDC, IAM) to staging
 pnpm run deploy:infra:production # Deploy base infra (OIDC, IAM) to production
 pnpm run remove           # Remove your personal dev stack
-pnpm run lint             # Lint all packages
+pnpm run lint             # Lint and typecheck TypeScript code (via oxlint)
 pnpm run lint:fix         # Lint and auto-fix where possible
-pnpm run typecheck        # tsc --noEmit across all packages
 ```
 
 ```bash
@@ -305,7 +307,11 @@ Note: `read:users` (already granted) covers reading Guardian enrollments. `updat
 
 ### Auth0 Machine-to-Machine (M2M) Application
 
-The deploy automation uses an M2M application to update Auth0 settings programmatically.
+Two separate M2M applications are used to limit the scope of credentials exposed to Lambda functions.
+
+#### Deploy automation (`Auth0MgmtClientId` / `Auth0MgmtClientSecret`)
+
+Used only by the deploy-time setup Lambda to configure Auth0 on each deploy. Not available to runtime Lambda functions.
 
 **One-time setup in Auth0 Dashboard:**
 
@@ -313,14 +319,30 @@ The deploy automation uses an M2M application to update Auth0 settings programma
 2. Choose **Machine to Machine Applications**
 3. Name it something like `Fil.one Deploy Automation`
 4. Authorize it for the **Auth0 Management API** (`https://<tenant>.us.auth0.com/api/v2/`)
-5. Grant these scopes: `read:clients`, `update:clients`, `read:users`, `update:users`, `update:users_app_metadata`, `create:user_tickets`, `delete:users`, `delete:guardian_enrollments`, `create:actions`, `read:actions`, `update:actions`, `read:triggers`, `update:triggers`
+5. Grant these scopes: `read:clients`, `update:clients`, `read:email_provider`, `create:email_provider`, `update:email_provider`, `create:actions`, `read:actions`, `update:actions`, `read:triggers`, `update:triggers`
 6. Copy the **Client ID** and **Client Secret**
-
-Set these as SST secrets:
 
 ```bash
 pnpx sst secret set Auth0MgmtClientId <M2M-client-id> [--stage <stage>]
 pnpx sst secret set Auth0MgmtClientSecret <M2M-client-secret> [--stage <stage>]
+```
+
+#### Runtime user management (`Auth0MgmtRuntimeClientId` / `Auth0MgmtRuntimeClientSecret`)
+
+Used by request-time Lambda handlers (`update-profile`, `resend-verification`, `enroll-mfa`, `disable-mfa`, `delete-mfa-enrollment`) to manage user records, trigger verification emails, and manage MFA enrollments.
+
+**One-time setup in Auth0 Dashboard:**
+
+1. Go to **Applications > Create Application**
+2. Choose **Machine to Machine Applications**
+3. Name it something like `Fil.one Runtime`
+4. Authorize it for the **Auth0 Management API** (`https://<tenant>.us.auth0.com/api/v2/`)
+5. Grant these scopes: `read:users`, `update:users`, `update:users_app_metadata`, `create:user_tickets`, `delete:guardian_enrollments`
+6. Copy the **Client ID** and **Client Secret**
+
+```bash
+pnpx sst secret set Auth0MgmtRuntimeClientId <M2M-client-id> [--stage <stage>]
+pnpx sst secret set Auth0MgmtRuntimeClientSecret <M2M-client-secret> [--stage <stage>]
 ```
 
 ## Stripe (Billing)
@@ -415,7 +437,7 @@ After API changes, update the relevant Swagger spec and regenerate:
 Download the updated Swagger spec from the Aurora Portal API docs and save it to `packages/aurora-portal-client/aurora-portal.swagger.json`:
 
 ```bash
-curl https://portal-ff.dev.aur.lu/api/docs/swagger.json -o packages/aurora-portal-client/aurora-portal.swagger.json
+curl https://portal-ff.dev.aur.lu/api/v1/docs/swagger.json -o packages/aurora-portal-client/aurora-portal.swagger.json && oxfmt
 ```
 
 Reformat the file:
@@ -464,6 +486,23 @@ The full fork at `joemocode-business/filecoin-foundation` tracks the upstream `F
 ```
 
 > **Note**: Several components in `packages/ui` use Next.js-specific APIs (`next/navigation`, `next/image`) or `nuqs` and are not usable as-is in this Vite app. These include `Navigation/*`, `Network/*`, and `Search/Search`. They will be adapted for React Router as needed.
+
+## Observability
+
+Logs are sent to Grafana Cloud. See `docs/architectural-decisions/2026-03-observability-architecture.md` for details.
+
+**Logs**: CloudWatch Logs → Kinesis Firehose → Grafana Cloud Loki.
+
+### Grafana secrets
+
+Generate API keys in Grafana Cloud (grafana.com → your stack → Connections → API keys):
+
+- **GrafanaLokiAuth**: Plain `<instanceId>:<apiKey>` where instanceId is your Loki instance ID (sent as-is in the Firehose `X-Amz-Firehose-Access-Key` header)
+
+```bash
+# GrafanaLokiAuth uses plain text (Firehose access key)
+pnpx sst secret set GrafanaLokiAuth '<instanceId>:<apiKey>' [--stage <stage>]
+```
 
 ## Contracts (`contracts/`)
 

@@ -248,6 +248,12 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
     const userId = result.Item.userId.S;
     const orgId = result.Item.orgId.S;
     const resolvedEmail = email;
+    if (!resolvedEmail) {
+      console.error(
+        '[auth] Existing user authenticated without email claim — ID token verification may have failed',
+        { userId },
+      );
+    }
 
     const { Item: orgItem } = await getDynamoClient().send(
       new GetItemCommand({
@@ -416,6 +422,44 @@ export function authMiddleware() {
         if (blocked) return blocked;
         return; // Continue to handler
       }
+      if (forceRefresh) {
+        console.error(
+          '[auth] forceRefresh requested but token exchange failed, falling back to existing access token',
+        );
+      }
+    } else if (forceRefresh) {
+      console.error(
+        '[auth] forceRefresh requested but no refresh token present, falling back to existing access token',
+      );
+    }
+
+    // Fallback: when forceRefresh fails (no refresh token or exchange error), try the existing
+    // access token rather than returning 401 — this prevents social-provider misconfigurations
+    // or transient refresh failures from locking out users in prod.
+    if (forceRefresh && accessToken) {
+      try {
+        const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
+        const sub = payload.sub!;
+        const idClaims = await extractIdTokenClaims({
+          idToken,
+          jwks,
+          clientId: secrets.AUTH0_CLIENT_ID,
+          issuer,
+        });
+        const blocked = await attachIdentity({
+          event,
+          sub,
+          email: idClaims.email,
+          emailVerified: idClaims.emailVerified,
+          name: idClaims.name,
+        });
+        if (blocked) return blocked;
+        return;
+      } catch (err) {
+        console.warn('[auth] Fallback access token validation failed', {
+          error: (err as Error).message,
+        });
+      }
     }
 
     console.warn('[auth] Returning 401 — no valid tokens');
@@ -436,7 +480,7 @@ export function authMiddleware() {
       }
     )._forceTokenRefresh;
 
-    if (forceRefresh && !newTokens && request.internal.refreshToken) {
+    if (forceRefresh && request.internal.refreshToken) {
       const refreshed = await exchangeRefreshToken(request.internal.refreshToken);
       if (refreshed) {
         newTokens = refreshed;

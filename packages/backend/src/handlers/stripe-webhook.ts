@@ -84,6 +84,11 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         await handleSubscriptionDeleted(tableName, subscription);
         break;
       }
+      case 'customer.updated': {
+        const customer = stripeEvent.data.object as Stripe.Customer;
+        await handleCustomerUpdated(tableName, customer);
+        break;
+      }
       case 'customer.subscription.trial_will_end': {
         const subscription = stripeEvent.data.object as Stripe.Subscription;
         console.log('[stripe-webhook] Trial ending soon for customer:', subscription.customer);
@@ -121,6 +126,50 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
 function getCustomerIdString(customer: string | Stripe.Customer | Stripe.DeletedCustomer): string {
   return typeof customer === 'string' ? customer : customer.id;
+}
+
+async function handleCustomerUpdated(tableName: string, customer: Stripe.Customer): Promise<void> {
+  const userId = customer.metadata?.userId;
+  if (!userId) {
+    throw new Error(`[stripe-webhook] No userId in metadata for customer: ${customer.id}`);
+  }
+
+  const defaultPm = customer.invoice_settings?.default_payment_method;
+  if (!defaultPm) {
+    throw new Error('[stripe-webhook] No default_payment_method on customer.updated');
+  }
+
+  const stripe = getStripeClient();
+  const pm =
+    typeof defaultPm === 'string' ? await stripe.paymentMethods.retrieve(defaultPm) : defaultPm;
+  await updatePaymentMethod(tableName, userId, pm);
+}
+
+async function updatePaymentMethod(
+  tableName: string,
+  userId: string,
+  pm: Stripe.PaymentMethod,
+): Promise<void> {
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: tableName,
+      Key: {
+        pk: { S: `CUSTOMER#${userId}` },
+        sk: { S: 'SUBSCRIPTION' },
+      },
+      UpdateExpression:
+        'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
+      ExpressionAttributeValues: {
+        ':pmId': { S: pm.id },
+        ':last4': { S: pm.card?.last4 ?? '' },
+        ':brand': { S: pm.card?.brand ?? '' },
+        ':expMonth': { N: String(pm.card?.exp_month ?? 0) },
+        ':expYear': { N: String(pm.card?.exp_year ?? 0) },
+        ':now': { S: new Date().toISOString() },
+      },
+      ConditionExpression: 'attribute_exists(pk)',
+    }),
+  );
 }
 
 async function handleSubscriptionUpdate(

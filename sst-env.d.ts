@@ -6,6 +6,10 @@
 
 declare module "sst" {
   export interface Resource {
+    "ActivateSubscription": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "Api": {
       "type": "sst.aws.ApiGatewayV2"
       "url": string
@@ -13,6 +17,10 @@ declare module "sst" {
     "AuroraBackofficeToken": {
       "type": "sst.sst.Secret"
       "value": string
+    }
+    "AuroraTenantSetup": {
+      "name": string
+      "type": "sst.aws.Function"
     }
     "AuroraTenantSetupDlq": {
       "type": "sst.aws.Queue"
@@ -38,9 +46,121 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "Auth0MgmtRuntimeClientId": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "Auth0MgmtRuntimeClientSecret": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "AuthCallback": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "AuthLogout": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "BillingTable": {
       "name": string
       "type": "sst.aws.Dynamo"
+    }
+    "ChangePassword": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "ConfirmOrg": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "CreateAccessKey": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "CreateBucket": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "CreatePortalSession": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "CreateSetupIntent": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "DeleteAccessKey": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "DeleteBucket": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "DeleteObject": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "DownloadObject": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "GetActivity": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "GetBilling": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "GetBucket": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "GetMe": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "GetUsage": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "GrafanaLokiAuth": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "HeadObject": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "ListAccessKeys": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "ListBuckets": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "ListInvoices": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "ListObjects": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "OtelFirehoseBackup": {
+      "name": string
+      "type": "sst.aws.Bucket"
+    }
+    "PresignUpload": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "ResendVerification": {
+      "name": string
+      "type": "sst.aws.Function"
     }
     "SetupIntegrations": {
       "name": string
@@ -53,6 +173,14 @@ declare module "sst" {
     "StripeSecretKey": {
       "type": "sst.sst.Secret"
       "value": string
+    }
+    "StripeWebhook": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "UpdateProfile": {
+      "name": string
+      "type": "sst.aws.Function"
     }
     "UsageReportingOrchestrator": {
       "name": string

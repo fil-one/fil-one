@@ -7,7 +7,7 @@ import { UpdateProfileSchema, isSocialConnection } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
-import { sanitizeOrgName } from '../lib/org-name-validation.js';
+import { SanitizedOrgNameSchema } from '../lib/org-name-validation.js';
 import {
   updateAuth0User,
   sendVerificationEmail,
@@ -21,7 +21,15 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId, sub } = getUserInfo(event);
-  const body = JSON.parse(event.body ?? '{}') as unknown;
+  let body: unknown;
+  try {
+    body = JSON.parse(event.body ?? '{}');
+  } catch {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: 'Invalid JSON body' })
+      .build();
+  }
 
   const parsed = UpdateProfileSchema.safeParse(body);
   if (!parsed.success) {
@@ -58,12 +66,29 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
         .build();
     }
     await updateAuth0User(sub, { email: parsed.data.email, email_verified: false });
-    await sendVerificationEmail(sub);
+    // TODO: sync updated email to Stripe customer profile when we store a separate billing email
+    // https://linear.app/filecoin-foundation/issue/FIL-141/sync-stripe-customer-email-after-auth0-email-verification-via-auth0
+    try {
+      await sendVerificationEmail(sub);
+    } catch (err) {
+      // Email was updated in Auth0 but verification send failed.
+      // Log and continue — the user can resend from the UI.
+      console.error('[update-profile] Failed to send verification email after email update', {
+        error: (err as Error).message,
+      });
+    }
     response.email = parsed.data.email;
   }
 
   if (parsed.data.orgName !== undefined) {
-    const sanitized = sanitizeOrgName(parsed.data.orgName);
+    const sanitizeResult = SanitizedOrgNameSchema.safeParse(parsed.data.orgName);
+    if (!sanitizeResult.success) {
+      return new ResponseBuilder()
+        .status(400)
+        .body<ErrorResponse>({ message: sanitizeResult.error.issues[0].message })
+        .build();
+    }
+    const sanitized = sanitizeResult.data;
 
     await getDynamoClient().send(
       new UpdateItemCommand({

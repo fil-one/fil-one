@@ -16,8 +16,8 @@ vi.mock('sst', () => ({
     UserInfoTable: { name: 'UserInfoTable' },
     Auth0ClientId: { value: 'test-client-id' },
     Auth0ClientSecret: { value: 'test-client-secret' },
-    Auth0MgmtClientId: { value: 'test-mgmt-client-id' },
-    Auth0MgmtClientSecret: { value: 'test-mgmt-client-secret' },
+    Auth0MgmtRuntimeClientId: { value: 'test-mgmt-runtime-client-id' },
+    Auth0MgmtRuntimeClientSecret: { value: 'test-mgmt-runtime-client-secret' },
     AuroraBackofficeToken: { value: 'test-aurora-token' },
   },
 }));
