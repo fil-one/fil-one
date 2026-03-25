@@ -36,12 +36,24 @@ describe('Usage Reporting Worker (direct Lambda invoke)', () => {
     expect(result.functionError).toBeUndefined();
 
     const audit = await getAuditRecord(orgId, reportDate);
-    expect(audit).not.toBeNull();
-    expect(audit!.orgId).toBe(orgId);
-    expect(audit!.subscriptionId).toBe('sub_test_paid');
-    expect(audit!.stripeCustomerId).toBe(cusId);
-    expect(audit!.lockAction).toBe('skipped:paid');
-    expect(audit!.reportDate).toBe(reportDate);
+    expect(audit).toStrictEqual({
+      pk: { S: `ORG#${orgId}` },
+      sk: { S: `USAGE_REPORT#${reportDate}` },
+      orgId: { S: orgId },
+      subscriptionId: { S: 'sub_test_paid' },
+      stripeCustomerId: { S: cusId },
+      currentPeriodStart: { S: expect.any(String) },
+      subscriptionStatus: { S: 'active' },
+      reportDate: { S: reportDate },
+      averageStorageBytesUsed: { N: expect.any(String) },
+      averageStorageGbUsed: { N: expect.any(String) },
+      totalEgressBytes: { N: expect.any(String) },
+      sampleCount: { N: expect.any(String) },
+      reportedToStripe: { BOOL: expect.any(Boolean) },
+      lockAction: { S: 'skipped:paid' },
+      createdAt: { S: expect.any(String) },
+      ttl: { N: expect.any(String) },
+    });
   });
 
   it('trial subscription — enforces limits check', async () => {
@@ -62,10 +74,24 @@ describe('Usage Reporting Worker (direct Lambda invoke)', () => {
       expect(result.functionError).toBeUndefined();
 
       const audit = await getAuditRecord(trialOrgId, trialReportDate);
-      expect(audit).not.toBeNull();
-      expect(audit!.lockAction).toBeDefined();
-      // Low-usage test tenant should be ACTIVE
-      expect(audit!.lockAction).toBe('ACTIVE');
+      expect(audit).toStrictEqual({
+        pk: { S: `ORG#${trialOrgId}` },
+        sk: { S: `USAGE_REPORT#${trialReportDate}` },
+        orgId: { S: trialOrgId },
+        subscriptionId: { S: 'sub_test_trial' },
+        stripeCustomerId: { S: cusId },
+        currentPeriodStart: { S: expect.any(String) },
+        subscriptionStatus: { S: 'trialing' },
+        reportDate: { S: trialReportDate },
+        averageStorageBytesUsed: { N: expect.any(String) },
+        averageStorageGbUsed: { N: expect.any(String) },
+        totalEgressBytes: { N: expect.any(String) },
+        sampleCount: { N: expect.any(String) },
+        reportedToStripe: { BOOL: expect.any(Boolean) },
+        lockAction: { S: 'ACTIVE' },
+        createdAt: { S: expect.any(String) },
+        ttl: { N: expect.any(String) },
+      });
     } finally {
       await deleteAuditRecord(trialOrgId, trialReportDate);
     }

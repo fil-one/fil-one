@@ -1,7 +1,11 @@
 import { Resource } from 'sst';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
-import { PutItemCommand, GetItemCommand, DeleteItemCommand } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
+import {
+  PutItemCommand,
+  GetItemCommand,
+  DeleteItemCommand,
+  AttributeValue,
+} from '@aws-sdk/client-dynamodb';
 import {
   getDynamoClient,
   getBillingTableName,
@@ -102,7 +106,7 @@ export async function deleteUserProfile(orgId: string): Promise<void> {
 export async function getAuditRecord(
   orgId: string,
   reportDate: string,
-): Promise<Record<string, unknown> | null> {
+): Promise<Record<string, AttributeValue> | null> {
   const result = await getDynamoClient().send(
     new GetItemCommand({
       TableName: getBillingTableName(),
@@ -112,7 +116,7 @@ export async function getAuditRecord(
       },
     }),
   );
-  return result.Item ? unmarshall(result.Item) : null;
+  return result.Item ?? null;
 }
 
 export async function deleteAuditRecord(orgId: string, reportDate: string): Promise<void> {
@@ -135,7 +139,7 @@ export async function pollForAuditRecord(
   orgId: string,
   reportDate: string,
   timeoutMs = 120_000,
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, AttributeValue>> {
   return pollUntil(() => getAuditRecord(orgId, reportDate), timeoutMs);
 }
 

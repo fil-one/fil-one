@@ -1,5 +1,5 @@
 import { describe, it, beforeAll, afterAll, expect } from 'vitest';
-import { createTestCustomer, getStripeClient, sleep } from '../helpers.js';
+import { createTestCustomer, getStripeClient } from '../helpers.js';
 import {
   AURORA_TEST_TENANT_ID,
   invokeOrchestrator,
@@ -8,8 +8,8 @@ import {
   seedSubscriptionRecord,
   deleteSubscriptionRecord,
   pollForAuditRecord,
-  getAuditRecord,
   deleteAuditRecord,
+  getAuditRecord,
 } from './helpers.js';
 
 const reportDate = new Date().toISOString().split('T')[0];
@@ -79,36 +79,26 @@ describe('Usage Reporting Orchestrator (direct Lambda invoke)', () => {
     expect(result.functionError).toBeUndefined();
 
     // Poll for both audit records (orchestrator invokes workers async)
-    const [auditA, auditB] = await Promise.all([
+    const [auditA, auditB, auditD] = await Promise.all([
       pollForAuditRecord(orgA, reportDate),
       pollForAuditRecord(orgB, reportDate),
+      pollForAuditRecord(orgD, reportDate),
     ]);
 
-    expect(auditA.orgId).toBe(orgA);
-    expect(auditA.reportDate).toBe(reportDate);
+    const auditC = await getAuditRecord(orgC, reportDate);
 
-    expect(auditB.orgId).toBe(orgB);
-    expect(auditB.reportDate).toBe(reportDate);
-  });
+    expect(auditA.orgId.S).toBe(orgA);
+    expect(auditA.reportDate.S).toBe(reportDate);
 
-  it('skips org without profile', async () => {
-    // Orchestrator was already invoked in previous test.
-    // Wait to ensure async workers have had time to complete.
-    await sleep(30_000);
+    expect(auditB.orgId.S).toBe(orgB);
+    expect(auditB.reportDate.S).toBe(reportDate);
 
-    const audit = await getAuditRecord(orgC, reportDate);
-    expect(audit).toBeNull();
-  });
-
-  it('deduplicates by orgId', async () => {
-    // Orchestrator was already invoked — poll for orgD's audit record
-    const audit = await pollForAuditRecord(orgD, reportDate);
-
-    expect(audit.orgId).toBe(orgD);
-    expect(audit.reportDate).toBe(reportDate);
+    expect(auditC).toBeNull();
 
     // Only 1 audit record should exist (dedup means only 1 worker invocation)
     // The record existing at all confirms processing; dedup is validated by
     // the orchestrator's internal logic (it skips the second subscription)
+    expect(auditD.orgId.S).toBe(orgD);
+    expect(auditD.reportDate.S).toBe(reportDate);
   });
 });
