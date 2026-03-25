@@ -2,22 +2,21 @@ import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { ErrorResponse, PresignUploadResponse } from '@filone/shared';
-import { PresignUploadSchema } from '@filone/shared';
+import type { ErrorResponse, ObjectMetadataResponse } from '@filone/shared';
+import { HeadObjectQuerySchema } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraS3Credentials, getPresignedPutObjectUrl } from '../lib/aurora-s3-client.js';
+import { getAuroraS3Credentials, headObject, getObjectRetention } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
+import { isNoSuchBucketError, isNotFoundError } from '../lib/s3-errors.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
 const dynamo = getDynamoClient();
-const PRESIGN_EXPIRY_SECONDS = 300;
 
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -30,25 +29,15 @@ export async function baseHandler(
       .build();
   }
 
-  let body: unknown;
-  try {
-    body = JSON.parse(event.body ?? '{}');
-  } catch {
+  const queryParsed = HeadObjectQuerySchema.safeParse(event.queryStringParameters ?? {});
+  if (!queryParsed.success) {
     return new ResponseBuilder()
       .status(400)
-      .body<ErrorResponse>({ message: 'Invalid JSON body' })
+      .body<ErrorResponse>({ message: queryParsed.error.issues[0].message })
       .build();
   }
 
-  const parsed = PresignUploadSchema.safeParse(body);
-  if (!parsed.success) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: parsed.error.issues[0].message })
-      .build();
-  }
-
-  const { key, contentType, fileName } = parsed.data;
+  const { key: objectKey } = queryParsed.data;
 
   const { orgId } = getUserInfo(event);
 
@@ -75,31 +64,44 @@ export async function baseHandler(
   const stage = process.env.FILONE_STAGE!;
   const gatewayUrl = process.env.AURORA_S3_GATEWAY_URL!;
 
-  const metadata: Record<string, string> = { filename: fileName };
-  if (parsed.data.description) {
-    metadata.description = parsed.data.description;
-  }
-  if (parsed.data.tags && parsed.data.tags.length > 0) {
-    metadata.tags = JSON.stringify(parsed.data.tags);
-  }
-
   const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
-  const url = await getPresignedPutObjectUrl({
-    endpointUrl: gatewayUrl,
-    credentials,
-    bucket: bucketName,
-    key,
-    expiresIn: PRESIGN_EXPIRY_SECONDS,
-    contentType,
-    metadata,
-  });
+  try {
+    const [result, retention] = await Promise.all([
+      headObject(gatewayUrl, credentials, bucketName, objectKey),
+      getObjectRetention(gatewayUrl, credentials, bucketName, objectKey),
+    ]);
 
-  return new ResponseBuilder().status(200).body<PresignUploadResponse>({ url, key }).build();
+    const response: ObjectMetadataResponse = {
+      key: result.key,
+      sizeBytes: result.sizeBytes,
+      lastModified: result.lastModified,
+      ...(result.etag && { etag: result.etag }),
+      ...(result.contentType && { contentType: result.contentType }),
+      metadata: result.metadata ?? {},
+      ...(result.filCid && { filCid: result.filCid }),
+      ...(retention && { retention }),
+    };
+
+    return new ResponseBuilder().status(200).body<ObjectMetadataResponse>(response).build();
+  } catch (err) {
+    if (isNoSuchBucketError(err)) {
+      return new ResponseBuilder()
+        .status(404)
+        .body<ErrorResponse>({ message: 'Bucket not found' })
+        .build();
+    }
+    if (isNotFoundError(err)) {
+      return new ResponseBuilder()
+        .status(404)
+        .body<ErrorResponse>({ message: 'Object not found' })
+        .build();
+    }
+    throw err;
+  }
 }
 
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
-  .use(csrfMiddleware())
-  .use(subscriptionGuardMiddleware(AccessLevel.Write))
+  .use(subscriptionGuardMiddleware(AccessLevel.Read))
   .use(errorHandlerMiddleware());

@@ -444,6 +444,13 @@ export default $config({
       auroraS3GatewayEnv,
       auroraS3GatewayPermissions,
     );
+    addRoute(
+      'GET',
+      '/api/buckets/{name}/objects/metadata',
+      'head-object',
+      auroraS3GatewayEnv,
+      auroraS3GatewayPermissions,
+    );
 
     // ── Auth routes ──────────────────────────────────────────────────
     const allowedRedirectOrigins = allowedOrigins.join(',');

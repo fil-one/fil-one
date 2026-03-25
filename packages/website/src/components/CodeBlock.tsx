@@ -16,7 +16,7 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
   return (
     <div
       className={clsx(
-        'relative rounded-lg bg-zinc-950 p-4 font-mono text-sm text-zinc-300',
+        'relative rounded-lg border border-zinc-200 bg-zinc-100/60 p-4 font-mono text-[11px] leading-5 text-zinc-800/80',
         className,
       )}
     >
@@ -27,7 +27,7 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
           type="button"
           onClick={() => void copy(code)}
           aria-label={copied ? 'Copied!' : 'Copy code'}
-          className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-1 focus:ring-offset-zinc-950"
+          className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-200 hover:text-zinc-700 focus:outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-1"
         >
           <CopyIcon width={14} height={14} />
           <span>{copied ? 'Copied!' : 'Copy'}</span>

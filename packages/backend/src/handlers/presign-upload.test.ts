@@ -137,6 +137,47 @@ describe('presign-upload baseHandler', () => {
     expect(result.statusCode).toBe(400);
   });
 
+  it('includes tags in metadata when provided', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetAuroraS3Credentials.mockResolvedValue({
+      accessKeyId: 'AKIA_CONSOLE',
+      secretAccessKey: 's3_secret',
+    });
+    mockGetPresignedPutObjectUrl.mockResolvedValue(
+      'https://s3.dev.aur.lu/my-bucket/photos/cat.jpg?sig=abc',
+    );
+
+    const event = buildEvent({
+      body: JSON.stringify({
+        key: 'photos/cat.jpg',
+        contentType: 'image/jpeg',
+        fileName: 'cat.jpg',
+        tags: ['vacation', 'pets'],
+      }),
+      userInfo: USER_INFO,
+      rawPath: '/api/buckets/my-bucket/objects/presign',
+    });
+    event.pathParameters = { name: 'my-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body as string);
+    expect(body).toStrictEqual({
+      url: 'https://s3.dev.aur.lu/my-bucket/photos/cat.jpg?sig=abc',
+      key: 'photos/cat.jpg',
+    });
+
+    expect(mockGetPresignedPutObjectUrl).toHaveBeenCalledWith({
+      endpointUrl: 'https://s3.dev.aur.lu',
+      credentials: { accessKeyId: 'AKIA_CONSOLE', secretAccessKey: 's3_secret' },
+      bucket: 'my-bucket',
+      key: 'photos/cat.jpg',
+      expiresIn: 300,
+      contentType: 'image/jpeg',
+      metadata: { filename: 'cat.jpg', tags: JSON.stringify(['vacation', 'pets']) },
+    });
+  });
+
   it('returns 503 when org setup is not complete', async () => {
     ddbMock.on(GetItemCommand).resolves({
       Item: {
