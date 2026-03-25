@@ -91,8 +91,9 @@ function stubAuth0Fetch(
     web_origins: [] as string[],
     initiate_login_uri: '',
   },
-  emailProviderStatus = 200,
+  emailProvider: { patchStatus?: number; postStatus?: number } = {},
 ) {
+  const { patchStatus = 200, postStatus = 200 } = emailProvider;
   capturedCfnBody = undefined;
   capturedAuth0PatchBody = undefined;
   capturedEmailProviderBody = undefined;
@@ -115,10 +116,17 @@ function stubAuth0Fetch(
       capturedAuth0PatchBody = JSON.parse(init.body!);
       return new Response('{}', { status: 200 });
     }
-    if (urlStr.includes('/api/v2/emails/provider') && init?.method === 'PUT') {
+    if (urlStr.includes('/api/v2/emails/provider') && init?.method === 'PATCH') {
       capturedEmailProviderBody = JSON.parse(init.body!);
-      if (emailProviderStatus !== 200) {
-        return new Response('Provider config error', { status: emailProviderStatus });
+      if (patchStatus !== 200) {
+        return new Response('Provider config error', { status: patchStatus });
+      }
+      return new Response('{}', { status: 200 });
+    }
+    if (urlStr.includes('/api/v2/emails/provider') && init?.method === 'POST') {
+      capturedEmailProviderBody = JSON.parse(init.body!);
+      if (postStatus !== 200) {
+        return new Response('Provider create error', { status: postStatus });
       }
       return new Response('{}', { status: 200 });
     }
@@ -159,6 +167,7 @@ describe('setup-integrations', () => {
       expect(mockStripeWebhookEndpoints.create).toHaveBeenCalledWith({
         url: 'https://app.example.com/api/stripe/webhook',
         enabled_events: [
+          'customer.updated',
           'customer.subscription.created',
           'customer.subscription.updated',
           'customer.subscription.deleted',
@@ -682,7 +691,7 @@ describe('setup-integrations', () => {
       expect(capturedEmailProviderBody).toBeUndefined();
     });
 
-    it('sends FAILED CFN response when email provider setup fails', async () => {
+    it('sends FAILED CFN response when email provider PATCH fails with non-404 error', async () => {
       ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
       ssmMock.on(PutParameterCommand).resolves({});
       mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
@@ -691,7 +700,7 @@ describe('setup-integrations', () => {
         secret: 'whsec_1',
       });
 
-      stubAuth0Fetch(undefined, 422);
+      stubAuth0Fetch(undefined, { patchStatus: 422 });
 
       await handler(
         buildCfnEvent({
@@ -706,7 +715,82 @@ describe('setup-integrations', () => {
 
       expect(capturedCfnBody).toEqual({
         Status: 'FAILED',
-        Reason: 'Auth0 email provider setup failed (422): Provider config error',
+        Reason: 'Auth0 email provider update failed (422): Provider config error',
+        PhysicalResourceId: 'filone-setup-staging',
+        ...BASE_CFN_FIELDS,
+      });
+    });
+
+    it('falls back to POST when PATCH returns 404 (provider not yet configured)', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      stubAuth0Fetch(undefined, { patchStatus: 404 });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://staging.filone.ai',
+            Stage: 'staging',
+          },
+        }),
+      );
+
+      expect(capturedCfnBody).toEqual({
+        Status: 'SUCCESS',
+        PhysicalResourceId: 'filone-setup-staging',
+        ...BASE_CFN_FIELDS,
+        Data: { webhookSecret: 'whsec_1', webhookEndpointId: 'we_1' },
+      });
+
+      expect(capturedEmailProviderBody).toEqual({
+        name: 'sendgrid',
+        enabled: true,
+        credentials: { api_key: 'SG.test-api-key' },
+        default_from_address: 'no-reply+staging@filone.ai',
+      });
+
+      // Verify both PATCH and POST were called on the email provider endpoint
+      const emailProviderCalls = mockFetch.mock.calls.filter(([url]) =>
+        String(url).includes('/api/v2/emails/provider'),
+      );
+      expect(emailProviderCalls).toHaveLength(2);
+      expect(emailProviderCalls[0][1]?.method).toBe('PATCH');
+      expect(emailProviderCalls[1][1]?.method).toBe('POST');
+    });
+
+    it('sends FAILED CFN response when POST fallback also fails', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      stubAuth0Fetch(undefined, { patchStatus: 404, postStatus: 500 });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://staging.filone.ai',
+            Stage: 'staging',
+          },
+        }),
+      );
+
+      expect(capturedCfnBody).toEqual({
+        Status: 'FAILED',
+        Reason: 'Auth0 email provider create failed (500): Provider create error',
         PhysicalResourceId: 'filone-setup-staging',
         ...BASE_CFN_FIELDS,
       });

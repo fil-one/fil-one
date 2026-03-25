@@ -5,10 +5,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { Bucket, ErrorResponse, GetBucketResponse } from '@filone/shared';
 import { S3_REGION } from '@filone/shared';
 import { Resource } from 'sst';
-import {
-  createClient,
-  getV1TenantsByTenantIdBucketByBucketName,
-} from '@filone/aurora-portal-client';
+import { createClient, getBucketInfo } from '@filone/aurora-portal-client';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getAuroraPortalApiKey } from '../lib/aurora-portal.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
@@ -60,7 +57,7 @@ export async function baseHandler(
     headers: { 'X-Api-Key': apiKey },
   });
 
-  const { data, error, response } = await getV1TenantsByTenantIdBucketByBucketName({
+  const { data, error, response } = await getBucketInfo({
     client,
     path: { tenantId: auroraTenantId, bucketName },
     throwOnError: false,

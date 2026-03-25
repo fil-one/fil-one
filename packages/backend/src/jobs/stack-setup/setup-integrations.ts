@@ -34,6 +34,7 @@ interface Auth0Client {
 // ── Constants ─────────────────────────────────────────────────────────
 
 const WEBHOOK_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
+  'customer.updated',
   'customer.subscription.created',
   'customer.subscription.updated',
   'customer.subscription.deleted',
@@ -288,23 +289,41 @@ async function setupAuth0EmailProvider(domain: string, isProduction: boolean): P
   const token = await getAuth0ManagementToken(domain);
   const fromAddress = isProduction ? 'no-reply@filone.ai' : 'no-reply+staging@filone.ai';
 
-  const resp = await fetch(`https://${domain}/api/v2/emails/provider`, {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      name: 'sendgrid',
-      enabled: true,
-      credentials: { api_key: Resource.SendGridApiKey.value },
-      default_from_address: fromAddress,
-    }),
+  const payload = {
+    name: 'sendgrid',
+    enabled: true,
+    credentials: { api_key: Resource.SendGridApiKey.value },
+    default_from_address: fromAddress,
+  };
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+
+  // Try PATCH (update existing) first; if 404, the provider doesn't exist yet — POST to create.
+  const patchResp = await fetch(`https://${domain}/api/v2/emails/provider`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(payload),
   });
 
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Auth0 email provider setup failed (${resp.status}): ${body}`);
+  if (patchResp.status === 404) {
+    const postResp = await fetch(`https://${domain}/api/v2/emails/provider`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!postResp.ok) {
+      const body = await postResp.text();
+      throw new Error(`Auth0 email provider create failed (${postResp.status}): ${body}`);
+    }
+    return;
+  }
+
+  if (!patchResp.ok) {
+    const body = await patchResp.text();
+    throw new Error(`Auth0 email provider update failed (${patchResp.status}): ${body}`);
   }
 }
 

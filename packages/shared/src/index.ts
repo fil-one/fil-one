@@ -89,4 +89,6 @@ export type {
   CreateSetupIntentResponse,
   ActivateSubscriptionResponse,
   CreatePortalSessionResponse,
+  Invoice,
+  ListInvoicesResponse,
 } from './api/billing.js';

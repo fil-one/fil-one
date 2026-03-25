@@ -21,11 +21,13 @@ vi.mock('sst', () => ({
 
 const mockConstructEvent = vi.fn();
 const mockCustomersRetrieve = vi.fn();
+const mockPaymentMethodsRetrieve = vi.fn();
 
 vi.mock('../lib/stripe-client.js', () => ({
   getStripeClient: () => ({
     webhooks: { constructEvent: mockConstructEvent },
     customers: { retrieve: mockCustomersRetrieve },
+    paymentMethods: { retrieve: mockPaymentMethodsRetrieve },
   }),
   getWebhookSecret: vi.fn().mockResolvedValue('whsec_test_fake'),
 }));
@@ -101,6 +103,40 @@ function setupDeletedCustomerRetrieve() {
   });
 }
 
+const MOCK_PM_ID = 'pm_test_abc';
+const MOCK_PM_LAST4 = '3184';
+const MOCK_PM_BRAND = 'visa';
+const MOCK_PM_EXP_MONTH = 12;
+const MOCK_PM_EXP_YEAR = 2030;
+
+function mockPaymentMethod(overrides?: Record<string, unknown>) {
+  return {
+    id: MOCK_PM_ID,
+    card: {
+      last4: MOCK_PM_LAST4,
+      brand: MOCK_PM_BRAND,
+      exp_month: MOCK_PM_EXP_MONTH,
+      exp_year: MOCK_PM_EXP_YEAR,
+    },
+    ...overrides,
+  };
+}
+
+function mockCustomerObject(overrides?: Record<string, unknown>) {
+  return {
+    id: MOCK_CUSTOMER_ID,
+    metadata: { userId: MOCK_USER_ID },
+    invoice_settings: {
+      default_payment_method: mockPaymentMethod(),
+    },
+    ...overrides,
+  };
+}
+
+function setupPaymentMethodsRetrieve() {
+  mockPaymentMethodsRetrieve.mockResolvedValue(mockPaymentMethod());
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -113,6 +149,7 @@ describe('stripe-webhook handler', () => {
     ddbMock.on(DeleteItemCommand).resolves({});
     mockConstructEvent.mockReset();
     mockCustomersRetrieve.mockReset();
+    mockPaymentMethodsRetrieve.mockReset();
   });
 
   // -----------------------------------------------------------------------
@@ -456,6 +493,96 @@ describe('stripe-webhook handler', () => {
         }),
       );
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 4b. customer.updated
+  // -----------------------------------------------------------------------
+  describe('customer.updated', () => {
+    it('updates payment method in DynamoDB when default_payment_method is expanded object', async () => {
+      setupStripeEvent('customer.updated', mockCustomerObject());
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      expect(updateCalls[0].args[0].input).toStrictEqual({
+        TableName: TABLE_NAME,
+        Key: {
+          pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
+          sk: { S: 'SUBSCRIPTION' },
+        },
+        UpdateExpression:
+          'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
+        ExpressionAttributeValues: {
+          ':pmId': { S: MOCK_PM_ID },
+          ':last4': { S: MOCK_PM_LAST4 },
+          ':brand': { S: MOCK_PM_BRAND },
+          ':expMonth': { N: String(MOCK_PM_EXP_MONTH) },
+          ':expYear': { N: String(MOCK_PM_EXP_YEAR) },
+          ':now': { S: expect.any(String) },
+        },
+        ConditionExpression: 'attribute_exists(pk)',
+      });
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('fetches payment method via paymentMethods.retrieve when default_payment_method is a string ID', async () => {
+      setupStripeEvent(
+        'customer.updated',
+        mockCustomerObject({
+          invoice_settings: { default_payment_method: MOCK_PM_ID },
+        }),
+      );
+      setupPaymentMethodsRetrieve();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(mockPaymentMethodsRetrieve).toHaveBeenCalledWith(MOCK_PM_ID);
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      expect(updateCalls[0].args[0].input).toEqual(
+        expect.objectContaining({
+          ExpressionAttributeValues: expect.objectContaining({
+            ':last4': { S: MOCK_PM_LAST4 },
+          }),
+        }),
+      );
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('throws when customer has no userId in metadata', async () => {
+      setupStripeEvent('customer.updated', mockCustomerObject({ metadata: {} }));
+
+      const result = await handler(buildWebhookEvent('{}'));
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
+
+      const deleteCalls = ddbMock.commandCalls(DeleteItemCommand);
+      expect(deleteCalls).toHaveLength(1);
+    });
+
+    it('throws when invoice_settings.default_payment_method is null', async () => {
+      setupStripeEvent(
+        'customer.updated',
+        mockCustomerObject({
+          invoice_settings: { default_payment_method: null },
+        }),
+      );
+
+      const result = await handler(buildWebhookEvent('{}'));
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
+
+      const deleteCalls = ddbMock.commandCalls(DeleteItemCommand);
+      expect(deleteCalls).toHaveLength(1);
     });
   });
 

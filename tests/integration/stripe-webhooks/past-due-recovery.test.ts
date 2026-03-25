@@ -43,6 +43,11 @@ describe('Past Due Recovery (invoice.payment_succeeded with canceledAt)', () => 
       subscriptionStatus: { S: 'active' },
       updatedAt: { S: expect.any(String) },
       lastPaymentAt: { S: expect.any(String) },
+      paymentMethodBrand: { S: 'visa' },
+      paymentMethodId: { S: expect.any(String) },
+      paymentMethodLast4: { S: '4242' },
+      paymentMethodExpYear: { N: expect.any(String) },
+      paymentMethodExpMonth: { N: expect.any(String) },
     });
   });
 });
