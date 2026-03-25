@@ -4,8 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit",
     "test": "vitest run --coverage"
   },
   "dependencies": {
