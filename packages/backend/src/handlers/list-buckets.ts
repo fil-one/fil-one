@@ -5,7 +5,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { Bucket, ListBucketsResponse, ErrorResponse } from '@filone/shared';
 import { S3_REGION } from '@filone/shared';
 import { Resource } from 'sst';
-import { createClient, getV1TenantsByTenantIdBucket } from '@filone/aurora-portal-client';
+import { createClient, listBuckets } from '@filone/aurora-portal-client';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getAuroraPortalApiKey } from '../lib/aurora-portal.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
@@ -52,7 +52,7 @@ export async function baseHandler(
     headers: { 'X-Api-Key': apiKey },
   });
 
-  const { data, error } = await getV1TenantsByTenantIdBucket({
+  const { data, error } = await listBuckets({
     client,
     path: { tenantId: auroraTenantId },
     throwOnError: false,
@@ -64,7 +64,7 @@ export async function baseHandler(
     });
   }
 
-  const buckets: Bucket[] = (data?.buckets ?? [])
+  const buckets: Bucket[] = (data?.items ?? [])
     .filter((b): b is typeof b & { name: string; createdAt: string } => !!b.name && !!b.createdAt)
     .map((b) => ({
       name: b.name,

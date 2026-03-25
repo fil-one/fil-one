@@ -16,15 +16,11 @@ const mockDeleteAccessKey = vi.fn((_options: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/aurora-portal-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
-  postV1TenantsByTenantIdBucket: (options: Record<string, unknown>) => mockPostBucket(options),
-  postV1TenantsByTenantIdAccessKeys: (options: Record<string, unknown>) =>
-    mockPostAccessKeys(options),
-  getV1TenantsByTenantIdAccessKeys: (options: Record<string, unknown>) =>
-    mockGetAccessKeys(options),
-  getV1TenantsByTenantIdAccessKeysByAccessKeyId: (options: Record<string, unknown>) =>
-    mockGetAccessKeyById(options),
-  deleteV1TenantsByTenantIdAccessKeysByAccessKeyId: (options: Record<string, unknown>) =>
-    mockDeleteAccessKey(options),
+  createBucket: (options: Record<string, unknown>) => mockPostBucket(options),
+  createS3AccessKey: (options: Record<string, unknown>) => mockPostAccessKeys(options),
+  listS3AccessKeys: (options: Record<string, unknown>) => mockGetAccessKeys(options),
+  getS3AccessKey: (options: Record<string, unknown>) => mockGetAccessKeyById(options),
+  deleteS3AccessKey: (options: Record<string, unknown>) => mockDeleteAccessKey(options),
 }));
 
 process.env.AURORA_PORTAL_URL = 'https://api.portal.test.example.com/api';
@@ -406,7 +402,7 @@ describe('findAuroraAccessKeyByName', () => {
     setupSsmMock();
     mockGetAccessKeys.mockResolvedValue({
       data: {
-        accessKeys: [
+        items: [
           { id: 'key-1', name: 'other-key' },
           { id: 'key-2', name: 'my-key' },
         ],
@@ -438,7 +434,7 @@ describe('findAuroraAccessKeyByName', () => {
     setupSsmMock();
     mockGetAccessKeys.mockResolvedValue({
       data: {
-        accessKeys: [{ id: 'key-1', name: 'other-key' }],
+        items: [{ id: 'key-1', name: 'other-key' }],
       },
       error: undefined,
     });
@@ -465,7 +461,7 @@ describe('findAuroraAccessKeyByName', () => {
     setupSsmMock();
     mockGetAccessKeys.mockResolvedValue({
       data: {
-        accessKeys: [{ id: 'key-2', name: 'my-key' }],
+        items: [{ id: 'key-2', name: 'my-key' }],
       },
       error: undefined,
     });

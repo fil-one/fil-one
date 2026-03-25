@@ -25,14 +25,11 @@ const mockGetStorage = vi.fn((_options: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/aurora-backoffice-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
-  postV1PartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockPostTenants(options),
-  getV1PartnersByPartnerIdTenants: (options: Record<string, unknown>) => mockGetTenants(options),
-  getAnalyticsV1ByPartnerIdTenantsByTenantIdStorage: (options: Record<string, unknown>) =>
-    mockGetStorage(options),
-  postV1PartnersByPartnerIdTenantsByTenantIdSetup: (options: Record<string, unknown>) =>
-    mockPostSetup(options),
-  postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens: (options: Record<string, unknown>) =>
-    mockPostTokens(options),
+  createTenant: (options: Record<string, unknown>) => mockPostTenants(options),
+  listTenants: (options: Record<string, unknown>) => mockGetTenants(options),
+  getTenantStorageMetrics: (options: Record<string, unknown>) => mockGetStorage(options),
+  setupTenant: (options: Record<string, unknown>) => mockPostSetup(options),
+  createTenantToken: (options: Record<string, unknown>) => mockPostTokens(options),
 }));
 
 process.env.AURORA_BACKOFFICE_URL = 'https://api.backoffice.test.example.com/api';
@@ -94,7 +91,7 @@ describe('createAuroraTenant', () => {
     });
     mockGetTenants.mockResolvedValue({
       data: {
-        tenants: [
+        items: [
           { id: 'existing-tenant-id', name: 'org-123' },
           { id: 'other-tenant', name: 'org-other' },
         ],
@@ -131,7 +128,14 @@ describe('setupAuroraTenant', () => {
 
   it('returns id and lastSetupStep on success', async () => {
     mockPostSetup.mockResolvedValue({
-      data: { id: 'tenant-123', lastSetupStep: 'FINISHED' },
+      data: {
+        id: 'tenant-123',
+        components: {
+          auth: { lastSetupStep: 'FINISHED' },
+          compute: { lastSetupStep: 'FINISHED' },
+          s3: { lastSetupStep: 'FINISHED' },
+        },
+      },
       error: undefined,
     });
 
@@ -142,7 +146,14 @@ describe('setupAuroraTenant', () => {
 
   it('returns a non-FINISHED lastSetupStep value', async () => {
     mockPostSetup.mockResolvedValue({
-      data: { id: 'tenant-123', lastSetupStep: 'WARM_TIER_ADDED' },
+      data: {
+        id: 'tenant-123',
+        components: {
+          auth: { lastSetupStep: 'FINISHED' },
+          compute: { lastSetupStep: 'NOT_STARTED' },
+          s3: { lastSetupStep: 'WARM_TIER_ADDED' },
+        },
+      },
       error: undefined,
     });
 
@@ -151,9 +162,12 @@ describe('setupAuroraTenant', () => {
     expect(result).toStrictEqual({ id: 'tenant-123', lastSetupStep: 'WARM_TIER_ADDED' });
   });
 
-  it('calls postPartnersByPartnerIdTenantsByTenantIdSetup with correct parameters', async () => {
+  it('calls setupTenant with correct parameters', async () => {
     mockPostSetup.mockResolvedValue({
-      data: { id: 'tenant-123', lastSetupStep: 'FINISHED' },
+      data: {
+        id: 'tenant-123',
+        components: { auth: { lastSetupStep: 'FINISHED' }, s3: { lastSetupStep: 'FINISHED' } },
+      },
       error: undefined,
     });
 
