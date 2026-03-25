@@ -4,6 +4,8 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   DeleteBucketCommand,
+  HeadObjectCommand,
+  GetObjectRetentionCommand,
   ListBucketsCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
@@ -72,7 +74,6 @@ export async function getPresignedPutObjectUrl(options: PresignPutObjectOptions)
     endpoint: endpointUrl,
     bucket,
     key,
-    accessKeyId: credentials.accessKeyId,
     expiresIn,
   });
 
@@ -113,7 +114,6 @@ export async function getPresignedGetObjectUrl(options: PresignGetObjectOptions)
     endpoint: endpointUrl,
     bucket,
     key,
-    accessKeyId: credentials.accessKeyId,
     expiresIn,
   });
 
@@ -147,7 +147,6 @@ export async function deleteObject(
     endpoint: endpointUrl,
     bucket,
     key,
-    accessKeyId: credentials.accessKeyId,
   });
 
   await s3.send(
@@ -255,4 +254,136 @@ export async function listObjects(options: ListObjectsOptions): Promise<ListObje
     nextToken: result.NextContinuationToken,
     isTruncated: result.IsTruncated ?? false,
   };
+}
+
+export interface HeadObjectResult {
+  key: string;
+  sizeBytes: number;
+  lastModified: string;
+  etag?: string;
+  contentType?: string;
+  metadata?: Record<string, string>;
+  filCid?: string;
+}
+
+export async function headObject(
+  endpointUrl: string,
+  credentials: AuroraS3Credentials,
+  bucketName: string,
+  key: string,
+): Promise<HeadObjectResult> {
+  const s3 = new S3Client({
+    endpoint: endpointUrl,
+    region: 'auto',
+    credentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+    },
+    forcePathStyle: true,
+  });
+
+  // Inject fil-include-meta=1 query parameter so Aurora returns
+  // X-Fil-Cid and X-Fil-Offload-Status headers in the response.
+  s3.middlewareStack.add(
+    (next) => async (args) => {
+      const request = args.request as { query?: Record<string, string> };
+      if (request.query) {
+        request.query['fil-include-meta'] = '1';
+      }
+      return next(args);
+    },
+    { step: 'build', name: 'filIncludeMetaQuery' },
+  );
+
+  // Capture X-Fil-Cid response header that the SDK would otherwise discard.
+  let filCid: string | undefined;
+
+  s3.middlewareStack.add(
+    (next) => async (args) => {
+      const result = await next(args);
+      const response = result.response as { headers?: Record<string, string> };
+      if (response.headers) {
+        filCid = response.headers['x-fil-cid'];
+      }
+      return result;
+    },
+    { step: 'deserialize', name: 'filMetaResponse', override: true },
+  );
+
+  console.log('[aurora-s3] HeadObject', {
+    endpoint: endpointUrl,
+    bucket: bucketName,
+    key,
+  });
+
+  const result = await s3.send(
+    new HeadObjectCommand({
+      Bucket: bucketName,
+      Key: key,
+    }),
+  );
+
+  return {
+    key,
+    sizeBytes: result.ContentLength ?? 0,
+    lastModified: result.LastModified?.toISOString() ?? new Date().toISOString(),
+    ...(result.ETag && { etag: result.ETag }),
+    ...(result.ContentType && { contentType: result.ContentType }),
+    ...(result.Metadata && { metadata: result.Metadata }),
+    ...(filCid && { filCid }),
+  };
+}
+
+export interface ObjectRetention {
+  mode: 'GOVERNANCE' | 'COMPLIANCE';
+  retainUntilDate: string;
+}
+
+export async function getObjectRetention(
+  endpointUrl: string,
+  credentials: AuroraS3Credentials,
+  bucketName: string,
+  key: string,
+): Promise<ObjectRetention | null> {
+  const s3 = new S3Client({
+    endpoint: endpointUrl,
+    region: 'auto',
+    credentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+    },
+    forcePathStyle: true,
+  });
+
+  try {
+    const result = await s3.send(
+      new GetObjectRetentionCommand({
+        Bucket: bucketName,
+        Key: key,
+      }),
+    );
+
+    const mode = result.Retention?.Mode;
+    const retainUntilDate = result.Retention?.RetainUntilDate;
+
+    if (!mode || !retainUntilDate) {
+      return null;
+    }
+
+    return {
+      mode: mode as 'GOVERNANCE' | 'COMPLIANCE',
+      retainUntilDate: retainUntilDate.toISOString(),
+    };
+  } catch (err) {
+    // Objects without retention return an error — this is expected.
+    if ((err as { name?: string }).name === 'NoSuchObjectLockConfiguration') {
+      return null;
+    }
+    // Also handle the case where the bucket doesn't have Object Lock enabled.
+    const code = (err as { Code?: string }).Code;
+    if (code === 'ObjectLockConfigurationNotFoundError' || code === 'InvalidRequest') {
+      return null;
+    }
+    throw err;
+  }
 }

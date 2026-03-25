@@ -42,7 +42,11 @@ export type {
   DeleteObjectRequest,
   PresignUploadRequest,
   PresignUploadResponse,
+  ObjectMetadataResponse,
+  ObjectRetentionInfo,
 } from './api/objects.js';
+
+export { PresignUploadSchema, HeadObjectQuerySchema } from './api/objects.js';
 
 export {
   ACCESS_KEY_PERMISSIONS,
@@ -85,4 +89,6 @@ export type {
   CreateSetupIntentResponse,
   ActivateSubscriptionResponse,
   CreatePortalSessionResponse,
+  Invoice,
+  ListInvoicesResponse,
 } from './api/billing.js';

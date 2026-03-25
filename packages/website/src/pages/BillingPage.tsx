@@ -7,6 +7,7 @@ import {
   ArrowRightIcon,
   WarningIcon,
   CloudIcon,
+  DownloadSimpleIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
 import { ProgressBar } from '../components/ProgressBar';
@@ -14,10 +15,15 @@ import { useToast } from '../components/Toast';
 import { formatBytes } from '@filone/shared';
 
 import { SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
-import type { BillingInfo, UsageResponse, CreateSetupIntentResponse } from '@filone/shared';
+import type {
+  BillingInfo,
+  UsageResponse,
+  CreateSetupIntentResponse,
+  ListInvoicesResponse,
+} from '@filone/shared';
 
-import { apiRequest, getUsage } from '../lib/api.js';
-import { daysUntil } from '../lib/time.js';
+import { apiRequest, getUsage, getInvoices } from '../lib/api.js';
+import { daysUntil, formatDate } from '../lib/time.js';
 import { ChoosePlanDialog } from '../components/billing/ChoosePlanDialog.js';
 import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
 
@@ -55,6 +61,10 @@ export function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [invoices, setInvoices] = useState<ListInvoicesResponse | null>(null);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [invoicesError, setInvoicesError] = useState<string | null>(null);
+
   // Modal states
   const [planOpen, setPlanOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -90,6 +100,21 @@ export function BillingPage() {
       void fetchBilling();
     }
   }, [fetchBilling]);
+
+  // Fetch invoices once billing loads (skip for trial users)
+  useEffect(() => {
+    if (!billing || billing.subscription.status === SubscriptionStatus.Trialing) return;
+    setInvoicesLoading(true);
+    getInvoices()
+      .then((data) => {
+        setInvoices(data);
+        setInvoicesError(null);
+      })
+      .catch(() => {
+        setInvoicesError('Unable to load invoices. Please try again later.');
+      })
+      .finally(() => setInvoicesLoading(false));
+  }, [billing]);
 
   const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
   const isActive = billing?.subscription.status === SubscriptionStatus.Active;
@@ -449,6 +474,76 @@ export function BillingPage() {
               </div>
             )}
           </div>
+
+          {/* Invoice history card */}
+          {!isTrialing && invoicesLoading && (
+            <div className="animate-pulse rounded-xl border border-[#e1e4ea] bg-white p-6">
+              <div className="h-3 w-28 rounded bg-zinc-200 mb-2" />
+              <div className="h-3 w-44 rounded bg-zinc-200 mb-4" />
+              <div className="h-4 w-full rounded bg-zinc-200 mb-3" />
+              <div className="h-4 w-full rounded bg-zinc-200 mb-3" />
+              <div className="h-4 w-full rounded bg-zinc-200" />
+            </div>
+          )}
+          {!isTrialing && !invoicesLoading && (
+            <div className="rounded-xl border border-[#e1e4ea] bg-white p-6">
+              <h3 className="text-[13px] font-semibold text-[#14181f] mb-0.5">Invoice history</h3>
+              <p className="text-[13px] text-[#99a0ae] mb-4">Recent billing statements</p>
+
+              {invoicesError && (
+                <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+                  <WarningIcon size={16} className="text-red-600 flex-shrink-0" weight="fill" />
+                  <span className="text-sm text-red-700">{invoicesError}</span>
+                </div>
+              )}
+
+              {!invoicesError && invoices && invoices.invoices.length === 0 && (
+                <p className="text-sm text-[#99a0ae]">
+                  No invoices yet. Your invoices will appear here after your first billing cycle.
+                </p>
+              )}
+
+              {!invoicesError && invoices && invoices.invoices.length > 0 && (
+                <div>
+                  {invoices.invoices.map((inv, idx) => (
+                    <div
+                      key={inv.id}
+                      className={`flex items-center justify-between py-3 ${
+                        idx > 0 ? 'border-t border-[#e1e4ea]' : ''
+                      }`}
+                    >
+                      <div className="flex flex-col">
+                        <span className="text-[13px] font-medium text-[#14181f]">
+                          {formatDate(inv.createdAt)}
+                        </span>
+                        <span className="text-[11px] text-[#99a0ae] capitalize">{inv.status}</span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className="text-[14px] font-semibold text-[#14181f]">
+                          {formatCents(inv.amountDueInCents)}
+                        </span>
+                        {inv.invoicePdfUrl && (
+                          <a
+                            href={inv.invoicePdfUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-[13px] font-medium text-[#0066ff] hover:underline"
+                          >
+                            <DownloadSimpleIcon
+                              size={14}
+                              className="text-[#677183]"
+                              aria-hidden="true"
+                            />
+                            PDF
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── Right column (pricing sidebar) ─────────────────── */}

@@ -53,3 +53,15 @@ export interface ActivateSubscriptionResponse {
 export interface CreatePortalSessionResponse {
   url: string;
 }
+
+export interface Invoice {
+  id: string;
+  amountDueInCents: number;
+  status: 'paid' | 'open' | 'void' | 'draft' | 'uncollectible' | 'unknown';
+  createdAt: string;
+  invoicePdfUrl: string | null;
+}
+
+export interface ListInvoicesResponse {
+  invoices: Invoice[];
+}
