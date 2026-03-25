@@ -329,47 +329,14 @@ async function setupAuth0EmailProvider(domain: string, isProduction: boolean): P
 
 // ── Auth0 MFA Action helper ──────────────────────────────────────────
 
+import { onExecutePostLogin } from './mfa-action.js';
+
 const MFA_ACTION_NAME = 'MFA Enrollment Trigger';
 
-const MFA_ACTION_CODE = `
-exports.onExecutePostLogin = async (event, api) => {
-  const allMfaTypes = new Set([
-    'otp', 'webauthn-roaming', 'webauthn-platform', 'email', 'recovery-code',
-  ]);
-  const enrolledFactors = (event.user.enrolledFactors || []).filter(
-    (f) => allMfaTypes.has(f.type)
-  );
-  const hasMfa = enrolledFactors.length > 0;
-  const mfaEnrolling = event.user.app_metadata?.mfa_enrolling === true;
-
-  const challengeTypes = [
-    { type: 'otp' },
-    { type: 'webauthn-roaming' },
-    { type: 'webauthn-platform' },
-    { type: 'email' },
-  ];
-
-  if (mfaEnrolling && !hasMfa) {
-    // User clicked "Enable with authenticator/key" — let them choose.
-    // Email enrollment is handled server-side via the Management API,
-    // not via Actions, so it is not offered here.
-    api.authentication.enrollWithAny([
-      { type: 'otp' },
-      { type: 'webauthn-roaming' },
-      { type: 'webauthn-platform' },
-    ]);
-  } else if (mfaEnrolling && hasMfa) {
-    // Already enrolled (e.g. re-login after enrolling). Clear the flag and challenge.
-    api.user.setAppMetadata('mfa_enrolling', false);
-    api.authentication.challengeWithAny(challengeTypes);
-  } else if (hasMfa) {
-    // Normal login for enrolled user — challenge with any enrolled factor
-    // (including email-only users who enrolled via the Management API).
-    api.authentication.challengeWithAny(challengeTypes);
-  }
-  // No MFA enrolled and not enrolling — skip MFA.
-};
-`.trim();
+// The handler is type-checked at compile time (see mfa-action.ts).
+// At runtime, Function.toString() returns the esbuild-compiled JS —
+// types stripped, ready for Auth0's Action sandbox.
+const MFA_ACTION_CODE = `exports.onExecutePostLogin = ${onExecutePostLogin.toString()}`;
 
 interface Auth0Action {
   id: string;
@@ -569,9 +536,7 @@ export async function handler(event: SetupEvent): Promise<void> {
       ...(isStagingOrProd
         ? [
             setupAuth0MfaAction(process.env.AUTH0_DOMAIN!),
-            setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production').catch(
-              (err) => console.error('[setup] Email provider setup failed (non-fatal):', err),
-            ),
+            setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production'),
           ]
         : []),
     ]);

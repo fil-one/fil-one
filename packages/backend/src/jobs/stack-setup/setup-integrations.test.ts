@@ -736,7 +736,7 @@ describe('setup-integrations', () => {
       expect(capturedEmailProviderBody).toBeUndefined();
     });
 
-    it('succeeds when email provider PATCH fails with non-404 error (non-fatal)', async () => {
+    it('sends FAILED CFN response when email provider PATCH fails with non-404 error', async () => {
       ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
       ssmMock.on(PutParameterCommand).resolves({});
       mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
@@ -758,12 +758,11 @@ describe('setup-integrations', () => {
         }),
       );
 
-      // Email provider failure is non-fatal — overall setup still succeeds
       expect(capturedCfnBody).toEqual({
-        Status: 'SUCCESS',
+        Status: 'FAILED',
+        Reason: 'Auth0 email provider update failed (422): Provider config error',
         PhysicalResourceId: 'filone-setup-staging',
         ...BASE_CFN_FIELDS,
-        Data: { webhookSecret: 'whsec_1', webhookEndpointId: 'we_1' },
       });
     });
 
@@ -812,7 +811,7 @@ describe('setup-integrations', () => {
       expect(emailProviderCalls[1][1]?.method).toBe('POST');
     });
 
-    it('succeeds when POST fallback also fails (non-fatal)', async () => {
+    it('sends FAILED CFN response when POST fallback also fails', async () => {
       ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
       ssmMock.on(PutParameterCommand).resolves({});
       mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
@@ -834,12 +833,11 @@ describe('setup-integrations', () => {
         }),
       );
 
-      // Email provider failure is non-fatal — overall setup still succeeds
       expect(capturedCfnBody).toEqual({
-        Status: 'SUCCESS',
+        Status: 'FAILED',
+        Reason: 'Auth0 email provider create failed (500): Provider create error',
         PhysicalResourceId: 'filone-setup-staging',
         ...BASE_CFN_FIELDS,
-        Data: { webhookSecret: 'whsec_1', webhookEndpointId: 'we_1' },
       });
     });
 
