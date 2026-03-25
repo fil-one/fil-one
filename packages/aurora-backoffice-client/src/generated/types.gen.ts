@@ -20,6 +20,13 @@ export type BucketsListBucketsResponse = {
   versioning?: boolean;
 };
 
+export type BucketsPaginatedListBucketsResponse = {
+  items?: Array<BucketsListBucketsResponse>;
+  page?: number;
+  pageSize?: number;
+  totalCount?: number;
+};
+
 export type CommonReturnMessage = {
   message?: string;
 };
@@ -88,11 +95,22 @@ export type ModelStorageMetricsSample = {
 };
 
 export type ModelsBackofficeEnvironmentResponse = {
+  apiUrl?: string;
   auth0Audience?: string;
   auth0ClientId?: string;
   auth0Issuer?: string;
   tracingEnabled?: boolean;
   tracingUrl?: string;
+};
+
+export type ModelsComponentSetupStatus = {
+  lastSetupStep?: ModelsSetupStep;
+};
+
+export type ModelsComponentsStatus = {
+  auth?: ModelsComponentSetupStatus;
+  compute?: ModelsComponentSetupStatus;
+  s3?: ModelsComponentSetupStatus;
 };
 
 export type ModelsCreateBackOfficeTokenRequest = {
@@ -145,38 +163,38 @@ export type ModelsMutateThemeRequest = {
 };
 
 export type ModelsPaginatedPartnerListResponse = {
+  items?: Array<ModelsPartnerBaseResponse>;
   page?: number;
   pageSize?: number;
-  partners?: Array<ModelsPartnerBaseResponse>;
   totalCount?: number;
 };
 
 export type ModelsPaginatedS3CredentialResponse = {
+  items?: Array<ModelsS3CredentialBase>;
   page?: number;
   pageSize?: number;
-  s3Credentials?: Array<ModelsS3CredentialBase>;
   totalCount?: number;
 };
 
 export type ModelsPaginatedTenantsResponse = {
+  items?: Array<ModelsTenantWithMetricsManagementResponse>;
   page?: number;
   pageSize?: number;
-  tenants?: Array<ModelsTenantWithMetricsManagementResponse>;
   totalCount?: number;
 };
 
 export type ModelsPaginatedUserResponse = {
+  items?: Array<ModelsUserResponse>;
   page?: number;
   pageSize?: number;
   totalCount?: number;
-  users?: Array<ModelsUserResponse>;
 };
 
 export type ModelsPaginatedWarmTierCredentialResponse = {
+  items?: Array<ModelsWarmTierCredentialBase>;
   page?: number;
   pageSize?: number;
   totalCount?: number;
-  warmTierCredentials?: Array<ModelsWarmTierCredentialBase>;
 };
 
 export type ModelsPartnerBaseResponse = {
@@ -208,7 +226,10 @@ export type ModelsRegionListBase = {
 };
 
 export type ModelsRegionListResponse = {
-  regions?: Array<ModelsRegionListBase>;
+  items?: Array<ModelsRegionListBase>;
+  page?: number;
+  pageSize?: number;
+  totalCount?: number;
 };
 
 export type ModelsRegionResponse = {
@@ -238,9 +259,9 @@ export type ModelsTenantManagementResponse = {
   accessKeyQuantityLimit?: number;
   bucketQuantityLimit?: number;
   bucketSizeLimit?: number;
+  components?: ModelsComponentsStatus;
   createdAt?: string;
   id?: string;
-  lastSetupStep?: ModelsSetupStep;
   name?: string;
   orgId?: string;
   partnerId?: string;
@@ -250,8 +271,8 @@ export type ModelsTenantManagementResponse = {
 };
 
 export type ModelsTenantSetupResponse = {
+  components?: ModelsComponentsStatus;
   id?: string;
-  lastSetupStep?: ModelsSetupStep;
 };
 
 export type ModelsTenantStatus = 'DISABLED' | 'LOCKED' | 'WRITE_LOCKED' | 'ACTIVE';
@@ -261,10 +282,10 @@ export type ModelsTenantWithMetricsManagementResponse = {
   bucketCount?: number;
   bucketQuantityLimit?: number;
   bucketSizeLimit?: number;
+  components?: ModelsComponentsStatus;
   createdAt?: string;
   id?: string;
   keyCount?: number;
-  lastSetupStep?: ModelsSetupStep;
   name?: string;
   orgId?: string;
   partnerId?: string;
@@ -282,7 +303,10 @@ export type ModelsThemeColors = {
 };
 
 export type ModelsThemeListResponse = {
-  themes?: Array<ModelsThemeResponseBase>;
+  items?: Array<ModelsThemeResponseBase>;
+  page?: number;
+  pageSize?: number;
+  totalCount?: number;
 };
 
 export type ModelsThemeResponse = {
@@ -339,11 +363,17 @@ export type ModelsTokenCreatePortalResponse = {
 };
 
 export type ModelsTokenListBackOfficeResponse = {
-  tokens?: Array<ModelsTokenBackOfficeResponseBase>;
+  items?: Array<ModelsTokenBackOfficeResponseBase>;
+  page?: number;
+  pageSize?: number;
+  totalCount?: number;
 };
 
 export type ModelsTokenListPortalResponse = {
-  tokens?: Array<ModelsTokenPortalResponse>;
+  items?: Array<ModelsTokenPortalResponse>;
+  page?: number;
+  pageSize?: number;
+  totalCount?: number;
 };
 
 export type ModelsTokenPortalResponse = {
@@ -389,9 +419,9 @@ export type ModelsWarmTierCredentialBase = {
 };
 
 export type RolesPaginatedRoleResponse = {
+  items?: Array<RolesRoleResponse>;
   page?: number;
   pageSize?: number;
-  roles?: Array<RolesRoleResponse>;
   totalCount?: number;
 };
 
@@ -410,13 +440,20 @@ export type UsersMemberResponse = {
   roles?: Array<string>;
 };
 
+export type UsersPaginatedMemberListResponse = {
+  items?: Array<UsersMemberResponse>;
+  page?: number;
+  pageSize?: number;
+  totalCount?: number;
+};
+
 export type UsersRegisterParams = {
   email?: string;
   role?: string;
   tenantId?: string;
 };
 
-export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsData = {
+export type GetBucketOperationMetricsData = {
   body?: never;
   path: {
     /**
@@ -453,7 +490,7 @@ export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsData = {
   url: '/analytics/v1/{partnerId}/buckets/{bucketName}/operations';
 };
 
-export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsErrors = {
+export type GetBucketOperationMetricsErrors = {
   /**
    * Bad request
    */
@@ -468,20 +505,20 @@ export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsError =
-  GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsErrors[keyof GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsErrors];
+export type GetBucketOperationMetricsError =
+  GetBucketOperationMetricsErrors[keyof GetBucketOperationMetricsErrors];
 
-export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsResponses = {
+export type GetBucketOperationMetricsResponses = {
   /**
    * Operation metrics
    */
   200: ModelOperationMetricsResponse;
 };
 
-export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsResponse =
-  GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsResponses[keyof GetAnalyticsV1ByPartnerIdBucketsByBucketNameOperationsResponses];
+export type GetBucketOperationMetricsResponse =
+  GetBucketOperationMetricsResponses[keyof GetBucketOperationMetricsResponses];
 
-export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageData = {
+export type GetBucketStorageMetricsData = {
   body?: never;
   path: {
     /**
@@ -510,7 +547,7 @@ export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageData = {
   url: '/analytics/v1/{partnerId}/buckets/{bucketName}/storage';
 };
 
-export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageErrors = {
+export type GetBucketStorageMetricsErrors = {
   /**
    * Bad request
    */
@@ -525,20 +562,20 @@ export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageError =
-  GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageErrors[keyof GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageErrors];
+export type GetBucketStorageMetricsError =
+  GetBucketStorageMetricsErrors[keyof GetBucketStorageMetricsErrors];
 
-export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageResponses = {
+export type GetBucketStorageMetricsResponses = {
   /**
    * Storage metrics
    */
   200: ModelStorageMetricsResponse;
 };
 
-export type GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageResponse =
-  GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageResponses[keyof GetAnalyticsV1ByPartnerIdBucketsByBucketNameStorageResponses];
+export type GetBucketStorageMetricsResponse =
+  GetBucketStorageMetricsResponses[keyof GetBucketStorageMetricsResponses];
 
-export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsData = {
+export type GetTenantOperationMetricsData = {
   body?: never;
   path: {
     /**
@@ -571,7 +608,7 @@ export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsData = {
   url: '/analytics/v1/{partnerId}/tenants/{tenantId}/operations';
 };
 
-export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsErrors = {
+export type GetTenantOperationMetricsErrors = {
   /**
    * Bad request
    */
@@ -586,20 +623,20 @@ export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsError =
-  GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsErrors[keyof GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsErrors];
+export type GetTenantOperationMetricsError =
+  GetTenantOperationMetricsErrors[keyof GetTenantOperationMetricsErrors];
 
-export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsResponses = {
+export type GetTenantOperationMetricsResponses = {
   /**
    * Operation metrics
    */
   200: ModelOperationMetricsResponse;
 };
 
-export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsResponse =
-  GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsResponses[keyof GetAnalyticsV1ByPartnerIdTenantsByTenantIdOperationsResponses];
+export type GetTenantOperationMetricsResponse =
+  GetTenantOperationMetricsResponses[keyof GetTenantOperationMetricsResponses];
 
-export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageData = {
+export type GetTenantStorageMetricsData = {
   body?: never;
   path: {
     /**
@@ -628,7 +665,7 @@ export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageData = {
   url: '/analytics/v1/{partnerId}/tenants/{tenantId}/storage';
 };
 
-export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageErrors = {
+export type GetTenantStorageMetricsErrors = {
   /**
    * Bad request
    */
@@ -643,20 +680,20 @@ export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageError =
-  GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageErrors[keyof GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageErrors];
+export type GetTenantStorageMetricsError =
+  GetTenantStorageMetricsErrors[keyof GetTenantStorageMetricsErrors];
 
-export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageResponses = {
+export type GetTenantStorageMetricsResponses = {
   /**
    * Storage metrics
    */
   200: ModelStorageMetricsResponse;
 };
 
-export type GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageResponse =
-  GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageResponses[keyof GetAnalyticsV1ByPartnerIdTenantsByTenantIdStorageResponses];
+export type GetTenantStorageMetricsResponse =
+  GetTenantStorageMetricsResponses[keyof GetTenantStorageMetricsResponses];
 
-export type GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensData = {
+export type ListTenantTokensData = {
   body?: never;
   path: {
     /**
@@ -668,31 +705,38 @@ export type GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensData = {
      */
     tenantId: string;
   };
-  query?: never;
+  query?: {
+    /**
+     * Page number
+     */
+    page?: number;
+    /**
+     * Page size
+     */
+    pageSize?: number;
+  };
   url: '/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens';
 };
 
-export type GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensErrors = {
+export type ListTenantTokensErrors = {
   /**
    * Error getting tokens
    */
   500: CommonReturnMessage;
 };
 
-export type GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensError =
-  GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensErrors[keyof GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensErrors];
+export type ListTenantTokensError = ListTenantTokensErrors[keyof ListTenantTokensErrors];
 
-export type GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensResponses = {
+export type ListTenantTokensResponses = {
   /**
    * List of tenant tokens
    */
   200: ModelsTokenListPortalResponse;
 };
 
-export type GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensResponse =
-  GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensResponses[keyof GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensResponses];
+export type ListTenantTokensResponse = ListTenantTokensResponses[keyof ListTenantTokensResponses];
 
-export type PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensData = {
+export type CreateTenantTokenData = {
   /**
    * Token creation request
    */
@@ -711,163 +755,7 @@ export type PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensData = {
   url: '/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens';
 };
 
-export type PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensErrors = {
-  /**
-   * Invalid request body or parameters
-   */
-  400: CommonReturnMessage;
-  /**
-   * Error while creating token
-   */
-  500: CommonReturnMessage;
-};
-
-export type PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensError =
-  PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensErrors[keyof PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensErrors];
-
-export type PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensResponses = {
-  /**
-   * Tenant token created
-   */
-  201: ModelsTokenCreatePortalResponse;
-};
-
-export type PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensResponse =
-  PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensResponses[keyof PostAuthV1PartnersByPartnerIdTenantsByTenantIdTokensResponses];
-
-export type DeleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdData = {
-  body?: never;
-  path: {
-    /**
-     * Partner ID
-     */
-    partnerId: string;
-    /**
-     * Tenant ID
-     */
-    tenantId: string;
-    /**
-     * Token ID
-     */
-    tokenId: string;
-  };
-  query?: never;
-  url: '/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens/{tokenId}';
-};
-
-export type DeleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdErrors = {
-  /**
-   * Token not found
-   */
-  404: CommonReturnMessage;
-  /**
-   * Error deleting token
-   */
-  500: CommonReturnMessage;
-};
-
-export type DeleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdError =
-  DeleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdErrors[keyof DeleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdErrors];
-
-export type DeleteAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdResponses = {
-  /**
-   * Token deleted
-   */
-  204: unknown;
-};
-
-export type GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdData = {
-  body?: never;
-  path: {
-    /**
-     * Partner ID
-     */
-    partnerId: string;
-    /**
-     * Tenant ID
-     */
-    tenantId: string;
-    /**
-     * Token ID
-     */
-    tokenId: string;
-  };
-  query?: never;
-  url: '/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens/{tokenId}';
-};
-
-export type GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdErrors = {
-  /**
-   * Token not found
-   */
-  404: CommonReturnMessage;
-  /**
-   * Error getting token
-   */
-  500: CommonReturnMessage;
-};
-
-export type GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdError =
-  GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdErrors[keyof GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdErrors];
-
-export type GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdResponses = {
-  /**
-   * Tenant token details
-   */
-  200: ModelsTokenPortalResponse;
-};
-
-export type GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdResponse =
-  GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdResponses[keyof GetAuthV1PartnersByPartnerIdTenantsByTenantIdTokensByTokenIdResponses];
-
-export type GetAuthV1PartnersByPartnerIdTokensData = {
-  body?: never;
-  path: {
-    /**
-     * Partner ID
-     */
-    partnerId: string;
-  };
-  query?: never;
-  url: '/auth/v1/partners/{partnerId}/tokens';
-};
-
-export type GetAuthV1PartnersByPartnerIdTokensErrors = {
-  /**
-   * Error getting tokens
-   */
-  500: CommonReturnMessage;
-};
-
-export type GetAuthV1PartnersByPartnerIdTokensError =
-  GetAuthV1PartnersByPartnerIdTokensErrors[keyof GetAuthV1PartnersByPartnerIdTokensErrors];
-
-export type GetAuthV1PartnersByPartnerIdTokensResponses = {
-  /**
-   * List of tokens
-   */
-  200: ModelsTokenListBackOfficeResponse;
-};
-
-export type GetAuthV1PartnersByPartnerIdTokensResponse =
-  GetAuthV1PartnersByPartnerIdTokensResponses[keyof GetAuthV1PartnersByPartnerIdTokensResponses];
-
-export type PostAuthV1PartnersByPartnerIdTokensData = {
-  /**
-   * Token creation request
-   */
-  body: ModelsCreateBackOfficeTokenRequest;
-  path: {
-    /**
-     * Partner ID
-     */
-    partnerId: string;
-  };
-  query?: never;
-  url: '/auth/v1/partners/{partnerId}/tokens';
-};
-
-export type PostAuthV1PartnersByPartnerIdTokensErrors = {
+export type CreateTenantTokenErrors = {
   /**
    * Invalid request body or parameters
    */
@@ -882,20 +770,19 @@ export type PostAuthV1PartnersByPartnerIdTokensErrors = {
   500: CommonReturnMessage;
 };
 
-export type PostAuthV1PartnersByPartnerIdTokensError =
-  PostAuthV1PartnersByPartnerIdTokensErrors[keyof PostAuthV1PartnersByPartnerIdTokensErrors];
+export type CreateTenantTokenError = CreateTenantTokenErrors[keyof CreateTenantTokenErrors];
 
-export type PostAuthV1PartnersByPartnerIdTokensResponses = {
+export type CreateTenantTokenResponses = {
   /**
-   * Token created
+   * Tenant token created
    */
-  201: ModelsTokenCreateBackOfficeResponse;
+  201: ModelsTokenCreatePortalResponse;
 };
 
-export type PostAuthV1PartnersByPartnerIdTokensResponse =
-  PostAuthV1PartnersByPartnerIdTokensResponses[keyof PostAuthV1PartnersByPartnerIdTokensResponses];
+export type CreateTenantTokenResponse =
+  CreateTenantTokenResponses[keyof CreateTenantTokenResponses];
 
-export type DeleteAuthV1PartnersByPartnerIdTokensByTokenIdData = {
+export type DeleteTenantTokenData = {
   body?: never;
   path: {
     /**
@@ -903,15 +790,19 @@ export type DeleteAuthV1PartnersByPartnerIdTokensByTokenIdData = {
      */
     partnerId: string;
     /**
+     * Tenant ID
+     */
+    tenantId: string;
+    /**
      * Token ID
      */
     tokenId: string;
   };
   query?: never;
-  url: '/auth/v1/partners/{partnerId}/tokens/{tokenId}';
+  url: '/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens/{tokenId}';
 };
 
-export type DeleteAuthV1PartnersByPartnerIdTokensByTokenIdErrors = {
+export type DeleteTenantTokenErrors = {
   /**
    * Token not found
    */
@@ -922,17 +813,138 @@ export type DeleteAuthV1PartnersByPartnerIdTokensByTokenIdErrors = {
   500: CommonReturnMessage;
 };
 
-export type DeleteAuthV1PartnersByPartnerIdTokensByTokenIdError =
-  DeleteAuthV1PartnersByPartnerIdTokensByTokenIdErrors[keyof DeleteAuthV1PartnersByPartnerIdTokensByTokenIdErrors];
+export type DeleteTenantTokenError = DeleteTenantTokenErrors[keyof DeleteTenantTokenErrors];
 
-export type DeleteAuthV1PartnersByPartnerIdTokensByTokenIdResponses = {
+export type DeleteTenantTokenResponses = {
   /**
    * Token deleted
    */
   204: unknown;
 };
 
-export type GetAuthV1PartnersByPartnerIdTokensByTokenIdData = {
+export type GetTenantTokenData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+    /**
+     * Token ID
+     */
+    tokenId: string;
+  };
+  query?: never;
+  url: '/auth/v1/partners/{partnerId}/tenants/{tenantId}/tokens/{tokenId}';
+};
+
+export type GetTenantTokenErrors = {
+  /**
+   * Token not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Error getting token
+   */
+  500: CommonReturnMessage;
+};
+
+export type GetTenantTokenError = GetTenantTokenErrors[keyof GetTenantTokenErrors];
+
+export type GetTenantTokenResponses = {
+  /**
+   * Tenant token details
+   */
+  200: ModelsTokenPortalResponse;
+};
+
+export type GetTenantTokenResponse = GetTenantTokenResponses[keyof GetTenantTokenResponses];
+
+export type ListTokensData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+  };
+  query?: {
+    /**
+     * Page number
+     */
+    page?: number;
+    /**
+     * Page size
+     */
+    pageSize?: number;
+  };
+  url: '/auth/v1/partners/{partnerId}/tokens';
+};
+
+export type ListTokensErrors = {
+  /**
+   * Error getting tokens
+   */
+  500: CommonReturnMessage;
+};
+
+export type ListTokensError = ListTokensErrors[keyof ListTokensErrors];
+
+export type ListTokensResponses = {
+  /**
+   * List of tokens
+   */
+  200: ModelsTokenListBackOfficeResponse;
+};
+
+export type ListTokensResponse = ListTokensResponses[keyof ListTokensResponses];
+
+export type CreateTokenData = {
+  /**
+   * Token creation request
+   */
+  body: ModelsCreateBackOfficeTokenRequest;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+  };
+  query?: never;
+  url: '/auth/v1/partners/{partnerId}/tokens';
+};
+
+export type CreateTokenErrors = {
+  /**
+   * Invalid request body or parameters
+   */
+  400: CommonReturnMessage;
+  /**
+   * Token with this name already exists
+   */
+  409: CommonReturnMessage;
+  /**
+   * Error while creating token
+   */
+  500: CommonReturnMessage;
+};
+
+export type CreateTokenError = CreateTokenErrors[keyof CreateTokenErrors];
+
+export type CreateTokenResponses = {
+  /**
+   * Token created
+   */
+  201: ModelsTokenCreateBackOfficeResponse;
+};
+
+export type CreateTokenResponse = CreateTokenResponses[keyof CreateTokenResponses];
+
+export type DeleteTokenData = {
   body?: never;
   path: {
     /**
@@ -948,7 +960,43 @@ export type GetAuthV1PartnersByPartnerIdTokensByTokenIdData = {
   url: '/auth/v1/partners/{partnerId}/tokens/{tokenId}';
 };
 
-export type GetAuthV1PartnersByPartnerIdTokensByTokenIdErrors = {
+export type DeleteTokenErrors = {
+  /**
+   * Token not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Error deleting token
+   */
+  500: CommonReturnMessage;
+};
+
+export type DeleteTokenError = DeleteTokenErrors[keyof DeleteTokenErrors];
+
+export type DeleteTokenResponses = {
+  /**
+   * Token deleted
+   */
+  204: unknown;
+};
+
+export type GetTokenData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Token ID
+     */
+    tokenId: string;
+  };
+  query?: never;
+  url: '/auth/v1/partners/{partnerId}/tokens/{tokenId}';
+};
+
+export type GetTokenErrors = {
   /**
    * Token not found
    */
@@ -959,20 +1007,18 @@ export type GetAuthV1PartnersByPartnerIdTokensByTokenIdErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetAuthV1PartnersByPartnerIdTokensByTokenIdError =
-  GetAuthV1PartnersByPartnerIdTokensByTokenIdErrors[keyof GetAuthV1PartnersByPartnerIdTokensByTokenIdErrors];
+export type GetTokenError = GetTokenErrors[keyof GetTokenErrors];
 
-export type GetAuthV1PartnersByPartnerIdTokensByTokenIdResponses = {
+export type GetTokenResponses = {
   /**
    * Token details
    */
   200: ModelsTokenBackOfficeResponse;
 };
 
-export type GetAuthV1PartnersByPartnerIdTokensByTokenIdResponse =
-  GetAuthV1PartnersByPartnerIdTokensByTokenIdResponses[keyof GetAuthV1PartnersByPartnerIdTokensByTokenIdResponses];
+export type GetTokenResponse = GetTokenResponses[keyof GetTokenResponses];
 
-export type GetPartnersByPartnerIdRegionsData = {
+export type ListPartnerRegionsData = {
   body?: never;
   path: {
     /**
@@ -980,56 +1026,73 @@ export type GetPartnersByPartnerIdRegionsData = {
      */
     partnerId: string;
   };
-  query?: never;
+  query?: {
+    /**
+     * Page number
+     */
+    page?: number;
+    /**
+     * Page size
+     */
+    pageSize?: number;
+  };
   url: '/partners/{partnerId}/regions';
 };
 
-export type GetPartnersByPartnerIdRegionsErrors = {
+export type ListPartnerRegionsErrors = {
   /**
    * Internal server error
    */
   500: CommonReturnMessage;
 };
 
-export type GetPartnersByPartnerIdRegionsError =
-  GetPartnersByPartnerIdRegionsErrors[keyof GetPartnersByPartnerIdRegionsErrors];
+export type ListPartnerRegionsError = ListPartnerRegionsErrors[keyof ListPartnerRegionsErrors];
 
-export type GetPartnersByPartnerIdRegionsResponses = {
+export type ListPartnerRegionsResponses = {
   /**
    * List of regions
    */
   200: ModelsRegionListResponse;
 };
 
-export type GetPartnersByPartnerIdRegionsResponse =
-  GetPartnersByPartnerIdRegionsResponses[keyof GetPartnersByPartnerIdRegionsResponses];
+export type ListPartnerRegionsResponse =
+  ListPartnerRegionsResponses[keyof ListPartnerRegionsResponses];
 
-export type GetRegionsData = {
+export type ListAllRegionsData = {
   body?: never;
   path?: never;
-  query?: never;
+  query?: {
+    /**
+     * Page number
+     */
+    page?: number;
+    /**
+     * Page size
+     */
+    pageSize?: number;
+  };
   url: '/regions';
 };
 
-export type GetRegionsErrors = {
+export type ListAllRegionsErrors = {
   /**
    * Error getting regions
    */
   500: CommonReturnMessage;
 };
 
-export type GetRegionsError = GetRegionsErrors[keyof GetRegionsErrors];
+export type ListAllRegionsError = ListAllRegionsErrors[keyof ListAllRegionsErrors];
 
-export type GetRegionsResponses = {
+export type ListAllRegionsResponses = {
   /**
    * List of all regions
    */
   200: ModelsRegionListResponse;
 };
 
-export type GetRegionsResponse = GetRegionsResponses[keyof GetRegionsResponses];
+export type ListAllRegionsResponse = ListAllRegionsResponses[keyof ListAllRegionsResponses];
 
-export type GetV1BucketsByBucketNameOwnerData = {
+export type GetBucketOwnerData = {
   body?: never;
   path: {
     /**
@@ -1041,7 +1104,7 @@ export type GetV1BucketsByBucketNameOwnerData = {
   url: '/v1/buckets/{bucketName}/owner';
 };
 
-export type GetV1BucketsByBucketNameOwnerErrors = {
+export type GetBucketOwnerErrors = {
   /**
    * Bad request
    */
@@ -1056,43 +1119,41 @@ export type GetV1BucketsByBucketNameOwnerErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetV1BucketsByBucketNameOwnerError =
-  GetV1BucketsByBucketNameOwnerErrors[keyof GetV1BucketsByBucketNameOwnerErrors];
+export type GetBucketOwnerError = GetBucketOwnerErrors[keyof GetBucketOwnerErrors];
 
-export type GetV1BucketsByBucketNameOwnerResponses = {
+export type GetBucketOwnerResponses = {
   /**
    * Bucket owner information
    */
   200: BucketsBucketOwnerResponse;
 };
 
-export type GetV1BucketsByBucketNameOwnerResponse =
-  GetV1BucketsByBucketNameOwnerResponses[keyof GetV1BucketsByBucketNameOwnerResponses];
+export type GetBucketOwnerResponse = GetBucketOwnerResponses[keyof GetBucketOwnerResponses];
 
-export type GetV1EnvironmentData = {
+export type GetEnvironmentData = {
   body?: never;
   path?: never;
   query?: never;
   url: '/v1/environment';
 };
 
-export type GetV1EnvironmentResponses = {
+export type GetEnvironmentResponses = {
   /**
    * Environment configuration
    */
   200: ModelsBackofficeEnvironmentResponse;
 };
 
-export type GetV1EnvironmentResponse = GetV1EnvironmentResponses[keyof GetV1EnvironmentResponses];
+export type GetEnvironmentResponse = GetEnvironmentResponses[keyof GetEnvironmentResponses];
 
-export type GetV1PartnerData = {
+export type GetMyPartnerData = {
   body?: never;
   path?: never;
   query?: never;
   url: '/v1/partner';
 };
 
-export type GetV1PartnerErrors = {
+export type GetMyPartnerErrors = {
   /**
    * Partner not found
    */
@@ -1103,18 +1164,18 @@ export type GetV1PartnerErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnerError = GetV1PartnerErrors[keyof GetV1PartnerErrors];
+export type GetMyPartnerError = GetMyPartnerErrors[keyof GetMyPartnerErrors];
 
-export type GetV1PartnerResponses = {
+export type GetMyPartnerResponses = {
   /**
    * Partner details
    */
   200: ModelsPartnerResponse;
 };
 
-export type GetV1PartnerResponse = GetV1PartnerResponses[keyof GetV1PartnerResponses];
+export type GetMyPartnerResponse = GetMyPartnerResponses[keyof GetMyPartnerResponses];
 
-export type GetV1PartnersData = {
+export type ListPartnersData = {
   body?: never;
   path?: never;
   query?: {
@@ -1130,25 +1191,25 @@ export type GetV1PartnersData = {
   url: '/v1/partners';
 };
 
-export type GetV1PartnersErrors = {
+export type ListPartnersErrors = {
   /**
    * Error getting partners
    */
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnersError = GetV1PartnersErrors[keyof GetV1PartnersErrors];
+export type ListPartnersError = ListPartnersErrors[keyof ListPartnersErrors];
 
-export type GetV1PartnersResponses = {
+export type ListPartnersResponses = {
   /**
    * List of partners
    */
   200: ModelsPaginatedPartnerListResponse;
 };
 
-export type GetV1PartnersResponse = GetV1PartnersResponses[keyof GetV1PartnersResponses];
+export type ListPartnersResponse = ListPartnersResponses[keyof ListPartnersResponses];
 
-export type GetV1PartnersByPartnerIdData = {
+export type GetPartnerData = {
   body?: never;
   path: {
     /**
@@ -1160,7 +1221,7 @@ export type GetV1PartnersByPartnerIdData = {
   url: '/v1/partners/{partnerId}';
 };
 
-export type GetV1PartnersByPartnerIdErrors = {
+export type GetPartnerErrors = {
   /**
    * Partner not found
    */
@@ -1171,20 +1232,18 @@ export type GetV1PartnersByPartnerIdErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnersByPartnerIdError =
-  GetV1PartnersByPartnerIdErrors[keyof GetV1PartnersByPartnerIdErrors];
+export type GetPartnerError = GetPartnerErrors[keyof GetPartnerErrors];
 
-export type GetV1PartnersByPartnerIdResponses = {
+export type GetPartnerResponses = {
   /**
    * Partner details
    */
   200: ModelsPartnerResponse;
 };
 
-export type GetV1PartnersByPartnerIdResponse =
-  GetV1PartnersByPartnerIdResponses[keyof GetV1PartnersByPartnerIdResponses];
+export type GetPartnerResponse = GetPartnerResponses[keyof GetPartnerResponses];
 
-export type GetV1PartnersByPartnerIdConfigData = {
+export type GetConfigData = {
   body?: never;
   path: {
     /**
@@ -1196,27 +1255,25 @@ export type GetV1PartnersByPartnerIdConfigData = {
   url: '/v1/partners/{partnerId}/config';
 };
 
-export type GetV1PartnersByPartnerIdConfigErrors = {
+export type GetConfigErrors = {
   /**
    * Failed to get partner config
    */
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnersByPartnerIdConfigError =
-  GetV1PartnersByPartnerIdConfigErrors[keyof GetV1PartnersByPartnerIdConfigErrors];
+export type GetConfigError = GetConfigErrors[keyof GetConfigErrors];
 
-export type GetV1PartnersByPartnerIdConfigResponses = {
+export type GetConfigResponses = {
   /**
    * Partner configuration
    */
   200: ModelsPartnerConfigResponse;
 };
 
-export type GetV1PartnersByPartnerIdConfigResponse =
-  GetV1PartnersByPartnerIdConfigResponses[keyof GetV1PartnersByPartnerIdConfigResponses];
+export type GetConfigResponse = GetConfigResponses[keyof GetConfigResponses];
 
-export type PutV1PartnersByPartnerIdConfigData = {
+export type UpdateConfigData = {
   /**
    * Partner configuration update
    */
@@ -1231,7 +1288,7 @@ export type PutV1PartnersByPartnerIdConfigData = {
   url: '/v1/partners/{partnerId}/config';
 };
 
-export type PutV1PartnersByPartnerIdConfigErrors = {
+export type UpdateConfigErrors = {
   /**
    * Bad request
    */
@@ -1246,17 +1303,16 @@ export type PutV1PartnersByPartnerIdConfigErrors = {
   500: CommonReturnMessage;
 };
 
-export type PutV1PartnersByPartnerIdConfigError =
-  PutV1PartnersByPartnerIdConfigErrors[keyof PutV1PartnersByPartnerIdConfigErrors];
+export type UpdateConfigError = UpdateConfigErrors[keyof UpdateConfigErrors];
 
-export type PutV1PartnersByPartnerIdConfigResponses = {
+export type UpdateConfigResponses = {
   /**
    * No content
    */
   204: unknown;
 };
 
-export type GetV1PartnersByPartnerIdRegionsByRegionIdData = {
+export type GetRegionData = {
   body?: never;
   path: {
     /**
@@ -1272,7 +1328,7 @@ export type GetV1PartnersByPartnerIdRegionsByRegionIdData = {
   url: '/v1/partners/{partnerId}/regions/{regionId}';
 };
 
-export type GetV1PartnersByPartnerIdRegionsByRegionIdErrors = {
+export type GetRegionErrors = {
   /**
    * Region not found
    */
@@ -1283,20 +1339,18 @@ export type GetV1PartnersByPartnerIdRegionsByRegionIdErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnersByPartnerIdRegionsByRegionIdError =
-  GetV1PartnersByPartnerIdRegionsByRegionIdErrors[keyof GetV1PartnersByPartnerIdRegionsByRegionIdErrors];
+export type GetRegionError = GetRegionErrors[keyof GetRegionErrors];
 
-export type GetV1PartnersByPartnerIdRegionsByRegionIdResponses = {
+export type GetRegionResponses = {
   /**
    * Region details
    */
   200: ModelsRegionResponse;
 };
 
-export type GetV1PartnersByPartnerIdRegionsByRegionIdResponse =
-  GetV1PartnersByPartnerIdRegionsByRegionIdResponses[keyof GetV1PartnersByPartnerIdRegionsByRegionIdResponses];
+export type GetRegionResponse = GetRegionResponses[keyof GetRegionResponses];
 
-export type GetV1PartnersByPartnerIdTenantsData = {
+export type ListTenantsData = {
   body?: never;
   path: {
     /**
@@ -1317,27 +1371,25 @@ export type GetV1PartnersByPartnerIdTenantsData = {
   url: '/v1/partners/{partnerId}/tenants';
 };
 
-export type GetV1PartnersByPartnerIdTenantsErrors = {
+export type ListTenantsErrors = {
   /**
    * Error getting tenants
    */
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnersByPartnerIdTenantsError =
-  GetV1PartnersByPartnerIdTenantsErrors[keyof GetV1PartnersByPartnerIdTenantsErrors];
+export type ListTenantsError = ListTenantsErrors[keyof ListTenantsErrors];
 
-export type GetV1PartnersByPartnerIdTenantsResponses = {
+export type ListTenantsResponses = {
   /**
    * List of tenants
    */
   200: ModelsPaginatedTenantsResponse;
 };
 
-export type GetV1PartnersByPartnerIdTenantsResponse =
-  GetV1PartnersByPartnerIdTenantsResponses[keyof GetV1PartnersByPartnerIdTenantsResponses];
+export type ListTenantsResponse = ListTenantsResponses[keyof ListTenantsResponses];
 
-export type PostV1PartnersByPartnerIdTenantsData = {
+export type CreateTenantData = {
   /**
    * Tenant creation parameters
    */
@@ -1352,7 +1404,7 @@ export type PostV1PartnersByPartnerIdTenantsData = {
   url: '/v1/partners/{partnerId}/tenants';
 };
 
-export type PostV1PartnersByPartnerIdTenantsErrors = {
+export type CreateTenantErrors = {
   /**
    * Bad request
    */
@@ -1367,20 +1419,18 @@ export type PostV1PartnersByPartnerIdTenantsErrors = {
   500: CommonReturnMessage;
 };
 
-export type PostV1PartnersByPartnerIdTenantsError =
-  PostV1PartnersByPartnerIdTenantsErrors[keyof PostV1PartnersByPartnerIdTenantsErrors];
+export type CreateTenantError = CreateTenantErrors[keyof CreateTenantErrors];
 
-export type PostV1PartnersByPartnerIdTenantsResponses = {
+export type CreateTenantResponses = {
   /**
    * Tenant created successfully
    */
   201: ModelsTenantManagementResponse;
 };
 
-export type PostV1PartnersByPartnerIdTenantsResponse =
-  PostV1PartnersByPartnerIdTenantsResponses[keyof PostV1PartnersByPartnerIdTenantsResponses];
+export type CreateTenantResponse = CreateTenantResponses[keyof CreateTenantResponses];
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdData = {
+export type GetTenantData = {
   body?: never;
   path: {
     /**
@@ -1396,7 +1446,7 @@ export type GetV1PartnersByPartnerIdTenantsByTenantIdData = {
   url: '/v1/partners/{partnerId}/tenants/{tenantId}';
 };
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdErrors = {
+export type GetTenantErrors = {
   /**
    * Tenant not found
    */
@@ -1407,20 +1457,18 @@ export type GetV1PartnersByPartnerIdTenantsByTenantIdErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdError =
-  GetV1PartnersByPartnerIdTenantsByTenantIdErrors[keyof GetV1PartnersByPartnerIdTenantsByTenantIdErrors];
+export type GetTenantError = GetTenantErrors[keyof GetTenantErrors];
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdResponses = {
+export type GetTenantResponses = {
   /**
    * Tenant details
    */
   200: ModelsTenantWithMetricsManagementResponse;
 };
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdResponse =
-  GetV1PartnersByPartnerIdTenantsByTenantIdResponses[keyof GetV1PartnersByPartnerIdTenantsByTenantIdResponses];
+export type GetTenantResponse = GetTenantResponses[keyof GetTenantResponses];
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdBucketsData = {
+export type ListBucketsData = {
   body?: never;
   path: {
     /**
@@ -1432,31 +1480,38 @@ export type GetV1PartnersByPartnerIdTenantsByTenantIdBucketsData = {
      */
     tenantId: string;
   };
-  query?: never;
+  query?: {
+    /**
+     * Page number
+     */
+    page?: number;
+    /**
+     * Page size
+     */
+    pageSize?: number;
+  };
   url: '/v1/partners/{partnerId}/tenants/{tenantId}/buckets';
 };
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdBucketsErrors = {
+export type ListBucketsErrors = {
   /**
    * Internal server error
    */
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdBucketsError =
-  GetV1PartnersByPartnerIdTenantsByTenantIdBucketsErrors[keyof GetV1PartnersByPartnerIdTenantsByTenantIdBucketsErrors];
+export type ListBucketsError = ListBucketsErrors[keyof ListBucketsErrors];
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdBucketsResponses = {
+export type ListBucketsResponses = {
   /**
    * Tenant buckets
    */
-  200: Array<BucketsListBucketsResponse>;
+  200: BucketsPaginatedListBucketsResponse;
 };
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdBucketsResponse =
-  GetV1PartnersByPartnerIdTenantsByTenantIdBucketsResponses[keyof GetV1PartnersByPartnerIdTenantsByTenantIdBucketsResponses];
+export type ListBucketsResponse = ListBucketsResponses[keyof ListBucketsResponses];
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdMembersData = {
+export type ListTenantMembersData = {
   body?: never;
   path: {
     /**
@@ -1468,11 +1523,20 @@ export type GetV1PartnersByPartnerIdTenantsByTenantIdMembersData = {
      */
     tenantId: string;
   };
-  query?: never;
+  query?: {
+    /**
+     * Page number
+     */
+    page?: number;
+    /**
+     * Page size
+     */
+    pageSize?: number;
+  };
   url: '/v1/partners/{partnerId}/tenants/{tenantId}/members';
 };
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdMembersErrors = {
+export type ListTenantMembersErrors = {
   /**
    * Tenant not found
    */
@@ -1487,20 +1551,19 @@ export type GetV1PartnersByPartnerIdTenantsByTenantIdMembersErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdMembersError =
-  GetV1PartnersByPartnerIdTenantsByTenantIdMembersErrors[keyof GetV1PartnersByPartnerIdTenantsByTenantIdMembersErrors];
+export type ListTenantMembersError = ListTenantMembersErrors[keyof ListTenantMembersErrors];
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdMembersResponses = {
+export type ListTenantMembersResponses = {
   /**
    * Tenant members
    */
-  200: Array<UsersMemberResponse>;
+  200: UsersPaginatedMemberListResponse;
 };
 
-export type GetV1PartnersByPartnerIdTenantsByTenantIdMembersResponse =
-  GetV1PartnersByPartnerIdTenantsByTenantIdMembersResponses[keyof GetV1PartnersByPartnerIdTenantsByTenantIdMembersResponses];
+export type ListTenantMembersResponse =
+  ListTenantMembersResponses[keyof ListTenantMembersResponses];
 
-export type PostV1PartnersByPartnerIdTenantsByTenantIdSetupData = {
+export type SetupTenantData = {
   body?: never;
   path: {
     /**
@@ -1516,7 +1579,7 @@ export type PostV1PartnersByPartnerIdTenantsByTenantIdSetupData = {
   url: '/v1/partners/{partnerId}/tenants/{tenantId}/setup';
 };
 
-export type PostV1PartnersByPartnerIdTenantsByTenantIdSetupErrors = {
+export type SetupTenantErrors = {
   /**
    * Bad request
    */
@@ -1527,20 +1590,18 @@ export type PostV1PartnersByPartnerIdTenantsByTenantIdSetupErrors = {
   500: CommonReturnMessage;
 };
 
-export type PostV1PartnersByPartnerIdTenantsByTenantIdSetupError =
-  PostV1PartnersByPartnerIdTenantsByTenantIdSetupErrors[keyof PostV1PartnersByPartnerIdTenantsByTenantIdSetupErrors];
+export type SetupTenantError = SetupTenantErrors[keyof SetupTenantErrors];
 
-export type PostV1PartnersByPartnerIdTenantsByTenantIdSetupResponses = {
+export type SetupTenantResponses = {
   /**
    * Setup response
    */
   200: ModelsTenantSetupResponse;
 };
 
-export type PostV1PartnersByPartnerIdTenantsByTenantIdSetupResponse =
-  PostV1PartnersByPartnerIdTenantsByTenantIdSetupResponses[keyof PostV1PartnersByPartnerIdTenantsByTenantIdSetupResponses];
+export type SetupTenantResponse = SetupTenantResponses[keyof SetupTenantResponses];
 
-export type PostV1PartnersByPartnerIdTenantsByTenantIdStatusData = {
+export type SetTenantStatusData = {
   /**
    * Status update request
    */
@@ -1559,7 +1620,7 @@ export type PostV1PartnersByPartnerIdTenantsByTenantIdStatusData = {
   url: '/v1/partners/{partnerId}/tenants/{tenantId}/status';
 };
 
-export type PostV1PartnersByPartnerIdTenantsByTenantIdStatusErrors = {
+export type SetTenantStatusErrors = {
   /**
    * Bad request
    */
@@ -1570,17 +1631,16 @@ export type PostV1PartnersByPartnerIdTenantsByTenantIdStatusErrors = {
   500: CommonReturnMessage;
 };
 
-export type PostV1PartnersByPartnerIdTenantsByTenantIdStatusError =
-  PostV1PartnersByPartnerIdTenantsByTenantIdStatusErrors[keyof PostV1PartnersByPartnerIdTenantsByTenantIdStatusErrors];
+export type SetTenantStatusError = SetTenantStatusErrors[keyof SetTenantStatusErrors];
 
-export type PostV1PartnersByPartnerIdTenantsByTenantIdStatusResponses = {
+export type SetTenantStatusResponses = {
   /**
    * No content
    */
   204: unknown;
 };
 
-export type GetV1PartnersByPartnerIdThemesData = {
+export type ListThemesData = {
   body?: never;
   path: {
     /**
@@ -1588,31 +1648,38 @@ export type GetV1PartnersByPartnerIdThemesData = {
      */
     partnerId: string;
   };
-  query?: never;
+  query?: {
+    /**
+     * Page number
+     */
+    page?: number;
+    /**
+     * Page size
+     */
+    pageSize?: number;
+  };
   url: '/v1/partners/{partnerId}/themes';
 };
 
-export type GetV1PartnersByPartnerIdThemesErrors = {
+export type ListThemesErrors = {
   /**
    * Error getting themes
    */
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnersByPartnerIdThemesError =
-  GetV1PartnersByPartnerIdThemesErrors[keyof GetV1PartnersByPartnerIdThemesErrors];
+export type ListThemesError = ListThemesErrors[keyof ListThemesErrors];
 
-export type GetV1PartnersByPartnerIdThemesResponses = {
+export type ListThemesResponses = {
   /**
    * List of themes
    */
   200: ModelsThemeListResponse;
 };
 
-export type GetV1PartnersByPartnerIdThemesResponse =
-  GetV1PartnersByPartnerIdThemesResponses[keyof GetV1PartnersByPartnerIdThemesResponses];
+export type ListThemesResponse = ListThemesResponses[keyof ListThemesResponses];
 
-export type PostV1PartnersByPartnerIdThemesData = {
+export type CreateThemeData = {
   /**
    * Theme creation parameters
    */
@@ -1627,7 +1694,7 @@ export type PostV1PartnersByPartnerIdThemesData = {
   url: '/v1/partners/{partnerId}/themes';
 };
 
-export type PostV1PartnersByPartnerIdThemesErrors = {
+export type CreateThemeErrors = {
   /**
    * Bad request
    */
@@ -1642,20 +1709,18 @@ export type PostV1PartnersByPartnerIdThemesErrors = {
   500: CommonReturnMessage;
 };
 
-export type PostV1PartnersByPartnerIdThemesError =
-  PostV1PartnersByPartnerIdThemesErrors[keyof PostV1PartnersByPartnerIdThemesErrors];
+export type CreateThemeError = CreateThemeErrors[keyof CreateThemeErrors];
 
-export type PostV1PartnersByPartnerIdThemesResponses = {
+export type CreateThemeResponses = {
   /**
    * Theme created successfully
    */
   201: ModelsThemeResponse;
 };
 
-export type PostV1PartnersByPartnerIdThemesResponse =
-  PostV1PartnersByPartnerIdThemesResponses[keyof PostV1PartnersByPartnerIdThemesResponses];
+export type CreateThemeResponse = CreateThemeResponses[keyof CreateThemeResponses];
 
-export type DeleteV1PartnersByPartnerIdThemesByThemeIdData = {
+export type DeleteThemeData = {
   body?: never;
   path: {
     /**
@@ -1671,7 +1736,7 @@ export type DeleteV1PartnersByPartnerIdThemesByThemeIdData = {
   url: '/v1/partners/{partnerId}/themes/{themeId}';
 };
 
-export type DeleteV1PartnersByPartnerIdThemesByThemeIdErrors = {
+export type DeleteThemeErrors = {
   /**
    * Theme not found
    */
@@ -1686,17 +1751,16 @@ export type DeleteV1PartnersByPartnerIdThemesByThemeIdErrors = {
   500: CommonReturnMessage;
 };
 
-export type DeleteV1PartnersByPartnerIdThemesByThemeIdError =
-  DeleteV1PartnersByPartnerIdThemesByThemeIdErrors[keyof DeleteV1PartnersByPartnerIdThemesByThemeIdErrors];
+export type DeleteThemeError = DeleteThemeErrors[keyof DeleteThemeErrors];
 
-export type DeleteV1PartnersByPartnerIdThemesByThemeIdResponses = {
+export type DeleteThemeResponses = {
   /**
    * No content
    */
   204: unknown;
 };
 
-export type GetV1PartnersByPartnerIdThemesByThemeIdData = {
+export type GetThemeData = {
   body?: never;
   path: {
     /**
@@ -1712,7 +1776,7 @@ export type GetV1PartnersByPartnerIdThemesByThemeIdData = {
   url: '/v1/partners/{partnerId}/themes/{themeId}';
 };
 
-export type GetV1PartnersByPartnerIdThemesByThemeIdErrors = {
+export type GetThemeErrors = {
   /**
    * Theme not found
    */
@@ -1723,20 +1787,18 @@ export type GetV1PartnersByPartnerIdThemesByThemeIdErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnersByPartnerIdThemesByThemeIdError =
-  GetV1PartnersByPartnerIdThemesByThemeIdErrors[keyof GetV1PartnersByPartnerIdThemesByThemeIdErrors];
+export type GetThemeError = GetThemeErrors[keyof GetThemeErrors];
 
-export type GetV1PartnersByPartnerIdThemesByThemeIdResponses = {
+export type GetThemeResponses = {
   /**
    * Theme details
    */
   200: ModelsThemeResponse;
 };
 
-export type GetV1PartnersByPartnerIdThemesByThemeIdResponse =
-  GetV1PartnersByPartnerIdThemesByThemeIdResponses[keyof GetV1PartnersByPartnerIdThemesByThemeIdResponses];
+export type GetThemeResponse = GetThemeResponses[keyof GetThemeResponses];
 
-export type PutV1PartnersByPartnerIdThemesByThemeIdData = {
+export type UpdateThemeData = {
   /**
    * Theme update parameters
    */
@@ -1755,7 +1817,7 @@ export type PutV1PartnersByPartnerIdThemesByThemeIdData = {
   url: '/v1/partners/{partnerId}/themes/{themeId}';
 };
 
-export type PutV1PartnersByPartnerIdThemesByThemeIdErrors = {
+export type UpdateThemeErrors = {
   /**
    * Bad request
    */
@@ -1774,20 +1836,18 @@ export type PutV1PartnersByPartnerIdThemesByThemeIdErrors = {
   500: CommonReturnMessage;
 };
 
-export type PutV1PartnersByPartnerIdThemesByThemeIdError =
-  PutV1PartnersByPartnerIdThemesByThemeIdErrors[keyof PutV1PartnersByPartnerIdThemesByThemeIdErrors];
+export type UpdateThemeError = UpdateThemeErrors[keyof UpdateThemeErrors];
 
-export type PutV1PartnersByPartnerIdThemesByThemeIdResponses = {
+export type UpdateThemeResponses = {
   /**
    * Theme updated successfully
    */
   200: ModelsThemeResponse;
 };
 
-export type PutV1PartnersByPartnerIdThemesByThemeIdResponse =
-  PutV1PartnersByPartnerIdThemesByThemeIdResponses[keyof PutV1PartnersByPartnerIdThemesByThemeIdResponses];
+export type UpdateThemeResponse = UpdateThemeResponses[keyof UpdateThemeResponses];
 
-export type GetV1PartnersByPartnerIdUsersData = {
+export type ListUsersData = {
   body?: never;
   path: {
     /**
@@ -1812,27 +1872,25 @@ export type GetV1PartnersByPartnerIdUsersData = {
   url: '/v1/partners/{partnerId}/users';
 };
 
-export type GetV1PartnersByPartnerIdUsersErrors = {
+export type ListUsersErrors = {
   /**
    * Failed to list users
    */
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnersByPartnerIdUsersError =
-  GetV1PartnersByPartnerIdUsersErrors[keyof GetV1PartnersByPartnerIdUsersErrors];
+export type ListUsersError = ListUsersErrors[keyof ListUsersErrors];
 
-export type GetV1PartnersByPartnerIdUsersResponses = {
+export type ListUsersResponses = {
   /**
    * List of users
    */
   200: ModelsPaginatedUserResponse;
 };
 
-export type GetV1PartnersByPartnerIdUsersResponse =
-  GetV1PartnersByPartnerIdUsersResponses[keyof GetV1PartnersByPartnerIdUsersResponses];
+export type ListUsersResponse = ListUsersResponses[keyof ListUsersResponses];
 
-export type PostV1PartnersByPartnerIdUsersData = {
+export type CreateUserData = {
   /**
    * User registration parameters
    */
@@ -1847,7 +1905,7 @@ export type PostV1PartnersByPartnerIdUsersData = {
   url: '/v1/partners/{partnerId}/users';
 };
 
-export type PostV1PartnersByPartnerIdUsersErrors = {
+export type CreateUserErrors = {
   /**
    * Bad request
    */
@@ -1862,20 +1920,18 @@ export type PostV1PartnersByPartnerIdUsersErrors = {
   500: CommonReturnMessage;
 };
 
-export type PostV1PartnersByPartnerIdUsersError =
-  PostV1PartnersByPartnerIdUsersErrors[keyof PostV1PartnersByPartnerIdUsersErrors];
+export type CreateUserError = CreateUserErrors[keyof CreateUserErrors];
 
-export type PostV1PartnersByPartnerIdUsersResponses = {
+export type CreateUserResponses = {
   /**
    * User created successfully
    */
   201: ModelsCreateUserResponse;
 };
 
-export type PostV1PartnersByPartnerIdUsersResponse =
-  PostV1PartnersByPartnerIdUsersResponses[keyof PostV1PartnersByPartnerIdUsersResponses];
+export type CreateUserResponse = CreateUserResponses[keyof CreateUserResponses];
 
-export type GetV1PartnersByPartnerIdUsersByUserIdData = {
+export type GetUserData = {
   body?: never;
   path: {
     /**
@@ -1891,7 +1947,7 @@ export type GetV1PartnersByPartnerIdUsersByUserIdData = {
   url: '/v1/partners/{partnerId}/users/{userId}';
 };
 
-export type GetV1PartnersByPartnerIdUsersByUserIdErrors = {
+export type GetUserErrors = {
   /**
    * User not found
    */
@@ -1902,20 +1958,18 @@ export type GetV1PartnersByPartnerIdUsersByUserIdErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetV1PartnersByPartnerIdUsersByUserIdError =
-  GetV1PartnersByPartnerIdUsersByUserIdErrors[keyof GetV1PartnersByPartnerIdUsersByUserIdErrors];
+export type GetUserError = GetUserErrors[keyof GetUserErrors];
 
-export type GetV1PartnersByPartnerIdUsersByUserIdResponses = {
+export type GetUserResponses = {
   /**
    * User details
    */
   200: ModelsUserInfoResponse;
 };
 
-export type GetV1PartnersByPartnerIdUsersByUserIdResponse =
-  GetV1PartnersByPartnerIdUsersByUserIdResponses[keyof GetV1PartnersByPartnerIdUsersByUserIdResponses];
+export type GetUserResponse = GetUserResponses[keyof GetUserResponses];
 
-export type GetV1RolesData = {
+export type ListPortalRolesData = {
   body?: never;
   path?: never;
   query?: {
@@ -1931,25 +1985,25 @@ export type GetV1RolesData = {
   url: '/v1/roles';
 };
 
-export type GetV1RolesErrors = {
+export type ListPortalRolesErrors = {
   /**
    * Failed to list roles
    */
   500: CommonReturnMessage;
 };
 
-export type GetV1RolesError = GetV1RolesErrors[keyof GetV1RolesErrors];
+export type ListPortalRolesError = ListPortalRolesErrors[keyof ListPortalRolesErrors];
 
-export type GetV1RolesResponses = {
+export type ListPortalRolesResponses = {
   /**
    * List of roles
    */
   200: RolesPaginatedRoleResponse;
 };
 
-export type GetV1RolesResponse = GetV1RolesResponses[keyof GetV1RolesResponses];
+export type ListPortalRolesResponse = ListPortalRolesResponses[keyof ListPortalRolesResponses];
 
-export type GetV1S3CredentialsData = {
+export type ListS3CredentialsData = {
   body?: never;
   path?: never;
   query?: {
@@ -1965,26 +2019,26 @@ export type GetV1S3CredentialsData = {
   url: '/v1/s3_credentials';
 };
 
-export type GetV1S3CredentialsErrors = {
+export type ListS3CredentialsErrors = {
   /**
    * Error getting s3 credentials
    */
   500: CommonReturnMessage;
 };
 
-export type GetV1S3CredentialsError = GetV1S3CredentialsErrors[keyof GetV1S3CredentialsErrors];
+export type ListS3CredentialsError = ListS3CredentialsErrors[keyof ListS3CredentialsErrors];
 
-export type GetV1S3CredentialsResponses = {
+export type ListS3CredentialsResponses = {
   /**
    * List of S3 credentials
    */
   200: ModelsPaginatedS3CredentialResponse;
 };
 
-export type GetV1S3CredentialsResponse =
-  GetV1S3CredentialsResponses[keyof GetV1S3CredentialsResponses];
+export type ListS3CredentialsResponse =
+  ListS3CredentialsResponses[keyof ListS3CredentialsResponses];
 
-export type GetV1S3CredentialsByS3CredentialIdData = {
+export type GetS3CredentialData = {
   body?: never;
   path: {
     /**
@@ -1996,7 +2050,7 @@ export type GetV1S3CredentialsByS3CredentialIdData = {
   url: '/v1/s3_credentials/{s3CredentialId}';
 };
 
-export type GetV1S3CredentialsByS3CredentialIdErrors = {
+export type GetS3CredentialErrors = {
   /**
    * S3 credential not found
    */
@@ -2007,20 +2061,18 @@ export type GetV1S3CredentialsByS3CredentialIdErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetV1S3CredentialsByS3CredentialIdError =
-  GetV1S3CredentialsByS3CredentialIdErrors[keyof GetV1S3CredentialsByS3CredentialIdErrors];
+export type GetS3CredentialError = GetS3CredentialErrors[keyof GetS3CredentialErrors];
 
-export type GetV1S3CredentialsByS3CredentialIdResponses = {
+export type GetS3CredentialResponses = {
   /**
    * S3 credential details
    */
   200: ModelsGetS3CredentialsResponse;
 };
 
-export type GetV1S3CredentialsByS3CredentialIdResponse =
-  GetV1S3CredentialsByS3CredentialIdResponses[keyof GetV1S3CredentialsByS3CredentialIdResponses];
+export type GetS3CredentialResponse = GetS3CredentialResponses[keyof GetS3CredentialResponses];
 
-export type GetV1WarmTierCredentialsData = {
+export type ListWarmTierCredentialsData = {
   body?: never;
   path?: never;
   query?: {
@@ -2036,27 +2088,27 @@ export type GetV1WarmTierCredentialsData = {
   url: '/v1/warm_tier_credentials';
 };
 
-export type GetV1WarmTierCredentialsErrors = {
+export type ListWarmTierCredentialsErrors = {
   /**
    * Error getting warm tier credentials
    */
   500: CommonReturnMessage;
 };
 
-export type GetV1WarmTierCredentialsError =
-  GetV1WarmTierCredentialsErrors[keyof GetV1WarmTierCredentialsErrors];
+export type ListWarmTierCredentialsError =
+  ListWarmTierCredentialsErrors[keyof ListWarmTierCredentialsErrors];
 
-export type GetV1WarmTierCredentialsResponses = {
+export type ListWarmTierCredentialsResponses = {
   /**
    * List of warm tier credentials
    */
   200: ModelsPaginatedWarmTierCredentialResponse;
 };
 
-export type GetV1WarmTierCredentialsResponse =
-  GetV1WarmTierCredentialsResponses[keyof GetV1WarmTierCredentialsResponses];
+export type ListWarmTierCredentialsResponse =
+  ListWarmTierCredentialsResponses[keyof ListWarmTierCredentialsResponses];
 
-export type GetV1WarmTierCredentialsByWarmTierCredentialIdData = {
+export type GetWarmTierCredentialData = {
   body?: never;
   path: {
     /**
@@ -2068,7 +2120,7 @@ export type GetV1WarmTierCredentialsByWarmTierCredentialIdData = {
   url: '/v1/warm_tier_credentials/{warmTierCredentialId}';
 };
 
-export type GetV1WarmTierCredentialsByWarmTierCredentialIdErrors = {
+export type GetWarmTierCredentialErrors = {
   /**
    * Warm tier credential not found
    */
@@ -2079,15 +2131,15 @@ export type GetV1WarmTierCredentialsByWarmTierCredentialIdErrors = {
   500: CommonReturnMessage;
 };
 
-export type GetV1WarmTierCredentialsByWarmTierCredentialIdError =
-  GetV1WarmTierCredentialsByWarmTierCredentialIdErrors[keyof GetV1WarmTierCredentialsByWarmTierCredentialIdErrors];
+export type GetWarmTierCredentialError =
+  GetWarmTierCredentialErrors[keyof GetWarmTierCredentialErrors];
 
-export type GetV1WarmTierCredentialsByWarmTierCredentialIdResponses = {
+export type GetWarmTierCredentialResponses = {
   /**
    * Warm tier credential details
    */
   200: ModelsGetWarmTierCredentialResponse;
 };
 
-export type GetV1WarmTierCredentialsByWarmTierCredentialIdResponse =
-  GetV1WarmTierCredentialsByWarmTierCredentialIdResponses[keyof GetV1WarmTierCredentialsByWarmTierCredentialIdResponses];
+export type GetWarmTierCredentialResponse =
+  GetWarmTierCredentialResponses[keyof GetWarmTierCredentialResponses];

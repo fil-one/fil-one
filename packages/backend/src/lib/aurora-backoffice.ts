@@ -1,13 +1,15 @@
 import {
   createClient,
-  getAnalyticsV1ByPartnerIdTenantsByTenantIdOperations,
-  getAnalyticsV1ByPartnerIdTenantsByTenantIdStorage,
-  getV1PartnersByPartnerIdTenants,
-  getV1PartnersByPartnerIdTenantsByTenantId,
-  postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens,
-  postV1PartnersByPartnerIdTenants,
-  postV1PartnersByPartnerIdTenantsByTenantIdSetup,
-  postV1PartnersByPartnerIdTenantsByTenantIdStatus,
+  createTenant,
+  createTenantToken,
+  getTenant,
+  getTenantOperationMetrics,
+  getTenantStorageMetrics,
+  listTenants,
+  setTenantStatus,
+  setupTenant,
+  type ModelsComponentsStatus,
+  type ModelsSetupStep,
   type ModelOperationMetricsSample,
   type ModelStorageMetricsSample,
   type ModelsTenantStatus,
@@ -47,7 +49,7 @@ export async function createAuroraTenant({
     },
   });
 
-  const { data, error, response } = await postV1PartnersByPartnerIdTenants({
+  const { data, error, response } = await createTenant({
     client,
     path: { partnerId },
     body: {
@@ -94,7 +96,7 @@ async function findAuroraTenantByOrgId({
   partnerId: string;
   orgId: string;
 }): Promise<CreateAuroraTenantResult> {
-  const { data, error } = await getV1PartnersByPartnerIdTenants({
+  const { data, error } = await listTenants({
     client,
     path: { partnerId },
     // TODO: paginate through all pages instead of assuming ≤1000 tenants
@@ -108,7 +110,7 @@ async function findAuroraTenantByOrgId({
     });
   }
 
-  const tenant = data?.tenants?.find((t) => t.name === orgId);
+  const tenant = data?.items?.find((t) => t.name === orgId);
   if (!tenant?.id) {
     throw new Error(`Aurora tenant not found for org ${orgId}`);
   }
@@ -123,7 +125,7 @@ export interface SetupAuroraTenantOptions {
 
 export interface SetupAuroraTenantResult {
   id: string;
-  lastSetupStep: string;
+  lastSetupStep: ModelsSetupStep;
 }
 
 export async function setupAuroraTenant({
@@ -140,7 +142,7 @@ export async function setupAuroraTenant({
     },
   });
 
-  const { data, error } = await postV1PartnersByPartnerIdTenantsByTenantIdSetup({
+  const { data, error } = await setupTenant({
     client,
     path: { partnerId, tenantId },
     throwOnError: false,
@@ -159,8 +161,22 @@ export async function setupAuroraTenant({
     throw new Error(`Aurora API did not return setup data for tenant ${tenantId}`);
   }
 
-  console.log(`Aurora tenant ${tenantId} setup response:`, JSON.stringify(data));
-  return { id: data.id!, lastSetupStep: data.lastSetupStep! };
+  const lastSetupStep = deriveOverallSetupStep(data.components);
+  console.log(
+    `Aurora tenant ${tenantId} setup response:`,
+    JSON.stringify(data),
+    `=> overall lastSetupStep=${lastSetupStep}`,
+  );
+  return { id: data.id!, lastSetupStep };
+}
+
+function deriveOverallSetupStep(components: ModelsComponentsStatus | undefined): ModelsSetupStep {
+  if (!components) return 'NOT_STARTED';
+  // Only check auth & s3 — compute is not set up yet
+  const steps = [components.auth?.lastSetupStep, components.s3?.lastSetupStep].filter(Boolean);
+  if (steps.length === 0) return 'NOT_STARTED';
+  const nonFinished = steps.find((s) => s !== 'FINISHED');
+  return nonFinished ?? 'FINISHED';
 }
 
 export interface CreateAuroraTenantApiKeyOptions {
@@ -188,7 +204,7 @@ export async function createAuroraTenantApiKey({
     },
   });
 
-  const { data, error } = await postAuthV1PartnersByPartnerIdTenantsByTenantIdTokens({
+  const { data, error } = await createTenantToken({
     client,
     path: { partnerId, tenantId },
     body: { name: `filone-${orgId}` },
@@ -240,7 +256,7 @@ export async function getStorageSamples({
     headers: { 'X-Api-Key': token },
   });
 
-  const { data, error } = await getAnalyticsV1ByPartnerIdTenantsByTenantIdStorage({
+  const { data, error } = await getTenantStorageMetrics({
     client,
     path: { partnerId, tenantId },
     query: { from, to, window },
@@ -278,7 +294,7 @@ export async function getOperationsSamples({
     headers: { 'X-Api-Key': token },
   });
 
-  const { data, error } = await getAnalyticsV1ByPartnerIdTenantsByTenantIdOperations({
+  const { data, error } = await getTenantOperationMetrics({
     client,
     path: { partnerId, tenantId },
     query: { from, to, window },
@@ -308,7 +324,7 @@ export async function getTenantInfo({
     headers: { 'X-Api-Key': token },
   });
 
-  const { data, error } = await getV1PartnersByPartnerIdTenantsByTenantId({
+  const { data, error } = await getTenant({
     client,
     path: { partnerId, tenantId },
     throwOnError: false,
@@ -343,7 +359,7 @@ export async function updateTenantStatus({
     headers: { 'X-Api-Key': token },
   });
 
-  const { error } = await postV1PartnersByPartnerIdTenantsByTenantIdStatus({
+  const { error } = await setTenantStatus({
     client,
     path: { partnerId, tenantId },
     body: { status },
