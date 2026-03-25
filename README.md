@@ -114,12 +114,16 @@ The `Auth0MgmtClientId` and `Auth0MgmtClientSecret` are from a **Machine-to-Mach
 
 ```bash
 pnpm run dev              # SST live dev mode (live Lambda debugging)
-pnpm run build            # Build all packages for dev (default)
-pnpm deploy:dev           # Build and deploy personal dev stack (uses OS username as stage)
+pnpm run build:dev        # Build all packages for dev stage
+pnpm run build:staging    # Build all packages for staging stage
+pnpm run build:production # Build all packages for production stage
+pnpm run deploy:dev       # Build and deploy personal dev stack (uses OS username as stage)
 pnpm run remove           # Remove your personal dev stack
 pnpm run lint             # Lint and typecheck TypeScript code (via oxlint)
 pnpm run lint:fix         # Lint and auto-fix where possible
 ```
+
+> **Do not run `deploy:staging` or `deploy:production` manually** you know better. Staging and production deployments should go through CI/CD.
 
 ```bash
 # Local website dev server (for frontend-only changes)
@@ -128,12 +132,12 @@ cd packages/website && pnpm run dev
 
 ### Building for different stages
 
-The `build` script accepts a `STAGE` environment variable to control stage-specific configuration (e.g., which `.env` file the website uses):
+Each stage has an explicit build script:
 
 ```bash
-pnpm run build                     # dev (default)
-STAGE=staging pnpm run build       # staging
-STAGE=production pnpm run build    # production
+pnpm run build:dev        # dev
+pnpm run build:staging    # staging
+pnpm run build:production # production
 ```
 
 Non-website packages have identical builds across stages. The website uses Vite's `--mode` flag to load the correct `.env.<stage>` file.
@@ -195,11 +199,13 @@ pnpm deploy:dev
 
 ### Staging / Production
 
-Staging and production deployments should go through CI/CD, not from dev machines. For reference, the CI/CD pipeline runs:
+> **Do not deploy to staging or production manually** unless there is a very good reason. Use CI/CD.
+
+For reference, the CI/CD pipeline runs:
 
 ```bash
-STAGE=staging pnpm run build && sst deploy --stage staging
-STAGE=production pnpm run build && sst deploy --stage production
+pnpm run deploy:staging
+pnpm run deploy:production
 ```
 
 Custom domains require a pre-provisioned ACM certificate in us-east-1 and a DNS CNAME pointing to the CloudFront distribution (managed by a separate pipeline).
