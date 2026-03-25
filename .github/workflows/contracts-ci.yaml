@@ -60,7 +60,7 @@ jobs:
         uses: crytic/slither-action@v0.4.2
         with:
           slither-config: slither.config.json
-          slither-args: --filter-paths "contracts/lib,node_modules"
+          slither-args: --filter-paths "contracts/lib"
           sarif: slither-results.sarif
           fail-on: medium
           solc-version: '0.8.13'
