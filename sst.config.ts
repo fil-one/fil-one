@@ -97,7 +97,7 @@ export default $config({
     let domainName = 'staging.fil.one';
     let certArn: string | undefined;
 
-    if (isProduction || stage === 'staging') {
+    if (isProduction || isStaging) {
       domainName = isProduction ? 'app.fil.one' : 'staging.fil.one';
       // ACM cert must be in us-east-1 for CloudFront
       const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
