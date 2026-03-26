@@ -17,12 +17,11 @@ export const S3_REGION = S3Region.EuWest1;
 
 /**
  * Build the S3-compatible endpoint URL for a given region and stage.
- * The region parameter is accepted for forward-compatibility with regional
- * endpoints (e.g. eu-1.s3.fil.one) but is not yet used in URL construction.
+ * e.g. https://eu-west-1.s3.fil.one (production) or https://eu-west-1.s3.staging.fil.one (non-prod).
  */
-export function getS3Endpoint(_region: S3Region, stage: Stage | string): string {
+export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
   const base = stage === Stage.Production ? 's3.fil.one' : 's3.staging.fil.one';
-  return `https://${base}`;
+  return `https://${region}.${base}`;
 }
 
 /** Cookie name for the OAuth state parameter (CSRF protection for login flow). */
