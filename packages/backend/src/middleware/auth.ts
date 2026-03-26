@@ -21,6 +21,7 @@ import {
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { suggestOrgName } from '../lib/suggest-org-name.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -241,8 +242,7 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
     }),
   );
 
-  // TODO: Improve the org display name (e.g. use the user's organization name from Auth0)
-  const orgName = (email && email.split('@')[1]) ?? 'My Organization';
+  const orgName = (email && suggestOrgName(email)) ?? 'My Organization';
 
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
     const userId = result.Item.userId.S;
@@ -349,20 +349,11 @@ export function authMiddleware() {
     const idToken = cookies[COOKIE_NAMES.ID_TOKEN];
     const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
 
-    // TODO [Option D]: AUTH0_DOMAIN env var will change to custom domain
-    // (e.g. auth.fil.one). JWKS, issuer, and token endpoints use the same domain.
     const domain = process.env.AUTH0_DOMAIN!;
     const audience = process.env.AUTH0_AUDIENCE!;
     const issuer = `https://${domain}/`;
     const secrets = getAuthSecrets();
     const jwks = getJWKS(domain);
-
-    const hasCookies = {
-      accessToken: !!accessToken,
-      idToken: !!idToken,
-      refreshToken: !!refreshToken,
-    };
-    console.warn('[auth] Starting auth check', { hasCookies });
 
     // Stash refresh token so the after hook can force-refresh if a handler requests it
     if (refreshToken) {
@@ -411,7 +402,6 @@ export function authMiddleware() {
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
         });
-        console.warn('[auth] Token refresh succeeded');
         const blocked = await attachIdentity({
           event,
           sub: refreshedSub,

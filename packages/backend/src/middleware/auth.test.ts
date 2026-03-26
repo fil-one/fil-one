@@ -433,7 +433,7 @@ describe('authMiddleware', () => {
             Item: {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: 'PROFILE' },
-              name: { S: 'example.com' },
+              name: { S: 'Example' },
               orgConfirmed: { BOOL: false },
               setupStatus: { S: 'FILONE_ORG_CREATED' },
               createdBy: { S: MOCK_USER_ID },
