@@ -169,7 +169,7 @@ describe('presign-upload baseHandler', () => {
     });
 
     expect(mockGetPresignedPutObjectUrl).toHaveBeenCalledWith({
-      endpointUrl: 'https://s3.dev.aur.lu',
+      endpointUrl: expectedS3Url,
       credentials: { accessKeyId: 'AKIA_CONSOLE', secretAccessKey: 's3_secret' },
       bucket: 'my-bucket',
       key: 'photos/cat.jpg',
