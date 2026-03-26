@@ -58,6 +58,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "AuthLogin": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "AuthLogout": {
       "name": string
       "type": "sst.aws.Function"

@@ -536,7 +536,7 @@ describe('setup-integrations', () => {
           'https://old.example.com/callback',
           'https://app.example.com/api/auth/callback',
         ],
-        allowed_logout_urls: ['https://app.example.com/sign-in'],
+        allowed_logout_urls: ['https://fil.one'],
         web_origins: ['https://app.example.com'],
       });
     });
@@ -562,7 +562,7 @@ describe('setup-integrations', () => {
       );
 
       expect(capturedAuth0PatchBody).toMatchObject({
-        initiate_login_uri: 'https://staging.fil.one/sign-in',
+        initiate_login_uri: 'https://staging.fil.one/login',
       });
     });
 
@@ -575,9 +575,9 @@ describe('setup-integrations', () => {
           'https://other.example.com/callback',
           'https://app.example.com/api/auth/callback',
         ],
-        allowed_logout_urls: ['https://app.example.com/sign-in'],
+        allowed_logout_urls: ['https://fil.one'],
         web_origins: ['https://app.example.com'],
-        initiate_login_uri: 'https://app.example.com/sign-in',
+        initiate_login_uri: 'https://app.example.com/login',
       });
 
       await handler(
@@ -589,7 +589,6 @@ describe('setup-integrations', () => {
 
       expect(capturedAuth0PatchBody).toEqual({
         callbacks: ['https://other.example.com/callback'],
-        allowed_logout_urls: [],
         web_origins: [],
       });
     });

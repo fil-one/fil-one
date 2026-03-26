@@ -1,3 +1,6 @@
+export { buildAuth0AuthorizeUrl } from './auth.js';
+export type { Auth0LoginUrlOptions } from './auth.js';
+
 export {
   S3_ENDPOINT,
   S3_REGION,
