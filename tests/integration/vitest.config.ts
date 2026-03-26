@@ -6,6 +6,6 @@ export default defineConfig({
     testTimeout: 180_000,
     hookTimeout: 60_000,
     fileParallelism: true,
-    include: ['stripe-webhooks/**/*.test.ts'],
+    include: ['stripe-webhooks/**/*.test.ts', 'usage-reporting/**/*.test.ts'],
   },
 });
