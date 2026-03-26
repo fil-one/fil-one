@@ -8,9 +8,9 @@
   "scripts": {
     "dev": "sst dev",
     "build": "pnpm -r --if-present run build",
-    "deploy": "pnpm build && sst deploy",
-    "deploy:staging": "pnpm build && sst deploy --stage staging",
-    "deploy:production": "pnpm build && sst deploy --stage production",
+    "deploy:dev": "pnpm run build && sst deploy",
+    "deploy:staging": "pnpm run build && sst deploy --stage staging",
+    "deploy:production": "pnpm run build && sst deploy --stage production",
     "deploy:infra:staging": "cd infra && sst deploy --stage staging",
     "deploy:infra:production": "cd infra && sst deploy --stage production",
     "generate:api-clients": "pnpm --filter @filone/aurora-backoffice-client --filter @filone/aurora-portal-client generate",

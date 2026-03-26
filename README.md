@@ -116,15 +116,14 @@ There are two Auth0 M2M credentials with different scopes — see the [Auth0 M2M
 
 ```bash
 pnpm run dev              # SST live dev mode (live Lambda debugging)
-pnpm run deploy           # Deploy personal dev stack (uses OS username as stage)
-pnpm run deploy:staging   # Deploy to staging.fil.one
-pnpm run deploy:production      # Deploy to console.fil.one
-pnpm run deploy:infra:staging   # Deploy base infra (OIDC, IAM) to staging
-pnpm run deploy:infra:production # Deploy base infra (OIDC, IAM) to production
+pnpm run build            # Build all packages
+pnpm run deploy:dev       # Build and deploy personal dev stack (uses OS username as stage)
 pnpm run remove           # Remove your personal dev stack
 pnpm run lint             # Lint and typecheck TypeScript code (via oxlint)
 pnpm run lint:fix         # Lint and auto-fix where possible
 ```
+
+> **Do not run `deploy:staging` or `deploy:production` manually.** Staging and production deployments should go through CI/CD.
 
 ```bash
 # Local website dev server (for frontend-only changes)
@@ -174,25 +173,37 @@ Tests run inside `sst shell` so that SST resource bindings (table names, Stripe 
 ### Personal Dev Stack
 
 ```bash
-pnpx sst deploy
+pnpm deploy:dev
 ```
 
 Uses your OS username as the stage name. No custom domain — outputs a CloudFront URL.
 
-If you are having trouble deploying after SST Changes (eg, a version bump of SST or drift on components from manual actions), you may need to refresh the stack. To do this:
+If you are having trouble deploying after SST changes (e.g., a version bump of SST or drift on components from manual actions), you may need to refresh the stack:
 
-`pnpm run refresh`
-
-Then deploy: `pnpm run deploy`
+```bash
+pnpm run refresh
+pnpm deploy:dev
+```
 
 ### Staging / Production
 
+> **Do not deploy to staging or production manually** unless there is a very good reason. Use CI/CD.
+
+For reference, the CI/CD pipeline runs:
+
 ```bash
-pnpx sst deploy --stage staging
-pnpx sst deploy --stage production
+pnpm run deploy:staging
+pnpm run deploy:production
 ```
 
 Custom domains require a pre-provisioned ACM certificate in us-east-1 and a DNS CNAME pointing to the CloudFront distribution (managed by a separate pipeline).
+
+Infrastructure-only deploys are available for cases where only the base infra (OIDC, IAM roles) needs updating:
+
+```bash
+pnpm run deploy:infra:staging
+pnpm run deploy:infra:production
+```
 
 ### Live Dev Mode
 
@@ -228,7 +239,7 @@ Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecre
 
 **API setup** (APIs > Create API):
 
-- **Identifier (audience)**: `console.fil.one` (prod) — this must match `AUTH0_AUDIENCE` in `sst.config.ts` and website env. It's what makes Auth0 issue a JWT access token (instead of an opaque one) and is the `aud` claim the middleware validates.
+- **Identifier (audience)**: `app.fil.one` (prod) — this must match `AUTH0_AUDIENCE` in `sst.config.ts`. It's what makes Auth0 issue a JWT access token (instead of an opaque one) and is the `aud` claim the middleware validates.
 - Under the API's **Machine to Machine Applications** tab, authorize your application so it can exchange tokens.
 
 ### Auth0 Machine-to-Machine (M2M) Application
