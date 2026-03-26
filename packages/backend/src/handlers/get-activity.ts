@@ -57,7 +57,18 @@ export async function baseHandler(
       : undefined;
 
   // Get buckets from Aurora S3
-  const buckets = credentials ? (await listBuckets(gatewayUrl, credentials)).buckets : [];
+  let buckets: Awaited<ReturnType<typeof listBuckets>>['buckets'] = [];
+  if (credentials) {
+    try {
+      buckets = (await listBuckets(gatewayUrl, credentials)).buckets;
+    } catch (error) {
+      console.error('[get-activity] Failed to list buckets from Aurora S3', {
+        error,
+        orgId,
+        auroraTenantId,
+      });
+    }
+  }
 
   for (const bucket of buckets) {
     activities.push({

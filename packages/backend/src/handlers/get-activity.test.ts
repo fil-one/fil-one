@@ -445,6 +445,29 @@ describe('get-activity baseHandler', () => {
     ]);
   });
 
+  it('returns 200 with empty activities when listBuckets fails', async () => {
+    vi.setSystemTime(new Date('2026-01-08T12:00:00Z'));
+    mockOrgProfile(AURORA_TENANT_ID);
+    mockListBuckets.mockRejectedValue(new Error('Aurora S3 unavailable'));
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(String(result.body));
+    expect(body.activities).toStrictEqual([]);
+    expect(body.trends.storage).toHaveLength(7);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '[get-activity] Failed to list buckets from Aurora S3',
+      expect.objectContaining({ orgId: USER_INFO.orgId, auroraTenantId: AURORA_TENANT_ID }),
+    );
+
+    consoleSpy.mockRestore();
+  });
+
   // Object activities are temporarily excluded from the feed.
   // https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard
 });
