@@ -1,3 +1,6 @@
+/** Documentation URL for Fil One. */
+export const DOCS_URL = 'https://fil.one/docs';
+
 /** S3-compatible storage endpoint for Fil One. */
 export const S3_ENDPOINT = 'https://s3.fil.one';
 

@@ -7,7 +7,7 @@ import { COOKIE_NAMES, makeClearCookieHeader } from '../lib/response-builder.js'
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 async function baseHandler(
-  event: APIGatewayProxyEventV2,
+  _event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const domain = process.env.AUTH0_DOMAIN!;
   const secrets = getAuthSecrets();
