@@ -17,11 +17,13 @@ export const S3_REGION = S3Region.EuWest1;
 
 /**
  * Build the S3-compatible endpoint URL for a given region and stage.
- * e.g. https://eu-west-1.s3.fil.one (production) or https://eu-west-1.s3.staging.fil.one (non-prod).
+ *
+ * TODO: revert to region-prefixed URLs once Aurora DNS is fixed:
+ *   const base = stage === Stage.Production ? 's3.fil.one' : 's3.staging.fil.one';
+ *   return `https://${region}.${base}`;
  */
-export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
-  const base = stage === Stage.Production ? 's3.fil.one' : 's3.staging.fil.one';
-  return `https://${region}.${base}`;
+export function getS3Endpoint(_region: S3Region, _stage: Stage | string): string {
+  return 'https://s3.dev.aur.lu';
 }
 
 /** Cookie name for the OAuth state parameter (CSRF protection for login flow). */
