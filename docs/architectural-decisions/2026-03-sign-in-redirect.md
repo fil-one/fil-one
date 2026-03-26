@@ -59,6 +59,8 @@ https://{AUTH0_DOMAIN}/authorize
 
 ### Per-environment values
 
+These values are set via SST Resource bindings and injected into the Lambda environment at deploy time — they are not stored in `.env` files or source code.
+
 | Parameter         | Staging                             | Production                   |
 | ----------------- | ----------------------------------- | ---------------------------- |
 | `AUTH0_DOMAIN`    | `dev-oar2nhqh58xf5pwf.us.auth0.com` | _(prod tenant when created)_ |
