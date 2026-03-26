@@ -21,10 +21,10 @@ VITE_API_URL=
 DEV_PROXY_TARGET=https://staging.fil.one
 ```
 
-| Variable               | Purpose                                                                                   |
-| ---------------------- | ----------------------------------------------------------------------------------------- |
-| `VITE_API_URL`         | Must be empty for local dev. The Vite proxy serves `/api/*` so cookies stay on localhost. |
-| `DEV_PROXY_TARGET`     | The backend URL that Vite proxies `/api/*` requests to.                                   |
+| Variable           | Purpose                                                                                   |
+| ------------------ | ----------------------------------------------------------------------------------------- |
+| `VITE_API_URL`     | Must be empty for local dev. The Vite proxy serves `/api/*` so cookies stay on localhost. |
+| `DEV_PROXY_TARGET` | The backend URL that Vite proxies `/api/*` requests to.                                   |
 
 ### 2. Start the dev server
 
