@@ -444,13 +444,17 @@ export default $config({
 
     // ── Auth routes ──────────────────────────────────────────────────
     const allowedRedirectOrigins = allowedOrigins.join(',');
-    addRoute('GET', '/api/auth/login', 'auth-login', {
-      WEBSITE_URL: siteUrl,
-      ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
+    addRoute({
+      method: 'GET',
+      routePath: '/api/auth/login',
+      handler: 'auth-login',
+      extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
     });
-    addRoute('GET', '/api/auth/callback', 'auth-callback', {
-      WEBSITE_URL: siteUrl,
-      ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
+    addRoute({
+      method: 'GET',
+      routePath: '/api/auth/callback',
+      handler: 'auth-callback',
+      extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
     });
     addRoute({
       method: 'GET',
