@@ -9,8 +9,10 @@ type ContactSalesFields = {
 };
 
 export async function submitContactSalesForm(fields: ContactSalesFields): Promise<void> {
+  const [firstName, ...lastName] = fields.name.split(' ');
   const hubspotFields = [
-    { objectTypeId: '0-1', name: 'firstname', value: fields.name },
+    { objectTypeId: '0-1', name: 'firstname', value: firstName },
+    { objectTypeId: '0-1', name: 'lastname', value: lastName.join(' ') },
     { objectTypeId: '0-1', name: 'company', value: fields.company },
     { objectTypeId: '0-1', name: 'email', value: fields.email },
   ];
