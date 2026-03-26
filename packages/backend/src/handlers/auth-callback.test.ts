@@ -58,7 +58,7 @@ describe('auth-callback handler', () => {
 
       expect(result.statusCode).toBe(302);
       expect(result.headers!['Location']).toBe(
-        'https://app.example.com/sign-in?error=User%20cancelled',
+        'https://app.example.com/login-error?error=User%20cancelled',
       );
     });
 
@@ -71,7 +71,7 @@ describe('auth-callback handler', () => {
 
       expect(result.statusCode).toBe(302);
       expect(result.headers!['Location']).toBe(
-        'https://app.example.com/sign-in?error=access_denied',
+        'https://app.example.com/login-error?error=access_denied',
       );
     });
   });
@@ -84,7 +84,7 @@ describe('auth-callback handler', () => {
 
       expect(result.statusCode).toBe(302);
       expect(result.headers!['Location']).toBe(
-        'https://app.example.com/sign-in?error=Authentication%20failed',
+        'https://app.example.com/login-error?error=Authentication%20failed',
       );
     });
   });
@@ -104,7 +104,7 @@ describe('auth-callback handler', () => {
 
       expect(result.statusCode).toBe(302);
       expect(result.headers!['Location']).toBe(
-        'https://app.example.com/sign-in?error=Invalid%20state',
+        'https://app.example.com/login-error?error=Invalid%20state',
       );
     });
 
@@ -117,7 +117,7 @@ describe('auth-callback handler', () => {
 
       expect(result.statusCode).toBe(302);
       expect(result.headers!['Location']).toBe(
-        'https://app.example.com/sign-in?error=Invalid%20state',
+        'https://app.example.com/login-error?error=Invalid%20state',
       );
     });
   });
@@ -139,7 +139,7 @@ describe('auth-callback handler', () => {
 
       expect(result.statusCode).toBe(302);
       expect(result.headers!['Location']).toBe(
-        'https://app.example.com/sign-in?error=Token%20exchange%20failed',
+        'https://app.example.com/login-error?error=Token%20exchange%20failed',
       );
     });
   });

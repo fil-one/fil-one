@@ -4,6 +4,7 @@ import { Route as indexRoute } from './routes/index.js';
 import { Route as authRoute } from './routes/_auth.js';
 import { Route as signInRoute } from './routes/_auth/sign-in.js';
 import { Route as signUpRoute } from './routes/_auth/sign-up.js';
+import { Route as loginErrorRoute } from './routes/_auth/login-error.js';
 import { Route as appRoute } from './routes/_app.js';
 import { Route as dashboardRoute } from './routes/_app/dashboard.js';
 import { Route as bucketsRoute } from './routes/_app/buckets.js';
@@ -23,7 +24,7 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   verifyEmailRoute,
   finishSignUpRoute,
-  authRoute.addChildren([signInRoute, signUpRoute]),
+  authRoute.addChildren([signInRoute, signUpRoute, loginErrorRoute]),
   appRoute.addChildren([
     dashboardRoute,
     bucketsRoute,
