@@ -99,6 +99,8 @@ pnpx sst secret set Auth0ClientId <value> [--stage <stage>]
 pnpx sst secret set Auth0ClientSecret <value> [--stage <stage>]
 pnpx sst secret set Auth0MgmtClientId <value> [--stage <stage>]
 pnpx sst secret set Auth0MgmtClientSecret <value> [--stage <stage>]
+pnpx sst secret set Auth0MgmtRuntimeClientId <value> [--stage <stage>]
+pnpx sst secret set Auth0MgmtRuntimeClientSecret <value> [--stage <stage>]
 pnpx sst secret set StripeSecretKey <value> [--stage <stage>]
 pnpx sst secret set StripePriceId <value> [--stage <stage>]
 pnpx sst secret set AuroraBackofficeToken <value> [--stage <stage>]
@@ -108,7 +110,7 @@ pnpx sst secret set GrafanaLokiAuth '<instanceId>:<apiKey>' [--stage <stage>]
 
 Omit `--stage` to set for your personal dev stage (defaults to OS username).
 
-The `Auth0MgmtClientId` and `Auth0MgmtClientSecret` are from a **Machine-to-Machine (M2M) application** in Auth0 — see the [Auth0 M2M Setup](#auth0-machine-to-machine-m2m-application) section below. The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below. The `GrafanaLokiAuth` secret is from Grafana Cloud — see the [Observability](#observability) section below.
+There are two Auth0 M2M credentials with different scopes — see the [Auth0 M2M Setup](#auth0-machine-to-machine-m2m-application) section below. The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below. The `GrafanaLokiAuth` secret is from Grafana Cloud — see the [Observability](#observability) section below.
 
 ## Commands
 
@@ -231,7 +233,11 @@ Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecre
 
 ### Auth0 Machine-to-Machine (M2M) Application
 
-The deploy automation uses an M2M application to update Auth0 settings programmatically.
+Two separate M2M applications are used to limit the scope of credentials exposed to Lambda functions.
+
+#### Deploy automation (`Auth0MgmtClientId` / `Auth0MgmtClientSecret`)
+
+Used only by the deploy-time setup Lambda to configure Auth0 on each deploy. Not available to runtime Lambda functions.
 
 **One-time setup in Auth0 Dashboard:**
 
@@ -239,14 +245,30 @@ The deploy automation uses an M2M application to update Auth0 settings programma
 2. Choose **Machine to Machine Applications**
 3. Name it something like `Fil.one Deploy Automation`
 4. Authorize it for the **Auth0 Management API** (`https://<tenant>.us.auth0.com/api/v2/`)
-5. Grant these scopes: `read:clients`, `update:clients`
+5. Grant these scopes: `read:clients`, `update:clients`, `read:email_provider`, `create:email_provider`, `update:email_provider`
 6. Copy the **Client ID** and **Client Secret**
-
-Set these as SST secrets:
 
 ```bash
 pnpx sst secret set Auth0MgmtClientId <M2M-client-id> [--stage <stage>]
 pnpx sst secret set Auth0MgmtClientSecret <M2M-client-secret> [--stage <stage>]
+```
+
+#### Runtime user management (`Auth0MgmtRuntimeClientId` / `Auth0MgmtRuntimeClientSecret`)
+
+Used by request-time Lambda handlers (`update-profile`, `resend-verification`) to manage user records and trigger verification emails.
+
+**One-time setup in Auth0 Dashboard:**
+
+1. Go to **Applications > Create Application**
+2. Choose **Machine to Machine Applications**
+3. Name it something like `Fil.one Runtime`
+4. Authorize it for the **Auth0 Management API** (`https://<tenant>.us.auth0.com/api/v2/`)
+5. Grant these scopes: `update:users`, `create:user_tickets`
+6. Copy the **Client ID** and **Client Secret**
+
+```bash
+pnpx sst secret set Auth0MgmtRuntimeClientId <M2M-client-id> [--stage <stage>]
+pnpx sst secret set Auth0MgmtRuntimeClientSecret <M2M-client-secret> [--stage <stage>]
 ```
 
 ## Stripe (Billing)
