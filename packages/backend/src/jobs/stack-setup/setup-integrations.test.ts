@@ -589,7 +589,6 @@ describe('setup-integrations', () => {
 
       expect(capturedAuth0PatchBody).toEqual({
         callbacks: ['https://other.example.com/callback'],
-        allowed_logout_urls: [],
         web_origins: [],
       });
     });
