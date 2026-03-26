@@ -1,15 +1,122 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+
+import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
+import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
-import { Modal, ModalBody, ModalFooter, ModalHeader } from '../components/Modal';
+import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
+import { getMe, updateProfile, changePassword } from '../lib/api.js';
+import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
+import type { MeResponse } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
-// Mock data
+// Section card wrapper
 // ---------------------------------------------------------------------------
 
-const MOCK_USER = { name: 'Joe Muoio', email: 'joe@example.com' };
+function SectionCard({
+  icon: IconComp,
+  title,
+  description,
+  danger,
+  children,
+}: {
+  icon: PhosphorIcon;
+  title: string;
+  description: string;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={`rounded-lg border bg-white shadow-sm ${
+        danger ? 'border-red-200' : 'border-[#e1e4ea]'
+      }`}
+    >
+      <div className="flex items-center gap-2.5 p-5 pb-0">
+        <div
+          className={`flex size-8 items-center justify-center rounded-lg ${
+            danger ? 'bg-red-50' : 'bg-zinc-100'
+          }`}
+        >
+          <IconComp size={16} className={danger ? 'text-red-600' : 'text-zinc-500'} />
+        </div>
+        <div>
+          <h2
+            className={`text-sm font-medium tracking-tight ${
+              danger ? 'text-red-600' : 'text-zinc-900'
+            }`}
+          >
+            {title}
+          </h2>
+          <p className="text-[13px] text-zinc-500">{description}</p>
+        </div>
+      </div>
+      <div className="p-5">{children}</div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Toggle row (for notifications)
+// ---------------------------------------------------------------------------
+
+function ToggleRow({
+  label,
+  description,
+  enabled,
+  disabled,
+}: {
+  label: string;
+  description: string;
+  enabled: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between py-1">
+      <div>
+        <p className="text-[13px] font-medium text-zinc-900">{label}</p>
+        <p className="text-xs text-zinc-500">{description}</p>
+      </div>
+      <div
+        className={`flex h-6 w-11 items-center rounded-full border-2 border-transparent p-0.5 ${
+          enabled ? 'bg-blue-500' : 'bg-zinc-300'
+        } ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+      >
+        <div
+          className={`size-5 rounded-full bg-white shadow transition-transform ${
+            enabled ? 'translate-x-5' : 'translate-x-0'
+          }`}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Setting row (for security section)
+// ---------------------------------------------------------------------------
+
+function SettingRow({
+  label,
+  description,
+  action,
+}: {
+  label: string;
+  description: string;
+  action: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between py-1">
+      <div>
+        <p className="text-[13px] font-medium text-zinc-900">{label}</p>
+        <p className="text-xs text-zinc-500">{description}</p>
+      </div>
+      {action}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -18,195 +125,293 @@ const MOCK_USER = { name: 'Joe Muoio', email: 'joe@example.com' };
 export function SettingsPage() {
   const { toast } = useToast();
 
-  // Profile state
-  const [name, setName] = useState(MOCK_USER.name);
-  const [email] = useState(MOCK_USER.email);
+  const [me, setMe] = useState<MeResponse | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Password state
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [orgName, setOrgName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
 
-  // Delete account modal state
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    async function fetch() {
+      try {
+        const data = await getMe();
+        if (!cancelled) {
+          setMe(data);
+          setName(data.name ?? '');
+          setEmail(data.email ?? '');
+          setOrgName(data.orgName ?? '');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          toast.error(err instanceof Error ? err.message : 'Failed to load settings');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void fetch();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // -------------------------------------------------------------------------
-  // Handlers
-  // -------------------------------------------------------------------------
+  const social = isSocialConnection(me?.connectionType);
+  const provider = getProvider(me?.connectionType);
 
-  function handleSaveProfile() {
-    // UNKNOWN: Real profile update API call not implemented — UI-only.
-    toast.success('Profile updated');
+  const nameChanged = !social && name !== (me?.name ?? '');
+  const emailChanged = !social && email !== (me?.email ?? '');
+  const orgNameChanged = orgName !== (me?.orgName ?? '');
+  const hasChanges = nameChanged || emailChanged || orgNameChanged;
+
+  async function handleSaveProfile() {
+    const payload: Record<string, string> = {};
+    if (nameChanged) payload.name = name;
+    if (emailChanged) payload.email = email;
+    if (orgNameChanged) payload.orgName = orgName;
+
+    const validated = UpdateProfileSchema.safeParse(payload);
+    if (!validated.success) {
+      toast.error(validated.error.issues[0].message);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const result = await updateProfile(validated.data);
+      const updated = { ...me } as MeResponse;
+      if (result.name !== undefined) {
+        setName(result.name);
+        updated.name = result.name;
+      }
+      if (result.email !== undefined) {
+        setEmail(result.email);
+        updated.email = result.email;
+      }
+      if (result.orgName !== undefined) {
+        setOrgName(result.orgName);
+        updated.orgName = result.orgName;
+      }
+      setMe(updated);
+
+      if (result.email && result.email !== me?.email) {
+        toast.success('Profile updated. Check your inbox to verify your new email.');
+      } else {
+        toast.success('Profile updated');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update profile');
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function handleUpdatePassword() {
-    // UNKNOWN: Real password change API call not implemented — UI-only.
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    toast.success('Password updated');
+  async function handleChangePassword() {
+    setChangingPassword(true);
+    try {
+      await changePassword();
+      toast.success('Password reset email sent');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send password reset email');
+    } finally {
+      setChangingPassword(false);
+    }
   }
 
-  function handleDeleteAccount() {
-    // UNKNOWN: Account deletion would need real auth + API. This is UI-only.
-    setDeleteOpen(false);
-    toast.info('Account deletion requested');
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-16">
+        <Spinner ariaLabel="Loading settings" />
+      </div>
+    );
   }
-
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
 
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-semibold text-zinc-900 mb-6">Settings</h1>
+      <div className="mb-1">
+        <h1 className="text-xl font-semibold tracking-tight text-zinc-900">Settings</h1>
+        <p className="text-[13px] text-zinc-500">Manage your profile and preferences</p>
+      </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Profile */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="rounded-lg border border-zinc-200 bg-white p-6 mb-4">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-4">
-          Profile
-        </h2>
+      <div className="mt-6 flex max-w-[672px] flex-col gap-6">
+        {/* Profile */}
+        <SectionCard icon={UserIcon} title="Profile" description="Your personal information">
+          <div className="flex flex-col gap-4">
+            <div className="flex gap-3">
+              <div className="flex flex-1 flex-col gap-1.5">
+                <label className="text-[13px] font-medium text-zinc-900">Full name</label>
+                {social ? (
+                  <>
+                    <Input value={name} onChange={() => {}} disabled />
+                    <p className="text-[11px] text-zinc-500">
+                      Managed by {provider?.label}.{' '}
+                      <a
+                        href={provider?.profileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-500 hover:underline"
+                      >
+                        Update at {provider?.label}
+                      </a>
+                    </p>
+                  </>
+                ) : (
+                  <Input value={name} onChange={setName} placeholder="Your full name" />
+                )}
+              </div>
+              <div className="flex flex-1 flex-col gap-1.5">
+                <label className="text-[13px] font-medium text-zinc-900">Company name</label>
+                <Input value={orgName} onChange={setOrgName} placeholder="Your company" />
+              </div>
+            </div>
 
-        <div className="flex flex-col gap-4 max-w-md">
-          {/* Full name */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-zinc-700">Full name</label>
-            <Input value={name} onChange={setName} placeholder="Your full name" />
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[13px] font-medium text-zinc-900">Email</label>
+              {social ? (
+                <>
+                  <Input value={email} onChange={() => {}} disabled />
+                  <p className="text-[11px] text-zinc-500">
+                    Managed by {provider?.label}.{' '}
+                    <a
+                      href={provider?.profileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-500 hover:underline"
+                    >
+                      Update at {provider?.label}
+                    </a>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Input value={email} onChange={setEmail} placeholder="you@example.com" />
+                  <p className="text-[11px] text-zinc-500">
+                    You will need to verify any email change.
+                  </p>
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button variant="filled" onClick={handleSaveProfile} disabled={saving || !hasChanges}>
+                {saving ? 'Saving...' : 'Save changes'}
+              </Button>
+              {hasChanges && (
+                <p className="text-[11px] text-zinc-500">
+                  Saving:{' '}
+                  {[
+                    nameChanged && 'name',
+                    emailChanged && 'email',
+                    orgNameChanged && 'company name',
+                  ]
+                    .filter(Boolean)
+                    .join(', ')}
+                </p>
+              )}
+            </div>
           </div>
+        </SectionCard>
 
-          {/* Email — read-only */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-zinc-700">Email</label>
-            <Input
-              value={email}
-              onChange={() => {
-                /* read-only */
-              }}
+        {/* Notifications */}
+        <SectionCard
+          icon={BellIcon}
+          title="Notifications"
+          description="Manage your notification preferences"
+        >
+          <div className="flex flex-col gap-3 opacity-50">
+            <ToggleRow
+              label="Email notifications"
+              description="Get notified about your uploads and when approaching storage limits"
+              enabled={false}
               disabled
-              placeholder="you@example.com"
             />
-            <p className="text-xs text-zinc-400 mt-1">Email cannot be changed here.</p>
-          </div>
-
-          <div>
-            <Button variant="filled" onClick={handleSaveProfile}>
-              Save changes
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Password */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="rounded-lg border border-zinc-200 bg-white p-6 mb-4">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-4">
-          Password
-        </h2>
-
-        <div className="flex flex-col gap-4 max-w-md">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-zinc-700">Current password</label>
-            <Input
-              type="password"
-              value={currentPassword}
-              onChange={setCurrentPassword}
-              placeholder="Current password"
-              autoComplete="current-password"
+            <div className="h-px bg-[#e1e4ea]" />
+            <ToggleRow
+              label="Marketing emails"
+              description="Receive updates about new features"
+              enabled={false}
+              disabled
             />
+            <p className="text-xs text-zinc-400 italic">Coming soon</p>
           </div>
+        </SectionCard>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-zinc-700">New password</label>
-            <Input
-              type="password"
-              value={newPassword}
-              onChange={setNewPassword}
-              placeholder="New password"
-              autoComplete="new-password"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-zinc-700">Confirm password</label>
-            <Input
-              type="password"
-              value={confirmPassword}
-              onChange={setConfirmPassword}
-              placeholder="Confirm new password"
-              autoComplete="new-password"
-            />
-          </div>
-
-          <div>
-            <Button variant="filled" onClick={handleUpdatePassword}>
-              Update password
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Danger Zone */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="rounded-lg border border-red-200 bg-white p-6">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-red-600 mb-4">
-          Danger Zone
-        </h2>
-
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-zinc-900">Delete account</span>
-            <span className="text-sm text-zinc-500">
-              This will permanently delete your account and all data.
-            </span>
-          </div>
-          <div className="shrink-0">
-            <Button
-              variant="ghost"
-              onClick={() => setDeleteOpen(true)}
-              className="border-red-300 text-red-600 hover:bg-red-50"
-            >
-              Delete account
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Delete Account Confirm Modal */}
-      {/* ------------------------------------------------------------------ */}
-      {/* UNKNOWN: Account deletion would need real auth + API. This is UI-only. */}
-      <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)} size="sm">
-        <ModalHeader onClose={() => setDeleteOpen(false)}>Delete account</ModalHeader>
-        <ModalBody>
+        {/* Security */}
+        <SectionCard
+          icon={ShieldCheckIcon}
+          title="Security"
+          description="Manage your account security"
+        >
           <div className="flex flex-col gap-3">
-            <p className="text-sm text-zinc-700">
-              Are you sure you want to delete your account? This action is{' '}
-              <strong>permanent</strong> and cannot be undone.
-            </p>
-            <p className="text-sm text-zinc-500">
-              All your buckets, objects, and access keys will be permanently removed.
-            </p>
+            {!social && (
+              <>
+                <SettingRow
+                  label="Two-factor authentication"
+                  description="Add an extra layer of security to your account"
+                  action={
+                    <Button variant="ghost" size="compact" disabled>
+                      Enable
+                    </Button>
+                  }
+                />
+                <p className="text-[11px] text-zinc-400 -mt-1">
+                  Requires Auth0 MFA configuration. Coming soon.
+                </p>
+                <div className="h-px bg-[#e1e4ea]" />
+              </>
+            )}
+            {!social && (
+              <SettingRow
+                label="Password"
+                description="Change your account password"
+                action={
+                  <Button
+                    variant="ghost"
+                    size="compact"
+                    onClick={handleChangePassword}
+                    disabled={changingPassword}
+                  >
+                    {changingPassword ? 'Sending...' : 'Change'}
+                  </Button>
+                }
+              />
+            )}
+            {social && provider && (
+              <p className="text-xs text-zinc-500">
+                Security settings are managed by {provider.label}.{' '}
+                <a
+                  href={provider.profileUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-500 hover:underline"
+                >
+                  Visit {provider.label} settings
+                </a>
+              </p>
+            )}
           </div>
-        </ModalBody>
-        <ModalFooter>
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setDeleteOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={handleDeleteAccount}
-              className="border-red-300 text-red-600 hover:bg-red-50"
-            >
-              Delete account
-            </Button>
+        </SectionCard>
+
+        {/* Danger Zone */}
+        <SectionCard icon={TrashIcon} title="Danger zone" description="Irreversible actions" danger>
+          <div className="rounded-lg border border-red-200 bg-red-50/50 p-3.5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[13px] font-medium text-zinc-900">Delete account</p>
+                <p className="text-xs text-zinc-500">
+                  Permanently delete your account and all data
+                </p>
+              </div>
+              <Button variant="ghost" className="cursor-not-allowed opacity-40" disabled>
+                Delete account
+              </Button>
+            </div>
           </div>
-        </ModalFooter>
-      </Modal>
+        </SectionCard>
+      </div>
     </div>
   );
 }

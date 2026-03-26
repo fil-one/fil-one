@@ -12,6 +12,7 @@ export function Input({ onChange, className, ...rest }: InputProps) {
       onChange={(event) => onChange(event.target.value)}
       className={clsx(
         'focus:brand-outline block w-full rounded-lg border border-(--input-border-color) p-3 text-(--color-text-base) placeholder:text-(--input-placeholder-color)',
+        'disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400',
         className,
       )}
     />
