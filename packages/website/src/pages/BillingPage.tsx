@@ -328,7 +328,7 @@ export function BillingPage() {
 
             {/* Trial CTA banner */}
             {isTrialing && (
-              <div className="mx-px rounded-lg bg-[rgba(243,244,246,0.5)] border border-[rgba(225,228,234,0.5)] p-[13px] flex items-center justify-between">
+              <div className="rounded-lg bg-[rgba(243,244,246,0.5)] border border-[rgba(225,228,234,0.5)] p-[13px] flex items-center justify-between">
                 <p className="text-[13px] font-medium text-[#14181f]">
                   Ready to unlock unlimited storage?
                 </p>
@@ -347,7 +347,7 @@ export function BillingPage() {
             {/* Grace period / Canceled reactivation CTA */}
             {(isGracePeriod || isCanceled) && (
               <div
-                className={`mx-px rounded-lg p-[13px] flex items-center justify-between ${
+                className={`rounded-lg p-[13px] flex items-center justify-between ${
                   isCanceled
                     ? 'bg-red-50 border border-red-200'
                     : 'bg-amber-50 border border-amber-200'
@@ -417,19 +417,19 @@ export function BillingPage() {
                   </p>
                 </>
               )}
-            </div>
 
-            {/* Estimated cost (active/grace) */}
-            {(isActive || isPastDue || isGracePeriod) && (
-              <div className="mx-[1px] mt-4 rounded-lg bg-[rgba(243,244,246,0.5)] border border-[rgba(225,228,234,0.5)] p-[13px] flex items-center justify-between">
-                <span className="text-[13px] font-medium text-[#14181f]">
-                  Estimated monthly cost
-                </span>
-                <span className="text-[18px] font-semibold leading-[28px] text-[#14181f]">
-                  {formatCents(estimatedCost)}
-                </span>
-              </div>
-            )}
+              {/* Estimated cost (active/grace) */}
+              {(isActive || isPastDue || isGracePeriod) && (
+                <div className="mt-4 rounded-lg bg-[rgba(243,244,246,0.5)] p-3 flex items-center justify-between">
+                  <span className="text-[13px] font-medium text-[#14181f]">
+                    Estimated monthly cost
+                  </span>
+                  <span className="text-[18px] font-semibold leading-[28px] text-[#14181f]">
+                    {formatCents(estimatedCost)}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Payment method card */}
