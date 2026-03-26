@@ -41,6 +41,9 @@ export default $config({
     const auth0ClientSecret = new sst.Secret('Auth0ClientSecret');
     const auth0MgmtClientId = new sst.Secret('Auth0MgmtClientId');
     const auth0MgmtClientSecret = new sst.Secret('Auth0MgmtClientSecret');
+    // Separate runtime M2M credentials (different scopes than setup credentials)
+    const auth0MgmtRuntimeClientId = new sst.Secret('Auth0MgmtRuntimeClientId');
+    const auth0MgmtRuntimeClientSecret = new sst.Secret('Auth0MgmtRuntimeClientSecret');
     const stripeSecretKey = new sst.Secret('StripeSecretKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
@@ -267,6 +270,8 @@ export default $config({
       stripePriceId,
       auroraBackofficeToken,
     ];
+    // Management API runtime credentials — linked only to handlers that call the Auth0 Management API
+    const mgmtRuntimeResources = [auth0MgmtRuntimeClientId, auth0MgmtRuntimeClientSecret];
 
     const sharedEnv: Record<string, $util.Input<string>> = {
       FILONE_STAGE: $app.stage,
@@ -307,13 +312,23 @@ export default $config({
     const createFn = (fnName: string, args: Omit<sst.aws.FunctionArgs, 'name'>) =>
       createFunction(fnName, args, { firehose, cwToFirehoseRole });
 
-    function addRoute(
-      method: string,
-      routePath: string,
-      handler: string,
-      extraEnv?: Record<string, $util.Input<string>>,
-      permissions?: sst.aws.FunctionPermissionArgs[],
-    ) {
+    interface AddRouteProps {
+      method: string;
+      routePath: string;
+      handler: string;
+      extraEnv?: Record<string, $util.Input<string>>;
+      permissions?: sst.aws.FunctionPermissionArgs[];
+      extraLink?: (typeof allResources)[number][];
+    }
+
+    function addRoute({
+      method,
+      routePath,
+      handler,
+      extraEnv,
+      permissions,
+      extraLink,
+    }: AddRouteProps) {
       // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
       const fnName = handler
         .split('-')
@@ -322,7 +337,7 @@ export default $config({
 
       const fn = createFn(fnName, {
         handler: `packages/backend/src/handlers/${handler}.handler`,
-        link: allResources,
+        link: [...allResources, ...(extraLink ?? [])],
         environment: {
           ...sharedEnv,
           ...extraEnv,
@@ -345,156 +360,157 @@ export default $config({
     }
 
     // ── Data routes ──────────────────────────────────────────────────
-    addRoute(
-      'GET',
-      '/api/buckets',
-      'list-buckets',
-      {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-      },
-      [
-        {
-          actions: ['ssm:GetParameter'],
-          resources: [auroraApiKeySsmArn],
-        },
-      ],
-    );
-    addRoute(
-      'POST',
-      '/api/buckets',
-      'create-bucket',
-      {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-      },
-      [
-        {
-          actions: ['ssm:GetParameter'],
-          resources: [auroraApiKeySsmArn],
-        },
-      ],
-    );
-    addRoute(
-      'GET',
-      '/api/buckets/{name}',
-      'get-bucket',
-      {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-      },
-      [
-        {
-          actions: ['ssm:GetParameter'],
-          resources: [auroraApiKeySsmArn],
-        },
-      ],
-    );
-    addRoute(
-      'DELETE',
-      '/api/buckets/{name}',
-      'delete-bucket',
-      auroraS3GatewayEnv,
-      auroraS3GatewayPermissions,
-    );
-    addRoute('GET', '/api/access-keys', 'list-access-keys');
-    addRoute(
-      'POST',
-      '/api/access-keys',
-      'create-access-key',
-      {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-      },
-      [
-        {
-          actions: ['ssm:GetParameter'],
-          resources: [auroraApiKeySsmArn],
-        },
-      ],
-    );
-    addRoute(
-      'DELETE',
-      '/api/access-keys/{keyId}',
-      'delete-access-key',
-      auroraS3GatewayEnv,
-      auroraS3GatewayPermissions,
-    );
-    addRoute(
-      'GET',
-      '/api/buckets/{name}/objects',
-      'list-objects',
-      auroraS3GatewayEnv,
-      auroraS3GatewayPermissions,
-    );
-    addRoute(
-      'POST',
-      '/api/buckets/{name}/objects/presign',
-      'presign-upload',
-      auroraS3GatewayEnv,
-      auroraS3GatewayPermissions,
-    );
-    addRoute(
-      'GET',
-      '/api/buckets/{name}/objects/download',
-      'download-object',
-      auroraS3GatewayEnv,
-      auroraS3GatewayPermissions,
-    );
-    addRoute(
-      'DELETE',
-      '/api/buckets/{name}/objects',
-      'delete-object',
-      auroraS3GatewayEnv,
-      auroraS3GatewayPermissions,
-    );
-    addRoute(
-      'GET',
-      '/api/buckets/{name}/objects/metadata',
-      'head-object',
-      auroraS3GatewayEnv,
-      auroraS3GatewayPermissions,
-    );
+    addRoute({
+      method: 'GET',
+      routePath: '/api/buckets',
+      handler: 'list-buckets',
+      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
+      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/buckets',
+      handler: 'create-bucket',
+      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
+      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+    });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/buckets/{name}',
+      handler: 'get-bucket',
+      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
+      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+    });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/buckets/{name}',
+      handler: 'delete-bucket',
+      extraEnv: auroraS3GatewayEnv,
+      permissions: auroraS3GatewayPermissions,
+    });
+    addRoute({ method: 'GET', routePath: '/api/access-keys', handler: 'list-access-keys' });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/access-keys',
+      handler: 'create-access-key',
+      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
+      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+    });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/access-keys/{keyId}',
+      handler: 'delete-access-key',
+      extraEnv: auroraS3GatewayEnv,
+      permissions: auroraS3GatewayPermissions,
+    });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/buckets/{name}/objects',
+      handler: 'list-objects',
+      extraEnv: auroraS3GatewayEnv,
+      permissions: auroraS3GatewayPermissions,
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/buckets/{name}/objects/presign',
+      handler: 'presign-upload',
+      extraEnv: auroraS3GatewayEnv,
+      permissions: auroraS3GatewayPermissions,
+    });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/buckets/{name}/objects/download',
+      handler: 'download-object',
+      extraEnv: auroraS3GatewayEnv,
+      permissions: auroraS3GatewayPermissions,
+    });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/buckets/{name}/objects',
+      handler: 'delete-object',
+      extraEnv: auroraS3GatewayEnv,
+      permissions: auroraS3GatewayPermissions,
+    });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/buckets/{name}/objects/metadata',
+      handler: 'head-object',
+      extraEnv: auroraS3GatewayEnv,
+      permissions: auroraS3GatewayPermissions,
+    });
 
     // ── Auth routes ──────────────────────────────────────────────────
     const allowedRedirectOrigins = allowedOrigins.join(',');
-    addRoute('GET', '/api/auth/callback', 'auth-callback', {
-      WEBSITE_URL: siteUrl,
-      ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
+    addRoute({
+      method: 'GET',
+      routePath: '/api/auth/callback',
+      handler: 'auth-callback',
+      extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
     });
-    addRoute('GET', '/api/auth/logout', 'auth-logout', {
-      WEBSITE_URL: siteUrl,
-      ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
+    addRoute({
+      method: 'GET',
+      routePath: '/api/auth/logout',
+      handler: 'auth-logout',
+      extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
     });
 
     // ── Me route ───────────────────────────────────────────────────
-    addRoute('GET', '/api/me', 'get-me');
+    addRoute({ method: 'GET', routePath: '/api/me', handler: 'get-me' });
+    addRoute({
+      method: 'PATCH',
+      routePath: '/api/me/profile',
+      handler: 'update-profile',
+      extraLink: mgmtRuntimeResources,
+    });
+    addRoute({ method: 'POST', routePath: '/api/me/change-password', handler: 'change-password' });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/me/resend-verification',
+      handler: 'resend-verification',
+      extraLink: mgmtRuntimeResources,
+    });
 
     // ── Org routes ──────────────────────────────────────────────────
-    addRoute('POST', '/api/org/confirm', 'confirm-org');
+    addRoute({ method: 'POST', routePath: '/api/org/confirm', handler: 'confirm-org' });
 
     // ── Usage + Dashboard routes ─────────────────────────────────────
-    addRoute('GET', '/api/usage', 'get-usage', auroraEnv);
-    addRoute(
-      'GET',
-      '/api/activity',
-      'get-activity',
-      { ...auroraEnv, ...auroraS3GatewayEnv },
-      auroraS3GatewayPermissions,
-    );
+    addRoute({ method: 'GET', routePath: '/api/usage', handler: 'get-usage', extraEnv: auroraEnv });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/activity',
+      handler: 'get-activity',
+      extraEnv: { ...auroraEnv, ...auroraS3GatewayEnv },
+      permissions: auroraS3GatewayPermissions,
+    });
 
     // ── Billing routes ───────────────────────────────────────────────
-    addRoute('GET', '/api/billing', 'get-billing');
-    addRoute('POST', '/api/billing/setup-intent', 'create-setup-intent');
-    addRoute('POST', '/api/billing/activate', 'activate-subscription', auroraEnv);
-    addRoute('GET', '/api/billing/invoices', 'list-invoices');
-    addRoute('POST', '/api/billing/portal', 'create-portal-session', {
-      WEBSITE_URL: siteUrl,
+    addRoute({ method: 'GET', routePath: '/api/billing', handler: 'get-billing' });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/billing/setup-intent',
+      handler: 'create-setup-intent',
     });
-    addRoute(
-      'POST',
-      '/api/stripe/webhook',
-      'stripe-webhook',
-      {
+    addRoute({
+      method: 'POST',
+      routePath: '/api/billing/activate',
+      handler: 'activate-subscription',
+      extraEnv: auroraEnv,
+    });
+    addRoute({ method: 'GET', routePath: '/api/billing/invoices', handler: 'list-invoices' });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/billing/portal',
+      handler: 'create-portal-session',
+      extraEnv: { WEBSITE_URL: siteUrl },
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/stripe/webhook',
+      handler: 'stripe-webhook',
+      extraEnv: {
         STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
       },
-      [
+      permissions: [
         {
           actions: ['ssm:GetParameter'],
           resources: [
@@ -502,7 +518,7 @@ export default $config({
           ],
         },
       ],
-    );
+    });
 
     // ── Tenant setup consumer ──────────────────────────────────────
     const tenantSetupFn = createFn('AuroraTenantSetup', {

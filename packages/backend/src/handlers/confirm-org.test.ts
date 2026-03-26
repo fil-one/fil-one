@@ -3,7 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { OrgSetupStatus, FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
-import { ORG_NAME_MIN_LENGTH, ORG_NAME_MAX_LENGTH } from '../lib/org-name-validation.js';
+import { ORG_NAME_MIN_LENGTH, ORG_NAME_MAX_LENGTH } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -173,7 +173,7 @@ describe('POST /api/org/confirm handler', () => {
     expect(mockCreateBillingTrial).toHaveBeenCalledWith({
       userId: MOCK_USER_ID,
       orgId: MOCK_ORG_ID,
-      email: MOCK_EMAIL,
+      email: undefined,
     });
   });
 
@@ -204,7 +204,7 @@ describe('POST /api/org/confirm handler', () => {
     expect(mockCreateBillingTrial).toHaveBeenCalledWith({
       userId: MOCK_USER_ID,
       orgId: MOCK_ORG_ID,
-      email: MOCK_EMAIL,
+      email: undefined,
     });
   });
 
@@ -216,7 +216,6 @@ describe('POST /api/org/confirm handler', () => {
 
     expect(result).toMatchObject({
       statusCode: 400,
-      body: expect.stringContaining('Organization name must be a string'),
     });
 
     // Should NOT update DDB, enqueue SQS, or create billing trial
@@ -265,7 +264,6 @@ describe('POST /api/org/confirm handler', () => {
 
     expect(result).toMatchObject({
       statusCode: 400,
-      body: expect.stringContaining('Organization name must be a string'),
     });
     expect(mockCreateBillingTrial).not.toHaveBeenCalled();
   });

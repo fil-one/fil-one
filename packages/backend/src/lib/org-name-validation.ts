@@ -1,48 +1,23 @@
 import validator from 'validator';
-
-/** Minimum length for an organization name (after trimming). */
-export const ORG_NAME_MIN_LENGTH = 2;
-
-/** Maximum length for an organization name (after trimming). */
-export const ORG_NAME_MAX_LENGTH = 100;
-
-export interface OrgNameValidationResult {
-  valid: boolean;
-  sanitized: string;
-  error?: string;
-}
+import { OrgNameSchema, ConfirmOrgSchema, ORG_NAME_MAX_LENGTH } from '@filone/shared';
 
 /**
- * Validates and sanitizes an organization name.
- *
- * - Trims whitespace
- * - Escapes HTML entities to prevent XSS
- * - Enforces min/max length
+ * Extends OrgNameSchema with an HTML-escape transform and a post-escape length check.
+ * Escaping can expand the string (e.g. '&' → '&amp;'), so we validate the stored
+ * value's length after sanitization rather than before.
  */
-export function validateOrgName(raw: unknown): OrgNameValidationResult {
-  if (typeof raw !== 'string') {
-    return { valid: false, sanitized: '', error: 'Organization name must be a string.' };
-  }
+export const SanitizedOrgNameSchema = OrgNameSchema.transform((name) =>
+  validator.escape(name),
+).refine(
+  (escaped) => escaped.length <= ORG_NAME_MAX_LENGTH,
+  `Organization name must be at most ${ORG_NAME_MAX_LENGTH} characters`,
+);
 
-  const trimmed = validator.trim(raw);
-
-  if (!validator.isLength(trimmed, { min: ORG_NAME_MIN_LENGTH })) {
-    return {
-      valid: false,
-      sanitized: trimmed,
-      error: `Organization name must be at least ${ORG_NAME_MIN_LENGTH} characters.`,
-    };
-  }
-
-  if (!validator.isLength(trimmed, { max: ORG_NAME_MAX_LENGTH })) {
-    return {
-      valid: false,
-      sanitized: trimmed,
-      error: `Organization name must be at most ${ORG_NAME_MAX_LENGTH} characters.`,
-    };
-  }
-
-  const sanitized = validator.escape(trimmed);
-
-  return { valid: true, sanitized };
-}
+/** Backend-specific confirm-org schema: validates then sanitizes the org name. */
+export const ConfirmOrgBackendSchema = ConfirmOrgSchema.transform((data) => ({
+  ...data,
+  orgName: validator.escape(data.orgName),
+})).refine(
+  (data) => data.orgName.length <= ORG_NAME_MAX_LENGTH,
+  `Organization name must be at most ${ORG_NAME_MAX_LENGTH} characters`,
+);

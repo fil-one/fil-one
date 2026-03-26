@@ -7,7 +7,10 @@ type NormalizedHeaderEvent = {
   rawHeaders: Record<string, string>;
 };
 
-type BuildEventUserInfo = Omit<UserInfo, 'emailVerified'> & { emailVerified?: boolean };
+type BuildEventUserInfo = Omit<UserInfo, 'emailVerified' | 'sub'> & {
+  emailVerified?: boolean;
+  sub?: string;
+};
 
 interface BuildEventProps {
   body?: string;
@@ -55,7 +58,13 @@ export function buildEvent(
       time: '01/Jan/2024:00:00:00 +0000',
       timeEpoch: 1704067200000,
       ...(props?.userInfo
-        ? { userInfo: { ...props.userInfo, emailVerified: props.userInfo.emailVerified ?? true } }
+        ? {
+            userInfo: {
+              sub: 'auth0|test-sub-id',
+              ...props.userInfo,
+              emailVerified: props.userInfo.emailVerified ?? true,
+            },
+          }
         : {}),
       ...props?.requestContext,
     },

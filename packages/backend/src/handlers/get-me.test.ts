@@ -117,6 +117,7 @@ describe('GET /api/me handler', () => {
         emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: true,
+        connectionType: 'auth0',
       }),
     });
   });
@@ -148,6 +149,7 @@ describe('GET /api/me handler', () => {
         emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: false,
+        connectionType: 'auth0',
       }),
     });
   });
@@ -178,6 +180,7 @@ describe('GET /api/me handler', () => {
         emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: false,
+        connectionType: 'auth0',
       }),
     });
   });
@@ -256,6 +259,7 @@ describe('GET /api/me handler', () => {
         emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: false,
+        connectionType: 'auth0',
       }),
     });
   });

@@ -2,13 +2,13 @@ import { UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { ConfirmOrgRequest, ConfirmOrgResponse, ErrorResponse } from '@filone/shared';
+import type { ConfirmOrgResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { createBillingTrial } from '../lib/create-billing-trial.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { triggerTenantSetup } from '../lib/trigger-tenant-setup.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
-import { validateOrgName } from '../lib/org-name-validation.js';
+import { ConfirmOrgBackendSchema } from '../lib/org-name-validation.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -18,16 +18,25 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId, userId, email } = getUserInfo(event);
-  const body = JSON.parse(event.body ?? '{}') as Partial<ConfirmOrgRequest>;
-
-  // Validate and sanitize org name
-  const result = validateOrgName(body.orgName);
-  if (!result.valid) {
+  let body: unknown;
+  try {
+    body = JSON.parse(event.body ?? '{}');
+  } catch {
     return new ResponseBuilder()
       .status(400)
-      .body<ErrorResponse>({ message: result.error! })
+      .body<ErrorResponse>({ message: 'Invalid JSON body' })
       .build();
   }
+
+  const parsed = ConfirmOrgBackendSchema.safeParse(body);
+  if (!parsed.success) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: parsed.error.issues[0].message })
+      .build();
+  }
+
+  const sanitized = parsed.data.orgName;
 
   // Update org profile: set name and mark as confirmed; return all attributes.
   // ConditionExpression ensures we don't accidentally upsert a missing org record.
@@ -42,7 +51,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       ConditionExpression: 'attribute_exists(pk)',
       ExpressionAttributeNames: { '#name': 'name' },
       ExpressionAttributeValues: {
-        ':name': { S: result.sanitized },
+        ':name': { S: sanitized },
         ':confirmed': { BOOL: true },
       },
       ReturnValues: 'ALL_NEW',
@@ -51,7 +60,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   const setupStatus = updatedOrg?.setupStatus?.S;
   if (!isOrgSetupComplete(setupStatus)) {
-    await triggerTenantSetup({ orgId, orgName: result.sanitized });
+    await triggerTenantSetup({ orgId, orgName: sanitized });
   }
 
   try {
@@ -68,7 +77,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   const responseBody: ConfirmOrgResponse = {
     orgId,
-    orgName: result.sanitized,
+    orgName: sanitized,
   };
 
   return new ResponseBuilder().status(200).body(responseBody).build();
