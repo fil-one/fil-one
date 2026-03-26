@@ -101,4 +101,4 @@ After clearing session cookies, the logout handler redirects to Auth0's `/v2/log
 - External links and bookmarks can point to `/api/auth/login` for immediate server-side redirect without loading JS.
 - Auth0 configuration (`VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`) has been fully removed from the frontend bundle. Auth0 credentials live exclusively in the backend, reducing the attack surface of the SPA.
 - The `SignInPage` and `SignUpPage` components are now unused and can be removed.
-- Logout returns users to `/sign-in`, which chains through `/api/auth/login` back to Auth0 — one additional 302 hop but no user-visible delay.
+- Logout returns users to `https://fil.one` via Auth0's `/v2/logout` with `returnTo=https://fil.one`, taking them to the marketing site rather than back into the login flow.
