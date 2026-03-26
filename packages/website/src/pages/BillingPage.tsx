@@ -276,7 +276,7 @@ export function BillingPage() {
 
       <div className="flex gap-6">
         {/* ── Left column ──────────────────────────────────────── */}
-        <div className="flex-1 min-w-0 flex flex-col gap-4">
+        <div className="flex-1 min-w-0 flex flex-col gap-6">
           {/* Plan card */}
           <div className="rounded-lg border border-[rgba(0,128,255,0.2)] bg-white pb-[21px] pt-px px-px shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
             <div className="flex items-center justify-between px-5 py-4">
@@ -374,7 +374,7 @@ export function BillingPage() {
           </div>
 
           {/* Current usage card */}
-          <div className="rounded-lg border border-[#e1e4ea] bg-white pb-[21px] shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+          <div className="rounded-lg border border-[#e1e4ea] bg-white p-px shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
             <div className="px-5 pt-5 pb-3">
               <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-[#14181f]">
                 Current usage
@@ -390,9 +390,9 @@ export function BillingPage() {
               </p>
             </div>
 
-            <div className="px-5">
+            <div className="p-5">
               {/* Storage bar */}
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-[10px]">
                 <span className="text-[13px] text-[#677183]">Storage used</span>
                 <span className="text-[13px] font-medium text-[#14181f]">
                   {formatBytes(storageUsed)}
@@ -404,7 +404,7 @@ export function BillingPage() {
               {/* Egress bar (trial only) */}
               {isTrialing && (
                 <>
-                  <div className="flex items-center justify-between mb-2 mt-4">
+                  <div className="flex items-center justify-between mb-[10px] mt-4">
                     <span className="text-[13px] text-[#677183]">Egress used</span>
                     <span className="text-[13px] font-medium text-[#14181f]">
                       {formatBytes(egressUsed)}
@@ -433,8 +433,8 @@ export function BillingPage() {
           </div>
 
           {/* Payment method card */}
-          <div className="rounded-lg border border-[#e1e4ea] bg-white pb-[21px] shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
-            <div className="px-5 pt-5 pb-3">
+          <div className="rounded-lg border border-[#e1e4ea] bg-white flex flex-col gap-[20px] items-center pb-[21px] pt-px px-px shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+            <div className="w-full px-5 pt-5 pb-3">
               <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-[#14181f]">
                 Payment method
               </h3>
@@ -446,7 +446,7 @@ export function BillingPage() {
             </div>
 
             {billing?.paymentMethod ? (
-              <div className="mx-[1px] rounded-lg border border-[#e1e4ea] p-[13px] flex items-center gap-3">
+              <div className="w-full rounded-lg border border-[#e1e4ea] p-[13px] flex items-center gap-3">
                 <div className="flex h-7 w-10 items-center justify-center rounded bg-gradient-to-r from-[rgba(0,128,255,0.8)] to-[#0080ff] flex-shrink-0">
                   <CreditCardIcon size={16} className="text-white" weight="fill" />
                 </div>
@@ -469,17 +469,17 @@ export function BillingPage() {
                 </button>
               </div>
             ) : (
-              <div className="mx-[1px] flex items-center gap-3 rounded-lg border border-[#e1e4ea] px-4 py-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#f1f2f4] flex-shrink-0">
-                  <CreditCardIcon size={20} className="text-[#677183]" />
+              <div className="flex items-center gap-3 rounded-lg border border-dashed border-[rgba(225,228,234,0.8)] bg-[rgba(243,244,246,0.3)] p-[13px] w-full">
+                <div className="flex h-7 w-10 items-center justify-center rounded bg-[#f3f4f6] flex-shrink-0">
+                  <CreditCardIcon size={16} className="text-[#677183]" />
                 </div>
-                <span className="flex-1 text-sm text-[#99a0ae]">No payment method added</span>
+                <span className="flex-1 text-[13px] text-[#677183]">No payment method added</span>
                 <button
                   type="button"
                   onClick={handleUpgradeClick}
-                  className="flex items-center gap-1.5 rounded-lg border border-[#e1e4ea] px-3 py-1.5 text-sm font-medium text-[#3a4252] transition-colors hover:bg-zinc-50"
+                  className="flex items-center gap-1 h-7 rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-[13px] text-[12px] font-medium text-[#14181f] shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] transition-colors hover:bg-zinc-100"
                 >
-                  <CreditCardIcon size={14} />
+                  <CreditCardIcon size={16} />
                   Add
                 </button>
               </div>
@@ -559,7 +559,7 @@ export function BillingPage() {
 
         {/* ── Right column (pricing sidebar) ─────────────────── */}
         <div className="w-[368px] flex-shrink-0">
-          <div className="rounded-xl border border-[#e1e4ea] bg-white shadow-sm overflow-hidden">
+          <div className="rounded-lg border border-[#e1e4ea] bg-white shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] overflow-hidden p-px">
             {/* Header */}
             <div
               className="flex flex-col gap-[6px] px-4 pt-4 pb-[13px] border-b border-[rgba(225,228,234,0.5)]"
@@ -578,34 +578,34 @@ export function BillingPage() {
             </div>
 
             {/* Features */}
-            <div className="px-6 py-5">
-              <ul className="flex flex-col gap-3">
-                <li className="flex items-center gap-2.5 text-sm text-[#3a4252]">
-                  <span className="flex h-5 w-5 items-center justify-center rounded bg-[#f1f2f4] flex-shrink-0">
+            <div className="flex flex-col gap-4 p-4">
+              <ul className="flex flex-col gap-[10px]">
+                <li className="flex items-center gap-[10px] text-[13px] text-[#677183]">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#f3f4f6] flex-shrink-0">
                     <CheckIcon size={12} className="text-[#3a4252]" weight="bold" />
                   </span>
                   Pay only for what you use
                 </li>
-                <li className="flex items-center gap-2.5 text-sm text-[#3a4252]">
-                  <span className="flex h-5 w-5 items-center justify-center rounded bg-[rgba(16,183,127,0.1)] flex-shrink-0">
+                <li className="flex items-center gap-[10px] text-[13px] text-[#14181f]">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[rgba(16,183,127,0.1)] flex-shrink-0">
                     <LightningIcon size={12} className="text-[#10b77f]" weight="fill" />
                   </span>
-                  <strong className="font-semibold">No egress fees</strong>
+                  <strong className="font-medium">No egress fees</strong>
                 </li>
-                <li className="flex items-center gap-2.5 text-sm text-[#3a4252]">
-                  <span className="flex h-5 w-5 items-center justify-center rounded bg-[rgba(16,183,127,0.1)] flex-shrink-0">
+                <li className="flex items-center gap-[10px] text-[13px] text-[#14181f]">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[rgba(16,183,127,0.1)] flex-shrink-0">
                     <LightningIcon size={12} className="text-[#10b77f]" weight="fill" />
                   </span>
-                  <strong className="font-semibold">No API request fees</strong>
+                  <strong className="font-medium">No API request fees</strong>
                 </li>
-                <li className="flex items-center gap-2.5 text-sm text-[#3a4252]">
-                  <span className="flex h-5 w-5 items-center justify-center rounded bg-[#f1f2f4] flex-shrink-0">
+                <li className="flex items-center gap-[10px] text-[13px] text-[#677183]">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#f3f4f6] flex-shrink-0">
                     <ShieldCheckIcon size={12} className="text-[#3a4252]" weight="fill" />
                   </span>
                   Data integrity guarantees
                 </li>
-                <li className="flex items-center gap-2.5 text-sm text-[#3a4252]">
-                  <span className="flex h-5 w-5 items-center justify-center rounded bg-[#f1f2f4] flex-shrink-0">
+                <li className="flex items-center gap-[10px] text-[13px] text-[#677183]">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#f3f4f6] flex-shrink-0">
                     <LockSimpleIcon size={12} className="text-[#3a4252]" weight="fill" />
                   </span>
                   Enterprise-grade security
@@ -617,7 +617,8 @@ export function BillingPage() {
                 <button
                   type="button"
                   onClick={handleUpgradeClick}
-                  className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-[#0066ff] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  className="flex w-full items-center justify-center gap-2 rounded-[6px] h-[36px] px-4 py-2 text-[13px] font-medium text-white shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] transition-opacity hover:opacity-90"
+                  style={{ backgroundImage: 'linear-gradient(135deg, #0080FF 0%, #256AF4 100%)' }}
                 >
                   <LightningIcon size={16} weight="fill" />
                   {isTrialing ? 'Upgrade now' : 'Reactivate'}
@@ -627,18 +628,18 @@ export function BillingPage() {
           </div>
 
           {/* Need more? section */}
-          <div className="mt-6 px-1">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#677183] mb-2">
+          <div className="flex flex-col gap-1 mt-5 px-1">
+            <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-[#677183]">
               Need more?
             </p>
-            <p className="text-sm text-[#3a4252]">
-              The <strong className="font-semibold">Business plan</strong> offers volume discounts,
-              SLA guarantees, and dedicated support.
+            <p className="text-[12px] leading-[19.5px] text-[#677183]">
+              The <strong className="font-medium text-[#14181f]">Business plan</strong> offers
+              volume discounts, SLA guarantees, and dedicated support.
             </p>
             <button
               type="button"
               onClick={() => setContactSalesOpen(true)}
-              className="mt-2 text-sm font-medium text-[#0066ff] hover:underline"
+              className="text-[12px] font-medium leading-[18px] text-[#0080ff] hover:underline text-left"
             >
               Contact sales &rarr;
             </button>
