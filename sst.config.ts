@@ -95,16 +95,14 @@ export default $config({
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
     const isProduction = stage === 'production';
-    const isEphemeralStage = stage !== 'production' && stage !== 'staging';
+    const isStaging = stage === 'staging';
+    const isEphemeralStage = !isProduction && !isStaging;
 
     let domainName = 'staging.fil.one';
     let certArn: string | undefined;
 
-    //TODO Bring this back after we have a successful prod deployment.
-    // https://linear.app/filecoin-foundation/issue/FIL-12/console-prod-deployed-at-appfilone
-    // if (stage === 'production' || stage === 'staging') {
-    // domainName = stage === 'production' ? 'console.fil.one' : 'staging.fil.one';
-    if (stage == 'staging') {
+    if (isProduction || isStaging) {
+      domainName = isProduction ? 'app.fil.one' : 'staging.fil.one';
       // ACM cert must be in us-east-1 for CloudFront
       const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
       const cert = await aws.acm.getCertificate(
@@ -216,7 +214,7 @@ export default $config({
         ...(sendGridApiKey ? [sendGridApiKey] : []),
       ],
       environment: {
-        AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
+        AUTH0_DOMAIN: isProduction ? 'fil-one.us.auth0.com' : 'dev-oar2nhqh58xf5pwf.us.auth0.com',
       },
       permissions: [
         {
@@ -286,15 +284,12 @@ export default $config({
 
     const sharedEnv: Record<string, $util.Input<string>> = {
       FILONE_STAGE: $app.stage,
-      AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
-      AUTH0_AUDIENCE: 'https://staging.fil.one',
+      AUTH0_DOMAIN: isProduction ? 'fil-one.us.auth0.com' : 'dev-oar2nhqh58xf5pwf.us.auth0.com',
+      AUTH0_AUDIENCE: isProduction ? 'https://app.fil.one' : 'https://staging.fil.one',
     };
 
     if (isProduction) {
-      throw new Error(
-        'Aurora production configuration not yet available. ' +
-          'Set AURORA_BACKOFFICE_URL, AURORA_PORTAL_URL, AURORA_PARTNER_ID, and AURORA_REGION_ID before deploying to production.',
-      );
+      // TODO Add the prod Info here!
     }
 
     const auroraEnv = {
