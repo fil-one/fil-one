@@ -92,6 +92,10 @@ https://staging.fil.one/api/auth/login?screen_hint=signup
 
 These can be linked from external sites, emails, or documentation without requiring the SPA to load.
 
+## Logout redirect
+
+After clearing session cookies, the logout handler redirects to Auth0's `/v2/logout` endpoint with `returnTo=https://fil.one`. This sends the user to the marketing site rather than back into the login flow. The `returnTo` is hardcoded to `https://fil.one` rather than derived from the request origin because the application is only deployed at that domain. `https://fil.one` must be registered in the Auth0 application's Allowed Logout URLs (handled by the `setup-integrations` stack job).
+
 ## Consequences
 
 - External links and bookmarks can point to `/api/auth/login` for immediate server-side redirect without loading JS.
