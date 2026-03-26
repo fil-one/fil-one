@@ -279,15 +279,15 @@ export function BillingPage() {
         {/* ── Left column ──────────────────────────────────────── */}
         <div className="flex-1 min-w-0 flex flex-col gap-4">
           {/* Plan card */}
-          <div className="rounded-xl border border-[#e1e4ea] bg-white p-6 shadow-sm">
-            <div className="flex items-start justify-between">
+          <div className="rounded-lg border border-[rgba(0,128,255,0.2)] bg-white pb-[21px] pt-px px-px shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+            <div className="flex items-center justify-between px-5 py-4">
               <div>
-                <h2 className="text-lg font-semibold text-[#14181f]">
+                <h2 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-[#14181f]">
                   {isActive || isPastDue || isGracePeriod || isCanceled
                     ? 'Pay-as-you-go'
                     : 'Free Trial'}
                 </h2>
-                <p className="text-sm text-[#677183] mt-0.5">
+                <p className="text-[13px] text-[#677183] leading-[19.5px]">
                   {isActive || isPastDue
                     ? 'Unlimited storage, pay only for what you use'
                     : isGracePeriod
@@ -303,24 +303,24 @@ export function BillingPage() {
               {/* Status badge */}
               <div className="flex items-center gap-2">
                 {isTrialing && (
-                  <span className="flex items-center gap-1 rounded-full bg-[rgba(0, 128, 255, 0.1)] px-3 py-1 text-xs font-semibold text-[#0080FF]">
-                    <CheckIcon size={14} weight="fill" />
+                  <span className="flex items-center gap-1 rounded-[6px] bg-[rgba(0,128,255,0.1)] px-2 py-0.5 text-[12px] font-medium leading-[16px] text-[#0080FF]">
+                    <CheckIcon size={12} weight="fill" />
                     Active
                   </span>
                 )}
                 {(isActive || isPastDue) && (
-                  <span className="flex items-center gap-1 rounded-full bg-[rgba(16,183,127,0.1)] px-3 py-1 text-xs font-semibold text-[#059669]">
-                    <CheckIcon size={14} weight="fill" />
+                  <span className="flex items-center gap-1 rounded-[6px] bg-[rgba(16,183,127,0.1)] px-2 py-0.5 text-[12px] font-medium leading-[16px] text-[#059669]">
+                    <CheckIcon size={12} weight="fill" />
                     Active
                   </span>
                 )}
                 {isGracePeriod && (
-                  <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                  <span className="rounded-[6px] bg-amber-100 px-2 py-0.5 text-[12px] font-medium leading-[16px] text-amber-700">
                     Grace Period
                   </span>
                 )}
                 {isCanceled && (
-                  <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
+                  <span className="rounded-[6px] bg-red-100 px-2 py-0.5 text-[12px] font-medium leading-[16px] text-red-700">
                     Canceled
                   </span>
                 )}
@@ -329,17 +329,18 @@ export function BillingPage() {
 
             {/* Trial CTA banner */}
             {isTrialing && (
-              <div className="mt-4 rounded-lg bg-[#f8fafc] border border-[#e1e4ea] px-4 py-3 flex items-center justify-between">
-                <p className="text-sm font-medium text-[#14181f]">
+              <div className="mx-px rounded-lg bg-[rgba(243,244,246,0.5)] border border-[rgba(225,228,234,0.5)] p-[13px] flex items-center justify-between">
+                <p className="text-[13px] font-medium text-[#14181f]">
                   Ready to unlock unlimited storage?
                 </p>
                 <button
                   type="button"
                   onClick={handleUpgradeClick}
-                  className="flex items-center gap-1.5 rounded-lg bg-[#0066ff] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  className="flex items-center gap-1.5 rounded-[6px] h-8 px-4 py-2 text-[12px] font-medium leading-[18px] text-white shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] transition-opacity hover:opacity-90"
+                  style={{ backgroundImage: 'linear-gradient(135deg, #0080FF 0%, #256AF4 100%)' }}
                 >
                   Upgrade
-                  <ArrowUpRightIcon size={14} weight="bold" />
+                  <ArrowUpRightIcon size={16} weight="bold" />
                 </button>
               </div>
             )}
@@ -347,13 +348,13 @@ export function BillingPage() {
             {/* Grace period / Canceled reactivation CTA */}
             {(isGracePeriod || isCanceled) && (
               <div
-                className={`mt-4 rounded-lg px-4 py-3 flex items-center justify-between ${
+                className={`mx-px rounded-lg p-[13px] flex items-center justify-between ${
                   isCanceled
                     ? 'bg-red-50 border border-red-200'
                     : 'bg-amber-50 border border-amber-200'
                 }`}
               >
-                <p className="text-sm font-medium text-[#14181f]">
+                <p className="text-[13px] font-medium text-[#14181f]">
                   {isCanceled
                     ? 'Reactivate your subscription to regain full access'
                     : isTrialExpiredGrace
@@ -363,10 +364,11 @@ export function BillingPage() {
                 <button
                   type="button"
                   onClick={handleUpgradeClick}
-                  className="flex items-center gap-1.5 rounded-lg bg-[#0066ff] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  className="flex items-center gap-1.5 rounded-[6px] h-8 px-4 py-2 text-[12px] font-medium leading-[18px] text-white shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] transition-opacity hover:opacity-90"
+                  style={{ backgroundImage: 'linear-gradient(135deg, #0080FF 0%, #256AF4 100%)' }}
                 >
                   {isTrialExpiredGrace ? 'Upgrade' : 'Reactivate'}
-                  <ArrowRightIcon size={14} weight="bold" />
+                  <ArrowRightIcon size={16} weight="bold" />
                 </button>
               </div>
             )}
@@ -424,41 +426,43 @@ export function BillingPage() {
           </div>
 
           {/* Payment method card */}
-          <div className="rounded-xl border border-[#e1e4ea] bg-white p-6 shadow-sm">
-            <h3 className="text-sm font-semibold text-[#14181f] mb-1">Payment method</h3>
-            <p className="text-xs text-[#99a0ae] mb-4">
-              {billing?.paymentMethod
-                ? 'Your active payment method'
-                : 'Add a payment method to continue after your trial'}
-            </p>
+          <div className="rounded-lg border border-[#e1e4ea] bg-white pb-[21px] shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+            <div className="px-5 pt-5 pb-3">
+              <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-[#14181f]">
+                Payment method
+              </h3>
+              <p className="text-[13px] text-[#677183] leading-[19.5px] mt-1">
+                {billing?.paymentMethod
+                  ? 'Your active payment method'
+                  : 'Add a payment method to continue after your trial'}
+              </p>
+            </div>
 
             {billing?.paymentMethod ? (
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-[#0066ff] to-[#0052cc]">
-                    <CreditCardIcon size={20} className="text-white" weight="fill" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-[#14181f]">
-                      &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull;{' '}
-                      {billing.paymentMethod.last4}
-                    </p>
-                    <p className="text-xs text-[#99a0ae]">
-                      Expires {String(billing.paymentMethod.expMonth).padStart(2, '0')}/
-                      {String(billing.paymentMethod.expYear).slice(-2)}
-                    </p>
-                  </div>
+              <div className="mx-[1px] rounded-lg border border-[#e1e4ea] p-[13px] flex items-center gap-3">
+                <div className="flex h-7 w-10 items-center justify-center rounded bg-gradient-to-r from-[rgba(0,128,255,0.8)] to-[#0080ff] flex-shrink-0">
+                  <CreditCardIcon size={16} className="text-white" weight="fill" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-medium leading-[19.5px] text-[#14181f]">
+                    &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull;{' '}
+                    {billing.paymentMethod.last4}
+                  </p>
+                  <p className="text-xs text-[#677183] leading-[18px]">
+                    Expires {String(billing.paymentMethod.expMonth).padStart(2, '0')}/
+                    {String(billing.paymentMethod.expYear).slice(-2)}
+                  </p>
                 </div>
                 <button
                   type="button"
                   onClick={handleUpdatePayment}
-                  className="rounded-lg border border-[#e1e4ea] px-3 py-1.5 text-sm font-medium text-[#3a4252] transition-colors hover:bg-zinc-50"
+                  className="h-7 rounded-md bg-[#f9fafb] border border-[#e1e4ea] px-[13px] text-xs font-medium text-[#14181f] shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] transition-colors hover:bg-zinc-100 flex-shrink-0"
                 >
                   Update
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-3 rounded-lg border border-[#e1e4ea] px-4 py-3">
+              <div className="mx-[1px] flex items-center gap-3 rounded-lg border border-[#e1e4ea] px-4 py-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#f1f2f4] flex-shrink-0">
                   <CreditCardIcon size={20} className="text-[#677183]" />
                 </div>
@@ -550,13 +554,19 @@ export function BillingPage() {
         <div className="w-[368px] flex-shrink-0">
           <div className="rounded-xl border border-[#e1e4ea] bg-white shadow-sm overflow-hidden">
             {/* Header */}
-            <div className="px-6 py-5 border-b border-[#e1e4ea]">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#677183]">
+            <div
+              className="flex flex-col gap-[6px] px-4 pt-4 pb-[13px] border-b border-[rgba(225,228,234,0.5)]"
+              style={{
+                backgroundImage:
+                  'linear-gradient(166.48deg, rgba(0,128,255,0.05) 0%, rgba(0,128,255,0.1) 50%, rgba(0,128,255,0.05) 100%)',
+              }}
+            >
+              <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-[#677183]">
                 Pay-as-you-go
               </p>
-              <div className="mt-2 flex items-baseline gap-1">
-                <span className="text-3xl font-bold text-[#14181f]">$4.99</span>
-                <span className="text-sm text-[#677183]">/ TB / month</span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-bold leading-9 text-[#14181f]">$4.99</span>
+                <span className="text-[12px] leading-[18px] text-[#677183]">/ TB / month</span>
               </div>
             </div>
 
