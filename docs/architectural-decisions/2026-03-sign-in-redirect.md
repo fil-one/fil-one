@@ -23,13 +23,19 @@ A new Lambda handler that generates the OAuth `state`, sets the `hs_oauth_state`
 
 This URL is stable and bookmarkable. Each visit generates a fresh state/cookie pair, so CSRF protection is maintained.
 
-### 2. Client-side fallback: `redirectToLogin()`
+### 2. Client-side 401 handling: `redirectToLogin()`
 
-When the SPA is already loaded and a 401 response triggers re-authentication, `redirectToLogin()` builds the Auth0 URL and sets the state cookie in the browser. This avoids a Lambda round-trip when the JS bundle is already in memory.
+When the SPA is already loaded and a 401 response triggers re-authentication, `redirectToLogin()` navigates to `/api/auth/login` via `window.location.href`. This is a simple redirect — no Auth0 configuration is needed in the frontend.
+
+**Why not return a 302 from the auth middleware instead?** The SPA makes API calls via `fetch()`, which follows HTTP redirects automatically and transparently. If the middleware returned a 302 to `/api/auth/login`, fetch would silently follow the redirect chain (middleware → `/api/auth/login` → Auth0) and return Auth0's HTML login page as the response body — the browser would never actually navigate. Only top-level document requests (link clicks, form submits, `window.location`) trigger real browser navigation on a 302. The 401 status code is the correct signal for "session expired" — it lets the client-side code perform a real navigation via `window.location.href`.
 
 ### Shared URL builder: `buildAuth0AuthorizeUrl()`
 
-Both paths use `buildAuth0AuthorizeUrl()` from `@filone/shared` to construct the Auth0 URL. This is a pure function (no side effects) that takes domain, client ID, audience, redirect URI, state, and optional hints as parameters. Callers are responsible for generating the state value and persisting it. Having a single implementation prevents drift between the server-side and client-side flows.
+The `/api/auth/login` Lambda uses `buildAuth0AuthorizeUrl()` from `@filone/shared` to construct the Auth0 URL. This is a pure function (no side effects) that takes domain, client ID, audience, redirect URI, state, and optional hints as parameters. The caller is responsible for generating the state value and persisting it. Having the URL builder in `@filone/shared` keeps the logic reusable if a second server-side caller is ever needed.
+
+### Auth0 configuration removed from frontend
+
+Because all login paths now go through `/api/auth/login`, the frontend no longer needs Auth0 credentials. The `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and `VITE_AUTH0_AUDIENCE` environment variables have been removed from the SPA bundle, `.env.local`, and `.env.production`. Auth0 configuration lives exclusively in the backend (SST secrets and Lambda environment variables).
 
 ### Route behavior
 
@@ -89,6 +95,6 @@ These can be linked from external sites, emails, or documentation without requir
 ## Consequences
 
 - External links and bookmarks can point to `/api/auth/login` for immediate server-side redirect without loading JS.
-- Auth0 credential/client configuration is no longer needed in the frontend bundle (`VITE_AUTH0_CLIENT_ID`, etc.) for the login flow, though `redirectToLogin()` still uses them for the 401 path.
+- Auth0 configuration (`VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`) has been fully removed from the frontend bundle. Auth0 credentials live exclusively in the backend, reducing the attack surface of the SPA.
 - The `SignInPage` and `SignUpPage` components are now unused and can be removed.
 - Logout returns users to `/sign-in`, which chains through `/api/auth/login` back to Auth0 — one additional 302 hop but no user-visible delay.

@@ -1,10 +1,5 @@
-import { API_URL, AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_AUDIENCE } from '../env.js';
-import {
-  ApiErrorCode,
-  OAUTH_STATE_COOKIE,
-  CSRF_COOKIE_NAME,
-  buildAuth0AuthorizeUrl,
-} from '@filone/shared';
+import { API_URL } from '../env.js';
+import { ApiErrorCode, CSRF_COOKIE_NAME } from '@filone/shared';
 
 // Prevents multiple simultaneous 401 responses from each triggering a redirect.
 let isRedirecting = false;
@@ -16,32 +11,14 @@ function getCsrfToken(): string | undefined {
     ?.split('=')[1];
 }
 
-interface LoginOptions {
-  loginHint?: string;
-  screenHint?: 'signup';
-  /** Auth0 connection name (e.g. 'google-oauth2', 'github') to skip Universal Login and go directly to a social provider. */
-  connection?: string;
-}
-
-export function buildAuth0LoginUrl(options?: LoginOptions): string {
-  const state = crypto.randomUUID();
-  document.cookie = `${OAUTH_STATE_COOKIE}=${state}; Secure; SameSite=Lax; Path=/; Max-Age=300`;
-  return buildAuth0AuthorizeUrl({
-    domain: AUTH0_DOMAIN,
-    clientId: AUTH0_CLIENT_ID,
-    audience: AUTH0_AUDIENCE,
-    redirectUri: `${window.location.origin}/api/auth/callback`,
-    state,
-    loginHint: options?.loginHint,
-    screenHint: options?.screenHint,
-    connection: options?.connection,
-  });
-}
-
-export function redirectToLogin(options?: LoginOptions): void {
+/**
+ * Redirect to the server-side login endpoint which handles OAuth state
+ * generation and redirects to Auth0 Universal Login.
+ */
+export function redirectToLogin(): void {
   if (isRedirecting) return;
   isRedirecting = true;
-  window.location.href = buildAuth0LoginUrl(options);
+  window.location.href = `${API_URL}/api/auth/login`;
 }
 
 export function logout(): void {
