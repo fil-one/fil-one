@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '../components/Button';
-import { logout, getMe } from '../lib/api.js';
+import { logout, getMe, resendVerificationEmail } from '../lib/api.js';
 import type { MeResponse } from '@filone/shared';
+
+const RESEND_COOLDOWN_SECONDS = 60;
 
 type VerifyEmailPageProps = {
   me: MeResponse;
@@ -11,12 +13,21 @@ type VerifyEmailPageProps = {
 export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
+  const [resending, setResending] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
   async function handleCheckAgain() {
     setError('');
     setChecking(true);
     try {
-      const updated = await getMe();
+      // Force a token refresh so we pick up the latest email_verified claim from Auth0
+      const updated = await getMe({ forceRefresh: true });
       if (updated.emailVerified) {
         onVerified();
       } else {
@@ -87,9 +98,36 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
             {checking ? 'Checking...' : 'I verified my email'}
           </Button>
 
-          <p className="text-xs text-zinc-400">
-            Didn't receive the email? Check your spam folder or log out and sign in again to resend.
-          </p>
+          <div className="flex flex-col gap-1">
+            <p className="text-xs text-zinc-400">
+              Didn't receive the email? Check your spam folder or resend it.
+            </p>
+            <button
+              type="button"
+              disabled={resending || resendCooldown > 0}
+              onClick={async () => {
+                setError('');
+                setResending(true);
+                try {
+                  await resendVerificationEmail();
+                  setResendCooldown(RESEND_COOLDOWN_SECONDS);
+                } catch (err) {
+                  setError(
+                    err instanceof Error ? err.message : 'Failed to resend verification email.',
+                  );
+                } finally {
+                  setResending(false);
+                }
+              }}
+              className="text-xs font-medium text-brand-600 hover:underline disabled:cursor-not-allowed disabled:text-zinc-400 disabled:no-underline self-start"
+            >
+              {resending
+                ? 'Sending...'
+                : resendCooldown > 0
+                  ? `Resend available in ${resendCooldown}s`
+                  : 'Resend verification email'}
+            </button>
+          </div>
         </div>
       </div>
 

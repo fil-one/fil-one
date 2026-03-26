@@ -108,10 +108,16 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
 // ── Me / Org API ────────────────────────────────────────────────────────
 
-import type { MeResponse, ConfirmOrgResponse } from '@filone/shared';
+import type {
+  MeResponse,
+  ConfirmOrgResponse,
+  UpdateProfileRequest,
+  UpdateProfileResponse,
+} from '@filone/shared';
 
-export function getMe(): Promise<MeResponse> {
-  return apiRequest<MeResponse>('/me');
+export function getMe(options?: { forceRefresh?: boolean }): Promise<MeResponse> {
+  const qs = options?.forceRefresh ? '?forceRefresh=1' : '';
+  return apiRequest<MeResponse>(`/me${qs}`);
 }
 
 export function confirmOrg(orgName: string): Promise<ConfirmOrgResponse> {
@@ -119,6 +125,21 @@ export function confirmOrg(orgName: string): Promise<ConfirmOrgResponse> {
     method: 'POST',
     body: JSON.stringify({ orgName }),
   });
+}
+
+export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfileResponse> {
+  return apiRequest<UpdateProfileResponse>('/me/profile', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function changePassword(): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>('/me/change-password', { method: 'POST' });
+}
+
+export function resendVerificationEmail(): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>('/me/resend-verification', { method: 'POST' });
 }
 
 // ── Usage API ────────────────────────────────────────────────────────────
