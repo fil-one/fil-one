@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { ShieldCheckIcon, CreditCardIcon, ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr';
+import { ShieldCheckIcon, CreditCardIcon } from '@phosphor-icons/react/dist/ssr';
 import {
   CardNumberElement,
   CardExpiryElement,
@@ -101,7 +101,7 @@ function PaymentForm({
         <p className="text-sm text-[#677183] mb-4">Pay as you go — $4.99/TB/month</p>
 
         {/* Security banner */}
-        <div className="flex items-center gap-2 rounded-lg bg-[#f0f6ff] px-3 py-2.5 mb-5">
+        <div className="flex items-center gap-2 rounded-lg bg-[rgba(243, 244, 246, 0.50] px-3 py-2.5 mb-5">
           <ShieldCheckIcon size={18} className="text-[#0066ff] flex-shrink-0" weight="fill" />
           <span className="text-xs text-[#3a4252]">
             Your payment information is encrypted and secure
@@ -147,7 +147,6 @@ function PaymentForm({
             onClick={onBack}
             className="flex items-center gap-1.5 rounded-lg border border-[#e1e4ea] px-4 py-2.5 text-sm font-medium text-[#3a4252] transition-colors hover:bg-zinc-50"
           >
-            <ArrowLeftIcon size={14} />
             Back
           </button>
 

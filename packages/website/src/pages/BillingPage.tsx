@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import {
-  CheckCircleIcon,
   CheckIcon,
   CreditCardIcon,
   ArrowRightIcon,
@@ -303,9 +302,15 @@ export function BillingPage() {
 
               {/* Status badge */}
               <div className="flex items-center gap-2">
-                {(isTrialing || isActive || isPastDue) && (
+                {isTrialing && (
+                  <span className="flex items-center gap-1 rounded-full bg-[rgba(0, 128, 255, 0.1)] px-3 py-1 text-xs font-semibold text-[#0080FF]">
+                    <CheckIcon size={14} weight="fill" />
+                    Active
+                  </span>
+                )}
+                {(isActive || isPastDue) && (
                   <span className="flex items-center gap-1 rounded-full bg-[rgba(16,183,127,0.1)] px-3 py-1 text-xs font-semibold text-[#059669]">
-                    <CheckCircleIcon size={14} weight="fill" />
+                    <CheckIcon size={14} weight="fill" />
                     Active
                   </span>
                 )}
@@ -601,18 +606,6 @@ export function BillingPage() {
                   {isTrialing ? 'Upgrade now' : 'Reactivate'}
                 </button>
               )}
-
-              {/* Contact sales link */}
-              <div className="mt-4 text-center">
-                <span className="text-xs text-[#99a0ae]">Questions about pricing? </span>
-                <button
-                  type="button"
-                  onClick={() => setContactSalesOpen(true)}
-                  className="text-xs font-medium text-[#0066ff] hover:underline"
-                >
-                  Contact sales &rarr;
-                </button>
-              </div>
             </div>
           </div>
 

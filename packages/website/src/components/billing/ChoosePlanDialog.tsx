@@ -38,7 +38,7 @@ export function ChoosePlanDialog({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {/* Pay as you go */}
-          <div className="rounded-xl border border-[#e1e4ea] bg-white p-6 flex flex-col">
+          <div className="rounded-xl border border-[rgba(0, 128, 255, 0.2)] bg-[rgba(0, 128, 255, 0.03)] p-6 flex flex-col">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#677183]">
               Pay-as-you-go
             </p>
