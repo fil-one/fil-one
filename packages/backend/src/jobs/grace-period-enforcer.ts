@@ -119,6 +119,8 @@ export async function handler(): Promise<void> {
       }
 
       if (candidate.action === 'cancel') {
+        await updateTenantStatus({ tenantId: auroraTenantId, status: 'DISABLED' });
+        await setOrgAuroraTenantStatus(candidate.orgId, 'DISABLED');
         // Transition DynamoDB status to canceled
         await dynamo.send(
           new UpdateItemCommand({
@@ -133,8 +135,6 @@ export async function handler(): Promise<void> {
         );
         canceled++;
 
-        await updateTenantStatus({ tenantId: auroraTenantId, status: 'DISABLED' });
-        await setOrgAuroraTenantStatus(candidate.orgId, 'DISABLED');
         console.log('[grace-period-enforcer] Canceled + disabled', {
           userId: candidate.userId,
           orgId: candidate.orgId,
