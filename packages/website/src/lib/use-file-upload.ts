@@ -7,10 +7,12 @@ export type UploadStep = 'idle' | 'uploading' | 'done';
 
 export type UseFileUploadOptions = {
   bucketName: string;
+  /** Tags to include in the upload metadata. Read at upload time. */
+  tags?: string[];
   onSuccess?: (key: string, file: File) => void;
 };
 
-export function useFileUpload({ bucketName, onSuccess }: UseFileUploadOptions) {
+export function useFileUpload({ bucketName, tags, onSuccess }: UseFileUploadOptions) {
   const { toast } = useToast();
 
   const [uploadStep, setUploadStep] = useState<UploadStep>('idle');
@@ -64,6 +66,7 @@ export function useFileUpload({ bucketName, onSuccess }: UseFileUploadOptions) {
             contentType,
             fileName: selectedFile.name,
             ...(description && { description }),
+            ...(tags && tags.length > 0 && { tags }),
           }),
         },
       );
@@ -99,7 +102,7 @@ export function useFileUpload({ bucketName, onSuccess }: UseFileUploadOptions) {
       reset();
       toast.error(err instanceof Error ? err.message : 'Upload failed');
     }
-  }, [selectedFile, objectName, objectDescription, bucketName, toast, onSuccess, reset]);
+  }, [selectedFile, objectName, objectDescription, bucketName, tags, toast, onSuccess, reset]);
 
   return {
     uploadStep,

@@ -38,6 +38,21 @@ echo "Using stage: $STAGE" >&2
 
 SST_STATE=$(sst state export --stage "$STAGE")
 
+# Extract the AWS region from the default provider in SST state
+REGION=$(echo "$SST_STATE" | jq -r '
+  [.latest.resources[]
+   | select(.type == "pulumi:providers:aws")
+   | select(.urn | test("::default"))
+   | .outputs.region
+  ] | first // empty
+')
+if [ -z "$REGION" ]; then
+  echo "Warning: could not detect region from SST state, using default" >&2
+else
+  echo "Region: $REGION" >&2
+  export AWS_REGION="$REGION"
+fi
+
 # Build a list of "ROUTE_KEY\tLOG_GROUP" lines from SST state.
 # For API routes, the route key is the HTTP verb + path (e.g. "POST /api/buckets").
 # For non-API-route handlers, we use the resource name as the label.

@@ -2,8 +2,8 @@ import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { getS3Endpoint, S3_REGION } from '@filone/shared';
-import type { ErrorResponse, PresignUploadRequest, PresignUploadResponse } from '@filone/shared';
+import type { ErrorResponse, PresignUploadResponse } from '@filone/shared';
+import { getS3Endpoint, PresignUploadSchema, S3_REGION } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getAuroraS3Credentials, getPresignedPutObjectUrl } from '../lib/aurora-s3-client.js';
@@ -30,9 +30,9 @@ export async function baseHandler(
       .build();
   }
 
-  let request: PresignUploadRequest;
+  let body: unknown;
   try {
-    request = JSON.parse(event.body ?? '{}') as PresignUploadRequest;
+    body = JSON.parse(event.body ?? '{}');
   } catch {
     return new ResponseBuilder()
       .status(400)
@@ -40,13 +40,15 @@ export async function baseHandler(
       .build();
   }
 
-  const { key, contentType, fileName } = request;
-  if (!key || !contentType || !fileName) {
+  const parsed = PresignUploadSchema.safeParse(body);
+  if (!parsed.success) {
     return new ResponseBuilder()
       .status(400)
-      .body<ErrorResponse>({ message: 'Missing required fields: key, contentType, fileName' })
+      .body<ErrorResponse>({ message: parsed.error.issues[0].message })
       .build();
   }
+
+  const { key, contentType, fileName } = parsed.data;
 
   const { orgId } = getUserInfo(event);
 
@@ -74,8 +76,11 @@ export async function baseHandler(
   const gatewayUrl = getS3Endpoint(S3_REGION, stage);
 
   const metadata: Record<string, string> = { filename: fileName };
-  if (request.description) {
-    metadata.description = request.description;
+  if (parsed.data.description) {
+    metadata.description = parsed.data.description;
+  }
+  if (parsed.data.tags && parsed.data.tags.length > 0) {
+    metadata.tags = JSON.stringify(parsed.data.tags);
   }
 
   const credentials = await getAuroraS3Credentials(stage, auroraTenantId);

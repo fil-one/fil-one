@@ -1,32 +1,23 @@
+// Re-export all shared helpers
+export {
+  getStripeClient,
+  getDynamoClient,
+  getBillingTableName,
+  getUserInfoTableName,
+  sleep,
+  pollUntil,
+  seedBillingRecord,
+  getBillingRecord,
+  deleteBillingRecord,
+  createTestCustomer,
+} from '../helpers.js';
+
+import { getStripeClient, pollUntil } from '../helpers.js';
 import { Resource } from 'sst';
-import {
-  DynamoDBClient,
-  PutItemCommand,
-  GetItemCommand,
-  DeleteItemCommand,
-  type AttributeValue,
-} from '@aws-sdk/client-dynamodb';
-import Stripe from 'stripe';
 
 // =============================================================================
-// Config (reads from SST Resource, available via `sst shell`)
+// Stripe-webhook-specific helpers
 // =============================================================================
-
-const AWS_REGION = process.env.AWS_REGION ?? 'us-east-1';
-
-export function getStripeClient(): Stripe {
-  return new Stripe(
-    (Resource as unknown as Record<string, { value: string }>).StripeSecretKey.value,
-  );
-}
-
-export function getDynamoClient(): DynamoDBClient {
-  return new DynamoDBClient({ region: AWS_REGION });
-}
-
-export function getBillingTableName(): string {
-  return (Resource as unknown as Record<string, { name: string }>).BillingTable.name;
-}
 
 export function getStripePriceId(): string {
   const priceId =
@@ -37,88 +28,6 @@ export function getStripePriceId(): string {
     throw new Error('STRIPE_PRICE_ID is not set and not available from SST Resource');
   }
   return priceId;
-}
-
-// =============================================================================
-// Utilities
-// =============================================================================
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// =============================================================================
-// DynamoDB helpers
-// =============================================================================
-
-export async function seedBillingRecord(
-  userId: string,
-  customerId: string,
-  status: string,
-  extra?: Record<string, { S: string }>,
-): Promise<void> {
-  const item: Record<string, { S: string }> = {
-    pk: { S: `CUSTOMER#${userId}` },
-    sk: { S: 'SUBSCRIPTION' },
-    orgId: { S: 'test-org' },
-    stripeCustomerId: { S: customerId },
-    subscriptionStatus: { S: status },
-    updatedAt: { S: new Date().toISOString() },
-    ...extra,
-  };
-
-  await getDynamoClient().send(
-    new PutItemCommand({
-      TableName: getBillingTableName(),
-      Item: item,
-    }),
-  );
-}
-
-export async function getBillingRecord(
-  userId: string,
-): Promise<Record<string, AttributeValue> | null> {
-  const result = await getDynamoClient().send(
-    new GetItemCommand({
-      TableName: getBillingTableName(),
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-    }),
-  );
-  return result.Item ?? null;
-}
-
-export async function deleteBillingRecord(userId: string): Promise<void> {
-  try {
-    await getDynamoClient().send(
-      new DeleteItemCommand({
-        TableName: getBillingTableName(),
-        Key: {
-          pk: { S: `CUSTOMER#${userId}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-      }),
-    );
-  } catch (error) {
-    console.error('Failed to delete billing record:', error);
-  }
-}
-
-// =============================================================================
-// Stripe helpers
-// =============================================================================
-
-export async function createTestCustomer(userId: string, testClock?: string): Promise<string> {
-  const params: Stripe.CustomerCreateParams = {
-    metadata: { userId, orgId: 'test-org' },
-    description: `Webhook test customer (${userId})`,
-  };
-  if (testClock) {
-    params.test_clock = testClock;
-  }
-  const customer = await getStripeClient().customers.create(params);
-  return customer.id;
 }
 
 export async function attachValidCard(customerId: string): Promise<string> {
@@ -186,20 +95,14 @@ export async function createAndFailInvoice(customerId: string): Promise<string> 
 // =============================================================================
 // Waiting
 // =============================================================================
-export async function pollTestClockReady(clockId: string, timeoutSeconds = 120): Promise<void> {
-  const timeoutMs = timeoutSeconds * 1000;
-  let elapsed = 0;
-  let delay = 200;
-  const maxDelay = 2000;
 
-  while (elapsed < timeoutMs) {
-    const clockState = await getStripeClient().testHelpers.testClocks.retrieve(clockId);
-    if (clockState.status === 'ready') {
-      return;
-    }
-    await sleep(delay);
-    elapsed += delay;
-    delay = Math.min(delay * 2, maxDelay);
-  }
-  throw new Error(`Test clock ${clockId} did not reach 'ready' status after ${timeoutSeconds}s`);
+export async function pollTestClockReady(clockId: string, timeoutSeconds = 120): Promise<void> {
+  await pollUntil(
+    async () => {
+      const clockState = await getStripeClient().testHelpers.testClocks.retrieve(clockId);
+      return clockState.status === 'ready' ? true : null;
+    },
+    timeoutSeconds * 1000,
+    { initialDelay: 200 },
+  );
 }

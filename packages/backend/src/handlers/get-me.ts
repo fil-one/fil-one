@@ -9,13 +9,14 @@ import { triggerTenantSetup } from '../lib/trigger-tenant-setup.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { suggestOrgName } from '../lib/suggest-org-name.js';
+import { getConnectionType } from '../lib/auth0-management.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { orgId, email, emailVerified } = getUserInfo(event);
+  const { orgId, email, emailVerified, sub, name } = getUserInfo(event);
 
   const { Item } = await getDynamoClient().send(
     new GetItemCommand({
@@ -46,6 +47,8 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     emailVerified,
     email,
     orgSetupComplete: isOrgSetupComplete(setupStatus),
+    name,
+    connectionType: getConnectionType(sub),
   };
 
   // Only include suggested name if org is not yet confirmed

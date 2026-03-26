@@ -169,10 +169,12 @@ describe('authMiddleware', () => {
         issuer: `https://${process.env.AUTH0_DOMAIN}/`,
       });
       expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
         userId: existingUserId,
         orgId: existingOrgId,
         email: MOCK_EMAIL,
         emailVerified: false,
+        name: undefined,
       });
     });
 
@@ -219,12 +221,14 @@ describe('authMiddleware', () => {
       const result = await before(request);
 
       expect(result).toBeUndefined();
-      // Falls back to DDB-stored email since ID token verification failed
+      // ID token failed so email is null/undefined — email comes from claims only, not DB.
       expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
         userId: existingUserId,
         orgId: existingOrgId,
-        email: 'stored@example.com',
+        email: undefined,
         emailVerified: false,
+        name: undefined,
       });
     });
 
@@ -248,10 +252,12 @@ describe('authMiddleware', () => {
       // Only one jwtVerify call (access token), no second call for ID token
       expect(mockJwtVerify).toHaveBeenCalledTimes(1);
       expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
         userId: MOCK_USER_ID,
         orgId: MOCK_ORG_ID,
         email: undefined,
         emailVerified: false,
+        name: undefined,
       });
     });
 
@@ -352,10 +358,12 @@ describe('authMiddleware', () => {
 
       expect(result).toBeUndefined();
       expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
         userId: existingUserId,
         orgId: existingOrgId,
-        email: MOCK_EMAIL,
+        email: undefined,
         emailVerified: false,
+        name: undefined,
       });
     });
 
@@ -380,10 +388,12 @@ describe('authMiddleware', () => {
 
       expect(result).toBeUndefined();
       expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
         userId: MOCK_USER_ID,
         orgId: MOCK_ORG_ID,
         email: MOCK_EMAIL,
         emailVerified: false,
+        name: undefined,
       });
 
       const transactCalls = ddbMock.commandCalls(TransactWriteItemsCommand);
@@ -398,7 +408,6 @@ describe('authMiddleware', () => {
               sk: { S: 'IDENTITY' },
               userId: { S: MOCK_USER_ID },
               orgId: { S: MOCK_ORG_ID },
-              email: { S: MOCK_EMAIL },
               createdAt: { S: expect.any(String) },
             },
             ConditionExpression: 'attribute_not_exists(pk)',
@@ -413,7 +422,6 @@ describe('authMiddleware', () => {
               sk: { S: 'PROFILE' },
               sub: { S: MOCK_SUB },
               orgId: { S: MOCK_ORG_ID },
-              email: { S: MOCK_EMAIL },
               createdAt: { S: expect.any(String) },
             },
           },
@@ -425,7 +433,7 @@ describe('authMiddleware', () => {
             Item: {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: 'PROFILE' },
-              name: { S: 'example.com' },
+              name: { S: 'Example' },
               orgConfirmed: { BOOL: false },
               setupStatus: { S: 'FILONE_ORG_CREATED' },
               createdBy: { S: MOCK_USER_ID },
@@ -441,7 +449,6 @@ describe('authMiddleware', () => {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: `MEMBER#${MOCK_USER_ID}` },
               role: { S: OrgRole.Admin },
-              email: { S: MOCK_EMAIL },
               joinedAt: { S: expect.any(String) },
             },
           },
@@ -506,15 +513,107 @@ describe('authMiddleware', () => {
 
       expect(result).toBeUndefined();
       expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
         userId: existingUserId,
         orgId: existingOrgId,
         email: MOCK_EMAIL,
         emailVerified: false,
+        name: undefined,
       });
       expect(request.internal.newTokens).toEqual({
         access_token: 'new-access-token',
         id_token: 'new-id-token',
         refresh_token: 'new-refresh-token',
+      });
+    });
+
+    it('forceRefresh=1 falls back to existing access token when refresh exchange fails', async () => {
+      const existingUserId = 'fallback-user-uuid';
+      const existingOrgId = 'fallback-org-uuid';
+
+      // Access token verify succeeds (used in fallback path); no ID token cookie so
+      // extractIdTokenClaims returns early without calling jwtVerify
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } });
+
+      // Refresh exchange fails
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        text: async () => 'invalid_grant',
+      });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+          },
+        });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({
+          Item: {
+            orgConfirmed: { BOOL: true },
+            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+          },
+        });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_refresh_token=bad-refresh`],
+        queryStringParameters: { forceRefresh: '1' },
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toMatchObject({
+        sub: MOCK_SUB,
+        userId: existingUserId,
+        orgId: existingOrgId,
+      });
+    });
+
+    it('forceRefresh=1 falls back to existing access token when no refresh token present', async () => {
+      const existingUserId = 'fallback-user-uuid';
+      const existingOrgId = 'fallback-org-uuid';
+
+      // Access token verify succeeds (fallback); no ID token so extractIdTokenClaims returns defaults
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } });
+      mockFetch.mockResolvedValue({ ok: false, status: 401, text: async () => '' });
+
+      // Use call-order mocking: first GetItem is IDENTITY lookup, second is ORG PROFILE lookup
+      ddbMock
+        .on(GetItemCommand)
+        .resolvesOnce({ Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } } })
+        .resolvesOnce({
+          Item: {
+            orgConfirmed: { BOOL: true },
+            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+          },
+        });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`],
+        queryStringParameters: { forceRefresh: '1' },
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toMatchObject({
+        sub: MOCK_SUB,
+        userId: existingUserId,
+        orgId: existingOrgId,
       });
     });
 
@@ -635,6 +734,51 @@ describe('authMiddleware', () => {
       expect(cookies[4]).toMatch(
         /^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/,
       );
+    });
+
+    it('always refreshes when _forceTokenRefresh is set, even when before-hook already set newTokens', async () => {
+      const { after } = authMiddleware();
+      const response: APIGatewayProxyStructuredResultV2 = { statusCode: 200, body: '{}' };
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: 'post-handler-at',
+          id_token: 'post-handler-it',
+          refresh_token: 'post-handler-rt',
+        }),
+      });
+      mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
+
+      const event = buildEvent();
+      (
+        event.requestContext as APIGatewayProxyEventV2['requestContext'] & {
+          _forceTokenRefresh?: boolean;
+        }
+      )._forceTokenRefresh = true;
+
+      const request: AuthRequest = {
+        event,
+        context: {} as Context,
+        response,
+        error: undefined,
+        internal: {
+          // Before-hook already produced tokens (e.g. access token was expired and refreshed)
+          newTokens: {
+            access_token: 'before-hook-at',
+            id_token: 'before-hook-it',
+            refresh_token: 'before-hook-rt',
+          },
+          refreshToken: 'before-hook-rt',
+        },
+      };
+
+      await after(request);
+
+      // Cookies should reflect the post-handler refresh, not the before-hook tokens
+      const cookies = response.cookies ?? [];
+      expect(cookies[0]).toContain('post-handler-at');
+      expect(cookies[1]).toContain('post-handler-it');
     });
 
     it('does not modify response when no newTokens', async () => {

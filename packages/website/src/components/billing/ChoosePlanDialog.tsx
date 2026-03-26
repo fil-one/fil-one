@@ -5,6 +5,7 @@ type ChoosePlanDialogProps = {
   open: boolean;
   onClose: () => void;
   onSelectPayAsYouGo: () => void;
+  onContactSales: () => void;
 };
 
 const PAY_AS_YOU_GO_FEATURES = [
@@ -22,7 +23,12 @@ const BUSINESS_FEATURES = [
   'Deployment SLAs',
 ];
 
-export function ChoosePlanDialog({ open, onClose, onSelectPayAsYouGo }: ChoosePlanDialogProps) {
+export function ChoosePlanDialog({
+  open,
+  onClose,
+  onSelectPayAsYouGo,
+  onContactSales,
+}: ChoosePlanDialogProps) {
   return (
     <Modal open={open} onClose={onClose} size="lg">
       <ModalHeader onClose={onClose}>Choose your plan</ModalHeader>
@@ -78,13 +84,14 @@ export function ChoosePlanDialog({ open, onClose, onSelectPayAsYouGo }: ChoosePl
               ))}
             </ul>
 
-            <a
-              href="mailto:sales@fil.one"
+            <button
+              type="button"
+              onClick={onContactSales}
               className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg border border-[#0066ff] px-4 py-2.5 text-sm font-semibold text-[#0066ff] transition-colors hover:bg-[#f0f6ff]"
             >
               <PhoneIcon size={16} weight="bold" />
               Contact sales
-            </a>
+            </button>
           </div>
         </div>
 
