@@ -1,5 +1,10 @@
 import { API_URL, AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_AUDIENCE } from '../env.js';
-import { ApiErrorCode, OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from '@filone/shared';
+import {
+  ApiErrorCode,
+  OAUTH_STATE_COOKIE,
+  CSRF_COOKIE_NAME,
+  buildAuth0AuthorizeUrl,
+} from '@filone/shared';
 
 // Prevents multiple simultaneous 401 responses from each triggering a redirect.
 let isRedirecting = false;
@@ -18,25 +23,19 @@ interface LoginOptions {
   connection?: string;
 }
 
-// TODO [Option D]: When we move to a custom domain (e.g. auth.fil.one),
-// AUTH0_DOMAIN will change to the custom domain. No code changes needed here —
-// just update the VITE_AUTH0_DOMAIN env var.
-function buildAuth0LoginUrl(options?: LoginOptions): string {
-  const callbackUrl = `${window.location.origin}/api/auth/callback`;
+export function buildAuth0LoginUrl(options?: LoginOptions): string {
   const state = crypto.randomUUID();
   document.cookie = `${OAUTH_STATE_COOKIE}=${state}; Secure; SameSite=Lax; Path=/; Max-Age=300`;
-  const params = new URLSearchParams({
-    client_id: AUTH0_CLIENT_ID,
-    redirect_uri: callbackUrl,
-    response_type: 'code',
-    scope: 'openid profile email offline_access',
+  return buildAuth0AuthorizeUrl({
+    domain: AUTH0_DOMAIN,
+    clientId: AUTH0_CLIENT_ID,
     audience: AUTH0_AUDIENCE,
+    redirectUri: `${window.location.origin}/api/auth/callback`,
     state,
+    loginHint: options?.loginHint,
+    screenHint: options?.screenHint,
+    connection: options?.connection,
   });
-  if (options?.loginHint) params.set('login_hint', options.loginHint);
-  if (options?.screenHint) params.set('screen_hint', options.screenHint);
-  if (options?.connection) params.set('connection', options.connection);
-  return `https://${AUTH0_DOMAIN}/authorize?${params.toString()}`;
 }
 
 export function redirectToLogin(options?: LoginOptions): void {
