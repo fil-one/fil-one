@@ -3,21 +3,20 @@
 export default $config({
   app(input) {
     const stage = input?.stage;
-    if (stage !== 'staging' && stage !== 'production') {
-      throw new Error(
-        `The infra project only supports "staging" and "production" stages, got "${stage}".`,
-      );
-    }
 
     const awsProvider: Record<string, unknown> = { region: 'us-east-2' };
 
-    if (stage === 'staging') {
-      awsProvider.allowedAccountIds = ['654654381893'];
-    } else if (stage === 'production') {
-      throw new Error(
-        'Production AWS account ID is not yet configured. ' +
-          'Set allowedAccountIds for the production stage before deploying.',
-      );
+    switch (stage) {
+      case 'staging':
+        awsProvider.allowedAccountIds = ['654654381893'];
+        break;
+      case 'production':
+        awsProvider.allowedAccountIds = ['811430801166'];
+        break;
+      default:
+        throw new Error(
+          `The infra project only supports "staging" and "production" stages, got "${stage}".`,
+        );
     }
 
     return {
