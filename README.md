@@ -123,7 +123,7 @@ pnpm run lint             # Lint and typecheck TypeScript code (via oxlint)
 pnpm run lint:fix         # Lint and auto-fix where possible
 ```
 
-> **Do not run `deploy:staging` or `deploy:production` manually** you know better. Staging and production deployments should go through CI/CD.
+> **Do not run `deploy:staging` or `deploy:production` manually.** Staging and production deployments should go through CI/CD.
 
 ```bash
 # Local website dev server (for frontend-only changes)
