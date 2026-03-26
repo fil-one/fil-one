@@ -426,19 +426,24 @@ The full fork at `joemocode-business/filecoin-foundation` tracks the upstream `F
 
 ## Observability
 
-Logs are sent to Grafana Cloud. See `docs/architectural-decisions/2026-03-observability-architecture.md` for details.
+Telemetry is sent to Grafana Cloud. See `docs/architectural-decisions/2026-03-observability-architecture.md` for details.
 
-**Logs**: CloudWatch Logs → Kinesis Firehose → Grafana Cloud Loki.
+**Logs**: CloudWatch Logs → Kinesis Firehose → Grafana Cloud Loki (per-stage, managed by the main stack).
+**Metrics**: CloudWatch Metrics → Metric Stream → Kinesis Firehose → Grafana Cloud Prometheus (per-account, managed by the `infra/` stack — one stream captures all Lambda metrics in the account regardless of stage). Developer stacks do not stream metrics to Grafana; use the CloudWatch console instead.
 
 ### Grafana secrets
 
 Generate API keys in Grafana Cloud (grafana.com → your stack → Connections → API keys):
 
-- **GrafanaLokiAuth**: Plain `<instanceId>:<apiKey>` where instanceId is your Loki instance ID (sent as-is in the Firehose `X-Amz-Firehose-Access-Key` header)
+- **GrafanaLokiAuth** (main stack): Plain `<instanceId>:<apiKey>` where instanceId is your Loki instance ID (sent as-is in the Firehose `X-Amz-Firehose-Access-Key` header)
+- **GrafanaPrometheusAuth** (infra stack): Plain `<instanceId>:<apiKey>` where instanceId is your Prometheus instance ID
 
 ```bash
-# GrafanaLokiAuth uses plain text (Firehose access key)
+# Main stack secrets
 pnpx sst secret set GrafanaLokiAuth '<instanceId>:<apiKey>' [--stage <stage>]
+
+# Infra stack secrets (run from infra/ directory)
+cd infra && pnpx sst secret set GrafanaPrometheusAuth '<instanceId>:<apiKey>' --stage <stage>
 ```
 
 ## Contracts (`contracts/`)
