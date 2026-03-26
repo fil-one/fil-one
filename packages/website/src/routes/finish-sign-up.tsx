@@ -10,7 +10,7 @@ export const Route = createRoute({
   path: '/finish-sign-up',
   beforeLoad: () => {
     if (!document.cookie.includes('hs_logged_in')) {
-      throw redirect({ href: '/api/auth/login' });
+      throw redirect({ href: '/api/auth/login', reloadDocument: true });
     }
   },
   component: FinishSignUpRoute,

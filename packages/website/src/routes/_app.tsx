@@ -9,7 +9,7 @@ export const Route = createRoute({
   getParentRoute: () => rootRoute,
   beforeLoad: async () => {
     if (!document.cookie.includes('hs_logged_in')) {
-      throw redirect({ href: '/api/auth/login' });
+      throw redirect({ href: '/api/auth/login', reloadDocument: true });
     }
     // Check if org is confirmed before allowing access to any app route
     let me;

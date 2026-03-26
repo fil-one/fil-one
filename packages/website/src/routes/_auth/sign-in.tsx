@@ -7,7 +7,7 @@ export const Route = createRoute({
   beforeLoad: () => {
     // Redirect to the server-side login endpoint which sets the OAuth state
     // cookie and 302s to Auth0 Universal Login.
-    throw redirect({ href: '/api/auth/login' });
+    throw redirect({ href: '/api/auth/login', reloadDocument: true });
   },
   component: () => null,
 });
