@@ -14,9 +14,9 @@ export default $config({
         awsProvider.allowedAccountIds = ['811430801166'];
         break;
       default:
-      throw new Error(
-        `The infra project only supports "staging" and "production" stages, got "${stage}".`,
-      );
+        throw new Error(
+          `The infra project only supports "staging" and "production" stages, got "${stage}".`,
+        );
     }
 
     return {
