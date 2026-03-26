@@ -6,7 +6,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ActivityResponse, RecentActivity, UsageDataPoint } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraS3Credentials, listBuckets, listObjects } from '../lib/aurora-s3-client.js';
+import { getAuroraS3Credentials, listBuckets } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -68,26 +68,8 @@ export async function baseHandler(
       timestamp: bucket.createdAt,
     });
 
-    let continuationToken: string | undefined;
-    do {
-      const result = await listObjects({
-        endpointUrl: gatewayUrl,
-        credentials: credentials!,
-        bucket: bucket.name,
-        continuationToken,
-      });
-      for (const obj of result.objects) {
-        activities.push({
-          id: `object-${bucket.name}-${obj.key}`,
-          action: 'object.uploaded',
-          resourceType: 'object',
-          resourceName: obj.key,
-          timestamp: obj.lastModified,
-          sizeBytes: obj.sizeBytes || undefined,
-        });
-      }
-      continuationToken = result.nextToken;
-    } while (continuationToken);
+    // TODO: Re-add object activities once we have an event system with Aurora.
+    // https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard
   }
 
   // Get access keys
