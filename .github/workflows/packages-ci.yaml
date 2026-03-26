@@ -98,7 +98,7 @@ jobs:
           GRAFANA_LOKI_AUTH: ${{ secrets.CI_GRAFANA_LOKI_AUTH }}
 
       - name: Build
-        run: pnpm --filter @filone/website run build:staging && pnpm -r --filter '!@filone/website' run build
+        run: pnpm run build:dev
 
       - name: Deploy SST stage
         run: pnpm exec sst deploy --stage "$STAGE"
