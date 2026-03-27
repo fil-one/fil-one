@@ -45,6 +45,7 @@ export default $config({
     const auth0MgmtRuntimeClientId = new sst.Secret('Auth0MgmtRuntimeClientId');
     const auth0MgmtRuntimeClientSecret = new sst.Secret('Auth0MgmtRuntimeClientSecret');
     const stripeSecretKey = new sst.Secret('StripeSecretKey');
+    const stripePublishableKey = new sst.Secret('StripePublishableKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
@@ -276,6 +277,7 @@ export default $config({
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
+      stripePublishableKey,
       stripePriceId,
       auroraBackofficeToken,
     ];
@@ -293,8 +295,12 @@ export default $config({
     }
 
     const auroraEnv = {
-      AURORA_BACKOFFICE_URL: 'https://api.backoffice.dev.aur.lu/api',
-      AURORA_PORTAL_URL: 'https://api.portal.dev.aur.lu/api',
+      AURORA_BACKOFFICE_URL: isProduction
+        ? 'https://api-backoffice.aur.lu/api'
+        : 'https://api.backoffice.dev.aur.lu/api',
+      AURORA_PORTAL_URL: isProduction
+        ? 'https://api-portal.aur.lu/api'
+        : 'https://api.portal.dev.aur.lu/api',
       AURORA_PARTNER_ID: 'ff',
       AURORA_REGION_ID: 'ff',
     };

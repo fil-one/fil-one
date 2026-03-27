@@ -3,7 +3,7 @@ export type { Auth0LoginUrlOptions } from './auth.js';
 
 export {
   Stage,
-  S3_ENDPOINT,
+  DOCS_URL,
   S3_REGION,
   S3Region,
   getS3Endpoint,

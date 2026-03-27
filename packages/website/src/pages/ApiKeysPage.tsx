@@ -13,7 +13,7 @@ import { useToast } from '../components/Toast';
 
 import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
 
-import { getS3Endpoint, S3_REGION } from '@filone/shared';
+import { getS3Endpoint, S3_REGION, DOCS_URL } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 import { apiRequest } from '../lib/api.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
@@ -182,7 +182,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-zinc-900">Quickstart (AWS CLI)</h3>
           <a
-            href="https://docs.fil.one"
+            href={DOCS_URL}
             target="_blank"
             rel="noreferrer"
             className="text-xs font-medium text-brand-600 hover:underline"

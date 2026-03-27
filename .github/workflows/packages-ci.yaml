@@ -91,6 +91,7 @@ jobs:
           pnpm exec sst secret set SendGridApiKey "$SENDGRID_API_KEY" --stage "$STAGE"
           pnpm exec sst secret set GrafanaLokiAuth "$GRAFANA_LOKI_AUTH" --stage "$STAGE"
           pnpm exec sst secret set GrafanaPrometheusAuth "$GRAFANA_PROMETHEUS_AUTH" --stage "$STAGE"
+          npx sst secret set StripePublishableKey "$STRIPE_PUBLISHABLE_KEY" --stage "$STAGE"
         env:
           AUTH0_CLIENT_ID: ${{ secrets.CI_AUTH0_CLIENT_ID }}
           AUTH0_CLIENT_SECRET: ${{ secrets.CI_AUTH0_CLIENT_SECRET }}
@@ -104,6 +105,7 @@ jobs:
           SENDGRID_API_KEY: ${{ secrets.CI_SENDGRID_API_KEY }}
           GRAFANA_LOKI_AUTH: ${{ secrets.CI_GRAFANA_LOKI_AUTH }}
           GRAFANA_PROMETHEUS_AUTH: ${{ secrets.CI_GRAFANA_PROMETHEUS_AUTH }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.CI_STRIPE_PUBLISHABLE_KEY }}
 
       - name: Build
         run: pnpm build

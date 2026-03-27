@@ -4,8 +4,7 @@ export enum Stage {
   Staging = 'staging',
 }
 
-/** S3-compatible storage endpoint for Fil One (production default). */
-export const S3_ENDPOINT = 'https://s3.fil.one';
+export const DOCS_URL = 'https://fil.one/docs';
 
 /** Available S3 regions. */
 export enum S3Region {
@@ -20,7 +19,12 @@ export const S3_REGION = S3Region.EuWest1;
  * e.g. https://eu-west-1.s3.fil.one (production) or https://eu-west-1.s3.staging.fil.one (non-prod).
  */
 export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
-  const base = stage === Stage.Production ? 's3.fil.one' : 's3.staging.fil.one';
+  //TODO change this when aurora supports staging URL structure through our DNS.
+  if (stage != Stage.Production) {
+    return 'https://s3.dev.aur.lu';
+  }
+  const base = 's3.fil.one';
+  // const base = stage === Stage.Production ? 's3.fil.one' : 's3.staging.fil.one';
   return `https://${region}.${base}`;
 }
 

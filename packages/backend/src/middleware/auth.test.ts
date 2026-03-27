@@ -26,6 +26,8 @@ const MOCK_USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const MOCK_ORG_ID = '11111111-2222-3333-4444-555555555555';
 const MOCK_SUB = 'auth0|abc123';
 const MOCK_EMAIL = 'user@example.com';
+const MOCK_PICTURE = 'https://lh3.googleusercontent.com/a/ACg8ocExample';
+const MOCK_NAME = 'Test User';
 
 // ---------------------------------------------------------------------------
 // Mocks — must be set up before importing the module under test
@@ -175,6 +177,140 @@ describe('authMiddleware', () => {
         email: MOCK_EMAIL,
         emailVerified: false,
         name: undefined,
+        picture: undefined,
+      });
+    });
+
+    it('extracts name and picture from ID token claims', async () => {
+      const existingUserId = 'existing-user-uuid';
+      const existingOrgId = 'existing-org-uuid';
+
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: {
+          email: MOCK_EMAIL,
+          email_verified: true,
+          name: MOCK_NAME,
+          picture: MOCK_PICTURE,
+        },
+      });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${MOCK_SUB}` },
+            sk: { S: 'IDENTITY' },
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+            email: { S: MOCK_EMAIL },
+          },
+        });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `ORG#${existingOrgId}` },
+            sk: { S: 'PROFILE' },
+            name: { S: 'example.com' },
+            orgConfirmed: { BOOL: true },
+            setupStatus: { S: FINAL_SETUP_STATUS },
+          },
+        });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [
+          `hs_access_token=valid-token`,
+          `hs_id_token=id-token`,
+          `hs_refresh_token=refresh-token`,
+        ],
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
+        userId: existingUserId,
+        orgId: existingOrgId,
+        email: MOCK_EMAIL,
+        emailVerified: true,
+        name: MOCK_NAME,
+        picture: MOCK_PICTURE,
+      });
+    });
+
+    it('extracts picture from refreshed ID token', async () => {
+      const existingUserId = 'refreshed-user-uuid';
+      const existingOrgId = 'refreshed-org-uuid';
+
+      mockJwtVerify.mockRejectedValueOnce(new Error('token expired')).mockResolvedValueOnce({
+        payload: {
+          email: MOCK_EMAIL,
+          email_verified: true,
+          name: MOCK_NAME,
+          picture: MOCK_PICTURE,
+        },
+      });
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: 'new-access-token',
+          id_token: 'new-id-token',
+          refresh_token: 'new-refresh-token',
+        }),
+      });
+
+      mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${MOCK_SUB}` },
+            sk: { S: 'IDENTITY' },
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+          },
+        });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({
+          Item: {
+            orgConfirmed: { BOOL: true },
+            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+          },
+        });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [`hs_access_token=expired-token`, `hs_refresh_token=valid-refresh`],
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toStrictEqual({
+        sub: MOCK_SUB,
+        userId: existingUserId,
+        orgId: existingOrgId,
+        email: MOCK_EMAIL,
+        emailVerified: true,
+        name: MOCK_NAME,
+        picture: MOCK_PICTURE,
       });
     });
 
@@ -229,6 +365,7 @@ describe('authMiddleware', () => {
         email: undefined,
         emailVerified: false,
         name: undefined,
+        picture: undefined,
       });
     });
 
@@ -258,6 +395,7 @@ describe('authMiddleware', () => {
         email: undefined,
         emailVerified: false,
         name: undefined,
+        picture: undefined,
       });
     });
 
@@ -364,6 +502,7 @@ describe('authMiddleware', () => {
         email: undefined,
         emailVerified: false,
         name: undefined,
+        picture: undefined,
       });
     });
 
@@ -394,6 +533,7 @@ describe('authMiddleware', () => {
         email: MOCK_EMAIL,
         emailVerified: false,
         name: undefined,
+        picture: undefined,
       });
 
       const transactCalls = ddbMock.commandCalls(TransactWriteItemsCommand);
@@ -519,6 +659,7 @@ describe('authMiddleware', () => {
         email: MOCK_EMAIL,
         emailVerified: false,
         name: undefined,
+        picture: undefined,
       });
       expect(request.internal.newTokens).toEqual({
         access_token: 'new-access-token',

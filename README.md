@@ -314,14 +314,7 @@ Events registered: `customer.subscription.created`, `customer.subscription.updat
 
 ### 4. Secrets
 
-Stripe credentials are managed as SST secrets (`StripeSecretKey`, `StripePriceId`). See the "Set SST secrets" step above.
-
-The frontend needs the **publishable key** in its env:
-
-```bash
-# packages/website/.env.local
-VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx
-```
+Stripe credentials are managed as SST secrets (`StripeSecretKey`, `StripePriceId`, `StripePublishableKey`). See the "Set SST secrets" step above.
 
 ## SendGrid (Transactional Email)
 

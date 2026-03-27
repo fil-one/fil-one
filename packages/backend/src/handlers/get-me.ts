@@ -16,7 +16,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { orgId, email, emailVerified, sub, name } = getUserInfo(event);
+  const { orgId, email, emailVerified, sub, name, picture } = getUserInfo(event);
 
   const { Item } = await getDynamoClient().send(
     new GetItemCommand({
@@ -48,6 +48,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     email,
     orgSetupComplete: isOrgSetupComplete(setupStatus),
     name,
+    picture,
     connectionType: getConnectionType(sub),
   };
 
