@@ -124,7 +124,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
     limits.egressLimitBytes > 0 ? Math.min(100, (egressUsed / limits.egressLimitBytes) * 100) : 0;
 
   return (
-    <TooltipProvider delayDuration={300}>
+    <TooltipProvider delayDuration={0}>
       <nav className="flex h-full flex-col border-r border-zinc-200 bg-white">
         {/* User + collapse toggle */}
         <div
