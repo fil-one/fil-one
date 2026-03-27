@@ -5,12 +5,10 @@ import { CSRF_COOKIE_NAME } from '@filone/shared';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { COOKIE_NAMES, makeClearCookieHeader } from '../lib/response-builder.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { resolveOrigin } from '../lib/resolve-origin.js';
 
 async function baseHandler(
-  event: APIGatewayProxyEventV2,
+  _event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const origin = resolveOrigin(event);
   const domain = process.env.AUTH0_DOMAIN!;
   const secrets = getAuthSecrets();
 
@@ -24,7 +22,7 @@ async function baseHandler(
 
   const logoutUrl = new URL(`https://${domain}/v2/logout`);
   logoutUrl.searchParams.set('client_id', secrets.AUTH0_CLIENT_ID);
-  logoutUrl.searchParams.set('returnTo', `${origin}/sign-in`);
+  logoutUrl.searchParams.set('returnTo', 'https://fil.one');
 
   return {
     statusCode: 302,

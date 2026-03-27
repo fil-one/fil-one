@@ -4,7 +4,19 @@
 /* deno-fmt-ignore-file */
 /* biome-ignore-all lint: auto-generated */
 
-/// <reference path="../sst-env.d.ts" />
+declare module "sst" {
+  export interface Resource {
+    "GrafanaPrometheusAuth": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "MetricFirehoseBackup": {
+      "name": string
+      "type": "sst.aws.Bucket"
+    }
+  }
+}
+/// <reference path="sst-env.d.ts" />
 
 import "sst"
 export {}

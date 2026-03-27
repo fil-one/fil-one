@@ -95,16 +95,14 @@ export default $config({
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
     const isProduction = stage === 'production';
-    const isEphemeralStage = stage !== 'production' && stage !== 'staging';
+    const isStaging = stage === 'staging';
+    const isEphemeralStage = !isProduction && !isStaging;
 
     let domainName = 'staging.fil.one';
     let certArn: string | undefined;
 
-    //TODO Bring this back after we have a successful prod deployment.
-    // https://linear.app/filecoin-foundation/issue/FIL-12/console-prod-deployed-at-appfilone
-    // if (stage === 'production' || stage === 'staging') {
-    // domainName = stage === 'production' ? 'console.fil.one' : 'staging.fil.one';
-    if (stage == 'staging') {
+    if (isProduction || isStaging) {
+      domainName = isProduction ? 'app.fil.one' : 'staging.fil.one';
       // ACM cert must be in us-east-1 for CloudFront
       const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
       const cert = await aws.acm.getCertificate(
@@ -150,6 +148,14 @@ export default $config({
       routes: {
         '/*': { bucket: websiteBucket },
         '/api/*': {
+          url: api.url,
+          cachePolicy: AWS_CACHING_DISABLED_POLICY,
+        },
+        '/login': {
+          url: api.url,
+          cachePolicy: AWS_CACHING_DISABLED_POLICY,
+        },
+        '/logout': {
           url: api.url,
           cachePolicy: AWS_CACHING_DISABLED_POLICY,
         },
@@ -208,7 +214,7 @@ export default $config({
         ...(sendGridApiKey ? [sendGridApiKey] : []),
       ],
       environment: {
-        AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
+        AUTH0_DOMAIN: isProduction ? 'fil-one.us.auth0.com' : 'dev-oar2nhqh58xf5pwf.us.auth0.com',
       },
       permissions: [
         {
@@ -230,6 +236,9 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
+              // Bump to re-trigger: registers https://fil.one as allowed logout URL
+              // and /login as initiate_login_uri
+              Version: '2.1',
             },
           },
         },
@@ -275,25 +284,30 @@ export default $config({
 
     const sharedEnv: Record<string, $util.Input<string>> = {
       FILONE_STAGE: $app.stage,
-      AUTH0_DOMAIN: 'dev-oar2nhqh58xf5pwf.us.auth0.com',
-      AUTH0_AUDIENCE: 'https://staging.fil.one',
+      AUTH0_DOMAIN: isProduction ? 'fil-one.us.auth0.com' : 'dev-oar2nhqh58xf5pwf.us.auth0.com',
+      AUTH0_AUDIENCE: isProduction ? 'https://app.fil.one' : 'https://staging.fil.one',
     };
 
     if (isProduction) {
-      throw new Error(
-        'Aurora production configuration not yet available. ' +
-          'Set AURORA_BACKOFFICE_URL, AURORA_PORTAL_URL, AURORA_PARTNER_ID, and AURORA_REGION_ID before deploying to production.',
-      );
+      // TODO Add the prod Info here!
     }
 
     const auroraEnv = {
-      AURORA_BACKOFFICE_URL: 'https://api.backoffice.dev.aur.lu/api',
-      AURORA_PORTAL_URL: 'https://api.portal.dev.aur.lu/api',
+      AURORA_BACKOFFICE_URL: isProduction
+        ? 'https://api-backoffice.aur.lu/api'
+        : 'https://api.backoffice.dev.aur.lu/api',
+      AURORA_PORTAL_URL: isProduction
+        ? 'https://api-portal.aur.lu/api'
+        : 'https://api.portal.dev.aur.lu/api',
       AURORA_PARTNER_ID: 'ff',
       AURORA_REGION_ID: 'ff',
     };
 
-    const auroraS3GatewayUrl = 'https://s3.dev.aur.lu';
+    // TODO: once https://eu-west-1.s3.staging.fil.one is live, switch the staging URL as well
+    // https://github.com/filecoin-project/fil-one/pull/111
+    const auroraS3GatewayUrl = isProduction
+      ? 'https://eu-west-1.s3.fil.one'
+      : 'https://s3.dev.aur.lu';
 
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
@@ -443,13 +457,19 @@ export default $config({
     const allowedRedirectOrigins = allowedOrigins.join(',');
     addRoute({
       method: 'GET',
+      routePath: '/login',
+      handler: 'auth-login',
+      extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
+    });
+    addRoute({
+      method: 'GET',
       routePath: '/api/auth/callback',
       handler: 'auth-callback',
       extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
     });
     addRoute({
       method: 'GET',
-      routePath: '/api/auth/logout',
+      routePath: '/logout',
       handler: 'auth-logout',
       extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
     });

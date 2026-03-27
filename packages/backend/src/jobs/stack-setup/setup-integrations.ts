@@ -243,11 +243,11 @@ async function setupAuth0Callbacks(
   const client = await getAuth0Client(domain, token, clientId);
 
   const callbackUrl = `${siteUrl}/api/auth/callback`;
-  const loginUrl = `${siteUrl}/sign-in`;
+  const loginUrl = `${siteUrl}/login`;
 
   const patch: Partial<Auth0Client> = {
     callbacks: addUnique(client.callbacks ?? [], callbackUrl),
-    allowed_logout_urls: addUnique(client.allowed_logout_urls ?? [], loginUrl),
+    allowed_logout_urls: addUnique(client.allowed_logout_urls ?? [], 'https://fil.one'),
     web_origins: addUnique(client.web_origins ?? [], siteUrl),
   };
 
@@ -268,11 +268,10 @@ async function teardownAuth0Callbacks(
   const client = await getAuth0Client(domain, token, clientId);
 
   const callbackUrl = `${siteUrl}/api/auth/callback`;
-  const logoutUrl = `${siteUrl}/sign-in`;
 
   const patch: Partial<Auth0Client> = {
     callbacks: removeValue(client.callbacks ?? [], callbackUrl),
-    allowed_logout_urls: removeValue(client.allowed_logout_urls ?? [], logoutUrl),
+    // Do not remove the shared logout URL 'https://fil.one' here, as it is used by all stages.
     web_origins: removeValue(client.web_origins ?? [], siteUrl),
   };
 

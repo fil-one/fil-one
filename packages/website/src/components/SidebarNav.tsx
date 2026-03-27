@@ -13,7 +13,7 @@ import {
 import { Link, useMatchRoute } from '@tanstack/react-router';
 import { ProgressBar } from './ProgressBar.js';
 import { Button } from './Button.js';
-import { SubscriptionStatus, getUsageLimits, formatBytes } from '@filone/shared';
+import { DOCS_URL, SubscriptionStatus, getUsageLimits, formatBytes } from '@filone/shared';
 import type { BillingInfo, UsageResponse } from '@filone/shared';
 import { getBilling, getUsage } from '../lib/api.js';
 import { daysUntil, formatDateTime } from '../lib/time.js';
@@ -236,7 +236,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
       {/* Bottom links */}
       <div className="flex flex-col gap-0.5 border-t border-zinc-200 p-2">
         <a
-          href="#"
+          href={DOCS_URL}
           title={collapsed ? 'Documentation' : undefined}
           className={[
             'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-100',
