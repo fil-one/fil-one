@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { ShieldCheckIcon, CreditCardIcon, ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr';
+import { ShieldCheckIcon, CreditCardIcon } from '@phosphor-icons/react/dist/ssr';
 import {
   CardNumberElement,
   CardExpiryElement,
@@ -101,9 +101,9 @@ function PaymentForm({
         <p className="text-sm text-[#677183] mb-4">Pay as you go — $4.99/TB/month</p>
 
         {/* Security banner */}
-        <div className="flex items-center gap-2 rounded-lg bg-[#f0f6ff] px-3 py-2.5 mb-5">
-          <ShieldCheckIcon size={18} className="text-[#0066ff] flex-shrink-0" weight="fill" />
-          <span className="text-xs text-[#3a4252]">
+        <div className="flex items-center gap-[10px] rounded-lg bg-[rgba(243,244,246,0.5)] p-[10px] mb-4">
+          <ShieldCheckIcon size={16} className="text-[#0066ff] flex-shrink-0" weight="fill" />
+          <span className="text-[13px] text-[#677183]">
             Your payment information is encrypted and secure
           </span>
         </div>
@@ -111,8 +111,8 @@ function PaymentForm({
         <div className="flex flex-col gap-4">
           {/* Card Number */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-[#3a4252]">Card number</label>
-            <div className="rounded-md border border-[#e1e4ea] bg-[#fcfbf8] px-3 py-2.5">
+            <label className="text-[13px] font-medium text-[#14181f]">Card number</label>
+            <div className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5">
               <CardNumberElement
                 options={{ ...ELEMENT_OPTIONS, showIcon: true }}
                 onChange={handleCardChange}
@@ -123,14 +123,14 @@ function PaymentForm({
           {/* Expiry + CVC */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-[#3a4252]">Expiry date</label>
-              <div className="rounded-md border border-[#e1e4ea] bg-[#fcfbf8] px-3 py-2.5">
+              <label className="text-[13px] font-medium text-[#14181f]">Expiry</label>
+              <div className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5">
                 <CardExpiryElement options={ELEMENT_OPTIONS} />
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-[#3a4252]">CVC</label>
-              <div className="rounded-md border border-[#e1e4ea] bg-[#fcfbf8] px-3 py-2.5">
+              <label className="text-[13px] font-medium text-[#14181f]">CVC</label>
+              <div className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5">
                 <CardCvcElement options={ELEMENT_OPTIONS} />
               </div>
             </div>
@@ -141,29 +141,30 @@ function PaymentForm({
         </div>
 
         {/* Buttons */}
-        <div className="mt-6 flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={onBack}
-            className="flex items-center gap-1.5 rounded-lg border border-[#e1e4ea] px-4 py-2.5 text-sm font-medium text-[#3a4252] transition-colors hover:bg-zinc-50"
-          >
-            <ArrowLeftIcon size={14} />
-            Back
-          </button>
+        <div className="mt-4 border-t border-[#e1e4ea] pt-4 flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onBack}
+              className="flex items-center justify-center rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-[17px] py-[9px] text-[13px] font-medium text-[#14181f] shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] transition-colors hover:bg-zinc-50"
+            >
+              Back
+            </button>
 
-          <button
-            type="submit"
-            disabled={!stripe || loading}
-            className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#0066ff] to-[#0052cc] px-5 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            <CreditCardIcon size={16} weight="bold" />
-            {loading ? 'Processing...' : 'Start subscription'}
-          </button>
+            <button
+              type="submit"
+              disabled={!stripe || loading}
+              className="flex flex-1 items-center justify-center gap-2 rounded-[6px] bg-gradient-to-br from-[#0080ff] to-[#256af4] px-4 py-2 text-[13px] font-medium text-white shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              <CreditCardIcon size={16} weight="bold" />
+              {loading ? 'Processing...' : 'Start subscription'}
+            </button>
+          </div>
+
+          <p className="text-center text-[11px] text-[#677183]">
+            Pay only for what you use. Cancel anytime.
+          </p>
         </div>
-
-        <p className="mt-4 text-center text-xs text-[#99a0ae]">
-          Pay only for what you use. Cancel anytime.
-        </p>
       </ModalBody>
     </form>
   );

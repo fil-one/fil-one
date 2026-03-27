@@ -7,6 +7,7 @@
  */
 import { HardDrivesIcon } from '@phosphor-icons/react/dist/ssr';
 import { Link } from '@tanstack/react-router';
+import { DOCS_URL } from '@filone/shared';
 
 export function SealingStatus() {
   return (
@@ -21,7 +22,7 @@ export function SealingStatus() {
           </span>
         </div>
         <a
-          href="https://docs.filecoin.io"
+          href={DOCS_URL}
           target="_blank"
           rel="noopener noreferrer"
           className="text-[11px] text-[#677183] hover:text-zinc-900"
