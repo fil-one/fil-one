@@ -15,6 +15,7 @@ export type ModalProps = {
   onClose: () => void;
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg';
+  panelClassName?: string;
 };
 
 export type ModalHeaderProps = {
@@ -36,7 +37,7 @@ const sizeClasses = {
   lg: 'modal-panel--lg',
 } as const;
 
-export function Modal({ open, onClose, children, size = 'md' }: ModalProps) {
+export function Modal({ open, onClose, children, size = 'md', panelClassName }: ModalProps) {
   return (
     <Transition show={open} as={Fragment}>
       <Dialog className="relative z-50" onClose={onClose}>
@@ -64,7 +65,9 @@ export function Modal({ open, onClose, children, size = 'md' }: ModalProps) {
             leaveFrom="opacity-100 scale-100"
             leaveTo="opacity-0 scale-95"
           >
-            <DialogPanel className={clsx('modal-panel', sizeClasses[size])}>{children}</DialogPanel>
+            <DialogPanel className={clsx('modal-panel', sizeClasses[size], panelClassName)}>
+              {children}
+            </DialogPanel>
           </TransitionChild>
         </div>
       </Dialog>

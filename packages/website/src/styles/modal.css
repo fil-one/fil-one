@@ -44,6 +44,6 @@
   }
 
   .modal-footer {
-    @apply flex items-center justify-end gap-3 border-t border-(--color-border-base) px-6 py-4;
+    @apply flex items-center justify-center gap-3 border-t border-(--color-border-base) px-6 py-4;
   }
 }
