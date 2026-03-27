@@ -2,7 +2,7 @@
 export const DOCS_URL = 'https://fil.one/docs';
 
 /** S3-compatible storage endpoint for Fil One. */
-export const S3_ENDPOINT = 'https://s3.fil.one';
+export const S3_ENDPOINT = 'https://eu-west-1.s3.fil.one';
 
 /** S3 region for Fil One. */
 export const S3_REGION = 'eu-west-1';
