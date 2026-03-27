@@ -35,7 +35,7 @@ function SectionCard({
         danger ? 'border-red-200' : 'border-[#e1e4ea]'
       }`}
     >
-      <div className="flex items-center gap-2.5 p-5 pb-0">
+      <div className="flex items-center gap-2 p-5 pb-0">
         <div
           className={`flex size-8 items-center justify-center rounded-lg ${
             danger ? 'bg-red-50' : 'bg-zinc-100'
@@ -242,7 +242,7 @@ export function SettingsPage() {
         <SectionCard icon={UserIcon} title="Profile" description="Your personal information">
           <div className="flex flex-col gap-4">
             <div className="flex gap-3">
-              <div className="flex flex-1 flex-col gap-2.5">
+              <div className="flex flex-1 flex-col gap-2">
                 <Label className="text-zinc-900">Full name</Label>
                 {social ? (
                   <>
@@ -267,7 +267,7 @@ export function SettingsPage() {
                   />
                 )}
               </div>
-              <div className="flex flex-1 flex-col gap-2.5">
+              <div className="flex flex-1 flex-col gap-2">
                 <Label className="text-zinc-900">Company name</Label>
                 <Input
                   value={orgName}
@@ -277,7 +277,7 @@ export function SettingsPage() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-2">
               <Label className="text-zinc-900">Email</Label>
               {social ? (
                 <>
