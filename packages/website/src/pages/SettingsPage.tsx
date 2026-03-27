@@ -243,7 +243,7 @@ export function SettingsPage() {
           <div className="flex flex-col gap-4">
             <div className="flex gap-3">
               <div className="flex flex-1 flex-col gap-2">
-                <Label className="text-zinc-900">Full name</Label>
+                <Label className="text-xs text-zinc-900">Full name</Label>
                 {social ? (
                   <>
                     <Input value={name} onChange={() => undefined} disabled />
@@ -268,7 +268,7 @@ export function SettingsPage() {
                 )}
               </div>
               <div className="flex flex-1 flex-col gap-2">
-                <Label className="text-zinc-900">Company name</Label>
+                <Label className="text-xs text-zinc-900">Company name</Label>
                 <Input
                   value={orgName}
                   onChange={(e) => setOrgName(e.target.value)}
@@ -278,7 +278,7 @@ export function SettingsPage() {
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label className="text-zinc-900">Email</Label>
+              <Label className="text-xs text-zinc-900">Email</Label>
               {social ? (
                 <>
                   <Input value={email} onChange={() => undefined} disabled />
