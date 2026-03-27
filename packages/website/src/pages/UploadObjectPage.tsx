@@ -103,7 +103,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
         <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-5">
             {/* File dropzone */}
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-2">
               <label className="text-xs font-medium text-zinc-900">File</label>
 
               {!upload.selectedFile ? (
@@ -153,7 +153,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
             </div>
 
             {/* Object name */}
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-2">
               <label htmlFor="object-name" className="text-xs font-medium text-zinc-900">
                 Object name
               </label>
@@ -170,7 +170,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
             </div>
 
             {/* Description */}
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-2">
               <label htmlFor="object-description" className="text-xs font-medium text-zinc-900">
                 Description <span className="font-normal text-zinc-400">(optional)</span>
               </label>
@@ -185,7 +185,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
             </div>
 
             {/* Tags */}
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-2">
               <label htmlFor="object-tags" className="text-xs font-medium text-zinc-900">
                 Tags <span className="font-normal text-zinc-400">(optional)</span>
               </label>

@@ -55,8 +55,8 @@ export function SignUpPage() {
 
       {/* Form — collects email only; Auth0 Universal Login handles credentials */}
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="sign-up-email" className="text-sm font-medium text-zinc-700">
+        <div className="flex flex-col gap-2">
+          <label htmlFor="sign-up-email" className="text-xs font-medium text-zinc-900">
             Email
           </label>
           <Input

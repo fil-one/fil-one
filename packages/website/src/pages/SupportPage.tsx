@@ -91,8 +91,8 @@ export function SupportPage() {
           <h2 className="text-lg font-semibold text-zinc-900 mb-4">Send a message</h2>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-zinc-700">Name</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-medium text-zinc-900">Name</label>
               <Input
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
@@ -101,8 +101,8 @@ export function SupportPage() {
               />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-zinc-700">Email</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-medium text-zinc-900">Email</label>
               <Input
                 type="email"
                 value={formEmail}
@@ -112,8 +112,8 @@ export function SupportPage() {
               />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-zinc-700">Subject</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-medium text-zinc-900">Subject</label>
               <Input
                 value={formSubject}
                 onChange={(e) => setFormSubject(e.target.value)}
@@ -122,8 +122,8 @@ export function SupportPage() {
               />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-zinc-700">Message</label>
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-medium text-zinc-900">Message</label>
               <TextArea
                 value={formMessage}
                 onChange={setFormMessage}

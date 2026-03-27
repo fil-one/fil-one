@@ -88,8 +88,8 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="org-name" className="text-sm font-medium text-zinc-700">
+            <div className="flex flex-col gap-2">
+              <label htmlFor="org-name" className="text-xs font-medium text-zinc-900">
                 Organization name
               </label>
               <Input

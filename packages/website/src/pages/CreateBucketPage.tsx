@@ -153,7 +153,7 @@ export function CreateBucketPage() {
         <div className="w-[520px] shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-5">
             {/* Bucket name */}
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-2">
               <label htmlFor="bucket-name" className="text-xs font-medium text-zinc-900">
                 Bucket name
               </label>
@@ -181,7 +181,7 @@ export function CreateBucketPage() {
             </div>
 
             {/* Region */}
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-2">
               <label htmlFor="bucket-region" className="text-xs font-medium text-zinc-900">
                 Region
               </label>
@@ -227,7 +227,7 @@ export function CreateBucketPage() {
               {permissionsOpen && (
                 <div className="flex flex-col gap-4 rounded-lg border border-zinc-200 p-4">
                   {/* Key name */}
-                  <div className="flex flex-col gap-1.5">
+                  <div className="flex flex-col gap-2">
                     <label htmlFor="key-name" className="text-xs font-medium text-zinc-900">
                       Key name
                     </label>

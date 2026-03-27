@@ -119,9 +119,13 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
           {/* Left: form fields */}
           <div className="flex flex-1 flex-col gap-5">
             {/* Key name */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-zinc-700">Key name</label>
-              <Input value={keyName} onChange={setKeyName} placeholder="e.g., Production API Key" />
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-medium text-zinc-900">Key name</label>
+              <Input
+                value={keyName}
+                onChange={(e) => setKeyName(e.target.value)}
+                placeholder="e.g., Production API Key"
+              />
               <p className="text-xs text-zinc-500">
                 A descriptive name helps identify this key in your list.
               </p>
@@ -129,7 +133,7 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
 
             {/* Permissions */}
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-zinc-700">What can this key do?</label>
+              <label className="text-xs font-medium text-zinc-900">What can this key do?</label>
               <AccessKeyPermissionsFields value={permissions} onChange={setPermissions} />
               {permissions.length === 0 && (
                 <p className="text-xs text-red-600">Select at least one permission.</p>
@@ -138,7 +142,7 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
 
             {/* Bucket scope */}
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-zinc-700">
+              <label className="text-xs font-medium text-zinc-900">
                 Which buckets can this key access?
               </label>
               <p className="text-xs text-zinc-500">
@@ -154,7 +158,7 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
 
             {/* Expiration */}
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-zinc-700">When should it expire?</label>
+              <label className="text-xs font-medium text-zinc-900">When should it expire?</label>
               <p className="text-xs text-zinc-500">Set an expiration date for added security.</p>
               <AccessKeyExpirationFields
                 value={expiration}

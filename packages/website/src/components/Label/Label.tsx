@@ -8,7 +8,7 @@ const Label = forwardRef<HTMLLabelElement, LabelProps>(({ className, ...props },
   <label
     ref={ref}
     className={clsx(
-      'text-sm font-medium leading-none text-zinc-700 peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
+      'text-xs font-medium leading-none text-zinc-900 peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
       className,
     )}
     {...props}

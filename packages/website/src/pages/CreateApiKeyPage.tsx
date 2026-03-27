@@ -106,8 +106,8 @@ export function CreateApiKeyPage() {
             <div className="rounded-lg border border-zinc-200 bg-white p-6">
               <div className="flex flex-col gap-6">
                 {/* Key name */}
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="key-name" className="text-sm font-medium text-zinc-700">
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="key-name" className="text-xs font-medium text-zinc-900">
                     Key name
                   </label>
                   <Input
@@ -123,7 +123,7 @@ export function CreateApiKeyPage() {
 
                 {/* Permissions */}
                 <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-zinc-700">What can this key do?</label>
+                  <label className="text-xs font-medium text-zinc-900">What can this key do?</label>
                   <AccessKeyPermissionsFields value={permissions} onChange={setPermissions} />
                   {permissions.length === 0 && (
                     <p className="text-xs text-red-600">Select at least one permission.</p>
@@ -132,7 +132,7 @@ export function CreateApiKeyPage() {
 
                 {/* Bucket scope */}
                 <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-zinc-700">
+                  <label className="text-xs font-medium text-zinc-900">
                     Which buckets can this key access?
                   </label>
                   <p className="text-xs text-zinc-500">
@@ -148,7 +148,7 @@ export function CreateApiKeyPage() {
 
                 {/* Expiration */}
                 <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-zinc-700">
+                  <label className="text-xs font-medium text-zinc-900">
                     When should it expire?
                   </label>
                   <p className="text-xs text-zinc-500">Set an expiration date for added security</p>
@@ -172,7 +172,7 @@ export function CreateApiKeyPage() {
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-400">
               Good to know
             </p>
-            <p className="mb-4 text-sm font-medium text-zinc-700">
+            <p className="mb-4 text-xs font-medium text-zinc-900">
               Keep these in mind when creating keys.
             </p>
             <div className="flex flex-col gap-4 text-sm text-zinc-600">
