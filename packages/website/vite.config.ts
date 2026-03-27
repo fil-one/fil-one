@@ -12,8 +12,10 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
   const proxyTarget = env.DEV_PROXY_TARGET; // e.g. https://staging.fil.one
 
+  const useHttps = env.VITE_DEV_BYPASS_AUTH !== 'true';
+
   return {
-    plugins: [react(), tailwindcss(), basicSsl()],
+    plugins: [react(), tailwindcss(), ...(useHttps ? [basicSsl()] : [])],
     server: {
       ...(proxyTarget && {
         proxy: {
