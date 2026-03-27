@@ -36,7 +36,7 @@ export function AppHeader() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [menuOpen]);
 
-  const initial = me?.name?.charAt(0).toUpperCase() ?? me?.email?.charAt(0).toUpperCase() ?? 'U';
+  const initial = me?.name?.charAt(0)?.toUpperCase() ?? me?.email?.charAt(0)?.toUpperCase() ?? 'U';
 
   return (
     <header className="flex h-14 flex-shrink-0 items-center border-b border-zinc-200 bg-white px-4 gap-4">
