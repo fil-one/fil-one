@@ -1,16 +1,10 @@
 import { useState } from 'react';
 
-import {
-  WarningCircle,
-  CopySimple,
-  Eye,
-  EyeSlash,
-  DownloadSimple,
-  CheckCircle,
-} from '@phosphor-icons/react/dist/ssr';
+import { WarningCircle, Eye, EyeSlash, DownloadSimple } from '@phosphor-icons/react/dist/ssr';
 
-import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal/index.js';
-import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
+import { CopyButton } from './CopyButton';
+import { IconButton } from './IconButton';
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from './Dialog';
 
 export type SaveCredentialsModalProps = {
   open: boolean;
@@ -29,8 +23,6 @@ export function SaveCredentialsModal({
   credentials,
 }: SaveCredentialsModalProps) {
   const [showSecret, setShowSecret] = useState(false);
-  const accessKeyIdCopy = useCopyToClipboard();
-  const secretCopy = useCopyToClipboard();
 
   function downloadBlob(content: string, filename: string, type: string) {
     const blob = new Blob([content], { type });
@@ -59,9 +51,9 @@ export function SaveCredentialsModal({
   }
 
   return (
-    <Modal open={open} onClose={onClose} size="md">
-      <ModalHeader onClose={onClose}>Save your credentials</ModalHeader>
-      <ModalBody>
+    <Dialog open={open} onClose={onClose} size="md">
+      <DialogHeader onClose={onClose}>Save your credentials</DialogHeader>
+      <DialogBody>
         {/* Warning banner */}
         <div className="mb-4 flex gap-2.5 rounded-lg border border-orange-500/20 bg-orange-500/10 p-3">
           <WarningCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-orange-500" />
@@ -81,18 +73,11 @@ export function SaveCredentialsModal({
                   {credentials.accessKeyId}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => void accessKeyIdCopy.copy(credentials.accessKeyId)}
-                aria-label={accessKeyIdCopy.copied ? 'Copied' : 'Copy Access Key ID'}
-                className="flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:text-zinc-600"
-              >
-                {accessKeyIdCopy.copied ? (
-                  <CheckCircle size={16} className="text-green-500" />
-                ) : (
-                  <CopySimple size={16} />
-                )}
-              </button>
+              <CopyButton
+                value={credentials.accessKeyId}
+                ariaLabel="Copy Access Key ID"
+                className=""
+              />
             </div>
           </div>
 
@@ -105,31 +90,22 @@ export function SaveCredentialsModal({
                   {showSecret ? credentials.secretAccessKey : '\u2022'.repeat(40)}
                 </span>
               </div>
-              <button
-                type="button"
+              <IconButton
                 onClick={() => setShowSecret((s) => !s)}
                 aria-label={showSecret ? 'Hide secret key' : 'Show secret key'}
-                className="flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:text-zinc-600"
               >
                 {showSecret ? <EyeSlash size={16} /> : <Eye size={16} />}
-              </button>
-              <button
-                type="button"
-                onClick={() => void secretCopy.copy(credentials.secretAccessKey)}
-                aria-label={secretCopy.copied ? 'Copied' : 'Copy Secret Access Key'}
-                className="flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:text-zinc-600"
-              >
-                {secretCopy.copied ? (
-                  <CheckCircle size={16} className="text-green-500" />
-                ) : (
-                  <CopySimple size={16} />
-                )}
-              </button>
+              </IconButton>
+              <CopyButton
+                value={credentials.secretAccessKey}
+                ariaLabel="Copy Secret Access Key"
+                className=""
+              />
             </div>
           </div>
         </div>
-      </ModalBody>
-      <ModalFooter>
+      </DialogBody>
+      <DialogFooter>
         <div className="flex w-full gap-2">
           <button
             type="button"
@@ -155,7 +131,7 @@ export function SaveCredentialsModal({
             Download .env
           </button>
         </div>
-      </ModalFooter>
-    </Modal>
+      </DialogFooter>
+    </Dialog>
   );
 }

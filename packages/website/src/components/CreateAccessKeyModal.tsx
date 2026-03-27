@@ -12,9 +12,10 @@ import { AccessKeyExpirationFields } from './AccessKeyExpirationFields.js';
 import type { ExpirationOption } from './AccessKeyExpirationFields.js';
 import { AccessKeyBucketScopeFields } from './AccessKeyBucketScopeFields.js';
 import { AccessKeyPermissionsFields } from './AccessKeyPermissionsFields.js';
-import { Button } from './Button.js';
-import { Input } from './Input.js';
-import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal/index.js';
+import { Button } from './Button';
+import { Input } from './Input/index.js';
+import { Label } from './Label/index.js';
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from './Dialog';
 import { SaveCredentialsModal } from './SaveCredentialsModal.js';
 import { useToast } from './Toast/index.js';
 
@@ -112,16 +113,20 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
     keyName.trim().length > 0 && permissions.length > 0 && bucketsValid && !creating;
 
   return (
-    <Modal open={open} onClose={handleClose} size="lg">
-      <ModalHeader onClose={handleClose}>Create API key</ModalHeader>
-      <ModalBody>
+    <Dialog open={open} onClose={handleClose} size="lg">
+      <DialogHeader onClose={handleClose}>Create API key</DialogHeader>
+      <DialogBody>
         <div className="flex gap-6">
           {/* Left: form fields */}
           <div className="flex flex-1 flex-col gap-5">
             {/* Key name */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-zinc-700">Key name</label>
-              <Input value={keyName} onChange={setKeyName} placeholder="e.g., Production API Key" />
+              <Label>Key name</Label>
+              <Input
+                value={keyName}
+                onChange={(e) => setKeyName(e.target.value)}
+                placeholder="e.g., Production API Key"
+              />
               <p className="text-xs text-zinc-500">
                 A descriptive name helps identify this key in your list.
               </p>
@@ -129,7 +134,7 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
 
             {/* Permissions */}
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-zinc-700">What can this key do?</label>
+              <Label>What can this key do?</Label>
               <AccessKeyPermissionsFields value={permissions} onChange={setPermissions} />
               {permissions.length === 0 && (
                 <p className="text-xs text-red-600">Select at least one permission.</p>
@@ -138,9 +143,7 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
 
             {/* Bucket scope */}
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-zinc-700">
-                Which buckets can this key access?
-              </label>
+              <Label>Which buckets can this key access?</Label>
               <p className="text-xs text-zinc-500">
                 Restrict access to specific buckets or allow all.
               </p>
@@ -154,7 +157,7 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
 
             {/* Expiration */}
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-zinc-700">When should it expire?</label>
+              <Label>When should it expire?</Label>
               <p className="text-xs text-zinc-500">Set an expiration date for added security.</p>
               <AccessKeyExpirationFields
                 value={expiration}
@@ -199,17 +202,17 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
             </div>
           </div>
         </div>
-      </ModalBody>
-      <ModalFooter>
+      </DialogBody>
+      <DialogFooter>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={handleClose}>
             Cancel
           </Button>
-          <Button variant="filled" disabled={!canSubmit} onClick={handleCreate}>
+          <Button variant="default" disabled={!canSubmit} onClick={handleCreate}>
             {creating ? 'Creating...' : 'Create key'}
           </Button>
         </div>
-      </ModalFooter>
-    </Modal>
+      </DialogFooter>
+    </Dialog>
   );
 }

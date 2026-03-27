@@ -11,7 +11,7 @@ import {
 } from '@stripe/react-stripe-js';
 import type { Stripe, StripeCardNumberElementChangeEvent } from '@stripe/stripe-js';
 
-import { Modal, ModalBody, ModalHeader } from '../Modal/index.js';
+import { Dialog, DialogBody, DialogHeader } from '../Dialog';
 
 import { getStripe } from '../../lib/stripe.js';
 
@@ -96,8 +96,8 @@ function PaymentForm({
 
   return (
     <form onSubmit={handleSubmit}>
-      <ModalHeader onClose={onClose}>Add payment method</ModalHeader>
-      <ModalBody>
+      <DialogHeader onClose={onClose}>Add payment method</DialogHeader>
+      <DialogBody>
         <p className="text-sm text-[#677183] mb-4">Pay as you go — $4.99/TB/month</p>
 
         {/* Security banner */}
@@ -164,7 +164,7 @@ function PaymentForm({
         <p className="mt-4 text-center text-xs text-[#99a0ae]">
           Pay only for what you use. Cancel anytime.
         </p>
-      </ModalBody>
+      </DialogBody>
     </form>
   );
 }
@@ -187,7 +187,7 @@ export function AddPaymentDialog({
   if (!clientSecret || !stripe) return null;
 
   return (
-    <Modal open={open} onClose={onClose} size="sm">
+    <Dialog open={open} onClose={onClose} size="sm">
       <Elements stripe={stripe} options={{ clientSecret }}>
         <PaymentForm
           clientSecret={clientSecret}
@@ -196,6 +196,6 @@ export function AddPaymentDialog({
           onSuccess={onSuccess}
         />
       </Elements>
-    </Modal>
+    </Dialog>
   );
 }
