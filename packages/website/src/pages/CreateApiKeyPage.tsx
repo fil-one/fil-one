@@ -162,7 +162,7 @@ export function CreateApiKeyPage() {
               </div>
             </div>
 
-            <Button type="submit" variant="filled" disabled={!canSubmit}>
+            <Button type="submit" variant="default" disabled={!canSubmit}>
               {creating ? 'Creating...' : 'Create API key'}
             </Button>
           </form>

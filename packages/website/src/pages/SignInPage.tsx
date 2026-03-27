@@ -72,7 +72,7 @@ export function SignInPage() {
           />
         </div>
 
-        <Button variant="filled" type="submit" className="w-full justify-center">
+        <Button variant="default" type="submit" className="w-full justify-center">
           Continue
         </Button>
       </form>

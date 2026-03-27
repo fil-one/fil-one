@@ -50,7 +50,7 @@ export function ConfirmDialog({
       </ModalBody>
       <ModalFooter>
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose} disabled={loading}>
+          <Button variant="outline" onClick={onClose} disabled={loading}>
             {cancelLabel}
           </Button>
           <button

@@ -5,6 +5,7 @@ import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/
 
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
+import { Label } from '../components/Label';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { getMe, updateProfile, changePassword } from '../lib/api.js';
@@ -242,7 +243,7 @@ export function SettingsPage() {
           <div className="flex flex-col gap-4">
             <div className="flex gap-3">
               <div className="flex flex-1 flex-col gap-1.5">
-                <label className="text-[13px] font-medium text-zinc-900">Full name</label>
+                <Label>Full name</Label>
                 {social ? (
                   <>
                     <Input value={name} onChange={() => {}} disabled />
@@ -263,13 +264,13 @@ export function SettingsPage() {
                 )}
               </div>
               <div className="flex flex-1 flex-col gap-1.5">
-                <label className="text-[13px] font-medium text-zinc-900">Company name</label>
+                <Label>Company name</Label>
                 <Input value={orgName} onChange={setOrgName} placeholder="Your company" />
               </div>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-[13px] font-medium text-zinc-900">Email</label>
+              <Label>Email</Label>
               {social ? (
                 <>
                   <Input value={email} onChange={() => {}} disabled />
@@ -296,7 +297,12 @@ export function SettingsPage() {
             </div>
 
             <div className="flex items-center gap-3">
-              <Button variant="filled" onClick={handleSaveProfile} disabled={saving || !hasChanges}>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleSaveProfile}
+                disabled={saving || !hasChanges}
+              >
                 {saving ? 'Saving...' : 'Save changes'}
               </Button>
               {hasChanges && (
@@ -352,7 +358,7 @@ export function SettingsPage() {
                   label="Two-factor authentication"
                   description="Add an extra layer of security to your account"
                   action={
-                    <Button variant="ghost" size="compact" disabled>
+                    <Button variant="outline" size="sm" disabled>
                       Enable
                     </Button>
                   }
@@ -369,8 +375,8 @@ export function SettingsPage() {
                 description="Change your account password"
                 action={
                   <Button
-                    variant="ghost"
-                    size="compact"
+                    variant="outline"
+                    size="sm"
                     onClick={handleChangePassword}
                     disabled={changingPassword}
                   >
@@ -405,7 +411,12 @@ export function SettingsPage() {
                   Permanently delete your account and all data
                 </p>
               </div>
-              <Button variant="ghost" className="cursor-not-allowed opacity-40" disabled>
+              <Button
+                variant="outline"
+                size="sm"
+                className="cursor-not-allowed opacity-40"
+                disabled
+              >
                 Delete account
               </Button>
             </div>

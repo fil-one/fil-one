@@ -202,10 +202,10 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
       </ModalBody>
       <ModalFooter>
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={handleClose}>
+          <Button variant="outline" onClick={handleClose}>
             Cancel
           </Button>
-          <Button variant="filled" disabled={!canSubmit} onClick={handleCreate}>
+          <Button variant="default" disabled={!canSubmit} onClick={handleCreate}>
             {creating ? 'Creating...' : 'Create key'}
           </Button>
         </div>

@@ -2,24 +2,16 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { Button } from './Button';
 
-vi.mock('@tanstack/react-router', () => ({
-  Link: ({ to, children, ...rest }: { to: string; children: React.ReactNode }) => (
-    <a href={to} {...rest}>
-      {children}
-    </a>
-  ),
-}));
-
 describe('Button', () => {
   it('renders children', () => {
-    render(<Button variant="filled">Click me</Button>);
+    render(<Button variant="default">Click me</Button>);
     expect(screen.getByText('Click me')).toBeInTheDocument();
   });
 
   it('handles click events', () => {
     const onClick = vi.fn();
     render(
-      <Button variant="filled" onClick={onClick}>
+      <Button variant="default" onClick={onClick}>
         Click
       </Button>,
     );
@@ -29,19 +21,19 @@ describe('Button', () => {
 
   it('renders as disabled', () => {
     render(
-      <Button variant="filled" disabled>
+      <Button variant="default" disabled>
         Disabled
       </Button>,
     );
     expect(screen.getByRole('button')).toBeDisabled();
   });
 
-  it('renders as a link when href is provided', () => {
+  it('renders as a link when asChild is used', () => {
     render(
-      <Button variant="filled" href="/test">
-        Link
+      <Button variant="default" asChild>
+        <a href="/test">Link</a>
       </Button>,
     );
-    expect(screen.getByText('Link').closest('a')).toHaveAttribute('href', '/test');
+    expect(screen.getByRole('link')).toHaveAttribute('href', '/test');
   });
 });

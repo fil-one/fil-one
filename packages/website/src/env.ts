@@ -16,6 +16,7 @@ export const AUTH0_DOMAIN: string =
 export const AUTH0_CLIENT_ID: string = import.meta.env['VITE_AUTH0_CLIENT_ID'] ?? '';
 export const AUTH0_AUDIENCE: string =
   import.meta.env['VITE_AUTH0_AUDIENCE'] ?? 'https://staging.fil.one';
+export const DEV_BYPASS_AUTH: boolean = import.meta.env['VITE_DEV_BYPASS_AUTH'] === 'true';
 export const STRIPE_PUBLISHABLE_KEY: string =
   import.meta.env['VITE_STRIPE_PUBLISHABLE_KEY'] ??
   'pk_test_51T2zW1AHbTIJ60DDv74RQYurdM94j0qvnJoqtrzurlbDsFgoE6SvQkTFccVKwp9kFkfv9wWC128IIpjHvmuLoVWX00ki9J0mN6';

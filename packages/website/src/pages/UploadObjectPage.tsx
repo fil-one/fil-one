@@ -226,12 +226,8 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
             </div>
 
             {/* Submit */}
-            <Button
-              variant="filled"
-              icon={ArrowUpIcon}
-              disabled={!canUpload}
-              onClick={upload.handleUpload}
-            >
+            <Button variant="default" disabled={!canUpload} onClick={upload.handleUpload}>
+              <ArrowUpIcon />
               Upload object
             </Button>
           </div>
@@ -286,7 +282,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
               {upload.selectedFile?.name} has been stored on Filecoin.
             </p>
             <Button
-              variant="filled"
+              variant="default"
               onClick={() => void navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
             >
               Back to bucket

@@ -34,7 +34,8 @@ function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
         <span className="text-sm text-zinc-600">
           {keys.length === 1 ? '1 key' : `${keys.length} keys`}
         </span>
-        <Button variant="filled" icon={PlusIcon} onClick={onCreateOpen}>
+        <Button variant="default" onClick={onCreateOpen}>
+          <PlusIcon />
           Create new key
         </Button>
       </div>

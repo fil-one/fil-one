@@ -2,12 +2,14 @@ import { createRoute, Outlet, redirect, useNavigate } from '@tanstack/react-rout
 import { useEffect } from 'react';
 import { Route as rootRoute } from './__root';
 import { AppShell } from '../components/AppShell';
+import { DEV_BYPASS_AUTH } from '../env.js';
 import { getMe } from '../lib/api.js';
 
 export const Route = createRoute({
   id: 'app',
   getParentRoute: () => rootRoute,
   beforeLoad: async () => {
+    if (DEV_BYPASS_AUTH) return;
     if (!document.cookie.includes('hs_logged_in')) {
       throw redirect({ to: '/sign-in' });
     }

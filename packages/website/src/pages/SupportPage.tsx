@@ -79,8 +79,8 @@ export function SupportPage() {
           </div>
 
           {/* UNKNOWN: Real Calendly / scheduling link not provided — using # as placeholder. */}
-          <Button variant="ghost" href="#">
-            Schedule call →
+          <Button variant="outline" asChild>
+            <a href="#">Schedule call →</a>
           </Button>
         </div>
 
@@ -129,7 +129,7 @@ export function SupportPage() {
             </div>
 
             <div className="flex justify-end">
-              <Button variant="filled" type="submit">
+              <Button variant="default" type="submit">
                 Send message
               </Button>
             </div>
