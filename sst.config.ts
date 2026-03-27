@@ -151,7 +151,7 @@ export default $config({
         name: $interpolate`filone-${$app.stage}-security-headers`,
         securityHeadersConfig: {
           contentSecurityPolicy: {
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://*.s3.${$app.stage === 'production' ? '' : 'staging.'}fil.one; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://*.s3.${$app.stage === 'production' ? '' : 'staging.'}fil.one; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
             override: true,
           },
           frameOptions: {
