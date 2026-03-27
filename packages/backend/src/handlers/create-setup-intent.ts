@@ -98,6 +98,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   const response: CreateSetupIntentResponse = {
     clientSecret: setupIntent.client_secret!,
+    stripePublishableKey: Resource.StripePublishableKey.value,
   };
 
   return new ResponseBuilder().status(200).body(response).build();

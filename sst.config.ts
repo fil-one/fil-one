@@ -45,6 +45,7 @@ export default $config({
     const auth0MgmtRuntimeClientId = new sst.Secret('Auth0MgmtRuntimeClientId');
     const auth0MgmtRuntimeClientSecret = new sst.Secret('Auth0MgmtRuntimeClientSecret');
     const stripeSecretKey = new sst.Secret('StripeSecretKey');
+    const stripePublishableKey = new sst.Secret('StripePublishableKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
@@ -276,6 +277,7 @@ export default $config({
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
+      stripePublishableKey,
       stripePriceId,
       auroraBackofficeToken,
     ];

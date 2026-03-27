@@ -18,6 +18,7 @@ import { getStripe } from '../../lib/stripe.js';
 type AddPaymentDialogProps = {
   open: boolean;
   clientSecret: string;
+  stripePublishableKey: string;
   onClose: () => void;
   onBack: () => void;
   onSuccess: () => void;
@@ -42,7 +43,7 @@ function PaymentForm({
   onClose,
   onBack,
   onSuccess,
-}: Omit<AddPaymentDialogProps, 'open'>) {
+}: Omit<AddPaymentDialogProps, 'open' | 'stripePublishableKey'>) {
   const stripe = useStripe();
   const elements = useElements();
   const [loading, setLoading] = useState(false);
@@ -173,6 +174,7 @@ function PaymentForm({
 export function AddPaymentDialog({
   open,
   clientSecret,
+  stripePublishableKey,
   onClose,
   onBack,
   onSuccess,
@@ -180,10 +182,10 @@ export function AddPaymentDialog({
   const [stripe, setStripe] = useState<Stripe | null>(null);
 
   useEffect(() => {
-    if (open) {
-      void getStripe().then(setStripe);
+    if (open && stripePublishableKey) {
+      void getStripe(stripePublishableKey).then(setStripe);
     }
-  }, [open]);
+  }, [open, stripePublishableKey]);
 
   if (!clientSecret || !stripe) return null;
 

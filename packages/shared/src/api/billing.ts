@@ -44,6 +44,7 @@ export interface BillingInfo {
 
 export interface CreateSetupIntentResponse {
   clientSecret: string;
+  stripePublishableKey: string;
 }
 
 export interface ActivateSubscriptionResponse {
