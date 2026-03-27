@@ -303,7 +303,7 @@ export default $config({
       AURORA_REGION_ID: 'ff',
     };
 
-    // TODO: switch to https://eu-west-1.s3.fil.one (production) and https://eu-west-1.s3.staging.fil.one (non-prod).
+    // TODO: once https://eu-west-1.s3.staging.fil.one is live, switch the staging URL as well
     // https://github.com/filecoin-project/fil-one/pull/111
     const auroraS3GatewayUrl = isProduction
       ? 'https://eu-west-1.s3.fil.one'
