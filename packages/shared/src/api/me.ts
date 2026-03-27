@@ -10,6 +10,7 @@ export interface MeResponse {
   email?: string;
   orgSetupComplete: boolean;
   name?: string;
+  picture?: string;
   connectionType?: string;
 }
 
