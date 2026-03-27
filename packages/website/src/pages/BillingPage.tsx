@@ -72,6 +72,7 @@ export function BillingPage() {
   const [planOpen, setPlanOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [clientSecret, setClientSecret] = useState('');
+  const [stripePublishableKey, setStripePublishableKey] = useState('');
   const [contactSalesOpen, setContactSalesOpen] = useState(false);
 
   const fetchBilling = useCallback(async () => {
@@ -158,11 +159,10 @@ export function BillingPage() {
   async function handleSelectPayAsYouGo() {
     setPlanOpen(false);
     try {
-      const { clientSecret: cs } = await apiRequest<CreateSetupIntentResponse>(
-        '/billing/setup-intent',
-        { method: 'POST' },
-      );
+      const { clientSecret: cs, stripePublishableKey: pk } =
+        await apiRequest<CreateSetupIntentResponse>('/billing/setup-intent', { method: 'POST' });
       setClientSecret(cs);
+      setStripePublishableKey(pk);
       setPaymentOpen(true);
     } catch (err) {
       toast.error((err as Error).message || 'Failed to set up payment. Please try again.');
@@ -660,6 +660,7 @@ export function BillingPage() {
       <AddPaymentDialog
         open={paymentOpen}
         clientSecret={clientSecret}
+        stripePublishableKey={stripePublishableKey}
         onClose={() => setPaymentOpen(false)}
         onBack={handlePaymentBack}
         onSuccess={handlePaymentSuccess}
