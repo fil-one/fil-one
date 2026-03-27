@@ -293,13 +293,21 @@ export default $config({
     }
 
     const auroraEnv = {
-      AURORA_BACKOFFICE_URL: 'https://api.backoffice.dev.aur.lu/api',
-      AURORA_PORTAL_URL: 'https://api.portal.dev.aur.lu/api',
+      AURORA_BACKOFFICE_URL: isProduction
+        ? 'https://api-backoffice.aur.lu/api'
+        : 'https://api.backoffice.dev.aur.lu/api',
+      AURORA_PORTAL_URL: isProduction
+        ? 'https://api-portal.aur.lu/api'
+        : 'https://api.portal.dev.aur.lu/api',
       AURORA_PARTNER_ID: 'ff',
       AURORA_REGION_ID: 'ff',
     };
 
-    const auroraS3GatewayUrl = 'https://s3.dev.aur.lu';
+    // TODO: switch to https://eu-west-1.s3.fil.one (production) and https://eu-west-1.s3.staging.fil.one (non-prod).
+    // https://github.com/filecoin-project/fil-one/pull/111
+    const auroraS3GatewayUrl = isProduction
+      ? 'https://a-fil-one-s3.aur.lu'
+      : 'https://s3.dev.aur.lu';
 
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
