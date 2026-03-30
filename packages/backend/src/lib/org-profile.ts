@@ -1,10 +1,14 @@
 import { UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
+import { ModelsTenantStatus } from '@filone/aurora-backoffice-client';
 
 const dynamo = getDynamoClient();
 
-export async function setOrgAuroraTenantStatus(orgId: string, status: string): Promise<void> {
+export async function setOrgAuroraTenantStatus(
+  orgId: string,
+  status: ModelsTenantStatus,
+): Promise<void> {
   await dynamo.send(
     new UpdateItemCommand({
       TableName: Resource.UserInfoTable.name,

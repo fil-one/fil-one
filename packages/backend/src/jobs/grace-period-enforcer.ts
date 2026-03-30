@@ -33,7 +33,7 @@ export async function handler(): Promise<void> {
     timestamp: now.toISOString(),
   });
 
-  // Scan for grace_period and trialing records
+  // Scan for grace_period records
   const candidates: Candidate[] = [];
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
 
@@ -142,7 +142,7 @@ export async function handler(): Promise<void> {
         });
       } else if (candidate.action === 'write_lock') {
         // Non-expired grace period — ensure Aurora is WRITE_LOCKED
-        if (currentAuroraStatus === 'WRITE_LOCKED') {
+        if (currentAuroraStatus === 'WRITE_LOCKED' || currentAuroraStatus === 'DISABLED') {
           skipped++;
           continue;
         }

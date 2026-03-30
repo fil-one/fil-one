@@ -348,8 +348,11 @@ describe('updateTenantStatus', () => {
     mockSetTenantStatus.mockResolvedValue({ error: { message: 'Service unavailable' } });
 
     const promise = updateTenantStatus({ tenantId: 'tenant-1', status: 'DISABLED' });
+    const expectation = expect(promise).rejects.toThrow(
+      'Aurora status update failed for tenant tenant-1',
+    );
     await vi.runAllTimersAsync();
-    await expect(promise).rejects.toThrow('Aurora status update failed for tenant tenant-1');
+    await expectation;
 
     // 1 initial + 3 retries
     expect(mockSetTenantStatus).toHaveBeenCalledTimes(4);
