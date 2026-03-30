@@ -380,8 +380,14 @@ export async function getObjectRetention(
       return null;
     }
     // Also handle the case where the bucket doesn't have Object Lock enabled.
-    const code = (err as { Code?: string }).Code;
-    if (code === 'ObjectLockConfigurationNotFoundError' || code === 'InvalidRequest') {
+    const errName = (err as { name?: string }).name;
+    const errCode = (err as { Code?: string }).Code;
+    if (
+      errName === 'ObjectLockConfigurationNotFoundError' ||
+      errName === 'InvalidRequest' ||
+      errCode === 'ObjectLockConfigurationNotFoundError' ||
+      errCode === 'InvalidRequest'
+    ) {
       return null;
     }
     throw err;
