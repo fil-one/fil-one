@@ -166,6 +166,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "SendGridApiKey": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "SetupIntegrations": {
       "name": string
       "type": "sst.aws.Function"
