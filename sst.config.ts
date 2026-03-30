@@ -145,6 +145,49 @@ export default $config({
       },
     });
 
+    const { getS3Endpoint, S3_REGION, Stage } = await import('@filone/shared');
+    const auroraS3GatewayUrl = getS3Endpoint(
+      S3_REGION,
+      isProduction ? Stage.Production : Stage.Staging,
+    );
+
+    // ── CloudFront security headers (CSP applied to the HTML document) ──
+    const responseHeadersPolicy = new aws.cloudfront.ResponseHeadersPolicy(
+      'WebsiteSecurityHeaders',
+      {
+        name: $interpolate`filone-${$app.stage}-security-headers`,
+        securityHeadersConfig: {
+          contentSecurityPolicy: {
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+            override: true,
+          },
+          frameOptions: {
+            frameOption: 'DENY',
+            override: true,
+          },
+          contentTypeOptions: {
+            override: true,
+          },
+          referrerPolicy: {
+            referrerPolicy: 'strict-origin-when-cross-origin',
+            override: true,
+          },
+          strictTransportSecurity: {
+            accessControlMaxAgeSec: 2592000, // 30 days
+            includeSubdomains: true,
+            override: true,
+          },
+        },
+        // Future: Sentry
+        //   script-src: add https://*.sentry.io (or your specific DSN host)
+        //   connect-src: add https://*.ingest.sentry.io
+        //
+        // Future: Plausible
+        //   script-src: add https://plausible.io (or self-hosted domain)
+        //   connect-src: add https://plausible.io/api
+      },
+    );
+
     const router = new sst.aws.Router('WebsiteRouter', {
       routes: {
         '/*': { bucket: websiteBucket },
@@ -165,6 +208,8 @@ export default $config({
       transform: {
         cdn: (args) => {
           args.defaultRootObject = 'index.html';
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Pulumi Input wrapper; value is a plain object at transform time
+          (args.defaultCacheBehavior as any).responseHeadersPolicyId = responseHeadersPolicy.id;
           args.customErrorResponses = [
             {
               errorCode: 403,
