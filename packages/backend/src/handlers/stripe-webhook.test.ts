@@ -749,6 +749,15 @@ describe('stripe-webhook handler', () => {
 
       // DynamoDB update should still have happened
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      // Org profile auroraTenantStatus must NOT be updated when updateTenantStatus fails
+      const orgProfileUpdate = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .find(
+          (c) =>
+            c.args[0].input.TableName === 'UserInfoTable' &&
+            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'WRITE_LOCKED',
+        );
+      expect(orgProfileUpdate).toBeUndefined();
       // Webhook should still return 200
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -885,6 +894,15 @@ describe('stripe-webhook handler', () => {
       const result = await handler(buildWebhookEvent('{}'));
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      // Org profile auroraTenantStatus must NOT be updated when updateTenantStatus fails
+      const orgProfileUpdate = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .find(
+          (c) =>
+            c.args[0].input.TableName === 'UserInfoTable' &&
+            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'ACTIVE',
+        );
+      expect(orgProfileUpdate).toBeUndefined();
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
