@@ -518,6 +518,7 @@ export default $config({
       routePath: '/api/stripe/webhook',
       handler: 'stripe-webhook',
       extraEnv: {
+        ...auroraEnv,
         STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
       },
       permissions: [
@@ -579,7 +580,7 @@ export default $config({
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
-      link: [billingTable, stripeSecretKey, stripePriceId, auroraBackofficeToken],
+      link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, auroraBackofficeToken],
       environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'gb_month_meter' },
       timeout: '60 seconds',
       memory: '256 MB',
@@ -606,6 +607,21 @@ export default $config({
       // run the Lambda every day at 6:00 AM UTC.
       schedule: 'cron(0 6 * * ? *)',
       function: usageOrchestrator.arn,
+    });
+
+    // ── Grace period enforcement ────────────────────────────────────
+    const gracePeriodEnforcer = createFn('GracePeriodEnforcer', {
+      handler: 'packages/backend/src/jobs/grace-period-enforcer.handler',
+      link: [billingTable, userInfoTable, auroraBackofficeToken],
+      environment: auroraEnv,
+      timeout: '300 seconds',
+      memory: '256 MB',
+    });
+
+    new sst.aws.Cron('GracePeriodEnforcerCron', {
+      // run the Lambda every day at 7:00 AM UTC (one hour after usage reporting).
+      schedule: 'cron(0 7 * * ? *)',
+      function: gracePeriodEnforcer.arn,
     });
 
     return {
