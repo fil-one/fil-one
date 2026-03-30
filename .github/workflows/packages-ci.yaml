@@ -72,7 +72,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
           aws-region: us-east-2
@@ -223,7 +223,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
           aws-region: us-east-2
@@ -258,7 +258,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: aws-actions/configure-aws-credentials@v5
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
           aws-region: us-east-2
