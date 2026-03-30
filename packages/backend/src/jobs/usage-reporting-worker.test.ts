@@ -10,7 +10,13 @@ import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
 vi.mock('sst', () => ({
   Resource: {
     BillingTable: { name: 'BillingTable' },
+    UserInfoTable: { name: 'UserInfoTable' },
   },
+}));
+
+const mockSetOrgAuroraTenantStatus = vi.fn().mockResolvedValue(undefined);
+vi.mock('../lib/org-profile.js', () => ({
+  setOrgAuroraTenantStatus: (...args: unknown[]) => mockSetOrgAuroraTenantStatus(...args),
 }));
 
 const mockMeterEventsCreate = vi.fn().mockResolvedValue({});
@@ -180,6 +186,7 @@ describe('usage-reporting-worker', () => {
 
       expect(mockGetTenantInfo).toHaveBeenCalledOnce();
       expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(mockSetOrgAuroraTenantStatus).not.toHaveBeenCalled();
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'ACTIVE' });
     });
@@ -197,6 +204,7 @@ describe('usage-reporting-worker', () => {
         tenantId: 'aurora-tenant-123',
         status: 'WRITE_LOCKED',
       });
+      expect(mockSetOrgAuroraTenantStatus).toHaveBeenCalledWith('org-1', 'WRITE_LOCKED');
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'WRITE_LOCKED' });
     });
@@ -216,6 +224,7 @@ describe('usage-reporting-worker', () => {
         tenantId: 'aurora-tenant-123',
         status: 'DISABLED',
       });
+      expect(mockSetOrgAuroraTenantStatus).toHaveBeenCalledWith('org-1', 'DISABLED');
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'DISABLED' });
     });
@@ -235,6 +244,7 @@ describe('usage-reporting-worker', () => {
         tenantId: 'aurora-tenant-123',
         status: 'DISABLED',
       });
+      expect(mockSetOrgAuroraTenantStatus).toHaveBeenCalledWith('org-1', 'DISABLED');
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'DISABLED' });
     });

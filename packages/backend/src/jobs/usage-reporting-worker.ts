@@ -11,6 +11,7 @@ import {
   updateTenantStatus,
 } from '../lib/aurora-backoffice.js';
 import type { ModelsTenantStatus } from '../lib/aurora-backoffice.js';
+import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
 import { calculateAverageUsage } from '../lib/usage-calculator.js';
 
 const dynamo = getDynamoClient();
@@ -27,11 +28,13 @@ export interface UsageReportingWorkerPayload {
 
 async function enforceTenantLocks({
   tenantId,
+  orgId,
   currentStatus,
   currentStorageBytes,
   totalEgressBytes,
 }: {
   tenantId: string;
+  orgId: string;
   currentStatus: ModelsTenantStatus | undefined;
   currentStorageBytes: number;
   totalEgressBytes: number;
@@ -55,6 +58,7 @@ async function enforceTenantLocks({
       totalEgressBytes,
     });
     await updateTenantStatus({ tenantId, status: desiredStatus });
+    await setOrgAuroraTenantStatus(orgId, desiredStatus);
   }
 
   return desiredStatus;
@@ -137,6 +141,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     try {
       lockAction = await enforceTenantLocks({
         tenantId: auroraTenantId,
+        orgId,
         currentStatus: tenantInfo!.status,
         currentStorageBytes,
         totalEgressBytes,

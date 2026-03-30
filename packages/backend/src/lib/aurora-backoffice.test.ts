@@ -4,6 +4,7 @@ import {
   setupAuroraTenant,
   getStorageSamples,
   createAuroraTenantApiKey,
+  updateTenantStatus,
 } from './aurora-backoffice.js';
 
 // ---------------------------------------------------------------------------
@@ -22,6 +23,7 @@ const mockPostSetup = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockPostTokens = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-aurora-client');
 const mockGetStorage = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockSetTenantStatus = vi.fn((_options: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/aurora-backoffice-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
@@ -30,6 +32,7 @@ vi.mock('@filone/aurora-backoffice-client', () => ({
   getTenantStorageMetrics: (options: Record<string, unknown>) => mockGetStorage(options),
   setupTenant: (options: Record<string, unknown>) => mockPostSetup(options),
   createTenantToken: (options: Record<string, unknown>) => mockPostTokens(options),
+  setTenantStatus: (options: Record<string, unknown>) => mockSetTenantStatus(options),
 }));
 
 process.env.AURORA_BACKOFFICE_URL = 'https://api.backoffice.test.example.com/api';
@@ -304,5 +307,55 @@ describe('getStorageSamples', () => {
         to: '2024-01-02T00:00:00Z',
       }),
     ).rejects.toThrow('Aurora storage API failed for tenant tenant-1');
+  });
+});
+
+describe('updateTenantStatus', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('succeeds on first attempt', async () => {
+    mockSetTenantStatus.mockResolvedValue({ error: undefined });
+
+    await updateTenantStatus({ tenantId: 'tenant-1', status: 'ACTIVE' });
+
+    expect(mockSetTenantStatus).toHaveBeenCalledTimes(1);
+    expect(mockSetTenantStatus).toHaveBeenCalledWith({
+      client: 'mock-aurora-client',
+      path: { partnerId: 'test-partner', tenantId: 'tenant-1' },
+      body: { status: 'ACTIVE' },
+      throwOnError: false,
+    });
+  });
+
+  it('retries on transient failure then succeeds', async () => {
+    vi.useFakeTimers();
+    mockSetTenantStatus
+      .mockResolvedValueOnce({ error: { message: 'Service unavailable' } })
+      .mockResolvedValueOnce({ error: undefined });
+
+    const promise = updateTenantStatus({ tenantId: 'tenant-1', status: 'WRITE_LOCKED' });
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(mockSetTenantStatus).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('throws after exhausting all retries', async () => {
+    vi.useFakeTimers();
+    mockSetTenantStatus.mockResolvedValue({ error: { message: 'Service unavailable' } });
+
+    const promise = updateTenantStatus({ tenantId: 'tenant-1', status: 'DISABLED' });
+    const expectation = expect(promise).rejects.toThrow(
+      'Aurora status update failed for tenant tenant-1',
+    );
+    await vi.runAllTimersAsync();
+    await expectation;
+
+    // 1 initial + 3 retries
+    expect(mockSetTenantStatus).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
   });
 });

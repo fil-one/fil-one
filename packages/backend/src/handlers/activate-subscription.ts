@@ -9,6 +9,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
 import { updateTenantStatus } from '../lib/aurora-backoffice.js';
+import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -163,6 +164,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   }
   try {
     await updateTenantStatus({ tenantId: auroraTenantId, status: 'ACTIVE' });
+    await setOrgAuroraTenantStatus(orgId, 'ACTIVE');
     console.log('[activate-subscription] Aurora tenant unlocked', { orgId, auroraTenantId });
   } catch (error) {
     console.error('[activate-subscription] Failed to unlock Aurora tenant', {

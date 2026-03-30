@@ -1,10 +1,18 @@
-import { DeleteItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DeleteItemCommand,
+  GetItemCommand,
+  PutItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
 import { PAID_GRACE_DAYS, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import { Resource } from 'sst';
+import { updateTenantStatus } from '../lib/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
+import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 
 const dynamo = getDynamoClient();
@@ -126,6 +134,48 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
 function getCustomerIdString(customer: string | Stripe.Customer | Stripe.DeletedCustomer): string {
   return typeof customer === 'string' ? customer : customer.id;
+}
+
+async function resolveAuroraTenantId(
+  userId: string,
+  tableName: string,
+): Promise<{ orgId: string; auroraTenantId: string } | null> {
+  // 1. Get orgId from billing record
+  const billingResult = await dynamo.send(
+    new GetItemCommand({
+      TableName: tableName,
+      Key: {
+        pk: { S: `CUSTOMER#${userId}` },
+        sk: { S: 'SUBSCRIPTION' },
+      },
+      ProjectionExpression: 'orgId',
+    }),
+  );
+  const orgId = billingResult.Item?.orgId?.S;
+  if (!orgId) {
+    console.warn('[stripe-webhook] No orgId on billing record for user:', userId);
+    return null;
+  }
+
+  // 2. Get auroraTenantId from org profile
+  const orgResult = await dynamo.send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: {
+        pk: { S: `ORG#${orgId}` },
+        sk: { S: 'PROFILE' },
+      },
+      ProjectionExpression: 'auroraTenantId, setupStatus',
+    }),
+  );
+  const auroraTenantId = orgResult.Item?.auroraTenantId?.S;
+  const setupStatus = orgResult.Item?.setupStatus?.S;
+  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
+    console.warn('[stripe-webhook] Aurora tenant not ready for org:', orgId);
+    return null;
+  }
+
+  return { orgId, auroraTenantId };
 }
 
 async function handleCustomerUpdated(tableName: string, customer: Stripe.Customer): Promise<void> {
@@ -263,6 +313,27 @@ async function handleSubscriptionDeleted(
       },
     }),
   );
+
+  // Best-effort: set Aurora tenant to WRITE_LOCKED during grace period.
+  // If this fails, the daily grace-period-enforcer cron will also attempt
+  // WRITE_LOCK for active grace periods missing it.
+  try {
+    const resolved = await resolveAuroraTenantId(userId, tableName);
+    if (resolved) {
+      await updateTenantStatus({ tenantId: resolved.auroraTenantId, status: 'WRITE_LOCKED' });
+      await setOrgAuroraTenantStatus(resolved.orgId, 'WRITE_LOCKED');
+      console.log('[stripe-webhook] Aurora tenant WRITE_LOCKED', {
+        userId,
+        orgId: resolved.orgId,
+        auroraTenantId: resolved.auroraTenantId,
+      });
+    }
+  } catch (error) {
+    console.error('[stripe-webhook] Failed to WRITE_LOCK Aurora tenant', {
+      userId,
+      error: (error as Error).message,
+    });
+  }
 }
 
 async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice): Promise<void> {
@@ -290,6 +361,26 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
       },
     }),
   );
+
+  // Best-effort: re-enable Aurora tenant if recovering from PastDue/GracePeriod.
+  // If this fails, the tenant may remain locked until manual intervention.
+  try {
+    const resolved = await resolveAuroraTenantId(userId, tableName);
+    if (resolved) {
+      await updateTenantStatus({ tenantId: resolved.auroraTenantId, status: 'ACTIVE' });
+      await setOrgAuroraTenantStatus(resolved.orgId, 'ACTIVE');
+      console.log('[stripe-webhook] Aurora tenant re-activated', {
+        userId,
+        orgId: resolved.orgId,
+        auroraTenantId: resolved.auroraTenantId,
+      });
+    }
+  } catch (error) {
+    console.error('[stripe-webhook] Failed to re-activate Aurora tenant', {
+      userId,
+      error: (error as Error).message,
+    });
+  }
 }
 
 async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): Promise<void> {
