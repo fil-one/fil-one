@@ -45,6 +45,7 @@ export default $config({
     const auth0MgmtRuntimeClientId = new sst.Secret('Auth0MgmtRuntimeClientId');
     const auth0MgmtRuntimeClientSecret = new sst.Secret('Auth0MgmtRuntimeClientSecret');
     const stripeSecretKey = new sst.Secret('StripeSecretKey');
+    const stripePublishableKey = new sst.Secret('StripePublishableKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
@@ -236,9 +237,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              // Bump to re-trigger: registers https://fil.one as allowed logout URL
-              // and /login as initiate_login_uri
-              Version: '2.1',
+              Version: '2.2',
             },
           },
         },
@@ -276,6 +275,7 @@ export default $config({
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
+      stripePublishableKey,
       stripePriceId,
       auroraBackofficeToken,
     ];
@@ -293,13 +293,21 @@ export default $config({
     }
 
     const auroraEnv = {
-      AURORA_BACKOFFICE_URL: 'https://api.backoffice.dev.aur.lu/api',
-      AURORA_PORTAL_URL: 'https://api.portal.dev.aur.lu/api',
+      AURORA_BACKOFFICE_URL: isProduction
+        ? 'https://api-backoffice.aur.lu/api'
+        : 'https://api.backoffice.dev.aur.lu/api',
+      AURORA_PORTAL_URL: isProduction
+        ? 'https://api-portal.aur.lu/api'
+        : 'https://api.portal.dev.aur.lu/api',
       AURORA_PARTNER_ID: 'ff',
       AURORA_REGION_ID: 'ff',
     };
 
-    const auroraS3GatewayUrl = 'https://s3.dev.aur.lu';
+    // TODO: once https://eu-west-1.s3.staging.fil.one is live, switch the staging URL as well
+    // https://github.com/filecoin-project/fil-one/pull/111
+    const auroraS3GatewayUrl = isProduction
+      ? 'https://eu-west-1.s3.fil.one'
+      : 'https://s3.dev.aur.lu';
 
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
