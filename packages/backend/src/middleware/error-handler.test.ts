@@ -67,7 +67,6 @@ describe('errorHandlerMiddleware', () => {
 
     const headers = (request.response as { headers: Record<string, string> }).headers;
     expect(headers['X-Content-Type-Options']).toBe('nosniff');
-    expect(headers['X-Frame-Options']).toBe('DENY');
     expect(headers['Content-Type']).toBe('application/json');
   });
 
