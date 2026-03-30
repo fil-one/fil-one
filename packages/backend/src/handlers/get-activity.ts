@@ -56,8 +56,27 @@ export async function baseHandler(
       ? await getAuroraS3Credentials(stage, auroraTenantId)
       : undefined;
 
-  // Get buckets from Aurora S3
-  const buckets = credentials ? (await listBuckets(gatewayUrl, credentials)).buckets : [];
+  // Get buckets from Aurora S3 — swallow errors so the dashboard still renders.
+  let buckets: Awaited<ReturnType<typeof listBuckets>>['buckets'] = [];
+  if (credentials) {
+    try {
+      buckets = (await listBuckets(gatewayUrl, credentials)).buckets;
+    } catch (err) {
+      const errName = (err as { name?: string }).name;
+      const errCode = (err as { Code?: string }).Code;
+      if (errName === 'AccessDenied' || errCode === 'AccessDenied') {
+        console.warn(
+          '[get-activity] AccessDenied listing buckets — tenant may have no buckets yet',
+          {
+            orgId,
+            auroraTenantId,
+          },
+        );
+      } else {
+        console.error('[get-activity] Failed to list buckets from Aurora S3', { orgId, err });
+      }
+    }
+  }
 
   for (const bucket of buckets) {
     activities.push({
