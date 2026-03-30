@@ -1,3 +1,5 @@
+import { Stage } from '@filone/shared';
+
 /**
  * Typed helpers for Vite environment variables.
  * Copy .env.local.example to .env.local and fill in values for local dev.
@@ -6,3 +8,12 @@
  *                             (empty in production — relative paths via CloudFront)
  */
 export const API_URL: string = import.meta.env['VITE_API_URL'] ?? '';
+
+function inferStage(): Stage {
+  if (typeof window !== 'undefined' && window.location.hostname === 'app.fil.one') {
+    return Stage.Production;
+  }
+  return Stage.Staging;
+}
+
+export const FILONE_STAGE = inferStage();

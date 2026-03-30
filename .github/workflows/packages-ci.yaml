@@ -2,7 +2,7 @@ name: 'CI [packages]'
 
 on:
   push:
-    branches: [main]
+    branches: [main, production]
   pull_request:
 
 jobs:
@@ -72,7 +72,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
           aws-region: us-east-2
@@ -223,7 +223,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
           aws-region: us-east-2
@@ -231,17 +231,19 @@ jobs:
       - name: Run integration tests
         run: pnpm test:integration
 
-  deploy-staging:
-    if: github.ref == 'refs/heads/main'
+  deploy:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
     needs: [check-packages]
     runs-on: ubuntu-latest
     concurrency:
-      group: deploy-staging
+      group: deploy-${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
       cancel-in-progress: false
-    environment: staging
+    environment: ${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
     permissions:
       id-token: write
       contents: read
+    env:
+      DEPLOY_STAGE: ${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
 
     steps:
       - uses: actions/checkout@v5
@@ -258,14 +260,14 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: aws-actions/configure-aws-credentials@v5
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-2
 
       - run: pnpm build
 
-      - run: pnpm exec sst deploy --stage staging
+      - run: pnpm exec sst deploy --stage "$DEPLOY_STAGE"
 
       - if: failure()
         id: commit_info
@@ -279,13 +281,13 @@ jobs:
           payload: |
             {
               "channel": "filone-alerts",
-              "text": ${{ toJSON(format('Deployment of `{0}` to `staging` failed. Commit: {1} by @{2}. Details: {3}/{4}/actions/runs/{5}', github.event.repository.name, steps.commit_info.outputs.subject, github.actor, github.server_url, github.repository, github.run_id)) }},
+              "text": ${{ toJSON(format('Deployment of `{0}` to `{1}` failed. Commit: {2} by @{3}. Details: {4}/{5}/actions/runs/{6}', github.event.repository.name, env.DEPLOY_STAGE, steps.commit_info.outputs.subject, github.actor, github.server_url, github.repository, github.run_id)) }},
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ${{ toJSON(format(':warning: *Deployment of `{0}` to `staging` failed* · <{1}/{2}/actions/runs/{3}|Details>', github.event.repository.name, github.server_url, github.repository, github.run_id)) }}
+                    "text": ${{ toJSON(format(':warning: *Deployment of `{0}` to `{1}` failed* · <{2}/{3}/actions/runs/{4}|Details>', github.event.repository.name, env.DEPLOY_STAGE, github.server_url, github.repository, github.run_id)) }}
                   }
                 },
                 {
@@ -299,7 +301,7 @@ jobs:
             }
 
   dispatch-telemetry:
-    needs: [check-packages, deploy-preview, comment, e2e-tests, integration-tests, deploy-staging]
+    needs: [check-packages, deploy-preview, comment, e2e-tests, integration-tests, deploy]
     if: >-
       always() && (
         github.event_name == 'push' ||

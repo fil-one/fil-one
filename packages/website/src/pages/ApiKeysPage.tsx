@@ -13,7 +13,8 @@ import { useToast } from '../components/Toast';
 
 import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
 
-import { DOCS_URL, S3_ENDPOINT, S3_REGION } from '@filone/shared';
+import { getS3Endpoint, S3_REGION, DOCS_URL } from '@filone/shared';
+import { FILONE_STAGE } from '../env';
 import { apiRequest } from '../lib/api.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
 
@@ -71,6 +72,7 @@ function CopyButton({ value }: { value: string }) {
 }
 
 function ConnectionDetailsTab() {
+  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
   const [sdkTab, setSdkTab] = useState<'python' | 'nodejs' | 'go'>('python');
 
   const pythonInstall = `pip install boto3`;
@@ -78,7 +80,7 @@ function ConnectionDetailsTab() {
 
 s3 = boto3.client(
     "s3",
-    endpoint_url="${S3_ENDPOINT}",
+    endpoint_url="${s3Endpoint}",
     aws_access_key_id="YOUR_ACCESS_KEY",
     aws_secret_access_key="YOUR_SECRET_KEY",
     region_name="${S3_REGION}",
@@ -99,7 +101,7 @@ for obj in s3.list_objects_v2(Bucket="my-bucket").get("Contents", []):
 import { createReadStream } from "fs";
 
 const s3 = new S3Client({
-  endpoint: "${S3_ENDPOINT}",
+  endpoint: "${s3Endpoint}",
   region: "${S3_REGION}",
   credentials: {
     accessKeyId: "YOUR_ACCESS_KEY",
@@ -129,7 +131,7 @@ cfg, _ := config.LoadDefaultConfig(context.TODO(),
 )
 
 client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-    o.BaseEndpoint = aws.String("${S3_ENDPOINT}")
+    o.BaseEndpoint = aws.String("${s3Endpoint}")
     o.UsePathStyle = true
 })`;
 
@@ -165,8 +167,8 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
         <div className="flex items-center border-b border-zinc-100 px-4 py-3">
           <span className="w-28 shrink-0 text-sm text-zinc-500">S3 Endpoint</span>
-          <span className="flex-1 font-mono text-sm text-zinc-900">{S3_ENDPOINT}</span>
-          <CopyButton value={S3_ENDPOINT} />
+          <span className="flex-1 font-mono text-sm text-zinc-900">{s3Endpoint}</span>
+          <CopyButton value={s3Endpoint} />
         </div>
         <div className="flex items-center px-4 py-3">
           <span className="w-28 shrink-0 text-sm text-zinc-500">Region</span>
@@ -198,12 +200,12 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
             {
               n: 2,
               title: 'Create a bucket',
-              code: `aws s3 mb s3://my-bucket --endpoint-url ${S3_ENDPOINT}`,
+              code: `aws s3 mb s3://my-bucket --endpoint-url ${s3Endpoint}`,
             },
             {
               n: 3,
               title: 'Upload a file',
-              code: `aws s3 cp ./my-file.parquet s3://my-bucket/ --endpoint-url ${S3_ENDPOINT}`,
+              code: `aws s3 cp ./my-file.parquet s3://my-bucket/ --endpoint-url ${s3Endpoint}`,
             },
           ].map(({ n, title, code }) => (
             <div key={n} className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -290,7 +292,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
                 {
                   label: 'Endpoint URL',
                   aws: 'https://s3.amazonaws.com',
-                  fil: S3_ENDPOINT,
+                  fil: s3Endpoint,
                   highlight: true,
                 },
                 {

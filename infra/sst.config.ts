@@ -207,16 +207,16 @@ function setupMetricStreamPipeline(grafanaPrometheusAuth: sst.Secret) {
     ],
   });
 
-  new aws.cloudwatch.MetricStream('LambdaMetricStream', {
-    name: $interpolate`filone-infra-${$app.stage}-LambdaMetricStream`,
+  new aws.cloudwatch.MetricStream('MetricStream', {
+    name: $interpolate`filone-infra-${$app.stage}-MetricStream`,
     roleArn: metricStreamRole.arn,
     firehoseArn: firehose.arn,
     outputFormat: 'opentelemetry1.0',
     includeFilters: [
-      {
-        namespace: 'AWS/Lambda',
-        metricNames: [],
-      },
+      { namespace: 'AWS/Lambda', metricNames: [] },
+      { namespace: 'AWS/ApiGateway', metricNames: [] },
+      { namespace: 'AWS/SQS', metricNames: [] },
+      { namespace: 'AWS/DynamoDB', metricNames: [] },
     ],
   });
 }

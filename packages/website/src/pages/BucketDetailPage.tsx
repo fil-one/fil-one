@@ -22,7 +22,8 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
-import { formatBytes, S3_ENDPOINT, S3_REGION } from '@filone/shared';
+import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
+import { FILONE_STAGE } from '../env';
 
 import type {
   Bucket,
@@ -106,6 +107,7 @@ export type BucketDetailPageProps = {
 };
 
 export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) {
+  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -539,7 +541,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                 <h2 className="mb-3 text-[13px] font-medium text-zinc-900">Access endpoints</h2>
                 <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
                   <div className="flex flex-col gap-3">
-                    <CopyableField label="S3 Endpoint" value={S3_ENDPOINT} />
+                    <CopyableField label="S3 Endpoint" value={s3Endpoint} />
                     <CopyableField label="S3 Path" value={`s3://${bucketName}`} />
                     <CopyableField label="Region" value={bucketRegion} />
                   </div>

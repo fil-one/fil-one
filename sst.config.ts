@@ -282,9 +282,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              // Bump to re-trigger: registers https://fil.one as allowed logout URL
-              // and /login as initiate_login_uri
-              Version: '2.1',
+              Version: '2.2',
             },
           },
         },
@@ -352,10 +350,6 @@ export default $config({
 
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
-
-    const auroraS3GatewayEnv = {
-      AURORA_S3_GATEWAY_URL: auroraS3GatewayUrl,
-    };
     const auroraS3GatewayPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
@@ -440,7 +434,7 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({ method: 'GET', routePath: '/api/access-keys', handler: 'list-access-keys' });
@@ -455,42 +449,42 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/access-keys/{keyId}',
       handler: 'delete-access-key',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
       method: 'GET',
       routePath: '/api/buckets/{name}/objects',
       handler: 'list-objects',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
       method: 'POST',
       routePath: '/api/buckets/{name}/objects/presign',
       handler: 'presign-upload',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
       method: 'GET',
       routePath: '/api/buckets/{name}/objects/download',
       handler: 'download-object',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
       method: 'DELETE',
       routePath: '/api/buckets/{name}/objects',
       handler: 'delete-object',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
       method: 'GET',
       routePath: '/api/buckets/{name}/objects/metadata',
       handler: 'head-object',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
 
@@ -540,7 +534,7 @@ export default $config({
       method: 'GET',
       routePath: '/api/activity',
       handler: 'get-activity',
-      extraEnv: { ...auroraEnv, ...auroraS3GatewayEnv },
+      extraEnv: auroraEnv,
       permissions: auroraS3GatewayPermissions,
     });
 
