@@ -3,9 +3,11 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
   DeleteItemCommand,
+  GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 import { SubscriptionStatus } from '@filone/shared';
 
@@ -16,7 +18,17 @@ import { SubscriptionStatus } from '@filone/shared';
 vi.mock('sst', () => ({
   Resource: {
     BillingTable: { name: 'BillingTable' },
+    UserInfoTable: { name: 'UserInfoTable' },
   },
+}));
+
+const mockUpdateTenantStatus = vi.fn();
+vi.mock('../lib/aurora-backoffice.js', () => ({
+  updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
+}));
+
+vi.mock('../lib/org-setup-status.js', () => ({
+  isOrgSetupComplete: (status: string | undefined) => status === 'AURORA_S3_ACCESS_KEY_CREATED',
 }));
 
 const mockConstructEvent = vi.fn();
@@ -137,6 +149,33 @@ function setupPaymentMethodsRetrieve() {
   mockPaymentMethodsRetrieve.mockResolvedValue(mockPaymentMethod());
 }
 
+const MOCK_ORG_ID = 'test-org-uuid';
+const MOCK_AURORA_TENANT_ID = 'aurora-tenant-123';
+
+function setupAuroraTenantResolution() {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'BillingTable',
+      Key: { pk: { S: `CUSTOMER#${MOCK_USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+    })
+    .resolves({
+      Item: marshall({ pk: `CUSTOMER#${MOCK_USER_ID}`, sk: 'SUBSCRIPTION', orgId: MOCK_ORG_ID }),
+    });
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+    })
+    .resolves({
+      Item: marshall({
+        pk: `ORG#${MOCK_ORG_ID}`,
+        sk: 'PROFILE',
+        auroraTenantId: MOCK_AURORA_TENANT_ID,
+        setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+      }),
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -147,9 +186,12 @@ describe('stripe-webhook handler', () => {
     ddbMock.on(PutItemCommand).resolves({});
     ddbMock.on(UpdateItemCommand).resolves({});
     ddbMock.on(DeleteItemCommand).resolves({});
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
     mockConstructEvent.mockReset();
     mockCustomersRetrieve.mockReset();
     mockPaymentMethodsRetrieve.mockReset();
+    mockUpdateTenantStatus.mockReset();
+    mockUpdateTenantStatus.mockResolvedValue(undefined);
   });
 
   // -----------------------------------------------------------------------
@@ -667,6 +709,69 @@ describe('stripe-webhook handler', () => {
       await handler(buildWebhookEvent('{}'));
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
+
+    it('calls updateTenantStatus WRITE_LOCKED and writes auroraTenantStatus to org profile', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: MOCK_AURORA_TENANT_ID,
+        status: 'WRITE_LOCKED',
+      });
+
+      // Verify org profile update with auroraTenantStatus
+      const orgProfileUpdate = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .find(
+          (c) =>
+            c.args[0].input.TableName === 'UserInfoTable' &&
+            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'WRITE_LOCKED',
+        );
+      expect(orgProfileUpdate).toBeDefined();
+      expect(orgProfileUpdate!.args[0].input.Key).toEqual({
+        pk: { S: `ORG#${MOCK_ORG_ID}` },
+        sk: { S: 'PROFILE' },
+      });
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('does not fail webhook when Aurora WRITE_LOCK fails', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+      mockUpdateTenantStatus.mockRejectedValue(new Error('Aurora API error'));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      // DynamoDB update should still have happened
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      // Org profile auroraTenantStatus must NOT be updated when updateTenantStatus fails
+      const orgProfileUpdate = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .find(
+          (c) =>
+            c.args[0].input.TableName === 'UserInfoTable' &&
+            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'WRITE_LOCKED',
+        );
+      expect(orgProfileUpdate).toBeUndefined();
+      // Webhook should still return 200
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('skips Aurora call when billing record has no orgId', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      // GetItemCommand returns no orgId (default mock returns undefined Item)
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -752,6 +857,52 @@ describe('stripe-webhook handler', () => {
       const result = await handler(buildWebhookEvent('{}'));
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('calls updateTenantStatus ACTIVE and writes auroraTenantStatus to org profile', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: MOCK_AURORA_TENANT_ID,
+        status: 'ACTIVE',
+      });
+
+      // Verify org profile update with auroraTenantStatus
+      const orgProfileUpdate = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .find(
+          (c) =>
+            c.args[0].input.TableName === 'UserInfoTable' &&
+            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'ACTIVE',
+        );
+      expect(orgProfileUpdate).toBeDefined();
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('does not fail webhook when Aurora re-activation fails', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+      mockUpdateTenantStatus.mockRejectedValue(new Error('Aurora API error'));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      // Org profile auroraTenantStatus must NOT be updated when updateTenantStatus fails
+      const orgProfileUpdate = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .find(
+          (c) =>
+            c.args[0].input.TableName === 'UserInfoTable' &&
+            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'ACTIVE',
+        );
+      expect(orgProfileUpdate).toBeUndefined();
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });

@@ -125,12 +125,11 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
         </div>
 
         <h2 className="mb-4 max-w-sm text-center text-3xl font-semibold text-zinc-950">
-          Welcome to Fil.one
+          Welcome to Fil One
         </h2>
 
         <p className="mb-10 max-w-sm text-center text-base text-zinc-600">
-          S3-compatible storage on Filecoin. Set up your organization to start storing objects with
-          verifiable content addressing.
+          S3-compatible storage on Filecoin. Start storing objects with integrity you can verify.
         </p>
 
         <ul className="mb-12 flex w-full max-w-sm flex-col gap-4">
@@ -155,7 +154,7 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
         </ul>
 
         <p className="text-sm text-zinc-400">
-          Trusted by teams storing critical data on the decentralized web
+          Trusted by teams storing critical enterprise and AI data.
         </p>
       </div>
     </div>

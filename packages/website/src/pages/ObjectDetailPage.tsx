@@ -15,9 +15,10 @@ import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyableField } from '../components/CopyableField';
 import { Spinner } from '../components/Spinner';
-import { formatBytes, S3_ENDPOINT } from '@filone/shared';
+import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
 
 import type { ObjectMetadataResponse } from '@filone/shared';
+import { FILONE_STAGE } from '../env';
 import { apiRequest } from '../lib/api.js';
 import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
@@ -139,9 +140,11 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
 
   const s3Path = `s3://${bucketName}/${objectKey}`;
 
+  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
+
   const apiExample = `# Retrieve via S3 API
 aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
-  --endpoint-url ${S3_ENDPOINT}`;
+  --endpoint-url ${s3Endpoint}`;
 
   function handleMenuAction(action: () => void) {
     setMenuOpen(false);

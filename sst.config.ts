@@ -145,6 +145,49 @@ export default $config({
       },
     });
 
+    const { getS3Endpoint, S3_REGION, Stage } = await import('@filone/shared');
+    const auroraS3GatewayUrl = getS3Endpoint(
+      S3_REGION,
+      isProduction ? Stage.Production : Stage.Staging,
+    );
+
+    // ── CloudFront security headers (CSP applied to the HTML document) ──
+    const responseHeadersPolicy = new aws.cloudfront.ResponseHeadersPolicy(
+      'WebsiteSecurityHeaders',
+      {
+        name: $interpolate`filone-${$app.stage}-security-headers`,
+        securityHeadersConfig: {
+          contentSecurityPolicy: {
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+            override: true,
+          },
+          frameOptions: {
+            frameOption: 'DENY',
+            override: true,
+          },
+          contentTypeOptions: {
+            override: true,
+          },
+          referrerPolicy: {
+            referrerPolicy: 'strict-origin-when-cross-origin',
+            override: true,
+          },
+          strictTransportSecurity: {
+            accessControlMaxAgeSec: 2592000, // 30 days
+            includeSubdomains: true,
+            override: true,
+          },
+        },
+        // Future: Sentry
+        //   script-src: add https://*.sentry.io (or your specific DSN host)
+        //   connect-src: add https://*.ingest.sentry.io
+        //
+        // Future: Plausible
+        //   script-src: add https://plausible.io (or self-hosted domain)
+        //   connect-src: add https://plausible.io/api
+      },
+    );
+
     const router = new sst.aws.Router('WebsiteRouter', {
       routes: {
         '/*': { bucket: websiteBucket },
@@ -165,6 +208,8 @@ export default $config({
       transform: {
         cdn: (args) => {
           args.defaultRootObject = 'index.html';
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Pulumi Input wrapper; value is a plain object at transform time
+          (args.defaultCacheBehavior as any).responseHeadersPolicyId = responseHeadersPolicy.id;
           args.customErrorResponses = [
             {
               errorCode: 403,
@@ -237,9 +282,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              // Bump to re-trigger: registers https://fil.one as allowed logout URL
-              // and /login as initiate_login_uri
-              Version: '2.1',
+              Version: '2.2',
             },
           },
         },
@@ -305,18 +348,8 @@ export default $config({
       AURORA_REGION_ID: 'ff',
     };
 
-    // TODO: once https://eu-west-1.s3.staging.fil.one is live, switch the staging URL as well
-    // https://github.com/filecoin-project/fil-one/pull/111
-    const auroraS3GatewayUrl = isProduction
-      ? 'https://eu-west-1.s3.fil.one'
-      : 'https://s3.dev.aur.lu';
-
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
-
-    const auroraS3GatewayEnv = {
-      AURORA_S3_GATEWAY_URL: auroraS3GatewayUrl,
-    };
     const auroraS3GatewayPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
@@ -401,7 +434,7 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({ method: 'GET', routePath: '/api/access-keys', handler: 'list-access-keys' });
@@ -423,35 +456,35 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}/objects',
       handler: 'list-objects',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
       method: 'POST',
       routePath: '/api/buckets/{name}/objects/presign',
       handler: 'presign-upload',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
       method: 'GET',
       routePath: '/api/buckets/{name}/objects/download',
       handler: 'download-object',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
       method: 'DELETE',
       routePath: '/api/buckets/{name}/objects',
       handler: 'delete-object',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
       method: 'GET',
       routePath: '/api/buckets/{name}/objects/metadata',
       handler: 'head-object',
-      extraEnv: auroraS3GatewayEnv,
+
       permissions: auroraS3GatewayPermissions,
     });
 
@@ -501,7 +534,7 @@ export default $config({
       method: 'GET',
       routePath: '/api/activity',
       handler: 'get-activity',
-      extraEnv: { ...auroraEnv, ...auroraS3GatewayEnv },
+      extraEnv: auroraEnv,
       permissions: auroraS3GatewayPermissions,
     });
 
@@ -530,6 +563,7 @@ export default $config({
       routePath: '/api/stripe/webhook',
       handler: 'stripe-webhook',
       extraEnv: {
+        ...auroraEnv,
         STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
       },
       permissions: [
@@ -591,7 +625,7 @@ export default $config({
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
-      link: [billingTable, stripeSecretKey, stripePriceId, auroraBackofficeToken],
+      link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, auroraBackofficeToken],
       environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'gb_month_meter' },
       timeout: '60 seconds',
       memory: '256 MB',
@@ -618,6 +652,21 @@ export default $config({
       // run the Lambda every day at 6:00 AM UTC.
       schedule: 'cron(0 6 * * ? *)',
       function: usageOrchestrator.arn,
+    });
+
+    // ── Grace period enforcement ────────────────────────────────────
+    const gracePeriodEnforcer = createFn('GracePeriodEnforcer', {
+      handler: 'packages/backend/src/jobs/grace-period-enforcer.handler',
+      link: [billingTable, userInfoTable, auroraBackofficeToken],
+      environment: auroraEnv,
+      timeout: '300 seconds',
+      memory: '256 MB',
+    });
+
+    new sst.aws.Cron('GracePeriodEnforcerCron', {
+      // run the Lambda every day at 7:00 AM UTC (one hour after usage reporting).
+      schedule: 'cron(0 7 * * ? *)',
+      function: gracePeriodEnforcer.arn,
     });
 
     return {

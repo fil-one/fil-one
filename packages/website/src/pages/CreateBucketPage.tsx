@@ -188,11 +188,11 @@ export function CreateBucketPage() {
               <select
                 id="bucket-region"
                 value={region}
-                onChange={(e) => setRegion(e.target.value)}
+                onChange={(e) => setRegion(e.target.value as typeof S3_REGION)}
                 disabled
                 className="block w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-[13px] text-zinc-900 opacity-50 focus:outline-2 focus:outline-brand-600"
               >
-                <option value={S3_REGION}>EU (Ireland)</option>
+                <option value={S3_REGION}>Europe (eu-west-1)</option>
               </select>
               <p className="text-[11px] text-zinc-500">More regions coming soon.</p>
             </div>

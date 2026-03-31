@@ -87,22 +87,27 @@ API Gateway V2 setup.
 Metrics delivery uses a two-step approach:
 
 **Step 1 (implemented): AWS-provided metrics via CloudWatch Metric Stream.**
-A CloudWatch Metric Stream forwards AWS-provided metrics (currently the
-`AWS/Lambda` namespace) to Grafana Cloud Prometheus via a Kinesis Firehose
-delivery stream. This gives us Lambda duration, invocations, errors, throttles,
-and concurrent executions in Grafana dashboards with zero application code
-changes. The pipeline:
+
+A CloudWatch Metric Stream forwards AWS-provided metrics (`AWS/Lambda`,
+`AWS/ApiGateway`, `AWS/SQS`, `AWS/DynamoDB`) to Grafana Cloud
+Prometheus via a Kinesis Firehose delivery stream. This gives us Lambda duration,
+invocations, errors, throttles, API latency, queue depth, and table throttles in
+Grafana dashboards with zero application code changes. The pipeline:
 
 - CloudWatch Metrics → Metric Stream (OpenTelemetry 1.0 format) → Firehose →
   Grafana Cloud Prometheus (`aws-metric-streams` endpoint)
 
-Additional AWS namespaces (API Gateway, SQS, DynamoDB, etc.) can be added to
-the Metric Stream's include filter as needed.
+Additional AWS namespaces can be added to the Metric Stream's include filter
+as needed.
+
+CloudFront metrics are not yet included because CloudFront is a global service
+whose metrics are only published in us-east-1, while our staging & production
+stacks deploys to us-east-2.
 
 **Deployment scope.** The metric stream pipeline is deployed once per account via
 the `infra/` stack (not per-stage via the main stack), because CloudWatch Metric
-Streams are account-wide — a single stream captures all metrics in the
-`AWS/Lambda` namespace regardless of which SST stage created the Lambda. This
+Streams are account-wide — a single stream captures all metrics in the configured
+namespaces regardless of which SST stage created the resources. This
 avoids duplicate data from multiple stages sharing an account. Metric Streams
 are also regional — if Lambdas are later deployed in multiple regions, a Metric
 Stream is needed in each region. Developer stacks (which may use a different
@@ -452,7 +457,7 @@ injection.
 - **Verified log pipeline.** The CloudWatch → Firehose → Loki pipeline has been
   tested and confirmed working end-to-end.
 - **AWS metrics in Grafana.** CloudWatch Metric Stream forwards AWS-provided
-  Lambda metrics (invocations, duration, errors, throttles) to Grafana Cloud
+  metrics (Lambda, API Gateway, SQS, DynamoDB) to Grafana Cloud
   Prometheus with zero application code changes.
 - **Clear path to custom metrics.** EMF → CloudWatch Metrics → the existing
   Metric Stream → Grafana Prometheus can be added incrementally without

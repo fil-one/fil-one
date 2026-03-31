@@ -2,6 +2,7 @@ import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import { getS3Endpoint, S3_REGION } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
@@ -52,7 +53,7 @@ export async function baseHandler(
   }
 
   const stage = process.env.FILONE_STAGE!;
-  const gatewayUrl = process.env.AURORA_S3_GATEWAY_URL!;
+  const gatewayUrl = getS3Endpoint(S3_REGION, stage);
 
   const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
 

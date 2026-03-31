@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { NoSuchBucket } from '@aws-sdk/client-s3';
+import { getS3Endpoint, S3Region } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -25,7 +26,7 @@ vi.mock('../lib/aurora-s3-client.js', () => ({
 }));
 
 process.env.FILONE_STAGE = 'test';
-process.env.AURORA_S3_GATEWAY_URL = 'https://s3.dev.aur.lu';
+const expectedS3Url = getS3Endpoint(S3Region.EuWest1, process.env.FILONE_STAGE);
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -74,7 +75,7 @@ describe('delete-bucket baseHandler', () => {
 
     expect(result.statusCode).toBe(204);
     expect(mockDeleteBucket).toHaveBeenCalledWith(
-      'https://s3.dev.aur.lu',
+      expectedS3Url,
       { accessKeyId: 'AKIA_CONSOLE', secretAccessKey: 's3_secret' },
       'my-bucket',
     );

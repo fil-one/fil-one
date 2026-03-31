@@ -2,9 +2,11 @@ export { buildAuth0AuthorizeUrl } from './auth.js';
 export type { Auth0LoginUrlOptions } from './auth.js';
 
 export {
+  Stage,
   DOCS_URL,
-  S3_ENDPOINT,
   S3_REGION,
+  S3Region,
+  getS3Endpoint,
   OAUTH_STATE_COOKIE,
   CSRF_COOKIE_NAME,
   GB_BYTES,
