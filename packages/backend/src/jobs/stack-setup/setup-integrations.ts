@@ -94,7 +94,7 @@ async function setupStripeWebhook(
   stripe: Stripe,
   siteUrl: string,
   stage: string,
-): Promise<{ webhookSecret: string; webhookEndpointId: string }> {
+): Promise<{ webhookSecret?: string; webhookEndpointId?: string }> {
   const webhookUrl = `${siteUrl}/api/stripe/webhook`;
   const storedSecret = await getStoredWebhookSecret(stage);
 
@@ -125,16 +125,27 @@ async function setupStripeWebhook(
     await Promise.all(disabled.map((ep) => stripe.webhookEndpoints.del(ep.id)));
   }
 
-  const newEndpoint = await stripe.webhookEndpoints.create({
-    url: webhookUrl,
-    enabled_events: WEBHOOK_EVENTS,
-    metadata: { app: 'filone', stage },
-  });
+  let webhookSecret: string | undefined;
+  let webhookEndpointId: string | undefined;
+  try {
+    const newEndpoint = await stripe.webhookEndpoints.create({
+      url: webhookUrl,
+      enabled_events: WEBHOOK_EVENTS,
+      metadata: { app: 'filone', stage },
+    });
 
-  const secret = newEndpoint.secret!;
-  await storeWebhookSecret(stage, secret);
+    webhookEndpointId = newEndpoint.id;
+    webhookSecret = newEndpoint.secret!;
+  } catch (err) {
+    console.error('Failed to create Stripe webhook endpoint:', err);
+    if (!stage.startsWith('pr-')) throw err;
+  }
 
-  return { webhookSecret: secret, webhookEndpointId: newEndpoint.id };
+  if (webhookSecret) {
+    await storeWebhookSecret(stage, webhookSecret);
+  }
+
+  return { webhookSecret, webhookEndpointId };
 }
 
 function isOrphanedEphemeralEndpoint(ep: Stripe.WebhookEndpoint): boolean {
@@ -386,35 +397,11 @@ export async function handler(event: SetupEvent): Promise<void> {
       }
     }
 
-    let stripeResult: { webhookSecret: string; webhookEndpointId: string } | null = null;
-
-    if (PROTECTED_STAGES.has(Stage)) {
-      // Protected stages: run everything in parallel (failure is fatal)
-      const [result] = await Promise.all([
-        setupStripeWebhook(stripe, siteUrl, Stage),
-        setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
-        setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production'),
-      ]);
-      stripeResult = result as { webhookSecret: string; webhookEndpointId: string };
-    } else {
-      // Ephemeral stages: Stripe failure is non-fatal (CI uses stripe listen fallback)
-      try {
-        stripeResult = await setupStripeWebhook(stripe, siteUrl, Stage);
-      } catch (err: unknown) {
-        console.warn(
-          'Stripe webhook registration failed for ephemeral stage (CI will use stripe listen fallback):',
-          err instanceof Error ? err.message : String(err),
-        );
-        await storeWebhookSecret(Stage, 'PENDING_CLI_SETUP');
-      }
-      await setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd);
-    }
-
-    console.log('Setup complete:', {
-      webhookEndpointId: stripeResult?.webhookEndpointId ?? 'none (CLI fallback)',
-      siteUrl,
-      stage: Stage,
-    });
+    const [stripeResult] = await Promise.all([
+      setupStripeWebhook(stripe, siteUrl, Stage),
+      setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
+      setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production'),
+    ]);
 
     await sendCfnResponse(event, {
       Status: 'SUCCESS',
@@ -424,8 +411,8 @@ export async function handler(event: SetupEvent): Promise<void> {
       LogicalResourceId: event.LogicalResourceId,
       Data: stripeResult
         ? {
-            webhookSecret: stripeResult.webhookSecret,
-            webhookEndpointId: stripeResult.webhookEndpointId,
+            webhookSecret: stripeResult?.webhookSecret ?? '',
+            webhookEndpointId: stripeResult?.webhookEndpointId ?? '',
           }
         : { webhookSecret: '', webhookEndpointId: '' },
     });
