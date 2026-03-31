@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createClient, createBucket, listBuckets } from '@filone/aurora-portal-client';
-import { type MetricEvent, reportMetric } from './metrics.ts';
-import { instrumentClient } from './aurora-api-metrics.ts';
+import { type MetricEvent, reportMetric } from './metrics.js';
+import { instrumentClient } from './aurora-api-metrics.js';
 
-vi.mock('./metrics.ts', () => ({
+vi.mock('./metrics.js', () => ({
   reportMetric: vi.fn(),
 }));
 
