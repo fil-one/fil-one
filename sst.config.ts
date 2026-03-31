@@ -373,6 +373,7 @@ export default $config({
       permissions?: sst.aws.FunctionPermissionArgs[];
       extraLink?: (typeof allResources)[number][];
       provisionedConcurrency?: number;
+      memory?: sst.aws.FunctionArgs['memory'];
     }
 
     function addRoute({
@@ -383,6 +384,7 @@ export default $config({
       permissions,
       extraLink,
       provisionedConcurrency,
+      memory,
     }: AddRouteProps) {
       // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
       const fnName = handler
@@ -399,6 +401,7 @@ export default $config({
         },
         permissions,
         timeout: '10 seconds',
+        ...(memory ? { memory } : {}),
         ...(provisionedConcurrency && provisionedConcurrency > 0
           ? {
               versioning: true,
@@ -424,7 +427,7 @@ export default $config({
     }
 
     // ── Provisioned concurrency for critical-path endpoints ────────
-    const criticalPathLambdaProvisionedConcurrency = 1;
+    const criticalPathLambdaProvisionedConcurrency = isProduction ? 1 : 0;
 
     // ── Data routes ──────────────────────────────────────────────────
     addRoute({
@@ -434,6 +437,7 @@ export default $config({
       extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
     addRoute({
       method: 'POST',
@@ -441,6 +445,7 @@ export default $config({
       handler: 'create-bucket',
       extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
       method: 'GET',
@@ -449,12 +454,12 @@ export default $config({
       extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
     addRoute({
       method: 'DELETE',
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
-
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
@@ -481,15 +486,14 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}/objects',
       handler: 'list-objects',
-
       permissions: auroraS3GatewayPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
     addRoute({
       method: 'POST',
       routePath: '/api/buckets/{name}/objects/presign',
       handler: 'presign-upload',
-
       permissions: auroraS3GatewayPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
@@ -497,23 +501,22 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}/objects/download',
       handler: 'download-object',
-
       permissions: auroraS3GatewayPermissions,
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
       method: 'DELETE',
       routePath: '/api/buckets/{name}/objects',
       handler: 'delete-object',
-
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
       method: 'GET',
       routePath: '/api/buckets/{name}/objects/metadata',
       handler: 'head-object',
-
       permissions: auroraS3GatewayPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
 
     // ── Auth routes ──────────────────────────────────────────────────
@@ -578,6 +581,7 @@ export default $config({
       extraEnv: auroraEnv,
       permissions: auroraS3GatewayPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
 
     // ── Billing routes ───────────────────────────────────────────────
