@@ -15,7 +15,6 @@
     "stripe": "^20.4.1"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
     "vitest": "^4.1.2"
   }
 }
