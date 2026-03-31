@@ -451,8 +451,8 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/access-keys/{keyId}',
       handler: 'delete-access-key',
-
-      permissions: auroraS3GatewayPermissions,
+      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
+      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
     });
     addRoute({
       method: 'GET',
