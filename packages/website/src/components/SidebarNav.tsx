@@ -94,14 +94,8 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
     <nav className="flex h-full flex-col border-r border-zinc-200 bg-white">
       {/* Logo + collapse toggle */}
       <div className="flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200 px-3">
-        <div className="flex items-center gap-2 overflow-hidden">
-          {/* Logo mark */}
-          <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-brand-600 text-sm font-bold text-white">
-            F
-          </span>
-          {!collapsed && (
-            <span className="truncate text-sm font-semibold text-zinc-900">Fil.one</span>
-          )}
+        <div className="flex items-center overflow-hidden">
+          <img src="/fil-one-logo.svg" alt="Fil.one" className={collapsed ? 'h-7 w-7' : 'h-7'} />
         </div>
 
         {/* Collapse toggle */}
