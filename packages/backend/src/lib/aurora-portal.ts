@@ -9,7 +9,7 @@ import {
   listS3AccessKeys,
 } from '@filone/aurora-portal-client';
 import type { AccessKeyPermission } from '@filone/shared';
-import { instrumentClient } from './aurora-api-metrics.ts';
+import { instrumentClient } from './aurora-api-metrics.js';
 
 const ssm = new SSMClient({});
 
