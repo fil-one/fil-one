@@ -386,16 +386,32 @@ export async function handler(event: SetupEvent): Promise<void> {
       }
     }
 
-    const [stripeResult] = await Promise.all([
-      setupStripeWebhook(stripe, siteUrl, Stage),
-      setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
-      ...(isStagingOrProd
-        ? [setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production')]
-        : []),
-    ]);
+    let stripeResult: { webhookSecret: string; webhookEndpointId: string } | null = null;
+
+    if (PROTECTED_STAGES.has(Stage)) {
+      // Protected stages: run everything in parallel (failure is fatal)
+      const [result] = await Promise.all([
+        setupStripeWebhook(stripe, siteUrl, Stage),
+        setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
+        setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production'),
+      ]);
+      stripeResult = result as { webhookSecret: string; webhookEndpointId: string };
+    } else {
+      // Ephemeral stages: Stripe failure is non-fatal (CI uses stripe listen fallback)
+      try {
+        stripeResult = await setupStripeWebhook(stripe, siteUrl, Stage);
+      } catch (err: unknown) {
+        console.warn(
+          'Stripe webhook registration failed for ephemeral stage (CI will use stripe listen fallback):',
+          err instanceof Error ? err.message : String(err),
+        );
+        await storeWebhookSecret(Stage, 'PENDING_CLI_SETUP');
+      }
+      await setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd);
+    }
 
     console.log('Setup complete:', {
-      webhookEndpointId: stripeResult.webhookEndpointId,
+      webhookEndpointId: stripeResult?.webhookEndpointId ?? 'none (CLI fallback)',
       siteUrl,
       stage: Stage,
     });
@@ -406,10 +422,12 @@ export async function handler(event: SetupEvent): Promise<void> {
       StackId: event.StackId,
       RequestId: event.RequestId,
       LogicalResourceId: event.LogicalResourceId,
-      Data: {
-        webhookSecret: stripeResult.webhookSecret,
-        webhookEndpointId: stripeResult.webhookEndpointId,
-      },
+      Data: stripeResult
+        ? {
+            webhookSecret: stripeResult.webhookSecret,
+            webhookEndpointId: stripeResult.webhookEndpointId,
+          }
+        : { webhookSecret: '', webhookEndpointId: '' },
     });
   } catch (err: unknown) {
     console.error('Setup/teardown failed:', err);

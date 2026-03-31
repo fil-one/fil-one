@@ -475,16 +475,87 @@ describe('setup-integrations', () => {
   // ── Error handling ──────────────────────────────────────────────────
 
   describe('error handling', () => {
-    it('sends FAILED CFN response when Stripe throws', async () => {
+    it('sends FAILED CFN response when Stripe throws on protected stage', async () => {
       ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
       mockStripeWebhookEndpoints.list.mockRejectedValue(new Error('Stripe is down'));
 
-      await handler(buildCfnEvent({ RequestType: 'Create' }));
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://staging.fil.one',
+            Stage: 'staging',
+          },
+        }),
+      );
 
       expect(capturedCfnBody).toEqual({
         Status: 'FAILED',
         Reason: 'Stripe is down',
-        PhysicalResourceId: 'filone-setup-dev',
+        PhysicalResourceId: 'filone-setup-staging',
+        ...BASE_CFN_FIELDS,
+      });
+    });
+
+    it('sends SUCCESS CFN response with sentinel when Stripe throws on ephemeral stage', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockRejectedValue(new Error('Stripe endpoint limit reached'));
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://pr-42.example.com',
+            Stage: 'pr-42',
+          },
+        }),
+      );
+
+      // SSM should contain the sentinel value
+      const putCalls = ssmMock.commandCalls(PutParameterCommand);
+      expect(putCalls).toHaveLength(1);
+      expect(putCalls[0].args[0].input).toEqual({
+        Name: '/filone/pr-42/stripe-webhook-secret',
+        Value: 'PENDING_CLI_SETUP',
+        Type: 'SecureString',
+        Overwrite: true,
+      });
+
+      // CFN response should be SUCCESS with empty webhook data
+      expect(capturedCfnBody).toEqual({
+        Status: 'SUCCESS',
+        PhysicalResourceId: 'filone-setup-pr-42',
+        ...BASE_CFN_FIELDS,
+        Data: { webhookSecret: '', webhookEndpointId: '' },
+      });
+
+      // Auth0 callbacks should still be configured
+      expect(capturedAuth0PatchBody).toBeDefined();
+    });
+
+    it('still fails production when Stripe throws', async () => {
+      mockResource.StripeSecretKey.value = 'sk_live_real';
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      mockStripeWebhookEndpoints.list.mockRejectedValue(new Error('Stripe is down'));
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://app.fil.one',
+            Stage: 'production',
+          },
+        }),
+      );
+
+      expect(capturedCfnBody).toEqual({
+        Status: 'FAILED',
+        Reason: 'Stripe is down',
+        PhysicalResourceId: 'filone-setup-production',
         ...BASE_CFN_FIELDS,
       });
     });

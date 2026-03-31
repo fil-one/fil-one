@@ -55,6 +55,7 @@ jobs:
       AWS_REGION: us-east-2
     outputs:
       url: ${{ steps.deploy.outputs.url }}
+      webhook_needs_cli: ${{ steps.check-webhook.outputs.needs_cli }}
 
     steps:
       - uses: actions/checkout@v5
@@ -123,6 +124,21 @@ jobs:
             exit 1
           fi
           echo "url=$URL_TRIMMED" >> "$GITHUB_OUTPUT"
+
+      - name: Check Stripe webhook status
+        id: check-webhook
+        run: |
+          SECRET=$(aws ssm get-parameter \
+            --name "/filone/${STAGE}/stripe-webhook-secret" \
+            --with-decryption \
+            --query 'Parameter.Value' \
+            --output text 2>/dev/null || echo "MISSING")
+          if [ "$SECRET" = "PENDING_CLI_SETUP" ] || [ "$SECRET" = "MISSING" ]; then
+            echo "needs_cli=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Stripe webhook registration failed -- will use stripe listen fallback"
+          else
+            echo "needs_cli=false" >> "$GITHUB_OUTPUT"
+          fi
 
   comment:
     name: Add Preview Environment Comment on PR
@@ -228,8 +244,58 @@ jobs:
           role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
           aws-region: us-east-2
 
+      - name: Install Stripe CLI
+        if: needs.deploy-preview.outputs.webhook_needs_cli == 'true'
+        run: |
+          curl -s https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public \
+            | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/stripe.gpg] https://packages.stripe.dev/stripe-cli-debian-local stable main" \
+            | sudo tee /etc/apt/sources.list.d/stripe.list
+          sudo apt-get update && sudo apt-get install -y stripe
+
+      # Events list must match WEBHOOK_EVENTS in setup-integrations.ts
+      - name: Start Stripe CLI webhook forwarding
+        id: stripe-listen
+        if: needs.deploy-preview.outputs.webhook_needs_cli == 'true'
+        env:
+          STRIPE_API_KEY: ${{ secrets.CI_STRIPE_SECRET_KEY }}
+          WEBHOOK_URL: ${{ needs.deploy-preview.outputs.url }}/api/stripe/webhook
+        run: |
+          LOGFILE=$(mktemp)
+          stripe listen \
+            --api-key "$STRIPE_API_KEY" \
+            --forward-to "$WEBHOOK_URL" \
+            --events customer.updated,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,customer.subscription.trial_will_end,invoice.payment_succeeded,invoice.payment_failed \
+            > "$LOGFILE" 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
+
+          # Wait for signing secret (pattern from test-stripe-webhooks.sh)
+          for i in $(seq 1 60); do
+            SECRET=$(grep -o 'whsec_[A-Za-z0-9]*' "$LOGFILE" 2>/dev/null | head -1) || true
+            [ -n "$SECRET" ] && break
+            sleep 1
+          done
+
+          if [ -z "$SECRET" ]; then
+            echo "::error::Failed to extract stripe listen signing secret"
+            cat "$LOGFILE"
+            exit 1
+          fi
+
+          # Update SSM with the stripe listen secret
+          aws ssm put-parameter \
+            --name "/filone/${SST_STAGE}/stripe-webhook-secret" \
+            --value "$SECRET" \
+            --type SecureString \
+            --overwrite > /dev/null
+          echo "SSM updated with stripe listen signing secret"
+
       - name: Run integration tests
         run: pnpm test:integration
+
+      - name: Stop Stripe CLI forwarding
+        if: always() && steps.stripe-listen.outputs.pid != ''
+        run: kill ${{ steps.stripe-listen.outputs.pid }} 2>/dev/null || true
 
   deploy:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
