@@ -4,7 +4,7 @@ export enum Stage {
   Staging = 'staging',
 }
 
-export const DOCS_URL = 'https://fil.one/docs';
+export const DOCS_URL = 'https://docs.fil.one';
 
 /** Available S3 regions. */
 export enum S3Region {
