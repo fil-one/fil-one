@@ -245,6 +245,8 @@ export default $config({
 
     const siteUrl = router.url;
 
+    const auth0Domain = isProduction ? 'auth.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
+
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
     // This Lambda is intentionally NOT created via createFn(). Its ARN is embedded in the
     // CloudFormation SetupStack template; changing the ARN (e.g. by migrating to createFn) would
@@ -260,7 +262,7 @@ export default $config({
         ...(sendGridApiKey ? [sendGridApiKey] : []),
       ],
       environment: {
-        AUTH0_DOMAIN: isProduction ? 'fil-one.us.auth0.com' : 'dev-oar2nhqh58xf5pwf.us.auth0.com',
+        AUTH0_DOMAIN: auth0Domain,
       },
       permissions: [
         {
@@ -329,7 +331,7 @@ export default $config({
 
     const sharedEnv: Record<string, $util.Input<string>> = {
       FILONE_STAGE: $app.stage,
-      AUTH0_DOMAIN: isProduction ? 'fil-one.us.auth0.com' : 'dev-oar2nhqh58xf5pwf.us.auth0.com',
+      AUTH0_DOMAIN: auth0Domain,
       AUTH0_AUDIENCE: isProduction ? 'https://app.fil.one' : 'https://staging.fil.one',
     };
 
