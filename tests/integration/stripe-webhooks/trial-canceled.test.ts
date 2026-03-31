@@ -41,7 +41,8 @@ describe('Trial Canceled (customer.subscription.deleted)', () => {
 
     await stripe.subscriptions.cancel(subId);
 
-    await sleep(15 * 1000);
+    // 30s sleep to allow for aurora API calls and retries
+    await sleep(30 * 1000);
 
     const record = await getBillingRecord(userId);
     expect(record).toMatchObject({

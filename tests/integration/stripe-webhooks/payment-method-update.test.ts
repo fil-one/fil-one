@@ -33,6 +33,9 @@ describe('Payment Method Update (customer.updated)', () => {
   it('should sync new payment method last4 after customer portal card update', async () => {
     const stripe = getStripeClient();
 
+    // Wait for initial webhook processing
+    await sleep(15 * 1000);
+
     // Attach a second card (Mastercard) and set as default
     const newPm = await stripe.paymentMethods.attach('pm_card_mastercard', {
       customer: cusId,
