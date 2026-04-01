@@ -12,7 +12,7 @@ export {
   createTestCustomer,
 } from '../helpers.js';
 
-import { getStripeClient, pollUntil } from '../helpers.js';
+import { getStripeClient, pollUntil, getBillingRecord } from '../helpers.js';
 import { Resource } from 'sst';
 
 // =============================================================================
@@ -40,13 +40,14 @@ export async function attachValidCard(customerId: string): Promise<string> {
   return pm.id;
 }
 
-export async function attachDecliningCard(customerId: string): Promise<void> {
+export async function attachDecliningCard(customerId: string): Promise<string> {
   const pm = await getStripeClient().paymentMethods.attach('pm_card_chargeCustomerFail', {
     customer: customerId,
   });
   await getStripeClient().customers.update(customerId, {
     invoice_settings: { default_payment_method: pm.id },
   });
+  return pm.id;
 }
 
 export async function createAndPayInvoice(customerId: string): Promise<string> {
@@ -96,7 +97,54 @@ export async function createAndFailInvoice(customerId: string): Promise<string> 
 // Waiting
 // =============================================================================
 
-export async function pollTestClockReady(clockId: string, timeoutSeconds = 120): Promise<void> {
+export async function pollForBillingStatusChange({
+  userId,
+  expectedStatus,
+  fromStatus,
+  timeoutMs = 30_000,
+}: {
+  userId: string;
+  expectedStatus: string;
+  fromStatus: string;
+  timeoutMs?: number;
+}): Promise<void> {
+  await pollUntil(async () => {
+    const record = await getBillingRecord(userId);
+    if (!record) return null;
+    const status = record.subscriptionStatus?.S;
+    if (status === expectedStatus) return record;
+    if (status === fromStatus) return null;
+    throw new Error(
+      `Unexpected subscriptionStatus "${status}" while polling for "${expectedStatus}" (from: "${fromStatus}")`,
+    );
+  }, timeoutMs);
+}
+
+export async function pollForPaymentMethod({
+  userId,
+  paymentMethodId,
+  timeoutMs = 30_000,
+}: {
+  userId: string;
+  paymentMethodId: string;
+  timeoutMs?: number;
+}): Promise<void> {
+  await pollUntil(async () => {
+    const record = await getBillingRecord(userId);
+    if (!record) return null;
+    const pmId = record.paymentMethodId?.S;
+    if (pmId === paymentMethodId) return record;
+    return null;
+  }, timeoutMs);
+}
+
+export async function pollTestClockReady({
+  clockId,
+  timeoutSeconds = 120,
+}: {
+  clockId: string;
+  timeoutSeconds?: number;
+}): Promise<void> {
   await pollUntil(
     async () => {
       const clockState = await getStripeClient().testHelpers.testClocks.retrieve(clockId);

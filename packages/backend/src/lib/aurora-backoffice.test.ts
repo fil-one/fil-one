@@ -17,6 +17,10 @@ vi.mock('./auth-secrets.js', () => ({
   }),
 }));
 
+vi.mock('./aurora-api-metrics.js', () => ({
+  instrumentClient: vi.fn(),
+}));
+
 const mockPostTenants = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockGetTenants = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockPostSetup = vi.fn((_options: Record<string, unknown>) => ({}));
