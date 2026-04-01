@@ -13,7 +13,7 @@ export default $config({
         : (process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? 'us-west-2');
 
     const awsProvider: aws.ProviderArgs & { version: string } = {
-      version: '7.20.0',
+      version: require('@pulumi/aws/package.json').version,
       region,
     };
 
