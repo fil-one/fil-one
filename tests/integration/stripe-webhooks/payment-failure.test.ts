@@ -4,10 +4,11 @@ import {
   attachDecliningCard,
   seedBillingRecord,
   createAndFailInvoice,
-  sleep,
-  getBillingRecord,
   deleteBillingRecord,
   getStripeClient,
+  pollForBillingStatusChange,
+  pollForPaymentMethod,
+  getBillingRecord,
 } from './helpers.js';
 
 describe('Payment Failure (invoice.payment_failed)', () => {
@@ -17,8 +18,9 @@ describe('Payment Failure (invoice.payment_failed)', () => {
   beforeAll(async () => {
     userId = `test-pf-${crypto.randomUUID()}`;
     cusId = await createTestCustomer(userId);
-    await attachDecliningCard(cusId);
     await seedBillingRecord(userId, cusId, 'active');
+    const paymentMethodId = await attachDecliningCard(cusId);
+    await pollForPaymentMethod({ userId, paymentMethodId });
   });
 
   afterAll(async () => {
@@ -28,7 +30,11 @@ describe('Payment Failure (invoice.payment_failed)', () => {
 
   it('should set status to past_due and record failure timestamp', async () => {
     await createAndFailInvoice(cusId);
-    await sleep(15 * 1000);
+    await pollForBillingStatusChange({
+      userId,
+      expectedStatus: 'past_due',
+      fromStatus: 'active',
+    });
     const record = await getBillingRecord(userId);
     expect(record).toStrictEqual({
       pk: { S: `CUSTOMER#${userId}` },
