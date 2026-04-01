@@ -106,7 +106,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const averageStorageGbUsed = usage.averageStorageBytesUsed / GB_BYTES;
   const currentStorageBytes = storageSamples.at(-1)?.bytesUsed ?? 0;
   const totalEgressBytes = operationsSamples.reduce(
-    (sum, sample) => sum + (sample.rxBytes ?? 0),
+    (sum, sample) => sum + (sample.txBytes ?? 0),
     0,
   );
 
