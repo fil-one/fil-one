@@ -9,6 +9,11 @@ build/
 # SST
 .sst/
 
+# We don't need access to infra `Resource.{key}` at runtime,
+# so there is no need to keep the auto-generated sst-env.d.ts
+# file around.
+infra/sst-env.d.ts
+
 # TypeScript build output
 packages/*/dist/
 # Keep the stub dist for CDK synth; real build output is not tracked

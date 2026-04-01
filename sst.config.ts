@@ -12,7 +12,10 @@ export default $config({
         ? 'us-east-2'
         : (process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? 'us-west-2');
 
-    const awsProvider: Record<string, unknown> = { region };
+    const awsProvider: aws.ProviderArgs & { version: string } = {
+      version: '7.20.0',
+      region,
+    };
 
     if (isStaging) {
       awsProvider.allowedAccountIds = ['654654381893'];
@@ -158,7 +161,8 @@ export default $config({
         name: $interpolate`filone-${$app.stage}-security-headers`,
         securityHeadersConfig: {
           contentSecurityPolicy: {
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+            // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
             override: true,
           },
           frameOptions: {
@@ -245,6 +249,8 @@ export default $config({
 
     const siteUrl = router.url;
 
+    const auth0Domain = isProduction ? 'auth.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
+
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
     // This Lambda is intentionally NOT created via createFn(). Its ARN is embedded in the
     // CloudFormation SetupStack template; changing the ARN (e.g. by migrating to createFn) would
@@ -260,7 +266,7 @@ export default $config({
         ...(sendGridApiKey ? [sendGridApiKey] : []),
       ],
       environment: {
-        AUTH0_DOMAIN: isProduction ? 'fil-one.us.auth0.com' : 'dev-oar2nhqh58xf5pwf.us.auth0.com',
+        AUTH0_DOMAIN: auth0Domain,
       },
       permissions: [
         {
@@ -329,7 +335,7 @@ export default $config({
 
     const sharedEnv: Record<string, $util.Input<string>> = {
       FILONE_STAGE: $app.stage,
-      AUTH0_DOMAIN: isProduction ? 'fil-one.us.auth0.com' : 'dev-oar2nhqh58xf5pwf.us.auth0.com',
+      AUTH0_DOMAIN: auth0Domain,
       AUTH0_AUDIENCE: isProduction ? 'https://app.fil.one' : 'https://staging.fil.one',
     };
 
@@ -449,8 +455,8 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/access-keys/{keyId}',
       handler: 'delete-access-key',
-
-      permissions: auroraS3GatewayPermissions,
+      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
+      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
     });
     addRoute({
       method: 'GET',

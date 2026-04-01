@@ -9,6 +9,7 @@ import {
   listS3AccessKeys,
 } from '@filone/aurora-portal-client';
 import type { AccessKeyPermission } from '@filone/shared';
+import { instrumentClient } from './aurora-api-metrics.js';
 
 const ssm = new SSMClient({});
 
@@ -33,6 +34,20 @@ export class AuroraValidationError extends Error {
   }
 }
 
+async function createPortalClient(tenantId: string) {
+  const baseUrl = process.env.AURORA_PORTAL_URL!;
+  const stage = process.env.FILONE_STAGE!;
+  const apiKey = await getAuroraPortalApiKey(stage, tenantId);
+
+  const client = createClient({
+    baseUrl,
+    headers: { 'X-Api-Key': apiKey },
+  });
+  instrumentClient(client, { apiName: 'aurora-portal' });
+
+  return client;
+}
+
 export interface CreateAuroraBucketOptions {
   tenantId: string;
   bucketName: string;
@@ -42,14 +57,7 @@ export async function createAuroraBucket({
   tenantId,
   bucketName,
 }: CreateAuroraBucketOptions): Promise<void> {
-  const baseUrl = process.env.AURORA_PORTAL_URL!;
-  const stage = process.env.FILONE_STAGE!;
-  const apiKey = await getAuroraPortalApiKey(stage, tenantId);
-
-  const client = createClient({
-    baseUrl,
-    headers: { 'X-Api-Key': apiKey },
-  });
+  const client = await createPortalClient(tenantId);
 
   const { error, response } = await createBucket({
     client,
@@ -111,14 +119,7 @@ export async function createAuroraAccessKey({
   buckets,
   expiresAt,
 }: CreateAuroraAccessKeyOptions): Promise<CreateAuroraAccessKeyResult> {
-  const baseUrl = process.env.AURORA_PORTAL_URL!;
-  const stage = process.env.FILONE_STAGE!;
-  const apiKey = await getAuroraPortalApiKey(stage, tenantId);
-
-  const client = createClient({
-    baseUrl,
-    headers: { 'X-Api-Key': apiKey },
-  });
+  const client = await createPortalClient(tenantId);
 
   const { data, error, response } = await createS3AccessKey({
     client,
@@ -196,14 +197,7 @@ export async function findAuroraAccessKeyByName({
   tenantId: string;
   keyName: string;
 }): Promise<FindAuroraAccessKeyResult | undefined> {
-  const baseUrl = process.env.AURORA_PORTAL_URL!;
-  const stage = process.env.FILONE_STAGE!;
-  const apiKey = await getAuroraPortalApiKey(stage, tenantId);
-
-  const client = createClient({
-    baseUrl,
-    headers: { 'X-Api-Key': apiKey },
-  });
+  const client = await createPortalClient(tenantId);
 
   // Step 1: List all access keys and find by name
   const { data: listData, error: listError } = await listS3AccessKeys({
@@ -274,14 +268,7 @@ export async function deleteAuroraAccessKey({
   tenantId: string;
   auroraKeyId: string;
 }): Promise<void> {
-  const baseUrl = process.env.AURORA_PORTAL_URL!;
-  const stage = process.env.FILONE_STAGE!;
-  const apiKey = await getAuroraPortalApiKey(stage, tenantId);
-
-  const client = createClient({
-    baseUrl,
-    headers: { 'X-Api-Key': apiKey },
-  });
+  const client = await createPortalClient(tenantId);
 
   const { error, response } = await deleteS3AccessKey({
     client,

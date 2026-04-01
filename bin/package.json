@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1002.0",
-    "@aws-sdk/client-ssm": "^3.1002.0",
-    "sst": "^4.1.10"
+    "@aws-sdk/client-dynamodb": "^3.1019.0",
+    "@aws-sdk/client-ssm": "^3.1019.0",
+    "sst": "^4.5.12"
   },
   "devDependencies": {
-    "@types/node": "^25.3.5"
+    "@types/node": "^25.5.0"
   }
 }

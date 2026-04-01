@@ -217,6 +217,7 @@ function setupMetricStreamPipeline(grafanaPrometheusAuth: sst.Secret) {
       { namespace: 'AWS/ApiGateway', metricNames: [] },
       { namespace: 'AWS/SQS', metricNames: [] },
       { namespace: 'AWS/DynamoDB', metricNames: [] },
+      { namespace: 'FilOne', metricNames: [] },
     ],
   });
 }
