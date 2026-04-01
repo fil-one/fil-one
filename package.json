@@ -28,17 +28,17 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
-    "@pulumi/aws": "^7.21.0",
+    "@pulumi/aws": "^7.23.0",
     "@pulumi/command": "^1.2.1",
-    "@types/node": "^24",
-    "aws-cdk-lib": "^2.241.0",
-    "constructs": "^10.5.1",
+    "@types/node": "^24.12.0",
+    "aws-cdk-lib": "^2.245.0",
+    "constructs": "^10.6.0",
     "husky": "^9.1.7",
-    "lint-staged": "^16.3.3",
-    "oxfmt": "^0.36.0",
-    "oxlint": "^1.52.0",
-    "oxlint-tsgolint": "^0.16.0",
-    "sst": "^4.2.4"
+    "lint-staged": "^16.4.0",
+    "oxfmt": "^0.42.0",
+    "oxlint": "^1.57.0",
+    "oxlint-tsgolint": "^0.18.1",
+    "sst": "^4.5.12"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs}": "oxlint --report-unused-disable-directives",

@@ -12,7 +12,10 @@ export default $config({
         ? 'us-east-2'
         : (process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? 'us-west-2');
 
-    const awsProvider: Record<string, unknown> = { region };
+    const awsProvider: aws.ProviderArgs & { version: string } = {
+      version: '7.20.0',
+      region,
+    };
 
     if (isStaging) {
       awsProvider.allowedAccountIds = ['654654381893'];

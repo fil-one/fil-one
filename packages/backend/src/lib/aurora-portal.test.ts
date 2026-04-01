@@ -23,6 +23,10 @@ vi.mock('@filone/aurora-portal-client', () => ({
   deleteS3AccessKey: (options: Record<string, unknown>) => mockDeleteAccessKey(options),
 }));
 
+vi.mock('./aurora-api-metrics.js', () => ({
+  instrumentClient: vi.fn(),
+}));
+
 process.env.AURORA_PORTAL_URL = 'https://api.portal.test.example.com/api';
 process.env.FILONE_STAGE = 'test';
 

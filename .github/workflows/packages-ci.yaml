@@ -55,6 +55,7 @@ jobs:
       AWS_REGION: us-east-2
     outputs:
       url: ${{ steps.deploy.outputs.url }}
+      sst-env-dirty: ${{ steps.sst-env-check.outputs.dirty }}
 
     steps:
       - uses: actions/checkout@v5
@@ -123,6 +124,22 @@ jobs:
             exit 1
           fi
           echo "url=$URL_TRIMMED" >> "$GITHUB_OUTPUT"
+
+      - name: Check sst-env.d.ts files are up to date
+        id: sst-env-check
+        run: |
+          if [ -n "$(git status --porcelain -- ':(glob)**/sst-env.d.ts')" ]; then
+            echo "dirty=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  check-sst-env:
+    needs: [deploy-preview]
+    if: needs.deploy-preview.outputs.sst-env-dirty == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::sst-env.d.ts files are out of date. Please run 'sst deploy' locally and commit the updated sst-env.d.ts files."
+          exit 1
 
   comment:
     name: Add Preview Environment Comment on PR
