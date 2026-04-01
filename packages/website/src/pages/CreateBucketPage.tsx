@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeftIcon,
   CheckCircleIcon,
@@ -15,6 +16,7 @@ import type {
 } from '@filone/shared';
 import { S3_REGION, CreateBucketSchema } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
+import { queryKeys } from '../lib/query-client.js';
 import { expiresAtFromForm } from '../lib/time.js';
 
 import { Input } from '../components/Input';
@@ -31,6 +33,7 @@ import { useToast } from '../components/Toast';
 export function CreateBucketPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   // Bucket fields
   const [name, setName] = useState('');
@@ -85,6 +88,8 @@ export function CreateBucketPage() {
         method: 'POST',
         body: JSON.stringify({ name: name.trim(), region }),
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
     } catch (err) {
       console.error('Failed to create bucket:', err);
       toast.error(err instanceof Error ? err.message : 'Failed to create bucket');
@@ -105,6 +110,7 @@ export function CreateBucketPage() {
             expiresAt: expiresAtFromForm(expiration, customDate),
           }),
         });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
         setCredentials({
           accessKeyId: keyResponse.accessKeyId,
           secretAccessKey: keyResponse.secretAccessKey,

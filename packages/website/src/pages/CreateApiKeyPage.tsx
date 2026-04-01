@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type {
@@ -9,6 +10,7 @@ import type {
 } from '@filone/shared';
 import { CreateAccessKeySchema } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
+import { queryKeys } from '../lib/query-client.js';
 import { expiresAtFromForm } from '../lib/time.js';
 import { AccessKeyExpirationFields } from '../components/AccessKeyExpirationFields.js';
 import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';
@@ -26,6 +28,7 @@ import { useToast } from '../components/Toast/index.js';
 export function CreateApiKeyPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const [keyName, setKeyName] = useState('');
   const [permissions, setPermissions] = useState<AccessKeyPermission[]>(['read', 'write', 'list']);
@@ -59,6 +62,8 @@ export function CreateApiKeyPage() {
         method: 'POST',
         body: JSON.stringify(body),
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       setCredentials({
         accessKeyId: response.accessKeyId,
         secretAccessKey: response.secretAccessKey,

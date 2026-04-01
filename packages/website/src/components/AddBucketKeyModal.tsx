@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import type { AccessKeyPermission, CreateAccessKeyResponse } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
+import { queryKeys } from '../lib/query-client.js';
 import { expiresAtFromForm } from '../lib/time.js';
 
 import { AccessKeyExpirationFields } from './AccessKeyExpirationFields.js';
@@ -35,6 +37,7 @@ export function AddBucketKeyModal({
   onKeyAdded,
 }: AddBucketKeyModalProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const [keyName, setKeyName] = useState('');
   const [permissions, setPermissions] = useState<AccessKeyPermission[]>([
@@ -84,6 +87,8 @@ export function AddBucketKeyModal({
         accessKeyId: response.accessKeyId,
         secretAccessKey: response.secretAccessKey,
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       onKeyAdded();
     } catch (err) {
       console.error('Failed to create access key:', err);

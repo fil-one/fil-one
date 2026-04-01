@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { LightbulbIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type {
@@ -7,6 +8,7 @@ import type {
   CreateAccessKeyResponse,
 } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
+import { queryKeys } from '../lib/query-client.js';
 import { expiresAtFromForm } from '../lib/time.js';
 import { AccessKeyExpirationFields } from './AccessKeyExpirationFields.js';
 import type { ExpirationOption } from './AccessKeyExpirationFields.js';
@@ -35,6 +37,7 @@ export type CreateAccessKeyModalProps = {
 
 export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyModalProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const [step, setStep] = useState<'form' | 'credentials'>('form');
   const [keyName, setKeyName] = useState('');
@@ -82,6 +85,8 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
           expiresAt: expiresAtFromForm(expiration, customDate),
         }),
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       setResult(response);
       setStep('credentials');
     } catch (err) {

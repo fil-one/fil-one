@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { SpinnerIcon } from '@phosphor-icons/react/dist/ssr';
 import type { AccessKeyBucketScope, ListBucketsResponse } from '@filone/shared';
@@ -6,6 +6,7 @@ import type { AccessKeyBucketScope, ListBucketsResponse } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { Checkbox } from './Checkbox.js';
 import { Icon } from './Icon.js';
+import { queryKeys } from '../lib/query-client.js';
 
 type AccessKeyBucketScopeFieldsProps = {
   bucketScope: AccessKeyBucketScope;
@@ -20,36 +21,13 @@ export function AccessKeyBucketScopeFields({
   selectedBuckets,
   onSelectedBucketsChange,
 }: AccessKeyBucketScopeFieldsProps) {
-  const [buckets, setBuckets] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fetched, setFetched] = useState(false);
-
-  useEffect(() => {
-    if (bucketScope !== 'specific' || fetched) return;
-
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    apiRequest<ListBucketsResponse>('/buckets')
-      .then((data) => {
-        if (cancelled) return;
-        setBuckets(data.buckets.map((b) => b.name));
-        setFetched(true);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to load buckets');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [bucketScope, fetched]);
+  const { data, isPending, isError, error } = useQuery({
+    queryKey: queryKeys.buckets,
+    queryFn: () => apiRequest<ListBucketsResponse>('/buckets'),
+    enabled: bucketScope === 'specific',
+  });
+  const buckets = data?.buckets.map((b) => b.name) ?? [];
+  const loading = isPending && bucketScope === 'specific';
 
   function toggleBucket(name: string) {
     if (selectedBuckets.includes(name)) {
@@ -95,13 +73,17 @@ export function AccessKeyBucketScopeFields({
             </div>
           )}
 
-          {error && <p className="px-4 py-3 text-sm text-red-600">{error}</p>}
+          {isError && (
+            <p className="px-4 py-3 text-sm text-red-600">
+              {error?.message ?? 'Failed to load buckets'}
+            </p>
+          )}
 
-          {!loading && !error && buckets.length === 0 && (
+          {!loading && !isError && buckets.length === 0 && (
             <p className="px-4 py-3 text-sm text-zinc-500">No buckets found.</p>
           )}
 
-          {!loading && !error && buckets.length > 0 && (
+          {!loading && !isError && buckets.length > 0 && (
             <div className="flex flex-col">
               {buckets.map((name) => (
                 <label

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import {
   PlusIcon,
   DatabaseIcon,
@@ -7,6 +7,7 @@ import {
   XIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
 
 const UsageTrends = lazy(() => import('./UsageTrends'));
 
@@ -15,10 +16,11 @@ import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
 
 import { PlanId, SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
-import type { UsageResponse, BillingInfo, RecentActivity } from '@filone/shared';
+import type { RecentActivity } from '@filone/shared';
 
 import { getUsage, getBilling, getActivity } from '../lib/api.js';
 import { daysUntil, formatDateTime, timeAgo } from '../lib/time.js';
+import { queryKeys } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -98,26 +100,26 @@ function DashboardSkeleton() {
 // ---------------------------------------------------------------------------
 
 export function DashboardPage() {
-  const [usage, setUsage] = useState<UsageResponse | null>(null);
-  const [billing, setBilling] = useState<BillingInfo | null>(null);
-  const [activities, setActivities] = useState<RecentActivity[]>([]);
-  const [loading, setLoading] = useState(true);
   const [trialBannerVisible, setTrialBannerVisible] = useState(true);
 
-  useEffect(() => {
-    Promise.all([getUsage(), getBilling(), getActivity({ limit: 5 })])
-      .then(([u, b, a]) => {
-        setUsage(u);
-        setBilling(b);
-        setActivities(a.activities);
-      })
-      .catch(() => {
-        // Errors handled by apiRequest (401 redirect, etc.)
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  const { data: usage, isPending: usagePending } = useQuery({
+    queryKey: queryKeys.usage,
+    queryFn: getUsage,
+  });
 
-  if (loading || !usage || !billing) {
+  const { data: billing, isPending: billingPending } = useQuery({
+    queryKey: queryKeys.billing,
+    queryFn: getBilling,
+  });
+
+  // Activity is optional — silently ignored if it fails
+  const { data: activityData } = useQuery({
+    queryKey: queryKeys.activityRecent(5),
+    queryFn: () => getActivity({ limit: 5 }),
+  });
+  const activities: RecentActivity[] = activityData?.activities ?? [];
+
+  if (usagePending || billingPending || !usage || !billing) {
     return <DashboardSkeleton />;
   }
 

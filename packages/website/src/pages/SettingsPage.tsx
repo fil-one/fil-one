@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
@@ -10,6 +11,7 @@ import { useToast } from '../components/Toast';
 import { getMe, updateProfile, changePassword } from '../lib/api.js';
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
+import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Section card wrapper
@@ -124,40 +126,30 @@ function SettingRow({
 
 export function SettingsPage() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const [me, setMe] = useState<MeResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: me, isPending } = useQuery({
+    queryKey: queryKeys.me,
+    queryFn: () => getMe(),
+    staleTime: ME_STALE_TIME,
+  });
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [orgName, setOrgName] = useState('');
+  const [initialized, setInitialized] = useState(false);
   const [saving, setSaving] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
 
+  // Initialize form fields once when data first arrives
   useEffect(() => {
-    let cancelled = false;
-    async function fetch() {
-      try {
-        const data = await getMe();
-        if (!cancelled) {
-          setMe(data);
-          setName(data.name ?? '');
-          setEmail(data.email ?? '');
-          setOrgName(data.orgName ?? '');
-        }
-      } catch (err) {
-        if (!cancelled) {
-          toast.error(err instanceof Error ? err.message : 'Failed to load settings');
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+    if (me && !initialized) {
+      setName(me.name ?? '');
+      setEmail(me.email ?? '');
+      setOrgName(me.orgName ?? '');
+      setInitialized(true);
     }
-    void fetch();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [me, initialized]);
 
   const social = isSocialConnection(me?.connectionType);
   const provider = getProvider(me?.connectionType);
@@ -182,20 +174,22 @@ export function SettingsPage() {
     setSaving(true);
     try {
       const result = await updateProfile(validated.data);
-      const updated = { ...me } as MeResponse;
-      if (result.name !== undefined) {
-        setName(result.name);
-        updated.name = result.name;
-      }
-      if (result.email !== undefined) {
-        setEmail(result.email);
-        updated.email = result.email;
-      }
-      if (result.orgName !== undefined) {
-        setOrgName(result.orgName);
-        updated.orgName = result.orgName;
-      }
-      setMe(updated);
+
+      // Update local form state to reflect saved values
+      if (result.name !== undefined) setName(result.name);
+      if (result.email !== undefined) setEmail(result.email);
+      if (result.orgName !== undefined) setOrgName(result.orgName);
+
+      // Update the cache immediately so hasChanges goes false without waiting for refetch
+      queryClient.setQueryData<MeResponse>(queryKeys.me, (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          ...(result.name !== undefined ? { name: result.name } : {}),
+          ...(result.email !== undefined ? { email: result.email } : {}),
+          ...(result.orgName !== undefined ? { orgName: result.orgName } : {}),
+        };
+      });
 
       if (result.email && result.email !== me?.email) {
         toast.success('Profile updated. Check your inbox to verify your new email.');
@@ -221,7 +215,7 @@ export function SettingsPage() {
     }
   }
 
-  if (loading) {
+  if (isPending) {
     return (
       <div className="flex items-center justify-center p-16">
         <Spinner ariaLabel="Loading settings" />
