@@ -14,9 +14,6 @@ importers:
       '@filone/shared':
         specifier: workspace:*
         version: link:packages/shared
-      '@sentry/vite-plugin':
-        specifier: ^5.1.1
-        version: 5.1.1(rollup@4.60.0)
     devDependencies:
       '@playwright/test':
         specifier: ^1.58.2
@@ -226,6 +223,9 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
+      '@sentry/vite-plugin':
+        specifier: ^5.1.1
+        version: 5.1.1(rollup@4.60.0)
       '@tailwindcss/typography':
         specifier: ^0.5.19
         version: 0.5.19(tailwindcss@4.2.2)
