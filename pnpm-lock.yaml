@@ -199,8 +199,8 @@ importers:
         specifier: ^8.11.0
         version: 8.11.0
       '@tanstack/react-router':
-        specifier: ^1.168.7
-        version: 1.168.7(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: ^1.168.8
+        version: 1.168.8(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -2013,8 +2013,8 @@ packages:
     resolution: {integrity: sha512-NaOGLRrddszbQj9upGat6HG/4TKvXLvu+osAIgfxPYA+eIvYKv8GKDJOrY2D3/U9MRnKfMWD7bU4jeD4xmqyIg==}
     engines: {node: '>=20.19'}
 
-  '@tanstack/react-router@1.168.7':
-    resolution: {integrity: sha512-fW/HvQja4PQeu9lsoyh+pXpZ0UXezbpQkkJvCuH6tHAaW3jvPkjh14lfadrNNiY+pXT7WiMTB3afGhTCC78PDQ==}
+  '@tanstack/react-router@1.168.8':
+    resolution: {integrity: sha512-t0S0QueXubBKmI9eLPcN/A1sLQgTu8/yHerjrvvsGeD12zMdw0uJPKwEKpStQF2OThQtw64cs34uUSYXBUTSNw==}
     engines: {node: '>=20.19'}
     peerDependencies:
       react: '>=18.0.0 || >=19.0.0'
@@ -2032,8 +2032,8 @@ packages:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
       react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  '@tanstack/router-core@1.168.6':
-    resolution: {integrity: sha512-okCno3pImpLFQMJ/4zqEIGjIV5yhxLGj0JByrzQDQehORN1y1q6lJUezT0KPK5qCQiKUApeWaboLPjgBVx1kaQ==}
+  '@tanstack/router-core@1.168.7':
+    resolution: {integrity: sha512-z4UEdlzMrFaKBsG4OIxlZEm+wsYBtEp//fnX6kW18jhQpETNcM6u2SXNdX+bcIYp6AaR7ERS3SBENzjC/xxwQQ==}
     engines: {node: '>=20.19'}
     hasBin: true
 
@@ -2361,8 +2361,8 @@ packages:
     resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
     engines: {node: 18 || 20 || >=22}
 
-  baseline-browser-mapping@2.10.11:
-    resolution: {integrity: sha512-DAKrHphkJyiGuau/cFieRYhcTFeK/lBuD++C7cZ6KZHbMhBrisoi+EvhQ5RZrIfV5qwsW8kgQ07JIC+MDJRAhg==}
+  baseline-browser-mapping@2.10.12:
+    resolution: {integrity: sha512-qyq26DxfY4awP2gIRXhhLWfwzwI+N5Nxk6iQi8EFizIaWIjqicQTE4sLnZZVdeKPRcVNoJOkkpfzoIYuvCKaIQ==}
     engines: {node: '>=6.0.0'}
     hasBin: true
 
@@ -6326,11 +6326,11 @@ snapshots:
 
   '@tanstack/history@1.161.6': {}
 
-  '@tanstack/react-router@1.168.7(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@tanstack/react-router@1.168.8(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
       '@tanstack/history': 1.161.6
       '@tanstack/react-store': 0.9.3(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      '@tanstack/router-core': 1.168.6
+      '@tanstack/router-core': 1.168.7
       isbot: 5.1.36
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
@@ -6348,7 +6348,7 @@ snapshots:
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
 
-  '@tanstack/router-core@1.168.6':
+  '@tanstack/router-core@1.168.7':
     dependencies:
       '@tanstack/history': 1.161.6
       cookie-es: 2.0.0
@@ -6693,7 +6693,7 @@ snapshots:
 
   balanced-match@4.0.4: {}
 
-  baseline-browser-mapping@2.10.11: {}
+  baseline-browser-mapping@2.10.12: {}
 
   bidi-js@1.0.3:
     dependencies:
@@ -6715,7 +6715,7 @@ snapshots:
 
   browserslist@4.28.1:
     dependencies:
-      baseline-browser-mapping: 2.10.11
+      baseline-browser-mapping: 2.10.12
       caniuse-lite: 1.0.30001781
       electron-to-chromium: 1.5.328
       node-releases: 2.0.36
