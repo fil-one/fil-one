@@ -66,7 +66,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const objectCount = latestStorage?.objectCount ?? 0;
 
   const egressSample = operationsSamples.at(-1);
-  const egressUsedBytes = egressSample?.rxBytes ?? 0;
+  const egressUsedBytes = egressSample?.txBytes ?? 0;
 
   const bucketCount = tenantInfo?.bucketCount ?? 0;
   const bucketLimit = tenantInfo?.bucketQuantityLimit ?? 100;
