@@ -63,10 +63,6 @@ importers:
       sst:
         specifier: ^4.5.12
         version: 4.5.12
-    devDependencies:
-      '@types/node':
-        specifier: ^25.5.0
-        version: 25.5.0
 
   infra:
     devDependencies:
@@ -6486,6 +6482,7 @@ snapshots:
   '@types/node@25.5.0':
     dependencies:
       undici-types: 7.18.2
+    optional: true
 
   '@types/react-dom@19.2.3(@types/react@19.2.14)':
     dependencies:
@@ -8255,7 +8252,8 @@ snapshots:
 
   undici-types@7.16.0: {}
 
-  undici-types@7.18.2: {}
+  undici-types@7.18.2:
+    optional: true
 
   undici@7.24.6: {}
 
