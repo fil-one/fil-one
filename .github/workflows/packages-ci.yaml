@@ -126,7 +126,7 @@ jobs:
 
       - name: Check sst-env.d.ts files are up to date
         run: |
-          if ! git diff --exit-code '**/sst-env.d.ts'; then
+          if [ -n "$(git status --porcelain -- ':(glob)**/sst-env.d.ts')" ]; then
             echo "::error::sst-env.d.ts files are out of date. Please run 'sst deploy' locally and commit the updated sst-env.d.ts files."
             exit 1
           fi
@@ -159,7 +159,7 @@ jobs:
             | | |
             |---|---|
             | **Latest commit** | `${{ github.event.pull_request.head.sha }}` |
-            | **Status** | ✅ Deploy successful |
+            | **Status** | ${{ needs.deploy-preview.result == 'success' && '✅ Deploy successful' || '❌ Deploy failed' }} |
             | **Preview URL** | [${{ needs.deploy-preview.outputs.url }}](${{ needs.deploy-preview.outputs.url }}) |
 
   e2e-tests:
