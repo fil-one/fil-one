@@ -162,7 +162,7 @@ export default $config({
         securityHeadersConfig: {
           contentSecurityPolicy: {
             // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
             override: true,
           },
           frameOptions: {
@@ -182,10 +182,6 @@ export default $config({
             override: true,
           },
         },
-        // Future: Sentry
-        //   script-src: add https://*.sentry.io (or your specific DSN host)
-        //   connect-src: add https://*.ingest.sentry.io
-        //
         // Future: Plausible
         //   script-src: add https://plausible.io (or self-hosted domain)
         //   connect-src: add https://plausible.io/api
