@@ -3,26 +3,22 @@ import {
   createTestCustomer,
   attachValidCard,
   seedBillingRecord,
-  sleep,
   getBillingRecord,
   deleteBillingRecord,
   getStripeClient,
+  pollForPaymentMethod,
 } from './helpers.js';
 
 describe('Payment Method Update (customer.updated)', () => {
   let userId: string;
   let cusId: string;
-  let firstPmId: string;
 
   beforeAll(async () => {
     userId = `test-pmu-${crypto.randomUUID()}`;
     cusId = await createTestCustomer(userId);
-    firstPmId = await attachValidCard(cusId);
-    await seedBillingRecord(userId, cusId, 'active', {
-      paymentMethodId: { S: firstPmId },
-      paymentMethodLast4: { S: '4242' },
-      paymentMethodBrand: { S: 'visa' },
-    });
+    await seedBillingRecord(userId, cusId, 'active');
+    const firstPmId = await attachValidCard(cusId);
+    await pollForPaymentMethod({ userId, paymentMethodId: firstPmId });
   });
 
   afterAll(async () => {
@@ -41,8 +37,8 @@ describe('Payment Method Update (customer.updated)', () => {
       invoice_settings: { default_payment_method: newPm.id },
     });
 
-    // Wait for webhook delivery and processing
-    await sleep(15 * 1000);
+    // Wait for customer.updated webhook to process the new payment method
+    await pollForPaymentMethod({ userId, paymentMethodId: newPm.id });
 
     const record = await getBillingRecord(userId);
     expect(record).toBeTruthy();
