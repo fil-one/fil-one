@@ -55,6 +55,7 @@ jobs:
       AWS_REGION: us-east-2
     outputs:
       url: ${{ steps.deploy.outputs.url }}
+      sst-env-dirty: ${{ steps.sst-env-check.outputs.dirty }}
 
     steps:
       - uses: actions/checkout@v5
@@ -125,16 +126,25 @@ jobs:
           echo "url=$URL_TRIMMED" >> "$GITHUB_OUTPUT"
 
       - name: Check sst-env.d.ts files are up to date
+        id: sst-env-check
         run: |
           if [ -n "$(git status --porcelain -- ':(glob)**/sst-env.d.ts')" ]; then
-            echo "::error::sst-env.d.ts files are out of date. Please run 'sst deploy' locally and commit the updated sst-env.d.ts files."
-            exit 1
+            echo "dirty=true" >> "$GITHUB_OUTPUT"
           fi
+
+  check-sst-env:
+    name: Check sst-env.d.ts files are up to date
+    needs: [deploy-preview]
+    if: needs.deploy-preview.outputs.sst-env-dirty == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::sst-env.d.ts files are out of date. Please run 'sst deploy' locally and commit the updated sst-env.d.ts files."
+          exit 1
 
   comment:
     name: Add Preview Environment Comment on PR
-    # always(): run even when deploy-preview fails (e.g. sst-env.d.ts out of date)
-    if: always() && github.event_name == 'pull_request' && needs.deploy-preview.outputs.url != ''
+    if: github.event_name == 'pull_request' && needs.deploy-preview.outputs.url != ''
     needs: [deploy-preview]
     runs-on: ubuntu-latest
     permissions:
@@ -159,7 +169,7 @@ jobs:
             | | |
             |---|---|
             | **Latest commit** | `${{ github.event.pull_request.head.sha }}` |
-            | **Status** | ${{ needs.deploy-preview.result == 'success' && '✅ Deploy successful' || '❌ Deploy failed' }} |
+            | **Status** | ✅ Deploy successful |
             | **Preview URL** | [${{ needs.deploy-preview.outputs.url }}](${{ needs.deploy-preview.outputs.url }}) |
 
   e2e-tests:
