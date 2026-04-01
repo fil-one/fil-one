@@ -157,7 +157,7 @@ export default $config({
     // ── CloudFront security headers (CSP applied to the HTML document) ──
     const sentryCspEndpoint =
       'https://o4507369657991168.ingest.us.sentry.io/api/4511144562655232/security/' +
-      `?sentry_key=a67c49004e3562393b7c63deedcbb951&sentry_environment=${stage}`;
+      `?sentry_key=a67c49004e3562393b7c63deedcbb951&sentry_environment=${isProduction ? 'production' : 'staging'}`;
 
     const responseHeadersPolicy = new aws.cloudfront.ResponseHeadersPolicy(
       'WebsiteSecurityHeaders',
