@@ -13,6 +13,7 @@
     "@filone/shared": "workspace:*",
     "@headlessui/react": "^2.2.9",
     "@phosphor-icons/react": "^2.1.10",
+    "@plausible-analytics/tracker": "^0.4.4",
     "@sentry/react": "^10.46.0",
     "@stripe/react-stripe-js": "^5.6.1",
     "@stripe/stripe-js": "^8.11.0",
