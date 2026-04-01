@@ -62,6 +62,7 @@ export default $config({
     $transform(sst.aws.Function, (args) => {
       args.runtime = args.runtime ?? 'nodejs24.x';
       args.memory = args.memory ?? '512 MB';
+      args.architecture = args.architecture ?? 'arm64';
     });
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
