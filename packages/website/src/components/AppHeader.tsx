@@ -1,24 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { BookOpenIcon, SignOutIcon } from '@phosphor-icons/react/dist/ssr';
 import { DOCS_URL } from '@filone/shared';
-import type { MeResponse } from '@filone/shared';
 import { getMe, logout } from '../lib/api.js';
-import { useToast } from './Toast';
+import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
 export function AppHeader() {
-  const [me, setMe] = useState<MeResponse | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const { toast } = useToast();
 
-  useEffect(() => {
-    getMe()
-      .then(setMe)
-      .catch(() => {
-        toast.error('Failed to refresh user info');
-      });
-  }, []);
+  const { data: me } = useQuery({
+    queryKey: queryKeys.me,
+    queryFn: () => getMe(),
+    staleTime: ME_STALE_TIME,
+  });
 
   useEffect(() => {
     if (!menuOpen) return;

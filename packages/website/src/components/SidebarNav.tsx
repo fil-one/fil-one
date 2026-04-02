@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import {
   SquaresFourIcon,
   DatabaseIcon,
@@ -10,12 +9,13 @@ import {
   BookOpenIcon,
   ChatCircleIcon,
 } from '@phosphor-icons/react/dist/ssr';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 import { ProgressBar } from './ProgressBar.js';
 import { Button } from './Button.js';
 import { DOCS_URL, SubscriptionStatus, getUsageLimits, formatBytes } from '@filone/shared';
-import type { BillingInfo, UsageResponse } from '@filone/shared';
 import { getBilling, getUsage } from '../lib/api.js';
+import { queryKeys } from '../lib/query-client.js';
 import { daysUntil, formatDateTime } from '../lib/time.js';
 
 type SidebarNavProps = {
@@ -39,26 +39,8 @@ const navItems: NavItem[] = [
 
 export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
-  const [billing, setBilling] = useState<BillingInfo | null>(null);
-  const [usage, setUsage] = useState<UsageResponse | null>(null);
-
-  useEffect(() => {
-    const refresh = () => {
-      getBilling()
-        .then(setBilling)
-        .catch(() => {
-          /* silent */
-        });
-      getUsage()
-        .then(setUsage)
-        .catch(() => {
-          /* silent */
-        });
-    };
-    refresh();
-    window.addEventListener('billing:updated', refresh);
-    return () => window.removeEventListener('billing:updated', refresh);
-  }, []);
+  const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
+  const { data: usage } = useQuery({ queryKey: queryKeys.usage, queryFn: getUsage });
 
   const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
   const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod;

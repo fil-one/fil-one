@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import type { BucketsBucketCreateRequest } from '@filone/aurora-portal-client';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -97,7 +98,10 @@ describe('createAuroraBucket', () => {
     expect(mockPostBucket).toHaveBeenCalledWith({
       client: 'mock-portal-client',
       path: { tenantId: 'tenant-1' },
-      body: { name: 'my-bucket' },
+      body: {
+        name: 'my-bucket',
+        encrypted: true,
+      } satisfies BucketsBucketCreateRequest,
       throwOnError: false,
     });
   });

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { LightbulbIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type {
@@ -7,6 +8,7 @@ import type {
   CreateAccessKeyResponse,
 } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
+import { queryKeys } from '../lib/query-client.js';
 import { expiresAtFromForm } from '../lib/time.js';
 import { AccessKeyExpirationFields } from './AccessKeyExpirationFields.js';
 import type { ExpirationOption } from './AccessKeyExpirationFields.js';
@@ -35,6 +37,7 @@ export type CreateAccessKeyModalProps = {
 
 export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyModalProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const [step, setStep] = useState<'form' | 'credentials'>('form');
   const [keyName, setKeyName] = useState('');
@@ -48,7 +51,6 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
   const [selectedBuckets, setSelectedBuckets] = useState<string[]>([]);
   const [expiration, setExpiration] = useState<ExpirationOption>('never');
   const [customDate, setCustomDate] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
   const [result, setResult] = useState<CreateAccessKeyResponse | null>(null);
 
   function reset() {
@@ -59,7 +61,6 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
     setSelectedBuckets([]);
     setExpiration('never');
     setCustomDate(null);
-    setCreating(false);
     setResult(null);
   }
 
@@ -68,27 +69,38 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
     onClose();
   }
 
-  async function handleCreate() {
-    if (!keyName.trim() || permissions.length === 0) return;
-    setCreating(true);
-    try {
-      const response = await apiRequest<CreateAccessKeyResponse>('/access-keys', {
+  const createKeyMutation = useMutation({
+    mutationFn: (body: {
+      keyName: string;
+      permissions: AccessKeyPermission[];
+      bucketScope: AccessKeyBucketScope;
+      buckets?: string[];
+      expiresAt?: string | null;
+    }) =>
+      apiRequest<CreateAccessKeyResponse>('/access-keys', {
         method: 'POST',
-        body: JSON.stringify({
-          keyName: keyName.trim(),
-          permissions,
-          bucketScope,
-          buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
-          expiresAt: expiresAtFromForm(expiration, customDate),
-        }),
-      });
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (response) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       setResult(response);
       setStep('credentials');
-    } catch (err) {
+    },
+    onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to create access key');
-    } finally {
-      setCreating(false);
-    }
+    },
+  });
+
+  function handleCreate() {
+    if (!keyName.trim() || permissions.length === 0) return;
+    createKeyMutation.mutate({
+      keyName: keyName.trim(),
+      permissions,
+      bucketScope,
+      buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
+      expiresAt: expiresAtFromForm(expiration, customDate),
+    });
   }
 
   function handleDone() {
@@ -109,7 +121,10 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
 
   const bucketsValid = bucketScope === 'all' || selectedBuckets.length > 0;
   const canSubmit =
-    keyName.trim().length > 0 && permissions.length > 0 && bucketsValid && !creating;
+    keyName.trim().length > 0 &&
+    permissions.length > 0 &&
+    bucketsValid &&
+    !createKeyMutation.isPending;
 
   return (
     <Modal open={open} onClose={handleClose} size="lg">
@@ -206,7 +221,7 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
             Cancel
           </Button>
           <Button variant="filled" disabled={!canSubmit} onClick={handleCreate}>
-            {creating ? 'Creating...' : 'Create key'}
+            {createKeyMutation.isPending ? 'Creating...' : 'Create key'}
           </Button>
         </div>
       </ModalFooter>

@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { Route as rootRoute } from './__root';
 import { AppShell } from '../components/AppShell';
 import { getMe } from '../lib/api.js';
+import { queryClient, queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
 export const Route = createRoute({
   id: 'app',
@@ -11,10 +12,16 @@ export const Route = createRoute({
     if (!document.cookie.includes('hs_logged_in')) {
       throw redirect({ href: '/login', reloadDocument: true });
     }
-    // Check if org is confirmed before allowing access to any app route
+    // Check if org is confirmed before allowing access to any app route.
+    // Uses queryClient.fetchQuery so the result is cached — subsequent useQuery(['me'])
+    // calls in components will get this data instantly without a second network request.
     let me;
     try {
-      me = await getMe();
+      me = await queryClient.fetchQuery({
+        queryKey: queryKeys.me,
+        queryFn: () => getMe(),
+        staleTime: ME_STALE_TIME,
+      });
     } catch {
       // Network error or 401 (handled by apiRequest) — let the app through
       return;

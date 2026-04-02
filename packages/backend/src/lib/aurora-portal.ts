@@ -65,7 +65,13 @@ export async function createAuroraBucket({
   const { error, response } = await createBucket({
     client,
     path: { tenantId },
-    body: { name: bucketName },
+    body: {
+      name: bucketName,
+      encrypted: true,
+      // TODO: https://linear.app/filecoin-foundation/issue/FIL-202/enable-objectlock-and-versioning-for-aurora-buckets
+      // lock: true,
+      // versioning: true,
+    },
     throwOnError: false,
   });
 
