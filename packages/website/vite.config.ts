@@ -49,6 +49,16 @@ export default defineConfig(({ mode }) => {
             changeOrigin: true,
             headers: { 'X-Dev-Origin': 'https://localhost:5173' },
           },
+          '/login': {
+            target: proxyTarget,
+            changeOrigin: true,
+            headers: { 'X-Dev-Origin': 'https://localhost:5173' },
+          },
+          '/logout': {
+            target: proxyTarget,
+            changeOrigin: true,
+            headers: { 'X-Dev-Origin': 'https://localhost:5173' },
+          },
         },
       }),
     },
