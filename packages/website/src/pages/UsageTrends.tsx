@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   AreaChart,
   Area,
@@ -9,12 +9,14 @@ import {
   YAxis,
   ResponsiveContainer,
 } from 'recharts';
+import { useQuery } from '@tanstack/react-query';
 
 import type { UsageTrendsResponse } from '@filone/shared';
 
 import { formatBytes, formatBytesShort } from '@filone/shared';
 import { getActivity } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
+import { queryKeys } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -22,23 +24,17 @@ import { formatDate } from '../lib/time.js';
 
 export function UsageTrends() {
   const [period, setPeriod] = useState<'7d' | '30d'>('7d');
-  const [data, setData] = useState<UsageTrendsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    setLoading(true);
-    getActivity({ period })
-      .then((res) => setData(res.trends))
-      .catch(() => {
-        // silent — dashboard still usable without trends
-      })
-      .finally(() => setLoading(false));
-  }, [period]);
+  const { data, isPending } = useQuery({
+    queryKey: queryKeys.activityTrends(period),
+    queryFn: () => getActivity({ period }),
+  });
 
-  const storageSeries = data?.storage ?? [];
+  const trends: UsageTrendsResponse | null = data?.trends ?? null;
+  const storageSeries = trends?.storage ?? [];
   const latestStorage =
     storageSeries.length > 0 ? storageSeries[storageSeries.length - 1].value : 0;
-  const latestObjects = data?.objects.reduce((sum, p) => sum + p.value, 0) ?? 0;
+  const latestObjects = trends?.objects.reduce((sum, p) => sum + p.value, 0) ?? 0;
 
   return (
     <div className="mb-6">
@@ -71,7 +67,7 @@ export function UsageTrends() {
         </div>
       </div>
 
-      {loading && !data ? (
+      {isPending && !trends ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="h-[180px] animate-pulse rounded-lg bg-zinc-100" />
           <div className="h-[180px] animate-pulse rounded-lg bg-zinc-100" />
@@ -90,7 +86,7 @@ export function UsageTrends() {
             </div>
             <ResponsiveContainer width="100%" height={160}>
               <AreaChart
-                data={data?.storage ?? []}
+                data={trends?.storage ?? []}
                 margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
               >
                 <defs>
@@ -144,7 +140,7 @@ export function UsageTrends() {
             </div>
             <ResponsiveContainer width="100%" height={160}>
               <BarChart
-                data={data?.objects ?? []}
+                data={trends?.objects ?? []}
                 margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
               >
                 <CartesianGrid
