@@ -1,0 +1,229 @@
+name: 'PR Integration & E2E Tests'
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  run-tests:
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/run-tests')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: tests-pr-${{ github.event.issue.number }}
+      cancel-in-progress: true
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    env:
+      SST_STAGE: pr-${{ github.event.issue.number }}
+      AWS_REGION: us-east-2
+
+    steps:
+      - name: Check commenter permission
+        id: check-permission
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PERMISSION=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.event.comment.user.login }}/permission" --jq '.permission')
+          if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "write" ]]; then
+            echo "::error::User ${{ github.event.comment.user.login }} does not have write access"
+            exit 1
+          fi
+
+      - name: React to comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            --method POST -f content='eyes' --silent
+
+      - name: Get PR details
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_JSON=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}")
+          echo "head_sha=$(echo "$PR_JSON" | jq -r '.head.sha')" >> "$GITHUB_OUTPUT"
+          echo "head_ref=$(echo "$PR_JSON" | jq -r '.head.ref')" >> "$GITHUB_OUTPUT"
+
+      - name: Post starting comment
+        id: status-comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            ## 🧪 Test Run
+
+            | | |
+            |---|---|
+            | **Commit** | `${{ steps.pr.outputs.head_sha }}` |
+            | **Status** | ⏳ Running E2E and integration tests... |
+            | **Triggered by** | @${{ github.event.comment.user.login }} |
+            | **Workflow** | [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.pr.outputs.head_sha }}
+          submodules: recursive
+
+      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
+      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
+          aws-region: us-east-2
+
+      - name: Get preview URL
+        id: preview-url
+        run: |
+          URL=$(pnpm exec sst state export --stage "$SST_STAGE" | jq -r '.latest.resources[] | select(.type == "pulumi:pulumi:Stack") | .outputs.baseUrl')
+          URL_TRIMMED=$(printf '%s' "$URL" | xargs)
+          if [ -z "$URL_TRIMMED" ] || [ "$URL_TRIMMED" = "null" ]; then
+            echo "::error::Preview environment not deployed for stage $SST_STAGE. Deploy first, then re-run /run-tests."
+            exit 1
+          fi
+          echo "url=$URL_TRIMMED" >> "$GITHUB_OUTPUT"
+
+      - name: Install Stripe CLI
+        run: |
+          curl -s https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public \
+            | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/stripe.gpg] https://packages.stripe.dev/stripe-cli-debian-local stable main" \
+            | sudo tee /etc/apt/sources.list.d/stripe.list
+          sudo apt-get update && sudo apt-get install -y stripe
+
+      # Events list must match WEBHOOK_EVENTS in setup-integrations.ts
+      - name: Start Stripe CLI webhook forwarding
+        id: stripe-listen
+        env:
+          STRIPE_API_KEY: ${{ secrets.CI_STRIPE_SECRET_KEY }}
+          WEBHOOK_URL: ${{ steps.preview-url.outputs.url }}/api/stripe/webhook
+        run: |
+          LOGFILE=$(mktemp)
+          stripe listen \
+            --api-key "$STRIPE_API_KEY" \
+            --forward-to "$WEBHOOK_URL" \
+            --events customer.updated,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,customer.subscription.trial_will_end,invoice.payment_succeeded,invoice.payment_failed \
+            > "$LOGFILE" 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
+
+          # Wait for signing secret
+          for i in $(seq 1 60); do
+            SECRET=$(grep -o 'whsec_[A-Za-z0-9]*' "$LOGFILE" 2>/dev/null | head -1) || true
+            [ -n "$SECRET" ] && break
+            sleep 1
+          done
+
+          if [ -z "$SECRET" ]; then
+            echo "::error::Failed to extract stripe listen signing secret"
+            cat "$LOGFILE"
+            exit 1
+          fi
+
+          # Save the original SSM value before overwriting
+          ORIGINAL_SECRET=$(aws ssm get-parameter \
+            --name "/filone/${SST_STAGE}/stripe-webhook-secret" \
+            --with-decryption \
+            --query "Parameter.Value" \
+            --output text 2>/dev/null) || ORIGINAL_SECRET=""
+          if [[ "$ORIGINAL_SECRET" == whsec_* ]]; then
+            echo "::add-mask::$ORIGINAL_SECRET"
+            printf '%s' "$ORIGINAL_SECRET" > /tmp/.stripe-webhook-original
+            echo "has-original=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Update SSM with the stripe listen secret
+          aws ssm put-parameter \
+            --name "/filone/${SST_STAGE}/stripe-webhook-secret" \
+            --value "$SECRET" \
+            --type SecureString \
+            --overwrite > /dev/null
+          echo "SSM updated with stripe listen signing secret"
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps
+
+      - name: Run integration tests
+        id: integration-tests
+        env:
+          BASE_URL: ${{ steps.preview-url.outputs.url }}
+        run: pnpm test:integration
+
+      - name: Run E2E tests
+        id: e2e-tests
+        if: always() && steps.integration-tests.outcome != 'skipped'
+        env:
+          BASE_URL: ${{ steps.preview-url.outputs.url }}
+        run: pnpm test:e2e
+
+      - name: Stop Stripe CLI forwarding
+        if: always() && steps.stripe-listen.outputs.pid != ''
+        run: kill ${{ steps.stripe-listen.outputs.pid }} 2>/dev/null || true
+
+      - name: Restore original Stripe webhook secret in SSM
+        if: always() && steps.stripe-listen.outputs.has-original == 'true'
+        run: |
+          ORIGINAL_SECRET=$(cat /tmp/.stripe-webhook-original)
+          aws ssm put-parameter \
+            --name "/filone/${SST_STAGE}/stripe-webhook-secret" \
+            --value "$ORIGINAL_SECRET" \
+            --type SecureString \
+            --overwrite > /dev/null
+          echo "SSM restored with original webhook signing secret"
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
+      - name: Post results comment
+        if: always() && (steps.integration-tests.outcome != 'skipped' || steps.e2e-tests.outcome != 'skipped')
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.status-comment.outputs.comment-id }}
+          edit-mode: replace
+          body: |
+            ## 🧪 Test Results
+
+            | Suite | Status |
+            |-------|--------|
+            | **Integration Tests** | ${{ steps.integration-tests.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |
+            | **E2E Tests** | ${{ steps.e2e-tests.outcome == 'success' && '✅ Passed' || (steps.e2e-tests.outcome == 'skipped' && '⏭️ Skipped' || '❌ Failed') }} |
+
+            | | |
+            |---|---|
+            | **Commit** | `${{ steps.pr.outputs.head_sha }}` |
+            | **Triggered by** | @${{ github.event.comment.user.login }} |
+            | **Workflow** | [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+      - name: Post failure comment on early exit
+        if: failure() && steps.integration-tests.outcome == 'skipped' && steps.e2e-tests.outcome == 'skipped'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.status-comment.outputs.comment-id }}
+          edit-mode: replace
+          body: |
+            ## 🧪 Test Results
+
+            | | |
+            |---|---|
+            | **Status** | ❌ Setup failed before tests could run |
+            | **Commit** | `${{ steps.pr.outputs.head_sha }}` |
+            | **Triggered by** | @${{ github.event.comment.user.login }} |
+            | **Workflow** | [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |

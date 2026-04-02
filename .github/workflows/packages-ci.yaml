@@ -204,6 +204,9 @@ jobs:
             | **Preview URL** | [${{ needs.deploy-preview.outputs.url }}](${{ needs.deploy-preview.outputs.url }}) |
             | **Stripe Webhook** | ${{ needs.deploy-preview.outputs.webhook-status || '⚠️ Check skipped' }} |
 
+            ---
+            Comment `/run-tests` to start E2E and integration tests.
+
       - name: Create or update comment (failure)
         if: needs.deploy-preview.result == 'failure'
         uses: peter-evans/create-or-update-comment@v4
@@ -235,154 +238,6 @@ jobs:
             | **Latest commit** | `${{ github.event.pull_request.head.sha }}` |
             | **Status** | ⚠️ Deploy cancelled |
             | **Workflow logs** | [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
-
-  e2e-tests:
-    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production'
-    needs: [deploy-preview]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    concurrency:
-      group: preview-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright Browsers
-        run: pnpm exec playwright install --with-deps
-
-      - name: Run Playwright tests
-        run: pnpm test:e2e
-        env:
-          BASE_URL: ${{ needs.deploy-preview.outputs.url }}
-
-      - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 30
-
-  integration-tests:
-    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production' && github.event.pull_request.head.repo.full_name == github.repository
-    needs: [deploy-preview]
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    concurrency:
-      group: preview-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      SST_STAGE: pr-${{ github.event.pull_request.number }}
-      AWS_REGION: us-east-2
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
-          aws-region: us-east-2
-
-      - name: Install Stripe CLI
-        run: |
-          curl -s https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public \
-            | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/stripe.gpg] https://packages.stripe.dev/stripe-cli-debian-local stable main" \
-            | sudo tee /etc/apt/sources.list.d/stripe.list
-          sudo apt-get update && sudo apt-get install -y stripe
-
-      # Events list must match WEBHOOK_EVENTS in setup-integrations.ts
-      - name: Start Stripe CLI webhook forwarding
-        id: stripe-listen
-        env:
-          STRIPE_API_KEY: ${{ secrets.CI_STRIPE_SECRET_KEY }}
-          WEBHOOK_URL: ${{ needs.deploy-preview.outputs.url }}/api/stripe/webhook
-        run: |
-          LOGFILE=$(mktemp)
-          stripe listen \
-            --api-key "$STRIPE_API_KEY" \
-            --forward-to "$WEBHOOK_URL" \
-            --events customer.updated,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,customer.subscription.trial_will_end,invoice.payment_succeeded,invoice.payment_failed \
-            > "$LOGFILE" 2>&1 &
-          echo "pid=$!" >> "$GITHUB_OUTPUT"
-
-          # Wait for signing secret (pattern from test-stripe-webhooks.sh)
-          for i in $(seq 1 60); do
-            SECRET=$(grep -o 'whsec_[A-Za-z0-9]*' "$LOGFILE" 2>/dev/null | head -1) || true
-            [ -n "$SECRET" ] && break
-            sleep 1
-          done
-
-          if [ -z "$SECRET" ]; then
-            echo "::error::Failed to extract stripe listen signing secret"
-            cat "$LOGFILE"
-            exit 1
-          fi
-
-          # Save the original SSM value before overwriting (to file, not step output)
-          ORIGINAL_SECRET=$(aws ssm get-parameter \
-            --name "/filone/${SST_STAGE}/stripe-webhook-secret" \
-            --with-decryption \
-            --query "Parameter.Value" \
-            --output text 2>/dev/null) || ORIGINAL_SECRET=""
-          if [[ "$ORIGINAL_SECRET" == whsec_* ]]; then
-            echo "::add-mask::$ORIGINAL_SECRET"
-            printf '%s' "$ORIGINAL_SECRET" > /tmp/.stripe-webhook-original
-            echo "has-original=true" >> "$GITHUB_OUTPUT"
-          fi
-
-          # Update SSM with the stripe listen secret
-          aws ssm put-parameter \
-            --name "/filone/${SST_STAGE}/stripe-webhook-secret" \
-            --value "$SECRET" \
-            --type SecureString \
-            --overwrite > /dev/null
-          echo "SSM updated with stripe listen signing secret"
-
-      - name: Run integration tests
-        run: pnpm test:integration
-
-      - name: Stop Stripe CLI forwarding
-        if: always() && steps.stripe-listen.outputs.pid != ''
-        run: kill ${{ steps.stripe-listen.outputs.pid }} 2>/dev/null || true
-
-      - name: Restore original Stripe webhook secret in SSM
-        if: always() && steps.stripe-listen.outputs.has-original == 'true'
-        run: |
-          ORIGINAL_SECRET=$(cat /tmp/.stripe-webhook-original)
-          aws ssm put-parameter \
-            --name "/filone/${SST_STAGE}/stripe-webhook-secret" \
-            --value "$ORIGINAL_SECRET" \
-            --type SecureString \
-            --overwrite > /dev/null
-          echo "SSM restored with original webhook signing secret"
 
   deploy:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
@@ -458,7 +313,7 @@ jobs:
             }
 
   dispatch-telemetry:
-    needs: [check-packages, deploy-preview, comment, e2e-tests, integration-tests, deploy]
+    needs: [check-packages, deploy-preview, comment, deploy]
     if: >-
       always() && (
         github.event_name == 'push' ||
