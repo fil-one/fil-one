@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import QuickLRU from 'quick-lru';
 import {
   createClient,
   createBucket,
@@ -12,6 +13,8 @@ import type { AccessKeyPermission } from '@filone/shared';
 import { instrumentClient } from './aurora-api-metrics.js';
 
 const ssm = new SSMClient({});
+const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
+export const _resetSsmCacheForTesting = () => ssmCache.clear();
 
 export class BucketAlreadyExistsError extends Error {
   constructor(bucketName: string) {
@@ -293,6 +296,10 @@ export async function deleteAuroraAccessKey({
 }
 
 export async function getAuroraPortalApiKey(stage: string, tenantId: string): Promise<string> {
+  const cacheKey = `${stage}/${tenantId}`;
+  const cached = ssmCache.get(cacheKey);
+  if (cached) return cached;
+
   let apiKey: string | undefined;
   try {
     const { Parameter } = await ssm.send(
@@ -313,5 +320,6 @@ export async function getAuroraPortalApiKey(stage: string, tenantId: string): Pr
     throw new Error(`Aurora API key not found in SSM for tenant ${tenantId}`);
   }
 
+  ssmCache.set(cacheKey, apiKey);
   return apiKey;
 }
