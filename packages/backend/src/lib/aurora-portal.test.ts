@@ -38,6 +38,7 @@ import {
   DuplicateKeyNameError,
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
+  _resetSsmCacheForTesting,
 } from './aurora-portal.js';
 
 // ---------------------------------------------------------------------------
@@ -58,6 +59,7 @@ describe('createAuroraBucket', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ssmMock.reset();
+    _resetSsmCacheForTesting();
   });
 
   it('calls SSM with correct parameter name and WithDecryption', async () => {
@@ -137,6 +139,7 @@ describe('createAuroraBucket', () => {
 describe('getAuroraPortalApiKey', () => {
   beforeEach(() => {
     ssmMock.reset();
+    _resetSsmCacheForTesting();
   });
 
   it('calls SSM with correct parameter name and WithDecryption', async () => {
@@ -176,6 +179,35 @@ describe('getAuroraPortalApiKey', () => {
     await expect(getAuroraPortalApiKey('test', 'tenant-1')).rejects.toThrow(
       'Aurora API key not found in SSM for tenant tenant-1',
     );
+  });
+
+  it('returns cached value on second call without hitting SSM', async () => {
+    setupSsmMock('cached-key');
+
+    await getAuroraPortalApiKey('test', 'tenant-1');
+    ssmMock.reset();
+    const result = await getAuroraPortalApiKey('test', 'tenant-1');
+
+    expect(result).toBe('cached-key');
+    expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(0);
+  });
+
+  it('caches per stage+tenantId independently', async () => {
+    ssmMock
+      .on(GetParameterCommand, { Name: '/filone/test/aurora-portal/tenant-api-key/tenant-1' })
+      .resolves({ Parameter: { Value: 'key-for-tenant-1' } });
+    ssmMock
+      .on(GetParameterCommand, { Name: '/filone/test/aurora-portal/tenant-api-key/tenant-2' })
+      .resolves({ Parameter: { Value: 'key-for-tenant-2' } });
+
+    const [result1, result2] = await Promise.all([
+      getAuroraPortalApiKey('test', 'tenant-1'),
+      getAuroraPortalApiKey('test', 'tenant-2'),
+    ]);
+
+    expect(result1).toBe('key-for-tenant-1');
+    expect(result2).toBe('key-for-tenant-2');
+    expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(2);
   });
 });
 
@@ -220,6 +252,7 @@ describe('createAuroraAccessKey', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ssmMock.reset();
+    _resetSsmCacheForTesting();
   });
 
   it('calls SSM with correct parameter path using FILONE_STAGE', async () => {
@@ -400,6 +433,7 @@ describe('findAuroraAccessKeyByName', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ssmMock.reset();
+    _resetSsmCacheForTesting();
   });
 
   it('returns key details when key is found by name', async () => {

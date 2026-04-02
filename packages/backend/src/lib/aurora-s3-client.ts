@@ -12,8 +12,11 @@ import {
 import type { S3Object } from '@filone/shared';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import QuickLRU from 'quick-lru';
 
 const ssm = new SSMClient({});
+const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
+export const _resetSsmCacheForTesting = () => ssmCache.clear();
 
 export interface AuroraS3Credentials {
   accessKeyId: string;
@@ -24,6 +27,10 @@ export async function getAuroraS3Credentials(
   stage: string,
   tenantId: string,
 ): Promise<AuroraS3Credentials> {
+  const cacheKey = `${stage}/${tenantId}`;
+  const cached = ssmCache.get(cacheKey);
+  if (cached) return JSON.parse(cached) as AuroraS3Credentials;
+
   let value: string | undefined;
   try {
     const { Parameter } = await ssm.send(
@@ -44,6 +51,7 @@ export async function getAuroraS3Credentials(
     throw new Error(`Aurora S3 credentials not found in SSM for tenant ${tenantId}`);
   }
 
+  ssmCache.set(cacheKey, value);
   return JSON.parse(value) as AuroraS3Credentials;
 }
 

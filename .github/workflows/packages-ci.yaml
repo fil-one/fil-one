@@ -8,6 +8,8 @@ on:
 jobs:
   check-packages:
     runs-on: ubuntu-latest
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
     steps:
       - uses: actions/checkout@v5
@@ -40,7 +42,7 @@ jobs:
         run: pnpm test
 
   deploy-preview:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production' && github.event.pull_request.head.repo.full_name == github.repository
     needs: [check-packages]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -53,9 +55,11 @@ jobs:
     env:
       STAGE: pr-${{ github.event.pull_request.number }}
       AWS_REGION: us-east-2
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     outputs:
       url: ${{ steps.deploy.outputs.url }}
       webhook-status: ${{ steps.webhook-check.outputs.status }}
+      sst-env-dirty: ${{ steps.sst-env-check.outputs.dirty }}
 
     steps:
       - uses: actions/checkout@v5
@@ -152,6 +156,22 @@ jobs:
             echo "status=⚠️ Not found — integration tests will use \`stripe listen\`" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check sst-env.d.ts files are up to date
+        id: sst-env-check
+        run: |
+          if [ -n "$(git status --porcelain -- ':(glob)**/sst-env.d.ts')" ]; then
+            echo "dirty=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  check-sst-env:
+    needs: [deploy-preview]
+    if: needs.deploy-preview.outputs.sst-env-dirty == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::sst-env.d.ts files are out of date. Please run 'sst deploy' locally and commit the updated sst-env.d.ts files."
+          exit 1
+
   comment:
     name: Add Preview Environment Comment on PR
     if: always() && github.event_name == 'pull_request' && needs.deploy-preview.result != 'skipped'
@@ -217,7 +237,7 @@ jobs:
             | **Workflow logs** | [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
   e2e-tests:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production'
     needs: [deploy-preview]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -256,7 +276,7 @@ jobs:
           retention-days: 30
 
   integration-tests:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production' && github.event.pull_request.head.repo.full_name == github.repository
     needs: [deploy-preview]
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -354,6 +374,7 @@ jobs:
       contents: read
     env:
       DEPLOY_STAGE: ${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
     steps:
       - uses: actions/checkout@v5
@@ -376,6 +397,9 @@ jobs:
           aws-region: us-east-2
 
       - run: pnpm build
+        env:
+          SENTRY_DEPLOY_ENV: ${{ env.DEPLOY_STAGE }}
+          SENTRY_RELEASE_DIST: ${{ github.run_number }}
 
       - run: pnpm exec sst deploy --stage "$DEPLOY_STAGE"
 

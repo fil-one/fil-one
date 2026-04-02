@@ -13,6 +13,8 @@
     "@filone/shared": "workspace:*",
     "@headlessui/react": "^2.2.9",
     "@phosphor-icons/react": "^2.1.10",
+    "@plausible-analytics/tracker": "^0.4.4",
+    "@sentry/react": "^10.46.0",
     "@stripe/react-stripe-js": "^5.6.1",
     "@stripe/stripe-js": "^8.11.0",
     "@tanstack/react-router": "^1.168.8",
@@ -24,6 +26,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@sentry/vite-plugin": "^5.1.1",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.2.2",
     "@testing-library/jest-dom": "^6.9.1",

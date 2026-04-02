@@ -178,7 +178,7 @@ describe('usage-reporting-worker', () => {
         { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500_000_000_000 }, // 500 GB
       ]);
       mockGetOperationsSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', rxBytes: 1_000_000_000_000 }, // 1 TB
+        { timestamp: '2024-01-01T00:00:00Z', txBytes: 1_000_000_000_000 }, // 1 TB
       ]);
       mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
@@ -214,7 +214,7 @@ describe('usage-reporting-worker', () => {
         { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 0 },
       ]);
       mockGetOperationsSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', rxBytes: 2_500_000_000_000 }, // 2.5 TB
+        { timestamp: '2024-01-01T00:00:00Z', txBytes: 2_500_000_000_000 }, // 2.5 TB
       ]);
       mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
@@ -234,7 +234,7 @@ describe('usage-reporting-worker', () => {
         { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }, // 1.5 TB
       ]);
       mockGetOperationsSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', rxBytes: 2_500_000_000_000 }, // 2.5 TB
+        { timestamp: '2024-01-01T00:00:00Z', txBytes: 2_500_000_000_000 }, // 2.5 TB
       ]);
       mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
@@ -252,7 +252,7 @@ describe('usage-reporting-worker', () => {
     it('audit record includes totalEgressBytes', async () => {
       mockGetStorageSamples.mockResolvedValue([]);
       mockGetOperationsSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', rxBytes: 500_000_000_000 }, // 500 GB
+        { timestamp: '2024-01-01T00:00:00Z', txBytes: 500_000_000_000 }, // 500 GB
       ]);
       mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
