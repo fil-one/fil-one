@@ -1,4 +1,5 @@
 import './sentry.js';
+import './plausible.js';
 import './styles.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
