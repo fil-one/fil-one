@@ -61,6 +61,8 @@ export default $config({
     // ── Global Function settings ────────────────────────────
     $transform(sst.aws.Function, (args) => {
       args.runtime = args.runtime ?? 'nodejs24.x';
+      args.memory = args.memory ?? '512 MB';
+      args.architecture = args.architecture ?? 'arm64';
     });
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
@@ -393,6 +395,8 @@ export default $config({
       extraEnv?: Record<string, $util.Input<string>>;
       permissions?: sst.aws.FunctionPermissionArgs[];
       extraLink?: (typeof allResources)[number][];
+      provisionedConcurrency?: number;
+      memory?: sst.aws.FunctionArgs['memory'];
     }
 
     function addRoute({
@@ -402,6 +406,8 @@ export default $config({
       extraEnv,
       permissions,
       extraLink,
+      provisionedConcurrency,
+      memory,
     }: AddRouteProps) {
       // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
       const fnName = handler
@@ -418,20 +424,33 @@ export default $config({
         },
         permissions,
         timeout: '10 seconds',
+        ...(memory ? { memory } : {}),
+        ...(provisionedConcurrency && provisionedConcurrency > 0
+          ? {
+              versioning: true,
+              concurrency: { provisioned: provisionedConcurrency },
+            }
+          : {}),
       });
 
-      api.route(`${method} ${routePath}`, fn.arn);
+      const isVersioned = provisionedConcurrency != null && provisionedConcurrency > 0;
+      const invokeArn = isVersioned ? fn.nodes.function.qualifiedArn : fn.arn;
+
+      api.route(`${method} ${routePath}`, invokeArn);
 
       // SST's api.route() with an ARN creates lambda.Permission with
       // qualifier: "" (from undefined), which doesn't actually grant
       // API Gateway invoke access. Add an explicit permission.
       new aws.lambda.Permission(`${fnName}ApiPermission`, {
         action: 'lambda:InvokeFunction',
-        function: fn.nodes.function.name,
+        function: isVersioned ? fn.nodes.function.qualifiedArn : fn.nodes.function.name,
         principal: 'apigateway.amazonaws.com',
         sourceArn: $interpolate`${api.nodes.api.executionArn}/*`,
       });
     }
+
+    // ── Provisioned concurrency for critical-path endpoints ────────
+    const criticalPathLambdaProvisionedConcurrency = isProduction ? 1 : 0;
 
     // ── Data routes ──────────────────────────────────────────────────
     addRoute({
@@ -440,6 +459,8 @@ export default $config({
       handler: 'list-buckets',
       extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
     addRoute({
       method: 'POST',
@@ -447,6 +468,7 @@ export default $config({
       handler: 'create-bucket',
       extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
       method: 'GET',
@@ -454,15 +476,21 @@ export default $config({
       handler: 'get-bucket',
       extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
     addRoute({
       method: 'DELETE',
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
-
       permissions: auroraS3GatewayPermissions,
     });
-    addRoute({ method: 'GET', routePath: '/api/access-keys', handler: 'list-access-keys' });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/access-keys',
+      handler: 'list-access-keys',
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+    });
     addRoute({
       method: 'POST',
       routePath: '/api/access-keys',
@@ -481,36 +509,37 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}/objects',
       handler: 'list-objects',
-
       permissions: auroraS3GatewayPermissions,
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
     addRoute({
       method: 'POST',
       routePath: '/api/buckets/{name}/objects/presign',
       handler: 'presign-upload',
-
       permissions: auroraS3GatewayPermissions,
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
       method: 'GET',
       routePath: '/api/buckets/{name}/objects/download',
       handler: 'download-object',
-
       permissions: auroraS3GatewayPermissions,
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
       method: 'DELETE',
       routePath: '/api/buckets/{name}/objects',
       handler: 'delete-object',
-
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
       method: 'GET',
       routePath: '/api/buckets/{name}/objects/metadata',
       handler: 'head-object',
-
       permissions: auroraS3GatewayPermissions,
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
 
     // ── Auth routes ──────────────────────────────────────────────────
@@ -520,12 +549,14 @@ export default $config({
       routePath: '/login',
       handler: 'auth-login',
       extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
       method: 'GET',
       routePath: '/api/auth/callback',
       handler: 'auth-callback',
       extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
       method: 'GET',
@@ -535,7 +566,12 @@ export default $config({
     });
 
     // ── Me route ───────────────────────────────────────────────────
-    addRoute({ method: 'GET', routePath: '/api/me', handler: 'get-me' });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/me',
+      handler: 'get-me',
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+    });
     addRoute({
       method: 'PATCH',
       routePath: '/api/me/profile',
@@ -554,17 +590,30 @@ export default $config({
     addRoute({ method: 'POST', routePath: '/api/org/confirm', handler: 'confirm-org' });
 
     // ── Usage + Dashboard routes ─────────────────────────────────────
-    addRoute({ method: 'GET', routePath: '/api/usage', handler: 'get-usage', extraEnv: auroraEnv });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/usage',
+      handler: 'get-usage',
+      extraEnv: auroraEnv,
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+    });
     addRoute({
       method: 'GET',
       routePath: '/api/activity',
       handler: 'get-activity',
       extraEnv: auroraEnv,
       permissions: auroraS3GatewayPermissions,
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
 
     // ── Billing routes ───────────────────────────────────────────────
-    addRoute({ method: 'GET', routePath: '/api/billing', handler: 'get-billing' });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/billing',
+      handler: 'get-billing',
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+    });
     addRoute({
       method: 'POST',
       routePath: '/api/billing/setup-intent',
