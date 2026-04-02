@@ -139,7 +139,6 @@ async function setupStripeWebhook(
   } catch (err) {
     console.error('Stripe webhook setup failed:', err);
     if (!stage.startsWith('pr-')) throw err;
-    await storeWebhookSecret(stage, 'PENDING_CLI_SETUP');
     return {};
   }
 }
