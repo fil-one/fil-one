@@ -172,7 +172,7 @@ jobs:
           echo "::error::sst-env.d.ts files are out of date. Please run 'sst deploy' locally and commit the updated sst-env.d.ts files."
           exit 1
 
-  run-tests:
+  integration-tests:
     needs: [deploy-preview]
     if: needs.deploy-preview.result == 'success'
     runs-on: ubuntu-latest
@@ -188,7 +188,6 @@ jobs:
       AWS_REGION: us-east-2
     outputs:
       integration-result: ${{ steps.integration-tests.outcome }}
-      e2e-result: ${{ steps.e2e-tests.outcome }}
 
     steps:
       - uses: actions/checkout@v5
@@ -231,7 +230,7 @@ jobs:
             --api-key "$STRIPE_API_KEY" \
             --forward-to "$WEBHOOK_URL" \
             --events customer.updated,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,customer.subscription.trial_will_end,invoice.payment_succeeded,invoice.payment_failed \
-            > "$LOGFILE" 2>&1 &
+            2>&1 | tee "$LOGFILE" &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
 
           # Wait for signing secret
@@ -276,13 +275,6 @@ jobs:
           BASE_URL: ${{ needs.deploy-preview.outputs.url }}
         run: pnpm test:integration
 
-      - name: Run E2E tests
-        id: e2e-tests
-        if: false
-        env:
-          BASE_URL: ${{ needs.deploy-preview.outputs.url }}
-        run: pnpm test:e2e
-
       - name: Stop Stripe CLI forwarding
         if: always() && steps.stripe-listen.outputs.pid != ''
         run: kill ${{ steps.stripe-listen.outputs.pid }} 2>/dev/null || true
@@ -298,18 +290,10 @@ jobs:
             --overwrite > /dev/null
           echo "SSM restored with original webhook signing secret"
 
-      - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 30
-
   comment:
     name: Add Preview Environment Comment on PR
     if: always() && github.event_name == 'pull_request' && needs.deploy-preview.result != 'skipped'
-    needs: [deploy-preview, run-tests]
+    needs: [deploy-preview, integration-tests]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -342,8 +326,7 @@ jobs:
 
             | Suite | Status |
             |-------|--------|
-            | **Integration Tests** | ${{ needs.run-tests.outputs.integration-result == 'success' && '✅ Passed' || (needs.run-tests.outputs.integration-result == 'skipped' && '⏭️ Skipped' || '❌ Failed') }} |
-            | **E2E Tests** | ${{ needs.run-tests.outputs.e2e-result == 'success' && '✅ Passed' || (needs.run-tests.outputs.e2e-result == 'skipped' && '⏭️ Skipped' || '❌ Failed') }} |
+            | **Integration Tests** | ${{ needs.integration-tests.outputs.integration-result == 'success' && '✅ Passed' || (needs.integration-tests.outputs.integration-result == 'skipped' && '⏭️ Skipped' || '❌ Failed') }} |
 
             **Workflow** | [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
@@ -453,7 +436,7 @@ jobs:
             }
 
   dispatch-telemetry:
-    needs: [check-packages, deploy-preview, run-tests, comment, deploy]
+    needs: [check-packages, deploy-preview, integration-tests, comment, deploy]
     if: >-
       always() && (
         github.event_name == 'push' ||
