@@ -3,10 +3,10 @@ import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeftIcon,
-  CheckCircleIcon,
   CaretDownIcon,
   CaretUpIcon,
   PlusIcon,
+  CheckIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
 import { S3_REGION, CreateBucketSchema, CreateAccessKeySchema } from '@filone/shared';
@@ -254,9 +254,9 @@ export function CreateBucketPage() {
               type="button"
               disabled={!canSubmit}
               onClick={handleSubmit}
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-gradient-to-br from-brand-600 to-[#256af4] px-4 py-3 text-[13px] font-medium text-white shadow-sm transition-colors hover:from-brand-700 hover:to-[#2060d8] disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-700 px-4 pb-2 pt-3 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <CheckCircleIcon size={16} aria-hidden="true" />
+              <CheckIcon size={16} aria-hidden="true" />
               {creating
                 ? 'Creating...'
                 : wantsApiKey
