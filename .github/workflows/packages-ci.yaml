@@ -147,15 +147,27 @@ jobs:
           PREVIEW_URL: ${{ steps.deploy.outputs.url }}
         run: |
           WEBHOOK_URL="${PREVIEW_URL}/api/stripe/webhook"
-          MATCH=$(stripe webhook_endpoints list --limit 100 --api-key "$STRIPE_API_KEY" 2>/dev/null \
-            | jq -r --arg url "$WEBHOOK_URL" '.data[] | select(.url == $url) | .id' \
-            | head -1)
-          if [ -n "$MATCH" ]; then
-            echo "status=✅ Registered (\`$MATCH\`)" >> "$GITHUB_OUTPUT"
+          STRIPE_STDERR=$(mktemp)
+
+          if STRIPE_OUTPUT=$(stripe webhook_endpoints list --limit 100 --api-key "$STRIPE_API_KEY" 2>"$STRIPE_STDERR"); then
+            MATCH=$(printf '%s\n' "$STRIPE_OUTPUT" \
+              | jq -r --arg url "$WEBHOOK_URL" '.data[] | select(.url == $url) | .id' \
+              | head -1)
+            if [ -n "$MATCH" ]; then
+              echo "status=✅ Registered (\`$MATCH\`)" >> "$GITHUB_OUTPUT"
+            else
+              echo "status=⚠️ Not found" >> "$GITHUB_OUTPUT"
+            fi
           else
-            echo "status=⚠️ Not found" >> "$GITHUB_OUTPUT"
+            STRIPE_ERROR=$(tr '\n' ' ' < "$STRIPE_STDERR" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')
+            if [ -n "$STRIPE_ERROR" ]; then
+              echo "status=⚠️ Check failed (\`$STRIPE_ERROR\`)" >> "$GITHUB_OUTPUT"
+            else
+              echo "status=⚠️ Check failed" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
+          rm -f "$STRIPE_STDERR"
       - name: Check sst-env.d.ts files are up to date
         id: sst-env-check
         run: |
