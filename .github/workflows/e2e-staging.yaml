@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: 'Override BASE_URL (defaults to staging URL from SST state)'
+        description: 'Override BASE_URL (defaults to staging URL)'
         required: false
         type: string
 
