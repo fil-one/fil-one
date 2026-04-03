@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeftIcon,
   CheckCircleIcon,
@@ -8,9 +9,10 @@ import {
   PlusIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
-import type { CreateBucketResponse } from '@filone/shared';
 import { S3_REGION, CreateBucketSchema, CreateAccessKeySchema } from '@filone/shared';
 import { apiRequest, createAccessKey } from '../lib/api.js';
+import type { CreateBucketResponse } from '@filone/shared';
+import { queryKeys } from '../lib/query-client.js';
 
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
 import { Input } from '../components/Input';
@@ -25,6 +27,7 @@ import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 export function CreateBucketPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   // Bucket fields
   const [name, setName] = useState('');
@@ -94,6 +97,8 @@ export function CreateBucketPage() {
         body: JSON.stringify({ name: name.trim(), region }),
       });
       bucketName = bucket.name;
+      void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create bucket');
       setCreating(false);
@@ -118,6 +123,7 @@ export function CreateBucketPage() {
       }
       try {
         const keyResponse = await createAccessKey(parsed.data);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
         setCredentials({
           accessKeyId: keyResponse.accessKeyId,
           secretAccessKey: keyResponse.secretAccessKey,

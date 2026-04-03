@@ -10,6 +10,7 @@ import { createAccessKey } from './api.js';
 import { expiresAtFromForm } from './time.js';
 import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';
 import { useToast } from '../components/Toast/index.js';
+import { useMutation } from '@tanstack/react-query';
 
 export type UseAccessKeyFormOptions = {
   defaultBucket?: string;
@@ -45,33 +46,42 @@ export function useAccessKeyForm({ defaultBucket, onSuccess }: UseAccessKeyFormO
     setCreating(false);
   }
 
-  async function doSubmit() {
-    const body = {
-      keyName: keyName.trim(),
-      permissions,
-      bucketScope,
-      buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
-      expiresAt: expiresAtFromForm(expiration, customDate),
-    };
-    const parsed = CreateAccessKeySchema.safeParse(body);
-    if (!parsed.success) {
-      toast.error(parsed.error.issues[0].message);
-      return;
-    }
-    setCreating(true);
-    try {
-      const response = await createAccessKey(body);
-      onSuccess(response);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create access key');
-    } finally {
+  const createKeyMutation = useMutation({
+    mutationFn: (body: {
+      keyName: string;
+      permissions: AccessKeyPermission[];
+      bucketScope: 'specific';
+      buckets: string[];
+      expiresAt?: string | null;
+    }) => {
+      const parsed = CreateAccessKeySchema.safeParse(body);
+      if (!parsed.success) {
+        throw new Error(parsed.error.issues[0].message);
+      }
+      setCreating(true);
+      return createAccessKey(body);
+    },
+    onSuccess: (response) => {
       setCreating(false);
-    }
-  }
+      onSuccess(response);
+    },
+    onError: (err) => {
+      setCreating(false);
+      console.error('Failed to create access key:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to create access key');
+    },
+  });
 
   function handleSubmit(e?: { preventDefault(): void }) {
     e?.preventDefault();
-    void doSubmit();
+    if (!keyName.trim() || permissions.length === 0) return;
+    createKeyMutation.mutate({
+      keyName: keyName.trim(),
+      permissions,
+      bucketScope: 'specific',
+      buckets: [defaultBucket ?? ''],
+      expiresAt: expiresAtFromForm(expiration, customDate),
+    });
   }
 
   return {

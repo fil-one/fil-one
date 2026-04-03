@@ -14,7 +14,6 @@ import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 
 export function CreateApiKeyPage() {
   const navigate = useNavigate();
-
   const [credentials, setCredentials] = useState<{
     accessKeyId: string;
     secretAccessKey: string;

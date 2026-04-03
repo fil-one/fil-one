@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { LightbulbIcon } from '@phosphor-icons/react/dist/ssr';
 
-import type { CreateAccessKeyResponse } from '@filone/shared';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyFormFields } from './AccessKeyFormFields.js';
+
+import type { CreateAccessKeyResponse } from '@filone/shared';
+
 import { Button } from './Button.js';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal/index.js';
 import { SaveCredentialsModal } from './SaveCredentialsModal.js';
@@ -33,7 +35,6 @@ export function AddBucketKeyModal({
     accessKeyId: string;
     secretAccessKey: string;
   } | null>(null);
-
   const form = useAccessKeyForm({
     defaultBucket: bucketName,
     onSuccess: (response: CreateAccessKeyResponse) => {
