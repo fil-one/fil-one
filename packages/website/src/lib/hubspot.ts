@@ -67,8 +67,8 @@ export async function submitSupportForm(fields: SupportFields): Promise<void> {
     { objectTypeId: '0-1', name: 'lastname', value: fields.lastName },
     { objectTypeId: '0-1', name: 'company', value: fields.company },
     { objectTypeId: '0-1', name: 'email', value: fields.email },
-    { objectTypeId: '0-1', name: 'hs_ticket_category', value: fields.categories.join(';') },
-    { objectTypeId: '0-1', name: 'content', value: fields.message },
+    { objectTypeId: '0-5', name: 'hs_ticket_category', value: fields.categories.join(';') },
+    { objectTypeId: '0-5', name: 'content', value: fields.message },
   ];
 
   return submitToHubSpot(HUBSPOT_SUPPORT_FORM_ID, hubspotFields, 'Support');
