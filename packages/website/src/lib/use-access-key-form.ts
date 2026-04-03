@@ -52,7 +52,7 @@ export function useAccessKeyForm({ defaultBucket, onSuccess }: UseAccessKeyFormO
       keyName: string;
       permissions: AccessKeyPermission[];
       bucketScope: AccessKeyBucketScope;
-      buckets: string[];
+      buckets?: string[];
       expiresAt?: string | null;
     }) => {
       const parsed = CreateAccessKeySchema.safeParse(body);
@@ -82,7 +82,7 @@ export function useAccessKeyForm({ defaultBucket, onSuccess }: UseAccessKeyFormO
       keyName: keyName.trim(),
       permissions,
       bucketScope,
-      buckets: [defaultBucket ?? ''],
+      buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
       expiresAt: expiresAtFromForm(expiration, customDate),
     });
   }

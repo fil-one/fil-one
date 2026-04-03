@@ -1,5 +1,5 @@
 import { KEY_NAME_MAX_LENGTH } from '@filone/shared';
-import type { useAccessKeyForm } from '../lib/use-access-key-form.js';
+import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyBucketScopeFields } from './AccessKeyBucketScopeFields.js';
 import { AccessKeyExpirationFields } from './AccessKeyExpirationFields.js';
 import { AccessKeyPermissionsFields } from './AccessKeyPermissionsFields.js';
