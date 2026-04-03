@@ -32,7 +32,7 @@ type NavItem = {
 const navItems: NavItem[] = [
   { path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard' },
   { path: '/buckets', icon: DatabaseIcon, label: 'Buckets' },
-  { path: '/api-keys', icon: KeyIcon, label: 'API & Keys' },
+  { path: '/api-keys', icon: KeyIcon, label: 'API Keys' },
   { path: '/billing', icon: CreditCardIcon, label: 'Billing' },
   { path: '/settings', icon: GearIcon, label: 'Settings' },
 ];
