@@ -311,26 +311,26 @@ export function CreateBucketPage() {
           </div>
         </div>
 
-        {/* Right: Info sidebar (no box, just text) */}
-        <div className="w-60 shrink-0 pt-1">
+        {/* Right: Info sidebar */}
+        <div className="sticky top-0 w-60 shrink-0 self-start pt-1">
           <p className="text-[10px] font-semibold uppercase tracking-[1px] text-zinc-500">
             Included by default
           </p>
-          <p className="mt-1 text-xs font-medium text-zinc-900">
-            Every bucket comes with these features built in.
-          </p>
 
-          <div className="mt-4 flex flex-col gap-0.5">
+          <div className="mt-3 flex flex-col">
             {/* Encryption */}
-            <div className="py-3">
-              <div className="flex items-center gap-2">
-                <span className="text-[13px] font-semibold text-zinc-900">Encryption</span>
-                <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-emerald-600">
-                  Always on
-                </span>
-              </div>
-              <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
-                All data is encrypted at rest by default for both private and public buckets.
+            <div className="flex flex-col gap-0.5 py-3">
+              <span className="text-[13px] font-semibold text-zinc-900">Encryption</span>
+              <p className="text-xs leading-relaxed text-zinc-500">
+                All data is encrypted at rest by default.
+              </p>
+            </div>
+
+            {/* Private */}
+            <div className="flex flex-col gap-0.5 border-t border-zinc-200/60 py-3">
+              <span className="text-[13px] font-semibold text-zinc-900">Private</span>
+              <p className="text-xs leading-relaxed text-zinc-500">
+                All buckets are private by default. Access requires an API key.
               </p>
             </div>
           </div>
