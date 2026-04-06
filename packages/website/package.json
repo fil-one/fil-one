@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@filone/shared": "workspace:*",
-    "@fontsource-variable/inconsolata": "^5.2.8",
     "@headlessui/react": "^2.2.9",
     "@phosphor-icons/react": "^2.1.10",
     "@plausible-analytics/tracker": "^0.4.4",
