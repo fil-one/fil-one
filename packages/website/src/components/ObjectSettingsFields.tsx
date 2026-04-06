@@ -1,5 +1,5 @@
 import type { RetentionDurationType, RetentionMode } from '@filone/shared';
-import { RETENTION_MAX_DAYS } from '@filone/shared';
+import { RETENTION_MAX_DAYS, RETENTION_MAX_YEARS } from '@filone/shared';
 
 import { Switch } from './Switch';
 
@@ -161,7 +161,7 @@ export function ObjectSettingsFields({
                     <input
                       type="number"
                       min={1}
-                      max={RETENTION_MAX_DAYS}
+                      max={retentionDurationType === 'y' ? RETENTION_MAX_YEARS : RETENTION_MAX_DAYS}
                       step={1}
                       value={retentionDuration}
                       onChange={(e) => {

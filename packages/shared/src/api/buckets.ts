@@ -11,17 +11,23 @@ export const RETENTION_DURATION_TYPES = ['d', 'y'] as const;
 export type RetentionDurationType = (typeof RETENTION_DURATION_TYPES)[number];
 
 export const RETENTION_MAX_DAYS = 36500;
+export const RETENTION_MAX_YEARS = 100;
 
-const RetentionSchema = z.object({
-  enabled: z.literal(true),
-  mode: z.enum(RETENTION_MODES),
-  duration: z
-    .number()
-    .int()
-    .min(1, 'Duration must be at least 1')
-    .max(RETENTION_MAX_DAYS, `Duration must be at most ${RETENTION_MAX_DAYS}`),
-  durationType: z.enum(RETENTION_DURATION_TYPES),
-});
+const RetentionSchema = z
+  .object({
+    enabled: z.literal(true),
+    mode: z.enum(RETENTION_MODES),
+    duration: z.number().int().min(1, 'Duration must be at least 1'),
+    durationType: z.enum(RETENTION_DURATION_TYPES),
+  })
+  .refine(
+    (data) =>
+      data.duration <= (data.durationType === 'y' ? RETENTION_MAX_YEARS : RETENTION_MAX_DAYS),
+    {
+      message: `Duration exceeds the maximum allowed`,
+      path: ['duration'],
+    },
+  );
 
 export const CreateBucketSchema = z
   .object({

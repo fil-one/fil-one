@@ -57,6 +57,7 @@ export {
   RETENTION_MODES,
   RETENTION_DURATION_TYPES,
   RETENTION_MAX_DAYS,
+  RETENTION_MAX_YEARS,
   CreateBucketSchema,
 } from './api/buckets.js';
 

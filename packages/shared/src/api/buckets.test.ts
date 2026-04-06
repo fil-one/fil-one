@@ -179,6 +179,22 @@ describe('CreateBucketSchema', () => {
       expect(result.success).toBe(false);
     });
 
+    it('accepts years duration of 100', () => {
+      const result = CreateBucketSchema.safeParse({
+        ...base,
+        retention: validRetention({ duration: 100, durationType: 'y' }),
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects years duration of 101', () => {
+      const result = CreateBucketSchema.safeParse({
+        ...base,
+        retention: validRetention({ duration: 101, durationType: 'y' }),
+      });
+      expect(result.success).toBe(false);
+    });
+
     it('rejects non-integer duration', () => {
       const result = CreateBucketSchema.safeParse({
         ...base,
