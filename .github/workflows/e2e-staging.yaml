@@ -22,7 +22,7 @@ jobs:
       actions: write
       contents: read
     env:
-      BASE_URL: ${{ inputs.base_url || 'https://staging.fil.one' }}
+      BASE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'https://staging.fil.one' }}
 
     steps:
       - uses: actions/checkout@v5
