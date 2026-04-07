@@ -46,7 +46,6 @@ jobs:
     needs: [check-packages]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: preview
     concurrency:
       group: preview-pr-${{ github.event.pull_request.number }}
       cancel-in-progress: false
@@ -99,19 +98,19 @@ jobs:
           pnpm exec sst secret set GrafanaPrometheusAuth "$GRAFANA_PROMETHEUS_AUTH" --stage "$STAGE"
           npx sst secret set StripePublishableKey "$STRIPE_PUBLISHABLE_KEY" --stage "$STAGE"
         env:
-          AUTH0_CLIENT_ID: ${{ secrets.AUTH0_CLIENT_ID }}
-          AUTH0_CLIENT_SECRET: ${{ secrets.AUTH0_CLIENT_SECRET }}
-          AUTH0_MGMT_CLIENT_ID: ${{ secrets.AUTH0_MGMT_CLIENT_ID }}
-          AUTH0_MGMT_CLIENT_SECRET: ${{ secrets.AUTH0_MGMT_CLIENT_SECRET }}
-          AUTH0_MGMT_RUNTIME_CLIENT_ID: ${{ secrets.AUTH0_MGMT_RUNTIME_CLIENT_ID }}
-          AUTH0_MGMT_RUNTIME_CLIENT_SECRET: ${{ secrets.AUTH0_MGMT_RUNTIME_CLIENT_SECRET }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-          STRIPE_PRICE_ID: ${{ secrets.STRIPE_PRICE_ID }}
-          AURORA_BACKOFFICE_TOKEN: ${{ secrets.AURORA_BACKOFFICE_TOKEN }}
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-          GRAFANA_LOKI_AUTH: ${{ secrets.GRAFANA_LOKI_AUTH }}
-          GRAFANA_PROMETHEUS_AUTH: ${{ secrets.GRAFANA_PROMETHEUS_AUTH }}
-          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          AUTH0_CLIENT_ID: ${{ secrets.CI_AUTH0_CLIENT_ID }}
+          AUTH0_CLIENT_SECRET: ${{ secrets.CI_AUTH0_CLIENT_SECRET }}
+          AUTH0_MGMT_CLIENT_ID: ${{ secrets.CI_AUTH0_MGMT_CLIENT_ID }}
+          AUTH0_MGMT_CLIENT_SECRET: ${{ secrets.CI_AUTH0_MGMT_CLIENT_SECRET }}
+          AUTH0_MGMT_RUNTIME_CLIENT_ID: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_ID }}
+          AUTH0_MGMT_RUNTIME_CLIENT_SECRET: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_SECRET }}
+          STRIPE_SECRET_KEY: ${{ secrets.CI_STRIPE_SECRET_KEY }}
+          STRIPE_PRICE_ID: ${{ secrets.CI_STRIPE_PRICE_ID }}
+          AURORA_BACKOFFICE_TOKEN: ${{ secrets.CI_AURORA_BACKOFFICE_TOKEN }}
+          SENDGRID_API_KEY: ${{ secrets.CI_SENDGRID_API_KEY }}
+          GRAFANA_LOKI_AUTH: ${{ secrets.CI_GRAFANA_LOKI_AUTH }}
+          GRAFANA_PROMETHEUS_AUTH: ${{ secrets.CI_GRAFANA_PROMETHEUS_AUTH }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.CI_STRIPE_PUBLISHABLE_KEY }}
 
       - name: Build
         run: pnpm build
@@ -144,7 +143,7 @@ jobs:
         id: webhook-check
         continue-on-error: true
         env:
-          STRIPE_API_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_API_KEY: ${{ secrets.CI_STRIPE_SECRET_KEY }}
           PREVIEW_URL: ${{ steps.deploy.outputs.url }}
         run: |
           WEBHOOK_URL="${PREVIEW_URL}/api/stripe/webhook"
