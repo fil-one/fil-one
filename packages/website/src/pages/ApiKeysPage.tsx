@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { CopySimpleIcon, PlusIcon } from '@phosphor-icons/react/dist/ssr';
 
@@ -17,6 +18,7 @@ import { getS3Endpoint, S3_REGION, DOCS_URL } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 import { apiRequest } from '../lib/api.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
+import { queryKeys } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Tab 1: Access Keys
@@ -333,9 +335,9 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 
       {/* Manage buckets */}
       <div className="flex justify-center border-t border-zinc-100 pt-4">
-        <Link to="/buckets" className="text-sm font-medium text-zinc-500 hover:text-zinc-800">
+        <a href="/buckets" className="text-sm font-medium text-zinc-500 hover:text-zinc-800">
           Manage buckets →
-        </Link>
+        </a>
       </div>
     </div>
   );
@@ -348,34 +350,30 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 export function ApiKeysPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
-  const [keys, setKeys] = useState<AccessKey[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchKeys() {
-      try {
-        const data = await apiRequest<ListAccessKeysResponse>('/access-keys');
-        if (!cancelled) {
-          setKeys(data.keys);
-          setLoading(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load access keys');
-          setLoading(false);
-        }
-      }
-    }
-    void fetchKeys();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data, isPending, isError, error } = useQuery({
+    queryKey: queryKeys.accessKeys,
+    queryFn: () => apiRequest<ListAccessKeysResponse>('/access-keys'),
+  });
+  const keys = data?.keys ?? [];
 
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+
+  const deleteKeyMutation = useMutation({
+    mutationFn: (id: string) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }),
+    onSuccess: (_, id) => {
+      queryClient.setQueryData<ListAccessKeysResponse>(queryKeys.accessKeys, (old) =>
+        old ? { keys: old.keys.filter((k) => k.id !== id) } : old,
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
+      toast.success('Access key deleted');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete key');
+    },
+  });
 
   async function handleDelete(id: string) {
     setConfirmDeleteKey(id);
@@ -383,17 +381,14 @@ export function ApiKeysPage() {
 
   async function confirmDeleteKeyAction() {
     if (!confirmDeleteKey) return;
-    const id = confirmDeleteKey;
     try {
-      await apiRequest(`/access-keys/${id}`, { method: 'DELETE' });
-      setKeys((prev) => prev.filter((k) => k.id !== id));
-      toast.success('Access key deleted');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete key');
+      await deleteKeyMutation.mutateAsync(confirmDeleteKey);
+    } catch {
+      // error handled by mutation.onError
     }
   }
 
-  if (loading) {
+  if (isPending) {
     return (
       <div className="flex items-center justify-center p-16">
         <Spinner ariaLabel="Loading access keys" size={32} />
@@ -401,11 +396,11 @@ export function ApiKeysPage() {
     );
   }
 
-  if (error) {
+  if (isError) {
     return (
       <div className="p-6">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
+          {error?.message ?? 'Failed to load access keys'}
         </div>
       </div>
     );

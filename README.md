@@ -316,8 +316,7 @@ Run this command to delete all webhooks created by PR preview deployments (inclu
 
 ```bash
 stripe webhook_endpoints list --limit 100 | \
-  jq -r '.data[] | \
-  select(.metadata.stage // "" | startswith("pr-")) | .id' | \
+  jq -r '.data[] | select(.metadata.stage // "" | startswith("pr-")) | .id' | \
   xargs -I{} stripe webhook_endpoints delete {} --confirm
 ```
 

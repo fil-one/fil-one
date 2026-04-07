@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { confirmOrg, logout } from '../lib/api.js';
 import type { MeResponse } from '@filone/shared';
+import { queryKeys } from '../lib/query-client.js';
 
 type FinishSignUpPageProps = {
   me: MeResponse;
@@ -10,6 +12,7 @@ type FinishSignUpPageProps = {
 };
 
 export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
+  const queryClient = useQueryClient();
   const [orgName, setOrgName] = useState(me.orgName || me.suggestedOrgName || '');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -34,6 +37,7 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
     setSubmitting(true);
     try {
       await confirmOrg(trimmed);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.me });
       onComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { useQuery } from '@tanstack/react-query';
 import { XIcon } from '@phosphor-icons/react/dist/ssr';
 import { clsx } from 'clsx';
 
@@ -9,6 +10,7 @@ import { TextArea } from '../TextArea';
 import { useToast } from '../Toast';
 import { getMe } from '../../lib/api.js';
 import { submitContactSalesForm } from '../../lib/hubspot.js';
+import { queryKeys, ME_STALE_TIME } from '../../lib/query-client.js';
 
 type ContactSalesDialogProps = {
   open: boolean;
@@ -29,20 +31,22 @@ export function ContactSalesDialog({ open, onClose }: ContactSalesDialogProps) {
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [nameError, setNameError] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
-  // Fetch user info when dialog opens
+  const { data: me } = useQuery({
+    queryKey: queryKeys.me,
+    queryFn: () => getMe(),
+    staleTime: ME_STALE_TIME,
+    enabled: open,
+  });
+
   useEffect(() => {
-    if (!open) return;
-    getMe()
-      .then((me) => {
-        if (me.email) setEmail(me.email);
-        if (me.name) setName(me.name);
-        if (me.orgName) setCompany(me.orgName);
-      })
-      .catch(() => {
-        // Non-blocking — email/name prefill is optional
-      });
-  }, [open]);
+    if (!me || initialized) return;
+    if (me.email) setEmail(me.email);
+    if (me.name) setName(me.name);
+    if (me.orgName) setCompany(me.orgName);
+    setInitialized(true);
+  }, [me, initialized]);
 
   const resetForm = useCallback(() => {
     setName('');
@@ -50,6 +54,7 @@ export function ContactSalesDialog({ open, onClose }: ContactSalesDialogProps) {
     setMessage('');
     setEmail('');
     setNameError(false);
+    setInitialized(false);
   }, []);
 
   function handleClose() {

@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
 import { AppHeader } from './AppHeader';
 import { SidebarNav } from './SidebarNav';
 import { getUsage } from '../lib/api';
-import type { UsageResponse } from '@filone/shared';
+import { queryKeys } from '../lib/query-client.js';
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -11,13 +12,9 @@ type AppShellProps = {
 
 export function AppShell({ children }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [tenantStatus, setTenantStatus] = useState<UsageResponse['tenantStatus']>();
 
-  useEffect(() => {
-    getUsage()
-      .then((data) => setTenantStatus(data.tenantStatus))
-      .catch(() => {});
-  }, []);
+  const { data: usage } = useQuery({ queryKey: queryKeys.usage, queryFn: getUsage });
+  const tenantStatus = usage?.tenantStatus;
 
   return (
     <div className="flex h-screen overflow-hidden">

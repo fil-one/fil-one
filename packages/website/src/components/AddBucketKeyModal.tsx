@@ -1,17 +1,14 @@
 import { useState } from 'react';
+import { LightbulbIcon } from '@phosphor-icons/react/dist/ssr';
 
-import type { AccessKeyPermission, CreateAccessKeyResponse } from '@filone/shared';
-import { apiRequest } from '../lib/api.js';
-import { expiresAtFromForm } from '../lib/time.js';
+import { useAccessKeyForm } from '../lib/use-access-key-form.js';
+import { AccessKeyFormFields } from './AccessKeyFormFields.js';
 
-import { AccessKeyExpirationFields } from './AccessKeyExpirationFields.js';
-import type { ExpirationOption } from './AccessKeyExpirationFields.js';
-import { AccessKeyPermissionsFields } from './AccessKeyPermissionsFields.js';
+import type { CreateAccessKeyResponse } from '@filone/shared';
+
 import { Button } from './Button.js';
-import { Input } from './Input.js';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal/index.js';
 import { SaveCredentialsModal } from './SaveCredentialsModal.js';
-import { useToast } from './Toast/index.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -34,63 +31,25 @@ export function AddBucketKeyModal({
   bucketName,
   onKeyAdded,
 }: AddBucketKeyModalProps) {
-  const { toast } = useToast();
-
-  const [keyName, setKeyName] = useState('');
-  const [permissions, setPermissions] = useState<AccessKeyPermission[]>([
-    'read',
-    'write',
-    'list',
-    'delete',
-  ]);
-  const [expiration, setExpiration] = useState<ExpirationOption>('never');
-  const [customDate, setCustomDate] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-
   const [credentials, setCredentials] = useState<{
     accessKeyId: string;
     secretAccessKey: string;
   } | null>(null);
-
-  function reset() {
-    setKeyName('');
-    setPermissions(['read', 'write', 'list', 'delete']);
-    setExpiration('never');
-    setCustomDate(null);
-    setCreating(false);
-    setCredentials(null);
-  }
-
-  function handleClose() {
-    reset();
-    onClose();
-  }
-
-  async function handleCreate() {
-    if (!keyName.trim() || permissions.length === 0) return;
-    setCreating(true);
-    try {
-      const response = await apiRequest<CreateAccessKeyResponse>('/access-keys', {
-        method: 'POST',
-        body: JSON.stringify({
-          keyName: keyName.trim(),
-          permissions,
-          bucketScope: 'specific',
-          buckets: [bucketName],
-          expiresAt: expiresAtFromForm(expiration, customDate),
-        }),
-      });
+  const form = useAccessKeyForm({
+    defaultBucket: bucketName,
+    onSuccess: (response: CreateAccessKeyResponse) => {
       setCredentials({
         accessKeyId: response.accessKeyId,
         secretAccessKey: response.secretAccessKey,
       });
       onKeyAdded();
-    } catch (err) {
-      console.error('Failed to create access key:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to create access key');
-    } finally {
-      setCreating(false);
-    }
+    },
+  });
+
+  function handleClose() {
+    form.reset();
+    setCredentials(null);
+    onClose();
   }
 
   if (credentials) {
@@ -104,37 +63,48 @@ export function AddBucketKeyModal({
     );
   }
 
-  const canSubmit = keyName.trim().length > 0 && permissions.length > 0 && !creating;
-
   return (
-    <Modal open={open} onClose={handleClose} size="md">
+    <Modal open={open} onClose={handleClose} size="lg">
       <ModalHeader onClose={handleClose}>Create API key for {bucketName}</ModalHeader>
       <ModalBody>
-        <div className="flex flex-col gap-4">
-          {/* Key name */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-zinc-700">Key name</label>
-            <Input value={keyName} onChange={setKeyName} placeholder="e.g., Production API Key" />
+        <div className="flex gap-6">
+          {/* Left: form fields */}
+          <div className="flex-1">
+            <AccessKeyFormFields form={form} />
           </div>
 
-          {/* Permissions */}
-          <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium text-zinc-700">Permissions</label>
-            <AccessKeyPermissionsFields value={permissions} onChange={setPermissions} />
-            {permissions.length === 0 && (
-              <p className="text-xs text-red-600">Select at least one permission.</p>
-            )}
-          </div>
-
-          {/* Expiration */}
-          <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium text-zinc-700">Expiration</label>
-            <AccessKeyExpirationFields
-              value={expiration}
-              customDate={customDate}
-              onChange={setExpiration}
-              onDateChange={setCustomDate}
-            />
+          {/* Right: info panel */}
+          <div className="w-56 shrink-0">
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <LightbulbIcon size={16} className="text-zinc-500" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                  Good to know
+                </span>
+              </div>
+              <div className="flex flex-col gap-4 text-xs text-zinc-600">
+                <div>
+                  <p className="mb-1 font-medium text-zinc-800">Keep your secret safe</p>
+                  <p>
+                    Your secret access key grants full access to your data. Never share it with
+                    anyone, including support. Store it in a password manager or secrets vault.
+                  </p>
+                </div>
+                <div>
+                  <p className="mb-1 font-medium text-zinc-800">Scope by bucket</p>
+                  <p>
+                    Restrict keys to specific buckets to follow the principle of least privilege.
+                  </p>
+                </div>
+                <div>
+                  <p className="mb-1 font-medium text-zinc-800">Set an expiry</p>
+                  <p>
+                    Keys can be set to expire automatically. Use short-lived keys for temporary
+                    access.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </ModalBody>
@@ -143,8 +113,8 @@ export function AddBucketKeyModal({
           <Button variant="ghost" onClick={handleClose}>
             Cancel
           </Button>
-          <Button variant="filled" disabled={!canSubmit} onClick={handleCreate}>
-            {creating ? 'Creating...' : 'Create & add key'}
+          <Button variant="filled" disabled={!form.canSubmit} onClick={form.handleSubmit}>
+            {form.creating ? 'Creating...' : 'Create API key'}
           </Button>
         </div>
       </ModalFooter>

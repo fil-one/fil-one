@@ -1,9 +1,9 @@
 import { createRoute, redirect, useNavigate } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root.js';
 import { FinishSignUpPage } from '../pages/FinishSignUpPage';
 import { getMe } from '../lib/api.js';
-import { useState, useEffect } from 'react';
-import type { MeResponse } from '@filone/shared';
+import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -18,34 +18,28 @@ export const Route = createRoute({
 
 function FinishSignUpRoute() {
   const navigate = useNavigate();
-  const [me, setMe] = useState<MeResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: me, isPending } = useQuery({
+    queryKey: queryKeys.me,
+    queryFn: () => getMe(),
+    staleTime: ME_STALE_TIME,
+  });
 
-  useEffect(() => {
-    getMe()
-      .then((data) => {
-        if (!data.emailVerified) {
-          void navigate({ to: '/verify-email' });
-          return;
-        }
-        if (data.orgConfirmed) {
-          void navigate({ to: '/dashboard' });
-          return;
-        }
-        setMe(data);
-      })
-      .catch(() => {
-        // If /me fails, let the app handle it (likely a 401 redirect)
-      })
-      .finally(() => setLoading(false));
-  }, [navigate]);
-
-  if (loading || !me) {
+  if (isPending || !me) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="text-sm text-zinc-500">Loading...</p>
       </div>
     );
+  }
+
+  if (!me.emailVerified) {
+    void navigate({ to: '/verify-email' });
+    return null;
+  }
+
+  if (me.orgConfirmed) {
+    void navigate({ to: '/dashboard' });
+    return null;
   }
 
   return <FinishSignUpPage me={me} onComplete={() => navigate({ to: '/dashboard' })} />;

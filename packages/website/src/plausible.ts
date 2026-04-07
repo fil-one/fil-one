@@ -1,9 +1,13 @@
 import { init, track } from '@plausible-analytics/tracker';
+import { Stage } from '@filone/shared';
+import { FILONE_STAGE } from './env.js';
 
-init({
-  domain: 'fil.one',
-  captureOnLocalhost: false,
-  autoCapturePageviews: true,
-});
+if (FILONE_STAGE === Stage.Production) {
+  init({
+    domain: 'fil.one',
+    captureOnLocalhost: false,
+    autoCapturePageviews: true,
+  });
+}
 
 export { track };
