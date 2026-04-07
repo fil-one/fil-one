@@ -8,7 +8,7 @@ jobs:
   guard:
     if: >-
       github.event.issue.pull_request &&
-      startsWith(github.event.comment.body, '/deploy')
+      contains(github.event.comment.body, '/deploy')
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
