@@ -1,4 +1,4 @@
-name: 'Deploy Preview'
+name: 'CI [Deploy Preview]'
 
 on:
   issue_comment:
@@ -265,7 +265,7 @@ jobs:
         run: pnpm test:integration
 
   dispatch-telemetry:
-    needs: [guard, check-packages, deploy-preview, comment, e2e-tests, integration-tests]
+    needs: [guard, deploy-preview, comment, e2e-tests, integration-tests]
     if: always()
     runs-on: ubuntu-latest
     permissions:
