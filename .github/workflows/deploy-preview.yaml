@@ -5,29 +5,18 @@ on:
     types: [created]
 
 jobs:
-  guard:
+  pre-deploy:
     if: >-
       github.event.issue.pull_request &&
-      contains(github.event.comment.body, '/deploy')
+      contains(github.event.comment.body, '/deploy') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     permissions:
-      pull-requests: read
-      issues: write
+      pull-requests: write
     outputs:
       head-sha: ${{ steps.pr.outputs.head-sha }}
-      base-ref: ${{ steps.pr.outputs.base-ref }}
-      head-repo: ${{ steps.pr.outputs.head-repo }}
+      comment-id: ${{ steps.comment.outputs.comment-id }}
     steps:
-      - name: Check permissions
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PERMISSION=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission" --jq '.permission')
-          if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "write" && "$PERMISSION" != "maintain" ]]; then
-            echo "::error::User ${{ github.actor }} does not have write permission"
-            exit 1
-          fi
-
       - name: Add reaction
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -40,28 +29,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PR_JSON=$(gh pr view "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --json state,headRefOid,baseRefName,headRepository)
+          PR_JSON=$(gh pr view "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --json state,headRefOid,baseRefName,headRepository,headRepositoryOwner)
           STATE=$(echo "$PR_JSON" | jq -r '.state')
           if [ "$STATE" != "OPEN" ]; then
             echo "::error::PR is not open (state: $STATE)"
             exit 1
           fi
+          HEAD_REPO=$(echo "$PR_JSON" | jq -r '.headRepositoryOwner.login + "/" + .headRepository.name')
+          if [ "$HEAD_REPO" != "${{ github.repository }}" ]; then
+            echo "::error::Cannot deploy from fork ($HEAD_REPO)"
+            exit 1
+          fi
+          BASE_REF=$(echo "$PR_JSON" | jq -r '.baseRefName')
+          if [ "$BASE_REF" = "production" ]; then
+            echo "::error::Cannot deploy preview for PRs targeting production"
+            exit 1
+          fi
           echo "head-sha=$(echo "$PR_JSON" | jq -r '.headRefOid')" >> "$GITHUB_OUTPUT"
-          echo "base-ref=$(echo "$PR_JSON" | jq -r '.baseRefName')" >> "$GITHUB_OUTPUT"
-          HEAD_REPO=$(echo "$PR_JSON" | jq -r '.headRepository.owner.login + "/" + .headRepository.name')
-          echo "head-repo=$HEAD_REPO" >> "$GITHUB_OUTPUT"
-
-  pre-deploy:
-    needs: [guard]
-    if: >-
-      needs.guard.outputs.base-ref != 'production' &&
-      needs.guard.outputs.head-repo == github.repository
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    outputs:
-      comment-id: ${{ steps.comment.outputs.comment-id }}
-    steps:
       - name: Post deployment started comment
         id: comment
         uses: peter-evans/create-or-update-comment@v4
@@ -72,12 +56,12 @@ jobs:
 
             | | |
             |---|---|
-            | **Latest commit** | `${{ needs.guard.outputs.head-sha }}` |
+            | **Latest commit** | `${{ needs.pre-deploy.outputs.head-sha }}` |
             | **Status** | ⏳ Deployment in progress... |
             | **Logs** | [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
   deploy-preview:
-    needs: [guard, pre-deploy]
+    needs: [pre-deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -94,12 +78,12 @@ jobs:
       url: ${{ steps.deploy.outputs.url }}
       sst-env-dirty: ${{ steps.sst-env-check.outputs.dirty }}
       pr-number: ${{ github.event.issue.number }}
-      head-sha: ${{ needs.guard.outputs.head-sha }}
+      head-sha: ${{ needs.pre-deploy.outputs.head-sha }}
 
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ needs.guard.outputs.head-sha }}
+          ref: ${{ needs.pre-deploy.outputs.head-sha }}
           submodules: recursive
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
@@ -180,31 +164,6 @@ jobs:
           echo "::error::sst-env.d.ts files are out of date. Please run 'sst deploy' locally and commit the updated sst-env.d.ts files."
           exit 1
 
-  comment:
-    name: Update Preview Environment Comment
-    if: always() && needs.pre-deploy.outputs.comment-id
-    needs: [pre-deploy, deploy-preview, e2e-tests, integration-tests]
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-      - name: Update comment with result
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          comment-id: ${{ needs.pre-deploy.outputs.comment-id }}
-          edit-mode: replace
-          body: |
-            ## 🚀 Preview Environment
-
-            | | |
-            |---|---|
-            | **Latest commit** | `${{ needs.deploy-preview.outputs.head-sha }}` |
-            | **Status** | ${{ needs.deploy-preview.result == 'success' && '✅ Deploy successful' || '❌ Deploy failed' }} |
-            | **Preview URL** | ${{ needs.deploy-preview.result == 'success' && format('[{0}]({0})', needs.deploy-preview.outputs.url) || 'N/A' }} |
-            | **E2E Tests** | ${{ needs.e2e-tests.result == 'success' && '✅ Passed' || needs.e2e-tests.result == 'failure' && '❌ Failed' || '⏭️ Skipped' }} |
-            | **Integration Tests** | ${{ needs.integration-tests.result == 'success' && '✅ Passed' || needs.integration-tests.result == 'failure' && '❌ Failed' || '⏭️ Skipped' }} |
-            | **Logs** | [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
-
   e2e-tests:
     needs: [deploy-preview]
     runs-on: ubuntu-latest
@@ -283,8 +242,33 @@ jobs:
       - name: Run integration tests
         run: pnpm test:integration
 
+  comment:
+    name: Update Preview Environment Comment
+    if: always() && needs.pre-deploy.outputs.comment-id
+    needs: [pre-deploy, deploy-preview, e2e-tests, integration-tests]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Update comment with result
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ needs.pre-deploy.outputs.comment-id }}
+          edit-mode: replace
+          body: |
+            ## 🚀 Preview Environment
+
+            | | |
+            |---|---|
+            | **Latest commit** | `${{ needs.deploy-preview.outputs.head-sha }}` |
+            | **Status** | ${{ needs.deploy-preview.result == 'success' && '✅ Deploy successful' || '❌ Deploy failed' }} |
+            | **Preview URL** | ${{ needs.deploy-preview.result == 'success' && format('[{0}]({0})', needs.deploy-preview.outputs.url) || 'N/A' }} |
+            | **E2E Tests** | ${{ needs.e2e-tests.result == 'success' && '✅ Passed' || needs.e2e-tests.result == 'failure' && '❌ Failed' || '⏭️ Skipped' }} |
+            | **Integration Tests** | ${{ needs.integration-tests.result == 'success' && '✅ Passed' || needs.integration-tests.result == 'failure' && '❌ Failed' || '⏭️ Skipped' }} |
+            | **Logs** | [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
   dispatch-telemetry:
-    needs: [guard, pre-deploy, deploy-preview, comment, e2e-tests, integration-tests]
+    needs: [pre-deploy, deploy-preview, comment, e2e-tests, integration-tests]
     if: always()
     runs-on: ubuntu-latest
     permissions:
