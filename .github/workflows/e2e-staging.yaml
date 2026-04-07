@@ -10,6 +10,10 @@ on:
         required: false
         type: string
 
+concurrency:
+  group: e2e-staging
+  cancel-in-progress: true
+
 jobs:
   e2e:
     runs-on: ubuntu-latest
@@ -17,6 +21,8 @@ jobs:
     permissions:
       actions: write
       contents: read
+    env:
+      BASE_URL: ${{ inputs.base_url || 'https://staging.fil.one' }}
 
     steps:
       - uses: actions/checkout@v5
@@ -37,8 +43,6 @@ jobs:
         run: pnpm exec playwright install --with-deps
 
       - name: Run E2E tests
-        env:
-          BASE_URL: ${{ inputs.base_url || 'https://staging.fil.one' }}
         run: pnpm test:e2e
 
       - name: Upload Playwright report
@@ -71,7 +75,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "URL tested: `${{ inputs.base_url || 'https://staging.fil.one' }}`"
+                    "text": "URL tested: `${{ env.BASE_URL }}`"
                   }
                 }
               ]
