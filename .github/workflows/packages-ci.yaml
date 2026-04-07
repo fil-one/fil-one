@@ -128,7 +128,6 @@ jobs:
           echo "url=$URL_TRIMMED" >> "$GITHUB_OUTPUT"
 
       - name: Install Stripe CLI
-        if: success()
         run: |
           curl -s https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public \
             | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg > /dev/null
@@ -137,7 +136,6 @@ jobs:
           sudo apt-get update && sudo apt-get install -y stripe
 
       - name: Check Stripe webhook registration
-        if: success()
         id: webhook-check
         continue-on-error: true
         env:
@@ -215,7 +213,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-2
 
       - name: Install Stripe CLI
