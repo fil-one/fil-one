@@ -54,8 +54,14 @@ export {
   BUCKET_NAME_MIN_LENGTH,
   BUCKET_NAME_MAX_LENGTH,
   BUCKET_NAME_PATTERN,
+  RETENTION_MODES,
+  RETENTION_DURATION_TYPES,
+  RETENTION_MAX_DAYS,
+  RETENTION_MAX_YEARS,
   CreateBucketSchema,
 } from './api/buckets.js';
+
+export type { RetentionMode, RetentionDurationType } from './api/buckets.js';
 
 export type {
   S3Object,

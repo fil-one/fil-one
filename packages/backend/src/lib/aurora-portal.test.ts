@@ -138,6 +138,90 @@ describe('createAuroraBucket', () => {
       createAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' }),
     ).rejects.toThrow('Failed to create Aurora bucket "my-bucket" for tenant tenant-1');
   });
+
+  it('passes versioning: true when option is set', async () => {
+    setupSsmMock();
+    mockPostBucket.mockResolvedValue({ error: undefined });
+
+    await createAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket', versioning: true });
+
+    expect(mockPostBucket).toHaveBeenCalledWith({
+      client: 'mock-portal-client',
+      path: { tenantId: 'tenant-1' },
+      body: {
+        name: 'my-bucket',
+        encrypted: true,
+        versioning: true,
+      } satisfies BucketsBucketCreateRequest,
+      throwOnError: false,
+    });
+  });
+
+  it('passes lock: true when option is set', async () => {
+    setupSsmMock();
+    mockPostBucket.mockResolvedValue({ error: undefined });
+
+    await createAuroraBucket({
+      tenantId: 'tenant-1',
+      bucketName: 'my-bucket',
+      versioning: true,
+      lock: true,
+    });
+
+    expect(mockPostBucket).toHaveBeenCalledWith({
+      client: 'mock-portal-client',
+      path: { tenantId: 'tenant-1' },
+      body: {
+        name: 'my-bucket',
+        encrypted: true,
+        versioning: true,
+        lock: true,
+      } satisfies BucketsBucketCreateRequest,
+      throwOnError: false,
+    });
+  });
+
+  it('passes defaultRetention when retention option is provided', async () => {
+    setupSsmMock();
+    mockPostBucket.mockResolvedValue({ error: undefined });
+
+    await createAuroraBucket({
+      tenantId: 'tenant-1',
+      bucketName: 'my-bucket',
+      versioning: true,
+      lock: true,
+      retention: { enabled: true, mode: 'governance', duration: 30, durationType: 'd' },
+    });
+
+    expect(mockPostBucket).toHaveBeenCalledWith({
+      client: 'mock-portal-client',
+      path: { tenantId: 'tenant-1' },
+      body: {
+        name: 'my-bucket',
+        encrypted: true,
+        versioning: true,
+        lock: true,
+        defaultRetention: {
+          enabled: true,
+          mode: 'governance',
+          duration: { duration: 30, type: 'd' },
+        },
+      } satisfies BucketsBucketCreateRequest,
+      throwOnError: false,
+    });
+  });
+
+  it('omits versioning, lock, retention from body when not provided', async () => {
+    setupSsmMock();
+    mockPostBucket.mockResolvedValue({ error: undefined });
+
+    await createAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' });
+
+    const body = (mockPostBucket.mock.calls[0][0] as { body: Record<string, unknown> }).body;
+    expect(body).not.toHaveProperty('versioning');
+    expect(body).not.toHaveProperty('lock');
+    expect(body).not.toHaveProperty('defaultRetention');
+  });
 });
 
 describe('getAuroraPortalApiKey', () => {

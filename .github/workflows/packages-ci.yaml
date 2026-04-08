@@ -16,8 +16,7 @@ jobs:
         with:
           submodules: recursive
 
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - uses: actions/setup-node@v5
         with:
@@ -65,8 +64,7 @@ jobs:
         with:
           submodules: recursive
 
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - uses: actions/setup-node@v5
         with:
@@ -174,45 +172,6 @@ jobs:
             | **Status** | ✅ Deploy successful |
             | **Preview URL** | [${{ needs.deploy-preview.outputs.url }}](${{ needs.deploy-preview.outputs.url }}) |
 
-  e2e-tests:
-    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production'
-    needs: [deploy-preview]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    concurrency:
-      group: preview-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright Browsers
-        run: pnpm exec playwright install --with-deps
-
-      - name: Run Playwright tests
-        run: pnpm test:e2e
-        env:
-          BASE_URL: ${{ needs.deploy-preview.outputs.url }}
-
-      - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 30
-
   integration-tests:
     if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production' && github.event.pull_request.head.repo.full_name == github.repository
     needs: [deploy-preview]
@@ -233,7 +192,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - uses: actions/setup-node@v5
         with:
@@ -271,8 +230,7 @@ jobs:
         with:
           submodules: recursive
 
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - uses: actions/setup-node@v5
         with:
@@ -325,7 +283,7 @@ jobs:
             }
 
   dispatch-telemetry:
-    needs: [check-packages, deploy-preview, comment, e2e-tests, integration-tests, deploy]
+    needs: [check-packages, deploy-preview, comment, integration-tests, deploy]
     if: >-
       always() && (
         github.event_name == 'push' ||

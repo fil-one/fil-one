@@ -10,12 +10,13 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 
 import { S3_REGION, CreateBucketSchema, CreateAccessKeySchema } from '@filone/shared';
+import type { CreateBucketResponse, RetentionMode, RetentionDurationType } from '@filone/shared';
 import { apiRequest, createAccessKey } from '../lib/api.js';
-import type { CreateBucketResponse } from '@filone/shared';
 import { queryKeys } from '../lib/query-client.js';
 
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
 import { Input } from '../components/Input';
+import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
 import { useToast } from '../components/Toast';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
@@ -32,6 +33,14 @@ export function CreateBucketPage() {
   // Bucket fields
   const [name, setName] = useState('');
   const [region, setRegion] = useState(S3_REGION);
+
+  // Object settings
+  const [versioning, setVersioning] = useState(false);
+  const [lock, setLock] = useState(false);
+  const [retentionEnabled, setRetentionEnabled] = useState(false);
+  const [retentionMode, setRetentionMode] = useState<RetentionMode>('governance');
+  const [retentionDuration, setRetentionDuration] = useState(15);
+  const [retentionDurationType, setRetentionDurationType] = useState<RetentionDurationType>('d');
 
   // Key section visibility
   const [permissionsOpen, setPermissionsOpen] = useState(false);
@@ -84,8 +93,36 @@ export function CreateBucketPage() {
   const wantsApiKey = permissionsOpen && form.keyName.trim().length > 0;
 
   async function handleSubmit() {
-    if (!validateName(name)) return;
     if (wantsApiKey && form.permissions.length === 0) return;
+
+    const bucketBody = {
+      name: name.trim(),
+      region,
+      versioning,
+      lock,
+      ...(retentionEnabled
+        ? {
+            retention: {
+              enabled: true as const,
+              mode: retentionMode,
+              duration: retentionDuration,
+              durationType: retentionDurationType,
+            },
+          }
+        : {}),
+    };
+
+    const parsed = CreateBucketSchema.safeParse(bucketBody);
+    if (!parsed.success) {
+      const msg = parsed.error.issues[0].message;
+      // Show name errors inline; everything else as a toast
+      if (parsed.error.issues[0].path[0] === 'name') {
+        setNameError(msg);
+      } else {
+        toast.error(msg);
+      }
+      return;
+    }
 
     setCreating(true);
 
@@ -94,7 +131,7 @@ export function CreateBucketPage() {
     try {
       const { bucket } = await apiRequest<CreateBucketResponse>('/buckets', {
         method: 'POST',
-        body: JSON.stringify({ name: name.trim(), region }),
+        body: JSON.stringify(parsed.data),
       });
       bucketName = bucket.name;
       void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
@@ -159,9 +196,9 @@ export function CreateBucketPage() {
   const canSubmit = name.trim().length > 0 && !nameError && !creating && accessKeyFormValid;
 
   return (
-    <div className="p-6">
+    <div className="mx-auto flex max-w-[860px] flex-col gap-6 py-12">
       {/* Back + header */}
-      <div className="mb-6 flex items-center gap-4">
+      <div className="flex items-center gap-4">
         <button
           type="button"
           onClick={() => navigate({ to: '/buckets' })}
@@ -225,6 +262,22 @@ export function CreateBucketPage() {
               <p className="text-[11px] text-zinc-500">More regions coming soon.</p>
             </div>
 
+            {/* Object settings */}
+            <ObjectSettingsFields
+              versioning={versioning}
+              onVersioningChange={setVersioning}
+              lock={lock}
+              onLockChange={setLock}
+              retentionEnabled={retentionEnabled}
+              onRetentionEnabledChange={setRetentionEnabled}
+              retentionMode={retentionMode}
+              onRetentionModeChange={setRetentionMode}
+              retentionDuration={retentionDuration}
+              onRetentionDurationChange={setRetentionDuration}
+              retentionDurationType={retentionDurationType}
+              onRetentionDurationTypeChange={setRetentionDurationType}
+            />
+
             {/* API key section */}
             <div className="flex flex-col gap-3">
               <label className="text-xs font-medium text-zinc-900">API key</label>
@@ -271,26 +324,26 @@ export function CreateBucketPage() {
           </div>
         </div>
 
-        {/* Right: Info sidebar (no box, just text) */}
-        <div className="w-60 shrink-0 pt-1">
+        {/* Right: Info sidebar */}
+        <div className="sticky top-0 w-60 shrink-0 self-start pt-1">
           <p className="text-[10px] font-semibold uppercase tracking-[1px] text-zinc-500">
             Included by default
           </p>
-          <p className="mt-1 text-xs font-medium text-zinc-900">
-            Every bucket comes with these features built in.
-          </p>
 
-          <div className="mt-4 flex flex-col gap-0.5">
+          <div className="mt-3 flex flex-col">
             {/* Encryption */}
-            <div className="py-3">
-              <div className="flex items-center gap-2">
-                <span className="text-[13px] font-semibold text-zinc-900">Encryption</span>
-                <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-emerald-600">
-                  Always on
-                </span>
-              </div>
-              <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
-                All data is encrypted at rest by default for both private and public buckets.
+            <div className="flex flex-col gap-0.5 py-3">
+              <span className="text-[13px] font-semibold text-zinc-900">Encryption</span>
+              <p className="text-xs leading-relaxed text-zinc-500">
+                All data is encrypted at rest by default.
+              </p>
+            </div>
+
+            {/* Private */}
+            <div className="flex flex-col gap-0.5 border-t border-zinc-200/60 py-3">
+              <span className="text-[13px] font-semibold text-zinc-900">Private</span>
+              <p className="text-xs leading-relaxed text-zinc-500">
+                All buckets are private by default. Access requires an API key.
               </p>
             </div>
           </div>

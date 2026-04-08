@@ -9,7 +9,7 @@ import {
   getS3AccessKey,
   listS3AccessKeys,
 } from '@filone/aurora-portal-client';
-import type { AccessKeyPermission } from '@filone/shared';
+import type { AccessKeyPermission, RetentionDurationType, RetentionMode } from '@filone/shared';
 import { instrumentClient } from './aurora-api-metrics.js';
 
 const ssm = new SSMClient({});
@@ -54,11 +54,22 @@ async function createPortalClient(tenantId: string) {
 export interface CreateAuroraBucketOptions {
   tenantId: string;
   bucketName: string;
+  versioning?: boolean;
+  lock?: boolean;
+  retention?: {
+    enabled: boolean;
+    mode: RetentionMode;
+    duration: number;
+    durationType: RetentionDurationType;
+  };
 }
 
 export async function createAuroraBucket({
   tenantId,
   bucketName,
+  versioning,
+  lock,
+  retention,
 }: CreateAuroraBucketOptions): Promise<void> {
   const client = await createPortalClient(tenantId);
 
@@ -68,9 +79,20 @@ export async function createAuroraBucket({
     body: {
       name: bucketName,
       encrypted: true,
-      // TODO: https://linear.app/filecoin-foundation/issue/FIL-202/enable-objectlock-and-versioning-for-aurora-buckets
-      // lock: true,
-      // versioning: true,
+      ...(versioning ? { versioning: true } : {}),
+      ...(lock ? { lock: true } : {}),
+      ...(retention?.enabled
+        ? {
+            defaultRetention: {
+              enabled: true,
+              mode: retention.mode,
+              duration: {
+                duration: retention.duration,
+                type: retention.durationType,
+              },
+            },
+          }
+        : {}),
     },
     throwOnError: false,
   });
