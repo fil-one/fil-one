@@ -25,7 +25,7 @@ export function EmptyStateCard({
         </span>
 
         <div className="space-y-4 text-center">
-          <Heading tag={titleTag} variant="card-heading">
+          <Heading tag={titleTag} size="xl">
             {title}
           </Heading>
           <p className="text-(--color-paragraph-text)">{description}</p>
