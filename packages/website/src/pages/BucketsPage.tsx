@@ -145,10 +145,14 @@ export function BucketsPage() {
                       type="button"
                       aria-label={`Delete bucket ${bucket.name}`}
                       onClick={() => deleteBucketMutation.mutate(bucket.name)}
-                      disabled={
-                        deleteBucketMutation.isPending &&
-                        deleteBucketMutation.variables === bucket.name
-                      }
+                      // TODO: enable bucket deletion after Aurora implements this operation
+                      // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
+                      // disabled={
+                      //   deleteBucketMutation.isPending &&
+                      //   deleteBucketMutation.variables === bucket.name
+                      // }
+                      disabled
+                      title="Deleting buckets is not available yet"
                       className="text-zinc-400 hover:text-red-500 disabled:opacity-50"
                     >
                       <TrashIcon size={16} aria-hidden="true" />
