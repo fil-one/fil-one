@@ -1,6 +1,12 @@
+export { buildAuth0AuthorizeUrl } from './auth.js';
+export type { Auth0LoginUrlOptions } from './auth.js';
+
 export {
-  S3_ENDPOINT,
+  Stage,
+  DOCS_URL,
   S3_REGION,
+  S3Region,
+  getS3Endpoint,
   OAUTH_STATE_COOKIE,
   CSRF_COOKIE_NAME,
   GB_BYTES,
@@ -48,8 +54,14 @@ export {
   BUCKET_NAME_MIN_LENGTH,
   BUCKET_NAME_MAX_LENGTH,
   BUCKET_NAME_PATTERN,
+  RETENTION_MODES,
+  RETENTION_DURATION_TYPES,
+  RETENTION_MAX_DAYS,
+  RETENTION_MAX_YEARS,
   CreateBucketSchema,
 } from './api/buckets.js';
+
+export type { RetentionMode, RetentionDurationType } from './api/buckets.js';
 
 export type {
   S3Object,

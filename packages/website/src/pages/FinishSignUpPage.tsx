@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { confirmOrg, logout } from '../lib/api.js';
 import type { MeResponse } from '@filone/shared';
+import { queryKeys } from '../lib/query-client.js';
 
 type FinishSignUpPageProps = {
   me: MeResponse;
@@ -10,6 +12,7 @@ type FinishSignUpPageProps = {
 };
 
 export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
+  const queryClient = useQueryClient();
   const [orgName, setOrgName] = useState(me.orgName || me.suggestedOrgName || '');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -34,6 +37,7 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
     setSubmitting(true);
     try {
       await confirmOrg(trimmed);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.me });
       onComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
@@ -125,12 +129,11 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
         </div>
 
         <h2 className="mb-4 max-w-sm text-center text-3xl font-semibold text-zinc-950">
-          Welcome to Fil.one
+          Welcome to Fil One
         </h2>
 
         <p className="mb-10 max-w-sm text-center text-base text-zinc-600">
-          S3-compatible storage on Filecoin. Set up your organization to start storing objects with
-          verifiable content addressing.
+          S3-compatible storage on Filecoin. Start storing objects with integrity you can verify.
         </p>
 
         <ul className="mb-12 flex w-full max-w-sm flex-col gap-4">
@@ -155,7 +158,7 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
         </ul>
 
         <p className="text-sm text-zinc-400">
-          Trusted by teams storing critical data on the decentralized web
+          Trusted by teams storing critical enterprise and AI data.
         </p>
       </div>
     </div>

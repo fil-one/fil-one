@@ -26,14 +26,16 @@ vi.mock('stripe', () => ({
   },
 }));
 
+const mockResource = vi.hoisted(() => ({
+  StripeSecretKey: { value: 'sk_test_fake' },
+  Auth0MgmtClientId: { value: 'mgmt-client-id' },
+  Auth0MgmtClientSecret: { value: 'mgmt-client-secret' },
+  Auth0ClientId: { value: 'auth0-client-id' },
+  SendGridApiKey: { value: 'SG.test-api-key' },
+}));
+
 vi.mock('sst', () => ({
-  Resource: {
-    StripeSecretKey: { value: 'sk_test_fake' },
-    Auth0MgmtClientId: { value: 'mgmt-client-id' },
-    Auth0MgmtClientSecret: { value: 'mgmt-client-secret' },
-    Auth0ClientId: { value: 'auth0-client-id' },
-    SendGridApiKey: { value: 'SG.test-api-key' },
-  },
+  Resource: mockResource,
 }));
 
 const ssmMock = mockClient(SSMClient);
@@ -147,6 +149,7 @@ describe('setup-integrations', () => {
     ssmMock.reset();
     vi.clearAllMocks();
     stubAuth0Fetch();
+    mockResource.StripeSecretKey.value = 'sk_test_fake';
     process.env.AUTH0_DOMAIN = 'test.us.auth0.com';
   });
 
@@ -536,7 +539,7 @@ describe('setup-integrations', () => {
           'https://old.example.com/callback',
           'https://app.example.com/api/auth/callback',
         ],
-        allowed_logout_urls: ['https://app.example.com/sign-in'],
+        allowed_logout_urls: ['https://fil.one'],
         web_origins: ['https://app.example.com'],
       });
     });
@@ -562,7 +565,7 @@ describe('setup-integrations', () => {
       );
 
       expect(capturedAuth0PatchBody).toMatchObject({
-        initiate_login_uri: 'https://staging.fil.one/sign-in',
+        initiate_login_uri: 'https://staging.fil.one/login',
       });
     });
 
@@ -575,9 +578,9 @@ describe('setup-integrations', () => {
           'https://other.example.com/callback',
           'https://app.example.com/api/auth/callback',
         ],
-        allowed_logout_urls: ['https://app.example.com/sign-in'],
+        allowed_logout_urls: ['https://fil.one'],
         web_origins: ['https://app.example.com'],
-        initiate_login_uri: 'https://app.example.com/sign-in',
+        initiate_login_uri: 'https://app.example.com/login',
       });
 
       await handler(
@@ -589,7 +592,6 @@ describe('setup-integrations', () => {
 
       expect(capturedAuth0PatchBody).toEqual({
         callbacks: ['https://other.example.com/callback'],
-        allowed_logout_urls: [],
         web_origins: [],
       });
     });
@@ -627,6 +629,7 @@ describe('setup-integrations', () => {
     });
 
     it('uses production from-address when stage is production', async () => {
+      mockResource.StripeSecretKey.value = 'sk_live_real';
       ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
       ssmMock.on(PutParameterCommand).resolves({});
       mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
@@ -827,6 +830,84 @@ describe('setup-integrations', () => {
         credentials: { api_key: 'SG.test-api-key' },
         default_from_address: 'no-reply+staging@filone.ai',
       });
+    });
+  });
+
+  // ── Production Stripe key guard ─────────────────────────────────────
+
+  describe('production Stripe key guard', () => {
+    it('rejects test Stripe key in production', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://app.filone.ai',
+            Stage: 'production',
+          },
+        }),
+      );
+
+      expect(capturedCfnBody).toEqual({
+        Status: 'FAILED',
+        Reason: 'Using test Stripe key in production is not allowed',
+        PhysicalResourceId: 'filone-setup-production',
+        ...BASE_CFN_FIELDS,
+      });
+    });
+
+    it('allows live Stripe key in production', async () => {
+      mockResource.StripeSecretKey.value = 'sk_live_real';
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://app.filone.ai',
+            Stage: 'production',
+          },
+        }),
+      );
+
+      expect(capturedCfnBody).toEqual({
+        Status: 'SUCCESS',
+        PhysicalResourceId: 'filone-setup-production',
+        ...BASE_CFN_FIELDS,
+        Data: { webhookSecret: 'whsec_1', webhookEndpointId: 'we_1' },
+      });
+    });
+
+    it('allows test Stripe key in non-production stages', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://staging.filone.ai',
+            Stage: 'staging',
+          },
+        }),
+      );
+
+      expect(capturedCfnBody).toMatchObject({ Status: 'SUCCESS' });
     });
   });
 

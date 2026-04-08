@@ -148,6 +148,7 @@ interface IdTokenClaims {
   email: string | null;
   emailVerified: boolean;
   name: string | null;
+  picture: string | null;
 }
 
 /**
@@ -165,19 +166,20 @@ async function extractIdTokenClaims({
   clientId: string;
   issuer: string;
 }): Promise<IdTokenClaims> {
-  if (!idToken) return { email: null, emailVerified: false, name: null };
+  if (!idToken) return { email: null, emailVerified: false, name: null, picture: null };
   try {
     const { payload } = await jwtVerify(idToken, jwks, { audience: clientId, issuer });
     return {
       email: (payload.email as string) ?? null,
       emailVerified: (payload.email_verified as boolean) ?? false,
       name: (payload.name as string) ?? null,
+      picture: (payload.picture as string) ?? null,
     };
   } catch (err) {
     console.warn('[auth] ID token verification failed, continuing without email', {
       error: (err as Error).message,
     });
-    return { email: null, emailVerified: false, name: null };
+    return { email: null, emailVerified: false, name: null, picture: null };
   }
 }
 
@@ -193,12 +195,14 @@ async function attachIdentity({
   email,
   emailVerified,
   name,
+  picture,
 }: {
   event: APIGatewayProxyEventV2;
   sub: string;
   email: string | null;
   emailVerified: boolean;
   name: string | null;
+  picture: string | null;
 }): Promise<APIGatewayProxyStructuredResultV2 | null> {
   const resolved = await resolveUserAndOrg(sub, email);
   (
@@ -210,6 +214,7 @@ async function attachIdentity({
     email: resolved.email ?? undefined,
     emailVerified,
     name: name ?? undefined,
+    picture: picture ?? undefined,
   };
   if (!resolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
     return orgNotConfirmedResponse();
@@ -379,6 +384,7 @@ export function authMiddleware() {
           email: idClaims.email,
           emailVerified: idClaims.emailVerified,
           name: idClaims.name,
+          picture: idClaims.picture,
         });
         if (blocked) return blocked;
         return; // Valid — continue to handler
@@ -408,6 +414,7 @@ export function authMiddleware() {
           email: refreshedClaims.email,
           emailVerified: refreshedClaims.emailVerified,
           name: refreshedClaims.name,
+          picture: refreshedClaims.picture,
         });
         if (blocked) return blocked;
         return; // Continue to handler
@@ -442,6 +449,7 @@ export function authMiddleware() {
           email: idClaims.email,
           emailVerified: idClaims.emailVerified,
           name: idClaims.name,
+          picture: idClaims.picture,
         });
         if (blocked) return blocked;
         return;

@@ -1,8 +1,5 @@
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
-const CSP =
-  "default-src 'none'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
-
 export const COOKIE_ATTRIBUTES = 'HttpOnly; Secure; SameSite=Lax; Path=/';
 
 export const COOKIE_NAMES = {
@@ -58,11 +55,9 @@ export class ResponseBuilder {
       statusCode: this._statusCode,
       headers: {
         'Content-Type': 'application/json',
-        'Content-Security-Policy': CSP,
         'X-Content-Type-Options': 'nosniff',
-        'X-Frame-Options': 'DENY',
         'Referrer-Policy': 'strict-origin-when-cross-origin',
-        'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+        'Strict-Transport-Security': 'max-age=2592000; includeSubDomains',
       },
       body: JSON.stringify(this._body),
       ...(this._cookies.length > 0 && { cookies: this._cookies }),

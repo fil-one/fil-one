@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import basicSsl from '@vitejs/plugin-basic-ssl';
+import { sentryVitePlugin } from '@sentry/vite-plugin';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -13,11 +14,47 @@ export default defineConfig(({ mode }) => {
   const proxyTarget = env.DEV_PROXY_TARGET; // e.g. https://staging.fil.one
 
   return {
-    plugins: [react(), tailwindcss(), basicSsl()],
+    build: {
+      // A separate sourcemap file will be created.
+      // The corresponding sourcemap comments in the bundled files are suppressed.
+      sourcemap: 'hidden',
+    },
+    plugins: [
+      react(),
+      tailwindcss(),
+      basicSsl(),
+      sentryVitePlugin({
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        org: 'filecoin-foundation-qk',
+        project: 'filone-web',
+        telemetry: false,
+        release: {
+          // release.name is auto-detected from the git HEAD commit SHA.
+          dist: process.env.SENTRY_RELEASE_DIST || undefined,
+          deploy: process.env.SENTRY_DEPLOY_ENV
+            ? { env: process.env.SENTRY_DEPLOY_ENV }
+            : undefined,
+        },
+        sourcemaps: {
+          // Delete source maps after they are uploaded to Sentry.
+          filesToDeleteAfterUpload: ['./dist/**/*.map'],
+        },
+      }),
+    ],
     server: {
       ...(proxyTarget && {
         proxy: {
           '/api': {
+            target: proxyTarget,
+            changeOrigin: true,
+            headers: { 'X-Dev-Origin': 'https://localhost:5173' },
+          },
+          '/login': {
+            target: proxyTarget,
+            changeOrigin: true,
+            headers: { 'X-Dev-Origin': 'https://localhost:5173' },
+          },
+          '/logout': {
             target: proxyTarget,
             changeOrigin: true,
             headers: { 'X-Dev-Origin': 'https://localhost:5173' },

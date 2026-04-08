@@ -1,7 +1,8 @@
 # ADR: Observability Architecture for Serverless Wide Events
 
 **Status:** Accepted
-**Date:** 2026-03-24
+**Created:** 2026-03-24
+**Last Modified:** 2026-03-31
 
 ---
 
@@ -47,10 +48,10 @@ the response. See Alternative B for details.
 ## Decision
 
 **Lambda → `console.log` → CloudWatch Logs → Kinesis Firehose → Grafana Cloud
-Loki** for logs. No tracing or OpenTelemetry — the performance penalty of
-synchronous trace export is too large for our Lambda + API Gateway V2 setup.
-Metrics via EMF → CloudWatch Metrics → Grafana Cloud Prometheus is the planned
-next step.
+Loki** for logs. **CloudWatch Metrics → Metric Stream → Kinesis Firehose →
+Grafana Cloud Prometheus** for metrics. No tracing or OpenTelemetry — the
+performance penalty of synchronous trace export is too large for our Lambda +
+API Gateway V2 setup.
 
 ### How it works
 
@@ -68,9 +69,10 @@ next step.
 3. **Signal routing.**
    - **Logs → Loki** — JSON application logs with Lambda-injected `requestId`.
      Low-cardinality Loki labels (service, environment). LogQL for querying.
-   - **Metrics → Prometheus (planned)** — RED metrics (rate, errors, duration)
-     via CloudWatch Embedded Metric Format (EMF), streamed to Grafana Cloud
-     Prometheus via CloudWatch Metrics Firehose. See below.
+   - **Metrics → Prometheus** — AWS-provided metrics (Lambda invocations,
+     duration, errors, throttles) via CloudWatch Metric Stream → Firehose →
+     Grafana Cloud Prometheus. Custom application metrics via EMF planned as
+     step 2. See below.
    - **Traces** — not implemented. Debugging relies on structured log queries
      in Loki, correlated by `requestId`.
 
@@ -81,24 +83,81 @@ next step.
    visualization and TraceQL queries, but gain zero telemetry overhead on every
    request.
 
-### Metrics via EMF (planned near-future work)
+### Metrics pipeline
 
-We plan to add application metrics using CloudWatch Embedded Metric Format
-(EMF). The approach:
+Metrics delivery uses a two-step approach:
 
-- Emit EMF-formatted JSON to stdout from Lambda handlers, using low-cardinality
-  dimensions (e.g. route, status code, error type) to avoid the CloudWatch
-  cardinality trap.
-- CloudWatch automatically extracts metrics from EMF log lines — no additional
-  infrastructure needed for CloudWatch dashboards and alarms.
-- Stream CloudWatch Metrics to Grafana Cloud Prometheus via a CloudWatch Metrics
-  Firehose delivery stream, giving us PromQL-based dashboards and alerting in
-  Grafana.
-- Metrics are collected explicitly in application code, giving full control over
-  what is measured and how dimensions are chosen — fully manageable via IaC.
+**Step 1 (implemented): AWS-provided metrics via CloudWatch Metric Stream.**
 
-This is a direction to explore, not a finalized design. Details will be captured
-in a separate ADR or update to this one once implemented.
+A CloudWatch Metric Stream forwards AWS-provided metrics (`AWS/Lambda`,
+`AWS/ApiGateway`, `AWS/SQS`, `AWS/DynamoDB`) to Grafana Cloud
+Prometheus via a Kinesis Firehose delivery stream. This gives us Lambda duration,
+invocations, errors, throttles, API latency, queue depth, and table throttles in
+Grafana dashboards with zero application code changes. The pipeline:
+
+- CloudWatch Metrics → Metric Stream (OpenTelemetry 1.0 format) → Firehose →
+  Grafana Cloud Prometheus (`aws-metric-streams` endpoint)
+
+Additional AWS namespaces can be added to the Metric Stream's include filter
+as needed.
+
+CloudFront metrics are not yet included because CloudFront is a global service
+whose metrics are only published in us-east-1, while our staging & production
+stacks deploys to us-east-2.
+
+**Deployment scope.** The metric stream pipeline is deployed once per account via
+the `infra/` stack (not per-stage via the main stack), because CloudWatch Metric
+Streams are account-wide — a single stream captures all metrics in the configured
+namespaces regardless of which SST stage created the resources. This
+avoids duplicate data from multiple stages sharing an account. Metric Streams
+are also regional — if Lambdas are later deployed in multiple regions, a Metric
+Stream is needed in each region. Developer stacks (which may use a different
+region) do not get metrics streamed to Grafana; their metrics remain accessible
+via the CloudWatch console.
+
+**Step 2 (implemented): Custom application metrics via EMF.**
+
+Aurora API calls (Portal and Backoffice) are instrumented with Hey API client
+interceptors that emit CloudWatch Embedded Metric Format (EMF) JSON to stdout
+via `process.stdout.write()`. Each Aurora API HTTP call produces one EMF line
+with two metrics:
+
+- `AuroraApiDuration` (Milliseconds) — response time of the upstream API call.
+- `AuroraApiRequestCount` (Count, always 1) — enables rate and error-rate
+  calculations via aggregation.
+
+Dimensions (all low-cardinality):
+
+- `apiName`: `"aurora-portal"` or `"aurora-backoffice"`.
+- `endpoint`: HTTP method + URL template, e.g.
+  `"POST /v1/tenants/{tenantId}/buckets"`. Derived from the Hey API SDK's
+  URL template passed through `ResolvedRequestOptions.url`, so no manual
+  endpoint map is needed.
+- `statusGroup`: `"2xx"`, `"3xx"`, `"4xx"`, `"5xx"`, or `"network_error"`.
+
+The exact HTTP `statusCode` is included as a non-dimension property for
+log-level debugging.
+
+**Why `process.stdout.write()` instead of `console.log()`:** Lambda's JSON log
+format (`logging: { format: 'json' }`) wraps `console.log` output in a JSON
+envelope, which double-encodes the EMF and prevents CloudWatch from extracting
+metrics. Writing directly to stdout bypasses the Lambda formatter.
+
+**Interceptor details:** A request interceptor records `performance.now()` in a
+`WeakMap<Request, number>`. The response interceptor (which runs for all HTTP
+responses, including 4xx/5xx) computes the duration and emits the EMF line. A
+separate error interceptor handles network failures (where `response` is
+`undefined`) to avoid double-counting with the response interceptor.
+
+The Metric Stream's `includeFilters` includes the `FilOne` custom namespace,
+so EMF-extracted metrics flow through the existing Firehose pipeline to Grafana
+Cloud Prometheus.
+
+**PromQL examples:**
+
+- Error rate:
+  `sum(rate(AuroraApiRequestCount{statusGroup!="2xx"}[5m])) / sum(rate(AuroraApiRequestCount[5m]))`
+- p99 duration: use `AuroraApiDuration` with appropriate histogram/summary queries.
 
 ### Lambda configuration
 
@@ -428,9 +487,13 @@ injection.
   log delivery at $0.029/GB is the cheapest managed option.
 - **Verified log pipeline.** The CloudWatch → Firehose → Loki pipeline has been
   tested and confirmed working end-to-end.
-- **Clear path to metrics.** EMF → CloudWatch Metrics → Firehose → Grafana
-  Prometheus is a well-understood pipeline that can be added incrementally
-  without affecting the logging pipeline.
+- **AWS metrics in Grafana.** CloudWatch Metric Stream forwards AWS-provided
+  metrics (Lambda, API Gateway, SQS, DynamoDB) to Grafana Cloud
+  Prometheus with zero application code changes.
+- **Custom Aurora API metrics.** EMF-based metrics for Aurora Portal and
+  Backoffice API calls (duration, request count by status group) flow through
+  the existing Metric Stream → Grafana Prometheus pipeline with zero additional
+  infrastructure.
 
 ### Negative
 
@@ -439,13 +502,12 @@ injection.
   trace waterfall views, no TraceQL. This is a significant observability
   regression compared to the OTel approaches — acceptable at current scale
   where most debugging is single-request investigation.
-- **No automatic metrics from spans.** Without OTel spans, RED metrics must be
-  collected explicitly via EMF (planned future work). Until then, we have no
-  application-level metrics beyond what CloudWatch provides natively (Lambda
-  invocation count, duration, errors).
-- **Firehose infrastructure.** The log pipeline requires a Firehose delivery
-  stream — one more AWS resource to provision via SST. Operationally simple
-  but not zero.
+- **Limited custom metrics coverage.** Aurora API calls have EMF metrics, but
+  other application-level RED metrics (per-route rate, errors, duration for our
+  own API handlers) are not yet instrumented.
+- **Firehose infrastructure.** The log and metric pipelines each require a
+  Firehose delivery stream plus supporting resources (S3 backup, IAM roles).
+  Operationally simple but not zero.
 - **Log-only wide events are limited.** High-cardinality fields in logs are
   queryable via LogQL JSON parsing, but this is scan-based — slower than
   Tempo's indexed span attributes for broad analytical queries.

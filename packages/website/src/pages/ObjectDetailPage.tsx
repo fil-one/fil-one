@@ -9,18 +9,21 @@ import {
   TagIcon,
   TrashIcon,
 } from '@phosphor-icons/react/dist/ssr';
+import { useQuery } from '@tanstack/react-query';
 
 import { Breadcrumb } from '../components/Breadcrumb';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyableField } from '../components/CopyableField';
 import { Spinner } from '../components/Spinner';
-import { formatBytes, S3_ENDPOINT } from '@filone/shared';
+import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
 
 import type { ObjectMetadataResponse } from '@filone/shared';
+import { FILONE_STAGE } from '../env';
 import { apiRequest } from '../lib/api.js';
 import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
+import { queryKeys } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -34,9 +37,18 @@ export type ObjectDetailPageProps = {
 export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProps) {
   const navigate = useNavigate();
 
-  const [metadata, setMetadata] = useState<ObjectMetadataResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data: metadata,
+    isPending,
+    isError,
+    error,
+  } = useQuery({
+    queryKey: queryKeys.objectMetadata(bucketName, objectKey),
+    queryFn: () =>
+      apiRequest<ObjectMetadataResponse>(
+        `/buckets/${encodeURIComponent(bucketName)}/objects/metadata?key=${encodeURIComponent(objectKey)}`,
+      ),
+  });
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -52,32 +64,6 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
       });
     },
   });
-
-  // Fetch object metadata on mount
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchMetadata() {
-      try {
-        const data = await apiRequest<ObjectMetadataResponse>(
-          `/buckets/${encodeURIComponent(bucketName)}/objects/metadata?key=${encodeURIComponent(objectKey)}`,
-        );
-        if (!cancelled) {
-          setMetadata(data);
-          setLoading(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error('Failed to load object metadata:', err);
-          setError(err instanceof Error ? err.message : 'Failed to load object metadata');
-          setLoading(false);
-        }
-      }
-    }
-    void fetchMetadata();
-    return () => {
-      cancelled = true;
-    };
-  }, [bucketName, objectKey]);
 
   // Close menu on outside click
   useEffect(() => {
@@ -96,7 +82,7 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
     return () => document.removeEventListener('mousedown', handleClick);
   }, [menuOpen]);
 
-  if (loading) {
+  if (isPending) {
     return (
       <div className="flex items-center justify-center p-16">
         <Spinner ariaLabel="Loading object details" size={32} />
@@ -104,7 +90,7 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
     );
   }
 
-  if (error) {
+  if (isError) {
     return (
       <div className="p-6">
         <Breadcrumb
@@ -115,7 +101,7 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
           ]}
         />
         <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
+          {error?.message ?? 'Failed to load object metadata'}
         </div>
       </div>
     );
@@ -139,9 +125,11 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
 
   const s3Path = `s3://${bucketName}/${objectKey}`;
 
+  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
+
   const apiExample = `# Retrieve via S3 API
 aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
-  --endpoint-url ${S3_ENDPOINT}`;
+  --endpoint-url ${s3Endpoint}`;
 
   function handleMenuAction(action: () => void) {
     setMenuOpen(false);

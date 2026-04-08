@@ -1,8 +1,32 @@
-/** S3-compatible storage endpoint for Fil One. */
-export const S3_ENDPOINT = 'https://s3.fil.one';
+/** Deployment stages. */
+export enum Stage {
+  Production = 'production',
+  Staging = 'staging',
+}
 
-/** S3 region for Fil One. */
-export const S3_REGION = 'eu-west-1';
+export const DOCS_URL = 'https://docs.fil.one';
+
+/** Available S3 regions. */
+export enum S3Region {
+  EuWest1 = 'eu-west-1',
+}
+
+/** Default S3 region for Fil One. */
+export const S3_REGION = S3Region.EuWest1;
+
+/**
+ * Build the S3-compatible endpoint URL for a given region and stage.
+ * e.g. https://eu-west-1.s3.fil.one (production) or https://eu-west-1.s3.staging.fil.one (non-prod).
+ */
+export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
+  //TODO change this when aurora supports staging URL structure through our DNS.
+  if (stage != Stage.Production) {
+    return 'https://s3.dev.aur.lu';
+  }
+  const base = 's3.fil.one';
+  // const base = stage === Stage.Production ? 's3.fil.one' : 's3.staging.fil.one';
+  return `https://${region}.${base}`;
+}
 
 /** Cookie name for the OAuth state parameter (CSRF protection for login flow). */
 export const OAUTH_STATE_COOKIE = 'hs_oauth_state';

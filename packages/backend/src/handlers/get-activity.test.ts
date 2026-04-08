@@ -30,7 +30,6 @@ vi.mock('../lib/aurora-s3-client.js', () => ({
 }));
 
 process.env.FILONE_STAGE = 'test';
-process.env.AURORA_S3_GATEWAY_URL = 'https://s3.dev.aur.lu';
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -443,6 +442,52 @@ describe('get-activity baseHandler', () => {
         timestamp: '2026-01-01T00:00:00Z',
       },
     ]);
+  });
+
+  it('returns 200 with empty buckets when listBuckets throws AccessDenied', async () => {
+    mockOrgProfile(AURORA_TENANT_ID);
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const err = new Error('Access Denied.');
+    err.name = 'AccessDenied';
+    mockListBuckets.mockRejectedValue(err);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(String(result.body));
+    expect(body.activities).toStrictEqual([]);
+  });
+
+  it('returns 200 with empty buckets when listBuckets throws AccessDenied via Code fallback', async () => {
+    mockOrgProfile(AURORA_TENANT_ID);
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const err = new Error('Access Denied.');
+    Object.assign(err, { Code: 'AccessDenied' });
+    mockListBuckets.mockRejectedValue(err);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(String(result.body));
+    expect(body.activities).toStrictEqual([]);
+  });
+
+  it('returns 200 with empty buckets when listBuckets throws a non-AccessDenied error', async () => {
+    mockOrgProfile(AURORA_TENANT_ID);
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    mockListBuckets.mockRejectedValue(new Error('network timeout'));
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(String(result.body));
+    expect(body.activities).toStrictEqual([]);
   });
 
   // Object activities are temporarily excluded from the feed.

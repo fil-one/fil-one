@@ -27,7 +27,7 @@ async function baseHandler(
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const origin = resolveOrigin(event);
-  const signInUrl = `${origin}/sign-in`;
+  const errorUrl = `${origin}/login-error`;
 
   const { code, error, error_description, state } = event.queryStringParameters ?? {};
 
@@ -35,7 +35,7 @@ async function baseHandler(
   if (error ?? !code) {
     const reason = error_description ?? error ?? 'Authentication failed';
     console.error('Auth0 callback error:', { error, error_description });
-    return redirect(`${signInUrl}?error=${encodeURIComponent(reason)}`);
+    return redirect(`${errorUrl}?error=${encodeURIComponent(reason)}`);
   }
 
   // Validate OAuth state parameter to prevent CSRF on the login flow
@@ -43,7 +43,7 @@ async function baseHandler(
   const storedState = cookies[OAUTH_STATE_COOKIE];
   if (!state || !storedState || state !== storedState) {
     console.error('OAuth state mismatch', { state, storedState: !!storedState });
-    return redirect(`${signInUrl}?error=${encodeURIComponent('Invalid state')}`, [
+    return redirect(`${errorUrl}?error=${encodeURIComponent('Invalid state')}`, [
       makeClearCookieHeader(OAUTH_STATE_COOKIE),
     ]);
   }
@@ -69,7 +69,7 @@ async function baseHandler(
   if (!tokenRes.ok) {
     const errorBody = await tokenRes.text();
     console.error('Auth0 token exchange failed:', { status: tokenRes.status, body: errorBody });
-    return redirect(`${signInUrl}?error=${encodeURIComponent('Token exchange failed')}`);
+    return redirect(`${errorUrl}?error=${encodeURIComponent('Token exchange failed')}`);
   }
 
   const { access_token, id_token, refresh_token } = (await tokenRes.json()) as {

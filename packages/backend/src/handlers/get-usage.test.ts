@@ -53,7 +53,6 @@ vi.mock('../lib/aurora-s3-client.js', () => ({
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 process.env.FILONE_STAGE = 'test';
-process.env.AURORA_S3_GATEWAY_URL = 'https://s3.dev.aur.lu';
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -164,7 +163,7 @@ describe('GET /api/usage handler', () => {
       { timestamp: '2026-01-01T00:00:00Z', bytesUsed: 4000, objectCount: 3 },
     ]);
     mockGetOperationsSamples.mockResolvedValue([
-      { timestamp: '2026-01-01T00:00:00Z', rxBytes: 1500 },
+      { timestamp: '2026-01-01T00:00:00Z', txBytes: 1500 },
     ]);
     mockGetTenantInfo.mockResolvedValue({
       bucketCount: 2,

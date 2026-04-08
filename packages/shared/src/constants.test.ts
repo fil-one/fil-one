@@ -5,6 +5,9 @@ import {
   TRIAL_EGRESS_LIMIT,
   UNLIMITED,
   getUsageLimits,
+  getS3Endpoint,
+  S3Region,
+  Stage,
 } from './constants.js';
 
 describe('constants', () => {
@@ -56,5 +59,19 @@ describe('getUsageLimits', () => {
     const limits = getUsageLimits(true);
     expect(limits.storageLimitBytes).toBe(-1);
     expect(limits.egressLimitBytes).toBe(-1);
+  });
+});
+
+describe('getS3Endpoint', () => {
+  it('returns the production URL with region prefix', () => {
+    expect(getS3Endpoint(S3Region.EuWest1, Stage.Production)).toBe('https://eu-west-1.s3.fil.one');
+  });
+
+  it('returns the dev URL for staging', () => {
+    expect(getS3Endpoint(S3Region.EuWest1, Stage.Staging)).toBe('https://s3.dev.aur.lu');
+  });
+
+  it('returns the dev URL for arbitrary non-production stage strings', () => {
+    expect(getS3Endpoint(S3Region.EuWest1, 'dev')).toBe('https://s3.dev.aur.lu');
   });
 });

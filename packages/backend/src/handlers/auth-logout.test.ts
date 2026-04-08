@@ -54,7 +54,7 @@ describe('auth-logout handler', () => {
 
     const location = new URL(result.headers!['Location'] as string);
     expect(location.searchParams.get('client_id')).toBe('test-client-id');
-    expect(location.searchParams.get('returnTo')).toBe('https://app.example.com/sign-in');
+    expect(location.searchParams.get('returnTo')).toBe('https://fil.one');
   });
 
   it('clears all auth and CSRF cookies', async () => {
