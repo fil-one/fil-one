@@ -1,20 +1,19 @@
-import { Input as HeadlessInput, type InputProps as HeadlessInputProps } from '@headlessui/react';
 import { clsx } from 'clsx';
 
-type InputProps = {
-  onChange: (value: string) => void;
-} & Omit<HeadlessInputProps, 'onChange'>;
+export interface InputProps extends React.ComponentProps<'input'> {}
 
-export function Input({ onChange, className, ...rest }: InputProps) {
+export function Input({ className, ...props }: InputProps) {
   return (
-    <HeadlessInput
-      {...rest}
-      onChange={(event) => onChange(event.target.value)}
+    <input
       className={clsx(
-        'focus:brand-outline block w-full rounded-lg border border-(--input-border-color) p-3 text-(--color-text-base) placeholder:text-(--input-placeholder-color)',
-        'disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400',
+        'flex h-9 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-[13px] text-zinc-900 transition-colors',
+        'placeholder:text-zinc-400',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-1',
+        'disabled:cursor-not-allowed disabled:opacity-50',
+        'file:border-0 file:bg-transparent file:text-[13px] file:font-medium',
         className,
       )}
+      {...props}
     />
   );
 }
