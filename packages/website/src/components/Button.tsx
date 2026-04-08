@@ -1,81 +1,41 @@
-import { ArrowUpRightIcon } from '@phosphor-icons/react/dist/ssr';
+import { Slot } from '@radix-ui/react-slot';
+import { cva, type VariantProps } from 'class-variance-authority';
 import { clsx } from 'clsx';
 
-import { BaseLink, type BaseLinkProps } from './BaseLink';
-import { Icon as IconComponent, type IconProps } from './Icon';
+const buttonVariants = cva(
+  'inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md text-[13px] font-medium transition-all duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
+  {
+    variants: {
+      variant: {
+        default: 'bg-brand-800 text-white shadow-sm hover:bg-brand-800/90 active:bg-brand-800/95',
+        destructive: 'bg-red-600 text-white shadow-sm hover:bg-red-600/90',
+        outline: 'border border-zinc-200 bg-white shadow-xs hover:bg-zinc-50 hover:text-zinc-950',
+        secondary: 'bg-zinc-100 text-zinc-900 shadow-xs hover:bg-zinc-100/80',
+        ghost: 'hover:bg-zinc-100 hover:text-zinc-900',
+        link: 'text-brand-800 underline-offset-4 hover:underline',
+      },
+      size: {
+        default: 'h-9 px-4 py-2',
+        sm: 'h-8 rounded-md px-3 text-[12px]',
+        lg: 'h-10 rounded-md px-6',
+        icon: 'h-9 w-9',
+      },
+    },
+    defaultVariants: {
+      variant: 'default',
+      size: 'default',
+    },
+  },
+);
 
-export type ButtonProps = {
-  variant: keyof typeof variantClasses;
-  icon?: IconProps['component'];
-  href?: BaseLinkProps['href'];
-  size?: keyof typeof sizeClasses;
-  children: React.ReactNode;
-} & React.ComponentPropsWithoutRef<'button'>;
-
-type ButtonInnerProps = Pick<ButtonProps, 'children' | 'icon'> & {
-  isExternalLink?: boolean;
-};
-
-const variantClasses = {
-  primary: 'button--primary',
-  ghost: 'button--ghost',
-  tertiary: 'button--tertiary',
-  filled: 'button--filled',
-} as const;
-
-const sizeClasses = {
-  compact: 'button--compact',
-} as const;
-
-function isExternalHref(href: string): boolean {
-  return !href.startsWith('/') && !href.startsWith('#') && !href.startsWith('mailto:');
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {
+  asChild?: boolean;
 }
 
-export function Button({
-  variant,
-  className,
-  icon,
-  children,
-  disabled,
-  href,
-  size,
-  ...rest
-}: ButtonProps) {
-  const classes = clsx('button', variantClasses[variant], size && sizeClasses[size], className);
-
-  if (typeof href === 'undefined' || disabled) {
-    return (
-      <button className={classes} disabled={disabled} {...rest}>
-        <ButtonInner icon={icon}>{children}</ButtonInner>
-      </button>
-    );
-  }
-
-  return (
-    <BaseLink className={classes} href={href}>
-      <ButtonInner isExternalLink={isExternalHref(href)} icon={icon}>
-        {children}
-      </ButtonInner>
-    </BaseLink>
-  );
+export function Button({ className, variant, size, asChild = false, ...props }: ButtonProps) {
+  const Comp = asChild ? Slot : 'button';
+  return <Comp className={clsx(buttonVariants({ variant, size, className }))} {...props} />;
 }
 
-function ButtonInner({ icon: Icon, children, isExternalLink }: ButtonInnerProps) {
-  return (
-    <>
-      {Icon && (
-        <span className="button-custom-icon">
-          <IconComponent component={Icon} />
-        </span>
-      )}
-
-      <span>{children}</span>
-
-      {isExternalLink && (
-        <span className="button-arrow-icon">
-          <IconComponent component={ArrowUpRightIcon} size={20} />
-        </span>
-      )}
-    </>
-  );
-}
+export { buttonVariants };
