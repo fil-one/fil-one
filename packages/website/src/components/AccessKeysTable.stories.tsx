@@ -16,7 +16,7 @@ const mockKeys: AccessKey[] = [
   {
     id: '1',
     keyName: 'Production API Key',
-    accessKeyId: 'AKIA1234567890EXAMPL',
+    accessKeyId: 'ACCESS_KEY_12345EXAMPL',
     createdAt: '2026-01-15T10:00:00Z',
     lastUsedAt: '2026-04-08T14:30:00Z',
     status: 'active',
@@ -26,7 +26,7 @@ const mockKeys: AccessKey[] = [
   {
     id: '2',
     keyName: 'Backup Read-Only',
-    accessKeyId: 'AKIA0987654321EXAMPL',
+    accessKeyId: 'ACCESS_KEY_09876EXAMPL',
     createdAt: '2026-02-20T08:00:00Z',
     status: 'active',
     permissions: ['read', 'list'],
@@ -36,7 +36,7 @@ const mockKeys: AccessKey[] = [
   {
     id: '3',
     keyName: 'Deprecated Key',
-    accessKeyId: 'AKIAOLDKEY00000EXAMPL',
+    accessKeyId: 'ACCESS_KEY_00000EXAMPL',
     createdAt: '2025-06-01T12:00:00Z',
     lastUsedAt: '2025-12-01T09:00:00Z',
     status: 'inactive',
