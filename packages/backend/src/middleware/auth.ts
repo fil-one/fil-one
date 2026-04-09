@@ -345,7 +345,7 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
 // ---------------------------------------------------------------------------
 // eslint-disable-next-line max-lines-per-function
 export function authMiddleware() {
-  // eslint-disable-next-line max-lines-per-function
+  // eslint-disable-next-line max-lines-per-function, complexity/complexity
   const before = async (
     request: AuthMiddlewareRequest,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {

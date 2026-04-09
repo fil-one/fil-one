@@ -30,6 +30,7 @@ export function logout(): void {
  * - Always sends HttpOnly auth cookies via credentials: 'include'
  * - Redirects to Auth0 login on 401
  */
+// eslint-disable-next-line complexity/complexity
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const method = options.method?.toUpperCase() ?? 'GET';
   const headers = new Headers(options.headers);

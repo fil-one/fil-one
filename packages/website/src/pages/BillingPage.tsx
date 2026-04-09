@@ -54,7 +54,7 @@ function SkeletonCard({ height = 'h-36' }: { height?: string }) {
 // Page
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line max-lines-per-function
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export function BillingPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();

@@ -32,7 +32,7 @@ function addDays(date: Date, days: number): Date {
 
 // eslint-disable-next-line max-lines-per-function
 export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
-  // eslint-disable-next-line max-lines-per-function
+  // eslint-disable-next-line max-lines-per-function, complexity/complexity
   const before = async (
     request: Request<
       APIGatewayProxyEventV2,

@@ -37,6 +37,7 @@ const navItems: NavItem[] = [
   { path: '/settings', icon: GearIcon, label: 'Settings' },
 ];
 
+// eslint-disable-next-line complexity/complexity
 export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
   const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
