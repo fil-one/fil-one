@@ -124,6 +124,7 @@ function SettingRow({
 // Page
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line max-lines-per-function
 export function SettingsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();

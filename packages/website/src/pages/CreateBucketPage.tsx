@@ -25,6 +25,7 @@ import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 // Component
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line max-lines-per-function
 export function CreateBucketPage() {
   const { toast } = useToast();
   const navigate = useNavigate();

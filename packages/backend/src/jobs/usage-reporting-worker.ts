@@ -64,6 +64,7 @@ async function enforceTenantLocks({
   return desiredStatus;
 }
 
+// eslint-disable-next-line max-lines-per-function
 export async function handler(event: UsageReportingWorkerPayload): Promise<void> {
   const {
     orgId,

@@ -18,6 +18,7 @@ import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.js';
 
 const dynamo = getDynamoClient();
 
+// eslint-disable-next-line max-lines-per-function
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
