@@ -119,6 +119,8 @@ pnpm run dev              # SST live dev mode (live Lambda debugging)
 pnpm run build            # Build all packages
 pnpm run deploy:dev       # Build and deploy personal dev stack (uses OS username as stage)
 pnpm run remove           # Remove your personal dev stack
+pnpm run storybook        # Start Storybook dev server on port 6006
+pnpm run test:storybook   # Run Storybook tests (browser-based, requires Playwright)
 pnpm run lint             # Lint and typecheck TypeScript code (via oxlint)
 pnpm run lint:fix         # Lint and auto-fix where possible
 ```
@@ -311,6 +313,14 @@ Use **test mode** first. Switch to live mode for production.
 **Webhook endpoints are created and managed automatically during deploy.** The deploy-time setup Lambda creates the Stripe webhook endpoint with the correct URL for the deployed domain and stores the signing secret in AWS SSM Parameter Store. No manual configuration needed.
 
 Events registered: `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `customer.subscription.trial_will_end`, `invoice.payment_succeeded`, `invoice.payment_failed`
+
+Run this command to delete all webhooks created by PR preview deployments (including hooks from active pull requests):
+
+```bash
+stripe webhook_endpoints list --limit 100 | \
+  jq -r '.data[] | select(.metadata.stage // "" | startswith("pr-")) | .id' | \
+  xargs -I{} stripe webhook_endpoints delete {} --confirm
+```
 
 ### 4. Secrets
 

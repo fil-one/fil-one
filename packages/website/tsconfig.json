@@ -16,5 +16,5 @@
       "@hyperspace/ui/*": ["../ui/src/components/*"]
     }
   },
-  "include": ["src", "../shared/src"]
+  "include": ["src", "../shared/src", ".storybook/*"]
 }

@@ -92,7 +92,7 @@ describe('Usage Reporting (meter events via test clock)', () => {
     });
 
     // Poll until clock is ready
-    await pollTestClockReady(clockId, 120);
+    await pollTestClockReady({ clockId, timeoutSeconds: 120 });
 
     // Fetch invoices and check for metered line item
     const invoices = await stripe.invoices.list({

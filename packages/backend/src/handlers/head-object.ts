@@ -3,7 +3,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ErrorResponse, ObjectMetadataResponse } from '@filone/shared';
-import { HeadObjectQuerySchema } from '@filone/shared';
+import { HeadObjectQuerySchema, getS3Endpoint, S3_REGION } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getAuroraS3Credentials, headObject, getObjectRetention } from '../lib/aurora-s3-client.js';
@@ -62,7 +62,7 @@ export async function baseHandler(
   }
 
   const stage = process.env.FILONE_STAGE!;
-  const gatewayUrl = process.env.AURORA_S3_GATEWAY_URL!;
+  const gatewayUrl = getS3Endpoint(S3_REGION, stage);
 
   const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
   try {

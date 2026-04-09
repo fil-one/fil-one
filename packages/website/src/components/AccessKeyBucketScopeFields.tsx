@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { SpinnerIcon } from '@phosphor-icons/react/dist/ssr';
 import type { AccessKeyBucketScope, ListBucketsResponse } from '@filone/shared';
@@ -6,12 +6,15 @@ import type { AccessKeyBucketScope, ListBucketsResponse } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { Checkbox } from './Checkbox.js';
 import { Icon } from './Icon.js';
+import { queryKeys } from '../lib/query-client.js';
 
 type AccessKeyBucketScopeFieldsProps = {
   bucketScope: AccessKeyBucketScope;
   onBucketScopeChange: (scope: AccessKeyBucketScope) => void;
   selectedBuckets: string[];
   onSelectedBucketsChange: (buckets: string[]) => void;
+  /** Always show this bucket in the list even when unchecked (e.g. the bucket being created). */
+  pinnedBucket?: string;
 };
 
 export function AccessKeyBucketScopeFields({
@@ -19,37 +22,15 @@ export function AccessKeyBucketScopeFields({
   onBucketScopeChange,
   selectedBuckets,
   onSelectedBucketsChange,
+  pinnedBucket,
 }: AccessKeyBucketScopeFieldsProps) {
-  const [buckets, setBuckets] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fetched, setFetched] = useState(false);
-
-  useEffect(() => {
-    if (bucketScope !== 'specific' || fetched) return;
-
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    apiRequest<ListBucketsResponse>('/buckets')
-      .then((data) => {
-        if (cancelled) return;
-        setBuckets(data.buckets.map((b) => b.name));
-        setFetched(true);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to load buckets');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [bucketScope, fetched]);
+  const { data, isPending, isError, error } = useQuery({
+    queryKey: queryKeys.buckets,
+    queryFn: () => apiRequest<ListBucketsResponse>('/buckets'),
+    enabled: bucketScope === 'specific',
+  });
+  const buckets = data?.buckets.map((b) => b.name) ?? [];
+  const loading = isPending && bucketScope === 'specific';
 
   function toggleBucket(name: string) {
     if (selectedBuckets.includes(name)) {
@@ -95,28 +76,42 @@ export function AccessKeyBucketScopeFields({
             </div>
           )}
 
-          {error && <p className="px-4 py-3 text-sm text-red-600">{error}</p>}
-
-          {!loading && !error && buckets.length === 0 && (
-            <p className="px-4 py-3 text-sm text-zinc-500">No buckets found.</p>
+          {isError && (
+            <p className="px-4 py-3 text-sm text-red-600">
+              {error?.message ?? 'Failed to load buckets'}
+            </p>
           )}
 
-          {!loading && !error && buckets.length > 0 && (
-            <div className="flex flex-col">
-              {buckets.map((name) => (
-                <label
-                  key={name}
-                  className="flex cursor-pointer items-center gap-3 border-b border-zinc-100 px-4 py-2.5 last:border-b-0 hover:bg-zinc-50"
-                >
-                  <Checkbox
-                    checked={selectedBuckets.includes(name)}
-                    onChange={() => toggleBucket(name)}
-                  />
-                  <span className="text-sm font-medium text-zinc-900">{name}</span>
-                </label>
-              ))}
-            </div>
-          )}
+          {!loading &&
+            !isError &&
+            buckets.length === 0 &&
+            selectedBuckets.length === 0 &&
+            !pinnedBucket && <p className="px-4 py-3 text-sm text-zinc-500">No buckets found.</p>}
+
+          {!loading &&
+            !isError &&
+            (buckets.length > 0 || selectedBuckets.length > 0 || pinnedBucket) && (
+              <div className="flex flex-col">
+                {[
+                  ...new Set([
+                    ...(pinnedBucket ? [pinnedBucket] : []),
+                    ...selectedBuckets,
+                    ...buckets,
+                  ]),
+                ].map((name) => (
+                  <label
+                    key={name}
+                    className="flex cursor-pointer items-center gap-3 border-b border-zinc-100 px-4 py-2.5 last:border-b-0 hover:bg-zinc-50"
+                  >
+                    <Checkbox
+                      checked={selectedBuckets.includes(name)}
+                      onChange={() => toggleBucket(name)}
+                    />
+                    <span className="text-sm font-medium text-zinc-900">{name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
         </div>
       )}
     </div>

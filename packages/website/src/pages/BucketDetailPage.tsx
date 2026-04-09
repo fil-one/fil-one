@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ArrowUpIcon,
@@ -12,6 +12,7 @@ import {
   CubeIcon,
   HardDrivesIcon,
 } from '@phosphor-icons/react/dist/ssr';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { AccessKeysTable } from '../components/AccessKeysTable';
 import { Button } from '../components/Button';
@@ -22,12 +23,11 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
-import { formatBytes, S3_ENDPOINT, S3_REGION } from '@filone/shared';
+import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
+import { FILONE_STAGE } from '../env';
 
 import type {
-  Bucket,
   S3Object,
-  AccessKey,
   ListObjectsResponse,
   GetBucketResponse,
   ListAccessKeysResponse,
@@ -35,6 +35,7 @@ import type {
 import { apiRequest } from '../lib/api.js';
 import { formatDate, formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
+import { queryKeys } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -106,16 +107,10 @@ export type BucketDetailPageProps = {
 };
 
 export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) {
+  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
   const { toast } = useToast();
   const navigate = useNavigate();
-
-  // Bucket metadata
-  const [bucket, setBucket] = useState<Bucket | null>(null);
-
-  // Objects state
-  const [objects, setObjects] = useState<S3Object[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   // Prefix-based folder navigation
   const currentPrefix = prefix ?? '';
@@ -132,9 +127,33 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
     [navigate, bucketName],
   );
 
-  // Access keys state
-  const [accessKeys, setAccessKeys] = useState<AccessKey[]>([]);
-  const [accessKeysLoading, setAccessKeysLoading] = useState(true);
+  // Bucket metadata
+  const { data: bucketData } = useQuery({
+    queryKey: queryKeys.bucket(bucketName),
+    queryFn: () => apiRequest<GetBucketResponse>(`/buckets/${encodeURIComponent(bucketName)}`),
+  });
+  const bucket = bucketData?.bucket ?? null;
+
+  // Objects
+  const {
+    data: objectsData,
+    isPending: objectsLoading,
+    isError: objectsIsError,
+    error: objectsError,
+  } = useQuery({
+    queryKey: queryKeys.objects(bucketName),
+    queryFn: () =>
+      apiRequest<ListObjectsResponse>(`/buckets/${encodeURIComponent(bucketName)}/objects`),
+  });
+  const objects = objectsData?.objects ?? [];
+
+  // Access keys scoped to this bucket
+  const { data: accessKeysData, isPending: accessKeysLoading } = useQuery({
+    queryKey: queryKeys.bucketAccessKeys(bucketName),
+    queryFn: () =>
+      apiRequest<ListAccessKeysResponse>(`/access-keys?bucket=${encodeURIComponent(bucketName)}`),
+  });
+  const accessKeys = accessKeysData?.keys ?? [];
 
   // Add key modal
   const [addKeyOpen, setAddKeyOpen] = useState(false);
@@ -145,94 +164,35 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
 
   const objectActions = useObjectActions({
     bucketName,
-    onDeleted: (key) => setObjects((prev) => prev.filter((o) => o.key !== key)),
+    onDeleted: (key) => {
+      // Optimistically remove the deleted object from cache
+      queryClient.setQueryData<ListObjectsResponse>(queryKeys.objects(bucketName), (old) =>
+        old ? { ...old, objects: old.objects.filter((o) => o.key !== key) } : old,
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName) });
+    },
   });
 
-  // Fetch bucket metadata
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchBucket() {
-      try {
-        const data = await apiRequest<GetBucketResponse>(
-          `/buckets/${encodeURIComponent(bucketName)}`,
-        );
-        if (!cancelled) {
-          setBucket(data.bucket);
-        }
-      } catch (err) {
-        console.error('Failed to load bucket metadata:', err);
-      }
-    }
-    void fetchBucket();
-    return () => {
-      cancelled = true;
-    };
-  }, [bucketName]);
-
-  // Fetch objects on mount
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchObjects() {
-      try {
-        const data = await apiRequest<ListObjectsResponse>(
-          `/buckets/${encodeURIComponent(bucketName)}/objects`,
-        );
-        if (!cancelled) {
-          setObjects(data.objects);
-          setLoading(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error('Failed to load objects:', err);
-          setError(err instanceof Error ? err.message : 'Failed to load objects');
-          setLoading(false);
-        }
-      }
-    }
-    void fetchObjects();
-    return () => {
-      cancelled = true;
-    };
-  }, [bucketName]);
-
-  // Fetch access keys for this bucket
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchKeys() {
-      try {
-        const data = await apiRequest<ListAccessKeysResponse>(
-          `/access-keys?bucket=${encodeURIComponent(bucketName)}`,
-        );
-        if (!cancelled) {
-          setAccessKeys(data.keys);
-          setAccessKeysLoading(false);
-        }
-      } catch {
-        if (!cancelled) {
-          setAccessKeysLoading(false);
-        }
-      }
-    }
-    void fetchKeys();
-    return () => {
-      cancelled = true;
-    };
-  }, [bucketName]);
-
-  async function handleKeyAdded() {
-    setAccessKeysLoading(true);
-    try {
-      const data = await apiRequest<ListAccessKeysResponse>(
-        `/access-keys?bucket=${encodeURIComponent(bucketName)}`,
-      );
-      setAccessKeys(data.keys);
-    } catch (err) {
-      console.error('Failed to refresh access keys:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to refresh access keys');
-    } finally {
-      setAccessKeysLoading(false);
-    }
+  function handleKeyAdded() {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
   }
+
+  const deleteKeyMutation = useMutation({
+    mutationFn: (id: string) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }),
+    onSuccess: (_, id) => {
+      queryClient.setQueryData<ListAccessKeysResponse>(
+        queryKeys.bucketAccessKeys(bucketName),
+        (old) => (old ? { keys: old.keys.filter((k) => k.id !== id) } : old),
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
+      toast.success('Access key deleted');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete key');
+    },
+  });
 
   async function handleDeleteKey(id: string) {
     setConfirmDeleteKey(id);
@@ -240,17 +200,14 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
 
   async function confirmDeleteKeyAction() {
     if (!confirmDeleteKey) return;
-    const id = confirmDeleteKey;
     try {
-      await apiRequest(`/access-keys/${id}`, { method: 'DELETE' });
-      setAccessKeys((prev) => prev.filter((k) => k.id !== id));
-      toast.success('Access key deleted');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete key');
+      await deleteKeyMutation.mutateAsync(confirmDeleteKey);
+    } catch {
+      // error handled by mutation.onError
     }
   }
 
-  if (loading) {
+  if (objectsLoading) {
     return (
       <div className="flex items-center justify-center p-16">
         <Spinner ariaLabel="Loading objects" size={32} />
@@ -258,12 +215,12 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
     );
   }
 
-  if (error) {
+  if (objectsIsError) {
     return (
       <div className="p-6">
         <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
         <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
+          {objectsError?.message ?? 'Failed to load objects'}
         </div>
       </div>
     );
@@ -539,7 +496,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                 <h2 className="mb-3 text-[13px] font-medium text-zinc-900">Access endpoints</h2>
                 <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
                   <div className="flex flex-col gap-3">
-                    <CopyableField label="S3 Endpoint" value={S3_ENDPOINT} />
+                    <CopyableField label="S3 Endpoint" value={s3Endpoint} />
                     <CopyableField label="S3 Path" value={`s3://${bucketName}`} />
                     <CopyableField label="Region" value={bucketRegion} />
                   </div>

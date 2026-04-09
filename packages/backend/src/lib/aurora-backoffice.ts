@@ -15,6 +15,8 @@ import {
   type ModelsTenantStatus,
   type ModelsTenantWithMetricsManagementResponse,
 } from '@filone/aurora-backoffice-client';
+import pRetry from 'p-retry';
+import { instrumentClient } from './aurora-api-metrics.js';
 import { getAuroraBackofficeSecrets } from './auth-secrets.js';
 
 export type {
@@ -23,6 +25,19 @@ export type {
   ModelsTenantStatus,
   ModelsTenantWithMetricsManagementResponse,
 };
+
+function createBackofficeClient() {
+  const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
+  const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
+
+  const client = createClient({
+    baseUrl,
+    headers: { 'X-Api-Key': token },
+  });
+  instrumentClient(client, { apiName: 'aurora-backoffice' });
+
+  return client;
+}
 
 export interface CreateAuroraTenantOptions {
   orgId: string;
@@ -37,17 +52,9 @@ export async function createAuroraTenant({
   orgId,
   displayName,
 }: CreateAuroraTenantOptions): Promise<CreateAuroraTenantResult> {
-  const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const regionId = process.env.AURORA_REGION_ID!;
-  const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
-
-  const client = createClient({
-    baseUrl,
-    headers: {
-      'X-Api-Key': token,
-    },
-  });
+  const client = createBackofficeClient();
 
   const { data, error, response } = await createTenant({
     client,
@@ -131,16 +138,8 @@ export interface SetupAuroraTenantResult {
 export async function setupAuroraTenant({
   tenantId,
 }: SetupAuroraTenantOptions): Promise<SetupAuroraTenantResult> {
-  const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
   const partnerId = process.env.AURORA_PARTNER_ID!;
-  const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
-
-  const client = createClient({
-    baseUrl,
-    headers: {
-      'X-Api-Key': token,
-    },
-  });
+  const client = createBackofficeClient();
 
   const { data, error } = await setupTenant({
     client,
@@ -193,16 +192,8 @@ export async function createAuroraTenantApiKey({
   tenantId,
   orgId,
 }: CreateAuroraTenantApiKeyOptions): Promise<CreateAuroraTenantApiKeyResult> {
-  const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
   const partnerId = process.env.AURORA_PARTNER_ID!;
-  const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
-
-  const client = createClient({
-    baseUrl,
-    headers: {
-      'X-Api-Key': token,
-    },
-  });
+  const client = createBackofficeClient();
 
   const { data, error } = await createTenantToken({
     client,
@@ -247,14 +238,8 @@ export async function getStorageSamples({
   to,
   window = '1h',
 }: GetStorageSamplesOptions): Promise<ModelStorageMetricsSample[]> {
-  const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
   const partnerId = process.env.AURORA_PARTNER_ID!;
-  const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
-
-  const client = createClient({
-    baseUrl,
-    headers: { 'X-Api-Key': token },
-  });
+  const client = createBackofficeClient();
 
   const { data, error } = await getTenantStorageMetrics({
     client,
@@ -285,14 +270,8 @@ export async function getOperationsSamples({
   to,
   window = '24h',
 }: GetOperationsSamplesOptions): Promise<ModelOperationMetricsSample[]> {
-  const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
   const partnerId = process.env.AURORA_PARTNER_ID!;
-  const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
-
-  const client = createClient({
-    baseUrl,
-    headers: { 'X-Api-Key': token },
-  });
+  const client = createBackofficeClient();
 
   const { data, error } = await getTenantOperationMetrics({
     client,
@@ -315,14 +294,8 @@ export async function getTenantInfo({
 }: {
   tenantId: string;
 }): Promise<ModelsTenantWithMetricsManagementResponse> {
-  const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
   const partnerId = process.env.AURORA_PARTNER_ID!;
-  const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
-
-  const client = createClient({
-    baseUrl,
-    headers: { 'X-Api-Key': token },
-  });
+  const client = createBackofficeClient();
 
   const { data, error } = await getTenant({
     client,
@@ -350,25 +323,24 @@ export async function updateTenantStatus({
   tenantId: string;
   status: ModelsTenantStatus;
 }): Promise<void> {
-  const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
   const partnerId = process.env.AURORA_PARTNER_ID!;
-  const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
+  const client = createBackofficeClient();
 
-  const client = createClient({
-    baseUrl,
-    headers: { 'X-Api-Key': token },
-  });
+  await pRetry(
+    async () => {
+      const { error } = await setTenantStatus({
+        client,
+        path: { partnerId, tenantId },
+        body: { status },
+        throwOnError: false,
+      });
 
-  const { error } = await setTenantStatus({
-    client,
-    path: { partnerId, tenantId },
-    body: { status },
-    throwOnError: false,
-  });
-
-  if (error) {
-    throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
-      cause: error,
-    });
-  }
+      if (error) {
+        throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
+          cause: error,
+        });
+      }
+    },
+    { retries: 3 },
+  );
 }

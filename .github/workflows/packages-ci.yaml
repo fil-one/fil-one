@@ -2,20 +2,21 @@ name: 'CI [packages]'
 
 on:
   push:
-    branches: [main]
+    branches: [main, production]
   pull_request:
 
 jobs:
   check-packages:
     runs-on: ubuntu-latest
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
     steps:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - uses: actions/setup-node@v5
         with:
@@ -39,8 +40,31 @@ jobs:
       - name: Test
         run: pnpm test
 
+  check-storybook:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
+      options: --user 1001
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test Stories
+        run: pnpm test:storybook
+
   deploy-preview:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production' && github.event.pull_request.head.repo.full_name == github.repository
     needs: [check-packages]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -53,16 +77,17 @@ jobs:
     env:
       STAGE: pr-${{ github.event.pull_request.number }}
       AWS_REGION: us-east-2
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     outputs:
       url: ${{ steps.deploy.outputs.url }}
+      sst-env-dirty: ${{ steps.sst-env-check.outputs.dirty }}
 
     steps:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - uses: actions/setup-node@v5
         with:
@@ -72,7 +97,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
           aws-region: us-east-2
@@ -124,6 +149,22 @@ jobs:
           fi
           echo "url=$URL_TRIMMED" >> "$GITHUB_OUTPUT"
 
+      - name: Check sst-env.d.ts files are up to date
+        id: sst-env-check
+        run: |
+          if [ -n "$(git status --porcelain -- ':(glob)**/sst-env.d.ts')" ]; then
+            echo "dirty=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  check-sst-env:
+    needs: [deploy-preview]
+    if: needs.deploy-preview.outputs.sst-env-dirty == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::sst-env.d.ts files are out of date. Please run 'sst deploy' locally and commit the updated sst-env.d.ts files."
+          exit 1
+
   comment:
     name: Add Preview Environment Comment on PR
     if: github.event_name == 'pull_request' && needs.deploy-preview.outputs.url != ''
@@ -154,47 +195,8 @@ jobs:
             | **Status** | ✅ Deploy successful |
             | **Preview URL** | [${{ needs.deploy-preview.outputs.url }}](${{ needs.deploy-preview.outputs.url }}) |
 
-  e2e-tests:
-    if: github.event_name == 'pull_request'
-    needs: [deploy-preview]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    concurrency:
-      group: preview-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright Browsers
-        run: pnpm exec playwright install --with-deps
-
-      - name: Run Playwright tests
-        run: pnpm test:e2e
-        env:
-          BASE_URL: ${{ needs.deploy-preview.outputs.url }}
-
-      - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 30
-
   integration-tests:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production' && github.event.pull_request.head.repo.full_name == github.repository
     needs: [deploy-preview]
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -213,7 +215,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - uses: actions/setup-node@v5
         with:
@@ -223,7 +225,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
           aws-region: us-east-2
@@ -231,25 +233,27 @@ jobs:
       - name: Run integration tests
         run: pnpm test:integration
 
-  deploy-staging:
-    if: github.ref == 'refs/heads/main'
+  deploy:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
     needs: [check-packages]
     runs-on: ubuntu-latest
     concurrency:
-      group: deploy-staging
+      group: deploy-${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
       cancel-in-progress: false
-    environment: staging
+    environment: ${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
     permissions:
       id-token: write
       contents: read
+    env:
+      DEPLOY_STAGE: ${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
     steps:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - uses: actions/setup-node@v5
         with:
@@ -258,14 +262,17 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: aws-actions/configure-aws-credentials@v5
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-2
 
       - run: pnpm build
+        env:
+          SENTRY_DEPLOY_ENV: ${{ env.DEPLOY_STAGE }}
+          SENTRY_RELEASE_DIST: ${{ github.run_number }}
 
-      - run: pnpm exec sst deploy --stage staging
+      - run: pnpm exec sst deploy --stage "$DEPLOY_STAGE"
 
       - if: failure()
         id: commit_info
@@ -279,13 +286,13 @@ jobs:
           payload: |
             {
               "channel": "filone-alerts",
-              "text": ${{ toJSON(format('Deployment of `{0}` to `staging` failed. Commit: {1} by @{2}. Details: {3}/{4}/actions/runs/{5}', github.event.repository.name, steps.commit_info.outputs.subject, github.actor, github.server_url, github.repository, github.run_id)) }},
+              "text": ${{ toJSON(format('Deployment of `{0}` to `{1}` failed. Commit: {2} by @{3}. Details: {4}/{5}/actions/runs/{6}', github.event.repository.name, env.DEPLOY_STAGE, steps.commit_info.outputs.subject, github.actor, github.server_url, github.repository, github.run_id)) }},
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ${{ toJSON(format(':warning: *Deployment of `{0}` to `staging` failed* · <{1}/{2}/actions/runs/{3}|Details>', github.event.repository.name, github.server_url, github.repository, github.run_id)) }}
+                    "text": ${{ toJSON(format(':warning: *Deployment of `{0}` to `{1}` failed* · <{2}/{3}/actions/runs/{4}|Details>', github.event.repository.name, env.DEPLOY_STAGE, github.server_url, github.repository, github.run_id)) }}
                   }
                 },
                 {
@@ -299,7 +306,7 @@ jobs:
             }
 
   dispatch-telemetry:
-    needs: [check-packages, deploy-preview, comment, e2e-tests, integration-tests, deploy-staging]
+    needs: [check-packages, check-storybook, deploy-preview, comment, integration-tests, deploy]
     if: >-
       always() && (
         github.event_name == 'push' ||

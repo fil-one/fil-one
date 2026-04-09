@@ -165,3 +165,14 @@ export function createPortalSession(): Promise<CreatePortalSessionResponse> {
 export function getInvoices(): Promise<ListInvoicesResponse> {
   return apiRequest<ListInvoicesResponse>('/billing/invoices');
 }
+
+// ── Access Keys API ──────────────────────────────────────────────────────────
+
+import type { CreateAccessKeyRequest, CreateAccessKeyResponse } from '@filone/shared';
+
+export function createAccessKey(body: CreateAccessKeyRequest): Promise<CreateAccessKeyResponse> {
+  return apiRequest<CreateAccessKeyResponse>('/access-keys', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}

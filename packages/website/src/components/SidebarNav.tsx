@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import {
   SquaresFourIcon,
   DatabaseIcon,
@@ -10,12 +9,13 @@ import {
   BookOpenIcon,
   ChatCircleIcon,
 } from '@phosphor-icons/react/dist/ssr';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 import { ProgressBar } from './ProgressBar.js';
 import { Button } from './Button.js';
 import { DOCS_URL, SubscriptionStatus, getUsageLimits, formatBytes } from '@filone/shared';
-import type { BillingInfo, UsageResponse } from '@filone/shared';
 import { getBilling, getUsage } from '../lib/api.js';
+import { queryKeys } from '../lib/query-client.js';
 import { daysUntil, formatDateTime } from '../lib/time.js';
 
 type SidebarNavProps = {
@@ -32,33 +32,15 @@ type NavItem = {
 const navItems: NavItem[] = [
   { path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard' },
   { path: '/buckets', icon: DatabaseIcon, label: 'Buckets' },
-  { path: '/api-keys', icon: KeyIcon, label: 'API & Keys' },
+  { path: '/api-keys', icon: KeyIcon, label: 'API Keys' },
   { path: '/billing', icon: CreditCardIcon, label: 'Billing' },
   { path: '/settings', icon: GearIcon, label: 'Settings' },
 ];
 
 export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
-  const [billing, setBilling] = useState<BillingInfo | null>(null);
-  const [usage, setUsage] = useState<UsageResponse | null>(null);
-
-  useEffect(() => {
-    const refresh = () => {
-      getBilling()
-        .then(setBilling)
-        .catch(() => {
-          /* silent */
-        });
-      getUsage()
-        .then(setUsage)
-        .catch(() => {
-          /* silent */
-        });
-    };
-    refresh();
-    window.addEventListener('billing:updated', refresh);
-    return () => window.removeEventListener('billing:updated', refresh);
-  }, []);
+  const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
+  const { data: usage } = useQuery({ queryKey: queryKeys.usage, queryFn: getUsage });
 
   const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
   const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod;
@@ -94,14 +76,8 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
     <nav className="flex h-full flex-col border-r border-zinc-200 bg-white">
       {/* Logo + collapse toggle */}
       <div className="flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200 px-3">
-        <div className="flex items-center gap-2 overflow-hidden">
-          {/* Logo mark */}
-          <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-brand-600 text-sm font-bold text-white">
-            F
-          </span>
-          {!collapsed && (
-            <span className="truncate text-sm font-semibold text-zinc-900">Fil.one</span>
-          )}
+        <div className="flex items-center overflow-hidden">
+          <img src="/fil-one-logo.svg" alt="Fil.one" className={collapsed ? 'h-7 w-7' : 'h-7'} />
         </div>
 
         {/* Collapse toggle */}

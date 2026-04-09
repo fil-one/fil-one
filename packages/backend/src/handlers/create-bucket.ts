@@ -2,8 +2,8 @@ import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { CreateBucketRequest, CreateBucketResponse, ErrorResponse } from '@filone/shared';
-import { S3_REGION } from '@filone/shared';
+import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
+import { CreateBucketSchema, S3_REGION } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { createAuroraBucket, BucketAlreadyExistsError } from '../lib/aurora-portal.js';
@@ -18,14 +18,12 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 
 const dynamo = getDynamoClient();
 
-const BUCKET_NAME_REGEX = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
-
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  let request: CreateBucketRequest;
+  let body: unknown;
   try {
-    request = JSON.parse(event.body ?? '{}') as CreateBucketRequest;
+    body = JSON.parse(event.body ?? '{}');
   } catch {
     return new ResponseBuilder()
       .status(400)
@@ -33,28 +31,21 @@ export async function baseHandler(
       .build();
   }
 
-  const { name, region } = request;
-  if (!name || !region) {
+  const parsed = CreateBucketSchema.safeParse(body);
+  if (!parsed.success) {
+    const firstIssue = parsed.error.issues[0];
     return new ResponseBuilder()
       .status(400)
-      .body<ErrorResponse>({ message: 'Missing required fields: name, region' })
+      .body<ErrorResponse>({ message: firstIssue.message })
       .build();
   }
+
+  const { name, region, versioning, lock, retention } = parsed.data;
 
   if (region !== S3_REGION) {
     return new ResponseBuilder()
       .status(400)
       .body<ErrorResponse>({ message: `Unsupported region. Supported: ${S3_REGION}` })
-      .build();
-  }
-
-  if (!BUCKET_NAME_REGEX.test(name)) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({
-        message:
-          'Bucket name must be 3-63 characters, lowercase letters, numbers, and hyphens only',
-      })
       .build();
   }
 
@@ -81,7 +72,13 @@ export async function baseHandler(
   }
 
   try {
-    await createAuroraBucket({ tenantId: auroraTenantId, bucketName: name });
+    await createAuroraBucket({
+      tenantId: auroraTenantId,
+      bucketName: name,
+      versioning,
+      lock,
+      retention,
+    });
   } catch (err) {
     if (err instanceof BucketAlreadyExistsError) {
       return new ResponseBuilder()

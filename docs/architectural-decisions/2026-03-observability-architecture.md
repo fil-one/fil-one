@@ -1,7 +1,8 @@
 # ADR: Observability Architecture for Serverless Wide Events
 
 **Status:** Accepted
-**Date:** 2026-03-24
+**Created:** 2026-03-24
+**Last Modified:** 2026-03-31
 
 ---
 
@@ -87,41 +88,76 @@ API Gateway V2 setup.
 Metrics delivery uses a two-step approach:
 
 **Step 1 (implemented): AWS-provided metrics via CloudWatch Metric Stream.**
-A CloudWatch Metric Stream forwards AWS-provided metrics (currently the
-`AWS/Lambda` namespace) to Grafana Cloud Prometheus via a Kinesis Firehose
-delivery stream. This gives us Lambda duration, invocations, errors, throttles,
-and concurrent executions in Grafana dashboards with zero application code
-changes. The pipeline:
+
+A CloudWatch Metric Stream forwards AWS-provided metrics (`AWS/Lambda`,
+`AWS/ApiGateway`, `AWS/SQS`, `AWS/DynamoDB`) to Grafana Cloud
+Prometheus via a Kinesis Firehose delivery stream. This gives us Lambda duration,
+invocations, errors, throttles, API latency, queue depth, and table throttles in
+Grafana dashboards with zero application code changes. The pipeline:
 
 - CloudWatch Metrics → Metric Stream (OpenTelemetry 1.0 format) → Firehose →
   Grafana Cloud Prometheus (`aws-metric-streams` endpoint)
 
-Additional AWS namespaces (API Gateway, SQS, DynamoDB, etc.) can be added to
-the Metric Stream's include filter as needed.
+Additional AWS namespaces can be added to the Metric Stream's include filter
+as needed.
+
+CloudFront metrics are not yet included because CloudFront is a global service
+whose metrics are only published in us-east-1, while our staging & production
+stacks deploys to us-east-2.
 
 **Deployment scope.** The metric stream pipeline is deployed once per account via
 the `infra/` stack (not per-stage via the main stack), because CloudWatch Metric
-Streams are account-wide — a single stream captures all metrics in the
-`AWS/Lambda` namespace regardless of which SST stage created the Lambda. This
+Streams are account-wide — a single stream captures all metrics in the configured
+namespaces regardless of which SST stage created the resources. This
 avoids duplicate data from multiple stages sharing an account. Metric Streams
 are also regional — if Lambdas are later deployed in multiple regions, a Metric
 Stream is needed in each region. Developer stacks (which may use a different
 region) do not get metrics streamed to Grafana; their metrics remain accessible
 via the CloudWatch console.
 
-**Step 2 (planned): Custom application metrics via EMF.**
-Custom application metrics will use CloudWatch Embedded Metric Format (EMF):
+**Step 2 (implemented): Custom application metrics via EMF.**
 
-- Emit EMF-formatted JSON to stdout from Lambda handlers, using low-cardinality
-  dimensions (e.g. route, status code, error type) to avoid the CloudWatch
-  cardinality trap.
-- CloudWatch automatically extracts metrics from EMF log lines — no additional
-  infrastructure needed for CloudWatch dashboards and alarms.
-- The existing Metric Stream automatically picks up EMF-extracted metrics from
-  the `AWS/Lambda` namespace (or a custom namespace if configured).
+Aurora API calls (Portal and Backoffice) are instrumented with Hey API client
+interceptors that emit CloudWatch Embedded Metric Format (EMF) JSON to stdout
+via `process.stdout.write()`. Each Aurora API HTTP call produces one EMF line
+with two metrics:
 
-This is a direction to explore, not a finalized design. Details will be captured
-in a separate ADR or update to this one once implemented.
+- `AuroraApiDuration` (Milliseconds) — response time of the upstream API call.
+- `AuroraApiRequestCount` (Count, always 1) — enables rate and error-rate
+  calculations via aggregation.
+
+Dimensions (all low-cardinality):
+
+- `apiName`: `"aurora-portal"` or `"aurora-backoffice"`.
+- `endpoint`: HTTP method + URL template, e.g.
+  `"POST /v1/tenants/{tenantId}/buckets"`. Derived from the Hey API SDK's
+  URL template passed through `ResolvedRequestOptions.url`, so no manual
+  endpoint map is needed.
+- `statusGroup`: `"2xx"`, `"3xx"`, `"4xx"`, `"5xx"`, or `"network_error"`.
+
+The exact HTTP `statusCode` is included as a non-dimension property for
+log-level debugging.
+
+**Why `process.stdout.write()` instead of `console.log()`:** Lambda's JSON log
+format (`logging: { format: 'json' }`) wraps `console.log` output in a JSON
+envelope, which double-encodes the EMF and prevents CloudWatch from extracting
+metrics. Writing directly to stdout bypasses the Lambda formatter.
+
+**Interceptor details:** A request interceptor records `performance.now()` in a
+`WeakMap<Request, number>`. The response interceptor (which runs for all HTTP
+responses, including 4xx/5xx) computes the duration and emits the EMF line. A
+separate error interceptor handles network failures (where `response` is
+`undefined`) to avoid double-counting with the response interceptor.
+
+The Metric Stream's `includeFilters` includes the `FilOne` custom namespace,
+so EMF-extracted metrics flow through the existing Firehose pipeline to Grafana
+Cloud Prometheus.
+
+**PromQL examples:**
+
+- Error rate:
+  `sum(rate(AuroraApiRequestCount{statusGroup!="2xx"}[5m])) / sum(rate(AuroraApiRequestCount[5m]))`
+- p99 duration: use `AuroraApiDuration` with appropriate histogram/summary queries.
 
 ### Lambda configuration
 
@@ -452,11 +488,12 @@ injection.
 - **Verified log pipeline.** The CloudWatch → Firehose → Loki pipeline has been
   tested and confirmed working end-to-end.
 - **AWS metrics in Grafana.** CloudWatch Metric Stream forwards AWS-provided
-  Lambda metrics (invocations, duration, errors, throttles) to Grafana Cloud
+  metrics (Lambda, API Gateway, SQS, DynamoDB) to Grafana Cloud
   Prometheus with zero application code changes.
-- **Clear path to custom metrics.** EMF → CloudWatch Metrics → the existing
-  Metric Stream → Grafana Prometheus can be added incrementally without
-  affecting the logging pipeline.
+- **Custom Aurora API metrics.** EMF-based metrics for Aurora Portal and
+  Backoffice API calls (duration, request count by status group) flow through
+  the existing Metric Stream → Grafana Prometheus pipeline with zero additional
+  infrastructure.
 
 ### Negative
 
@@ -465,9 +502,9 @@ injection.
   trace waterfall views, no TraceQL. This is a significant observability
   regression compared to the OTel approaches — acceptable at current scale
   where most debugging is single-request investigation.
-- **No custom application metrics yet.** AWS-provided Lambda metrics are
-  available in Grafana via Metric Stream, but custom RED metrics (per-route
-  rate, errors, duration) require EMF instrumentation (planned step 2).
+- **Limited custom metrics coverage.** Aurora API calls have EMF metrics, but
+  other application-level RED metrics (per-route rate, errors, duration for our
+  own API handlers) are not yet instrumented.
 - **Firehose infrastructure.** The log and metric pipelines each require a
   Firehose delivery stream plus supporting resources (S3 backup, IAM roles).
   Operationally simple but not zero.

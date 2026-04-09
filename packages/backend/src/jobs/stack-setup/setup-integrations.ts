@@ -347,11 +347,16 @@ export async function handler(event: SetupEvent): Promise<void> {
     `filone-setup-${Stage}`;
 
   try {
-    const isStagingOrProd = Stage === 'staging' || Stage === 'production';
+    const isProduction = Stage === 'production';
+    const isStagingOrProd = Stage === 'staging' || isProduction;
+
+    if (isProduction && Resource.StripeSecretKey.value.startsWith('sk_test_')) {
+      throw new Error('Using test Stripe key in production is not allowed');
+    }
+
+    const stripe = new Stripe(Resource.StripeSecretKey.value);
 
     if (event.RequestType === 'Delete') {
-      const stripe = new Stripe(Resource.StripeSecretKey.value);
-
       await Promise.all([
         teardownStripeWebhook(stripe, siteUrl, Stage),
         teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
@@ -370,8 +375,6 @@ export async function handler(event: SetupEvent): Promise<void> {
     }
 
     // Create or Update
-    const stripe = new Stripe(Resource.StripeSecretKey.value);
-
     // If Update changed the SiteUrl, clean up old URLs first
     if (event.RequestType === 'Update') {
       const oldUrl = event.OldResourceProperties.SiteUrl?.replace(/\/$/, '');

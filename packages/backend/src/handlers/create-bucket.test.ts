@@ -81,6 +81,9 @@ describe('create-bucket baseHandler', () => {
     expect(mockCreateAuroraBucket).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
       bucketName: 'my-bucket',
+      versioning: false,
+      lock: false,
+      retention: undefined,
     });
   });
 
@@ -128,6 +131,80 @@ describe('create-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(409);
+  });
+
+  it('passes versioning, lock, and retention to createAuroraBucket', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockCreateAuroraBucket.mockResolvedValue(undefined);
+
+    const event = buildEvent({
+      body: JSON.stringify({
+        name: 'my-bucket',
+        region: S3_REGION,
+        versioning: true,
+        lock: true,
+        retention: { enabled: true, mode: 'governance', duration: 30, durationType: 'd' },
+      }),
+      userInfo: USER_INFO,
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(201);
+    expect(mockCreateAuroraBucket).toHaveBeenCalledWith({
+      tenantId: 'aurora-t-1',
+      bucketName: 'my-bucket',
+      versioning: true,
+      lock: true,
+      retention: { enabled: true, mode: 'governance', duration: 30, durationType: 'd' },
+    });
+  });
+
+  it('defaults versioning and lock to false when not provided', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockCreateAuroraBucket.mockResolvedValue(undefined);
+
+    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(201);
+    expect(mockCreateAuroraBucket).toHaveBeenCalledWith({
+      tenantId: 'aurora-t-1',
+      bucketName: 'my-bucket',
+      versioning: false,
+      lock: false,
+      retention: undefined,
+    });
+  });
+
+  it('returns 400 when lock is true but versioning is false', async () => {
+    const event = buildEvent({
+      body: JSON.stringify({ name: 'my-bucket', region: S3_REGION, lock: true }),
+      userInfo: USER_INFO,
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(400);
+    const body = JSON.parse(result.body as string);
+    expect(body.message).toContain('Versioning must be enabled');
+    expect(mockCreateAuroraBucket).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when retention is provided without lock', async () => {
+    const event = buildEvent({
+      body: JSON.stringify({
+        name: 'my-bucket',
+        region: S3_REGION,
+        versioning: true,
+        retention: { enabled: true, mode: 'governance', duration: 30, durationType: 'd' },
+      }),
+      userInfo: USER_INFO,
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(400);
+    const body = JSON.parse(result.body as string);
+    expect(body.message).toContain('Object Lock must be enabled');
+    expect(mockCreateAuroraBucket).not.toHaveBeenCalled();
   });
 
   it('returns 400 when region is unsupported', async () => {
