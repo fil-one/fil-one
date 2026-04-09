@@ -196,7 +196,7 @@ jobs:
           format: sarif
           output: trivy-iac.sarif
           severity: CRITICAL,HIGH,MEDIUM
-          skip-dirs: packages/ui,contracts/lib,.sst,node_modules
+          skip-dirs: contracts/lib,.sst,node_modules
         continue-on-error: true
 
       - name: Upload Trivy IaC results
