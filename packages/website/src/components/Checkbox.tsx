@@ -1,46 +1,26 @@
-import {
-  Checkbox as HeadlessCheckbox,
-  type CheckboxProps as HeadlessCheckboxProps,
-} from '@headlessui/react';
+import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
 import { CheckIcon } from '@phosphor-icons/react/dist/ssr';
-import clsx from 'clsx';
+import { clsx } from 'clsx';
 
-import { Icon } from './Icon';
+export interface CheckboxProps extends React.ComponentPropsWithoutRef<
+  typeof CheckboxPrimitive.Root
+> {}
 
-type TouchTarget = {
-  visibleElementSize?: string | number;
-  touchAreaOffset?: string;
-  touchAreaPadding: string;
-};
-
-type CheckboxProps = Omit<HeadlessCheckboxProps, 'children' | 'className'>;
-
-const TOUCH_TARGET: TouchTarget = {
-  visibleElementSize: 'size-5',
-  touchAreaPadding: 'p-3.5',
-  touchAreaOffset: '-m-3.5',
-};
-
-export function Checkbox(props: CheckboxProps) {
+export function Checkbox({ className, ...props }: CheckboxProps) {
   return (
-    <HeadlessCheckbox
-      {...props}
+    <CheckboxPrimitive.Root
       className={clsx(
-        'group inline-block cursor-pointer focus:outline-hidden',
-        TOUCH_TARGET.touchAreaPadding,
-        TOUCH_TARGET.touchAreaOffset,
+        'peer h-4 w-4 shrink-0 rounded-sm border border-zinc-300 bg-white',
+        'data-[state=checked]:border-brand-700 data-[state=checked]:bg-brand-700 data-[state=checked]:text-white',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2',
+        'disabled:cursor-not-allowed disabled:opacity-50',
+        className,
       )}
+      {...props}
     >
-      <div
-        className={clsx(
-          TOUCH_TARGET.visibleElementSize,
-          'group-focus:outline-brand-700 group-data-checked:bg-brand-700 group-data-checked:hover:bg-brand-600 flex items-center justify-center rounded-sm border border-zinc-400 bg-white p-0.5 text-white group-focus:bg-zinc-100 group-focus:outline-2 group-focus:outline-offset-2 group-data-disabled:cursor-not-allowed hover:bg-zinc-200',
-        )}
-      >
-        <span className="invisible group-data-checked:visible">
-          <Icon component={CheckIcon} size={16} weight="bold" />
-        </span>
-      </div>
-    </HeadlessCheckbox>
+      <CheckboxPrimitive.Indicator className="flex items-center justify-center text-current">
+        <CheckIcon size={12} weight="bold" />
+      </CheckboxPrimitive.Indicator>
+    </CheckboxPrimitive.Root>
   );
 }
