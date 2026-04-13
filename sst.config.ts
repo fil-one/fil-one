@@ -267,7 +267,7 @@ export default $config({
 
     const siteUrl = router.url;
 
-    const auth0Domain = isProduction ? 'auth.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
+    const auth0Domain = isProduction ? 'app.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
 
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
     // This Lambda is intentionally NOT created via createFn(). Its ARN is embedded in the
