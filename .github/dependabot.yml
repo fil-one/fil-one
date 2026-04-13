@@ -49,9 +49,6 @@ updates:
       middy:
         patterns:
           - '@middy/*'
-    ignore:
-      # Auto-generated clients — regenerated from Swagger specs, not manually updated
-      - dependency-name: '@hey-api/*'
 
   # ── GitHub Actions ──
   - package-ecosystem: github-actions
