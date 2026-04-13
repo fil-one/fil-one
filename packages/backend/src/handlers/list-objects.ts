@@ -2,11 +2,11 @@ import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { getS3Endpoint, S3_REGION } from '@filone/shared';
+import { S3_REGION } from '@filone/shared';
 import type { ErrorResponse, ListObjectsResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraS3Credentials, listObjects } from '../lib/aurora-s3-client.js';
+import { getAuroraS3Client, listObjects } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { isNoSuchBucketError } from '../lib/s3-errors.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -52,9 +52,7 @@ export async function baseHandler(
   }
 
   const stage = process.env.FILONE_STAGE!;
-  const gatewayUrl = getS3Endpoint(S3_REGION, stage);
-
-  const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
+  const s3 = getAuroraS3Client(stage, S3_REGION, auroraTenantId);
 
   const prefix = event.queryStringParameters?.prefix;
   const delimiter = event.queryStringParameters?.delimiter;
@@ -65,9 +63,7 @@ export async function baseHandler(
 
   let result;
   try {
-    result = await listObjects({
-      endpointUrl: gatewayUrl,
-      credentials,
+    result = await listObjects(s3, {
       bucket: bucketName,
       prefix,
       delimiter,

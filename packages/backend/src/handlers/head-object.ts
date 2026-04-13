@@ -3,10 +3,10 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ErrorResponse, ObjectMetadataResponse } from '@filone/shared';
-import { HeadObjectQuerySchema, getS3Endpoint, S3_REGION } from '@filone/shared';
+import { HeadObjectQuerySchema, S3_REGION } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraS3Credentials, headObject, getObjectRetention } from '../lib/aurora-s3-client.js';
+import { getAuroraS3Client, headObject, getObjectRetention } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { isNoSuchBucketError, isNotFoundError } from '../lib/s3-errors.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -62,13 +62,11 @@ export async function baseHandler(
   }
 
   const stage = process.env.FILONE_STAGE!;
-  const gatewayUrl = getS3Endpoint(S3_REGION, stage);
-
-  const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
+  const s3 = getAuroraS3Client(stage, S3_REGION, auroraTenantId);
   try {
     const [result, retention] = await Promise.all([
-      headObject(gatewayUrl, credentials, bucketName, objectKey),
-      getObjectRetention(gatewayUrl, credentials, bucketName, objectKey),
+      headObject(s3, bucketName, objectKey),
+      getObjectRetention(s3, bucketName, objectKey),
     ]);
 
     const response: ObjectMetadataResponse = {

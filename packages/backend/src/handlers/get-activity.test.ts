@@ -21,11 +21,12 @@ vi.mock('../lib/aurora-backoffice.js', () => ({
   getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...(args as [])),
 }));
 
-const mockGetAuroraS3Credentials = vi.fn();
+const s3ClientSentinel = Symbol('s3-client');
+const mockGetAuroraS3Client = vi.fn((..._args: unknown[]) => s3ClientSentinel);
 const mockListBuckets = vi.fn();
 
 vi.mock('../lib/aurora-s3-client.js', () => ({
-  getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
+  getAuroraS3Client: (...args: unknown[]) => mockGetAuroraS3Client(...args),
   listBuckets: (...args: unknown[]) => mockListBuckets(...args),
 }));
 
@@ -98,10 +99,6 @@ describe('get-activity baseHandler', () => {
     vi.clearAllMocks();
     ddbMock.reset();
     mockGetStorageSamples.mockResolvedValue([]);
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
     mockListBuckets.mockResolvedValue({ buckets: [] });
     ddbMock.on(GetItemCommand, { TableName: 'UserInfoTable' }).resolves(orgProfileWithTenant());
   });

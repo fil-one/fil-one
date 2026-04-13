@@ -3,11 +3,11 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { getS3Endpoint, S3_REGION } from '@filone/shared';
+import { S3_REGION } from '@filone/shared';
 import type { ActivityResponse, RecentActivity, UsageDataPoint } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraS3Credentials, listBuckets } from '../lib/aurora-s3-client.js';
+import { getAuroraS3Client, listBuckets } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -51,17 +51,16 @@ export async function baseHandler(
   const activities: RecentActivity[] = [];
 
   const stage = process.env.FILONE_STAGE!;
-  const gatewayUrl = getS3Endpoint(S3_REGION, stage);
-  const credentials =
+  const s3 =
     auroraTenantId && isOrgSetupComplete(setupStatus)
-      ? await getAuroraS3Credentials(stage, auroraTenantId)
+      ? getAuroraS3Client(stage, S3_REGION, auroraTenantId)
       : undefined;
 
   // Get buckets from Aurora S3 — swallow errors so the dashboard still renders.
   let buckets: Awaited<ReturnType<typeof listBuckets>>['buckets'] = [];
-  if (credentials) {
+  if (s3) {
     try {
-      buckets = (await listBuckets(gatewayUrl, credentials)).buckets;
+      buckets = (await listBuckets(s3)).buckets;
     } catch (err) {
       const errName = (err as { name?: string }).name;
       const errCode = (err as { Code?: string }).Code;

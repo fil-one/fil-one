@@ -42,14 +42,6 @@ vi.mock('jose', () => ({
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
 }));
 
-const mockGetAuroraS3Credentials = vi.fn();
-const mockListObjects = vi.fn();
-
-vi.mock('../lib/aurora-s3-client.js', () => ({
-  getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
-  listObjects: (...args: unknown[]) => mockListObjects(...args),
-}));
-
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 process.env.FILONE_STAGE = 'test';

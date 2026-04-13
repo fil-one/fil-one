@@ -3,10 +3,10 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ErrorResponse, PresignUploadResponse } from '@filone/shared';
-import { getS3Endpoint, PresignUploadSchema, S3_REGION } from '@filone/shared';
+import { PresignUploadSchema, S3_REGION } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraS3Credentials, getPresignedPutObjectUrl } from '../lib/aurora-s3-client.js';
+import { getAuroraS3Client, getPresignedPutObjectUrl } from '../lib/aurora-s3-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -73,7 +73,7 @@ export async function baseHandler(
   }
 
   const stage = process.env.FILONE_STAGE!;
-  const gatewayUrl = getS3Endpoint(S3_REGION, stage);
+  const s3 = getAuroraS3Client(stage, S3_REGION, auroraTenantId);
 
   const metadata: Record<string, string> = { filename: fileName };
   if (parsed.data.description) {
@@ -83,10 +83,7 @@ export async function baseHandler(
     metadata.tags = JSON.stringify(parsed.data.tags);
   }
 
-  const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
-  const url = await getPresignedPutObjectUrl({
-    endpointUrl: gatewayUrl,
-    credentials,
+  const url = await getPresignedPutObjectUrl(s3, {
     bucket: bucketName,
     key,
     expiresIn: PRESIGN_EXPIRY_SECONDS,

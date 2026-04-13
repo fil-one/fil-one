@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { getS3Endpoint, S3Region } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -14,16 +14,16 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockGetAuroraS3Credentials = vi.fn();
+const s3ClientSentinel = Symbol('s3-client');
+const mockGetAuroraS3Client = vi.fn((..._args: unknown[]) => s3ClientSentinel);
 const mockGetPresignedPutObjectUrl = vi.fn();
 
 vi.mock('../lib/aurora-s3-client.js', () => ({
-  getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
+  getAuroraS3Client: (...args: unknown[]) => mockGetAuroraS3Client(...args),
   getPresignedPutObjectUrl: (...args: unknown[]) => mockGetPresignedPutObjectUrl(...args),
 }));
 
 process.env.FILONE_STAGE = 'test';
-const expectedS3Url = getS3Endpoint(S3Region.EuWest1, process.env.FILONE_STAGE);
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -63,13 +63,8 @@ describe('presign-upload baseHandler', () => {
 
   it('returns 200 with presigned URL on success', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
-    mockGetPresignedPutObjectUrl.mockResolvedValue(
-      `${expectedS3Url}/my-bucket/photos/cat.jpg?sig=abc`,
-    );
+    const presignedUrl = 'https://s3.example/my-bucket/photos/cat.jpg?sig=abc';
+    mockGetPresignedPutObjectUrl.mockResolvedValue(presignedUrl);
 
     const event = buildEvent({
       body: validBody(),
@@ -81,15 +76,10 @@ describe('presign-upload baseHandler', () => {
 
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(result.body as string);
-    expect(body).toStrictEqual({
-      url: `${expectedS3Url}/my-bucket/photos/cat.jpg?sig=abc`,
-      key: 'photos/cat.jpg',
-    });
+    expect(body).toStrictEqual({ url: presignedUrl, key: 'photos/cat.jpg' });
 
-    expect(mockGetAuroraS3Credentials).toHaveBeenCalledWith('test', 'aurora-t-1');
-    expect(mockGetPresignedPutObjectUrl).toHaveBeenCalledWith({
-      endpointUrl: expectedS3Url,
-      credentials: { accessKeyId: 'AKIA_CONSOLE', secretAccessKey: 's3_secret' },
+    expect(mockGetAuroraS3Client).toHaveBeenCalledWith('test', S3Region.EuWest1, 'aurora-t-1');
+    expect(mockGetPresignedPutObjectUrl).toHaveBeenCalledWith(s3ClientSentinel, {
       bucket: 'my-bucket',
       key: 'photos/cat.jpg',
       expiresIn: 300,
@@ -140,10 +130,6 @@ describe('presign-upload baseHandler', () => {
 
   it('includes tags in metadata when provided', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
     mockGetPresignedPutObjectUrl.mockResolvedValue(
       'https://s3.dev.aur.lu/my-bucket/photos/cat.jpg?sig=abc',
     );
@@ -168,9 +154,7 @@ describe('presign-upload baseHandler', () => {
       key: 'photos/cat.jpg',
     });
 
-    expect(mockGetPresignedPutObjectUrl).toHaveBeenCalledWith({
-      endpointUrl: expectedS3Url,
-      credentials: { accessKeyId: 'AKIA_CONSOLE', secretAccessKey: 's3_secret' },
+    expect(mockGetPresignedPutObjectUrl).toHaveBeenCalledWith(s3ClientSentinel, {
       bucket: 'my-bucket',
       key: 'photos/cat.jpg',
       expiresIn: 300,
@@ -194,6 +178,6 @@ describe('presign-upload baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(503);
-    expect(mockGetAuroraS3Credentials).not.toHaveBeenCalled();
+    expect(mockGetAuroraS3Client).not.toHaveBeenCalled();
   });
 });

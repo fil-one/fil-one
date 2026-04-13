@@ -1,7 +1,8 @@
 # ADR: Lambda Provisioned Concurrency and SSM Caching for Critical-Path Endpoints
 
 **Status:** Accepted
-**Date:** 2026-03-30
+**Created:** 2026-03-30
+**Last Updated:** 2026-04-13
 
 ---
 
@@ -124,6 +125,16 @@ Both `aurora-portal.ts` and `aurora-s3-client.ts` cache SSM results in a module-
 **Why LRU instead of an unbounded `Map`:** With PC = 1, a warm Lambda instance can live for hours and accumulate one cache entry per unique tenant it serves. An unbounded `Map` grows monotonically for the instance's lifetime with no eviction path. `QuickLRU` provides a principled ceiling: once `maxSize` is reached, the least-recently-seen tenant's entry is evicted and re-fetched from SSM on next access — a cache miss, not a failure.
 
 **Why `maxSize: 500`:** The cache value is a small string (~40–150 bytes). At 500 entries the footprint is ~100 KB — negligible against the 512 MB allocation. 500 is well above the number of unique tenants any single Lambda instance will realistically accumulate before recycling at current scale, so eviction is effectively never triggered in practice. It exists as a safety bound if scale grows significantly.
+
+### S3 client caching: one `S3Client` per `(stage, region, tenantId)`
+
+`aurora-s3-client.ts` exports `getAuroraS3Client(stage, region, tenantId)`, backed by a second module-scope `QuickLRU<string, S3Client>` with the same `maxSize: 500` cap. All handlers that previously built an `S3Client` per request now obtain one from this factory and pass it to the library functions (`listBuckets`, `listObjects`, `headObject`, presigners, etc.).
+
+The factory uses an async credentials provider (`credentials: async () => getAuroraS3Credentials(stage, tenantId)`), so the same client instance can serve subsequent requests even if the underlying SSM credentials were to rotate — the inner `getAuroraS3Credentials` call hits the existing SSM LRU cache and is effectively synchronous on warm paths.
+
+**Why this matters:** Constructing an `S3Client` is non-trivial — it initializes signing middleware, endpoint resolver, and connection pool. Under provisioned concurrency, the old code re-did this work on every invocation. `get-activity` (1094 ms avg) and `head-object` (1085 ms avg) were the most affected; this change lets warm invocations reuse the underlying HTTP agent and connection pool across calls within a Lambda instance.
+
+**`HeadObject` middleware:** The `fil-include-meta=1` query injection and `X-Fil-Cid` response capture are attached to the per-request `HeadObjectCommand` instance (via its own `middlewareStack`), not to the shared client. This prevents middleware from accumulating on the cached client or leaking into other command types.
 
 ### Memory allocation: 1024 MB for execution-bound functions
 

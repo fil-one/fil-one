@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { NoSuchBucket, NotFound } from '@aws-sdk/client-s3';
-import { getS3Endpoint, S3Region } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -15,12 +15,13 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockGetAuroraS3Credentials = vi.fn();
+const s3ClientSentinel = Symbol('s3-client');
+const mockGetAuroraS3Client = vi.fn((..._args: unknown[]) => s3ClientSentinel);
 const mockHeadObject = vi.fn();
 const mockGetObjectRetention = vi.fn();
 
 vi.mock('../lib/aurora-s3-client.js', () => ({
-  getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
+  getAuroraS3Client: (...args: unknown[]) => mockGetAuroraS3Client(...args),
   headObject: (...args: unknown[]) => mockHeadObject(...args),
   getObjectRetention: (...args: unknown[]) => mockGetObjectRetention(...args),
 }));
@@ -71,10 +72,6 @@ describe('head-object baseHandler', () => {
 
   it('returns 404 when S3 throws NoSuchBucket', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
     mockHeadObject.mockRejectedValue(
       new NoSuchBucket({ message: 'The specified bucket does not exist', $metadata: {} }),
     );
@@ -94,10 +91,6 @@ describe('head-object baseHandler', () => {
 
   it('returns 404 when S3 throws NotFound for missing object key', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
     mockHeadObject.mockRejectedValue(new NotFound({ message: 'Not Found', $metadata: {} }));
     mockGetObjectRetention.mockResolvedValue(null);
 
@@ -115,10 +108,6 @@ describe('head-object baseHandler', () => {
 
   it('returns 200 with object metadata and retention on success', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
     mockHeadObject.mockResolvedValue({
       key: 'photos/cat.jpg',
       sizeBytes: 12345,
@@ -157,21 +146,12 @@ describe('head-object baseHandler', () => {
       },
     });
 
-    expect(mockGetAuroraS3Credentials).toHaveBeenCalledWith('test', 'aurora-t-1');
-    expect(mockHeadObject).toHaveBeenCalledWith(
-      getS3Endpoint(S3Region.EuWest1, process.env.FILONE_STAGE!),
-      { accessKeyId: 'AKIA_CONSOLE', secretAccessKey: 's3_secret' },
-      'my-bucket',
-      'photos/cat.jpg',
-    );
+    expect(mockGetAuroraS3Client).toHaveBeenCalledWith('test', S3Region.EuWest1, 'aurora-t-1');
+    expect(mockHeadObject).toHaveBeenCalledWith(s3ClientSentinel, 'my-bucket', 'photos/cat.jpg');
   });
 
   it('returns 200 without fil fields when object is not yet offloaded', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
     mockHeadObject.mockResolvedValue({
       key: 'docs/readme.txt',
       sizeBytes: 256,

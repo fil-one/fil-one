@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { NoSuchBucket } from '@aws-sdk/client-s3';
-import { getS3Endpoint, S3Region } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -15,16 +15,16 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockGetAuroraS3Credentials = vi.fn();
+const s3ClientSentinel = Symbol('s3-client');
+const mockGetAuroraS3Client = vi.fn((..._args: unknown[]) => s3ClientSentinel);
 const mockListObjects = vi.fn();
 
 vi.mock('../lib/aurora-s3-client.js', () => ({
-  getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
+  getAuroraS3Client: (...args: unknown[]) => mockGetAuroraS3Client(...args),
   listObjects: (...args: unknown[]) => mockListObjects(...args),
 }));
 
 process.env.FILONE_STAGE = 'test';
-const expectedS3Url = getS3Endpoint(S3Region.EuWest1, process.env.FILONE_STAGE);
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -60,10 +60,6 @@ describe('list-objects baseHandler', () => {
 
   it('returns 200 with objects from S3', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
     mockListObjects.mockResolvedValue({
       objects: [
         { key: 'photos/cat.jpg', sizeBytes: 1024, lastModified: '2026-01-01T00:00:00.000Z' },
@@ -84,9 +80,8 @@ describe('list-objects baseHandler', () => {
       isTruncated: false,
     });
 
-    expect(mockListObjects).toHaveBeenCalledWith({
-      endpointUrl: expectedS3Url,
-      credentials: { accessKeyId: 'AKIA_CONSOLE', secretAccessKey: 's3_secret' },
+    expect(mockGetAuroraS3Client).toHaveBeenCalledWith('test', S3Region.EuWest1, 'aurora-t-1');
+    expect(mockListObjects).toHaveBeenCalledWith(s3ClientSentinel, {
       bucket: 'my-bucket',
       prefix: undefined,
       delimiter: undefined,
@@ -117,15 +112,11 @@ describe('list-objects baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(503);
-    expect(mockGetAuroraS3Credentials).not.toHaveBeenCalled();
+    expect(mockGetAuroraS3Client).not.toHaveBeenCalled();
   });
 
   it('returns 404 when S3 throws NoSuchBucket', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
     mockListObjects.mockRejectedValue(
       new NoSuchBucket({ message: 'The specified bucket does not exist', $metadata: {} }),
     );
@@ -141,10 +132,6 @@ describe('list-objects baseHandler', () => {
 
   it('passes pagination parameters through to listObjects', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
     mockListObjects.mockResolvedValue({
       objects: [],
       nextToken: 'next-page',
@@ -160,6 +147,7 @@ describe('list-objects baseHandler', () => {
 
     expect(result.statusCode).toBe(200);
     expect(mockListObjects).toHaveBeenCalledWith(
+      s3ClientSentinel,
       expect.objectContaining({
         prefix: 'photos/',
         maxKeys: 10,
