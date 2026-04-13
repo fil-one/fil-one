@@ -911,6 +911,51 @@ describe('setup-integrations', () => {
     });
   });
 
+  // ── AUTH0_MGMT_DOMAIN ───────────────────────────────────────────────
+
+  describe('AUTH0_MGMT_DOMAIN resolution', () => {
+    it('sends Auth0 management API calls to AUTH0_MGMT_DOMAIN instead of AUTH0_DOMAIN', async () => {
+      process.env.AUTH0_MGMT_DOMAIN = 'canonical.us.auth0.com';
+
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      await handler(buildCfnEvent({ RequestType: 'Create' }));
+
+      const auth0Calls = mockFetch.mock.calls.filter(
+        ([url]) => String(url).includes('/oauth/token') || String(url).includes('/api/v2/'),
+      );
+      for (const [url] of auth0Calls) {
+        expect(String(url)).toContain('canonical.us.auth0.com');
+        expect(String(url)).not.toContain('test.us.auth0.com');
+      }
+
+      delete process.env.AUTH0_MGMT_DOMAIN;
+    });
+
+    it('falls back to AUTH0_DOMAIN when AUTH0_MGMT_DOMAIN is not set', async () => {
+      delete process.env.AUTH0_MGMT_DOMAIN;
+
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      await handler(buildCfnEvent({ RequestType: 'Create' }));
+
+      const tokenCall = mockFetch.mock.calls.find(([url]) => String(url).includes('/oauth/token'));
+      expect(String(tokenCall![0])).toContain('test.us.auth0.com');
+    });
+  });
+
   // ── PhysicalResourceId ─────────────────────────────────────────────
 
   describe('PhysicalResourceId', () => {
