@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { S3Region } from '@filone/shared';
 
 import {
   getAuroraS3Client,
+  getAuroraS3Credentials,
   _resetS3ClientCacheForTesting,
   _resetSsmCacheForTesting,
 } from './aurora-s3-client.js';
@@ -98,5 +99,43 @@ describe('getAuroraS3Client', () => {
     }
     const firstAgain = getAuroraS3Client('dev', S3Region.EuWest1, 'tenant-0');
     expect(firstAgain).not.toBe(first);
+  });
+
+  it('destroys evicted S3Client instances to release their socket pool', () => {
+    const first = getAuroraS3Client('dev', S3Region.EuWest1, 'tenant-0');
+    const destroySpy = vi.spyOn(first, 'destroy');
+    // See the overflow test above for why 1000 additional inserts guarantee
+    // tenant-0 is evicted.
+    for (let i = 1; i <= 1000; i += 1) {
+      getAuroraS3Client('dev', S3Region.EuWest1, `tenant-${i}`);
+    }
+    expect(destroySpy).toHaveBeenCalled();
+  });
+});
+
+describe('getAuroraS3Credentials', () => {
+  beforeEach(() => {
+    ssmMock.reset();
+    _resetS3ClientCacheForTesting();
+    _resetSsmCacheForTesting();
+  });
+
+  it('deduplicates concurrent SSM lookups for the same tenant', async () => {
+    resolveSsmWithCredentials('AKIA', 'sek');
+
+    const [a, b] = await Promise.all([
+      getAuroraS3Credentials('dev', 'tenant-x'),
+      getAuroraS3Credentials('dev', 'tenant-x'),
+    ]);
+
+    expect({
+      calls: ssmMock.commandCalls(GetParameterCommand).length,
+      a,
+      b,
+    }).toStrictEqual({
+      calls: 1,
+      a: { accessKeyId: 'AKIA', secretAccessKey: 'sek' },
+      b: { accessKeyId: 'AKIA', secretAccessKey: 'sek' },
+    });
   });
 });

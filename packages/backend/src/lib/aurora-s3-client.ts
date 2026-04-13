@@ -17,12 +17,23 @@ import QuickLRU from 'quick-lru';
 
 const ssm = new SSMClient({});
 const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
-export const _resetSsmCacheForTesting = () => ssmCache.clear();
+const ssmInFlight = new Map<string, Promise<AuroraS3Credentials>>();
+export const _resetSsmCacheForTesting = () => {
+  ssmCache.clear();
+  ssmInFlight.clear();
+};
 
 // One S3Client per (stage, region, tenantId) — reused across Lambda warm
 // invocations. Capped at 500 entries to match the SSM credential cache.
-const s3ClientCache = new QuickLRU<string, S3Client>({ maxSize: 500 });
-export const _resetS3ClientCacheForTesting = () => s3ClientCache.clear();
+// Destroy evicted clients so their HTTP handler sockets don't linger until GC.
+const s3ClientCache = new QuickLRU<string, S3Client>({
+  maxSize: 500,
+  onEviction: (_key, client) => client.destroy(),
+});
+export const _resetS3ClientCacheForTesting = () => {
+  for (const client of s3ClientCache.values()) client.destroy();
+  s3ClientCache.clear();
+};
 
 export function getAuroraS3Client(stage: string, region: S3Region, tenantId: string): S3Client {
   const cacheKey = `${stage}/${region}/${tenantId}`;
@@ -55,6 +66,21 @@ export async function getAuroraS3Credentials(
   const cached = ssmCache.get(cacheKey);
   if (cached) return JSON.parse(cached) as AuroraS3Credentials;
 
+  const existing = ssmInFlight.get(cacheKey);
+  if (existing) return existing;
+
+  const promise = fetchAuroraS3CredentialsFromSsm(stage, tenantId, cacheKey).finally(() => {
+    ssmInFlight.delete(cacheKey);
+  });
+  ssmInFlight.set(cacheKey, promise);
+  return promise;
+}
+
+async function fetchAuroraS3CredentialsFromSsm(
+  stage: string,
+  tenantId: string,
+  cacheKey: string,
+): Promise<AuroraS3Credentials> {
   let value: string | undefined;
   try {
     const { Parameter } = await ssm.send(
