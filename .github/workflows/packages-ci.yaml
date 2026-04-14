@@ -176,8 +176,14 @@ jobs:
               ]
             }
 
+  test-staging:
+    if: github.ref == 'refs/heads/main'
+    needs: [deploy]
+    uses: ./.github/workflows/test-staging.yaml
+    secrets: inherit
+
   dispatch-telemetry:
-    needs: [check-packages, check-storybook, deploy]
+    needs: [check-packages, check-storybook, deploy, test-staging]
     if: >-
       always() && (
         github.event_name == 'push' ||
