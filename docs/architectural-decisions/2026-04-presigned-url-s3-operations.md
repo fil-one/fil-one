@@ -58,12 +58,12 @@ Use **batch presigned URLs** via a single `POST /api/presign` endpoint.
 
 ### Operations Remaining on Lambda
 
-| Operation    | Reason                                                                                   |
-| ------------ | ---------------------------------------------------------------------------------------- |
-| ListBuckets  | Aurora Portal REST API (API key auth, not S3 Sig V4)                                     |
+| Operation    | Reason                                                                                                                                                            |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ListBuckets  | Aurora Portal REST API (API key auth, not S3 Sig V4)                                                                                                              |
 | GetBucket    | Aurora Portal REST API (returns rich metadata including `objectLockEnabled`, used by the frontend to conditionally include GetObjectRetention in presign batches) |
-| CreateBucket | Aurora Portal API mutation                                                               |
-| DeleteBucket | Aurora Portal API; must verify bucket is empty server-side                               |
+| CreateBucket | Aurora Portal API mutation                                                                                                                                        |
+| DeleteBucket | Aurora Portal API; must verify bucket is empty server-side                                                                                                        |
 
 ListBuckets could switch from the Portal API to the S3 `ListBuckets` command (making it presignable), since the handler currently only uses `name`, `createdAt`, `region` (hardcoded), and `isPublic` (hardcoded false). However, the Portal API returns richer metadata that will matter as the UI matures. This can be revisited independently.
 
