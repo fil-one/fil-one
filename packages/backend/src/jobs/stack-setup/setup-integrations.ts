@@ -354,12 +354,13 @@ export async function handler(event: SetupEvent): Promise<void> {
       throw new Error('Using test Stripe key in production is not allowed');
     }
 
+    const mgmtDomain = process.env.AUTH0_MGMT_DOMAIN ?? process.env.AUTH0_DOMAIN!;
     const stripe = new Stripe(Resource.StripeSecretKey.value);
 
     if (event.RequestType === 'Delete') {
       await Promise.all([
         teardownStripeWebhook(stripe, siteUrl, Stage),
-        teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
+        teardownAuth0Callbacks(mgmtDomain, siteUrl, isStagingOrProd),
       ]);
 
       console.log('Teardown complete:', { siteUrl, stage: Stage });
@@ -381,17 +382,15 @@ export async function handler(event: SetupEvent): Promise<void> {
       if (oldUrl && oldUrl !== siteUrl) {
         await Promise.all([
           teardownStripeWebhook(stripe, oldUrl, Stage),
-          teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, oldUrl, isStagingOrProd),
+          teardownAuth0Callbacks(mgmtDomain, oldUrl, isStagingOrProd),
         ]);
       }
     }
 
     const [stripeResult] = await Promise.all([
       setupStripeWebhook(stripe, siteUrl, Stage),
-      setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
-      ...(isStagingOrProd
-        ? [setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production')]
-        : []),
+      setupAuth0Callbacks(mgmtDomain, siteUrl, isStagingOrProd),
+      ...(isStagingOrProd ? [setupAuth0EmailProvider(mgmtDomain, Stage === 'production')] : []),
     ]);
 
     console.log('Setup complete:', {
