@@ -119,6 +119,8 @@ pnpm run dev              # SST live dev mode (live Lambda debugging)
 pnpm run build            # Build all packages
 pnpm run deploy:dev       # Build and deploy personal dev stack (uses OS username as stage)
 pnpm run remove           # Remove your personal dev stack
+pnpm run storybook        # Start Storybook dev server on port 6006
+pnpm run test:storybook   # Run Storybook tests (browser-based, requires Playwright)
 pnpm run lint             # Lint and typecheck TypeScript code (via oxlint)
 pnpm run lint:fix         # Lint and auto-fix where possible
 ```

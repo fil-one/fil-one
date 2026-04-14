@@ -16,6 +16,7 @@ interface SubscriptionRecord {
   subscriptionStatus: string;
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export async function handler(): Promise<void> {
   const billingTableName = Resource.BillingTable.name;
   const workerFunctionName = process.env.USAGE_WORKER_FUNCTION_NAME!;

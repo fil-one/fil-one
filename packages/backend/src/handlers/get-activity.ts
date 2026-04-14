@@ -25,6 +25,7 @@ function endOfDay(d: Date): Date {
   return eod;
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {

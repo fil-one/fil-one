@@ -147,6 +147,10 @@ function isOrphanedEphemeralEndpoint(ep: Stripe.WebhookEndpoint): boolean {
   );
 }
 
+function isPreviewStage(stage: string): boolean {
+  return stage.startsWith('pr-');
+}
+
 async function teardownStripeWebhook(
   stripe: Stripe,
   siteUrl: string,
@@ -337,6 +341,71 @@ async function sendCfnResponse(event: SetupEvent, response: SetupResponse): Prom
   });
 }
 
+// ── Orchestration helpers ─────────────────────────────────────────────
+
+interface StageContext {
+  stripe: Stripe | undefined;
+  mgmtDomain: string;
+  siteUrl: string;
+  stage: string;
+  isStagingOrProd: boolean;
+  isPreview: boolean;
+}
+
+async function handleDelete(ctx: StageContext): Promise<void> {
+  const tasks: Promise<unknown>[] = [
+    teardownAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.isStagingOrProd),
+  ];
+  if (!ctx.isPreview) {
+    tasks.push(teardownStripeWebhook(ctx.stripe!, ctx.siteUrl, ctx.stage));
+  }
+  await Promise.all(tasks);
+  console.log('Teardown complete:', { siteUrl: ctx.siteUrl, stage: ctx.stage });
+}
+
+async function handleOldUrlTeardown(ctx: StageContext, oldUrl: string): Promise<void> {
+  const tasks: Promise<unknown>[] = [
+    teardownAuth0Callbacks(ctx.mgmtDomain, oldUrl, ctx.isStagingOrProd),
+  ];
+  if (!ctx.isPreview) {
+    tasks.push(teardownStripeWebhook(ctx.stripe!, oldUrl, ctx.stage));
+  }
+  await Promise.all(tasks);
+}
+
+async function handleSetup(
+  ctx: StageContext,
+): Promise<{ webhookSecret: string; webhookEndpointId: string } | undefined> {
+  if (ctx.isPreview) {
+    await setupAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.isStagingOrProd);
+    console.log('Setup complete (preview, Stripe skipped):', {
+      siteUrl: ctx.siteUrl,
+      stage: ctx.stage,
+    });
+    return undefined;
+  }
+
+  const tasks: [
+    Promise<{ webhookSecret: string; webhookEndpointId: string }>,
+    Promise<void>,
+    ...Promise<void>[],
+  ] = [
+    setupStripeWebhook(ctx.stripe!, ctx.siteUrl, ctx.stage),
+    setupAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.isStagingOrProd),
+  ];
+  if (ctx.isStagingOrProd) {
+    tasks.push(setupAuth0EmailProvider(ctx.mgmtDomain, ctx.stage === 'production'));
+  }
+
+  const [stripeResult] = await Promise.all(tasks);
+  console.log('Setup complete:', {
+    webhookEndpointId: stripeResult.webhookEndpointId,
+    siteUrl: ctx.siteUrl,
+    stage: ctx.stage,
+  });
+  return stripeResult;
+}
+
 // ── Handler ───────────────────────────────────────────────────────────
 
 export async function handler(event: SetupEvent): Promise<void> {
@@ -349,20 +418,25 @@ export async function handler(event: SetupEvent): Promise<void> {
   try {
     const isProduction = Stage === 'production';
     const isStagingOrProd = Stage === 'staging' || isProduction;
+    const isPreview = isPreviewStage(Stage);
 
     if (isProduction && Resource.StripeSecretKey.value.startsWith('sk_test_')) {
       throw new Error('Using test Stripe key in production is not allowed');
     }
 
-    const stripe = new Stripe(Resource.StripeSecretKey.value);
+    const mgmtDomain = process.env.AUTH0_MGMT_DOMAIN ?? process.env.AUTH0_DOMAIN!;
+    const stripe = isPreview ? undefined : new Stripe(Resource.StripeSecretKey.value);
+    const ctx: StageContext = {
+      stripe,
+      mgmtDomain,
+      siteUrl,
+      stage: Stage,
+      isStagingOrProd,
+      isPreview,
+    };
 
     if (event.RequestType === 'Delete') {
-      await Promise.all([
-        teardownStripeWebhook(stripe, siteUrl, Stage),
-        teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
-      ]);
-
-      console.log('Teardown complete:', { siteUrl, stage: Stage });
+      await handleDelete(ctx);
 
       await sendCfnResponse(event, {
         Status: 'SUCCESS',
@@ -374,31 +448,16 @@ export async function handler(event: SetupEvent): Promise<void> {
       return;
     }
 
-    // Create or Update
-    // If Update changed the SiteUrl, clean up old URLs first
-    if (event.RequestType === 'Update') {
-      const oldUrl = event.OldResourceProperties.SiteUrl?.replace(/\/$/, '');
-      if (oldUrl && oldUrl !== siteUrl) {
-        await Promise.all([
-          teardownStripeWebhook(stripe, oldUrl, Stage),
-          teardownAuth0Callbacks(process.env.AUTH0_DOMAIN!, oldUrl, isStagingOrProd),
-        ]);
-      }
+    // Create or Update — if Update changed the SiteUrl, clean up old URLs first
+    const oldUrl =
+      event.RequestType === 'Update'
+        ? event.OldResourceProperties.SiteUrl?.replace(/\/$/, '')
+        : undefined;
+    if (oldUrl && oldUrl !== siteUrl) {
+      await handleOldUrlTeardown(ctx, oldUrl);
     }
 
-    const [stripeResult] = await Promise.all([
-      setupStripeWebhook(stripe, siteUrl, Stage),
-      setupAuth0Callbacks(process.env.AUTH0_DOMAIN!, siteUrl, isStagingOrProd),
-      ...(isStagingOrProd
-        ? [setupAuth0EmailProvider(process.env.AUTH0_DOMAIN!, Stage === 'production')]
-        : []),
-    ]);
-
-    console.log('Setup complete:', {
-      webhookEndpointId: stripeResult.webhookEndpointId,
-      siteUrl,
-      stage: Stage,
-    });
+    const stripeResult = await handleSetup(ctx);
 
     await sendCfnResponse(event, {
       Status: 'SUCCESS',
@@ -406,10 +465,12 @@ export async function handler(event: SetupEvent): Promise<void> {
       StackId: event.StackId,
       RequestId: event.RequestId,
       LogicalResourceId: event.LogicalResourceId,
-      Data: {
-        webhookSecret: stripeResult.webhookSecret,
-        webhookEndpointId: stripeResult.webhookEndpointId,
-      },
+      ...(stripeResult && {
+        Data: {
+          webhookSecret: stripeResult.webhookSecret,
+          webhookEndpointId: stripeResult.webhookEndpointId,
+        },
+      }),
     });
   } catch (err: unknown) {
     console.error('Setup/teardown failed:', err);

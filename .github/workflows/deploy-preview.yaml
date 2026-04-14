@@ -1,0 +1,204 @@
+name: 'CI [Deploy Preview]'
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  pre-deploy:
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/deploy') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    outputs:
+      head-sha: ${{ steps.pr.outputs.head-sha }}
+      comment-id: ${{ steps.comment.outputs.comment-id }}
+    steps:
+      - name: Add reaction
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            --method POST -f content=rocket
+
+      - name: Fetch PR details
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_JSON=$(gh pr view "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --json state,headRefOid,baseRefName,headRepository,headRepositoryOwner)
+          STATE=$(echo "$PR_JSON" | jq -r '.state')
+          if [ "$STATE" != "OPEN" ]; then
+            echo "::error::PR is not open (state: $STATE)"
+            exit 1
+          fi
+          HEAD_REPO=$(echo "$PR_JSON" | jq -r '.headRepositoryOwner.login + "/" + .headRepository.name')
+          if [ "$HEAD_REPO" != "${{ github.repository }}" ]; then
+            echo "::error::Cannot deploy from fork ($HEAD_REPO)"
+            exit 1
+          fi
+          BASE_REF=$(echo "$PR_JSON" | jq -r '.baseRefName')
+          if [ "$BASE_REF" = "production" ]; then
+            echo "::error::Cannot deploy preview for PRs targeting production"
+            exit 1
+          fi
+          echo "head-sha=$(echo "$PR_JSON" | jq -r '.headRefOid')" >> "$GITHUB_OUTPUT"
+      - name: Post deployment started comment
+        id: comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            ## 🚀 Preview Environment
+
+            | | |
+            |---|---|
+            | **Latest commit** | `${{ needs.pre-deploy.outputs.head-sha }}` |
+            | **Status** | ⏳ Deployment in progress... |
+            | **Logs** | [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+  deploy-preview:
+    needs: [pre-deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: preview-pr-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      STAGE: pr-${{ github.event.issue.number }}
+      AWS_REGION: us-east-2
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+      sst-env-dirty: ${{ steps.sst-env-check.outputs.dirty }}
+      pr-number: ${{ github.event.issue.number }}
+      head-sha: ${{ needs.pre-deploy.outputs.head-sha }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.pre-deploy.outputs.head-sha }}
+          submodules: recursive
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
+          aws-region: us-east-2
+
+      - name: Set SST secrets
+        run: |
+          pnpm exec sst secret set Auth0ClientId "$AUTH0_CLIENT_ID" --stage "$STAGE"
+          pnpm exec sst secret set Auth0ClientSecret "$AUTH0_CLIENT_SECRET" --stage "$STAGE"
+          pnpm exec sst secret set Auth0MgmtClientId "$AUTH0_MGMT_CLIENT_ID" --stage "$STAGE"
+          pnpm exec sst secret set Auth0MgmtClientSecret "$AUTH0_MGMT_CLIENT_SECRET" --stage "$STAGE"
+          pnpm exec sst secret set Auth0MgmtRuntimeClientId "$AUTH0_MGMT_RUNTIME_CLIENT_ID" --stage "$STAGE"
+          pnpm exec sst secret set Auth0MgmtRuntimeClientSecret "$AUTH0_MGMT_RUNTIME_CLIENT_SECRET" --stage "$STAGE"
+          pnpm exec sst secret set StripeSecretKey "$STRIPE_SECRET_KEY" --stage "$STAGE"
+          pnpm exec sst secret set StripePriceId "$STRIPE_PRICE_ID" --stage "$STAGE"
+          pnpm exec sst secret set AuroraBackofficeToken "$AURORA_BACKOFFICE_TOKEN" --stage "$STAGE"
+          pnpm exec sst secret set SendGridApiKey "$SENDGRID_API_KEY" --stage "$STAGE"
+          pnpm exec sst secret set GrafanaLokiAuth "$GRAFANA_LOKI_AUTH" --stage "$STAGE"
+          pnpm exec sst secret set GrafanaPrometheusAuth "$GRAFANA_PROMETHEUS_AUTH" --stage "$STAGE"
+          pnpm exec sst secret set StripePublishableKey "$STRIPE_PUBLISHABLE_KEY" --stage "$STAGE"
+        env:
+          AUTH0_CLIENT_ID: ${{ secrets.CI_AUTH0_CLIENT_ID }}
+          AUTH0_CLIENT_SECRET: ${{ secrets.CI_AUTH0_CLIENT_SECRET }}
+          AUTH0_MGMT_CLIENT_ID: ${{ secrets.CI_AUTH0_MGMT_CLIENT_ID }}
+          AUTH0_MGMT_CLIENT_SECRET: ${{ secrets.CI_AUTH0_MGMT_CLIENT_SECRET }}
+          AUTH0_MGMT_RUNTIME_CLIENT_ID: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_ID }}
+          AUTH0_MGMT_RUNTIME_CLIENT_SECRET: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_SECRET }}
+          STRIPE_SECRET_KEY: ${{ secrets.CI_STRIPE_SECRET_KEY }}
+          STRIPE_PRICE_ID: ${{ secrets.CI_STRIPE_PRICE_ID }}
+          AURORA_BACKOFFICE_TOKEN: ${{ secrets.CI_AURORA_BACKOFFICE_TOKEN }}
+          SENDGRID_API_KEY: ${{ secrets.CI_SENDGRID_API_KEY }}
+          GRAFANA_LOKI_AUTH: ${{ secrets.CI_GRAFANA_LOKI_AUTH }}
+          GRAFANA_PROMETHEUS_AUTH: ${{ secrets.CI_GRAFANA_PROMETHEUS_AUTH }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.CI_STRIPE_PUBLISHABLE_KEY }}
+
+      - name: Build
+        run: pnpm build
+
+      - name: Deploy SST stage
+        run: pnpm exec sst deploy --stage "$STAGE"
+
+      - name: Extract preview URL
+        id: deploy
+        run: |
+          URL=$(pnpm exec sst state export --stage "$STAGE" | jq -r '.latest.resources[] | select(.type == "pulumi:pulumi:Stack") | .outputs.baseUrl')
+          URL_TRIMMED=$(printf '%s' "$URL" | xargs)
+          if [ -z "$URL_TRIMMED" ] || [ "$URL_TRIMMED" = "null" ]; then
+            echo "::error::Failed to extract preview URL from SST state"
+            exit 1
+          fi
+          echo "url=$URL_TRIMMED" >> "$GITHUB_OUTPUT"
+
+      - name: Check sst-env.d.ts files are up to date
+        id: sst-env-check
+        run: |
+          if [ -n "$(git status --porcelain -- ':(glob)**/sst-env.d.ts')" ]; then
+            echo "dirty=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  check-sst-env:
+    needs: [deploy-preview]
+    if: needs.deploy-preview.outputs.sst-env-dirty == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::sst-env.d.ts files are out of date. Please run 'sst deploy' locally and commit the updated sst-env.d.ts files."
+          exit 1
+
+  comment:
+    name: Update Preview Environment Comment
+    if: always() && needs.pre-deploy.outputs.comment-id
+    needs: [pre-deploy, deploy-preview]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Update comment with result
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ needs.pre-deploy.outputs.comment-id }}
+          edit-mode: replace
+          body: |
+            ## 🚀 Preview Environment
+
+            | | |
+            |---|---|
+            | **Latest commit** | `${{ needs.deploy-preview.outputs.head-sha }}` |
+            | **Status** | ${{ needs.deploy-preview.result == 'success' && '✅ Deploy successful' || '❌ Deploy failed' }} |
+            | **Preview URL** | ${{ needs.deploy-preview.result == 'success' && format('[{0}]({0})', needs.deploy-preview.outputs.url) || 'N/A' }} |
+            | **Logs** | [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+  dispatch-telemetry:
+    needs: [pre-deploy, deploy-preview, comment]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Dispatch telemetry event
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/dispatches" \
+            --method POST \
+            -f event_type=workflow-telemetry \
+            -f "client_payload[run_id]=${{ github.run_id }}"
