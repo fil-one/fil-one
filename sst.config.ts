@@ -268,6 +268,8 @@ export default $config({
     const siteUrl = router.url;
 
     const auth0Domain = isProduction ? 'auth.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
+    // Auth0 Management API requires the canonical tenant domain — custom domains don't support /api/v2/
+    const auth0MgmtDomain = isProduction ? 'fil-one.us.auth0.com' : auth0Domain;
 
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
     // This Lambda is intentionally NOT created via createFn(). Its ARN is embedded in the
@@ -285,6 +287,7 @@ export default $config({
       ],
       environment: {
         AUTH0_DOMAIN: auth0Domain,
+        AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
       },
       permissions: [
         {
@@ -574,6 +577,7 @@ export default $config({
       routePath: '/api/me/profile',
       handler: 'update-profile',
       extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
     addRoute({ method: 'POST', routePath: '/api/me/change-password', handler: 'change-password' });
     addRoute({
@@ -581,6 +585,7 @@ export default $config({
       routePath: '/api/me/resend-verification',
       handler: 'resend-verification',
       extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
 
     // ── Org routes ──────────────────────────────────────────────────

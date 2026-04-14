@@ -45,6 +45,9 @@ importers:
       oxlint:
         specifier: ^1.57.0
         version: 1.57.0(oxlint-tsgolint@0.18.1)
+      oxlint-plugin-complexity:
+        specifier: ^2.1.1
+        version: 2.1.1(@oxlint/plugins@1.58.0)(diff@5.2.2)(estree-walker@3.0.3)
       oxlint-tsgolint:
         specifier: ^0.18.1
         version: 0.18.1
@@ -1680,6 +1683,10 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [win32]
+
+  '@oxlint/plugins@1.58.0':
+    resolution: {integrity: sha512-lW4/uOVf0O9qp/niWS+0dTi45SNsLn2e6J2s9r0gl7Uy19T/kWcMIgZjOE5579WPjStYX58Vjw41H/Yi/6Q8xQ==}
+    engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
 
   '@phosphor-icons/react@2.1.10':
     resolution: {integrity: sha512-vt8Tvq8GLjheAZZYa+YG/pW7HDbov8El/MANW8pOAz4eGxrwhnbfrQZq0Cp4q8zBEu8NIhHdnr+r8thnfRSNYA==}
@@ -4002,6 +4009,22 @@ packages:
     resolution: {integrity: sha512-QhejGErLSMReNuZ6vxgFHDyGoPbjTRNi6uGHjy0cvIjOQFqD6xmr/T+3L41ixR3NIgzcNiJ6ylQKpvShTgDfqg==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
+
+  oxlint-plugin-complexity@2.1.1:
+    resolution: {integrity: sha512-4HzpMO1K98SpC0UQrJroEf5POfwE0JY8VMkDhTHPHLyYijXPzGIR/uRM7GXFmOTDx9erG4E8YQ4/++M8A8tPiw==}
+    engines: {node: '>=20.0.0'}
+    peerDependencies:
+      '@oxlint/plugins': '>=1.43.0'
+      diff: '>=5.0.0'
+      estree-walker: '>=3.0.0'
+      oxc-parser: '>=0.60.0'
+    peerDependenciesMeta:
+      diff:
+        optional: true
+      estree-walker:
+        optional: true
+      oxc-parser:
+        optional: true
 
   oxlint-tsgolint@0.18.1:
     resolution: {integrity: sha512-Hgb0wMfuXBYL0ddY+1hAG8IIfC40ADwPnBuUaC6ENAuCtTF4dHwsy7mCYtQ2e7LoGvfoSJRY0+kqQRiembJ/jQ==}
@@ -6740,6 +6763,8 @@ snapshots:
   '@oxlint/binding-win32-x64-msvc@1.57.0':
     optional: true
 
+  '@oxlint/plugins@1.58.0': {}
+
   '@phosphor-icons/react@2.1.10(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
       react: 19.2.4
@@ -9215,6 +9240,13 @@ snapshots:
       '@oxfmt/binding-win32-arm64-msvc': 0.42.0
       '@oxfmt/binding-win32-ia32-msvc': 0.42.0
       '@oxfmt/binding-win32-x64-msvc': 0.42.0
+
+  oxlint-plugin-complexity@2.1.1(@oxlint/plugins@1.58.0)(diff@5.2.2)(estree-walker@3.0.3):
+    dependencies:
+      '@oxlint/plugins': 1.58.0
+    optionalDependencies:
+      diff: 5.2.2
+      estree-walker: 3.0.3
 
   oxlint-tsgolint@0.18.1:
     optionalDependencies:

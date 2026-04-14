@@ -73,6 +73,7 @@ function CopyButton({ value }: { value: string }) {
   );
 }
 
+// eslint-disable-next-line max-lines-per-function
 function ConnectionDetailsTab() {
   const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
   const [sdkTab, setSdkTab] = useState<'python' | 'nodejs' | 'go'>('python');

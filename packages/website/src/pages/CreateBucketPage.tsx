@@ -25,6 +25,7 @@ import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 // Component
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export function CreateBucketPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -92,6 +93,7 @@ export function CreateBucketPage() {
 
   const wantsApiKey = permissionsOpen && form.keyName.trim().length > 0;
 
+  // eslint-disable-next-line complexity/complexity
   async function handleSubmit() {
     if (wantsApiKey && form.permissions.length === 0) return;
 
