@@ -63,175 +63,46 @@ jobs:
       - name: Test Stories
         run: pnpm test:storybook
 
-  deploy-preview:
-    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production' && github.event.pull_request.head.repo.full_name == github.repository
+  deploy-hint:
+    if: github.event_name == 'pull_request'
     needs: [check-packages]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    concurrency:
-      group: preview-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      STAGE: pr-${{ github.event.pull_request.number }}
-      AWS_REGION: us-east-2
-      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-    outputs:
-      url: ${{ steps.deploy.outputs.url }}
-      sst-env-dirty: ${{ steps.sst-env-check.outputs.dirty }}
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
-          aws-region: us-east-2
-
-      - name: Set SST secrets
-        run: |
-          pnpm exec sst secret set Auth0ClientId "$AUTH0_CLIENT_ID" --stage "$STAGE"
-          pnpm exec sst secret set Auth0ClientSecret "$AUTH0_CLIENT_SECRET" --stage "$STAGE"
-          pnpm exec sst secret set Auth0MgmtClientId "$AUTH0_MGMT_CLIENT_ID" --stage "$STAGE"
-          pnpm exec sst secret set Auth0MgmtClientSecret "$AUTH0_MGMT_CLIENT_SECRET" --stage "$STAGE"
-          pnpm exec sst secret set Auth0MgmtRuntimeClientId "$AUTH0_MGMT_RUNTIME_CLIENT_ID" --stage "$STAGE"
-          pnpm exec sst secret set Auth0MgmtRuntimeClientSecret "$AUTH0_MGMT_RUNTIME_CLIENT_SECRET" --stage "$STAGE"
-          pnpm exec sst secret set StripeSecretKey "$STRIPE_SECRET_KEY" --stage "$STAGE"
-          pnpm exec sst secret set StripePriceId "$STRIPE_PRICE_ID" --stage "$STAGE"
-          pnpm exec sst secret set AuroraBackofficeToken "$AURORA_BACKOFFICE_TOKEN" --stage "$STAGE"
-          pnpm exec sst secret set SendGridApiKey "$SENDGRID_API_KEY" --stage "$STAGE"
-          pnpm exec sst secret set GrafanaLokiAuth "$GRAFANA_LOKI_AUTH" --stage "$STAGE"
-          pnpm exec sst secret set GrafanaPrometheusAuth "$GRAFANA_PROMETHEUS_AUTH" --stage "$STAGE"
-          npx sst secret set StripePublishableKey "$STRIPE_PUBLISHABLE_KEY" --stage "$STAGE"
-        env:
-          AUTH0_CLIENT_ID: ${{ secrets.CI_AUTH0_CLIENT_ID }}
-          AUTH0_CLIENT_SECRET: ${{ secrets.CI_AUTH0_CLIENT_SECRET }}
-          AUTH0_MGMT_CLIENT_ID: ${{ secrets.CI_AUTH0_MGMT_CLIENT_ID }}
-          AUTH0_MGMT_CLIENT_SECRET: ${{ secrets.CI_AUTH0_MGMT_CLIENT_SECRET }}
-          AUTH0_MGMT_RUNTIME_CLIENT_ID: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_ID }}
-          AUTH0_MGMT_RUNTIME_CLIENT_SECRET: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_SECRET }}
-          STRIPE_SECRET_KEY: ${{ secrets.CI_STRIPE_SECRET_KEY }}
-          STRIPE_PRICE_ID: ${{ secrets.CI_STRIPE_PRICE_ID }}
-          AURORA_BACKOFFICE_TOKEN: ${{ secrets.CI_AURORA_BACKOFFICE_TOKEN }}
-          SENDGRID_API_KEY: ${{ secrets.CI_SENDGRID_API_KEY }}
-          GRAFANA_LOKI_AUTH: ${{ secrets.CI_GRAFANA_LOKI_AUTH }}
-          GRAFANA_PROMETHEUS_AUTH: ${{ secrets.CI_GRAFANA_PROMETHEUS_AUTH }}
-          STRIPE_PUBLISHABLE_KEY: ${{ secrets.CI_STRIPE_PUBLISHABLE_KEY }}
-
-      - name: Build
-        run: pnpm build
-
-      - name: Deploy SST stage
-        run: pnpm exec sst deploy --stage "$STAGE"
-
-      - name: Extract preview URL
-        id: deploy
-        run: |
-          URL=$(pnpm exec sst state export --stage "$STAGE" | jq -r '.latest.resources[] | select(.type == "pulumi:pulumi:Stack") | .outputs.baseUrl')
-          URL_TRIMMED=$(printf '%s' "$URL" | xargs)
-          if [ -z "$URL_TRIMMED" ] || [ "$URL_TRIMMED" = "null" ]; then
-            echo "::error::Failed to extract preview URL from SST state"
-            exit 1
-          fi
-          echo "url=$URL_TRIMMED" >> "$GITHUB_OUTPUT"
-
-      - name: Check sst-env.d.ts files are up to date
-        id: sst-env-check
-        run: |
-          if [ -n "$(git status --porcelain -- ':(glob)**/sst-env.d.ts')" ]; then
-            echo "dirty=true" >> "$GITHUB_OUTPUT"
-          fi
-
-  check-sst-env:
-    needs: [deploy-preview]
-    if: needs.deploy-preview.outputs.sst-env-dirty == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "::error::sst-env.d.ts files are out of date. Please run 'sst deploy' locally and commit the updated sst-env.d.ts files."
-          exit 1
-
-  comment:
-    name: Add Preview Environment Comment on PR
-    if: github.event_name == 'pull_request' && needs.deploy-preview.outputs.url != ''
-    needs: [deploy-preview]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
     steps:
       - name: Find existing comment
         uses: peter-evans/find-comment@v3
-        id: find_comment
+        id: find
         with:
           issue-number: ${{ github.event.pull_request.number }}
-          body-includes: '🚀 Preview Environment'
+          comment-author: github-actions[bot]
+          body-includes: Preview deployment
 
-      - name: Create or update comment
+      - name: Post deploy hint
+        if: >-
+          steps.find.outputs.comment-id == '' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.base.ref != 'production'
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
-          comment-id: ${{ steps.find_comment.outputs.comment-id }}
-          edit-mode: replace
           body: |
-            ## 🚀 Preview Environment
+            **Preview deployments are available** for this PR.
 
-            | | |
-            |---|---|
-            | **Latest commit** | `${{ github.event.pull_request.head.sha }}` |
-            | **Status** | ✅ Deploy successful |
-            | **Preview URL** | [${{ needs.deploy-preview.outputs.url }}](${{ needs.deploy-preview.outputs.url }}) |
+            Comment `/deploy` to deploy a preview environment.
 
-  integration-tests:
-    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production' && github.event.pull_request.head.repo.full_name == github.repository
-    needs: [deploy-preview]
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    concurrency:
-      group: preview-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      SST_STAGE: pr-${{ github.event.pull_request.number }}
-      AWS_REGION: us-east-2
-
-    steps:
-      - uses: actions/checkout@v5
+      - name: Post deploy unavailable hint
+        if: >-
+          steps.find.outputs.comment-id == '' &&
+          (github.event.pull_request.head.repo.full_name != github.repository ||
+          github.event.pull_request.base.ref == 'production')
+        uses: peter-evans/create-or-update-comment@v4
         with:
-          submodules: recursive
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            **Preview deployments are not available** for this PR.
 
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
-          aws-region: us-east-2
-
-      - name: Run integration tests
-        run: pnpm test:integration
+            ${{ github.event.pull_request.head.repo.full_name != github.repository && 'Preview deployments cannot be created from forks.' || 'Preview deployments cannot be created for PRs targeting production.' }}
 
   deploy:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
@@ -306,7 +177,7 @@ jobs:
             }
 
   dispatch-telemetry:
-    needs: [check-packages, check-storybook, deploy-preview, comment, integration-tests, deploy]
+    needs: [check-packages, check-storybook, deploy]
     if: >-
       always() && (
         github.event_name == 'push' ||

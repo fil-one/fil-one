@@ -30,7 +30,9 @@ function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
+// eslint-disable-next-line max-lines-per-function
 export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
+  // eslint-disable-next-line max-lines-per-function, complexity/complexity
   const before = async (
     request: Request<
       APIGatewayProxyEventV2,

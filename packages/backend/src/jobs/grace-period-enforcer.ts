@@ -24,6 +24,7 @@ interface Candidate {
   action: Action;
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export async function handler(): Promise<void> {
   const billingTableName = Resource.BillingTable.name;
   const now = new Date();

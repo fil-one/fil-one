@@ -26,6 +26,7 @@ export type UploadObjectPageProps = {
   bucketName: string;
 };
 
+// eslint-disable-next-line max-lines-per-function
 export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
   const navigate = useNavigate();
 

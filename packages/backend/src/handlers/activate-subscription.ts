@@ -20,6 +20,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 const dynamo = getDynamoClient();
 
+// eslint-disable-next-line max-lines-per-function
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId, orgId } = getUserInfo(event);
   const tableName = Resource.BillingTable.name;
