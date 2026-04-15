@@ -23,6 +23,19 @@ Browser -> CloudFront -> API Gateway -> Lambda -> Aurora S3 -> Lambda -> API Gat
 Browser -> Lambda (presign, ~50ms) -> Browser -> Aurora S3 (direct)
 ```
 
+### Latency Implications
+
+Moving S3 operations from Lambda-proxied to browser-direct changes the network routing. For users geographically close to the Lambda region (us-east-2), the presigned path is faster because it eliminates the proxy hop. For users far from the Aurora S3 region (eu-west-1), the direct browser-to-Aurora path can be slower than the Lambda-to-Aurora path because the Lambda is closer to Aurora than the browser is.
+
+Example latencies (based on https://latency.bluegoat.net/) for a user in New Zealand (ap-southeast-6):
+
+| Path                   | Hops                                                                                 | Total  |
+| ---------------------- | ------------------------------------------------------------------------------------ | ------ |
+| **Current (proxied)**  | ap-southeast-6 → us-east-2 (~212ms) + us-east-2 → eu-west-1 (~90ms)                  | ~302ms |
+| **Presigned (direct)** | ap-southeast-6 → us-east-2 (~212ms presign) + ap-southeast-6 → eu-west-1 (~296ms S3) | ~508ms |
+
+This is an acceptable trade-off because: the presign call is a lightweight JSON request (~50ms Lambda execution), most latency-sensitive operations (list, head) return small payloads, and the consolidated Lambda at 512 MB with lower provisioned concurrency reduces ongoing infrastructure cost. For large file uploads/downloads, the direct path avoids the API Gateway payload size limit and data transfer overhead, which is a net improvement regardless of routing.
+
 ## Options Considered
 
 ### Browser S3 Client with Temporary Credentials
@@ -71,7 +84,9 @@ ListBuckets could switch from the Portal API to the S3 `ListBuckets` command (ma
 
 **Route:** `POST /api/presign`
 
-**Middleware:** Auth (JWT cookie) + subscription guard. No CSRF — presigned URLs are themselves the authorization token. The handler inspects the batch to determine access level: if any operation is `putObject` or `deleteObject`, Write access is required; otherwise Read.
+**Middleware:** Auth (JWT cookie) + subscription guard. No CSRF — presigned URLs are themselves the authorization token.
+
+**Write vs Read access:** The subscription guard middleware runs at the Read access level so that listing and viewing objects continues to work during a grace period or past-due state. The handler then inspects the batch to determine if any operations require Write access (`putObject`, `deleteObject`). If so, and the account is in a grace period or past due, the handler returns a 403 before generating any presigned URLs. This ensures users retain read-only access to their data while preventing mutations until the subscription is reactivated. Although the presigned URL API itself only performs reads (signing URLs, not executing S3 operations), enforcing the write/read distinction at presign time prevents vending URLs that could be used for unauthorized writes — a defense-in-depth measure that also supports future access control changes (e.g., user roles).
 
 **Request:** Array of 1–10 operation descriptors, each a discriminated union on the `op` field (`listObjects`, `headObject`, `getObjectRetention`, `getObject`, `putObject`, `deleteObject`).
 
@@ -121,7 +136,7 @@ Five handlers are replaced by one:
 
 ### Aurora CORS Header Exposure
 
-The Aurora S3 endpoint must expose `x-fil-cid` and `x-amz-meta-*` headers via `Access-Control-Expose-Headers` for HeadObject to work from the browser. Without this, the Filecoin CID and custom metadata are invisible to JavaScript. File upload (PUT) already works, confirming CORS is partially configured. GET, HEAD, and DELETE methods and the specific exposed headers must be verified before deploying the frontend changes. The presign handler can ship independently; only the frontend switch depends on CORS.
+The Aurora S3 endpoint must expose `x-fil-cid` and `x-amz-meta-*` headers via `Access-Control-Expose-Headers` for HeadObject to work from the browser. Without this, the Filecoin CID and custom metadata are invisible to JavaScript. Aurora's CORS configuration has been verified to support GET, HEAD, PUT, and DELETE methods with the required exposed headers (`x-fil-cid`, `x-amz-meta-*`, `ETag`, `Content-Length`, `Content-Type`, `Last-Modified`). Both the presign handler and the frontend changes can ship together.
 
 ### S3 XML Parsing in the Browser
 

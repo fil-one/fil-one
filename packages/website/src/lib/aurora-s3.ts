@@ -14,7 +14,9 @@ export function parseListObjectsResponse(xml: string): ListObjectsResponse {
 
   const errorNode = doc.querySelector('parsererror');
   if (errorNode) {
-    throw new Error('Failed to parse S3 ListObjects response');
+    throw new Error(
+      `Failed to parse S3 ListObjects response: ${errorNode.textContent ?? 'unknown parse error'}`,
+    );
   }
 
   const contents = doc.getElementsByTagName('Contents');
@@ -88,7 +90,13 @@ export function parseGetObjectRetentionResponse(xml: string): ObjectRetentionInf
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
 
   const errorNode = doc.querySelector('parsererror');
-  if (errorNode) return null;
+  if (errorNode) {
+    console.error(
+      'Failed to parse S3 GetObjectRetention response:',
+      errorNode.textContent ?? 'unknown parse error',
+    );
+    return null;
+  }
 
   const mode = getText(doc.documentElement, 'Mode');
   const retainUntilDate = getText(doc.documentElement, 'RetainUntilDate');

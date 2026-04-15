@@ -68,10 +68,19 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
 
       let retention = undefined;
       if (hasObjectLock && items[1]) {
-        const retentionResult = await fetch(items[1].url, { method: items[1].method });
-        if (retentionResult.ok) {
-          const xml = await retentionResult.text();
+        try {
+          const retentionResponse = await executePresignedUrl(items[1].url, items[1].method);
+          const xml = await retentionResponse.text();
           retention = parseGetObjectRetentionResponse(xml) ?? undefined;
+        } catch (err) {
+          // Objects without retention configured return an S3 error — this is expected.
+          const msg = err instanceof Error ? err.message : '';
+          const isExpected =
+            msg.includes('NoSuchObjectLockConfiguration') ||
+            msg.includes('ObjectLockConfigurationNotFoundError');
+          if (!isExpected) {
+            console.error('Failed to fetch object retention:', err);
+          }
         }
       }
 

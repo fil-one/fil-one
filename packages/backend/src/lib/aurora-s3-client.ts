@@ -242,6 +242,8 @@ export async function getPresignedHeadObjectUrl(
   const { endpointUrl, credentials, bucket, key, expiresIn, includeFilMeta } = options;
   const s3 = createS3Client(endpointUrl, credentials);
 
+  // Inject fil-include-meta=1 query parameter so Aurora returns
+  // X-Fil-Cid and X-Fil-Offload-Status headers in the response.
   if (includeFilMeta) {
     s3.middlewareStack.add(
       (next) => async (args) => {

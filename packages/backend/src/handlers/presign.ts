@@ -35,6 +35,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
 const dynamo = getDynamoClient();
+
 const PRESIGN_EXPIRY_SECONDS = 300;
 
 const WRITE_OPS = new Set<string>(['putObject', 'deleteObject']);
@@ -151,19 +152,15 @@ export async function baseHandler(
   }
 
   const ops = parsed.data;
-  const { orgId, userId } = getUserInfo(event);
+  const { orgId } = getUserInfo(event);
 
   // The subscription guard middleware uses Read access level so that listing
-  // and viewing objects still works during a grace period. If the batch
-  // contains write ops (putObject, deleteObject), block during grace period.
+  // and viewing objects still works during a grace period. The middleware stores
+  // the resolved subscription status on the event, so we can check it here
+  // without a second DynamoDB query. If the batch contains write ops
+  // (putObject, deleteObject), block during grace period.
   if (ops.some((op) => WRITE_OPS.has(op.op))) {
-    const billingResult = await dynamo.send(
-      new GetItemCommand({
-        TableName: Resource.BillingTable.name,
-        Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
-      }),
-    );
-    const status = billingResult.Item?.subscriptionStatus?.S;
+    const status = event.requestContext.subscriptionStatus;
     if (status === SubscriptionStatus.GracePeriod || status === SubscriptionStatus.PastDue) {
       return new ResponseBuilder()
         .status(403)

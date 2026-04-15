@@ -67,7 +67,7 @@ export function useFileUpload({ bucketName, tags, onSuccess }: UseFileUploadOpti
           ...(tags && tags.length > 0 && { tags }),
         },
       ]);
-      const presignedUrl = items[0].url;
+      const { url: presignedUrl, method: presignedMethod } = items[0];
       setUploadProgress(1);
 
       await new Promise<void>((resolve, reject) => {
@@ -86,7 +86,7 @@ export function useFileUpload({ bucketName, tags, onSuccess }: UseFileUploadOpti
           }
         };
         xhr.onerror = () => reject(new Error('Upload failed'));
-        xhr.open('PUT', presignedUrl);
+        xhr.open(presignedMethod, presignedUrl);
         xhr.setRequestHeader('Content-Type', contentType);
         xhr.send(selectedFile);
       });
