@@ -265,7 +265,7 @@ describe('activate-subscription handler', () => {
     const body = JSON.parse((result as { body: string }).body);
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
-    expect(body.message).toContain('additional authentication');
+    expect(body.message).toContain('Additional authentication');
 
     // DynamoDB should NOT have been updated with the subscription status
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);

@@ -3,7 +3,7 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import { PlanId, mapStripeStatus } from '@filone/shared';
+import { PlanId, SubscriptionStatus, mapStripeStatus } from '@filone/shared';
 import type { ActivateSubscriptionResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
@@ -114,7 +114,8 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   // Guard: reject if subscription is not in a usable state after activation.
   // e.g. Stripe returns 'incomplete' when 3DS challenge is required but not completed.
-  if (subscription.status !== 'active' && subscription.status !== 'trialing') {
+  const mappedStatus = mapStripeStatus(subscription.status);
+  if (mappedStatus !== SubscriptionStatus.Active && mappedStatus !== SubscriptionStatus.Trialing) {
     console.error('[activate-subscription] Subscription not active after activation', {
       userId,
       subscriptionId: subscription.id,
@@ -124,16 +125,9 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .status(402)
       .body({
         message:
-          'Payment could not be completed for this subscription. Please verify your payment details and try again.',
+          'Payment could not be completed for this subscription. Additional authentication may be required. Please verify your payment details and try again.',
       })
       .build();
-  }
-
-  const mappedStatus = mapStripeStatus(subscription.status);
-  if (!mappedStatus) {
-    throw new Error(
-      `Unexpected unmappable subscription status '${subscription.status}' after activation`,
-    );
   }
 
   // 4. Get payment method details
