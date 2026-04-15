@@ -131,6 +131,7 @@ export default $config({
     }
 
     const api = new sst.aws.ApiGatewayV2('Api', {
+      accessLog: { retention: '1 week' },
       cors: {
         allowOrigins: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -385,6 +386,15 @@ export default $config({
     ];
 
     const { firehose, cwToFirehoseRole } = setupFirehoseLogPipeline(grafanaLokiAuth);
+
+    // Forward API Gateway access logs to Grafana Loki via the same Firehose
+    new aws.cloudwatch.LogSubscriptionFilter('ApiAccessLogFwd', {
+      logGroup: api.nodes.logGroup.name,
+      filterPattern: '',
+      destinationArn: firehose.arn,
+      roleArn: cwToFirehoseRole.arn,
+    });
+
     const createFn = (fnName: string, args: Omit<sst.aws.FunctionArgs, 'name'>) =>
       createFunction(fnName, args, { firehose, cwToFirehoseRole });
 
@@ -682,21 +692,6 @@ export default $config({
     });
 
     tenantSetupQueue.subscribe(tenantSetupFn.arn, { batch: { size: 1 } });
-
-    // ── CloudWatch alarm on DLQ ──────────────────────────────────
-    // TODO: Rework this alarm to trigger alert in Grafana IRM
-    new aws.cloudwatch.MetricAlarm('AuroraTenantSetupDlqAlarm', {
-      alarmDescription: 'Messages in tenant-setup DLQ — failed tenant setup needs investigation',
-      namespace: 'AWS/SQS',
-      metricName: 'ApproximateNumberOfMessagesVisible',
-      dimensions: { QueueName: tenantSetupDlq.nodes.queue.name },
-      statistic: 'Maximum',
-      period: 60,
-      evaluationPeriods: 1,
-      threshold: 1,
-      comparisonOperator: 'GreaterThanOrEqualToThreshold',
-      treatMissingData: 'notBreaching',
-    });
 
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {

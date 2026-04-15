@@ -1002,4 +1002,115 @@ describe('setup-integrations', () => {
       });
     });
   });
+
+  // ── Preview stage (pr-*) ───────────────────────────────────────────
+
+  describe('preview stage (pr-*)', () => {
+    it('skips Stripe webhook setup and omits Data on Create', async () => {
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://pr-185.filone.dev',
+            Stage: 'pr-185',
+          },
+        }),
+      );
+
+      expect(mockStripeWebhookEndpoints.list).not.toHaveBeenCalled();
+      expect(mockStripeWebhookEndpoints.create).not.toHaveBeenCalled();
+      expect(mockStripeWebhookEndpoints.update).not.toHaveBeenCalled();
+      expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(0);
+      expect(ssmMock.commandCalls(PutParameterCommand)).toHaveLength(0);
+
+      expect(capturedAuth0PatchBody).toBeDefined();
+
+      expect(capturedCfnBody).toEqual({
+        Status: 'SUCCESS',
+        PhysicalResourceId: 'filone-setup-pr-185',
+        ...BASE_CFN_FIELDS,
+      });
+    });
+
+    it('still sets up Auth0 callbacks for preview stage', async () => {
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://pr-185.filone.dev',
+            Stage: 'pr-185',
+          },
+        }),
+      );
+
+      expect(capturedAuth0PatchBody).toEqual({
+        callbacks: [
+          'https://old.example.com/callback',
+          'https://pr-185.filone.dev/api/auth/callback',
+        ],
+        allowed_logout_urls: ['https://fil.one'],
+        web_origins: ['https://pr-185.filone.dev'],
+      });
+    });
+
+    it('skips Stripe teardown on Delete', async () => {
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Delete',
+          PhysicalResourceId: 'filone-setup-pr-42',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://pr-42.filone.dev',
+            Stage: 'pr-42',
+          },
+        }),
+      );
+
+      expect(mockStripeWebhookEndpoints.list).not.toHaveBeenCalled();
+      expect(mockStripeWebhookEndpoints.del).not.toHaveBeenCalled();
+      expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
+
+      expect(capturedAuth0PatchBody).toBeDefined();
+
+      expect(capturedCfnBody).toEqual({
+        Status: 'SUCCESS',
+        PhysicalResourceId: 'filone-setup-pr-42',
+        ...BASE_CFN_FIELDS,
+      });
+    });
+
+    it('skips Stripe teardown of old URL on Update', async () => {
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Update',
+          PhysicalResourceId: 'filone-setup-pr-99',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://pr-99-v2.filone.dev',
+            Stage: 'pr-99',
+          },
+          OldResourceProperties: {
+            SiteUrl: 'https://pr-99.filone.dev',
+            Stage: 'pr-99',
+          },
+        } as never),
+      );
+
+      expect(mockStripeWebhookEndpoints.list).not.toHaveBeenCalled();
+      expect(mockStripeWebhookEndpoints.del).not.toHaveBeenCalled();
+
+      const auth0PatchCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).includes('/api/v2/clients/') && init?.method === 'PATCH',
+      );
+      expect(auth0PatchCalls).toHaveLength(2);
+
+      expect(capturedCfnBody).toEqual({
+        Status: 'SUCCESS',
+        PhysicalResourceId: 'filone-setup-pr-99',
+        ...BASE_CFN_FIELDS,
+      });
+    });
+  });
 });

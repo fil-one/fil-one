@@ -155,7 +155,15 @@ export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
         .build();
     }
 
-    // Unknown status → allow (fail open for safety)
+    // Unknown or unhandled status → block (fail closed)
+    return new ResponseBuilder()
+      .status(403)
+      .body({
+        message:
+          'Your subscription is not active. Please contact support or update your payment method.',
+        code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+      })
+      .build();
   };
 
   const after = async (
