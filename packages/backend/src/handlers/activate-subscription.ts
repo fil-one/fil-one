@@ -225,10 +225,7 @@ async function unlockAuroraTenant(orgId: string) {
     await setOrgAuroraTenantStatus(orgId, 'ACTIVE');
     console.log('[activate-subscription] Aurora tenant unlocked', { orgId, auroraTenantId });
   } catch (error) {
-    console.error('[activate-subscription] Failed to unlock Aurora tenant', {
-      orgId,
-      error: (error as Error).message,
-    });
+    console.error('[activate-subscription] Failed to unlock Aurora tenant', { orgId, error });
     throw error;
   }
 }

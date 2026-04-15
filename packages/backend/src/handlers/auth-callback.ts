@@ -68,7 +68,8 @@ async function baseHandler(
 
   if (!tokenRes.ok) {
     const errorBody = await tokenRes.text();
-    console.error('Auth0 token exchange failed:', { status: tokenRes.status, body: errorBody });
+    console.log('Auth0 token exchange error body:', errorBody);
+    console.error('Auth0 token exchange failed:', { status: tokenRes.status });
     return redirect(`${errorUrl}?error=${encodeURIComponent('Token exchange failed')}`);
   }
 

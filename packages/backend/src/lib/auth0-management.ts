@@ -84,8 +84,9 @@ export async function sendVerificationEmail(sub: string): Promise<void> {
 
   if (!resp.ok) {
     const body = await resp.text();
-    console.error('[auth0] Failed to send verification email', { status: resp.status, body });
-    throw new Error(`Auth0 send verification email failed (${resp.status}): ${body}`);
+    console.log('[auth0] Verification email error body:', body);
+    console.error('[auth0] Failed to send verification email', { status: resp.status });
+    throw new Error(`Auth0 send verification email failed (${resp.status})`);
   }
 }
 

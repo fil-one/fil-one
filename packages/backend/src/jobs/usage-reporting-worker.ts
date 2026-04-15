@@ -149,10 +149,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
       });
     } catch (error) {
       lockAction = `error:${(error as Error).message}`;
-      console.error('[usage-worker] Failed to enforce tenant locks', {
-        orgId,
-        error: (error as Error).message,
-      });
+      console.error('[usage-worker] Failed to enforce tenant locks', { orgId, error });
     }
   } else {
     lockAction = 'skipped:paid';
