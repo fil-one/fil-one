@@ -27,7 +27,7 @@ def delete_object(s3, bucket: str, key: str, version_id: str = None) -> dict:
     resp = s3.delete_object(**kwargs)
     return {
         "delete_marker": resp.get("DeleteMarker"),
-        "version_id": resp.get("VersionId"),
+        "resp_version_id": resp.get("VersionId"),
     }
 
 
