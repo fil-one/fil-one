@@ -296,6 +296,7 @@ export default $config({
           resources: [$interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/*`],
         },
       ],
+      logging: { retention: '1 week', format: 'json' },
       timeout: '10 seconds',
     });
 
@@ -390,6 +391,15 @@ export default $config({
     // Forward API Gateway access logs to Grafana Loki via the same Firehose
     new aws.cloudwatch.LogSubscriptionFilter('ApiAccessLogFwd', {
       logGroup: api.nodes.logGroup.name,
+      filterPattern: '',
+      destinationArn: firehose.arn,
+      roleArn: cwToFirehoseRole.arn,
+    });
+
+    // Forward SetupIntegrations logs to Grafana Loki. This function is not
+    // created via createFn() (see comment above), so wire up forwarding manually.
+    new aws.cloudwatch.LogSubscriptionFilter('SetupIntegrationsLogFwd', {
+      logGroup: setupFn.nodes.logGroup.apply((lg) => lg!.name),
       filterPattern: '',
       destinationArn: firehose.arn,
       roleArn: cwToFirehoseRole.arn,
