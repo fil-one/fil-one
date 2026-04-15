@@ -25,7 +25,7 @@ const missingCredentials = REQUIRED_CREDENTIAL_VARS.filter((name) => !process.en
 if (missingCredentials.length > 0) {
   throw new Error(
     `Missing required E2E credential env vars: ${missingCredentials.join(', ')}. ` +
-      `See tests/e2e/README.md for details.`,
+      `See README.md for details.`,
   );
 }
 
