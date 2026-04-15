@@ -2,7 +2,7 @@ name: 'CI [packages]'
 
 on:
   push:
-    branches: [main, production]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -75,8 +75,7 @@ jobs:
       - name: Post deploy hint
         if: >-
           steps.find.outputs.comment-id == '' &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          github.event.pull_request.base.ref != 'production'
+          github.event.pull_request.head.repo.full_name == github.repository
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
@@ -88,29 +87,28 @@ jobs:
       - name: Post deploy unavailable hint
         if: >-
           steps.find.outputs.comment-id == '' &&
-          (github.event.pull_request.head.repo.full_name != github.repository ||
-          github.event.pull_request.base.ref == 'production')
+          github.event.pull_request.head.repo.full_name != github.repository
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
           body: |
             **Preview deployments are not available** for this PR.
 
-            ${{ github.event.pull_request.head.repo.full_name != github.repository && 'Preview deployments cannot be created from forks.' || 'Preview deployments cannot be created for PRs targeting production.' }}
+            Preview deployments cannot be created from forks.
 
-  deploy:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
+  deploy-staging:
+    if: github.ref == 'refs/heads/main'
     needs: [check-packages]
     runs-on: ubuntu-latest
     concurrency:
-      group: deploy-${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
+      group: deploy-staging
       cancel-in-progress: false
-    environment: ${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
+    environment: staging
     permissions:
       id-token: write
       contents: read
     env:
-      DEPLOY_STAGE: ${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
+      DEPLOY_STAGE: staging
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
     steps:
@@ -171,13 +169,83 @@ jobs:
             }
 
   test-staging:
-    if: github.ref == 'refs/heads/main'
-    needs: [deploy]
+    needs: [deploy-staging]
     uses: ./.github/workflows/test-staging.yaml
     secrets: inherit
 
+  deploy-production:
+    needs: [test-staging]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      DEPLOY_STAGE: production
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+
+      - run: pnpm build
+        env:
+          SENTRY_DEPLOY_ENV: ${{ env.DEPLOY_STAGE }}
+          SENTRY_RELEASE_DIST: ${{ github.run_number }}
+
+      - run: pnpm exec sst deploy --stage "$DEPLOY_STAGE"
+
+      - if: failure()
+        id: commit_info
+        run: echo "subject=$(git log -1 --format=%s)" >> "$GITHUB_OUTPUT"
+
+      - if: failure()
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "filone-alerts",
+              "text": ${{ toJSON(format('Deployment of `{0}` to `{1}` failed. Commit: {2} by @{3}. Details: {4}/{5}/actions/runs/{6}', github.event.repository.name, env.DEPLOY_STAGE, steps.commit_info.outputs.subject, github.actor, github.server_url, github.repository, github.run_id)) }},
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format(':warning: *Deployment of `{0}` to `{1}` failed* · <{2}/{3}/actions/runs/{4}|Details>', github.event.repository.name, env.DEPLOY_STAGE, github.server_url, github.repository, github.run_id)) }}
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format('Commit: `{0}` by <https://github.com/{1}|@{1}>', steps.commit_info.outputs.subject, github.actor)) }}
+                  }
+                }
+              ]
+            }
+
   dispatch-telemetry:
-    needs: [check-packages, check-storybook, deploy, test-staging]
+    needs: [check-packages, check-storybook, deploy-staging, test-staging, deploy-production]
     if: >-
       always() && (
         github.event_name == 'push' ||

@@ -23,15 +23,24 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
+      name: 'smoke',
+      testDir: './tests/e2e/smoke',
+      use: { ...devices['Desktop Chrome'] },
+    },
+    // `full-*` projects run both smoke and full suites across all browsers.
+    {
+      name: 'full-chromium',
+      testDir: './tests/e2e',
       use: { ...devices['Desktop Chrome'] },
     },
     {
-      name: 'firefox',
+      name: 'full-firefox',
+      testDir: './tests/e2e',
       use: { ...devices['Desktop Firefox'] },
     },
     {
-      name: 'webkit',
+      name: 'full-webkit',
+      testDir: './tests/e2e',
       use: { ...devices['Desktop Safari'] },
     },
   ],

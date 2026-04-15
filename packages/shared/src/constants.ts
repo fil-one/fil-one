@@ -28,6 +28,16 @@ export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
   return `https://${region}.${base}`;
 }
 
+/**
+ * Auth0 tenant domain used by the deployment for user authentication.
+ *
+ * Production uses a custom domain (`auth.fil.one`); all other stages —
+ * staging, per-PR previews, personal dev — share the dev tenant.
+ */
+export function getAuth0Domain(stage: Stage | string): string {
+  return stage === Stage.Production ? 'auth.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
+}
+
 /** Cookie name for the OAuth state parameter (CSRF protection for login flow). */
 export const OAUTH_STATE_COOKIE = 'hs_oauth_state';
 

@@ -3,5 +3,5 @@ minimumReleaseAge: 4320 # 3 days
 packages:
   - 'bin'
   - 'infra'
-  - 'tests/integration'
   - 'packages/*'
+  - 'tests/*'

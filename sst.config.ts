@@ -268,7 +268,7 @@ export default $config({
 
     const siteUrl = router.url;
 
-    const auth0Domain = isProduction ? 'auth.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
+    const auth0Domain = require('@filone/shared').getAuth0Domain($app.stage);
     // Auth0 Management API requires the canonical tenant domain — custom domains don't support /api/v2/
     const auth0MgmtDomain = isProduction ? 'fil-one.us.auth0.com' : auth0Domain;
 

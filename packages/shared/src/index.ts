@@ -7,6 +7,7 @@ export {
   S3_REGION,
   S3Region,
   getS3Endpoint,
+  getAuth0Domain,
   OAUTH_STATE_COOKIE,
   CSRF_COOKIE_NAME,
   GB_BYTES,
