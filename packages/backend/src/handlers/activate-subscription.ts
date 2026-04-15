@@ -124,7 +124,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .status(402)
       .body({
         message:
-          'Payment requires additional authentication. Please complete the verification and try again.',
+          'Payment could not be completed for this subscription. Please verify your payment details and try again.',
       })
       .build();
   }
