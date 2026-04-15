@@ -15,6 +15,9 @@ importers:
         specifier: workspace:*
         version: link:packages/shared
     devDependencies:
+      '@aws-sdk/client-dynamodb':
+        specifier: ^3.1023.0
+        version: 3.1023.0
       '@playwright/test':
         specifier: ^1.58.2
         version: 1.58.2

@@ -46,3 +46,4 @@ contracts/out/
 
 # Sentry Config File
 .env.sentry-build-plugin
+.auth
