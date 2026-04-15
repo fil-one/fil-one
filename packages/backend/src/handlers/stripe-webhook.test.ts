@@ -439,6 +439,58 @@ describe('stripe-webhook handler', () => {
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
+    it('skips DDB update when Stripe status is incomplete (unmappable)', async () => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      setupStripeEvent('customer.subscription.created', mockSubscription({ status: 'incomplete' }));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(consoleSpy).toHaveBeenCalledWith(
+        '[stripe-webhook] Unmappable Stripe status, skipping update',
+        expect.objectContaining({ stripeStatus: 'incomplete' }),
+      );
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      consoleSpy.mockRestore();
+    });
+
+    it('maps incomplete_expired to canceled', async () => {
+      setupStripeEvent(
+        'customer.subscription.created',
+        mockSubscription({ status: 'incomplete_expired' }),
+      );
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      expect(updateCalls[0].args[0].input).toEqual(
+        expect.objectContaining({
+          ExpressionAttributeValues: expect.objectContaining({
+            ':status': { S: SubscriptionStatus.Canceled },
+          }),
+        }),
+      );
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('maps unpaid to past_due', async () => {
+      setupStripeEvent('customer.subscription.created', mockSubscription({ status: 'unpaid' }));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      expect(updateCalls[0].args[0].input).toEqual(
+        expect.objectContaining({
+          ExpressionAttributeValues: expect.objectContaining({
+            ':status': { S: SubscriptionStatus.PastDue },
+          }),
+        }),
+      );
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
     it('falls back to customer lookup when userId is empty string', async () => {
       setupStripeEvent(
         'customer.subscription.created',

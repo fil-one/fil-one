@@ -3,7 +3,7 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import { PlanId, SubscriptionStatus } from '@filone/shared';
+import { PlanId, SubscriptionStatus, mapStripeStatus } from '@filone/shared';
 import type { ActivateSubscriptionResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
@@ -19,6 +19,13 @@ import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 const dynamo = getDynamoClient();
+
+function resolvePaymentMethodId(
+  paymentMethod: string | { id: string } | null | undefined,
+): string | undefined {
+  if (typeof paymentMethod === 'string') return paymentMethod;
+  return paymentMethod?.id;
+}
 
 // eslint-disable-next-line max-lines-per-function
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
@@ -71,10 +78,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  const paymentMethodId =
-    typeof latestSetupIntent.payment_method === 'string'
-      ? latestSetupIntent.payment_method
-      : latestSetupIntent.payment_method?.id;
+  const paymentMethodId = resolvePaymentMethodId(latestSetupIntent.payment_method);
 
   if (!paymentMethodId) {
     return new ResponseBuilder()
@@ -108,6 +112,24 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     });
   }
 
+  // Guard: reject if subscription is not in a usable state after activation.
+  // e.g. Stripe returns 'incomplete' when 3DS challenge is required but not completed.
+  const mappedStatus = mapStripeStatus(subscription.status);
+  if (mappedStatus !== SubscriptionStatus.Active && mappedStatus !== SubscriptionStatus.Trialing) {
+    console.error('[activate-subscription] Subscription not active after activation', {
+      userId,
+      subscriptionId: subscription.id,
+      stripeStatus: subscription.status,
+    });
+    return new ResponseBuilder()
+      .status(402)
+      .body({
+        message:
+          'Payment could not be completed for this subscription. Additional authentication may be required. Please verify your payment details and try again.',
+      })
+      .build();
+  }
+
   // 4. Get payment method details
   const pm = subscription.default_payment_method;
   let paymentMethodLast4 = '';
@@ -134,7 +156,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
         'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
       ExpressionAttributeValues: {
         ':subId': { S: subscription.id },
-        ':status': { S: subscription.status },
+        ':status': { S: mappedStatus },
         ':periodEnd': {
           S: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
         },
@@ -178,8 +200,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const response: ActivateSubscriptionResponse = {
     subscription: {
       planId: PlanId.PayAsYouGo,
-      status:
-        subscription.status === 'active' ? SubscriptionStatus.Active : SubscriptionStatus.Trialing,
+      status: mappedStatus,
       currentPeriodEnd: new Date(
         subscription.items.data[0].current_period_end * 1000,
       ).toISOString(),

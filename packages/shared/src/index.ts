@@ -108,7 +108,7 @@ export type {
 
 export type { UsageResponse } from './api/usage.js';
 
-export { PlanId, SubscriptionStatus } from './api/billing.js';
+export { PlanId, SubscriptionStatus, mapStripeStatus } from './api/billing.js';
 export type {
   Plan,
   Subscription,
