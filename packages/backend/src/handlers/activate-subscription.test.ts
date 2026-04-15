@@ -248,6 +248,52 @@ describe('activate-subscription handler', () => {
     expect(updateExpr).toContain('REMOVE trialEndsAt');
   });
 
+  it('returns 402 when subscription status is incomplete after activation (3DS pending)', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'incomplete' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    const result = await handler(event, {} as never);
+    const body = JSON.parse((result as { body: string }).body);
+
+    expect((result as { statusCode: number }).statusCode).toBe(402);
+    expect(body.message).toContain('Additional authentication');
+
+    // DynamoDB should NOT have been updated with the subscription status
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+
+    // Aurora tenant should NOT have been unlocked
+    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+  });
+
+  it('returns 402 when subscription status is unpaid after activation', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'unpaid' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    const result = await handler(event, {} as never);
+
+    expect((result as { statusCode: number }).statusCode).toBe(402);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+  });
+
   it('returns 500 when Aurora org setup is incomplete', async () => {
     ddbMock
       .on(GetItemCommand)

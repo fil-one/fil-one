@@ -7,7 +7,12 @@ import {
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
-import { PAID_GRACE_DAYS, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
+import {
+  PAID_GRACE_DAYS,
+  SubscriptionStatus,
+  TRIAL_GRACE_DAYS,
+  mapStripeStatus,
+} from '@filone/shared';
 import { Resource } from 'sst';
 import { updateTenantStatus } from '../lib/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
@@ -227,6 +232,16 @@ async function handleSubscriptionUpdate(
   subscription: Stripe.Subscription,
 ): Promise<void> {
   const customerId = getCustomerIdString(subscription.customer);
+  const mappedStatus = mapStripeStatus(subscription.status);
+
+  if (mappedStatus === null) {
+    console.warn('[stripe-webhook] Unmappable Stripe status, skipping update', {
+      stripeStatus: subscription.status,
+      subscriptionId: subscription.id,
+      customerId,
+    });
+    return;
+  }
 
   // Find billing record by Stripe customer ID — we need to scan or use a GSI.
   // For MVP, use metadata.userId set during customer creation.
@@ -244,17 +259,18 @@ async function handleSubscriptionUpdate(
       console.warn('[stripe-webhook] No userId in metadata for customer:', customerId);
       return;
     }
-    await updateBillingRecord(tableName, metaUserId, subscription);
+    await updateBillingRecord(tableName, metaUserId, subscription, mappedStatus);
     return;
   }
 
-  await updateBillingRecord(tableName, userId, subscription);
+  await updateBillingRecord(tableName, userId, subscription, mappedStatus);
 }
 
 async function updateBillingRecord(
   tableName: string,
   userId: string,
   subscription: Stripe.Subscription,
+  mappedStatus: SubscriptionStatus,
 ): Promise<void> {
   await dynamo.send(
     new UpdateItemCommand({
@@ -267,7 +283,7 @@ async function updateBillingRecord(
         'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
       ExpressionAttributeValues: {
         ':subId': { S: subscription.id },
-        ':status': { S: subscription.status },
+        ':status': { S: mappedStatus },
         ':periodEnd': {
           S: new Date((subscription.items.data[0]?.current_period_end ?? 0) * 1000).toISOString(),
         },

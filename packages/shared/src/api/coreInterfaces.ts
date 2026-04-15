@@ -6,6 +6,8 @@ export enum ApiErrorCode {
   GRACE_PERIOD_WRITE_BLOCKED = 'GRACE_PERIOD_WRITE_BLOCKED',
   /** Subscription has been canceled — all access is blocked. */
   SUBSCRIPTION_CANCELED = 'SUBSCRIPTION_CANCELED',
+  /** Subscription is in an inactive or incomplete state — all access is blocked. */
+  SUBSCRIPTION_INACTIVE = 'SUBSCRIPTION_INACTIVE',
 }
 
 export interface ErrorResponse {
