@@ -106,6 +106,7 @@ export type BucketDetailPageProps = {
   prefix?: string;
 };
 
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) {
   const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
   const { toast } = useToast();

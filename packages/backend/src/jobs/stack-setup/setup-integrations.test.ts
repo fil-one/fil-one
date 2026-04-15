@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   SSMClient,
@@ -911,6 +911,51 @@ describe('setup-integrations', () => {
     });
   });
 
+  // ── AUTH0_MGMT_DOMAIN ───────────────────────────────────────────────
+
+  describe('AUTH0_MGMT_DOMAIN resolution', () => {
+    afterEach(() => {
+      delete process.env.AUTH0_MGMT_DOMAIN;
+    });
+
+    it('sends Auth0 management API calls to AUTH0_MGMT_DOMAIN instead of AUTH0_DOMAIN', async () => {
+      process.env.AUTH0_MGMT_DOMAIN = 'canonical.us.auth0.com';
+
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      await handler(buildCfnEvent({ RequestType: 'Create' }));
+
+      const auth0Calls = mockFetch.mock.calls.filter(
+        ([url]) => String(url).includes('/oauth/token') || String(url).includes('/api/v2/'),
+      );
+      for (const [url] of auth0Calls) {
+        expect(String(url)).toContain('canonical.us.auth0.com');
+        expect(String(url)).not.toContain('test.us.auth0.com');
+      }
+    });
+
+    it('falls back to AUTH0_DOMAIN when AUTH0_MGMT_DOMAIN is not set', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      await handler(buildCfnEvent({ RequestType: 'Create' }));
+
+      const tokenCall = mockFetch.mock.calls.find(([url]) => String(url).includes('/oauth/token'));
+      expect(String(tokenCall![0])).toContain('test.us.auth0.com');
+    });
+  });
+
   // ── PhysicalResourceId ─────────────────────────────────────────────
 
   describe('PhysicalResourceId', () => {
@@ -954,6 +999,117 @@ describe('setup-integrations', () => {
 
       expect(capturedCfnBody).toMatchObject({
         PhysicalResourceId: 'filone-setup-staging',
+      });
+    });
+  });
+
+  // ── Preview stage (pr-*) ───────────────────────────────────────────
+
+  describe('preview stage (pr-*)', () => {
+    it('skips Stripe webhook setup and omits Data on Create', async () => {
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://pr-185.filone.dev',
+            Stage: 'pr-185',
+          },
+        }),
+      );
+
+      expect(mockStripeWebhookEndpoints.list).not.toHaveBeenCalled();
+      expect(mockStripeWebhookEndpoints.create).not.toHaveBeenCalled();
+      expect(mockStripeWebhookEndpoints.update).not.toHaveBeenCalled();
+      expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(0);
+      expect(ssmMock.commandCalls(PutParameterCommand)).toHaveLength(0);
+
+      expect(capturedAuth0PatchBody).toBeDefined();
+
+      expect(capturedCfnBody).toEqual({
+        Status: 'SUCCESS',
+        PhysicalResourceId: 'filone-setup-pr-185',
+        ...BASE_CFN_FIELDS,
+      });
+    });
+
+    it('still sets up Auth0 callbacks for preview stage', async () => {
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://pr-185.filone.dev',
+            Stage: 'pr-185',
+          },
+        }),
+      );
+
+      expect(capturedAuth0PatchBody).toEqual({
+        callbacks: [
+          'https://old.example.com/callback',
+          'https://pr-185.filone.dev/api/auth/callback',
+        ],
+        allowed_logout_urls: ['https://fil.one'],
+        web_origins: ['https://pr-185.filone.dev'],
+      });
+    });
+
+    it('skips Stripe teardown on Delete', async () => {
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Delete',
+          PhysicalResourceId: 'filone-setup-pr-42',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://pr-42.filone.dev',
+            Stage: 'pr-42',
+          },
+        }),
+      );
+
+      expect(mockStripeWebhookEndpoints.list).not.toHaveBeenCalled();
+      expect(mockStripeWebhookEndpoints.del).not.toHaveBeenCalled();
+      expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
+
+      expect(capturedAuth0PatchBody).toBeDefined();
+
+      expect(capturedCfnBody).toEqual({
+        Status: 'SUCCESS',
+        PhysicalResourceId: 'filone-setup-pr-42',
+        ...BASE_CFN_FIELDS,
+      });
+    });
+
+    it('skips Stripe teardown of old URL on Update', async () => {
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Update',
+          PhysicalResourceId: 'filone-setup-pr-99',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://pr-99-v2.filone.dev',
+            Stage: 'pr-99',
+          },
+          OldResourceProperties: {
+            SiteUrl: 'https://pr-99.filone.dev',
+            Stage: 'pr-99',
+          },
+        } as never),
+      );
+
+      expect(mockStripeWebhookEndpoints.list).not.toHaveBeenCalled();
+      expect(mockStripeWebhookEndpoints.del).not.toHaveBeenCalled();
+
+      const auth0PatchCalls = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).includes('/api/v2/clients/') && init?.method === 'PATCH',
+      );
+      expect(auth0PatchCalls).toHaveLength(2);
+
+      expect(capturedCfnBody).toEqual({
+        Status: 'SUCCESS',
+        PhysicalResourceId: 'filone-setup-pr-99',
+        ...BASE_CFN_FIELDS,
       });
     });
   });

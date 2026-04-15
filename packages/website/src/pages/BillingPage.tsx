@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -53,6 +54,7 @@ function SkeletonCard({ height = 'h-36' }: { height?: string }) {
 // Page
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export function BillingPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();

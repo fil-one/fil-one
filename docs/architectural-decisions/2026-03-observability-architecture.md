@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Created:** 2026-03-24
-**Last Modified:** 2026-03-31
+**Last Modified:** 2026-04-14
 
 ---
 
@@ -67,8 +67,11 @@ API Gateway V2 setup.
    Cloud Loki for long-term storage and LogQL querying.
 
 3. **Signal routing.**
-   - **Logs → Loki** — JSON application logs with Lambda-injected `requestId`.
-     Low-cardinality Loki labels (service, environment). LogQL for querying.
+   - **Logs → Loki** — JSON application logs with Lambda-injected `requestId`,
+     plus API Gateway access logs (requestId, httpMethod, path, routeKey, status,
+     responseLatency, integrationLatency, ip, userAgent). Both log streams use
+     the same CloudWatch → Firehose → Loki pipeline with low-cardinality Loki
+     labels (service, environment). LogQL for querying.
    - **Metrics → Prometheus** — AWS-provided metrics (Lambda invocations,
      duration, errors, throttles) via CloudWatch Metric Stream → Firehose →
      Grafana Cloud Prometheus. Custom application metrics via EMF planned as

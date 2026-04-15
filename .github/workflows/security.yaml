@@ -1,0 +1,246 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly scan: Sunday 2am UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same branch/PR
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ──────────────────────────────────────────────────
+  # Job 1: Semgrep SAST (custom rules + community)
+  # ──────────────────────────────────────────────────
+  semgrep:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    container:
+      image: semgrep/semgrep:1.93.0
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --config .semgrep.yml \
+            --sarif --output semgrep-results.sarif \
+            --error \
+            --verbose
+        continue-on-error: true # Advisory mode — flip to false to block PRs
+
+      - name: Upload Semgrep results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-results
+          path: semgrep-results.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always() && vars.ENABLE_GHAS == 'true'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep-results.sarif
+          category: semgrep
+
+  # ──────────────────────────────────────────────────
+  # Job 2: CodeQL (conditional — requires GHAS)
+  # ──────────────────────────────────────────────────
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    # Only run if GHAS is available (secret acts as feature flag)
+    if: vars.ENABLE_CODEQL == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v4
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
+
+  # ──────────────────────────────────────────────────
+  # Job 3: Dependency Vulnerability Scanning
+  # ──────────────────────────────────────────────────
+  dependencies:
+    name: Dependency Scan
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # pnpm audit — native npm advisory database check
+      - name: pnpm audit
+        run: pnpm audit --prod --audit-level=moderate
+        continue-on-error: true # Advisory mode — flip to false to block on CRITICAL
+
+      # Trivy — broader vulnerability database + license scanning
+      # trivy-action@0.35.0 internally uses actions/cache@v4 (Node 20).
+      # No newer version available yet. Monitor:
+      # https://github.com/aquasecurity/trivy-action/releases
+      - name: Trivy vulnerability scan (fs mode)
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-deps.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          trivyignores: .trivyignore
+          skip-dirs: packages/aurora-backoffice-client,packages/aurora-portal-client,contracts/lib,.sst,node_modules
+        continue-on-error: true
+
+      - name: Upload Trivy dependency results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-deps-results
+          path: trivy-deps.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always() && vars.ENABLE_GHAS == 'true'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-deps.sarif
+          category: trivy-dependencies
+
+  # ──────────────────────────────────────────────────
+  # Job 4: Secret Scanning (Gitleaks)
+  # ──────────────────────────────────────────────────
+  secrets:
+    name: Gitleaks Secret Scan
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # Full history for git log scanning
+
+      # gitleaks-action v2 still uses Node 20; no v3 yet. Monitor:
+      # https://github.com/gitleaks/gitleaks-action/releases
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'true'
+          GITLEAKS_ENABLE_SUMMARY: 'true'
+        continue-on-error: true # Advisory mode — flip to false to block on secrets
+
+  # ──────────────────────────────────────────────────
+  # Job 5: IaC Scanning (Trivy config mode)
+  # ──────────────────────────────────────────────────
+  iac:
+    name: Trivy IaC Scan
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+
+      # trivy-action@0.35.0 internally uses actions/cache@v4 (Node 20).
+      # No newer version available yet. Monitor:
+      # https://github.com/aquasecurity/trivy-action/releases
+      - name: Trivy IaC misconfiguration scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy-iac.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          skip-dirs: contracts/lib,.sst,node_modules
+        continue-on-error: true
+
+      - name: Upload Trivy IaC results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-iac-results
+          path: trivy-iac.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always() && vars.ENABLE_GHAS == 'true'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-iac.sarif
+          category: trivy-iac
+
+  # ──────────────────────────────────────────────────
+  # Job 6: License Compliance
+  # ──────────────────────────────────────────────────
+  licenses:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # trivy-action@0.35.0 internally uses actions/cache@v4 (Node 20).
+      # No newer version available yet. Monitor:
+      # https://github.com/aquasecurity/trivy-action/releases
+      - name: Trivy license scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          scanners: license
+          severity: CRITICAL,HIGH
+          skip-dirs: packages/aurora-backoffice-client,packages/aurora-portal-client,contracts/lib,.sst,node_modules
+        continue-on-error: true # Advisory — review output before blocking

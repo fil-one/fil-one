@@ -131,6 +131,7 @@ export default $config({
     }
 
     const api = new sst.aws.ApiGatewayV2('Api', {
+      accessLog: { retention: '1 week' },
       cors: {
         allowOrigins: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -268,6 +269,8 @@ export default $config({
     const siteUrl = router.url;
 
     const auth0Domain = isProduction ? 'auth.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
+    // Auth0 Management API requires the canonical tenant domain — custom domains don't support /api/v2/
+    const auth0MgmtDomain = isProduction ? 'fil-one.us.auth0.com' : auth0Domain;
 
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
     // This Lambda is intentionally NOT created via createFn(). Its ARN is embedded in the
@@ -285,6 +288,7 @@ export default $config({
       ],
       environment: {
         AUTH0_DOMAIN: auth0Domain,
+        AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
       },
       permissions: [
         {
@@ -382,6 +386,15 @@ export default $config({
     ];
 
     const { firehose, cwToFirehoseRole } = setupFirehoseLogPipeline(grafanaLokiAuth);
+
+    // Forward API Gateway access logs to Grafana Loki via the same Firehose
+    new aws.cloudwatch.LogSubscriptionFilter('ApiAccessLogFwd', {
+      logGroup: api.nodes.logGroup.name,
+      filterPattern: '',
+      destinationArn: firehose.arn,
+      roleArn: cwToFirehoseRole.arn,
+    });
+
     const createFn = (fnName: string, args: Omit<sst.aws.FunctionArgs, 'name'>) =>
       createFunction(fnName, args, { firehose, cwToFirehoseRole });
 
@@ -574,6 +587,7 @@ export default $config({
       routePath: '/api/me/profile',
       handler: 'update-profile',
       extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
     addRoute({ method: 'POST', routePath: '/api/me/change-password', handler: 'change-password' });
     addRoute({
@@ -581,6 +595,7 @@ export default $config({
       routePath: '/api/me/resend-verification',
       handler: 'resend-verification',
       extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
 
     // ── Org routes ──────────────────────────────────────────────────
@@ -677,21 +692,6 @@ export default $config({
     });
 
     tenantSetupQueue.subscribe(tenantSetupFn.arn, { batch: { size: 1 } });
-
-    // ── CloudWatch alarm on DLQ ──────────────────────────────────
-    // TODO: Rework this alarm to trigger alert in Grafana IRM
-    new aws.cloudwatch.MetricAlarm('AuroraTenantSetupDlqAlarm', {
-      alarmDescription: 'Messages in tenant-setup DLQ — failed tenant setup needs investigation',
-      namespace: 'AWS/SQS',
-      metricName: 'ApproximateNumberOfMessagesVisible',
-      dimensions: { QueueName: tenantSetupDlq.nodes.queue.name },
-      statistic: 'Maximum',
-      period: 60,
-      evaluationPeriods: 1,
-      threshold: 1,
-      comparisonOperator: 'GreaterThanOrEqualToThreshold',
-      treatMissingData: 'notBreaching',
-    });
 
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {

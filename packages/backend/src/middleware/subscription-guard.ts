@@ -30,7 +30,9 @@ function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
+// eslint-disable-next-line max-lines-per-function
 export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
+  // eslint-disable-next-line max-lines-per-function, complexity/complexity
   const before = async (
     request: Request<
       APIGatewayProxyEventV2,
@@ -153,7 +155,15 @@ export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
         .build();
     }
 
-    // Unknown status → allow (fail open for safety)
+    // Unknown or unhandled status → block (fail closed)
+    return new ResponseBuilder()
+      .status(403)
+      .body({
+        message:
+          'Your subscription is not active. Please contact support or update your payment method.',
+        code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+      })
+      .build();
   };
 
   const after = async (

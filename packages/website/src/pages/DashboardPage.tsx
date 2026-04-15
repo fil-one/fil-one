@@ -99,6 +99,7 @@ function DashboardSkeleton() {
 // Component
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export function DashboardPage() {
   const [trialBannerVisible, setTrialBannerVisible] = useState(true);
 

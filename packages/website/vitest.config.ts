@@ -8,6 +8,19 @@ const dirname =
 
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 export default defineConfig({
+  // Pre-bundle heavy deps so Vite doesn't discover them mid-run and trigger
+  // a reload. A mid-run reload makes `@storybook/addon-vitest` re-import
+  // story files while a test is loading, which surfaces as
+  // "Vitest failed to find the current suite".
+  // See https://vite.dev/config/dep-optimization-options#optimizedeps-include
+  optimizeDeps: {
+    include: [
+      '@sentry/react',
+      '@plausible-analytics/tracker',
+      '@stripe/react-stripe-js',
+      '@stripe/stripe-js',
+    ],
+  },
   test: {
     projects: [
       {

@@ -1,16 +1,25 @@
 import type { Preview } from '@storybook/react-vite';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import '../src/styles.css';
 import { ToastProvider } from '../src/components/Toast';
 
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
+
 const preview: Preview = {
   decorators: [
-    (Story) => (
-      <ToastProvider>
-        <div className="light-section bg-white p-8">
-          <Story />
-        </div>
-      </ToastProvider>
-    ),
+    (Story) => {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <div className="light-section bg-white p-8">
+              <Story />
+            </div>
+          </ToastProvider>
+        </QueryClientProvider>
+      );
+    },
   ],
   parameters: {
     controls: {
