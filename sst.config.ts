@@ -683,21 +683,6 @@ export default $config({
 
     tenantSetupQueue.subscribe(tenantSetupFn.arn, { batch: { size: 1 } });
 
-    // ── CloudWatch alarm on DLQ ──────────────────────────────────
-    // TODO: Rework this alarm to trigger alert in Grafana IRM
-    new aws.cloudwatch.MetricAlarm('AuroraTenantSetupDlqAlarm', {
-      alarmDescription: 'Messages in tenant-setup DLQ — failed tenant setup needs investigation',
-      namespace: 'AWS/SQS',
-      metricName: 'ApproximateNumberOfMessagesVisible',
-      dimensions: { QueueName: tenantSetupDlq.nodes.queue.name },
-      statistic: 'Maximum',
-      period: 60,
-      evaluationPeriods: 1,
-      threshold: 1,
-      comparisonOperator: 'GreaterThanOrEqualToThreshold',
-      treatMissingData: 'notBreaching',
-    });
-
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
