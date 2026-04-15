@@ -25,12 +25,6 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # sst.config.ts uses SST globals ($config, $app, sst, aws, etc.) whose
-      # type definitions live in .sst/platform/ and are not checked into git.
-      # Run `sst install` to generate them so oxlint's type-aware checks pass.
-      - name: Generate SST provider types
-        run: pnpm exec sst install
-
       - name: Lint
         run: pnpm lint
 

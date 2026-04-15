@@ -16,6 +16,7 @@
     "deploy:infra:production": "cd infra && sst deploy --stage production",
     "generate:api-clients": "pnpm --filter @filone/aurora-backoffice-client --filter @filone/aurora-portal-client generate",
     "remove": "sst remove",
+    "prelint": "[ -f .sst/platform/config.d.ts ] || pnpm exec sst install",
     "lint": "oxlint --report-unused-disable-directives && oxfmt --check",
     "lint:fix": "oxlint --fix && oxfmt --write",
     "refresh": "sst refresh",
