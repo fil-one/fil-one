@@ -37,6 +37,29 @@ jobs:
         run: |
           forge test -vvv
         id: test
+      # ── Slither Static Analysis ──
+      - name: Run Slither
+        uses: crytic/slither-action@v0.4.2
+        with:
+          slither-config: slither.config.json
+          slither-args: --filter-paths "contracts/lib"
+          sarif: slither-results.sarif
+          solc-version: '0.8.13'
+        continue-on-error: true # Advisory mode
+
+      - name: Upload Slither results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slither-results
+          path: slither-results.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always() && vars.ENABLE_GHAS == 'true'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: slither-results.sarif
+          category: slither
 
   dispatch-telemetry:
     needs: [check-contracts]
