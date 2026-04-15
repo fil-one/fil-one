@@ -25,7 +25,6 @@ function endOfDay(d: Date): Date {
   return eod;
 }
 
-// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -35,12 +34,11 @@ export async function baseHandler(
     50,
   );
   const period = event.queryStringParameters?.period === '30d' ? 30 : 7;
-  const userInfoTableName = Resource.UserInfoTable.name;
 
   // Look up org profile for Aurora S3 credentials
   const { Item: orgProfile } = await dynamo.send(
     new GetItemCommand({
-      TableName: userInfoTableName,
+      TableName: Resource.UserInfoTable.name,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
     }),
   );
@@ -48,55 +46,66 @@ export async function baseHandler(
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
   const setupStatus = orgProfile?.setupStatus?.S;
 
-  // Collect activities and objects in a single pass over all buckets
-  const activities: RecentActivity[] = [];
+  const [bucketActivities, keyActivities] = await Promise.all([
+    fetchBucketActivities(orgId, auroraTenantId, setupStatus),
+    fetchAccessKeyActivities(orgId),
+  ]);
 
+  // TODO: Re-add object activities once we have an event system with Aurora.
+  // https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard
+
+  const activities = [...bucketActivities, ...keyActivities].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
+
+  const trends = await buildTimeSeries(auroraTenantId, period);
+
+  const response: ActivityResponse = {
+    activities: activities.slice(0, limit),
+    trends,
+  };
+  return new ResponseBuilder().status(200).body(response).build();
+}
+
+async function fetchBucketActivities(
+  orgId: string,
+  auroraTenantId: string | undefined,
+  setupStatus: string | undefined,
+): Promise<RecentActivity[]> {
+  // Swallow errors so the dashboard still renders.
   const stage = process.env.FILONE_STAGE!;
+  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) return [];
+
   const gatewayUrl = getS3Endpoint(S3_REGION, stage);
-  const credentials =
-    auroraTenantId && isOrgSetupComplete(setupStatus)
-      ? await getAuroraS3Credentials(stage, auroraTenantId)
-      : undefined;
-
-  // Get buckets from Aurora S3 — swallow errors so the dashboard still renders.
-  let buckets: Awaited<ReturnType<typeof listBuckets>>['buckets'] = [];
-  if (credentials) {
-    try {
-      buckets = (await listBuckets(gatewayUrl, credentials)).buckets;
-    } catch (err) {
-      const errName = (err as { name?: string }).name;
-      const errCode = (err as { Code?: string }).Code;
-      if (errName === 'AccessDenied' || errCode === 'AccessDenied') {
-        console.warn(
-          '[get-activity] AccessDenied listing buckets — tenant may have no buckets yet',
-          {
-            orgId,
-            auroraTenantId,
-          },
-        );
-      } else {
-        console.error('[get-activity] Failed to list buckets from Aurora S3', { orgId, err });
-      }
-    }
-  }
-
-  for (const bucket of buckets) {
-    activities.push({
+  try {
+    const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
+    const { buckets } = await listBuckets(gatewayUrl, credentials);
+    return buckets.map((bucket) => ({
       id: `bucket-${bucket.name}`,
-      action: 'bucket.created',
-      resourceType: 'bucket',
+      action: 'bucket.created' as const,
+      resourceType: 'bucket' as const,
       resourceName: bucket.name,
       timestamp: bucket.createdAt,
-    });
-
-    // TODO: Re-add object activities once we have an event system with Aurora.
-    // https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard
+    }));
+  } catch (err) {
+    const errName = (err as { name?: string }).name;
+    const errCode = (err as { Code?: string }).Code;
+    if (errName === 'AccessDenied' || errCode === 'AccessDenied') {
+      console.warn('[get-activity] AccessDenied listing buckets — tenant may have no buckets yet', {
+        orgId,
+        auroraTenantId,
+      });
+    } else {
+      console.error('[get-activity] Failed to list buckets from Aurora S3', { orgId, err });
+    }
+    return [];
   }
+}
 
-  // Get access keys
+async function fetchAccessKeyActivities(orgId: string): Promise<RecentActivity[]> {
   const keysResult = await dynamo.send(
     new QueryCommand({
-      TableName: userInfoTableName,
+      TableName: Resource.UserInfoTable.name,
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
       ExpressionAttributeValues: {
         ':pk': { S: `ORG#${orgId}` },
@@ -104,21 +113,22 @@ export async function baseHandler(
       },
     }),
   );
-  for (const item of keysResult.Items ?? []) {
+  return (keysResult.Items ?? []).map((item) => {
     const key = unmarshall(item) as AccessKeyRecord;
-    activities.push({
+    return {
       id: `key-${key.sk.replace('ACCESSKEY#', '')}`,
-      action: 'key.created',
-      resourceType: 'key',
+      action: 'key.created' as const,
+      resourceType: 'key' as const,
       resourceName: key.keyName,
       timestamp: key.createdAt,
-    });
-  }
+    };
+  });
+}
 
-  // Sort activities most-recent-first
-  activities.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-  // Fetch time series data from Aurora
+async function buildTimeSeries(
+  auroraTenantId: string | undefined,
+  period: number,
+): Promise<ActivityResponse['trends']> {
   const now = new Date();
   const from = new Date(now);
   from.setUTCDate(from.getUTCDate() - period + 1);
@@ -141,20 +151,16 @@ export async function baseHandler(
   );
 
   // Build full date range with gap-filling
-  const storageSeries: UsageDataPoint[] = [];
-  const objectsSeries: UsageDataPoint[] = [];
+  const storage: UsageDataPoint[] = [];
+  const objects: UsageDataPoint[] = [];
   for (const d = new Date(from); d <= now; d.setUTCDate(d.getUTCDate() + 1)) {
     const date = endOfDay(d).toISOString();
     const sample = samplesByDate.get(date);
-    storageSeries.push({ date, value: sample?.bytesUsed ?? 0 });
-    objectsSeries.push({ date, value: sample?.objectCount ?? 0 });
+    storage.push({ date, value: sample?.bytesUsed ?? 0 });
+    objects.push({ date, value: sample?.objectCount ?? 0 });
   }
 
-  const response: ActivityResponse = {
-    activities: activities.slice(0, limit),
-    trends: { storage: storageSeries, objects: objectsSeries },
-  };
-  return new ResponseBuilder().status(200).body(response).build();
+  return { storage, objects };
 }
 
 export const handler = middy(baseHandler)

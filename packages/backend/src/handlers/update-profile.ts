@@ -19,7 +19,6 @@ import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
-// eslint-disable-next-line complexity/complexity
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId, sub } = getUserInfo(event);
   let body: unknown;
@@ -45,68 +44,21 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const response: UpdateProfileResponse = {};
 
   if (parsed.data.name !== undefined) {
-    if (social) {
-      return new ResponseBuilder()
-        .status(400)
-        .body<ErrorResponse>({
-          message: 'Name cannot be changed for social login accounts. Update it at your provider.',
-        })
-        .build();
-    }
-    await updateAuth0User(sub, { name: parsed.data.name });
+    const error = await applyNameUpdate(sub, social, parsed.data.name);
+    if (error) return error;
     response.name = parsed.data.name;
   }
 
   if (parsed.data.email !== undefined) {
-    if (social) {
-      return new ResponseBuilder()
-        .status(400)
-        .body<ErrorResponse>({
-          message: 'Email cannot be changed for social login accounts. Update it at your provider.',
-        })
-        .build();
-    }
-    await updateAuth0User(sub, { email: parsed.data.email, email_verified: false });
-    // TODO: sync updated email to Stripe customer profile when we store a separate billing email
-    // https://linear.app/filecoin-foundation/issue/FIL-141/sync-stripe-customer-email-after-auth0-email-verification-via-auth0
-    try {
-      await sendVerificationEmail(sub);
-    } catch (err) {
-      // Email was updated in Auth0 but verification send failed.
-      // Log and continue — the user can resend from the UI.
-      console.error('[update-profile] Failed to send verification email after email update', {
-        error: (err as Error).message,
-      });
-    }
+    const error = await applyEmailUpdate(sub, social, parsed.data.email);
+    if (error) return error;
     response.email = parsed.data.email;
   }
 
   if (parsed.data.orgName !== undefined) {
-    const sanitizeResult = SanitizedOrgNameSchema.safeParse(parsed.data.orgName);
-    if (!sanitizeResult.success) {
-      return new ResponseBuilder()
-        .status(400)
-        .body<ErrorResponse>({ message: sanitizeResult.error.issues[0].message })
-        .build();
-    }
-    const sanitized = sanitizeResult.data;
-
-    await getDynamoClient().send(
-      new UpdateItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: {
-          pk: { S: `ORG#${orgId}` },
-          sk: { S: 'PROFILE' },
-        },
-        UpdateExpression: 'SET #name = :name',
-        ConditionExpression: 'attribute_exists(pk)',
-        ExpressionAttributeNames: { '#name': 'name' },
-        ExpressionAttributeValues: {
-          ':name': { S: sanitized },
-        },
-      }),
-    );
-    response.orgName = sanitized;
+    const result = await applyOrgNameUpdate(orgId, parsed.data.orgName);
+    if ('error' in result) return result.error;
+    response.orgName = result.sanitized;
   }
 
   if (response.name !== undefined || response.email !== undefined) {
@@ -114,6 +66,84 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   }
 
   return new ResponseBuilder().status(200).body(response).build();
+}
+
+async function applyNameUpdate(
+  sub: string,
+  social: boolean,
+  name: string,
+): Promise<APIGatewayProxyResultV2 | undefined> {
+  if (social) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({
+        message: 'Name cannot be changed for social login accounts. Update it at your provider.',
+      })
+      .build();
+  }
+  await updateAuth0User(sub, { name });
+  return undefined;
+}
+
+async function applyEmailUpdate(
+  sub: string,
+  social: boolean,
+  email: string,
+): Promise<APIGatewayProxyResultV2 | undefined> {
+  if (social) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({
+        message: 'Email cannot be changed for social login accounts. Update it at your provider.',
+      })
+      .build();
+  }
+  await updateAuth0User(sub, { email, email_verified: false });
+  // TODO: sync updated email to Stripe customer profile when we store a separate billing email
+  // https://linear.app/filecoin-foundation/issue/FIL-141/sync-stripe-customer-email-after-auth0-email-verification-via-auth0
+  try {
+    await sendVerificationEmail(sub);
+  } catch (err) {
+    // Email was updated in Auth0 but verification send failed.
+    // Log and continue — the user can resend from the UI.
+    console.error('[update-profile] Failed to send verification email after email update', {
+      error: (err as Error).message,
+    });
+  }
+  return undefined;
+}
+
+async function applyOrgNameUpdate(
+  orgId: string,
+  orgName: string,
+): Promise<{ error: APIGatewayProxyResultV2 } | { sanitized: string }> {
+  const sanitizeResult = SanitizedOrgNameSchema.safeParse(orgName);
+  if (!sanitizeResult.success) {
+    return {
+      error: new ResponseBuilder()
+        .status(400)
+        .body<ErrorResponse>({ message: sanitizeResult.error.issues[0].message })
+        .build(),
+    };
+  }
+  const sanitized = sanitizeResult.data;
+
+  await getDynamoClient().send(
+    new UpdateItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: {
+        pk: { S: `ORG#${orgId}` },
+        sk: { S: 'PROFILE' },
+      },
+      UpdateExpression: 'SET #name = :name',
+      ConditionExpression: 'attribute_exists(pk)',
+      ExpressionAttributeNames: { '#name': 'name' },
+      ExpressionAttributeValues: {
+        ':name': { S: sanitized },
+      },
+    }),
+  );
+  return { sanitized };
 }
 
 export const handler = middy(baseHandler)
