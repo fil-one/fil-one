@@ -124,11 +124,11 @@ importers:
         specifier: workspace:*
         version: link:../shared
       '@middy/core':
-        specifier: ^7.2.1
-        version: 7.2.1
+        specifier: ^7.2.2
+        version: 7.2.2
       '@middy/http-header-normalizer':
-        specifier: ^7.2.1
-        version: 7.2.1
+        specifier: ^7.2.2
+        version: 7.2.2
       jose:
         specifier: ^6.2.2
         version: 6.2.2
@@ -1137,8 +1137,8 @@ packages:
       '@types/react': '>=16'
       react: '>=16'
 
-  '@middy/core@7.2.1':
-    resolution: {integrity: sha512-KFtxLUhHQcBezrusBt5F2VKYY/p3Po2rM2OByyeZsqpzSY9D8iapsmJGaiHFgXbfuEUS5B0BxTXixFcxjChLUg==}
+  '@middy/core@7.2.2':
+    resolution: {integrity: sha512-UO1skdDb0ZRrbOlD4h0+FnOUqhT0YuA8ppuzNhaQGzz6CnQ3uYdKMrfgfoMChQ5HReNFhzejUa/LhRPX2CPvdA==}
     engines: {node: '>=22'}
     peerDependencies:
       '@aws/durable-execution-sdk-js': ^1.0.0
@@ -1146,12 +1146,12 @@ packages:
       '@aws/durable-execution-sdk-js':
         optional: true
 
-  '@middy/http-header-normalizer@7.2.1':
-    resolution: {integrity: sha512-dCne3FMDbdMzhYt4MEOoIHm8R47N0ooPNdU1JleeReWZtp7u54VbMET0C16GChVmbdCVFk/4IxDtM2nY+IHx1w==}
+  '@middy/http-header-normalizer@7.2.2':
+    resolution: {integrity: sha512-pbcAEdb+I/ShEaDjz0bOoZiD4biHraIb2l8qXEGlxrNfiyfooP15wrQ4JW/10C6BQsYka1OuEqOg7ju01GLpgg==}
     engines: {node: '>=22'}
 
-  '@middy/util@7.2.1':
-    resolution: {integrity: sha512-vwtRPxQ5stQFR8Ulfsuqt8GgPJX6iXrF/9SiOTsJzw2nliNu/aPcZ8DR6sPj+gFar/QdUJuym6iyjevfeMNiFA==}
+  '@middy/util@7.2.2':
+    resolution: {integrity: sha512-f9oCObbYpKf7uhYP3tl+NKrOBg5sHNIVxxIM+wiMETb4jExpGUkssn1pXj81lqx8LsIYj0Z47wz73ibMIkIJNg==}
     engines: {node: '>=22'}
 
   '@noble/hashes@1.8.0':
@@ -6197,13 +6197,13 @@ snapshots:
       '@types/react': 19.2.14
       react: 19.2.4
 
-  '@middy/core@7.2.1':
+  '@middy/core@7.2.2':
     dependencies:
-      '@middy/util': 7.2.1
+      '@middy/util': 7.2.2
 
-  '@middy/http-header-normalizer@7.2.1': {}
+  '@middy/http-header-normalizer@7.2.2': {}
 
-  '@middy/util@7.2.1': {}
+  '@middy/util@7.2.2': {}
 
   '@noble/hashes@1.8.0':
     optional: true
