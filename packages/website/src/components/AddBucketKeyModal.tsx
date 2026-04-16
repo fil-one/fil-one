@@ -53,14 +53,7 @@ export function AddBucketKeyModal({
   }
 
   if (credentials) {
-    return (
-      <SaveCredentialsModal
-        open={open}
-        onClose={handleClose}
-        onDone={handleClose}
-        credentials={credentials}
-      />
-    );
+    return <SaveCredentialsModal open={open} onDone={handleClose} credentials={credentials} />;
   }
 
   return (
@@ -113,7 +106,7 @@ export function AddBucketKeyModal({
           <Button variant="ghost" onClick={handleClose}>
             Cancel
           </Button>
-          <Button variant="filled" disabled={!form.canSubmit} onClick={form.handleSubmit}>
+          <Button variant="primary" disabled={!form.canSubmit} onClick={form.handleSubmit}>
             {form.creating ? 'Creating...' : 'Create API key'}
           </Button>
         </div>

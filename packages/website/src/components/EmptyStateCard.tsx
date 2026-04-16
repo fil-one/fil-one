@@ -1,38 +1,27 @@
-import { Heading, type HeadingProps } from './Heading';
-import { Icon, type IconProps } from './Icon';
-import { StateCard } from './StateCard';
+import { type IconProps } from './Icon';
+import { IconBox, type IconBoxColor } from './IconBox';
 
 export type EmptyStateCardProps = {
   icon: IconProps['component'];
-  title: HeadingProps['children'];
-  titleTag: HeadingProps['tag'];
+  iconColor?: IconBoxColor;
+  title: React.ReactNode;
   description: string;
   children?: React.ReactNode;
 };
 
 export function EmptyStateCard({
   icon,
+  iconColor = 'blue',
   title,
-  titleTag,
   description,
   children,
 }: EmptyStateCardProps) {
   return (
-    <StateCard border="dashed">
-      <div className="flex w-full flex-col items-center justify-center gap-8">
-        <span className="bg-brand-50 border-brand-100 text-brand-500 grid size-15 place-items-center rounded-full border">
-          <Icon component={icon} size={30} />
-        </span>
-
-        <div className="space-y-4 text-center">
-          <Heading tag={titleTag} size="xl">
-            {title}
-          </Heading>
-          <p className="text-(--color-paragraph-text)">{description}</p>
-        </div>
-
-        {children}
-      </div>
-    </StateCard>
+    <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
+      <IconBox icon={icon} size="md" color={iconColor} className="mb-4" />
+      <p className="mb-1 text-sm font-medium text-zinc-900">{title}</p>
+      <p className="mb-4 max-w-xs text-sm text-zinc-500">{description}</p>
+      {children}
+    </div>
   );
 }

@@ -238,7 +238,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
       <div className="mt-2 mb-2 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-zinc-900">{bucketName}</h1>
         <Button
-          variant="filled"
+          variant="primary"
           icon={ArrowUpIcon}
           onClick={() =>
             void navigate({
@@ -288,7 +288,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                   Upload your first object to this bucket
                 </p>
                 <Button
-                  variant="filled"
+                  variant="primary"
                   icon={ArrowUpIcon}
                   onClick={() =>
                     void navigate({
@@ -472,7 +472,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
                   <h2 className="text-base font-medium text-zinc-900">API keys</h2>
                   <p className="text-sm text-zinc-500">Keys with access to this bucket</p>
                 </div>
-                <Button variant="filled" icon={PlusIcon} onClick={() => setAddKeyOpen(true)}>
+                <Button variant="primary" icon={PlusIcon} onClick={() => setAddKeyOpen(true)}>
                   Add key
                 </Button>
               </div>

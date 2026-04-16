@@ -111,7 +111,7 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
             </div>
 
             <Button
-              variant="filled"
+              variant="primary"
               type="submit"
               className="w-full justify-center"
               disabled={submitting}
