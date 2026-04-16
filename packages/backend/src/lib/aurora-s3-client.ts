@@ -8,6 +8,7 @@ import {
   HeadObjectCommand,
   ListBucketsCommand,
   ListObjectsV2Command,
+  ListObjectVersionsCommand,
 } from '@aws-sdk/client-s3';
 import type { S3Object } from '@filone/shared';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -180,10 +181,10 @@ export async function getPresignedPutObjectUrl(options: PresignPutObjectOptions)
   );
 }
 
-export type PresignGetObjectOptions = PresignBaseOptions & { key: string };
+export type PresignGetObjectOptions = PresignBaseOptions & { key: string; versionId?: string };
 
 export async function getPresignedGetObjectUrl(options: PresignGetObjectOptions): Promise<string> {
-  const { endpointUrl, credentials, bucket, key, expiresIn } = options;
+  const { endpointUrl, credentials, bucket, key, expiresIn, versionId } = options;
   const s3 = createS3Client(endpointUrl, credentials);
 
   console.log('[aurora-s3] Creating presigned GetObject URL', {
@@ -193,7 +194,15 @@ export async function getPresignedGetObjectUrl(options: PresignGetObjectOptions)
     expiresIn,
   });
 
-  return getSignedUrl(s3, new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn });
+  return getSignedUrl(
+    s3,
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ...(versionId && { VersionId: versionId }),
+    }),
+    { expiresIn },
+  );
 }
 
 export interface PresignListObjectsOptions extends PresignBaseOptions {
@@ -231,15 +240,54 @@ export async function getPresignedListObjectsUrl(
   );
 }
 
+export interface PresignListObjectVersionsOptions extends PresignBaseOptions {
+  prefix?: string;
+  delimiter?: string;
+  maxKeys?: number;
+  keyMarker?: string;
+  versionIdMarker?: string;
+}
+
+export async function getPresignedListObjectVersionsUrl(
+  options: PresignListObjectVersionsOptions,
+): Promise<string> {
+  const {
+    endpointUrl,
+    credentials,
+    bucket,
+    expiresIn,
+    prefix,
+    delimiter,
+    maxKeys,
+    keyMarker,
+    versionIdMarker,
+  } = options;
+  const s3 = createS3Client(endpointUrl, credentials);
+
+  return getSignedUrl(
+    s3,
+    new ListObjectVersionsCommand({
+      Bucket: bucket,
+      ...(prefix && { Prefix: prefix }),
+      ...(delimiter && { Delimiter: delimiter }),
+      ...(maxKeys && { MaxKeys: maxKeys }),
+      ...(keyMarker && { KeyMarker: keyMarker }),
+      ...(versionIdMarker && { VersionIdMarker: versionIdMarker }),
+    }),
+    { expiresIn },
+  );
+}
+
 export interface PresignHeadObjectOptions extends PresignBaseOptions {
   key: string;
   includeFilMeta?: boolean;
+  versionId?: string;
 }
 
 export async function getPresignedHeadObjectUrl(
   options: PresignHeadObjectOptions,
 ): Promise<string> {
-  const { endpointUrl, credentials, bucket, key, expiresIn, includeFilMeta } = options;
+  const { endpointUrl, credentials, bucket, key, expiresIn, includeFilMeta, versionId } = options;
   const s3 = createS3Client(endpointUrl, credentials);
 
   // Inject fil-include-meta=1 query parameter so Aurora returns
@@ -257,29 +305,57 @@ export async function getPresignedHeadObjectUrl(
     );
   }
 
-  return getSignedUrl(s3, new HeadObjectCommand({ Bucket: bucket, Key: key }), { expiresIn });
+  return getSignedUrl(
+    s3,
+    new HeadObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ...(versionId && { VersionId: versionId }),
+    }),
+    { expiresIn },
+  );
 }
 
-export type PresignGetObjectRetentionOptions = PresignBaseOptions & { key: string };
+export type PresignGetObjectRetentionOptions = PresignBaseOptions & {
+  key: string;
+  versionId?: string;
+};
 
 export async function getPresignedGetObjectRetentionUrl(
   options: PresignGetObjectRetentionOptions,
 ): Promise<string> {
-  const { endpointUrl, credentials, bucket, key, expiresIn } = options;
+  const { endpointUrl, credentials, bucket, key, expiresIn, versionId } = options;
   const s3 = createS3Client(endpointUrl, credentials);
 
-  return getSignedUrl(s3, new GetObjectRetentionCommand({ Bucket: bucket, Key: key }), {
-    expiresIn,
-  });
+  return getSignedUrl(
+    s3,
+    new GetObjectRetentionCommand({
+      Bucket: bucket,
+      Key: key,
+      ...(versionId && { VersionId: versionId }),
+    }),
+    { expiresIn },
+  );
 }
 
-export type PresignDeleteObjectOptions = PresignBaseOptions & { key: string };
+export type PresignDeleteObjectOptions = PresignBaseOptions & {
+  key: string;
+  versionId?: string;
+};
 
 export async function getPresignedDeleteObjectUrl(
   options: PresignDeleteObjectOptions,
 ): Promise<string> {
-  const { endpointUrl, credentials, bucket, key, expiresIn } = options;
+  const { endpointUrl, credentials, bucket, key, expiresIn, versionId } = options;
   const s3 = createS3Client(endpointUrl, credentials);
 
-  return getSignedUrl(s3, new DeleteObjectCommand({ Bucket: bucket, Key: key }), { expiresIn });
+  return getSignedUrl(
+    s3,
+    new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ...(versionId && { VersionId: versionId }),
+    }),
+    { expiresIn },
+  );
 }

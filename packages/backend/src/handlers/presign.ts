@@ -22,6 +22,7 @@ import {
   getPresignedPutObjectUrl,
   getPresignedGetObjectUrl,
   getPresignedListObjectsUrl,
+  getPresignedListObjectVersionsUrl,
   getPresignedHeadObjectUrl,
   getPresignedGetObjectRetentionUrl,
   getPresignedDeleteObjectUrl,
@@ -62,6 +63,21 @@ async function presignOp(
       return { url, method: 'GET', expiresAt };
     }
 
+    case 'listObjectVersions': {
+      const url = await getPresignedListObjectVersionsUrl({
+        endpointUrl,
+        credentials,
+        bucket: op.bucket,
+        expiresIn: PRESIGN_EXPIRY_SECONDS,
+        prefix: op.prefix,
+        delimiter: op.delimiter,
+        maxKeys: op.maxKeys,
+        keyMarker: op.keyMarker,
+        versionIdMarker: op.versionIdMarker,
+      });
+      return { url, method: 'GET', expiresAt };
+    }
+
     case 'headObject': {
       const url = await getPresignedHeadObjectUrl({
         endpointUrl,
@@ -70,6 +86,7 @@ async function presignOp(
         key: op.key,
         expiresIn: PRESIGN_EXPIRY_SECONDS,
         includeFilMeta: op.includeFilMeta,
+        versionId: op.versionId,
       });
       return { url, method: 'HEAD', expiresAt };
     }
@@ -81,6 +98,7 @@ async function presignOp(
         bucket: op.bucket,
         key: op.key,
         expiresIn: PRESIGN_EXPIRY_SECONDS,
+        versionId: op.versionId,
       });
       return { url, method: 'GET', expiresAt };
     }
@@ -92,6 +110,7 @@ async function presignOp(
         bucket: op.bucket,
         key: op.key,
         expiresIn: PRESIGN_EXPIRY_SECONDS,
+        versionId: op.versionId,
       });
       return { url, method: 'GET', expiresAt };
     }
@@ -124,6 +143,7 @@ async function presignOp(
         bucket: op.bucket,
         key: op.key,
         expiresIn: PRESIGN_EXPIRY_SECONDS,
+        versionId: op.versionId,
       });
       return { url, method: 'DELETE', expiresAt };
     }

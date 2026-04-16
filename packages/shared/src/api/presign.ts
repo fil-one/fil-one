@@ -9,23 +9,36 @@ export const PresignListObjectsOpSchema = z.object({
   continuationToken: z.string().optional(),
 });
 
+export const PresignListObjectVersionsOpSchema = z.object({
+  op: z.literal('listObjectVersions'),
+  bucket: z.string().min(1, 'Bucket name is required'),
+  prefix: z.string().optional(),
+  delimiter: z.string().optional(),
+  maxKeys: z.number().int().positive().optional(),
+  keyMarker: z.string().optional(),
+  versionIdMarker: z.string().optional(),
+});
+
 export const PresignHeadObjectOpSchema = z.object({
   op: z.literal('headObject'),
   bucket: z.string().min(1, 'Bucket name is required'),
   key: z.string().min(1, 'Object key is required'),
   includeFilMeta: z.boolean().optional(),
+  versionId: z.string().optional(),
 });
 
 export const PresignGetObjectRetentionOpSchema = z.object({
   op: z.literal('getObjectRetention'),
   bucket: z.string().min(1, 'Bucket name is required'),
   key: z.string().min(1, 'Object key is required'),
+  versionId: z.string().optional(),
 });
 
 export const PresignGetObjectOpSchema = z.object({
   op: z.literal('getObject'),
   bucket: z.string().min(1, 'Bucket name is required'),
   key: z.string().min(1, 'Object key is required'),
+  versionId: z.string().optional(),
 });
 
 export const PresignPutObjectOpSchema = z.object({
@@ -45,10 +58,12 @@ export const PresignDeleteObjectOpSchema = z.object({
   op: z.literal('deleteObject'),
   bucket: z.string().min(1, 'Bucket name is required'),
   key: z.string().min(1, 'Object key is required'),
+  versionId: z.string().optional(),
 });
 
 export const PresignOpSchema = z.discriminatedUnion('op', [
   PresignListObjectsOpSchema,
+  PresignListObjectVersionsOpSchema,
   PresignHeadObjectOpSchema,
   PresignGetObjectRetentionOpSchema,
   PresignGetObjectOpSchema,

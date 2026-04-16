@@ -16,9 +16,15 @@ import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyableField } from '../components/CopyableField';
 import { Spinner } from '../components/Spinner';
+import { VersionBadge, VersionHistoryCard } from '../components/VersionHistoryCard';
 import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
 
-import type { ObjectMetadataResponse, GetBucketResponse } from '@filone/shared';
+import type {
+  ObjectMetadataResponse,
+  ObjectRetentionInfo,
+  GetBucketResponse,
+  ListObjectVersionsResponse,
+} from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
@@ -31,16 +37,54 @@ import {
 } from '../lib/aurora-s3.js';
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function fetchRetention(url: string, method: string) {
+  try {
+    const response = await executePresignedUrl(url, method);
+    const xml = await response.text();
+    return parseGetObjectRetentionResponse(xml) ?? undefined;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '';
+    const isExpected =
+      msg.includes('NoSuchObjectLockConfiguration') ||
+      msg.includes('ObjectLockConfigurationNotFoundError');
+    if (!isExpected) {
+      console.error('Failed to fetch object retention:', err);
+    }
+    return undefined;
+  }
+}
+
+function buildMetadataResponse(
+  head: ReturnType<typeof parseHeadObjectResponse>,
+  retention?: ObjectRetentionInfo,
+): ObjectMetadataResponse {
+  return {
+    key: head.key,
+    sizeBytes: head.sizeBytes,
+    lastModified: head.lastModified,
+    ...(head.etag && { etag: head.etag }),
+    ...(head.contentType && { contentType: head.contentType }),
+    metadata: head.metadata,
+    ...(head.filCid && { filCid: head.filCid }),
+    ...(retention && { retention }),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export type ObjectDetailPageProps = {
   bucketName: string;
   objectKey: string;
+  versionId?: string;
 };
 
 // eslint-disable-next-line max-lines-per-function, complexity/complexity
-export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProps) {
+export function ObjectDetailPage({ bucketName, objectKey, versionId }: ObjectDetailPageProps) {
   const navigate = useNavigate();
 
   const {
@@ -49,7 +93,7 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
     isError,
     error,
   } = useQuery({
-    queryKey: queryKeys.objectMetadata(bucketName, objectKey),
+    queryKey: queryKeys.objectMetadata(bucketName, objectKey, versionId),
     queryFn: async (): Promise<ObjectMetadataResponse> => {
       const cachedBucket = queryClient.getQueryData<GetBucketResponse>(
         queryKeys.bucket(bucketName),
@@ -57,9 +101,22 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
       const hasObjectLock = cachedBucket?.bucket.objectLockEnabled ?? false;
 
       const ops = [
-        { op: 'headObject' as const, bucket: bucketName, key: objectKey, includeFilMeta: true },
+        {
+          op: 'headObject' as const,
+          bucket: bucketName,
+          key: objectKey,
+          includeFilMeta: true,
+          ...(versionId && { versionId }),
+        },
         ...(hasObjectLock
-          ? [{ op: 'getObjectRetention' as const, bucket: bucketName, key: objectKey }]
+          ? [
+              {
+                op: 'getObjectRetention' as const,
+                bucket: bucketName,
+                key: objectKey,
+                ...(versionId && { versionId }),
+              },
+            ]
           : []),
       ];
       const { items } = await batchPresign(ops);
@@ -67,36 +124,18 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
       const headResponse = await executePresignedUrl(items[0].url, items[0].method);
       const head = parseHeadObjectResponse(headResponse, objectKey);
 
-      let retention = undefined;
-      if (hasObjectLock && items[1]) {
-        try {
-          const retentionResponse = await executePresignedUrl(items[1].url, items[1].method);
-          const xml = await retentionResponse.text();
-          retention = parseGetObjectRetentionResponse(xml) ?? undefined;
-        } catch (err) {
-          // Objects without retention configured return an S3 error — this is expected.
-          const msg = err instanceof Error ? err.message : '';
-          const isExpected =
-            msg.includes('NoSuchObjectLockConfiguration') ||
-            msg.includes('ObjectLockConfigurationNotFoundError');
-          if (!isExpected) {
-            console.error('Failed to fetch object retention:', err);
-          }
-        }
-      }
+      const retention =
+        hasObjectLock && items[1] ? await fetchRetention(items[1].url, items[1].method) : undefined;
 
-      return {
-        key: head.key,
-        sizeBytes: head.sizeBytes,
-        lastModified: head.lastModified,
-        ...(head.etag && { etag: head.etag }),
-        ...(head.contentType && { contentType: head.contentType }),
-        metadata: head.metadata,
-        ...(head.filCid && { filCid: head.filCid }),
-        ...(retention && { retention }),
-      };
+      return buildMetadataResponse(head, retention);
     },
   });
+
+  // Pull version history from the bucket object listing cache (no extra fetch)
+  const cachedVersions = queryClient.getQueryData<ListObjectVersionsResponse>(
+    queryKeys.objects(bucketName),
+  );
+  const objectVersions = (cachedVersions?.versions ?? []).filter((v) => v.key === objectKey);
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -205,7 +244,10 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
           <ArrowLeftIcon size={16} aria-hidden="true" />
         </button>
         <div className="flex-1">
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-900">{objectKey}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold tracking-tight text-zinc-900">{objectKey}</h1>
+            <VersionBadge versions={objectVersions} versionId={versionId} />
+          </div>
           <p className="text-[13px] text-zinc-500">
             <span className="underline">{metadata?.filCid ? 'Sealed on Filecoin' : 'Queued'}</span>
             <span> &bull; {bucketName}</span>
@@ -230,7 +272,9 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
             >
               <button
                 type="button"
-                onClick={() => handleMenuAction(() => void objectActions.downloadObject(objectKey))}
+                onClick={() =>
+                  handleMenuAction(() => void objectActions.downloadObject(objectKey, versionId))
+                }
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-zinc-900 hover:bg-zinc-50"
               >
                 <DownloadSimpleIcon size={14} />
@@ -239,7 +283,9 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
               <button
                 type="button"
                 onClick={() =>
-                  handleMenuAction(() => void objectActions.generatePresignedUrl(objectKey))
+                  handleMenuAction(
+                    () => void objectActions.generatePresignedUrl(objectKey, versionId),
+                  )
                 }
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-zinc-900 hover:bg-zinc-50"
               >
@@ -294,6 +340,12 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
             <span className="text-[13px] text-zinc-500">S3 Path</span>
             <CopyableField label="" value={s3Path} />
           </div>
+          {versionId && (
+            <div className="flex items-center justify-between py-1">
+              <span className="text-[13px] text-zinc-500">Version ID</span>
+              <CopyableField label="" value={versionId} />
+            </div>
+          )}
           {etag && (
             <div className="flex items-center justify-between py-1">
               <span className="text-[13px] text-zinc-500">ETag</span>
@@ -368,6 +420,13 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         </div>
       )}
 
+      {/* Version history */}
+      <VersionHistoryCard
+        versions={objectVersions}
+        currentVersionId={versionId}
+        bucketName={bucketName}
+      />
+
       {/* API access example card */}
       <div className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
         <h2 className="mb-3 text-sm font-medium text-zinc-900">API access example</h2>
@@ -378,7 +437,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
       <ConfirmDialog
         open={confirmDeleteOpen}
         onClose={() => setConfirmDeleteOpen(false)}
-        onConfirm={() => objectActions.deleteObject(objectKey)}
+        onConfirm={() => objectActions.deleteObject(objectKey, versionId)}
         title="Delete object"
         description="This object will be permanently deleted. This action cannot be undone."
         confirmLabel="Delete object"

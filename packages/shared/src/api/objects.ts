@@ -7,6 +7,19 @@ export interface S3Object {
   etag?: string;
 }
 
+export interface S3ObjectVersion extends S3Object {
+  versionId: string;
+  isLatest: boolean;
+  isDeleteMarker: boolean;
+}
+
+export interface ListObjectVersionsResponse {
+  versions: S3ObjectVersion[];
+  nextKeyMarker?: string;
+  nextVersionIdMarker?: string;
+  isTruncated: boolean;
+}
+
 export interface ListObjectsRequest {
   bucketName: string;
   prefix?: string;

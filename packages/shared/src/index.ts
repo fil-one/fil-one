@@ -65,8 +65,10 @@ export type { RetentionMode, RetentionDurationType } from './api/buckets.js';
 
 export type {
   S3Object,
+  S3ObjectVersion,
   ListObjectsRequest,
   ListObjectsResponse,
+  ListObjectVersionsResponse,
   DeleteObjectRequest,
   ObjectMetadataResponse,
   ObjectRetentionInfo,

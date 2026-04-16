@@ -5,7 +5,7 @@ import { executePresignedUrl } from './aurora-s3.js';
 
 export type UseObjectActionsOptions = {
   bucketName: string;
-  onDeleted?: (key: string) => void;
+  onDeleted?: (key: string, versionId?: string) => void;
 };
 
 export function useObjectActions({ bucketName, onDeleted }: UseObjectActionsOptions) {
@@ -14,13 +14,15 @@ export function useObjectActions({ bucketName, onDeleted }: UseObjectActionsOpti
   const [downloading, setDownloading] = useState<string | null>(null);
 
   const deleteObject = useCallback(
-    async (key: string) => {
+    async (key: string, versionId?: string) => {
       setDeleting(key);
       try {
-        const { items } = await batchPresign([{ op: 'deleteObject', bucket: bucketName, key }]);
+        const { items } = await batchPresign([
+          { op: 'deleteObject', bucket: bucketName, key, ...(versionId && { versionId }) },
+        ]);
         await executePresignedUrl(items[0].url, items[0].method);
         toast.success('Object deleted');
-        onDeleted?.(key);
+        onDeleted?.(key, versionId);
       } catch (err) {
         console.error('Failed to delete object:', err);
         toast.error(err instanceof Error ? err.message : 'Failed to delete object');
@@ -32,10 +34,12 @@ export function useObjectActions({ bucketName, onDeleted }: UseObjectActionsOpti
   );
 
   const downloadObject = useCallback(
-    async (key: string) => {
+    async (key: string, versionId?: string) => {
       setDownloading(key);
       try {
-        const { items } = await batchPresign([{ op: 'getObject', bucket: bucketName, key }]);
+        const { items } = await batchPresign([
+          { op: 'getObject', bucket: bucketName, key, ...(versionId && { versionId }) },
+        ]);
         window.open(items[0].url, '_blank', 'noopener,noreferrer');
         toast.success('Download started');
       } catch (err) {
@@ -51,10 +55,12 @@ export function useObjectActions({ bucketName, onDeleted }: UseObjectActionsOpti
   const [generatingUrl, setGeneratingUrl] = useState(false);
 
   const generatePresignedUrl = useCallback(
-    async (key: string) => {
+    async (key: string, versionId?: string) => {
       setGeneratingUrl(true);
       try {
-        const { items } = await batchPresign([{ op: 'getObject', bucket: bucketName, key }]);
+        const { items } = await batchPresign([
+          { op: 'getObject', bucket: bucketName, key, ...(versionId && { versionId }) },
+        ]);
         await navigator.clipboard.writeText(items[0].url);
         toast.success('Presigned URL copied to clipboard');
       } catch (err) {
