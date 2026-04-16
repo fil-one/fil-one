@@ -51,29 +51,38 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   if (response.status === 401) {
     redirectToLogin();
     // Throw so the caller's promise chain stops — the page is navigating away
-    throw new Error('Session expired. Redirecting to login...');
+    throw Object.assign(new Error('Session expired. Redirecting to login...'), { status: 401 });
   }
 
   if (response.status === 403) {
     const body = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
     if (body.code === ApiErrorCode.ORG_NOT_CONFIRMED) {
       window.dispatchEvent(new CustomEvent('org:not-confirmed'));
-      throw new Error('Please create an organization to continue.');
+      throw Object.assign(new Error('Please create an organization to continue.'), { status: 403 });
     }
     if (body.code === ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED) {
-      throw new Error(
-        'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
+      throw Object.assign(
+        new Error(
+          'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
+        ),
+        { status: 403 },
       );
     }
     if (body.code === ApiErrorCode.SUBSCRIPTION_CANCELED) {
-      throw new Error('Your subscription has been canceled. Please reactivate to regain access.');
+      throw Object.assign(
+        new Error('Your subscription has been canceled. Please reactivate to regain access.'),
+        { status: 403 },
+      );
     }
-    throw new Error(body.message ?? 'Access denied');
+    throw Object.assign(new Error(body.message ?? 'Access denied'), { status: 403 });
   }
 
   if (!response.ok) {
     const error = (await response.json().catch(() => ({}))) as { message?: string };
-    throw new Error(error.message ?? `Request failed with status ${response.status}`);
+    throw Object.assign(
+      new Error(error.message ?? `Request failed with status ${response.status}`),
+      { status: response.status },
+    );
   }
 
   if (response.status === 204 || response.headers.get('content-length') === '0') {
