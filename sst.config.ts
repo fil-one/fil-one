@@ -551,6 +551,12 @@ export default $config({
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/buckets/{name}/analytics',
+      handler: 'get-bucket-analytics',
+      extraEnv: auroraEnv,
+    });
 
     // ── Auth routes ──────────────────────────────────────────────────
     const allowedRedirectOrigins = allowedOrigins.join(',');

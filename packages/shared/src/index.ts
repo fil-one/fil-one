@@ -48,6 +48,7 @@ export type {
   CreateBucketResponse,
   GetBucketResponse,
   DeleteBucketRequest,
+  BucketAnalyticsResponse,
 } from './api/buckets.js';
 
 export {
