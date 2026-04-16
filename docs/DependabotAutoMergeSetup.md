@@ -1,11 +1,12 @@
 # Dependabot Auto-Merge Setup
 
-The workflow `.github/workflows/dependabot-auto-merge.yml` automatically
-squash-merges Dependabot PRs. It authenticates with a Personal Access Token
-(PAT) stored in the `DEPENDABOT_TOKEN` repository secret instead of the
-automatic `GITHUB_TOKEN`, because commits created by `GITHUB_TOKEN` do not
-trigger subsequent workflow runs (a GitHub limitation to prevent infinite
-loops).
+The workflow `.github/workflows/dependabot-auto-merge.yml` enables auto-merge
+on Dependabot PRs. It authenticates with a Personal Access Token (PAT) stored
+in the `DEPENDABOT_TOKEN` repository secret instead of the automatic
+`GITHUB_TOKEN`, because events triggered by `GITHUB_TOKEN` do not create new
+workflow runs (a GitHub limitation to prevent infinite loops). If auto-merge
+were authorized by `GITHUB_TOKEN`, the merge commit's push event would not
+trigger downstream workflows (e.g., deployments on main).
 
 ## Creating the token
 
