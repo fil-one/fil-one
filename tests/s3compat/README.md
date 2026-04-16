@@ -154,6 +154,71 @@ python compatibility_test.py --provider aurora --test-file s3tests/functional/te
 
 **Report:** The BY CATEGORY section breaks results down by S3 feature (versioning, lifecycle, encryption, etc.) with pass/fail counts and timing stats per category. Only failures are shown in detail — passing test names are omitted to keep the report readable.
 
+### Multi-pass test isolation (quarantine)
+
+The compatibility test runs pytest in two passes to prevent cascading failures
+from "poisoned buckets."
+
+#### The problem
+
+The ceph s3-tests suite cleans up test buckets before each test via
+`nuke_prefixed_buckets()` in the shared setup fixture. If a previous test left
+objects that can't be deleted (e.g. retention-locked objects), the cleanup raises
+`BucketNotEmpty` and the next test gets outcome "error" without ever running its
+actual test logic. The error cascades to every subsequent test.
+
+#### Analysis (Akave, 2026-04-15)
+
+In the first Akave full-suite run (595 tests, 172 errors), the errors clustered
+into 6 contiguous runs:
+
+| Run | Trigger test                              | Cascade | Recovers? |
+| --- | ----------------------------------------- | ------: | --------- |
+| 1   | `test_bucket_list_delimiter_basic`        |       2 | Yes       |
+| 2   | `test_multi_object_delete_key_limit`      |      10 | Yes       |
+| 3   | `test_bucket_create_special_key_names`    |       1 | Yes       |
+| 4   | `test_multipart_copy_special_names`       |       1 | Yes       |
+| 5   | `test_bucket_policy_upload_part_copy`     |       3 | Yes       |
+| 6   | `test_object_lock_put_obj_retention_versionid` | **155** | **No** |
+
+Runs 1-5 are transient (17 tests combined) — the gateway's eventual consistency
+allows cleanup to succeed after a few tests pass. Run 6 is permanent:
+object-lock retention creates objects that return `AccessDenied` on delete. Once
+this bucket exists, every subsequent test's setup fails.
+
+#### Solution
+
+`compatibility_test.py` splits the suite into two pytest passes:
+
+1. **Main pass**: everything except `object_lock` tests
+2. **Quarantine pass**: only `object_lock` tests (runs last)
+
+Between passes, a best-effort bucket cleanup deletes all test buckets matching
+the provider's prefix. Results from both passes are merged into a single unified
+report.
+
+This eliminates the 155-test cascade from run 6. Runs 1-5 still produce
+occasional transient errors but recover on their own within the same pass.
+
+The quarantine marks are configured in `_QUARANTINE_MARKS` in
+`compatibility_test.py`. To quarantine additional marks, add them to the list.
+
+#### Alternatives considered
+
+- **Modify ceph-s3-tests cleanup code**: The test suite is a git submodule we
+  don't own. Changes would be lost on submodule updates and diverge from
+  upstream.
+- **pytest-ordering or conftest.py reordering**: pytest doesn't support test
+  reordering without a plugin, and adding a plugin to the submodule has the same
+  ownership problem.
+- **pytest-forked (one process per test)**: The problem is shared S3 server
+  state, not in-process state. Process isolation doesn't help.
+- **More granular passes (per-category)**: Runs 1-5 are transient and
+  self-healing (17 tests combined). The added complexity of 5+ passes isn't
+  justified when only run 6 (155 tests) causes permanent damage.
+- **Skip object-lock tests entirely**: We still want to know their pass/fail
+  status — we just don't want them to poison other tests.
+
 ---
 
 ## Running ceph-s3-tests Directly

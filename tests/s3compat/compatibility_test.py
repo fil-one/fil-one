@@ -35,7 +35,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import report as _report
-from client import resolve_provider
+from client import get_s3_client, resolve_provider
 
 _SCRIPTS_DIR = Path(__file__).parent
 S3TESTS_DIR = _SCRIPTS_DIR / "ceph-s3-tests"
@@ -81,6 +81,12 @@ _FEATURE_MARKS = [
     "abac_test",
 ]
 _FEATURE_MARKS_SET = set(_FEATURE_MARKS)
+
+# Pytest marks whose tests run in a separate "quarantine" pass AFTER all other
+# tests.  Object-lock tests create retention-locked objects that can't be
+# deleted, poisoning the per-test bucket cleanup for every subsequent test.
+# Running them last prevents them from cascading into unrelated tests.
+_QUARANTINE_MARKS = ["object_lock"]
 
 
 def _check_prereqs():
@@ -279,6 +285,85 @@ def _parse_results(json_out: Path) -> tuple:
     return entries, meta
 
 
+def _combine_filters(user_filter: str, pass_filter: str) -> str:
+    """AND two pytest -k expressions together."""
+    if user_filter and pass_filter:
+        return f"({user_filter}) and ({pass_filter})"
+    return user_filter or pass_filter
+
+
+def _cleanup_buckets(provider: str):
+    """Best-effort removal of all test buckets for a provider.
+
+    Runs between pytest passes to prevent poisoned buckets from one pass
+    cascading into the next.  Logs failures but never raises.
+    """
+    client = get_s3_client()
+    static_prefix = f"{provider}-compat-"
+
+    try:
+        buckets = client.list_buckets().get("Buckets", [])
+    except Exception as e:
+        print(f"  cleanup: could not list buckets: {e}")
+        return
+
+    matched = [b["Name"] for b in buckets if static_prefix in b["Name"]]
+    if not matched:
+        print("  cleanup: no leftover buckets found")
+        return
+
+    print(f"  cleanup: found {len(matched)} bucket(s) to remove")
+    for name in matched:
+        try:
+            # Delete all object versions
+            kwargs = {"Bucket": name, "MaxKeys": 128}
+            truncated = True
+            while truncated:
+                listing = client.list_object_versions(**kwargs)
+                objs = listing.get("Versions", []) + listing.get("DeleteMarkers", [])
+                if objs:
+                    client.delete_objects(
+                        Bucket=name,
+                        Delete={
+                            "Objects": [{"Key": o["Key"], "VersionId": o["VersionId"]} for o in objs],
+                            "Quiet": True,
+                        },
+                        BypassGovernanceRetention=True,
+                    )
+                truncated = listing.get("IsTruncated", False)
+                kwargs["KeyMarker"] = listing.get("NextKeyMarker", "")
+                kwargs["VersionIdMarker"] = listing.get("NextVersionIdMarker", "")
+
+            client.delete_bucket(Bucket=name)
+            print(f"  cleanup: deleted {name}")
+        except Exception as e:
+            print(f"  cleanup: could not delete {name}: {e}")
+
+
+def _merge_results(json_paths: list) -> tuple:
+    """Merge pytest JSON reports from multiple passes into (entries, meta)."""
+    all_entries = []
+    total_meta = {
+        "collected": 0, "passed": 0, "failed": 0,
+        "error": 0, "skipped": 0, "duration_s": 0.0,
+    }
+
+    for jp in json_paths:
+        entries, meta = _parse_results(jp)
+        all_entries.extend(entries)
+        # 'collected' is the total in the test file — same for every pass
+        if total_meta["collected"] == 0:
+            total_meta["collected"] = meta["collected"]
+        total_meta["passed"] += meta["passed"]
+        total_meta["failed"] += meta["failed"]
+        total_meta["error"] += meta["error"]
+        total_meta["skipped"] += meta["skipped"]
+        total_meta["duration_s"] += meta["duration_s"]
+
+    total_meta["duration_s"] = round(total_meta["duration_s"], 1)
+    return all_entries, total_meta
+
+
 def main():
     parser = argparse.ArgumentParser(description="S3 compatibility tests against a provider")
     parser.add_argument("--provider", required=True, help="Provider name (e.g. aurora, fth)")
@@ -309,23 +394,58 @@ def main():
     reports_dir.mkdir(exist_ok=True)
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    json_out = logs_dir / f"{ts}_compatibility_pytest_raw.json"
     report_file = reports_dir / f"{ts}_compatibility_report.txt"
+
+    # Build pass list: main (everything except quarantined) then quarantine.
+    quarantine_expr = " or ".join(_QUARANTINE_MARKS)
+    passes = [
+        ("main", f"not ({quarantine_expr})"),
+        ("quarantine", quarantine_expr),
+    ]
+
+    json_outs = []
+    worst_exit = 0
 
     with tempfile.TemporaryDirectory() as tmp:
         conf_path = _generate_conf(Path(tmp), args.provider)
-        exit_code = _run_pytest(conf_path, args.marks, args.test_file, json_out,
-                               provider=args.provider, filter_expr=args.filter)
 
-    if not json_out.exists():
+        for i, (pass_name, pass_filter) in enumerate(passes):
+            combined = _combine_filters(args.filter, pass_filter)
+            json_out = logs_dir / f"{ts}_compatibility_pytest_{pass_name}.json"
+
+            print(f"\n{'=' * 60}")
+            print(f"  Pass {i + 1}/{len(passes)}: {pass_name}")
+            print(f"  Filter: {combined}")
+            print(f"{'=' * 60}\n")
+
+            exit_code = _run_pytest(
+                conf_path, args.marks, args.test_file, json_out,
+                provider=args.provider, filter_expr=combined,
+            )
+            if json_out.exists():
+                json_outs.append(json_out)
+            worst_exit = max(worst_exit, exit_code)
+
+            # Best-effort cleanup between passes (not after the last one)
+            if i < len(passes) - 1:
+                print("\nCleaning up test buckets between passes...")
+                _cleanup_buckets(args.provider)
+
+    if not json_outs:
         print(
-            "ERROR: No JSON report produced. "
+            "ERROR: No JSON reports produced. "
             "Make sure pytest-json-report is installed and s3-tests deps are available."
         )
         sys.exit(1)
 
-    entries, meta = _parse_results(json_out)
+    entries, meta = _merge_results(json_outs)
 
+    pass_desc = ", ".join(
+        f"{name} ({filt})" for name, filt in passes
+    )
+    json_refs = ", ".join(
+        os.path.relpath(jp, reports_dir) for jp in json_outs
+    )
     extra = [
         "TEST RUN",
         f"  Provider  : {args.provider}",
@@ -337,8 +457,9 @@ def main():
         f"  Duration  : {meta['duration_s']}s",
         f"  Marks     : {args.marks or '(none)'}",
         f"  Filter    : {args.filter or '(none)'}",
+        f"  Passes    : {pass_desc}",
         f"  Target    : {args.test_file}",
-        f"  Raw JSON  : {os.path.relpath(json_out, reports_dir)}",
+        f"  Raw JSON  : {json_refs}",
     ]
 
     text = _report.write_report(
@@ -355,7 +476,7 @@ def main():
     print(f"\n{text}")
     print(f"Report written to: {report_file}")
 
-    sys.exit(0 if exit_code == 0 else 1)
+    sys.exit(0 if worst_exit == 0 else 1)
 
 
 if __name__ == "__main__":
