@@ -20,7 +20,7 @@ test.describe('paid user', () => {
 test.describe('unpaid user', () => {
   test.use({ storageState: STORAGE_STATE.unpaid });
 
-  test('unpaid user sees upgrade prompt', async ({ page }) => {
+  test('unpaid (past_due) user sees update payment prompt', async ({ page }) => {
     await page.goto('/dashboard');
     await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
     await expect(page.getByText('Past Due')).toBeVisible();
