@@ -202,7 +202,7 @@ function StatusBanners({
   );
 }
 
-type HelpMenuProps = {
+export type HelpMenuProps = {
   collapsed: boolean;
   helpMenuOpen: boolean;
   helpMenuRef: React.RefObject<HTMLDivElement | null>;
@@ -210,7 +210,7 @@ type HelpMenuProps = {
   onToggle: () => void;
 };
 
-function HelpMenu({
+export function HelpMenu({
   collapsed,
   helpMenuOpen,
   helpMenuRef,
@@ -269,7 +269,6 @@ function HelpMenu({
   );
 }
 
-// eslint-disable-next-line complexity/complexity
 export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -336,7 +335,6 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   }
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
     <div className="h-full" onClick={handleClickOutside}>
       <nav className="relative flex h-full flex-col border-r border-zinc-200 bg-white">
         {/* Expand toggle (collapsed) — centered on the sidebar's right border */}
