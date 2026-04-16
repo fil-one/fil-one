@@ -389,7 +389,7 @@ export function DashboardPage() {
       </Suspense>
 
       {/* 8. Recent Activity */}
-      <Card padding="none" className="pb-5 pl-3 pr-5 pt-4">
+      <Card>
         <div className="mb-3">
           <h2 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
             Recent Activity
