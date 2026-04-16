@@ -168,7 +168,7 @@ The s3-tests suite creates a fresh bucket for each test and deletes it in teardo
 
 **2. Two credential pairs for cross-user tests**
 
-Any test that checks cross-account behavior (ACLs, cross-user bucket access, etc.) requires a second Aurora API key in `[s3 alt]`. Without it, those tests fail but single-user tests are unaffected. Create a second API key in the Aurora UI and populate `AURORA_ALT_*` in `.env`.
+Any test that checks cross-account behavior (ACLs, cross-user bucket access, etc.) requires a second Aurora API key in `[s3 alt]`. Without it, those tests fail but single-user tests are unaffected. Create a second API key in the Aurora UI and populate `S3_ALT_ACCESS_KEY_ID` and `S3_ALT_SECRET_ACCESS_KEY` in `.env`.
 
 **3. Python 3.10+**
 
