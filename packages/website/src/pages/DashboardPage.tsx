@@ -39,22 +39,18 @@ function planDisplayName(planId: PlanId): string {
   }
 }
 
-function statusBadge(status: SubscriptionStatus): {
-  label: string;
-  color: BadgeColor;
-  className?: string;
-} {
+function statusBadge(status: SubscriptionStatus): { label: string; color: BadgeColor } {
   switch (status) {
     case SubscriptionStatus.Trialing:
       return { label: 'Trial', color: 'blue' };
     case SubscriptionStatus.Active:
       return { label: 'Active', color: 'green' };
     case SubscriptionStatus.PastDue:
-      return { label: 'Past Due', color: 'grey', className: 'bg-amber-50 text-amber-700' };
+      return { label: 'Past Due', color: 'amber' };
     case SubscriptionStatus.Canceled:
       return { label: 'Canceled', color: 'red' };
     case SubscriptionStatus.GracePeriod:
-      return { label: 'Grace Period', color: 'grey', className: 'bg-amber-50 text-amber-700' };
+      return { label: 'Grace Period', color: 'amber' };
     default:
       return { label: status, color: 'grey' };
   }
@@ -269,7 +265,7 @@ export function DashboardPage() {
                 </span>
               )}
               {!isTrialing && (
-                <Badge color={badge.color} size="sm" weight="medium" className={badge.className}>
+                <Badge color={badge.color} size="sm" weight="medium">
                   {badge.label}
                 </Badge>
               )}

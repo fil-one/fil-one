@@ -6,7 +6,7 @@ const meta: Meta<typeof Badge> = {
   title: 'Components/Badge',
   component: Badge,
   argTypes: {
-    color: { control: 'select', options: ['green', 'blue', 'red', 'grey'] },
+    color: { control: 'select', options: ['green', 'blue', 'red', 'amber', 'grey'] },
     size: { control: 'select', options: ['sm', 'md', 'lg'] },
     weight: { control: 'select', options: ['regular', 'medium'] },
     variant: { control: 'select', options: ['subtle', 'solid'] },
@@ -35,6 +35,9 @@ export const Sizes: Story = {
           <Badge color="red" size={size}>
             size {size}
           </Badge>
+          <Badge color="amber" size={size}>
+            size {size}
+          </Badge>
           <Badge color="grey" size={size}>
             size {size}
           </Badge>
@@ -52,6 +55,9 @@ export const WithDot: Story = {
       </Badge>
       <Badge color="red" dot>
         Offline
+      </Badge>
+      <Badge color="amber" dot>
+        Pending
       </Badge>
       <Badge color="grey" dot>
         Idle
@@ -71,7 +77,7 @@ export const AllVariants: Story = {
           <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
             {variant}
           </p>
-          {(['green', 'blue', 'red', 'grey'] as BadgeColor[]).map((color) => (
+          {(['green', 'blue', 'red', 'amber', 'grey'] as BadgeColor[]).map((color) => (
             <div key={color} className="flex flex-col gap-2">
               <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-300">
                 {color}
@@ -110,7 +116,7 @@ export const AllVariants: Story = {
 export const Solid: Story = {
   render: () => (
     <div className="flex flex-col gap-6">
-      {(['green', 'blue', 'red', 'grey'] as BadgeColor[]).map((color) => (
+      {(['green', 'blue', 'red', 'amber', 'grey'] as BadgeColor[]).map((color) => (
         <div key={color} className="flex flex-col gap-2">
           <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">{color}</p>
           <div className="flex flex-wrap items-center gap-2">
