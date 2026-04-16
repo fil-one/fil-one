@@ -5,12 +5,12 @@ description = "S3 compatibility test harness for validating object storage behav
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "boto3>=1.42.89",
-    "pytest>=9.0.3",
-    "pytest-json-report>=1.5.0",
-    "python-dotenv>=1.2.2",
-    "requests>=2.33.1",
-    "urllib3>=2.6.3",
+  "boto3>=1.42.89",
+  "pytest>=9.0.3",
+  "pytest-json-report>=1.5.0",
+  "python-dotenv>=1.2.2",
+  "requests>=2.33.1",
+  "urllib3>=2.6.3",
 ]
 
 [tool.uv]

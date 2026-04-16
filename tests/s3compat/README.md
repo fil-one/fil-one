@@ -15,6 +15,7 @@ This project uses [uv](https://docs.astral.sh/uv/) for Python dependency managem
 See [Installing uv](https://docs.astral.sh/uv/getting-started/installation/) to get started.
 
 **Install dependencies:**
+
 ```bash
 cd tests/s3compat
 uv sync                                      # installs deps from pyproject.toml
@@ -22,12 +23,14 @@ uv pip install -r ceph-s3-tests/requirements.txt  # needed for compatibility_tes
 ```
 
 **Configure credentials:**
+
 ```bash
 cp aurora/.env.example aurora/.env
 # Edit aurora/.env — at minimum set S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET
 ```
 
 All scripts must be run from the `tests/s3compat/` directory:
+
 ```bash
 cd tests/s3compat
 ```
@@ -54,6 +57,7 @@ python upload.py --provider aurora --prefix gov-data/collections/
 **Resume after failure:** re-run the same command. Done entries in `manifest.json` are skipped.
 
 **Force re-upload** (ignore manifest, re-upload everything):
+
 ```bash
 python upload.py --provider aurora --force
 python upload.py --provider aurora --force --count 10
@@ -173,6 +177,7 @@ Any test that checks cross-account behavior (ACLs, cross-user bucket access, etc
 **3. Python 3.10+**
 
 The test harness requires Python 3.10 or newer (pytest 9+ dependency). Verify:
+
 ```bash
 python --version
 ```
@@ -199,6 +204,7 @@ uv sync
 **6. STS / IAM tests require additional Aurora configuration**
 
 The STS and IAM test files (`test_sts.py`, `test_iam.py`) require Aurora to support those APIs. If Aurora does not expose an IAM/STS endpoint, skip those files entirely:
+
 ```bash
 S3TEST_CONF=aurora.conf pytest s3tests/functional/test_s3.py  # core S3 only
 ```
@@ -335,29 +341,29 @@ S3TEST_CONF=aurora.conf pytest s3tests/functional/test_s3.py -m bucket_logging
 
 Key marks to know:
 
-| Mark | Meaning |
-|---|---|
-| `fails_on_aws` | Known to fail on real AWS S3 — likely fails on Aurora too |
-| `fails_on_rgw` | Ceph-specific failure — may pass on Aurora |
-| `versioning` | Object versioning tests |
-| `lifecycle` | Lifecycle policy tests |
-| `encryption` / `sse_s3` | Server-side encryption |
-| `object_lock` | Object lock / retention |
-| `tagging` | Object and bucket tagging |
-| `bucket_policy` | Bucket policy tests |
-| `checksum` | Checksum validation |
-| `test_of_sts` | STS AssumeRole / GetSessionToken |
-| `webidentity_test` | STS AssumeRoleWithWebIdentity (needs Keycloak) |
+| Mark                    | Meaning                                                   |
+| ----------------------- | --------------------------------------------------------- |
+| `fails_on_aws`          | Known to fail on real AWS S3 — likely fails on Aurora too |
+| `fails_on_rgw`          | Ceph-specific failure — may pass on Aurora                |
+| `versioning`            | Object versioning tests                                   |
+| `lifecycle`             | Lifecycle policy tests                                    |
+| `encryption` / `sse_s3` | Server-side encryption                                    |
+| `object_lock`           | Object lock / retention                                   |
+| `tagging`               | Object and bucket tagging                                 |
+| `bucket_policy`         | Bucket policy tests                                       |
+| `checksum`              | Checksum validation                                       |
+| `test_of_sts`           | STS AssumeRole / GetSessionToken                          |
+| `webidentity_test`      | STS AssumeRoleWithWebIdentity (needs Keycloak)            |
 
 ### Tox vs. compatibility_test.py
 
-| | `tox` / `pytest` directly | `compatibility_test.py` |
-|---|---|---|
-| Config | Manual (`aurora.conf`) | Auto-generated from `.env` |
-| Output | Raw pytest terminal output | Unified timestamped report |
-| Timing stats | No | Yes (avg, stddev, min, max per category) |
-| Resume | No | N/A (tests are fast enough to re-run) |
-| Best for | Quick iteration, debugging single tests | Full compatibility runs with reportable results |
+|              | `tox` / `pytest` directly               | `compatibility_test.py`                         |
+| ------------ | --------------------------------------- | ----------------------------------------------- |
+| Config       | Manual (`aurora.conf`)                  | Auto-generated from `.env`                      |
+| Output       | Raw pytest terminal output              | Unified timestamped report                      |
+| Timing stats | No                                      | Yes (avg, stddev, min, max per category)        |
+| Resume       | No                                      | N/A (tests are fast enough to re-run)           |
+| Best for     | Quick iteration, debugging single tests | Full compatibility runs with reportable results |
 
 ---
 
@@ -377,6 +383,7 @@ aurora/
 ```
 
 **Report format** (same across all scripts):
+
 ```
 ======================================================================
   <Title>
@@ -404,16 +411,16 @@ ERRORS
 
 ## File Reference
 
-| File | Purpose |
-|---|---|
-| `client.py` | boto3 client factory for Aurora and source.coop |
-| `report.py` | Shared report formatting used by all scripts |
-| `logger.py` | Per-operation JSONL logging + report generation for phase scripts |
-| `manifest.py` | Upload resume state (`manifest.json`) |
-| `upload.py` | Upload files from source.coop to Aurora |
-| `fetch.py` | Head, get preview, and list versions |
-| `delete.py` | Delete objects by key or version |
-| `load_test.py` | Concurrent load test with SQLite-backed resume |
-| `compatibility_test.py` | Full S3 compatibility test via ceph/s3-tests |
-| `manifest.json` | Created at runtime — upload state |
-| `load_test_state.db` | Created at runtime — load test state |
+| File                    | Purpose                                                           |
+| ----------------------- | ----------------------------------------------------------------- |
+| `client.py`             | boto3 client factory for Aurora and source.coop                   |
+| `report.py`             | Shared report formatting used by all scripts                      |
+| `logger.py`             | Per-operation JSONL logging + report generation for phase scripts |
+| `manifest.py`           | Upload resume state (`manifest.json`)                             |
+| `upload.py`             | Upload files from source.coop to Aurora                           |
+| `fetch.py`              | Head, get preview, and list versions                              |
+| `delete.py`             | Delete objects by key or version                                  |
+| `load_test.py`          | Concurrent load test with SQLite-backed resume                    |
+| `compatibility_test.py` | Full S3 compatibility test via ceph/s3-tests                      |
+| `manifest.json`         | Created at runtime — upload state                                 |
+| `load_test_state.db`    | Created at runtime — load test state                              |
