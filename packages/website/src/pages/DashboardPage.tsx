@@ -12,8 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 const UsageTrends = lazy(() => import('./UsageTrends'));
 
 import { Button } from '../components/Button';
-import { Badge } from '../components/Badge';
-import type { BadgeColor } from '../components/Badge';
+import { Badge, type BadgeColor } from '../components/Badge';
 import { Card } from '../components/Card';
 import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
