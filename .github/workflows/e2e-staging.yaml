@@ -18,11 +18,24 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: staging
     permissions:
+      id-token: write
       actions: write
       contents: read
     env:
+      SST_STAGE: staging
+      AWS_REGION: us-east-2
       BASE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'https://staging.fil.one' }}
+      E2E_PAID_EMAIL: ${{ secrets.E2E_PAID_EMAIL }}
+      E2E_PAID_PASSWORD: ${{ secrets.E2E_PAID_PASSWORD }}
+      E2E_PAID_USER_ID: ${{ secrets.E2E_PAID_USER_ID }}
+      E2E_UNPAID_EMAIL: ${{ secrets.E2E_UNPAID_EMAIL }}
+      E2E_UNPAID_PASSWORD: ${{ secrets.E2E_UNPAID_PASSWORD }}
+      E2E_UNPAID_USER_ID: ${{ secrets.E2E_UNPAID_USER_ID }}
+      E2E_TRIAL_EMAIL: ${{ secrets.E2E_TRIAL_EMAIL }}
+      E2E_TRIAL_PASSWORD: ${{ secrets.E2E_TRIAL_PASSWORD }}
+      E2E_TRIAL_USER_ID: ${{ secrets.E2E_TRIAL_USER_ID }}
 
     steps:
       - uses: actions/checkout@v6
@@ -41,6 +54,16 @@ jobs:
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
+
+      # auth.setup.ts re-seeds BillingTable rows for the test users via direct
+      # DynamoDB writes (see tests/e2e/billing-reset.ts). The test:e2e script
+      # wraps Playwright in `sst shell` so SST Resource bindings (BillingTable
+      # name, etc.) resolve to the staging stage.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-2
 
       - name: Run E2E tests
         run: pnpm test:e2e
