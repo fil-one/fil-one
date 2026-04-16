@@ -20,5 +20,5 @@ SUCCESSES
   {"ts": "2026-02-19T22:32:33.053410+00:00", "op": "upload", "status": "ok", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-aa506/v1.zip", "size": 21079670, "elapsed_s": 2.264, "target_bucket": "filecoin-foundation-bucket-nolock", "etag": "e39c176d19a7297918243f6242406417", "version_id": null}
 
 Log files:
-  Success : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/fth/logs/20260219_143221_upload_success.jsonl
-  Errors  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/fth/logs/20260219_143221_upload_errors.jsonl
+  Success : ../logs/20260219_143221_upload_success.jsonl
+  Errors  : ../logs/20260219_143221_upload_errors.jsonl

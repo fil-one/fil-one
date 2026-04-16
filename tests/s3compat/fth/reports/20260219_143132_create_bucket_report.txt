@@ -16,5 +16,5 @@ SUCCESSES
   {"ts": "2026-02-19T22:31:32.770586+00:00", "op": "create_bucket", "status": "ok", "bucket": "filecoin-foundation-bucket-nolock", "location": "", "object_lock_enabled": false, "elapsed_s": 0.212}
 
 Log files:
-  Success : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/fth/logs/20260219_143132_create_bucket_success.jsonl
-  Errors  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/fth/logs/20260219_143132_create_bucket_errors.jsonl
+  Success : ../logs/20260219_143132_create_bucket_success.jsonl
+  Errors  : ../logs/20260219_143132_create_bucket_errors.jsonl

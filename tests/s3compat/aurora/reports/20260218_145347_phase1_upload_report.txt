@@ -19,5 +19,5 @@ SUCCESSES
   {"ts": "2026-02-18T22:54:01.237922+00:00", "op": "upload", "key": "gov-data/collections/data_gov/0-25-meter-backscatter-jpeg-image-with-world-file-of-the-nearshore-seafloor-off-of-kill-de/v1.zip", "size": 21041409, "elapsed_s": 2.102, "target_bucket": "joe-test-all", "etag": "d353d274b25c88e9e245ddca2724ae97", "version_id": "fc090533-8a8d-4eba-8a3a-9f31be64ed5e"}
 
 Log files:
-  Success : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260218_145347_phase1_upload_success.jsonl
-  Errors  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260218_145347_phase1_upload_errors.jsonl
+  Success : ../logs/20260218_145347_phase1_upload_success.jsonl
+  Errors  : ../logs/20260218_145347_phase1_upload_errors.jsonl

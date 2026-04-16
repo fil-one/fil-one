@@ -53,5 +53,5 @@ SUCCESSES
   {"ts": "2026-02-19T18:47:13.287804+00:00", "op": "list_versions", "status": "ok", "key": "gov-data/collections/data_gov/0-3-meter-backscatter-jpeg-image-with-world-file-of-the-nearshore-seafloor-off-of-duck-nc-/v1.zip", "version_count": 1, "versions": [{"version_id": "bf0a3d3e-0ea4-453f-ba5d-77a93347dc13", "last_modified": "2026-02-19 02:37:51.450000+00:00", "etag": "39ebf458e83534b88ad5511bd3ef71ed", "size": 21041442, "is_latest": true}], "elapsed_s": 0.175}
 
 Log files:
-  Success : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260219_104706_fetch_success.jsonl
-  Errors  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260219_104706_fetch_errors.jsonl
+  Success : ../logs/20260219_104706_fetch_success.jsonl
+  Errors  : ../logs/20260219_104706_fetch_errors.jsonl

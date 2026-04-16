@@ -12,5 +12,5 @@ SUMMARY
 BY OPERATION
 
 Log files:
-  Success : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260218_151810_phase1_upload_success.jsonl
-  Errors  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260218_151810_phase1_upload_errors.jsonl
+  Success : ../logs/20260218_151810_phase1_upload_success.jsonl
+  Errors  : ../logs/20260218_151810_phase1_upload_errors.jsonl

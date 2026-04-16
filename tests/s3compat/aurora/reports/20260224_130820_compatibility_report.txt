@@ -22,7 +22,7 @@ TEST RUN
   Duration  : 5.9s
   Marks     : not fails_on_aws
   Target    : s3tests/functional/test_s3.py::test_bucket_list_empty
-  Raw JSON  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/aurora/logs/20260224_130820_compatibility_pytest_raw.json
+  Raw JSON  : ../logs/20260224_130820_compatibility_pytest_raw.json
 
 ERRORS
   {"op": "s3_core", "status": "err", "outcome": "error", "test": "s3tests/functional/test_s3.py::test_bucket_list_empty", "elapsed_s": 5.709, "longrepr": "s3tests/functional/__init__.py:344: in setup_teardown\n    teardown()\ns3tests/functional/__init__.py:314: in teardown\n    nuke_prefixed_buckets(prefix=prefix, client=alt_client)\ns3tests/functional/__init__.py:159: in nuke_prefixed_buckets\n    raise err\ns3tests/functional/__init__.py:150: in nuke_prefixed_buckets\n    nuke_bucket(client, bucket_name)\ns3tests/functional/__init__.py:103: in nuke_bucket\n    for objects in list_versions(client, bucket, batch_size):\ns3tests/functional/__init__.py:88: in list_versions\n    listing = client.list_object_versions(**kwargs)\n              ^^^^^^^^^^^^^^^^^^^"}

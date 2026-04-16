@@ -20,5 +20,5 @@ SUCCESSES
   {"ts": "2026-02-19T22:12:54.643646+00:00", "op": "put_bucket_encryption", "status": "ok", "bucket": "filecoin-foundation-bucket", "algorithm": "AES256", "elapsed_s": 0.072}
 
 Log files:
-  Success : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/fth/logs/20260219_141254_create_bucket_success.jsonl
-  Errors  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/fth/logs/20260219_141254_create_bucket_errors.jsonl
+  Success : ../logs/20260219_141254_create_bucket_success.jsonl
+  Errors  : ../logs/20260219_141254_create_bucket_errors.jsonl

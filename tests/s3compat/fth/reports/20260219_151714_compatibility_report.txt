@@ -34,7 +34,7 @@ TEST RUN
   Duration  : 3488.5s
   Marks     : not fails_on_aws
   Target    : s3tests/functional/test_s3.py
-  Raw JSON  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/fth/logs/20260219_151714_compatibility_pytest_raw.json
+  Raw JSON  : ../logs/20260219_151714_compatibility_pytest_raw.json
 
 ERRORS
   {"op": "list_objects_v2", "status": "err", "outcome": "failed", "test": "s3tests/functional/test_s3.py::test_expected_bucket_owner", "elapsed_s": 3.139, "longrepr": "s3tests/functional/test_s3.py:1724: in test_expected_bucket_owner\n    e = assert_raises(ClientError, unauthenticated_client.list_objects, Bucket=bucket_name, ExpectedBucketOwner=incorrect_expected_owner)\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ns3tests/functional/utils.py:19: in assert_raises\n    raise AssertionError(\"%s not raised\" % excName)\nE   AssertionError: ClientError not raised"}

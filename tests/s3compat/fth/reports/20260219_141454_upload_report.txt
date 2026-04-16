@@ -20,5 +20,5 @@ ERRORS
   {"ts": "2026-02-19T22:15:41.099067+00:00", "op": "upload", "status": "err", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-aa506/v1.zip", "size": 21079670, "elapsed_s": 8.174, "source_bucket": "harvard-lil", "target_bucket": "filecoin-foundation-bucket", "error_type": "SSLError", "error": "SSL validation failed for https://us-east-1.gw.future-tech-holdings.com/filecoin-foundation-bucket/gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-aa506/v1.zip [SYS] unknown error (_ssl.c:2427)"}
 
 Log files:
-  Success : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/fth/logs/20260219_141454_upload_success.jsonl
-  Errors  : /Users/joemuoio/workplace/filecoin-foundation/hyperspace/testing/fth/logs/20260219_141454_upload_errors.jsonl
+  Success : ../logs/20260219_141454_upload_success.jsonl
+  Errors  : ../logs/20260219_141454_upload_errors.jsonl
