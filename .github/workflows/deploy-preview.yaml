@@ -48,7 +48,7 @@ jobs:
           echo "head-sha=$(echo "$PR_JSON" | jq -r '.headRefOid')" >> "$GITHUB_OUTPUT"
       - name: Post deployment started comment
         id: comment
-        uses: peter-evans/create-or-update-comment@v4
+        uses: peter-evans/create-or-update-comment@v5
         with:
           issue-number: ${{ github.event.issue.number }}
           body: |
@@ -81,14 +81,14 @@ jobs:
       head-sha: ${{ needs.pre-deploy.outputs.head-sha }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.pre-deploy.outputs.head-sha }}
           submodules: recursive
 
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+      - uses: pnpm/action-setup@08c4be7e2e672a47d11bd04269e27e5f3e8529cb # v6.0.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
@@ -173,7 +173,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Update comment with result
-        uses: peter-evans/create-or-update-comment@v4
+        uses: peter-evans/create-or-update-comment@v5
         with:
           comment-id: ${{ needs.pre-deploy.outputs.comment-id }}
           edit-mode: replace
