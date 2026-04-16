@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { createRoute, redirect, useNavigate } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Route as rootRoute } from './__root.js';
@@ -18,11 +19,21 @@ export const Route = createRoute({
 
 function VerifyEmailRoute() {
   const navigate = useNavigate();
-  const { data: me, isPending } = useQuery({
+  const {
+    data: me,
+    isPending,
+    isError,
+  } = useQuery({
     queryKey: queryKeys.me,
     queryFn: () => getMe(),
     staleTime: ME_STALE_TIME,
   });
+
+  useEffect(() => {
+    if (me?.emailVerified) {
+      void navigate({ to: me.orgConfirmed ? '/dashboard' : '/finish-sign-up' });
+    }
+  }, [me, navigate]);
 
   if (isPending || !me) {
     return (
@@ -32,24 +43,19 @@ function VerifyEmailRoute() {
     );
   }
 
-  if (me.emailVerified) {
-    if (!me.orgConfirmed) {
-      void navigate({ to: '/finish-sign-up' });
-    } else {
-      void navigate({ to: '/dashboard' });
-    }
-    return null;
+  if (isError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-zinc-500">Something went wrong. Please refresh and try again.</p>
+      </div>
+    );
   }
 
   return (
     <VerifyEmailPage
       me={me}
       onVerified={() => {
-        if (!me.orgConfirmed) {
-          void navigate({ to: '/finish-sign-up' });
-        } else {
-          void navigate({ to: '/dashboard' });
-        }
+        void navigate({ to: me.orgConfirmed ? '/dashboard' : '/finish-sign-up' });
       }}
     />
   );

@@ -1,0 +1,8 @@
+{
+  "exclude_informational": true,
+  "exclude_low": false,
+  "exclude_optimization": true,
+  "solc_remaps": "forge-std/=contracts/lib/forge-std/src/",
+  "foundry_out_directory": "contracts/out",
+  "compile_force_framework": "foundry"
+}

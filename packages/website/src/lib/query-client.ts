@@ -2,12 +2,20 @@ import { QueryClient } from '@tanstack/react-query';
 
 export const ME_STALE_TIME = 10 * 60_000;
 
+const NO_RETRY_STATUSES = new Set([401, 403]);
+
+export function defaultRetry(failureCount: number, error: unknown): boolean {
+  const status = (error as { status?: number })?.status;
+  if (status !== undefined && NO_RETRY_STATUSES.has(status)) return false;
+  return failureCount < 1;
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 0,
       gcTime: 5 * 60_000,
-      retry: 1,
+      retry: defaultRetry,
     },
   },
 });
