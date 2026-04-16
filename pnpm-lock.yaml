@@ -52,8 +52,8 @@ importers:
         specifier: ^0.18.1
         version: 0.18.1
       sst:
-        specifier: ^4.5.12
-        version: 4.5.12
+        specifier: ^4.7.1
+        version: 4.7.1
 
   bin:
     dependencies:
@@ -64,14 +64,14 @@ importers:
         specifier: ^3.1029.0
         version: 3.1029.0
       sst:
-        specifier: ^4.5.12
-        version: 4.5.12
+        specifier: ^4.7.1
+        version: 4.7.1
 
   infra:
     devDependencies:
       sst:
-        specifier: ^4.5.12
-        version: 4.5.12
+        specifier: ^4.7.1
+        version: 4.7.1
 
   packages/aurora-backoffice-client:
     devDependencies:
@@ -125,7 +125,7 @@ importers:
         version: link:../shared
       '@middy/core':
         specifier: ^7.2.2
-        version: 7.2.2
+        version: 7.2.2(@aws/durable-execution-sdk-js@1.0.2)
       '@middy/http-header-normalizer':
         specifier: ^7.2.2
         version: 7.2.2
@@ -142,8 +142,8 @@ importers:
         specifier: ^7.3.0
         version: 7.3.0
       sst:
-        specifier: ^4.5.12
-        version: 4.5.12
+        specifier: ^4.7.1
+        version: 4.7.1
       stripe:
         specifier: ^22.0.1
         version: 22.0.1(@types/node@25.5.0)
@@ -316,8 +316,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       sst:
-        specifier: ^4.5.12
-        version: 4.5.12
+        specifier: ^4.7.1
+        version: 4.7.1
       stripe:
         specifier: ^22.0.1
         version: 22.0.1(@types/node@25.5.0)
@@ -555,6 +555,10 @@ packages:
   '@aws-sdk/xml-builder@3.972.17':
     resolution: {integrity: sha512-Ra7hjqAZf1OXRRMueB13qex7mFJRDK/pgCvdSFemXBT8KCGnQDPoKzHY1SjN+TjJVmnpSF14W5tJ1vDamFu+Gg==}
     engines: {node: '>=20.0.0'}
+
+  '@aws/durable-execution-sdk-js@1.0.2':
+    resolution: {integrity: sha512-KIYBVqV9gArkWdPEDYOjJqLlO+NecmCXOXadNBlOspJTmqztwuiyb6aZc468bYWSGuL4Me/gyTIK97ubkwFNCw==}
+    engines: {node: '>=22'}
 
   '@aws/lambda-invoke-store@0.2.4':
     resolution: {integrity: sha512-iY8yvjE0y651BixKNPgmv1WrQc+GZ142sb0z4gYnChDDY2YqI4P/jsSopBWrKfAt7LOJAkOXt7rC/hms+WclQQ==}
@@ -3760,12 +3764,12 @@ packages:
   lru-cache@10.4.3:
     resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
 
-  lru-cache@11.2.6:
-    resolution: {integrity: sha512-ESL2CrkS/2wTPfuend7Zhkzo2u0daGJ/A2VucJOgQ/C48S/zB8MMeMHSGKYpXhIjbPxfuezITkaBH1wqv00DDQ==}
-    engines: {node: 20 || >=22}
-
   lru-cache@11.2.7:
     resolution: {integrity: sha512-aY/R+aEsRelme17KGQa/1ZSIpLpNYYrhcrepKTZgE+W3WM16YMCaPwOHLHsmopZHELU0Ojin1lPVxKR0MihncA==}
+    engines: {node: 20 || >=22}
+
+  lru-cache@11.3.5:
+    resolution: {integrity: sha512-NxVFwLAnrd9i7KUBxC4DrUhmgjzOs+1Qm50D3oF1/oL+r1NpZ4gA7xvG0/zJ8evR7zIKn4vLf7qTNduWFtCrRw==}
     engines: {node: 20 || >=22}
 
   lru-cache@5.1.1:
@@ -4457,48 +4461,48 @@ packages:
     resolution: {integrity: sha512-QUiRf1+u9wPTL/76GTYlKttDEBWV1ga9ZXW8BG6kfdeyyM8LGPix9gROyg9V2+P0xNyF3X2Go526xKFdMZrHSQ==}
     engines: {node: ^20.17.0 || >=22.9.0}
 
-  sst-darwin-arm64@4.5.12:
-    resolution: {integrity: sha512-/irP0q3/2r3N84Qwfty7rBHlg7jSDry35CsS04oGdo3hdwD0kMTrQqkwQddB3QYXb6HBsmNpIUHTlwKjcjBeyg==}
+  sst-darwin-arm64@4.7.1:
+    resolution: {integrity: sha512-Ks9C5+6NDzrEhx9f9feuOEETGjaYZ/1XgYzgL6lTTYCIcA8PQnU87ptck4UrRL2NBMlhSIxSKuNUetHDa5ODKA==}
     cpu: [arm64]
     os: [darwin]
 
-  sst-darwin-x64@4.5.12:
-    resolution: {integrity: sha512-fWFanEBWqjxuIo+pX7J7DFTxUqCtrYKgv/OVAKnSZ07DndtmhI8+VpiQks17gS4C59i5JkC1NPgjw2Swdl5prA==}
+  sst-darwin-x64@4.7.1:
+    resolution: {integrity: sha512-rYhgOgrxohJFBUsQJu2dz/qEM7G9axNg64jCSvnPKsbn/AfFgzn3P1xsS1fKXHW2MOKfFVXKhPCThCJoD3KYqg==}
     cpu: [x64]
     os: [darwin]
 
-  sst-linux-arm64@4.5.12:
-    resolution: {integrity: sha512-jea1peKaqMgyFJhitOP2vuMaECL6hwBwFyLSVgjFyLN2aF7VSBz7vdrL84e13skofvc2ZM9dt4LjTDbQ/4YWGw==}
+  sst-linux-arm64@4.7.1:
+    resolution: {integrity: sha512-GXwMVZn6nXZ67cU03dh5xfWAYxgLBsnLZXgSVvh/AjgCtoI2sQcxXiDl+yKjHiDdY2ppaCiN9nT0nhW/oFbeZg==}
     cpu: [arm64]
     os: [linux]
 
-  sst-linux-x64@4.5.12:
-    resolution: {integrity: sha512-fLeYJhUAmv0ZgxQkhaoHHR7qekOKZYyQMqJElefgoGpy8o6vGaX+kuMZSNsd0xSNgnx/VA9bcx8H6Pjk7a03Aw==}
+  sst-linux-x64@4.7.1:
+    resolution: {integrity: sha512-ME74+2KYfxIzzJ8692kS67w0VpkyOXWSL2anqBbNY15vJqq4SqNAdXH77oMfn6qhWKyz4qWmdQ0bybJxHLTTuw==}
     cpu: [x64]
     os: [linux]
 
-  sst-linux-x86@4.5.12:
-    resolution: {integrity: sha512-C4sIDFboYGD0Q5K88taD2/296EGy8EcqpeJdDLclcHQy/wNZ6D7PaZjZoqJg3MD7CQaqdL8SSt2/YW34rjrXrw==}
+  sst-linux-x86@4.7.1:
+    resolution: {integrity: sha512-T2Q1hKXozmSCgT9hEC6dVEaVPHioqwJLcSUe/6eo+eJtBrg6daJsMXwdq+BRPElnFjI9GujB6sQPaMk7hp7rnQ==}
     cpu: [x86]
     os: [linux]
 
-  sst-win32-arm64@4.5.12:
-    resolution: {integrity: sha512-LksvtO5rphSDKjW+Xe1hroohy41a2Gk0JJNHaBZOM6qYN9gcHTrIFAd4Tk+ZG+netycxHi0QUKgA3tNuLQUpIw==}
+  sst-win32-arm64@4.7.1:
+    resolution: {integrity: sha512-fLumzUi3InJd83m6ymQCBNam9OMJ8WqZZh66lKp6XPdYmbF65M6nrkwNuut98rrEf9FkrvMHafbqJN43/YZaeQ==}
     cpu: [arm64]
     os: [win32]
 
-  sst-win32-x64@4.5.12:
-    resolution: {integrity: sha512-qdoergfWiyZovTabneB50uca6GZIZlcRaGHjJf7Zef+yvluFvjgR+zu5ma6TVtdemKtiQWD3TC+uaHdPrJLN0w==}
+  sst-win32-x64@4.7.1:
+    resolution: {integrity: sha512-iRzyuzooCus8TR6/y/0ruNlKag89+AXdx+HpGjzCL2nTdkWG41R87fqg83MVy1we2zAjAjeAONJckXSR0i+qjQ==}
     cpu: [x64]
     os: [win32]
 
-  sst-win32-x86@4.5.12:
-    resolution: {integrity: sha512-6O4ZBNTNSG/poYbRNbM5F9Ldj4pGxs5jZSDYZ+cMem0rKrQSAIH3yWXaXsqGadyJ1qetcAxkt8pxuN2GCbWS+w==}
+  sst-win32-x86@4.7.1:
+    resolution: {integrity: sha512-t7QsgoljceRVleCc2BDThMz/h9eV9Z95VQbNIrPghOTXJR4ekrmP0adqmog4dQoliliYr4nazpPZlXTw27DBsg==}
     cpu: [x86]
     os: [win32]
 
-  sst@4.5.12:
-    resolution: {integrity: sha512-gZX6riWnbmgDGl+K3sLWP6JrQJPAf+GKNycqmIH9/3rS14zAK+PJhnwtr52XaTaAOOfUFuJNN72TZNjfq5Vzyw==}
+  sst@4.7.1:
+    resolution: {integrity: sha512-rfzfR/0OmeY1BPwszG4EGVQlGR8N8D51JjgRmEW5OBcyREFUeonFFtmHeBFxqQk65sIlFlpmfIrDKp1gIbwbvA==}
     hasBin: true
 
   stackback@0.0.2:
@@ -5038,7 +5042,7 @@ snapshots:
       '@csstools/css-color-parser': 4.0.2(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-parser-algorithms': 4.0.0(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-tokenizer': 4.0.0
-      lru-cache: 11.2.7
+      lru-cache: 11.3.5
 
   '@asamuzakjp/dom-selector@7.0.4':
     dependencies:
@@ -5046,7 +5050,7 @@ snapshots:
       bidi-js: 1.0.3
       css-tree: 3.2.1
       is-potential-custom-element-name: 1.0.1
-      lru-cache: 11.2.7
+      lru-cache: 11.3.5
 
   '@asamuzakjp/nwsapi@2.3.9': {}
 
@@ -5740,6 +5744,12 @@ snapshots:
       fast-xml-parser: 5.5.8
       tslib: 2.8.1
 
+  '@aws/durable-execution-sdk-js@1.0.2':
+    dependencies:
+      '@aws-sdk/client-lambda': 3.1029.0
+    transitivePeerDependencies:
+      - aws-crt
+
   '@aws/lambda-invoke-store@0.2.4': {}
 
   '@babel/code-frame@7.29.0':
@@ -6197,9 +6207,11 @@ snapshots:
       '@types/react': 19.2.14
       react: 19.2.4
 
-  '@middy/core@7.2.2':
+  '@middy/core@7.2.2(@aws/durable-execution-sdk-js@1.0.2)':
     dependencies:
       '@middy/util': 7.2.2
+    optionalDependencies:
+      '@aws/durable-execution-sdk-js': 1.0.2
 
   '@middy/http-header-normalizer@7.2.2': {}
 
@@ -6213,7 +6225,7 @@ snapshots:
       agent-base: 7.1.4
       http-proxy-agent: 7.0.2
       https-proxy-agent: 7.0.6
-      lru-cache: 11.2.6
+      lru-cache: 11.3.5
       socks-proxy-agent: 8.0.5
     transitivePeerDependencies:
       - supports-color
@@ -6236,7 +6248,7 @@ snapshots:
       common-ancestor-path: 2.0.0
       hosted-git-info: 9.0.2
       json-stringify-nice: 1.1.4
-      lru-cache: 11.2.6
+      lru-cache: 11.3.5
       minimatch: 10.2.4
       nopt: 9.0.0
       npm-install-checks: 8.0.0
@@ -6275,7 +6287,7 @@ snapshots:
       common-ancestor-path: 2.0.0
       hosted-git-info: 9.0.2
       json-stringify-nice: 1.1.4
-      lru-cache: 11.2.7
+      lru-cache: 11.3.5
       minimatch: 10.2.4
       nopt: 9.0.0
       npm-install-checks: 8.0.0
@@ -6304,7 +6316,7 @@ snapshots:
       '@gar/promise-retry': 1.0.2
       '@npmcli/promise-spawn': 9.0.1
       ini: 6.0.0
-      lru-cache: 11.2.6
+      lru-cache: 11.3.5
       npm-pick-manifest: 11.0.3
       proc-log: 6.1.0
       semver: 7.7.4
@@ -8243,7 +8255,7 @@ snapshots:
       '@npmcli/fs': 5.0.0
       fs-minipass: 3.0.3
       glob: 13.0.6
-      lru-cache: 11.2.6
+      lru-cache: 11.3.5
       minipass: 7.1.3
       minipass-collect: 2.0.1
       minipass-flush: 1.0.5
@@ -8257,7 +8269,7 @@ snapshots:
       '@npmcli/fs': 5.0.0
       fs-minipass: 3.0.3
       glob: 13.0.6
-      lru-cache: 11.2.7
+      lru-cache: 11.3.5
       minipass: 7.1.3
       minipass-collect: 2.0.1
       minipass-flush: 1.0.7
@@ -8684,7 +8696,7 @@ snapshots:
 
   hosted-git-info@9.0.2:
     dependencies:
-      lru-cache: 11.2.6
+      lru-cache: 11.3.5
 
   html-encoding-sniffer@6.0.0(@noble/hashes@1.8.0):
     dependencies:
@@ -8969,9 +8981,9 @@ snapshots:
 
   lru-cache@10.4.3: {}
 
-  lru-cache@11.2.6: {}
-
   lru-cache@11.2.7: {}
+
+  lru-cache@11.3.5: {}
 
   lru-cache@5.1.1:
     dependencies:
@@ -9353,7 +9365,7 @@ snapshots:
 
   path-scurry@2.0.2:
     dependencies:
-      lru-cache: 11.2.6
+      lru-cache: 11.3.5
       minipass: 7.1.3
 
   path-to-regexp@8.3.0: {}
@@ -9746,44 +9758,47 @@ snapshots:
     dependencies:
       minipass: 7.1.3
 
-  sst-darwin-arm64@4.5.12:
+  sst-darwin-arm64@4.7.1:
     optional: true
 
-  sst-darwin-x64@4.5.12:
+  sst-darwin-x64@4.7.1:
     optional: true
 
-  sst-linux-arm64@4.5.12:
+  sst-linux-arm64@4.7.1:
     optional: true
 
-  sst-linux-x64@4.5.12:
+  sst-linux-x64@4.7.1:
     optional: true
 
-  sst-linux-x86@4.5.12:
+  sst-linux-x86@4.7.1:
     optional: true
 
-  sst-win32-arm64@4.5.12:
+  sst-win32-arm64@4.7.1:
     optional: true
 
-  sst-win32-x64@4.5.12:
+  sst-win32-x64@4.7.1:
     optional: true
 
-  sst-win32-x86@4.5.12:
+  sst-win32-x86@4.7.1:
     optional: true
 
-  sst@4.5.12:
+  sst@4.7.1:
     dependencies:
+      '@aws/durable-execution-sdk-js': 1.0.2
       aws4fetch: 1.0.18
       jose: 5.2.3
       openid-client: 5.6.4
     optionalDependencies:
-      sst-darwin-arm64: 4.5.12
-      sst-darwin-x64: 4.5.12
-      sst-linux-arm64: 4.5.12
-      sst-linux-x64: 4.5.12
-      sst-linux-x86: 4.5.12
-      sst-win32-arm64: 4.5.12
-      sst-win32-x64: 4.5.12
-      sst-win32-x86: 4.5.12
+      sst-darwin-arm64: 4.7.1
+      sst-darwin-x64: 4.7.1
+      sst-linux-arm64: 4.7.1
+      sst-linux-x64: 4.7.1
+      sst-linux-x86: 4.7.1
+      sst-win32-arm64: 4.7.1
+      sst-win32-x64: 4.7.1
+      sst-win32-x86: 4.7.1
+    transitivePeerDependencies:
+      - aws-crt
 
   stackback@0.0.2: {}
 

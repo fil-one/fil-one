@@ -6,6 +6,6 @@
     "deploy:staging": "sst deploy --stage staging"
   },
   "devDependencies": {
-    "sst": "^4.5.12"
+    "sst": "^4.7.1"
   }
 }
