@@ -23,9 +23,9 @@ test.describe('unpaid user', () => {
   test('unpaid user sees upgrade prompt', async ({ page }) => {
     await page.goto('/dashboard');
     await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
-    await expect(page.getByText('Grace Period')).toBeVisible();
+    await expect(page.getByText('Past Due')).toBeVisible();
     await expect(
-      page.getByRole('navigation').getByRole('link', { name: 'Upgrade', exact: true }),
+      page.getByRole('navigation').getByRole('link', { name: 'Update payment', exact: true }),
     ).toBeVisible();
   });
 });
