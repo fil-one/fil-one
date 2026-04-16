@@ -397,9 +397,9 @@ export function DashboardPage() {
         </div>
 
         {activities.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-8 text-center">
-            <p className="text-sm font-medium text-zinc-700">No activity yet</p>
-            <p className="text-sm text-zinc-500">Create a bucket to start storing objects</p>
+          <div className="flex flex-col items-center py-8 text-center">
+            <p className="mb-1 text-sm font-medium text-zinc-900">No activity yet</p>
+            <p className="mb-4 text-sm text-zinc-500">Create a bucket to start storing objects</p>
             <Button variant="primary" icon={PlusIcon} href="/buckets">
               Create bucket
             </Button>

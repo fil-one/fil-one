@@ -35,12 +35,6 @@ type AccessKeysTabProps = {
 function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
   return (
     <>
-      <div className="mt-4 mb-4">
-        <span className="text-sm text-zinc-600">
-          {keys.length === 1 ? '1 key' : `${keys.length} keys`}
-        </span>
-      </div>
-
       <AccessKeysTable
         keys={keys}
         showBuckets
