@@ -1,1 +1,0 @@
-{"ts": "2026-04-17T07:45:48.341869+00:00", "op": "bucket_cors_read", "status": "err", "error_code": "AccessDenied", "error_message": "An error occurred (AccessDenied) when calling the GetBucketCors operation: Access Denied."}

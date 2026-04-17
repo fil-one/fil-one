@@ -264,12 +264,12 @@ The Console operations only work from a browser if the bucket's CORS policy perm
 
 | Provider | CORS source | Test behavior |
 | -------- | ----------- | ------------- |
-| **Akave** | S3 API (`PutBucketCors`) | The test calls `put_bucket_cors` at start-up with a rule tailored to the tested operations (origin, all methods, wildcard `AllowedHeaders`, the required `ExposeHeaders`). |
+| **Akave** | S3 API (`PutBucketCors`) | The test captures the bucket's current CORS config, applies a rule tailored to the tested operations (origin, all methods, wildcard `AllowedHeaders`, the required `ExposeHeaders`), runs the checks, and restores the captured config in a `finally` block. |
 | **Aurora** | Configured out-of-band at the edge/CDN layer | The test does not call `put_bucket_cors` — Aurora rejects it. The operator must ensure the edge CORS rules match what the test asserts. |
 
 Providers that manage CORS via the S3 API are listed in `PROVIDERS_WITH_PUT_BUCKET_CORS` in `console_presign_test.py`.
 
-The report's header lists the bucket's current CORS configuration (via `GetBucketCors`) and whether the test applied a CORS rule itself, so mismatches between what the Console needs and what the provider has configured are visible in one place.
+The report's header lists the bucket's CORS configuration as read via `GetBucketCors` before the test runs, and — for providers that apply CORS themselves — the config after the test-applied rule. The test then restores the pre-existing config in a `finally` block so repeated runs do not leave behind the test's rule. Mismatches between what the Console needs and what the provider has configured are visible in one place.
 
 ---
 

@@ -39,6 +39,7 @@ Env (loaded from <provider>/.env via client.py):
   S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_ENDPOINT, S3_BUCKET
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -73,6 +74,28 @@ REQUIRED_EXPOSE_HEADERS_BASE = ("etag", "content-length", "content-type", "last-
 REQUIRED_EXPOSE_HEADERS_FIL_META = ("x-fil-cid",)
 # x-amz-meta-* is a prefix — we check any x-amz-meta-<something> header we sent
 # actually survives to the response (handled separately).
+
+# Allowlist of response headers written to log entries. Headers outside this
+# set (e.g. x-amz-server-side-encryption-aws-kms-key-id, x-amz-id-2,
+# x-amz-storage-class, rate-limit counters) are sensitive operational data
+# that should not be committed to the repo alongside the test reports.
+LOGGED_RESPONSE_HEADERS = frozenset({
+    "access-control-allow-credentials",
+    "access-control-allow-headers",
+    "access-control-allow-methods",
+    "access-control-allow-origin",
+    "access-control-expose-headers",
+    "access-control-max-age",
+    "content-disposition",
+    "content-encoding",
+    "content-length",
+    "content-type",
+    "date",
+    "etag",
+    "last-modified",
+    "vary",
+})
+LOGGED_RESPONSE_HEADER_PREFIXES = ("x-amz-meta-", "x-fil-")
 
 
 @dataclass
@@ -129,10 +152,13 @@ def main():
     put_metadata = {"filename": TEST_FILENAME}
 
     cors_applied = args.provider in PROVIDERS_WITH_PUT_BUCKET_CORS
+    pre_cors_rules, pre_cors_display = _snapshot_bucket_cors(s3, bucket, log, "pre")
+    post_cors_display: str | None = None
+
     if cors_applied:
         _apply_bucket_cors(s3, bucket, origin, list(put_metadata.keys()), log)
+        _, post_cors_display = _snapshot_bucket_cors(s3, bucket, log, "post")
 
-    cors_config = _fetch_bucket_cors(s3, bucket, log)
     cases = _build_cases(bucket, test_key, put_metadata)
 
     try:
@@ -140,6 +166,8 @@ def main():
             _run_case(s3, log, case, origin)
     finally:
         _cleanup(s3, bucket, test_key, log)
+        if cors_applied:
+            _restore_bucket_cors(s3, bucket, pre_cors_rules, log)
 
     extra = [
         "TEST RUN",
@@ -149,11 +177,17 @@ def main():
         f"  Test key         : {test_key}",
         f"  Browser origin   : {origin}",
         f"  Presign expiry   : {PRESIGN_EXPIRY_SECONDS}s",
-        f"  CORS applied     : {'yes (via put_bucket_cors)' if cors_applied else 'no (provider manages CORS out-of-band)'}",
+        f"  CORS applied     : {'yes (via put_bucket_cors, restored after test)' if cors_applied else 'no (provider manages CORS out-of-band)'}",
         "",
-        "BUCKET CORS CONFIGURATION (at test start)",
-        *(f"  {line}" for line in cors_config.splitlines() or ["(none)"]),
+        "BUCKET CORS CONFIGURATION (before test)",
+        *(f"  {line}" for line in pre_cors_display.splitlines() or ["(none)"]),
     ]
+    if post_cors_display is not None:
+        extra += [
+            "",
+            "BUCKET CORS CONFIGURATION (after test-applied rule)",
+            *(f"  {line}" for line in post_cors_display.splitlines() or ["(none)"]),
+        ]
     log.write_report("Console Presigned-URL Test", extra_lines=extra)
 
 
@@ -281,7 +315,7 @@ def _run_case(s3, log: Logger, case: OpCase, origin: str):
                 "request_method": case.preflight.method,
                 "request_headers": case.preflight.request_headers,
                 "status_code": resp.status_code,
-                "response_headers_lower": {k.lower(): v for k, v in resp.headers.items()},
+                "response_headers_lower": _filter_response_headers(resp.headers),
                 "response_body_sample": resp.text[:400],
                 **details,
             }
@@ -306,7 +340,7 @@ def _run_case(s3, log: Logger, case: OpCase, origin: str):
         "elapsed_s": round(time.monotonic() - t0, 3),
         "status_code": resp.status_code,
         "response_body_sample": resp.text[:400] if _has_text_body(case) else None,
-        "response_headers_lower": {k.lower(): v for k, v in resp.headers.items()},
+        "response_headers_lower": _filter_response_headers(resp.headers),
     }
     if resp.status_code in case.ok_statuses:
         log.success(f"execute_{case.name}", **exec_entry)
@@ -471,6 +505,23 @@ def _split_header(value: str, *, lower: bool = False) -> set[str]:
     return {p.lower() for p in parts} if lower else parts
 
 
+def _filter_response_headers(headers) -> dict:
+    """Return only the response headers we care about, dropping sensitive ones.
+
+    Restricts logged headers to the CORS + content metadata we assert on, plus
+    ``x-amz-meta-*`` / ``x-fil-*`` which the test validates directly. Everything
+    else (KMS key ARNs, internal request IDs, storage-class UUIDs, rate-limit
+    counters, backend hints) is excluded so committed logs stay free of
+    sensitive operational data.
+    """
+    out = {}
+    for k, v in headers.items():
+        lk = k.lower()
+        if lk in LOGGED_RESPONSE_HEADERS or any(lk.startswith(p) for p in LOGGED_RESPONSE_HEADER_PREFIXES):
+            out[lk] = v
+    return out
+
+
 def _has_text_body(case: OpCase) -> bool:
     # HEAD responses have no body; PUT/DELETE success bodies are empty.
     return case.http_method == "GET"
@@ -537,19 +588,64 @@ def _apply_bucket_cors(s3, bucket: str, origin: str, metadata_keys: list[str], l
                 expose_headers=expose)
 
 
-def _fetch_bucket_cors(s3, bucket: str, log: Logger) -> str:
-    """Return a human-readable snapshot of the bucket's CORS config."""
+def _snapshot_bucket_cors(s3, bucket: str, log: Logger, label: str) -> tuple[list | None, str]:
+    """Fetch the bucket's CORS config.
+
+    Returns ``(rules, display)``:
+
+    - ``rules`` is the CORSRules list (possibly empty) when GetBucketCors
+      succeeds or returns NoSuchCORSConfiguration — safe to pass to
+      :func:`_restore_bucket_cors`.
+    - ``rules`` is ``None`` when the provider refuses to disclose the config
+      (AccessDenied/AllAccessDisabled) or returns another error. Restoration
+      is not possible in that case.
+    - ``display`` is always a human-readable snapshot for the report.
+    """
     try:
         resp = s3.get_bucket_cors(Bucket=bucket)
     except Exception as e:
         code = getattr(e, "response", {}).get("Error", {}).get("Code", type(e).__name__)
         if code in {"NoSuchCORSConfiguration", "NoSuchBucket"}:
-            return f"(provider returned {code})"
-        log.error_raw("bucket_cors_read",
+            return [], f"(provider returned {code})"
+        if code in {"AccessDenied", "AllAccessDisabled"}:
+            log.success(f"bucket_cors_read_{label}",
+                        bucket=bucket,
+                        status="skipped",
+                        error_code=code,
+                        error_message=str(e))
+            return None, f"(cannot read: {code})"
+        log.error_raw(f"bucket_cors_read_{label}",
                       error_code=code, error_message=str(e))
-        return f"(error reading CORS: {code})"
-    import json
-    return json.dumps(resp.get("CORSRules", []), indent=2, default=str)
+        return None, f"(error reading CORS: {code})"
+    rules = resp.get("CORSRules", [])
+    return rules, json.dumps(rules, indent=2, default=str)
+
+
+def _restore_bucket_cors(s3, bucket: str, rules: list | None, log: Logger):
+    """Restore the CORS config captured by :func:`_snapshot_bucket_cors`.
+
+    If ``rules`` is ``None`` the pre-existing config was not readable, so we
+    cannot restore it — log a soft error and leave the test-applied rules in
+    place. The operator can reconcile manually.
+    """
+    if rules is None:
+        log.error_raw("bucket_cors_restore",
+                      error_code="NotRestorable",
+                      error_message="Pre-existing CORS config was not readable; "
+                                    "test-applied rules remain in place.",
+                      bucket=bucket)
+        return
+    try:
+        if rules:
+            s3.put_bucket_cors(Bucket=bucket,
+                               CORSConfiguration={"CORSRules": rules})
+            log.success("bucket_cors_restore", bucket=bucket,
+                        action="put", rules_count=len(rules))
+        else:
+            s3.delete_bucket_cors(Bucket=bucket)
+            log.success("bucket_cors_restore", bucket=bucket, action="delete")
+    except Exception as e:
+        log.error("bucket_cors_restore", e, bucket=bucket)
 
 
 def _cleanup(s3, bucket: str, key: str, log: Logger):
@@ -557,6 +653,13 @@ def _cleanup(s3, bucket: str, key: str, log: Logger):
     try:
         s3.delete_object(Bucket=bucket, Key=key)
     except Exception as e:
+        # The `deleteObject` case ordinarily succeeds, so finding the key gone
+        # here is the expected outcome — don't log it as a failure.
+        response = getattr(e, "response", {}) or {}
+        code = str(response.get("Error", {}).get("Code", ""))
+        status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if code == "NoSuchKey" or status == 404:
+            return
         log.error("cleanup_delete", e, bucket=bucket, key=key)
 
 
