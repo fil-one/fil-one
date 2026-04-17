@@ -63,6 +63,18 @@ export default $config({
       args.runtime = args.runtime ?? 'nodejs24.x';
       args.memory = args.memory ?? '512 MB';
       args.architecture = args.architecture ?? 'arm64';
+
+      // In production, suppress console.log/info/debug — only WARN and above are emitted.
+      if ($app.stage === 'production') {
+        args.transform = args.transform ?? {};
+        args.transform.function = (fnArgs) => {
+          fnArgs.loggingConfig = {
+            logFormat: 'JSON',
+            ...fnArgs.loggingConfig,
+            applicationLogLevel: 'WARN',
+          };
+        };
+      }
     });
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
@@ -296,6 +308,7 @@ export default $config({
           resources: [$interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/*`],
         },
       ],
+      logging: { retention: '1 week', format: 'json' },
       timeout: '10 seconds',
     });
 
@@ -390,6 +403,15 @@ export default $config({
     // Forward API Gateway access logs to Grafana Loki via the same Firehose
     new aws.cloudwatch.LogSubscriptionFilter('ApiAccessLogFwd', {
       logGroup: api.nodes.logGroup.name,
+      filterPattern: '',
+      destinationArn: firehose.arn,
+      roleArn: cwToFirehoseRole.arn,
+    });
+
+    // Forward SetupIntegrations logs to Grafana Loki. This function is not
+    // created via createFn() (see comment above), so wire up forwarding manually.
+    new aws.cloudwatch.LogSubscriptionFilter('SetupIntegrationsLogFwd', {
+      logGroup: setupFn.nodes.logGroup.apply((lg) => lg!.name),
       filterPattern: '',
       destinationArn: firehose.arn,
       roleArn: cwToFirehoseRole.arn,
