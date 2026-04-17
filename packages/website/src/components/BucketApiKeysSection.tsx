@@ -42,7 +42,7 @@ export function BucketApiKeysSection({
   createOpen,
   onCreateOpenChange,
 }: BucketApiKeysSectionProps) {
-  const { data } = useQuery({ queryKey: queryKeys.accessKeys, queryFn: getAccessKeys });
+  const { data, isPending } = useQuery({ queryKey: queryKeys.accessKeys, queryFn: getAccessKeys });
 
   const allBucketKeys = (data?.keys ?? []).filter(
     (k) => k.bucketScope === 'all' && k.status === 'active',
@@ -52,8 +52,18 @@ export function BucketApiKeysSection({
     <div className="flex flex-col gap-2.5">
       <label className="text-xs font-medium text-(--color-text-base)">API keys</label>
 
+      {/* Loading skeleton */}
+      {isPending && (
+        <div className="rounded-md border border-(--input-border-color) bg-zinc-50 px-3 py-3">
+          <div className="flex items-center gap-2.5">
+            <div className="h-3 w-3 shrink-0 animate-pulse rounded-full bg-zinc-200" />
+            <div className="h-3 w-32 animate-pulse rounded bg-zinc-200" />
+          </div>
+        </div>
+      )}
+
       {/* Existing all-bucket keys */}
-      {allBucketKeys.length > 0 && (
+      {!isPending && allBucketKeys.length > 0 && (
         <div className="rounded-md border border-(--input-border-color) bg-zinc-50 px-3 py-1">
           {allBucketKeys.map((key, i) => (
             <div key={key.id} className={i > 0 ? 'border-t border-(--color-border-muted)' : ''}>
