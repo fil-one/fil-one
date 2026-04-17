@@ -68,13 +68,19 @@ export type {
   ListObjectsRequest,
   ListObjectsResponse,
   DeleteObjectRequest,
-  PresignUploadRequest,
-  PresignUploadResponse,
   ObjectMetadataResponse,
   ObjectRetentionInfo,
 } from './api/objects.js';
 
-export { PresignUploadSchema, HeadObjectQuerySchema } from './api/objects.js';
+export type {
+  PresignOp,
+  PresignRequest,
+  PresignHttpMethod,
+  PresignResponseItem,
+  PresignResponse,
+} from './api/presign.js';
+
+export { PresignOpSchema, PresignRequestSchema } from './api/presign.js';
 
 export {
   ACCESS_KEY_PERMISSIONS,
