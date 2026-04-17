@@ -199,7 +199,7 @@ export async function createAuroraAccessKey({
   );
   assert(
     !!accessKeySecret,
-    `Aurora Portal API returned empty access key "accessKeySecret" for tenant ${tenantId}`,
+    `Aurora Portal API returned empty access key "accessKeySecret" for tenant ${tenantId}. Response fields: ${Object.keys(data)}`,
   );
   assert(
     !!createdAt,
