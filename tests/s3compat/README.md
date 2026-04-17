@@ -25,7 +25,7 @@ uv pip install -r ceph-s3-tests/requirements.txt  # needed for compatibility_tes
 **Configure credentials:**
 
 ```bash
-cp aurora/.env.example aurora/.env
+cp env.example aurora/.env
 # Edit aurora/.env — at minimum set S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET
 ```
 
