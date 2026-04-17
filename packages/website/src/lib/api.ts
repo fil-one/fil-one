@@ -178,7 +178,15 @@ export function getInvoices(): Promise<ListInvoicesResponse> {
 
 // ── Access Keys API ──────────────────────────────────────────────────────────
 
-import type { CreateAccessKeyRequest, CreateAccessKeyResponse } from '@filone/shared';
+import type {
+  CreateAccessKeyRequest,
+  CreateAccessKeyResponse,
+  ListAccessKeysResponse,
+} from '@filone/shared';
+
+export function getAccessKeys(): Promise<ListAccessKeysResponse> {
+  return apiRequest<ListAccessKeysResponse>('/access-keys');
+}
 
 export function createAccessKey(body: CreateAccessKeyRequest): Promise<CreateAccessKeyResponse> {
   return apiRequest<CreateAccessKeyResponse>('/access-keys', {

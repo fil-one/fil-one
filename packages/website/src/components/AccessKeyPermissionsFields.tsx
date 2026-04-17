@@ -41,8 +41,8 @@ export function AccessKeyPermissionsFields({ value, onChange }: AccessKeyPermiss
             onChange={() => toggle(option.value)}
           />
           <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-medium text-zinc-900">{option.label}</span>
-            <span className="text-xs text-zinc-600">{option.description}</span>
+            <span className="text-xs font-medium text-(--color-text-base)">{option.label}</span>
+            <span className="text-xs text-(--color-paragraph-text)">{option.description}</span>
           </div>
         </label>
       ))}
