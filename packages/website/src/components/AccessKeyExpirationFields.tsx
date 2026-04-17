@@ -1,3 +1,5 @@
+import { RadioOption } from './RadioOption.js';
+
 export type ExpirationOption = 'never' | '30d' | 'custom';
 
 type AccessKeyExpirationFieldsProps = {
@@ -28,32 +30,28 @@ export function AccessKeyExpirationFields({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex gap-3">
+      <div className="grid grid-cols-3 gap-2">
         {OPTIONS.map((option) => (
-          <label
+          <RadioOption
             key={option.value}
-            className="flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-200 px-4 py-2.5 text-sm hover:bg-zinc-50 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50"
+            name="expiration"
+            value={option.value}
+            checked={value === option.value}
+            onChange={() => handleOptionChange(option.value)}
           >
-            <input
-              type="radio"
-              name="expiration"
-              value={option.value}
-              checked={value === option.value}
-              onChange={() => handleOptionChange(option.value)}
-              className="accent-brand-600"
-            />
-            <span className="font-medium text-zinc-900">{option.label}</span>
-          </label>
+            {option.label}
+          </RadioOption>
         ))}
       </div>
 
       {value === 'custom' && (
         <input
           type="date"
+          aria-label="Custom expiration date"
           value={customDate ?? ''}
           min={new Date().toISOString().split('T')[0]}
           onChange={(e) => onDateChange(e.target.value || null)}
-          className="block w-full rounded-lg border border-zinc-200 p-2.5 text-sm text-zinc-900 focus:outline-2 focus:outline-brand-600"
+          className="mt-1 block w-full rounded-lg border border-zinc-200 p-2.5 text-sm text-zinc-900 focus:outline-2 focus:outline-brand-600"
         />
       )}
     </div>

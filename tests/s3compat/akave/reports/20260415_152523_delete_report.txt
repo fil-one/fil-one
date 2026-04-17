@@ -1,0 +1,24 @@
+======================================================================
+  Delete
+  Script : delete
+  Run    : 20260415_152523
+======================================================================
+
+SUMMARY
+  Total  : 5
+  OK     : 0
+  Failed : 5
+
+BY OPERATION
+  delete_object                      0 ok     5 failed  (   5 total)  avg 0.392s  stddev 0.148s  min 0.314s  max 0.688s
+
+ERRORS
+  {"ts": "2026-04-15T13:25:24.432143+00:00", "op": "delete_object", "status": "err", "key": "gov-data/README.md", "version_id": "V1", "bucket": "mbx-2024-04-15-1", "elapsed_s": 0.688, "error_type": "TypeError", "error": "logger.Logger.success() got multiple values for keyword argument 'version_id'"}
+  {"ts": "2026-04-15T13:25:24.747033+00:00", "op": "delete_object", "status": "err", "key": "gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip", "version_id": "V1", "bucket": "mbx-2024-04-15-1", "elapsed_s": 0.314, "error_type": "TypeError", "error": "logger.Logger.success() got multiple values for keyword argument 'version_id'"}
+  {"ts": "2026-04-15T13:25:25.064751+00:00", "op": "delete_object", "status": "err", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-0397e/v1.zip", "version_id": "V1", "bucket": "mbx-2024-04-15-1", "elapsed_s": 0.317, "error_type": "TypeError", "error": "logger.Logger.success() got multiple values for keyword argument 'version_id'"}
+  {"ts": "2026-04-15T13:25:25.384839+00:00", "op": "delete_object", "status": "err", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-54c47/v1.zip", "version_id": "V1", "bucket": "mbx-2024-04-15-1", "elapsed_s": 0.32, "error_type": "TypeError", "error": "logger.Logger.success() got multiple values for keyword argument 'version_id'"}
+  {"ts": "2026-04-15T13:25:25.707882+00:00", "op": "delete_object", "status": "err", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-aa506/v1.zip", "version_id": "V1", "bucket": "mbx-2024-04-15-1", "elapsed_s": 0.323, "error_type": "TypeError", "error": "logger.Logger.success() got multiple values for keyword argument 'version_id'"}
+
+Log files:
+  Success : /Users/bajtos/src/worktrees/fil-one/s3-compat-tests/testing/akave/logs/20260415_152523_delete_success.jsonl
+  Errors  : /Users/bajtos/src/worktrees/fil-one/s3-compat-tests/testing/akave/logs/20260415_152523_delete_errors.jsonl

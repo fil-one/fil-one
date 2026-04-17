@@ -356,7 +356,6 @@ export function CreateBucketPage() {
       {credentials && (
         <SaveCredentialsModal
           open={true}
-          onClose={handleCredentialsDone}
           onDone={handleCredentialsDone}
           credentials={credentials}
         />

@@ -1,4 +1,4 @@
-# Fil.one
+# Fil One
 
 Full-stack prototype — pnpm workspaces monorepo deploying to AWS via [SST v3](https://sst.dev/).
 
@@ -134,7 +134,7 @@ cd packages/website && pnpm run dev
 
 ### E2E Tests
 
-The repo includes a Playwright end-to-end test suite under `tests/e2e/`. The `@playwright/test` package is already a devDependency, so `pnpm install` covers it.
+Playwright end-to-end test suite under `tests/e2e/` that runs against a deployed environment (typically staging). The `@playwright/test` package is already a devDependency, so `pnpm install` covers it.
 
 **Install browser binaries** (one-time):
 
@@ -142,13 +142,31 @@ The repo includes a Playwright end-to-end test suite under `tests/e2e/`. The `@p
 pnpm exec playwright install --with-deps
 ```
 
-**Run tests** against a deployed stage:
+#### Required env vars
+
+| Variable                                                          | Purpose                                               |
+| ----------------------------------------------------------------- | ----------------------------------------------------- |
+| `BASE_URL`                                                        | The deployed app URL (e.g. `https://staging.fil.one`) |
+| `E2E_PAID_EMAIL` / `E2E_PAID_PASSWORD` / `E2E_PAID_USER_ID`       | Paid test user (Auth0 sub goes in `_USER_ID`)         |
+| `E2E_UNPAID_EMAIL` / `E2E_UNPAID_PASSWORD` / `E2E_UNPAID_USER_ID` | Unpaid test user                                      |
+| `E2E_TRIAL_EMAIL` / `E2E_TRIAL_PASSWORD` / `E2E_TRIAL_USER_ID`    | Trial test user                                       |
+
+In CI, all nine credential vars come from GitHub repository secrets (see [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)). Both workflows also configure AWS via OIDC (using `vars.AWS_ROLE_ARN`) so the billing-state reset can write to the staging `BillingTable`.
+
+#### Running locally
+
+The `test:e2e` script wraps Playwright in `sst shell` so SST Resource bindings (e.g. `BillingTable` name) resolve to the current SST stage. Deploy a stage first, then:
 
 ```bash
-BASE_URL=<your-cloudfront-url> pnpm test:e2e
+SST_STAGE=staging \
+BASE_URL=https://staging.fil.one \
+E2E_PAID_EMAIL=...   E2E_PAID_PASSWORD=...   E2E_PAID_USER_ID=auth0|... \
+E2E_UNPAID_EMAIL=... E2E_UNPAID_PASSWORD=... E2E_UNPAID_USER_ID=auth0|... \
+E2E_TRIAL_EMAIL=...  E2E_TRIAL_PASSWORD=...  E2E_TRIAL_USER_ID=auth0|... \
+pnpm test:e2e --project=chromium
 ```
 
-`BASE_URL` is required and should point to a deployed SST stage (personal dev stack, staging, etc.).
+Your local AWS credentials (e.g. via `aws sso login`) must have write access to the staging stage's `BillingTable`.
 
 After a run, an HTML report is generated at `playwright-report/`. To view it:
 
@@ -157,6 +175,32 @@ pnpm exec playwright show-report
 ```
 
 > CI runs these tests automatically against preview deployments on PRs.
+
+#### Subscription state reset
+
+[tests/e2e/auth.setup.ts](tests/e2e/auth.setup.ts) re-seeds the `BillingTable` row for each role before logging that role in. This is necessary because trial periods can elapse and `past_due` subscriptions can advance to `canceled` between scheduled runs, so prior runs' state is not safe to reuse.
+
+The seed values come from [tests/e2e/billing-reset.ts](tests/e2e/billing-reset.ts):
+
+- **paid** → `active`, `currentPeriodEnd` = now + 30d
+- **unpaid** → `past_due`, `lastPaymentFailedAt` = yesterday
+- **trial** → `trialing`, `trialEndsAt` = now + 14d
+
+The reset writes directly to DynamoDB (mirrors the integration-test pattern in [tests/integration/helpers.ts](tests/integration/helpers.ts)). It does **not** sync with Stripe — the local DB is the source of truth for `subscriptionStatus`, and Stripe state is allowed to drift for these test users.
+
+#### How auth works
+
+Each role logs in once via [tests/e2e/auth.setup.ts](tests/e2e/auth.setup.ts) and the session cookies are persisted to `.auth/<role>.json`. Authenticated specs reuse that storage state instead of going through the Auth0 login UI on every test.
+
+The `.auth/` directory is gitignored — the JSON files are regenerated on every run and **must not be committed**.
+
+#### Adding a new role
+
+1. Add an entry to [tests/e2e/roles.ts](tests/e2e/roles.ts) `STORAGE_STATE`.
+2. Add the role's desired subscription state to `DESIRED_STATE` in [tests/e2e/billing-reset.ts](tests/e2e/billing-reset.ts).
+3. Add the role to the `roles` array in [tests/e2e/auth.setup.ts](tests/e2e/auth.setup.ts) (with `email`, `password`, `userId`).
+4. Add `E2E_<ROLE>_EMAIL`, `E2E_<ROLE>_PASSWORD`, `E2E_<ROLE>_USER_ID` to `REQUIRED_CREDENTIAL_VARS` in [playwright.config.ts](playwright.config.ts).
+5. Add the same three vars to the `env:` block in both [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml), and provision the corresponding GitHub secrets.
 
 ### Integration Tests
 

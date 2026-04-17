@@ -24,13 +24,14 @@
     "storybook": "pnpm --filter @filone/website storybook",
     "test": "pnpm lint && pnpm --filter @filone/shared --filter @filone/backend --filter @filone/website test",
     "test:storybook": "pnpm --filter @filone/website test:storybook",
-    "test:e2e": "pnpm exec playwright test",
+    "test:e2e": "pnpm exec sst shell -- pnpm exec playwright test",
     "test:integration": "pnpm --filter @filone/integration test"
   },
   "dependencies": {
     "@filone/shared": "workspace:*"
   },
   "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1023.0",
     "@playwright/test": "^1.58.2",
     "@pulumi/aws": "^7.23.0",
     "@pulumi/command": "^1.2.1",
@@ -39,7 +40,7 @@
     "constructs": "^10.6.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
-    "oxfmt": "^0.42.0",
+    "oxfmt": "^0.45.0",
     "oxlint": "^1.57.0",
     "oxlint-plugin-complexity": "^2.1.1",
     "oxlint-tsgolint": "^0.18.1",

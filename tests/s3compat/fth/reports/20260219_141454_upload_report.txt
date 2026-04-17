@@ -1,0 +1,24 @@
+======================================================================
+  Upload
+  Script : upload
+  Run    : 20260219_141454
+======================================================================
+
+SUMMARY
+  Total  : 5
+  OK     : 0
+  Failed : 5
+
+BY OPERATION
+  upload                             0 ok     5 failed  (   5 total)  avg 9.228s  stddev 4.796s  min 0.826s  max 15.167s
+
+ERRORS
+  {"ts": "2026-02-19T22:14:55.777036+00:00", "op": "upload", "status": "err", "key": "gov-data/README.md", "size": 5555, "elapsed_s": 0.826, "source_bucket": "harvard-lil", "target_bucket": "filecoin-foundation-bucket", "status_code": 400, "error_code": "InvalidRequest", "error_message": null, "request_id": "tx0000013ac2227453c6bbf-0069978b5f-214da2d-us-east-1", "host_id": "", "response_body": {"Error": {"Code": "InvalidRequest", "Message": null, "BucketName": "filecoin-foundation-bucket"}, "ResponseMetadata": {"RequestId": "tx0000013ac2227453c6bbf-0069978b5f-214da2d-us-east-1", "HostId": "", "HTTPStatusCode": 400, "HTTPHeaders": {"content-length": "269", "x-amz-request-id": "tx0000013ac2227453c6bbf-0069978b5f-214da2d-us-east-1", "accept-ranges": "bytes", "content-type": "application/xml", "date": "Thu, 19 Feb 2026 22:14:55 GMT"}, "RetryAttempts": 0}}}
+  {"ts": "2026-02-19T22:15:05.811304+00:00", "op": "upload", "status": "err", "key": "gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip", "size": 740853, "elapsed_s": 10.033, "source_bucket": "harvard-lil", "target_bucket": "filecoin-foundation-bucket", "error_type": "SSLError", "error": "SSL validation failed for https://us-east-1.gw.future-tech-holdings.com/filecoin-foundation-bucket/gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip [SYS] unknown error (_ssl.c:2427)"}
+  {"ts": "2026-02-19T22:15:17.754644+00:00", "op": "upload", "status": "err", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-0397e/v1.zip", "size": 21037826, "elapsed_s": 11.941, "source_bucket": "harvard-lil", "target_bucket": "filecoin-foundation-bucket", "error_type": "SSLError", "error": "SSL validation failed for https://us-east-1.gw.future-tech-holdings.com/filecoin-foundation-bucket/gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-0397e/v1.zip [SYS] unknown error (_ssl.c:2427)"}
+  {"ts": "2026-02-19T22:15:32.922927+00:00", "op": "upload", "status": "err", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-54c47/v1.zip", "size": 21082117, "elapsed_s": 15.167, "source_bucket": "harvard-lil", "target_bucket": "filecoin-foundation-bucket", "error_type": "SSLError", "error": "SSL validation failed for https://us-east-1.gw.future-tech-holdings.com/filecoin-foundation-bucket/gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-54c47/v1.zip [SYS] unknown error (_ssl.c:2427)"}
+  {"ts": "2026-02-19T22:15:41.099067+00:00", "op": "upload", "status": "err", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-aa506/v1.zip", "size": 21079670, "elapsed_s": 8.174, "source_bucket": "harvard-lil", "target_bucket": "filecoin-foundation-bucket", "error_type": "SSLError", "error": "SSL validation failed for https://us-east-1.gw.future-tech-holdings.com/filecoin-foundation-bucket/gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-aa506/v1.zip [SYS] unknown error (_ssl.c:2427)"}
+
+Log files:
+  Success : ../logs/20260219_141454_upload_success.jsonl
+  Errors  : ../logs/20260219_141454_upload_errors.jsonl

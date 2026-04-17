@@ -24,11 +24,23 @@
   }
 
   .modal-header {
-    @apply flex items-center justify-between border-b border-(--color-border-base) px-6 py-4;
+    @apply flex items-start justify-between px-6 pt-5 pb-3;
+  }
+
+  .modal-header--with-description {
+    @apply pb-2;
+  }
+
+  .modal-header-content {
+    @apply flex flex-col gap-1;
   }
 
   .modal-header-title {
-    @apply text-base font-semibold text-(--color-text-base);
+    @apply text-base font-medium text-(--color-text-base);
+  }
+
+  .modal-header-description {
+    @apply text-sm text-(--color-paragraph-text-subtle);
   }
 
   .modal-header-close {
@@ -40,10 +52,14 @@
   }
 
   .modal-body {
-    @apply px-6 py-4 text-(--color-paragraph-text);
+    @apply px-6 py-3 text-(--color-paragraph-text);
   }
 
   .modal-footer {
-    @apply flex items-center justify-center gap-3 border-t border-(--color-border-base) px-6 py-4;
+    @apply flex items-center justify-end gap-3 px-6 pt-2 pb-6;
+  }
+
+  .modal-footer--full-width {
+    @apply [&>*]:flex-1;
   }
 }

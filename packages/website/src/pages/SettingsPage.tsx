@@ -291,7 +291,7 @@ export function SettingsPage() {
 
             <div className="flex items-center gap-3">
               <Button
-                variant="filled"
+                variant="primary"
                 onClick={handleSaveProfile}
                 disabled={saveProfileMutation.isPending || !hasChanges}
               >
@@ -350,7 +350,7 @@ export function SettingsPage() {
                   label="Two-factor authentication"
                   description="Add an extra layer of security to your account"
                   action={
-                    <Button variant="ghost" size="compact" disabled>
+                    <Button variant="ghost" disabled>
                       Enable
                     </Button>
                   }
@@ -368,7 +368,6 @@ export function SettingsPage() {
                 action={
                   <Button
                     variant="ghost"
-                    size="compact"
                     onClick={handleChangePassword}
                     disabled={changePasswordMutation.isPending}
                   >

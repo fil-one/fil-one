@@ -1,78 +1,85 @@
 @layer components {
   .button {
-    @apply inline-flex cursor-pointer items-center justify-center gap-2 text-base font-medium transition-all hover:no-underline;
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-md font-medium transition-all hover:no-underline;
 
     &:disabled {
       @apply cursor-not-allowed;
     }
 
+    /* default = md */
+    @apply px-4 py-2 text-sm;
+
+    &.button--sm {
+      @apply px-3 py-1.5 text-xs;
+    }
+
+    &.button--lg {
+      @apply px-5 py-2.5 text-base;
+    }
+
+    /* Balanced padding when icon is present */
+    &.button--icon-left {
+      &.button--sm {
+        @apply pl-2.5;
+      }
+      &.button--md {
+        @apply pl-3;
+      }
+      &.button--lg {
+        @apply pl-4;
+      }
+    }
+
+    &.button--icon-right {
+      &.button--sm {
+        @apply pr-2.5;
+      }
+      &.button--md {
+        @apply pr-3;
+      }
+      &.button--lg {
+        @apply pr-4;
+      }
+    }
+
     &.button--primary {
-      @apply rounded-full border-2 px-6 py-4;
-
-      &:focus {
-        @apply outline-2 outline-offset-0;
-      }
-
-      @apply border-brand-700;
-
-      & .button-custom-icon {
-        @apply text-brand-700;
-      }
+      @apply bg-brand-600 text-white;
 
       &:not(:disabled) {
-        &:hover,
-        &:focus {
-          @apply border-brand-500;
-
-          & .button-custom-icon {
-            @apply text-brand-500;
-          }
+        &:hover {
+          @apply bg-brand-500;
         }
 
         &:focus {
-          @apply outline-brand-400;
+          @apply bg-brand-500 outline-2 outline-offset-2 outline-brand-400;
         }
       }
 
-      .light-section & {
-        @apply bg-white text-zinc-950;
+      &:disabled {
+        @apply bg-zinc-300 text-zinc-500;
+      }
+    }
 
-        & .button-arrow-icon {
-          @apply text-zinc-500;
+    &.button--destructive {
+      @apply bg-red-600 text-white;
+
+      &:not(:disabled) {
+        &:hover {
+          @apply bg-red-500;
         }
 
-        &:disabled {
-          @apply border-zinc-300 bg-zinc-100 text-zinc-400;
-
-          .button-custom-icon {
-            @apply text-zinc-300;
-          }
+        &:focus {
+          @apply bg-red-500 outline-2 outline-offset-2 outline-red-400;
         }
       }
 
-      .gray-section & {
-        @apply bg-gray-200;
-      }
-
-      .dark-section & {
-        @apply bg-zinc-950 text-zinc-50;
-
-        & .button-arrow-icon {
-          @apply text-zinc-300;
-        }
-
-        &:disabled {
-          @apply border-zinc-500 bg-zinc-800 text-zinc-500;
-
-          .button-custom-icon {
-            @apply text-zinc-600;
-          }
-        }
+      &:disabled {
+        @apply bg-zinc-300 text-zinc-500;
       }
     }
 
     &.button--ghost {
-      @apply rounded-md border border-zinc-200 bg-white px-4 py-2 text-zinc-700;
+      @apply border border-zinc-200 bg-white text-zinc-700;
 
       &:focus {
         @apply outline-2 outline-offset-0;
@@ -90,92 +97,144 @@
       }
     }
 
-    &.button--filled {
-      @apply rounded-md px-4 py-2 bg-brand-600 text-white;
+    &.button--tertiary {
+      @apply text-zinc-600;
+
+      & .button-custom-icon {
+        @apply text-zinc-500;
+      }
 
       &:not(:disabled) {
-        &:hover {
-          @apply bg-brand-700;
-        }
-
+        &:hover,
         &:focus {
-          @apply brand-outline bg-brand-700;
+          @apply rounded-md bg-zinc-100 text-zinc-950;
+
+          .button-custom-icon {
+            @apply text-zinc-800;
+          }
         }
       }
 
       &:disabled {
-        @apply bg-zinc-300 text-zinc-500 cursor-not-allowed;
-      }
-    }
+        @apply text-zinc-400;
 
-    &.button--tertiary {
-      &:not(:disabled):focus {
-        @apply decoration-brand-400 underline underline-offset-8 outline-none;
-      }
-
-      .light-section & {
-        @apply text-zinc-600;
-
-        & .button-arrow-icon,
-        & .button-custom-icon {
-          @apply text-zinc-500;
-        }
-
-        &:not(:disabled) {
-          &:hover,
-          &:focus {
-            @apply text-zinc-950;
-
-            .button-arrow-icon,
-            .button-custom-icon {
-              @apply text-zinc-800;
-            }
-          }
-        }
-
-        &:disabled {
-          @apply text-zinc-400;
-
-          .button-arrow-icon,
-          .button-custom-icon {
-            @apply text-zinc-300;
-          }
-        }
-      }
-
-      .dark-section & {
-        @apply text-zinc-300;
-
-        & .button-arrow-icon,
-        & .button-custom-icon {
-          @apply text-zinc-400;
-        }
-
-        &:not(:disabled) {
-          &:hover,
-          &:focus {
-            @apply text-zinc-50;
-
-            .button-arrow-icon,
-            .button-custom-icon {
-              @apply text-zinc-300;
-            }
-          }
-        }
-
-        &:disabled {
-          @apply text-zinc-500;
-
-          .button-arrow-icon,
-          .button-custom-icon {
-            @apply text-zinc-500;
-          }
+        .button-custom-icon {
+          @apply text-zinc-300;
         }
       }
     }
+  }
+}
 
-    &.button--compact {
-      @apply px-4 py-2;
+@layer components {
+  .split-button {
+    @apply inline-flex items-stretch rounded-md font-medium;
+
+    &.split-button--primary {
+      @apply bg-brand-600 text-white;
+
+      & .split-button__main:not(:disabled):hover,
+      & .split-button__caret:not(:disabled):hover {
+        @apply bg-brand-500;
+      }
+
+      & .split-button__main:not(:disabled):focus,
+      & .split-button__caret:not(:disabled):focus {
+        @apply bg-brand-500 outline-2 outline-offset-2 outline-brand-400;
+      }
+
+      & .split-button__divider {
+        @apply bg-white/20;
+      }
+    }
+
+    &.split-button--ghost {
+      @apply border border-zinc-200 bg-white text-zinc-700;
+
+      & .split-button__main:not(:disabled):hover,
+      & .split-button__caret:not(:disabled):hover {
+        @apply bg-zinc-50;
+      }
+
+      & .split-button__divider {
+        @apply bg-zinc-200;
+      }
+    }
+
+    &.split-button--disabled {
+      &.split-button--primary {
+        @apply bg-zinc-300 text-zinc-500;
+      }
+
+      &.split-button--ghost {
+        @apply text-zinc-400;
+      }
+    }
+
+    &.split-button--sm {
+      @apply text-xs;
+
+      & .split-button__main {
+        @apply px-3 py-1.5;
+      }
+      & .split-button__caret {
+        @apply px-1.5;
+      }
+    }
+
+    &.split-button--md {
+      @apply text-sm;
+
+      & .split-button__main {
+        @apply px-4 py-2;
+      }
+      & .split-button__caret {
+        @apply px-2.5;
+      }
+    }
+
+    &.split-button--lg {
+      @apply text-base;
+
+      & .split-button__main {
+        @apply px-5 py-2.5;
+      }
+      & .split-button__caret {
+        @apply px-3;
+      }
+    }
+
+    & .split-button__main {
+      @apply inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-l-md transition-colors;
+
+      &:disabled {
+        @apply cursor-not-allowed;
+      }
+    }
+
+    & .split-button__divider {
+      @apply w-px shrink-0 self-stretch;
+    }
+
+    & .split-button__caret {
+      @apply inline-flex w-full cursor-pointer items-center justify-center rounded-r-md bg-transparent outline-none transition-colors;
+
+      &:disabled {
+        @apply cursor-not-allowed;
+      }
+    }
+
+    & .split-button__menu {
+      @apply absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-md;
+    }
+
+    & .split-button__item {
+      @apply flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-zinc-700 transition-colors;
+
+      &:hover,
+      &[data-focus] {
+        @apply bg-zinc-50 text-zinc-900;
+      }
     }
   }
 }

@@ -1,0 +1,24 @@
+======================================================================
+  Fetch
+  Script : fetch
+  Run    : 20260218_192512
+======================================================================
+
+SUMMARY
+  Total  : 3
+  OK     : 3
+  Failed : 0
+
+BY OPERATION
+  get_object_preview                 1 ok     0 failed  (   1 total)  avg 0.197s  stddev 0.000s  min 0.197s  max 0.197s
+  head_object                        1 ok     0 failed  (   1 total)  avg 0.703s  stddev 0.000s  min 0.703s  max 0.703s
+  list_versions                      1 ok     0 failed  (   1 total)  avg 0.189s  stddev 0.000s  min 0.189s  max 0.189s
+
+SUCCESSES
+  {"ts": "2026-02-19T03:25:12.867036+00:00", "op": "head_object", "status": "ok", "key": "gov-data/collections/data_gov/0-3-meter-backscatter-jpeg-image-with-world-file-of-the-nearshore-seafloor-off-of-avalon-b/v1.zip", "elapsed_s": 0.703, "content_length": 21086222, "content_type": "binary/octet-stream", "last_modified": "2026-02-19 02:37:49+00:00", "etag": "d8e3a59b62bc60dd8a2513fc5ace322c", "version_id": "133b708c-8fb6-438c-a0e3-66b0e7a578d4", "metadata": {}}
+  {"ts": "2026-02-19T03:25:13.063881+00:00", "op": "get_object_preview", "status": "ok", "key": "gov-data/collections/data_gov/0-3-meter-backscatter-jpeg-image-with-world-file-of-the-nearshore-seafloor-off-of-avalon-b/v1.zip", "elapsed_s": 0.197, "content_length": 1024, "content_type": "binary/octet-stream", "etag": "d8e3a59b62bc60dd8a2513fc5ace322c", "version_id": "133b708c-8fb6-438c-a0e3-66b0e7a578d4", "preview_bytes_read": 1024, "preview_hex_sample": "504b03041400000008003b378a5990fa58cb39000000370000000900000062616769742e747874734a4cf72cd10d4b2d2acecccfb35230d0b334e70a494cd775"}
+  {"ts": "2026-02-19T03:25:13.253372+00:00", "op": "list_versions", "status": "ok", "key": "gov-data/collections/data_gov/0-3-meter-backscatter-jpeg-image-with-world-file-of-the-nearshore-seafloor-off-of-avalon-b/v1.zip", "version_count": 1, "versions": [{"version_id": "133b708c-8fb6-438c-a0e3-66b0e7a578d4", "last_modified": "2026-02-19 02:37:49.026000+00:00", "etag": "d8e3a59b62bc60dd8a2513fc5ace322c", "size": 21086222, "is_latest": true}], "elapsed_s": 0.189}
+
+Log files:
+  Success : ../logs/20260218_192512_fetch_success.jsonl
+  Errors  : ../logs/20260218_192512_fetch_errors.jsonl
