@@ -203,7 +203,7 @@ export async function createAuroraAccessKey({
   );
   assert(
     !!createdAt,
-    `Aurora Portal API returned empty access key "createdAt" for tenant ${tenantId}`,
+    `Aurora Portal API returned empty access key "createdAt" for tenant ${tenantId}. Response fields: ${Object.keys(data)}`,
   );
 
   console.log(
