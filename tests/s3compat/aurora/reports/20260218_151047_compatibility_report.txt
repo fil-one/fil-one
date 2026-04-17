@@ -1,0 +1,27 @@
+======================================================================
+  S3 Compatibility Test
+  Script : compatibility_test
+  Run    : 20260218_151047
+======================================================================
+
+SUMMARY
+  Total  : 1
+  OK     : 0
+  Failed : 1
+
+BY CATEGORY
+  s3_core                            0 ok     1 failed  (   1 total)  avg 0.000s  stddev 0.000s  min 0.000s  max 0.000s
+
+TEST RUN
+  Collected : 1
+  Passed    : 0
+  Failed    : 1
+  Error     : 0
+  Skipped   : 0
+  Duration  : 4.8s
+  Marks     : (none)
+  Target    : s3tests/functional/test_s3.py::test_bucket_list_empty
+  Raw JSON  : ../logs/20260218_151047_compatibility_pytest_raw.json
+
+ERRORS
+  {"op": "s3_core", "status": "err", "outcome": "failed", "test": "s3tests/functional/test_s3.py::test_bucket_list_empty", "elapsed_s": 0.0, "longrepr": "s3tests/functional/test_s3.py:109: in test_bucket_list_empty\n    bucket = get_new_bucket_resource()\n             ^^^^^^^^^^^^^^^^^^^^^^^^^\ns3tests/functional/__init__.py:644: in get_new_bucket_resource\n    bucket_location = bucket.create()\n                      ^^^^^^^^^^^^^^^\n../../../../../.pyenv/versions/3.11.5/lib/python3.11/site-packages/boto3/resources/factory.py:581: in do_action\n    response = action(self, *args, **kwargs)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n../../../../../.pyenv/versions/3.11.5/lib/python3.11/site-packages/boto3/resources/action.py:88: in __call__\n    respons"}
