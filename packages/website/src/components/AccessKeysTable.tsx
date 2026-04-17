@@ -4,7 +4,8 @@ import { DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon } from '@phosphor-icons/rea
 
 import { IconBox } from './IconBox';
 
-import type { AccessKey } from '@filone/shared';
+import type { AccessKey, GranularPermission } from '@filone/shared';
+import { GRANULAR_PERMISSION_LABELS } from '@filone/shared';
 
 import { Badge } from './Badge';
 import { Button } from './Button';
@@ -20,6 +21,61 @@ function StatusBadge({ status }: { status: AccessKey['status'] }) {
     <Badge color="grey" size="sm" weight="medium">
       Inactive
     </Badge>
+  );
+}
+
+function PermissionBadge({ permission }: { permission: string }) {
+  return (
+    <span className="rounded-full border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-[10px] font-medium uppercase text-zinc-600">
+      {permission}
+    </span>
+  );
+}
+
+function DataProtectionBadge({
+  granularPermissions,
+}: {
+  granularPermissions: GranularPermission[];
+}) {
+  const [hover, setHover] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const ref = useRef<HTMLSpanElement>(null);
+
+  function handleEnter() {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setPos({ top: rect.bottom + 6, left: rect.left + rect.width / 2 });
+    }
+    setHover(true);
+  }
+
+  return (
+    <span
+      ref={ref}
+      onMouseEnter={handleEnter}
+      onMouseLeave={() => setHover(false)}
+      className="inline-block"
+    >
+      <span className="cursor-default rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+        Data protection
+      </span>
+      {hover && (
+        <div style={{ top: pos.top, left: pos.left }} className="fixed z-50 -translate-x-1/2">
+          <div className="w-max max-w-56 rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-lg">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+              Data protection
+            </p>
+            <ul className="flex flex-col gap-0.5">
+              {granularPermissions.map((g) => (
+                <li key={g} className="text-xs text-zinc-700">
+                  {GRANULAR_PERMISSION_LABELS[g].label}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </span>
   );
 }
 
@@ -190,6 +246,9 @@ export function AccessKeysTable({
                         {p}
                       </Badge>
                     ))}
+                    {(key.granularPermissions ?? []).length > 0 && (
+                      <DataProtectionBadge granularPermissions={key.granularPermissions!} />
+                    )}
                   </div>
                 </td>
               )}

@@ -6,7 +6,9 @@ import type {
   AccessKeyBucketScope,
   AccessKeyPermission,
   CreateAccessKeyResponse,
+  GranularPermission,
 } from '@filone/shared';
+import { GRANULAR_PERMISSION_MAP } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 import { expiresAtFromForm } from '../lib/time.js';
@@ -47,6 +49,7 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
     'list',
     'delete',
   ]);
+  const [granularPermissions, setGranularPermissions] = useState<GranularPermission[]>([]);
   const [bucketScope, setBucketScope] = useState<AccessKeyBucketScope>('all');
   const [selectedBuckets, setSelectedBuckets] = useState<string[]>([]);
   const [expiration, setExpiration] = useState<ExpirationOption>('never');
@@ -57,11 +60,18 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
     setStep('form');
     setKeyName('');
     setPermissions(['read', 'write', 'list', 'delete']);
+    setGranularPermissions([]);
     setBucketScope('all');
     setSelectedBuckets([]);
     setExpiration('never');
     setCustomDate(null);
     setResult(null);
+  }
+
+  function handlePermissionsChange(newPermissions: AccessKeyPermission[]) {
+    setPermissions(newPermissions);
+    const validGranular = new Set(newPermissions.flatMap((p) => GRANULAR_PERMISSION_MAP[p]));
+    setGranularPermissions((prev) => prev.filter((g) => validGranular.has(g)));
   }
 
   function handleClose() {
@@ -73,6 +83,7 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
     mutationFn: (body: {
       keyName: string;
       permissions: AccessKeyPermission[];
+      granularPermissions?: GranularPermission[];
       bucketScope: AccessKeyBucketScope;
       buckets?: string[];
       expiresAt?: string | null;
@@ -97,6 +108,7 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
     createKeyMutation.mutate({
       keyName: keyName.trim(),
       permissions,
+      granularPermissions: granularPermissions.length > 0 ? granularPermissions : undefined,
       bucketScope,
       buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
       expiresAt: expiresAtFromForm(expiration, customDate),
@@ -144,7 +156,12 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
             {/* Permissions */}
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium text-zinc-700">What can this key do?</label>
-              <AccessKeyPermissionsFields value={permissions} onChange={setPermissions} />
+              <AccessKeyPermissionsFields
+                value={permissions}
+                onChange={handlePermissionsChange}
+                granularPermissions={granularPermissions}
+                onGranularPermissionsChange={setGranularPermissions}
+              />
               {permissions.length === 0 && (
                 <p className="text-xs text-red-600">Select at least one permission.</p>
               )}
