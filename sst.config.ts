@@ -63,6 +63,18 @@ export default $config({
       args.runtime = args.runtime ?? 'nodejs24.x';
       args.memory = args.memory ?? '512 MB';
       args.architecture = args.architecture ?? 'arm64';
+
+      // In production, suppress console.log/info/debug — only WARN and above are emitted.
+      if ($app.stage === 'production') {
+        args.transform = args.transform ?? {};
+        args.transform.function = (fnArgs) => {
+          fnArgs.loggingConfig = {
+            logFormat: 'JSON',
+            ...fnArgs.loggingConfig,
+            applicationLogLevel: 'WARN',
+          };
+        };
+      }
     });
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
