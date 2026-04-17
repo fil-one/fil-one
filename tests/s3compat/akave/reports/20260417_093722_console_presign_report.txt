@@ -1,0 +1,108 @@
+======================================================================
+  Console Presigned-URL Test
+  Script : console_presign
+  Run    : 20260417_093722
+======================================================================
+
+SUMMARY
+  Total  : 25
+  OK     : 22
+  Failed : 3
+
+BY OPERATION
+  bucket_cors_apply                  1 ok     0 failed  (   1 total)  (no timing)
+  cleanup_delete                     0 ok     1 failed  (   1 total)  (no timing)
+  execute_deleteObject               1 ok     0 failed  (   1 total)  avg 0.415s  stddev 0.000s  min 0.415s  max 0.415s
+  execute_getObject                  1 ok     0 failed  (   1 total)  avg 0.427s  stddev 0.000s  min 0.427s  max 0.427s
+  execute_getObjectRetention         1 ok     0 failed  (   1 total)  avg 0.439s  stddev 0.000s  min 0.439s  max 0.439s
+  execute_headObject                 1 ok     0 failed  (   1 total)  avg 0.433s  stddev 0.000s  min 0.433s  max 0.433s
+  execute_headObjectFilMeta          1 ok     0 failed  (   1 total)  avg 0.418s  stddev 0.000s  min 0.418s  max 0.418s
+  execute_listObjects                1 ok     0 failed  (   1 total)  avg 0.428s  stddev 0.000s  min 0.428s  max 0.428s
+  execute_putObject                  1 ok     0 failed  (   1 total)  avg 0.469s  stddev 0.000s  min 0.469s  max 0.469s
+  preflight_deleteObject             0 ok     1 failed  (   1 total)  avg 0.421s  stddev 0.000s  min 0.421s  max 0.421s
+  preflight_putObject                0 ok     1 failed  (   1 total)  avg 0.408s  stddev 0.000s  min 0.408s  max 0.408s
+  presign_deleteObject               1 ok     0 failed  (   1 total)  avg 0.001s  stddev 0.000s  min 0.001s  max 0.001s
+  presign_getObject                  1 ok     0 failed  (   1 total)  avg 0.001s  stddev 0.000s  min 0.001s  max 0.001s
+  presign_getObjectRetention         1 ok     0 failed  (   1 total)  avg 0.002s  stddev 0.000s  min 0.002s  max 0.002s
+  presign_headObject                 1 ok     0 failed  (   1 total)  avg 0.002s  stddev 0.000s  min 0.002s  max 0.002s
+  presign_headObjectFilMeta          1 ok     0 failed  (   1 total)  avg 0.001s  stddev 0.000s  min 0.001s  max 0.001s
+  presign_listObjects                1 ok     0 failed  (   1 total)  avg 0.002s  stddev 0.000s  min 0.002s  max 0.002s
+  presign_putObject                  1 ok     0 failed  (   1 total)  avg 0.002s  stddev 0.000s  min 0.002s  max 0.002s
+  response_cors_deleteObject         1 ok     0 failed  (   1 total)  (no timing)
+  response_cors_getObject            1 ok     0 failed  (   1 total)  (no timing)
+  response_cors_getObjectRetention     1 ok     0 failed  (   1 total)  (no timing)
+  response_cors_headObject           1 ok     0 failed  (   1 total)  (no timing)
+  response_cors_headObjectFilMeta     1 ok     0 failed  (   1 total)  (no timing)
+  response_cors_listObjects          1 ok     0 failed  (   1 total)  (no timing)
+  response_cors_putObject            1 ok     0 failed  (   1 total)  (no timing)
+
+TEST RUN
+  Provider         : akave
+  Endpoint         : https://o3-rc3.akave.xyz
+  Bucket           : mbx-2024-04-15-1
+  Test key         : console-presign-test/700900c1-5465-4052-8987-34d65a7e387f/probe.txt
+  Browser origin   : https://app.fil.one
+  Presign expiry   : 300s
+  CORS applied     : yes (via put_bucket_cors)
+
+BUCKET CORS CONFIGURATION (at test start)
+  [
+    {
+      "ID": "",
+      "AllowedHeaders": [
+        "*"
+      ],
+      "AllowedMethods": [
+        "GET",
+        "HEAD",
+        "PUT",
+        "POST",
+        "DELETE"
+      ],
+      "AllowedOrigins": [
+        "https://app.fil.one"
+      ],
+      "ExposeHeaders": [
+        "etag",
+        "content-length",
+        "content-type",
+        "last-modified",
+        "x-fil-cid",
+        "x-amz-meta-filename"
+      ],
+      "MaxAgeSeconds": 3000
+    }
+  ]
+
+SUCCESSES
+  {"ts": "2026-04-17T07:37:22.865131+00:00", "op": "bucket_cors_apply", "status": "ok", "bucket": "mbx-2024-04-15-1", "allowed_origins": ["https://app.fil.one"], "allowed_methods": ["GET", "HEAD", "PUT", "POST", "DELETE"], "expose_headers": ["etag", "content-length", "content-type", "last-modified", "x-fil-cid", "x-amz-meta-filename"]}
+  {"ts": "2026-04-17T07:37:23.013610+00:00", "op": "presign_putObject", "status": "ok", "elapsed_s": 0.002, "s3_op": "put_object", "http_method": "PUT", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-17T07:37:23.892074+00:00", "op": "execute_putObject", "status": "ok", "elapsed_s": 0.469, "status_code": 200, "response_body_sample": null, "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "etag": "\"P6b2HkBitmTiSBH11gRemw==\"", "x-amz-expected-bucket-owner": "69df8f5f531de1dabd05a324", "x-amz-object-size": "41", "x-amz-version-id": "V1", "date": "Fri, 17 Apr 2026 07:37:23 GMT", "content-length": "0"}}
+  {"ts": "2026-04-17T07:37:23.892826+00:00", "op": "response_cors_putObject", "status": "ok", "status_code": 200, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-17T07:37:23.896318+00:00", "op": "presign_listObjects", "status": "ok", "elapsed_s": 0.002, "s3_op": "list_objects_v2", "http_method": "GET", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-17T07:37:24.324359+00:00", "op": "execute_listObjects", "status": "ok", "elapsed_s": 0.428, "status_code": 200, "response_body_sample": "<ListBucketResult><Contents><ETag>&#34;P6b2HkBitmTiSBH11gRemw==&#34;</ETag><Key>console-presign-test%2F700900c1-5465-4052-8987-34d65a7e387f%2Fprobe.txt</Key><LastModified>2026-04-17T07:37:23.772Z</LastModified><Size>41</Size><StorageClass>default</StorageClass></Contents><EncodingType>url</EncodingType><IsTruncated>false</IsTruncated><KeyCount>1</KeyCount><MaxKeys>10</MaxKeys><Name>mbx-2024-04-15-", "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "content-type": "application/xml; charset=utf-8", "x-amz-expected-bucket-owner": "69df8f5f531de1dabd05a324", "date": "Fri, 17 Apr 2026 07:37:24 GMT", "content-length": "515"}}
+  {"ts": "2026-04-17T07:37:24.325378+00:00", "op": "response_cors_listObjects", "status": "ok", "status_code": 200, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-17T07:37:24.329028+00:00", "op": "presign_headObject", "status": "ok", "elapsed_s": 0.002, "s3_op": "head_object", "http_method": "HEAD", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-17T07:37:24.762430+00:00", "op": "execute_headObject", "status": "ok", "elapsed_s": 0.433, "status_code": 200, "response_body_sample": null, "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "content-length": "41", "content-type": "text/plain; charset=utf-8", "etag": "\"P6b2HkBitmTiSBH11gRemw==\"", "last-modified": "Fri, 17 Apr 2026 07:37:23 GMT", "x-amz-checksum-type": "FULL_OBJECT", "x-amz-expected-bucket-owner": "69df8f5f531de1dabd05a324", "x-amz-meta-filename": "probe.txt", "x-amz-meta-network-file-name": "console-presign-test/700900c1-5465-4052-8987-34d65a7e387f/probe.txt/V1/R1", "x-amz-meta-network-processed": "0", "x-amz-meta-network-root-cid": "", "x-amz-meta-network-state": "none", "x-amz-missing-meta": "0", "x-amz-mp-parts-count": "0", "x-amz-server-side-encryption": "AES256", "x-amz-storage-class": "default", "x-amz-version-id": "V1", "date": "Fri, 17 Apr 2026 07:37:24 GMT"}}
+  {"ts": "2026-04-17T07:37:24.763756+00:00", "op": "response_cors_headObject", "status": "ok", "status_code": 200, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-17T07:37:24.767552+00:00", "op": "presign_headObjectFilMeta", "status": "ok", "elapsed_s": 0.001, "s3_op": "head_object", "http_method": "HEAD", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": true}
+  {"ts": "2026-04-17T07:37:25.185823+00:00", "op": "execute_headObjectFilMeta", "status": "ok", "elapsed_s": 0.418, "status_code": 200, "response_body_sample": null, "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "content-length": "41", "content-type": "text/plain; charset=utf-8", "etag": "\"P6b2HkBitmTiSBH11gRemw==\"", "last-modified": "Fri, 17 Apr 2026 07:37:23 GMT", "x-amz-checksum-type": "FULL_OBJECT", "x-amz-expected-bucket-owner": "69df8f5f531de1dabd05a324", "x-amz-meta-filename": "probe.txt", "x-amz-meta-network-file-name": "console-presign-test/700900c1-5465-4052-8987-34d65a7e387f/probe.txt/V1/R1", "x-amz-meta-network-processed": "0", "x-amz-meta-network-root-cid": "", "x-amz-meta-network-state": "none", "x-amz-missing-meta": "0", "x-amz-mp-parts-count": "0", "x-amz-server-side-encryption": "AES256", "x-amz-storage-class": "default", "x-amz-version-id": "V1", "date": "Fri, 17 Apr 2026 07:37:25 GMT"}}
+  {"ts": "2026-04-17T07:37:25.186603+00:00", "op": "response_cors_headObjectFilMeta", "status": "ok", "status_code": 200, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-17T07:37:25.190926+00:00", "op": "presign_getObject", "status": "ok", "elapsed_s": 0.001, "s3_op": "get_object", "http_method": "GET", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-17T07:37:25.618679+00:00", "op": "execute_getObject", "status": "ok", "elapsed_s": 0.427, "status_code": 200, "response_body_sample": "FilOne Console presigned-URL smoke test.\n", "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "content-length": "41", "content-type": "text/plain", "etag": "\"P6b2HkBitmTiSBH11gRemw==\"", "last-modified": "Fri, 17 Apr 2026 07:37:23 GMT", "x-amz-expected-bucket-owner": "69df8f5f531de1dabd05a324", "x-amz-meta-filename": "probe.txt", "x-amz-meta-network-file-name": "console-presign-test/700900c1-5465-4052-8987-34d65a7e387f/probe.txt/V1/R1", "x-amz-meta-network-processed": "0", "x-amz-meta-network-root-cid": "", "x-amz-meta-network-state": "none", "x-amz-missing-meta": "0", "x-amz-mp-parts-count": "0", "x-amz-server-side-encryption": "AES256", "x-amz-storage-class": "default", "x-amz-tagging-count": "0", "x-amz-version-id": "V1", "date": "Fri, 17 Apr 2026 07:37:25 GMT"}}
+  {"ts": "2026-04-17T07:37:25.619806+00:00", "op": "response_cors_getObject", "status": "ok", "status_code": 200, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-17T07:37:25.623795+00:00", "op": "presign_getObjectRetention", "status": "ok", "elapsed_s": 0.002, "s3_op": "get_object_retention", "http_method": "GET", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-17T07:37:26.063408+00:00", "op": "execute_getObjectRetention", "status": "ok", "note": "acceptable S3 error (pipeline still validated)", "elapsed_s": 0.439, "status_code": 404, "response_body_sample": "<Error><Code>NoSuchKey</Code><Message>The specified object does not have a retention configuration.</Message><Reason>mongo: no documents in result</Reason><Resource></Resource><RequestId></RequestId><HostId></HostId></Error>", "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "connection": "close", "content-type": "application/xml; charset=utf-8", "x-amz-expected-bucket-owner": "69df8f5f531de1dabd05a324", "x-amz-version-id": "V1", "date": "Fri, 17 Apr 2026 07:37:25 GMT", "transfer-encoding": "chunked"}}
+  {"ts": "2026-04-17T07:37:26.064354+00:00", "op": "response_cors_getObjectRetention", "status": "ok", "status_code": 404, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-17T07:37:26.067866+00:00", "op": "presign_deleteObject", "status": "ok", "elapsed_s": 0.001, "s3_op": "delete_object", "http_method": "DELETE", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-17T07:37:26.904803+00:00", "op": "execute_deleteObject", "status": "ok", "elapsed_s": 0.415, "status_code": 204, "response_body_sample": null, "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "x-amz-delete-marker": "true", "x-amz-expected-bucket-owner": "69df8f5f531de1dabd05a324", "x-amz-version-id": "V2", "date": "Fri, 17 Apr 2026 07:37:26 GMT"}}
+  {"ts": "2026-04-17T07:37:26.905664+00:00", "op": "response_cors_deleteObject", "status": "ok", "status_code": 204, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+
+ERRORS
+  {"ts": "2026-04-17T07:37:23.422120+00:00", "op": "preflight_putObject", "status": "err", "error_code": "PreflightFailed", "error_message": "CORS preflight did not permit the request", "elapsed_s": 0.408, "request_method": "PUT", "request_headers": ["Content-Type", "x-amz-meta-filename"], "status_code": 403, "response_headers_lower": {"connection": "close", "content-type": "application/xml; charset=utf-8", "date": "Fri, 17 Apr 2026 07:37:23 GMT", "transfer-encoding": "chunked"}, "response_body_sample": "<Error><Code>SignatureDoesNotMatch</Code><Message>The request signature that the server calculated does not match the signature that you provided. Check your AWS secret access key and signing method. For more information, see REST Authentication and SOAP Authentication.</Message><Reason>signature mismatch: provided=1d413b5112d9a6acd9250956e228a793acc27b0f2ca0d61b46889c8ee3170347</Reason><Resource>", "allow_origin": "", "allow_methods": [], "allow_headers": [], "missing_request_headers": ["Content-Type", "x-amz-meta-filename"], "status_ok": false, "origin_ok": false, "method_ok": false, "headers_ok": false}
+  {"ts": "2026-04-17T07:37:26.489245+00:00", "op": "preflight_deleteObject", "status": "err", "error_code": "PreflightFailed", "error_message": "CORS preflight did not permit the request", "elapsed_s": 0.421, "request_method": "DELETE", "request_headers": [], "status_code": 403, "response_headers_lower": {"connection": "close", "content-type": "application/xml; charset=utf-8", "date": "Fri, 17 Apr 2026 07:37:26 GMT", "transfer-encoding": "chunked"}, "response_body_sample": "<Error><Code>SignatureDoesNotMatch</Code><Message>The request signature that the server calculated does not match the signature that you provided. Check your AWS secret access key and signing method. For more information, see REST Authentication and SOAP Authentication.</Message><Reason>signature mismatch: provided=60390e9bf614043f70a3f6ffc238f88d5a434d4d6100267f712a0212891cfb92</Reason><Resource>", "allow_origin": "", "allow_methods": [], "allow_headers": [], "missing_request_headers": [], "status_ok": false, "origin_ok": false, "method_ok": false, "headers_ok": true}
+  {"ts": "2026-04-17T07:37:27.050174+00:00", "op": "cleanup_delete", "status": "err", "bucket": "mbx-2024-04-15-1", "key": "console-presign-test/700900c1-5465-4052-8987-34d65a7e387f/probe.txt", "status_code": 404, "error_code": "NoSuchKey", "error_message": "The specified key does not exist.", "request_id": null, "host_id": null, "response_body": {"Error": {"Code": "NoSuchKey", "Message": "The specified key does not exist.", "Reason": null, "Resource": null}, "ResponseMetadata": {"HTTPStatusCode": 404, "HTTPHeaders": {"connection": "close", "content-type": "application/xml; charset=utf-8", "x-amz-delete-marker": "true", "x-amz-expected-bucket-owner": "69df8f5f531de1dabd05a324", "x-amz-version-id": "V2", "date": "Fri, 17 Apr 2026 07:37:26 GMT", "transfer-encoding": "chunked"}, "RetryAttempts": 0}}}
+
+Log files:
+  Success : ../logs/20260417_093722_console_presign_success.jsonl
+  Errors  : ../logs/20260417_093722_console_presign_errors.jsonl
