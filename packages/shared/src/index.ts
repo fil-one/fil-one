@@ -37,6 +37,8 @@ export {
   ConfirmOrgSchema,
   ORG_NAME_MIN_LENGTH,
   ORG_NAME_MAX_LENGTH,
+  ORG_NAME_PATTERN,
+  ORG_NAME_DISALLOWED_CHARS,
 } from './api/org.js';
 export { ApiErrorCode } from './api/coreInterfaces.js';
 export type { ErrorResponse } from './api/coreInterfaces.js';
@@ -48,6 +50,7 @@ export type {
   CreateBucketResponse,
   GetBucketResponse,
   DeleteBucketRequest,
+  BucketAnalyticsResponse,
 } from './api/buckets.js';
 
 export {
@@ -68,13 +71,19 @@ export type {
   ListObjectsRequest,
   ListObjectsResponse,
   DeleteObjectRequest,
-  PresignUploadRequest,
-  PresignUploadResponse,
   ObjectMetadataResponse,
   ObjectRetentionInfo,
 } from './api/objects.js';
 
-export { PresignUploadSchema, HeadObjectQuerySchema } from './api/objects.js';
+export type {
+  PresignOp,
+  PresignRequest,
+  PresignHttpMethod,
+  PresignResponseItem,
+  PresignResponse,
+} from './api/presign.js';
+
+export { PresignOpSchema, PresignRequestSchema } from './api/presign.js';
 
 export {
   ACCESS_KEY_PERMISSIONS,

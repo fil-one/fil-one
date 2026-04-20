@@ -13,6 +13,8 @@ export interface UserInfo {
 export interface AuthenticatedEvent extends APIGatewayProxyEventV2 {
   requestContext: APIGatewayProxyEventV2['requestContext'] & {
     userInfo: UserInfo;
+    /** Set by subscriptionGuardMiddleware after resolving the billing record. */
+    subscriptionStatus?: string;
   };
 }
 

@@ -268,20 +268,52 @@ describe('POST /api/org/confirm handler', () => {
     expect(mockCreateBillingTrial).not.toHaveBeenCalled();
   });
 
-  it('sanitizes HTML in orgName', async () => {
+  it('returns 400 when orgName contains HTML special characters', async () => {
     const event = confirmOrgEvent({ orgName: '<script>alert("xss")</script>Acme' });
     event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
 
     const result = await handler(event, buildContext());
 
-    expect(result).toMatchObject({ statusCode: 200 });
+    expect(result).toMatchObject({ statusCode: 400 });
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(mockCreateBillingTrial).not.toHaveBeenCalled();
+  });
 
-    // The sanitized name should have HTML entities escaped
+  it('returns 400 when orgName contains special characters', async () => {
+    const event = confirmOrgEvent({ orgName: 'Acme @Corp!' });
+    event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
+
+    const result = await handler(event, buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 400,
+      body: expect.stringContaining('letters, numbers, spaces, hyphens, and periods'),
+    });
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(mockCreateBillingTrial).not.toHaveBeenCalled();
+  });
+
+  it('accepts orgName with dots and hyphens', async () => {
+    ddbMock.on(UpdateItemCommand).resolves({
+      Attributes: {
+        pk: { S: `ORG#${MOCK_ORG_ID}` },
+        sk: { S: 'PROFILE' },
+        name: { S: 'Acme-Corp Inc.' },
+        orgConfirmed: { BOOL: true },
+        setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+      },
+    });
+
+    const event = confirmOrgEvent({ orgName: 'Acme-Corp Inc.' });
+    event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
+
+    const result = await handler(event, buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(1);
-    const savedName = updateCalls[0].args[0].input.ExpressionAttributeValues![':name'].S!;
-    expect(savedName).not.toContain('<script>');
-    expect(savedName).toContain('&lt;');
   });
 
   it('trims whitespace from orgName', async () => {

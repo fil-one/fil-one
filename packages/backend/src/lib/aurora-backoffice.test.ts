@@ -5,6 +5,7 @@ import {
   getStorageSamples,
   createAuroraTenantApiKey,
   updateTenantStatus,
+  getBucketStorageSamples,
 } from './aurora-backoffice.js';
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,7 @@ const mockPostTokens = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-aurora-client');
 const mockGetStorage = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockSetTenantStatus = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockGetBucketStorageMetrics = vi.fn((_options: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/aurora-backoffice-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
@@ -37,6 +39,8 @@ vi.mock('@filone/aurora-backoffice-client', () => ({
   setupTenant: (options: Record<string, unknown>) => mockPostSetup(options),
   createTenantToken: (options: Record<string, unknown>) => mockPostTokens(options),
   setTenantStatus: (options: Record<string, unknown>) => mockSetTenantStatus(options),
+  getBucketStorageMetrics: (options: Record<string, unknown>) =>
+    mockGetBucketStorageMetrics(options),
 }));
 
 process.env.AURORA_BACKOFFICE_URL = 'https://api.backoffice.test.example.com/api';
@@ -311,6 +315,65 @@ describe('getStorageSamples', () => {
         to: '2024-01-02T00:00:00Z',
       }),
     ).rejects.toThrow('Aurora storage API failed for tenant tenant-1');
+  });
+});
+
+describe('getBucketStorageSamples', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns samples on success', async () => {
+    const mockSamples = [
+      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1000, objectCount: 10 },
+      { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 2000, objectCount: 20 },
+    ];
+    mockGetBucketStorageMetrics.mockResolvedValue({
+      data: { samples: mockSamples },
+      error: undefined,
+    });
+
+    const result = await getBucketStorageSamples({
+      bucketName: 'my-bucket',
+      from: '2024-01-01T00:00:00Z',
+      to: '2024-01-02T00:00:00Z',
+      window: '1h',
+    });
+
+    expect(result).toEqual(mockSamples);
+    expect(mockGetBucketStorageMetrics).toHaveBeenCalledWith({
+      client: 'mock-aurora-client',
+      path: { partnerId: 'test-partner', bucketName: 'my-bucket' },
+      query: { from: '2024-01-01T00:00:00Z', to: '2024-01-02T00:00:00Z', window: '1h' },
+      throwOnError: false,
+    });
+  });
+
+  it('returns empty array when data has no samples', async () => {
+    mockGetBucketStorageMetrics.mockResolvedValue({ data: {}, error: undefined });
+
+    const result = await getBucketStorageSamples({
+      bucketName: 'my-bucket',
+      from: '2024-01-01T00:00:00Z',
+      to: '2024-01-02T00:00:00Z',
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it('throws when the Aurora API returns an error', async () => {
+    mockGetBucketStorageMetrics.mockResolvedValue({
+      data: undefined,
+      error: { message: 'Not found' },
+    });
+
+    await expect(
+      getBucketStorageSamples({
+        bucketName: 'my-bucket',
+        from: '2024-01-01T00:00:00Z',
+        to: '2024-01-02T00:00:00Z',
+      }),
+    ).rejects.toThrow('Aurora bucket storage API failed for bucket my-bucket');
   });
 });
 

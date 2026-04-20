@@ -2,11 +2,11 @@ import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { getS3Endpoint, S3_REGION } from '@filone/shared';
-import type { ErrorResponse } from '@filone/shared';
+import type { BucketAnalyticsResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
+import { createClient, getBucketInfo } from '@filone/aurora-portal-client';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraS3Credentials, getPresignedGetObjectUrl } from '../lib/aurora-s3-client.js';
+import { getAuroraPortalApiKey } from '../lib/aurora-portal.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -14,33 +14,20 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+import { getBucketStorageSamples } from '../lib/aurora-backoffice.js';
 
 const dynamo = getDynamoClient();
-const PRESIGN_EXPIRY_SECONDS = 300;
 
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  const { orgId } = getUserInfo(event);
   const bucketName = event.pathParameters?.name;
-  const objectKey = event.queryStringParameters?.key;
 
   if (!bucketName) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: 'Missing bucket name in path' })
-      .build();
+    return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
   }
 
-  if (!objectKey) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: 'Missing object key query parameter' })
-      .build();
-  }
-
-  const { orgId } = getUserInfo(event);
-
-  // Look up org profile to get auroraTenantId
   const { Item: orgProfile } = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
@@ -60,19 +47,51 @@ export async function baseHandler(
       .build();
   }
 
+  // Verify bucket belongs to this tenant before fetching partner-level metrics
+  const baseUrl = process.env.AURORA_PORTAL_URL!;
   const stage = process.env.FILONE_STAGE!;
-  const gatewayUrl = getS3Endpoint(S3_REGION, stage);
+  const apiKey = await getAuroraPortalApiKey(stage, auroraTenantId);
 
-  const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
-  const url = await getPresignedGetObjectUrl({
-    endpointUrl: gatewayUrl,
-    credentials,
-    bucket: bucketName,
-    key: objectKey,
-    expiresIn: PRESIGN_EXPIRY_SECONDS,
+  const portalClient = createClient({
+    baseUrl,
+    headers: { 'X-Api-Key': apiKey },
   });
 
-  return new ResponseBuilder().status(200).body({ url }).build();
+  const { error: bucketError, response: bucketResponse } = await getBucketInfo({
+    client: portalClient,
+    path: { tenantId: auroraTenantId, bucketName },
+    throwOnError: false,
+  });
+
+  if (bucketError) {
+    if (bucketResponse?.status === 404) {
+      return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
+    }
+    throw new Error(
+      `Failed to verify bucket "${bucketName}" ownership for tenant ${auroraTenantId}`,
+      { cause: bucketError },
+    );
+  }
+
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime());
+  thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
+
+  const samples = await getBucketStorageSamples({
+    bucketName,
+    from: thirtyDaysAgo.toISOString(),
+    to: now.toISOString(),
+    window: '720h',
+  });
+
+  const latest = samples.at(-1);
+
+  const response: BucketAnalyticsResponse = {
+    objectCount: latest?.objectCount ?? 0,
+    bytesUsed: latest?.bytesUsed ?? 0,
+  };
+
+  return new ResponseBuilder().status(200).body(response).build();
 }
 
 export const handler = middy(baseHandler)

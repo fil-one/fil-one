@@ -86,6 +86,7 @@ export async function baseHandler(
     region: S3_REGION,
     createdAt: data.createdAt,
     isPublic: false,
+    objectLockEnabled: data.objectLock ?? false,
   };
 
   return new ResponseBuilder().status(200).body<GetBucketResponse>({ bucket }).build();
