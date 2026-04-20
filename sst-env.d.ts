@@ -114,6 +114,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "GetBucketAnalytics": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "GetMe": {
       "name": string
       "type": "sst.aws.Function"
