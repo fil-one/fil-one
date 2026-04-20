@@ -101,3 +101,8 @@ export interface GetBucketResponse {
 export interface DeleteBucketRequest {
   bucketName: string;
 }
+
+export interface BucketAnalyticsResponse {
+  objectCount: number;
+  bytesUsed: number;
+}

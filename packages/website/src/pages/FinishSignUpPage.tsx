@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { confirmOrg, logout } from '../lib/api.js';
+import { ORG_NAME_PATTERN, ORG_NAME_MIN_LENGTH, ORG_NAME_MAX_LENGTH } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 import { queryKeys } from '../lib/query-client.js';
 
@@ -24,12 +25,18 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
       setError('Organization name is required.');
       return;
     }
-    if (trimmed.length < 2) {
-      setError('Organization name must be at least 2 characters.');
+    if (trimmed.length < ORG_NAME_MIN_LENGTH) {
+      setError(`Organization name must be at least ${ORG_NAME_MIN_LENGTH} characters.`);
       return;
     }
-    if (trimmed.length > 100) {
-      setError('Organization name must be at most 100 characters.');
+    if (trimmed.length > ORG_NAME_MAX_LENGTH) {
+      setError(`Organization name must be at most ${ORG_NAME_MAX_LENGTH} characters.`);
+      return;
+    }
+    if (!ORG_NAME_PATTERN.test(trimmed)) {
+      setError(
+        'Organization name can only contain letters, numbers, spaces, hyphens, and periods.',
+      );
       return;
     }
 

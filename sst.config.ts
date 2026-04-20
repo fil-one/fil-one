@@ -545,6 +545,13 @@ export default $config({
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '512 MB',
     });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/buckets/{name}/analytics',
+      handler: 'get-bucket-analytics',
+      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: auroraEnv,
+    });
 
     // ── Auth routes ──────────────────────────────────────────────────
     const allowedRedirectOrigins = allowedOrigins.join(',');
@@ -713,9 +720,9 @@ export default $config({
       ],
     });
 
-    new sst.aws.Cron('UsageReportingCron', {
-      // run the Lambda every day at 6:00 AM UTC.
-      schedule: 'cron(0 6 * * ? *)',
+    new sst.aws.CronV2('UsageReportingCron', {
+      // run the Lambda every 12 hours (07:00 and 19:00 UTC).
+      schedule: 'cron(0 7/12 * * ? *)',
       function: usageOrchestrator.arn,
     });
 
@@ -728,9 +735,9 @@ export default $config({
       memory: '256 MB',
     });
 
-    new sst.aws.Cron('GracePeriodEnforcerCron', {
-      // run the Lambda every day at 7:00 AM UTC (one hour after usage reporting).
-      schedule: 'cron(0 7 * * ? *)',
+    new sst.aws.CronV2('GracePeriodEnforcerCron', {
+      // run the Lambda every 12 hours, one hour after usage reporting (08:00 and 20:00 UTC).
+      schedule: 'cron(0 8/12 * * ? *)',
       function: gracePeriodEnforcer.arn,
     });
 
