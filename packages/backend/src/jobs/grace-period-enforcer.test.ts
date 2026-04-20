@@ -329,4 +329,85 @@ describe('grace-period-enforcer', () => {
     expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(2);
     expect(mockUpdateTenantStatus).toHaveBeenCalledTimes(1);
   });
+
+  // -----------------------------------------------------------------------
+  // Idempotency — running twice
+  // -----------------------------------------------------------------------
+  describe('idempotency — running twice', () => {
+    it('expired grace period — second run finds no candidates after first run canceled', async () => {
+      // First scan: record has grace_period status. Second scan: record is now
+      // 'canceled' (set by first run), so the FilterExpression excludes it.
+      ddbMock
+        .on(ScanCommand)
+        .resolvesOnce({
+          Items: [
+            buildBillingItem({
+              subscriptionStatus: SubscriptionStatus.GracePeriod,
+              gracePeriodEndsAt: pastDate(1),
+            }),
+          ],
+        })
+        .resolvesOnce({ Items: [] });
+      setupOrgProfile();
+
+      await handler();
+      await handler();
+
+      // Aurora DISABLED called only on first run
+      expect(mockUpdateTenantStatus).toHaveBeenCalledTimes(1);
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: MOCK_AURORA_TENANT_ID,
+        status: 'DISABLED',
+      });
+
+      // UpdateItemCommands: 2 from first run (setOrgAuroraTenantStatus + subscription cancel), 0 from second
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(2);
+    });
+
+    it('non-expired grace period — second run skips write_lock when already WRITE_LOCKED', async () => {
+      // Both scans return the same grace_period item (write_lock doesn't change subscriptionStatus)
+      ddbMock.on(ScanCommand).resolves({
+        Items: [
+          buildBillingItem({
+            subscriptionStatus: SubscriptionStatus.GracePeriod,
+            gracePeriodEndsAt: futureDate(5),
+          }),
+        ],
+      });
+
+      // First run: profile has no auroraTenantStatus → triggers WRITE_LOCK
+      // Second run: profile shows WRITE_LOCKED (set by first run) → skipped
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolvesOnce({
+          Item: marshall({
+            auroraTenantId: MOCK_AURORA_TENANT_ID,
+            setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+          }),
+        })
+        .resolvesOnce({
+          Item: marshall({
+            auroraTenantId: MOCK_AURORA_TENANT_ID,
+            setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+            auroraTenantStatus: 'WRITE_LOCKED',
+          }),
+        });
+
+      await handler();
+      await handler();
+
+      // Aurora called only on first run
+      expect(mockUpdateTenantStatus).toHaveBeenCalledTimes(1);
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: MOCK_AURORA_TENANT_ID,
+        status: 'WRITE_LOCKED',
+      });
+
+      // Only 1 UpdateItemCommand from first run's setOrgAuroraTenantStatus; second run skips entirely
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+    });
+  });
 });

@@ -276,4 +276,104 @@ describe('usage-reporting-worker', () => {
       expect(item.lockAction).toEqual({ S: 'error:Aurora down' });
     });
   });
+
+  // -----------------------------------------------------------------------
+  // Idempotency — running twice
+  // -----------------------------------------------------------------------
+  describe('idempotency — running twice', () => {
+    it('Stripe meter event is created on every run', async () => {
+      // When the orchestrator runs twice per day
+      // Each worker invocation reports usage to Stripe independently.
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
+      ]);
+
+      await handler(basePayload);
+      await handler(basePayload);
+
+      expect(mockMeterEventsCreate).toHaveBeenCalledTimes(2);
+      // Both calls report the same usage value
+      for (const call of mockMeterEventsCreate.mock.calls) {
+        expect(call[0].payload.stripe_customer_id).toBe('cus_123');
+        expect(call[0].payload.value).toBe('1000');
+      }
+    });
+
+    it('DynamoDB audit record uses same pk/sk on both runs (safe overwrite)', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
+      ]);
+
+      await handler(basePayload);
+      await handler(basePayload);
+
+      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      expect(putCalls).toHaveLength(2);
+      // Both writes target the same key — PutItem overwrites safely
+      for (const call of putCalls) {
+        const item = call.args[0].input.Item!;
+        expect(item.pk).toEqual({ S: 'ORG#org-1' });
+        expect(item.sk).toEqual({ S: 'USAGE_REPORT#2024-01-15' });
+        expect(item.reportedToStripe).toEqual({ BOOL: true });
+      }
+    });
+
+    it('zero usage — Stripe not called on either run, audit written twice', async () => {
+      mockGetStorageSamples.mockResolvedValue([]);
+
+      await handler(basePayload);
+      await handler(basePayload);
+
+      expect(mockMeterEventsCreate).not.toHaveBeenCalled();
+      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      expect(putCalls).toHaveLength(2);
+      for (const call of putCalls) {
+        expect(call.args[0].input.Item!.reportedToStripe).toEqual({ BOOL: false });
+      }
+    });
+
+    it('trial enforcement skips Aurora update on second run when status already matches', async () => {
+      const trialPayload: UsageReportingWorkerPayload = {
+        ...basePayload,
+        subscriptionStatus: 'trialing',
+      };
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }, // exceeds trial limit
+      ]);
+      mockGetOperationsSamples.mockResolvedValue([]);
+
+      // First run: tenant is ACTIVE → should update to WRITE_LOCKED
+      mockGetTenantInfo.mockResolvedValueOnce({ status: 'ACTIVE' });
+      await handler(trialPayload);
+
+      // Second run: tenant is now WRITE_LOCKED (set by first run) → skip update
+      mockGetTenantInfo.mockResolvedValueOnce({ status: 'WRITE_LOCKED' });
+      await handler(trialPayload);
+
+      expect(mockUpdateTenantStatus).toHaveBeenCalledTimes(1);
+      expect(mockSetOrgAuroraTenantStatus).toHaveBeenCalledTimes(1);
+      // Both audit records still written
+      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      expect(putCalls).toHaveLength(2);
+      expect(putCalls[0].args[0].input.Item!.lockAction).toEqual({ S: 'WRITE_LOCKED' });
+      expect(putCalls[1].args[0].input.Item!.lockAction).toEqual({ S: 'WRITE_LOCKED' });
+    });
+
+    it('paid user — no tenant enforcement on either run', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
+      ]);
+
+      await handler(basePayload);
+      await handler(basePayload);
+
+      expect(mockGetTenantInfo).not.toHaveBeenCalled();
+      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      expect(putCalls).toHaveLength(2);
+      for (const call of putCalls) {
+        expect(call.args[0].input.Item!.lockAction).toEqual({ S: 'skipped:paid' });
+      }
+    });
+  });
 });
