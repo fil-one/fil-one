@@ -31,6 +31,24 @@ describe('suggestOrgName', () => {
     });
   });
 
+  describe('public email domains — strips special characters', () => {
+    it.each([
+      ['john+test@gmail.com', 'Johntest'],
+      ['alice_bob@gmail.com', 'Alicebob'],
+      ['user.name@gmail.com', 'User.name'],
+      ['a+b@gmail.com', 'Ab'],
+    ])('%s → %s', (email, expected) => {
+      expect(suggestOrgName(email)).toBe(expected);
+    });
+
+    it.each([
+      ['all special chars local part', '+++@gmail.com'],
+      ['single char after stripping', '+a@gmail.com'],
+    ])('returns undefined for %s', (_label, email) => {
+      expect(suggestOrgName(email)).toBeUndefined();
+    });
+  });
+
   describe('all public domains are handled', () => {
     for (const domain of PUBLIC_EMAIL_DOMAINS) {
       it(`returns local part for ${domain}`, () => {

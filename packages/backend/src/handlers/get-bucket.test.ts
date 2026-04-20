@@ -81,6 +81,33 @@ describe('get-bucket baseHandler', () => {
         region: S3_REGION,
         createdAt: '2026-01-15T10:00:00Z',
         isPublic: false,
+        objectLockEnabled: false,
+      },
+    });
+  });
+
+  it('returns objectLockEnabled true when Aurora reports objectLock', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
+    mockGetBucket.mockResolvedValue({
+      data: { name: 'locked-bucket', createdAt: '2026-01-15T10:00:00Z', objectLock: true },
+      error: undefined,
+      response: { status: 200 },
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'locked-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body!);
+    expect(body).toStrictEqual({
+      bucket: {
+        name: 'locked-bucket',
+        region: S3_REGION,
+        createdAt: '2026-01-15T10:00:00Z',
+        isPublic: false,
+        objectLockEnabled: true,
       },
     });
   });

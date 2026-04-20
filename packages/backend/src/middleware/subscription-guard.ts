@@ -69,6 +69,10 @@ export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
     // No subscription status yet → allow
     if (!status) return;
 
+    // Store the resolved status on the event so handlers can read it
+    // without a second DynamoDB query (may be updated below by lazy transitions).
+    event.requestContext.subscriptionStatus = status;
+
     // 3. Active → allow
     if (status === SubscriptionStatus.Active) return;
 
@@ -95,6 +99,7 @@ export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
           }),
         );
         status = SubscriptionStatus.GracePeriod;
+        event.requestContext.subscriptionStatus = status;
         // Fall through to grace_period handling below
       } else {
         return; // Trial still active

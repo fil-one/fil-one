@@ -242,6 +242,25 @@ describe('PATCH /api/me/profile handler', () => {
     expect(result).toMatchObject({ statusCode: 400 });
   });
 
+  it('returns 400 when orgName contains special characters', async () => {
+    const result = await handler(profileEvent({ orgName: 'Acme @Corp!' }), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 400,
+      body: expect.stringContaining('letters, numbers, spaces, hyphens, and periods'),
+    });
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('accepts orgName with dots and hyphens', async () => {
+    const result = await handler(profileEvent({ orgName: 'Acme-Corp Inc.' }), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({ orgName: 'Acme-Corp Inc.' }),
+    });
+  });
+
   it('returns 400 for invalid JSON body', async () => {
     const event = buildEvent({
       cookies: [`hs_access_token=valid-token`, `hs_csrf_token=${MOCK_CSRF_TOKEN}`],
