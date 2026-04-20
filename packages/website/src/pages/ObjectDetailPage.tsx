@@ -17,7 +17,7 @@ import { CopyableField } from '../components/CopyableField';
 import { IconButton } from '../components/IconButton';
 import { ShareObjectModal } from '../components/ShareObjectModal';
 import { Spinner } from '../components/Spinner';
-import { VersionBadge, VersionHistoryCard } from '../components/VersionHistoryCard';
+import { VersionHistoryCard } from '../components/VersionHistoryCard';
 import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
 
 import type {
@@ -230,10 +230,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
           <ArrowLeftIcon size={16} aria-hidden="true" />
         </button>
         <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold tracking-tight text-zinc-900">{objectKey}</h1>
-            <VersionBadge versions={objectVersions} versionId={versionId} />
-          </div>
+          <h1 className="text-xl font-semibold tracking-tight text-zinc-900">{objectKey}</h1>
           <p className="text-[13px] text-zinc-500">{bucketName}</p>
         </div>
 

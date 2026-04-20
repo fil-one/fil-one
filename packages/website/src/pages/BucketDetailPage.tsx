@@ -240,6 +240,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
             <ObjectBrowser
               bucketName={bucketName}
               versions={versions}
+              versioningEnabled={bucket?.versioning ?? false}
               currentPrefix={currentPrefix}
               onPrefixChange={setCurrentPrefix}
               onDownload={objectActions.downloadObject}

@@ -189,6 +189,7 @@ function LatestVersionRow({
   entry,
   group,
   isExpanded,
+  versioningEnabled,
   onToggleExpand,
   downloading,
   onDownload,
@@ -198,13 +199,14 @@ function LatestVersionRow({
   entry: { name: string };
   group: VersionGroup;
   isExpanded: boolean;
+  versioningEnabled: boolean;
   onToggleExpand: (key: string) => void;
   downloading: string | null;
   onDownload: (key: string, versionId?: string) => void;
   onRequestDelete: (key: string, versionId: string) => void;
   onNavigate: (key: string, versionId: string) => void;
 }) {
-  const hasMultipleVersions = group.versionCount > 1;
+  const hasMultipleVersions = versioningEnabled && group.versionCount > 1;
 
   return (
     <tr
@@ -245,12 +247,16 @@ function LatestVersionRow({
           )}
         </div>
       </td>
-      <td className="px-4 py-3 font-mono text-xs text-zinc-500" title={group.latest.versionId}>
-        {truncateVersionId(group.latest.versionId)}
-      </td>
-      <td className="px-4 py-3">
-        <VersionRowBadge version={{ ...group.latest, isLatest: true }} />
-      </td>
+      {versioningEnabled && (
+        <>
+          <td className="px-4 py-3 font-mono text-xs text-zinc-500" title={group.latest.versionId}>
+            {truncateVersionId(group.latest.versionId)}
+          </td>
+          <td className="px-4 py-3">
+            <VersionRowBadge version={{ ...group.latest, isLatest: true }} />
+          </td>
+        </>
+      )}
       <td className="px-4 py-3 text-zinc-600">
         {group.latest.isDeleteMarker ? '\u2014' : formatBytes(group.latest.sizeBytes)}
       </td>
@@ -276,6 +282,7 @@ function LatestVersionRow({
 export type ObjectBrowserProps = {
   bucketName: string;
   versions: S3ObjectVersion[];
+  versioningEnabled: boolean;
   currentPrefix: string;
   onPrefixChange: (prefix: string) => void;
   onDownload: (key: string, versionId?: string) => void;
@@ -286,6 +293,7 @@ export type ObjectBrowserProps = {
 export function ObjectBrowser({
   bucketName,
   versions,
+  versioningEnabled,
   currentPrefix,
   onPrefixChange,
   onDownload,
@@ -386,12 +394,16 @@ export function ObjectBrowser({
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
                   Name
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Version
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Status
-                </th>
+                {versioningEnabled && (
+                  <>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
+                      Version
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
+                      Status
+                    </th>
+                  </>
+                )}
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
                   Size
                 </th>
@@ -420,8 +432,12 @@ export function ObjectBrowser({
                           {entry.name}/
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-zinc-400">&mdash;</td>
-                      <td className="px-4 py-3 text-zinc-400">&mdash;</td>
+                      {versioningEnabled && (
+                        <>
+                          <td className="px-4 py-3 text-zinc-400">&mdash;</td>
+                          <td className="px-4 py-3 text-zinc-400">&mdash;</td>
+                        </>
+                      )}
                       <td className="px-4 py-3 text-zinc-400">&mdash;</td>
                       <td className="px-4 py-3 text-zinc-400">&mdash;</td>
                       <td className="px-4 py-3" />
@@ -439,6 +455,7 @@ export function ObjectBrowser({
                       entry={entry}
                       group={group}
                       isExpanded={isExpanded}
+                      versioningEnabled={versioningEnabled}
                       onToggleExpand={toggleExpand}
                       downloading={downloading}
                       onDownload={onDownload}

@@ -15,41 +15,6 @@ export function truncateVersionId(versionId: string, length = 8): string {
 }
 
 // ---------------------------------------------------------------------------
-// Version status badge — header context (shows "Historical version")
-// ---------------------------------------------------------------------------
-
-export function VersionBadge({
-  versions,
-  versionId,
-}: {
-  versions: S3ObjectVersion[];
-  versionId?: string;
-}) {
-  const current = versions.find((v) => v.versionId === versionId);
-  if (!current) return null;
-
-  if (current.isDeleteMarker) {
-    return (
-      <Badge color="red" size="sm" weight="semibold">
-        Delete marker
-      </Badge>
-    );
-  }
-  if (current.isLatest) {
-    return (
-      <Badge color="green" size="sm" weight="semibold">
-        Latest version
-      </Badge>
-    );
-  }
-  return (
-    <Badge color="amber" size="sm" weight="semibold">
-      Historical version
-    </Badge>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Version status badge — row context (shows nothing for historical)
 // ---------------------------------------------------------------------------
 

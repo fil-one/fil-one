@@ -115,11 +115,16 @@ const multiVersionVersions: S3ObjectVersion[] = [
   },
 ];
 
-function ObjectBrowserHarness(initial: Omit<ObjectBrowserProps, 'onPrefixChange' | 'onDelete'>) {
+function ObjectBrowserHarness(
+  initial: Omit<ObjectBrowserProps, 'onPrefixChange' | 'onDelete' | 'versioningEnabled'> & {
+    versioningEnabled?: boolean;
+  },
+) {
   const [prefix, setPrefix] = useState(initial.currentPrefix);
   return (
     <ObjectBrowser
       {...initial}
+      versioningEnabled={initial.versioningEnabled ?? true}
       currentPrefix={prefix}
       onPrefixChange={setPrefix}
       onDelete={() => Promise.resolve()}
@@ -232,6 +237,19 @@ export const MultipleVersions: Story = {
     <ObjectBrowserHarness
       bucketName="my-bucket"
       versions={multiVersionVersions}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+    />
+  ),
+};
+
+export const VersioningDisabled: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      versions={sampleVersions}
+      versioningEnabled={false}
       currentPrefix=""
       onDownload={() => {}}
       downloading={null}

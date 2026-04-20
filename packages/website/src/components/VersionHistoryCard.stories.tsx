@@ -9,7 +9,7 @@ import {
 
 import type { S3ObjectVersion } from '@filone/shared';
 
-import { VersionBadge, VersionHistoryCard, VersionRowBadge } from './VersionHistoryCard';
+import { VersionHistoryCard, VersionRowBadge } from './VersionHistoryCard';
 
 const multipleVersions: S3ObjectVersion[] = [
   {
@@ -125,43 +125,6 @@ export const SingleVersionRendersNothing: Story = {
         versions={[multipleVersions[0]]}
         currentVersionId={multipleVersions[0].versionId}
       />
-    </div>
-  ),
-};
-
-// ---------------------------------------------------------------------------
-// VersionBadge (header context)
-// ---------------------------------------------------------------------------
-
-export const BadgeLatestVersion: StoryObj = {
-  name: 'VersionBadge / Latest',
-  render: () => (
-    <VersionBadge versions={multipleVersions} versionId={multipleVersions[0].versionId} />
-  ),
-};
-
-export const BadgeHistoricalVersion: StoryObj = {
-  name: 'VersionBadge / Historical',
-  render: () => (
-    <VersionBadge versions={multipleVersions} versionId={multipleVersions[1].versionId} />
-  ),
-};
-
-export const BadgeDeleteMarker: StoryObj = {
-  name: 'VersionBadge / Delete marker',
-  render: () => (
-    <VersionBadge versions={withDeleteMarker} versionId={withDeleteMarker[0].versionId} />
-  ),
-};
-
-export const BadgeNotFound: StoryObj = {
-  name: 'VersionBadge / Not found (renders nothing)',
-  render: () => (
-    <div>
-      <p className="mb-2 text-xs text-zinc-500">
-        Renders nothing when versionId does not match any known version.
-      </p>
-      <VersionBadge versions={multipleVersions} versionId="unknown" />
     </div>
   ),
 };
