@@ -9,17 +9,19 @@
 @plugin '@tailwindcss/typography';
 
 @theme {
-  --color-brand-50: oklch(0.98 0.0157 216.67); /* #EDFBFF */
-  --color-brand-100: oklch(0.95 0.035 219.18); /* #D6F5FF */
-  --color-brand-200: oklch(0.92 0.0628 215.11); /* #B5F0FF */
-  --color-brand-300: oklch(0.88 0.1002 212.38); /* #83EAFF */
-  --color-brand-400: oklch(0.83 0.1306 218.59); /* #48DAFF */
-  --color-brand-500: oklch(0.76 0.1503 232.56); /* #1EBFFF */
-  --color-brand-600: oklch(0.69 0.1736 245.19); /* #06A3FF */
-  --color-brand-700: oklch(0.65 0.193 251.78); /* #0090FF */
-  --color-brand-800: oklch(0.53 0.1592 252.62); /* #086DC5 */
-  --color-brand-900: oklch(0.47 0.1224 248.85); /* #0D5D9B */
-  --color-brand-950: oklch(0.33 0.0795 249.37); /* #0E385D */
+  /* Blue scale — hue transitions from cyan-blue (252°) in lights to pure blue (264°) in darks.
+     brand-600 and brand-700 are designed to pass WCAG AA (4.5:1) with white text. */
+  --color-brand-50: oklch(0.97 0.012 252);
+  --color-brand-100: oklch(0.94 0.03 252);
+  --color-brand-200: oklch(0.88 0.068 253);
+  --color-brand-300: oklch(0.8 0.12 253);
+  --color-brand-400: oklch(0.72 0.178 254); /* vibrant, Filecoin Blue feel */
+  --color-brand-500: oklch(0.65 0.215 255); /* vibrant, decorative use */
+  --color-brand-600: oklch(0.55 0.25 262); /* accessible ~5:1 with white */
+  --color-brand-700: oklch(0.49 0.26 264); /* accessible ~6:1 with white */
+  --color-brand-800: oklch(0.4 0.205 264);
+  --color-brand-900: oklch(0.31 0.135 264);
+  --color-brand-950: oklch(0.21 0.078 264);
 
   --color-icon-success: var(--color-green-500);
   --color-brand-error: var(--color-red-500);
@@ -31,8 +33,7 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-funnel-sans);
-  --font-heading: var(--font-aspekta);
+  --font-sans: 'Inter', sans-serif;
 }
 
 @utility brand-outline {

@@ -61,7 +61,7 @@ export function CreateApiKeyPage() {
               <AccessKeyFormFields form={form} />
             </div>
 
-            <Button type="submit" variant="filled" disabled={!form.canSubmit}>
+            <Button type="submit" variant="primary" disabled={!form.canSubmit}>
               {form.creating ? 'Creating...' : 'Create API key'}
             </Button>
           </form>
@@ -102,7 +102,6 @@ export function CreateApiKeyPage() {
       {credentials && (
         <SaveCredentialsModal
           open={true}
-          onClose={handleCredentialsDone}
           onDone={handleCredentialsDone}
           credentials={credentials}
         />

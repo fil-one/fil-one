@@ -94,7 +94,7 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
           {error && <p className="text-xs text-red-600">{error}</p>}
 
           <Button
-            variant="filled"
+            variant="primary"
             type="button"
             className="w-full justify-center"
             disabled={checking}

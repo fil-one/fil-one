@@ -112,7 +112,6 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
     return (
       <SaveCredentialsModal
         open={open}
-        onClose={handleClose}
         onDone={handleDone}
         credentials={{ accessKeyId: result.accessKeyId, secretAccessKey: result.secretAccessKey }}
       />
@@ -220,7 +219,7 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
           <Button variant="ghost" onClick={handleClose}>
             Cancel
           </Button>
-          <Button variant="filled" disabled={!canSubmit} onClick={handleCreate}>
+          <Button variant="primary" disabled={!canSubmit} onClick={handleCreate}>
             {createKeyMutation.isPending ? 'Creating...' : 'Create key'}
           </Button>
         </div>

@@ -23,7 +23,6 @@ export const Default: Story = {
         </Button>
         <SaveCredentialsModal
           open={open}
-          onClose={() => setOpen(false)}
           onDone={() => setOpen(false)}
           credentials={{
             accessKeyId: 'ACCESS_KEY_ID_EXAMPLE',

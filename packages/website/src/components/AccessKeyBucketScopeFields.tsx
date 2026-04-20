@@ -6,6 +6,7 @@ import type { AccessKeyBucketScope, ListBucketsResponse } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { Checkbox } from './Checkbox.js';
 import { Icon } from './Icon.js';
+import { RadioOption } from './RadioOption.js';
 import { queryKeys } from '../lib/query-client.js';
 
 type AccessKeyBucketScopeFieldsProps = {
@@ -43,32 +44,25 @@ export function AccessKeyBucketScopeFields({
   return (
     <div className="flex flex-col gap-2">
       {/* Scope radio buttons */}
-      <div className="flex gap-3">
+      <div className="flex gap-2">
         {(['all', 'specific'] as const).map((scope) => (
-          <label
+          <RadioOption
             key={scope}
-            className="flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-200 px-4 py-2.5 text-sm hover:bg-zinc-50 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50"
+            name="bucket-scope"
+            value={scope}
+            checked={bucketScope === scope}
+            onChange={() => onBucketScopeChange(scope)}
           >
-            <input
-              type="radio"
-              name="bucket-scope"
-              value={scope}
-              checked={bucketScope === scope}
-              onChange={() => onBucketScopeChange(scope)}
-              className="accent-brand-600"
-            />
-            <span className="font-medium text-zinc-900">
-              {scope === 'all' ? 'All buckets' : 'Specific buckets'}
-            </span>
-          </label>
+            {scope === 'all' ? 'All buckets' : 'Specific buckets'}
+          </RadioOption>
         ))}
       </div>
 
       {/* Bucket checklist (only when "specific" is selected) */}
       {bucketScope === 'specific' && (
-        <div className="mt-1 rounded-lg border border-zinc-200 bg-white">
+        <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
           {loading && (
-            <div className="flex items-center justify-center py-6" role="status">
+            <div className="flex items-center justify-center py-4" role="status">
               <span className="text-brand-700 animate-spin">
                 <Icon component={SpinnerIcon} size={20} />
               </span>
@@ -77,21 +71,19 @@ export function AccessKeyBucketScopeFields({
           )}
 
           {isError && (
-            <p className="px-4 py-3 text-sm text-red-600">
-              {error?.message ?? 'Failed to load buckets'}
-            </p>
+            <p className="text-sm text-red-600">{error?.message ?? 'Failed to load buckets'}</p>
           )}
 
           {!loading &&
             !isError &&
             buckets.length === 0 &&
             selectedBuckets.length === 0 &&
-            !pinnedBucket && <p className="px-4 py-3 text-sm text-zinc-500">No buckets found.</p>}
+            !pinnedBucket && <p className="text-sm text-zinc-500">No buckets found.</p>}
 
           {!loading &&
             !isError &&
             (buckets.length > 0 || selectedBuckets.length > 0 || pinnedBucket) && (
-              <div className="flex flex-col">
+              <div className="flex flex-col space-y-1.5">
                 {[
                   ...new Set([
                     ...(pinnedBucket ? [pinnedBucket] : []),
@@ -99,15 +91,13 @@ export function AccessKeyBucketScopeFields({
                     ...buckets,
                   ]),
                 ].map((name) => (
-                  <label
-                    key={name}
-                    className="flex cursor-pointer items-center gap-3 border-b border-zinc-100 px-4 py-2.5 last:border-b-0 hover:bg-zinc-50"
-                  >
+                  <label key={name} className="flex cursor-pointer items-center gap-2.5 py-1">
                     <Checkbox
+                      aria-label={name}
                       checked={selectedBuckets.includes(name)}
                       onChange={() => toggleBucket(name)}
                     />
-                    <span className="text-sm font-medium text-zinc-900">{name}</span>
+                    <span className="text-sm font-normal text-zinc-900">{name}</span>
                   </label>
                 ))}
               </div>

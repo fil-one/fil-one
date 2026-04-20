@@ -8,5 +8,7 @@
     "**/dist",
     "**/sst-env.d.ts",
     "pnpm-lock.yaml",
+    "tests/s3compat/**/logs/*.json",
+    "tests/s3compat/*/manifest.json",
   ],
 }

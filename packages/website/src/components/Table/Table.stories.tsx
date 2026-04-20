@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { FolderOpenIcon } from '@phosphor-icons/react/dist/ssr';
 
+import { IconBox } from '../IconBox';
 import { Table } from './Table';
 
 const meta: Meta<typeof Table> = {
@@ -77,9 +79,15 @@ export const Empty: Story = {
         </Table.Row>
       </Table.Header>
       <Table.Body>
-        <Table.Row>
-          <Table.Cell colSpan={3} className="text-center text-zinc-500">
-            No data available
+        <Table.Row className="hover:bg-transparent">
+          <Table.Cell colSpan={3} className="py-16 text-center whitespace-normal">
+            <div className="flex flex-col items-center gap-3">
+              <IconBox icon={FolderOpenIcon} size="md" color="grey" />
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-medium text-zinc-900">No data available</p>
+                <p className="text-sm text-zinc-500">Add items to see them listed here.</p>
+              </div>
+            </div>
           </Table.Cell>
         </Table.Row>
       </Table.Body>

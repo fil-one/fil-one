@@ -68,7 +68,7 @@ export function BucketsPage() {
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-zinc-900">Buckets</h1>
         <Button
-          variant="filled"
+          variant="primary"
           icon={PlusIcon}
           onClick={() => navigate({ to: '/buckets/create' })}
         >
@@ -85,7 +85,7 @@ export function BucketsPage() {
             Create your first bucket to start storing objects
           </p>
           <Button
-            variant="filled"
+            variant="primary"
             icon={PlusIcon}
             onClick={() => navigate({ to: '/buckets/create' })}
           >

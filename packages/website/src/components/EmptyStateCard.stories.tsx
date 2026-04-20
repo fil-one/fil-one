@@ -17,7 +17,6 @@ export const Default: Story = {
   args: {
     icon: DatabaseIcon,
     title: 'No buckets yet',
-    titleTag: 'h2',
     description: 'Create your first bucket to start storing objects.',
   },
 };
@@ -27,7 +26,6 @@ export const WithAction: Story = {
     <EmptyStateCard
       icon={KeyIcon}
       title="No API keys"
-      titleTag="h2"
       description="Generate an API key to access your buckets programmatically."
     >
       <Button variant="primary">Create API key</Button>

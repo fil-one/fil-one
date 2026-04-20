@@ -33,12 +33,16 @@ export function AccessKeyPermissionsFields({ value, onChange }: AccessKeyPermiss
       {PERMISSION_OPTIONS.map((option) => (
         <label
           key={option.value}
-          className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-zinc-50"
+          className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-zinc-50"
         >
-          <Checkbox checked={value.includes(option.value)} onChange={() => toggle(option.value)} />
-          <div className="flex flex-col">
+          <Checkbox
+            aria-label={option.label}
+            checked={value.includes(option.value)}
+            onChange={() => toggle(option.value)}
+          />
+          <div className="flex flex-col gap-0.5">
             <span className="text-sm font-medium text-zinc-900">{option.label}</span>
-            <span className="text-xs text-zinc-500">{option.description}</span>
+            <span className="text-xs text-zinc-600">{option.description}</span>
           </div>
         </label>
       ))}

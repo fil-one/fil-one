@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { DialogTitle } from '@headlessui/react';
 import { WarningCircleIcon } from '@phosphor-icons/react/dist/ssr';
-import { Modal, ModalHeader, ModalBody, ModalFooter } from './Modal';
+import { Modal, ModalBody, ModalFooter } from './Modal';
 import { Button } from './Button';
+import { IconBox } from './IconBox';
 import { Spinner } from './Spinner';
 
 export type ConfirmDialogProps = {
@@ -37,27 +39,27 @@ export function ConfirmDialog({
 
   return (
     <Modal open={open} onClose={loading ? () => {} : onClose} size="sm">
-      <ModalHeader onClose={loading ? undefined : onClose}>{title}</ModalHeader>
       <ModalBody>
-        <div className="flex items-start gap-3">
-          <WarningCircleIcon
-            size={20}
-            className="mt-0.5 shrink-0 text-red-500"
-            aria-hidden="true"
-          />
-          <p className="text-sm text-zinc-600">{description}</p>
+        <div className="flex flex-col items-center gap-3 px-2 pt-6 pb-0 text-center">
+          <IconBox icon={WarningCircleIcon} color="red" size="lg" />
+          <div className="flex flex-col gap-1">
+            <DialogTitle as="p" className="text-base font-medium text-zinc-900">
+              {title}
+            </DialogTitle>
+            <p className="text-sm text-zinc-500">{description}</p>
+          </div>
         </div>
       </ModalBody>
       <ModalFooter>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose} disabled={loading}>
+        <div className="flex w-full gap-3">
+          <Button variant="ghost" className="flex-1" onClick={onClose} disabled={loading}>
             {cancelLabel}
           </Button>
           <button
             type="button"
             disabled={loading}
             onClick={() => void handleConfirm()}
-            className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
           >
             {loading && <Spinner ariaLabel="Processing" size={14} />}
             {confirmLabel}
