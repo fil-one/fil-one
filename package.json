@@ -31,7 +31,7 @@
     "@filone/shared": "workspace:*"
   },
   "devDependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1023.0",
+    "@aws-sdk/client-dynamodb": "^3.1031.0",
     "@playwright/test": "^1.58.2",
     "@pulumi/aws": "^7.23.0",
     "@pulumi/command": "^1.2.1",
