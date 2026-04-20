@@ -181,9 +181,24 @@ describe('GET /api/usage handler', () => {
         egress: { usedBytes: 1500 },
         buckets: { count: 2, limit: 50 },
         objects: { count: 3 },
-        accessKeys: { count: 3, limit: 200 },
+        accessKeys: { count: 2, limit: 199 },
       }),
     });
+  });
+
+  it('hides the system filone-console key from access key counts', async () => {
+    mockAuthIdentity();
+    mockGetTenantInfo.mockResolvedValue({
+      bucketCount: 0,
+      bucketQuantityLimit: 100,
+      keyCount: 1,
+      accessKeyQuantityLimit: 300,
+    });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+    const body = JSON.parse(String((result as { body: string }).body));
+
+    expect(body.accessKeys).toEqual({ count: 0, limit: 299 });
   });
 
   it('returns zeros when auroraTenantId is missing', async () => {
@@ -198,7 +213,7 @@ describe('GET /api/usage handler', () => {
         egress: { usedBytes: 0 },
         buckets: { count: 0, limit: 100 },
         objects: { count: 0 },
-        accessKeys: { count: 0, limit: 300 },
+        accessKeys: { count: 0, limit: 299 },
       }),
     });
     expect(mockGetStorageSamples).not.toHaveBeenCalled();
@@ -218,7 +233,7 @@ describe('GET /api/usage handler', () => {
         egress: { usedBytes: 0 },
         buckets: { count: 0, limit: 100 },
         objects: { count: 0 },
-        accessKeys: { count: 0, limit: 300 },
+        accessKeys: { count: 0, limit: 299 },
       }),
     });
   });
