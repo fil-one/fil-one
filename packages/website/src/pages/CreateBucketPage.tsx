@@ -71,6 +71,13 @@ export function CreateBucketPage() {
       ? daysUntil(billing.subscription.trialEndsAt)
       : null;
 
+  // Default the lock period to the remaining trial length (once billing data loads)
+  useEffect(() => {
+    if (trialDaysLeft != null && trialDaysLeft > 0) {
+      setRetentionDuration(trialDaysLeft);
+    }
+  }, [trialDaysLeft]); // runs once when trialDaysLeft first becomes available
+
   // When the key section opens, default to specific scope for this bucket
   useEffect(() => {
     if (!createKeyOpen) return;
