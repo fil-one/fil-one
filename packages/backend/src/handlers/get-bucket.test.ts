@@ -110,6 +110,8 @@ describe('get-bucket baseHandler', () => {
         createdAt: '2026-01-15T10:00:00Z',
         isPublic: false,
         objectLockEnabled: true,
+        versioning: false,
+        encrypted: true,
       },
     });
   });
