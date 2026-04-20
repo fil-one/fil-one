@@ -31,11 +31,14 @@ import type {
   ListObjectsResponse,
   GetBucketResponse,
   ListAccessKeysResponse,
+  BucketAnalyticsResponse,
 } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate, formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { queryKeys } from '../lib/query-client.js';
+import { batchPresign } from '../lib/use-presign.js';
+import { parseListObjectsResponse, executePresignedUrl } from '../lib/aurora-s3.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -135,7 +138,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
   });
   const bucket = bucketData?.bucket ?? null;
 
-  // Objects
+  // Objects (via presigned URL)
   const {
     data: objectsData,
     isPending: objectsLoading,
@@ -143,10 +146,20 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
     error: objectsError,
   } = useQuery({
     queryKey: queryKeys.objects(bucketName),
-    queryFn: () =>
-      apiRequest<ListObjectsResponse>(`/buckets/${encodeURIComponent(bucketName)}/objects`),
+    queryFn: async (): Promise<ListObjectsResponse> => {
+      const { items } = await batchPresign([{ op: 'listObjects', bucket: bucketName }]);
+      const response = await executePresignedUrl(items[0].url, items[0].method);
+      return parseListObjectsResponse(await response.text());
+    },
   });
   const objects = objectsData?.objects ?? [];
+
+  // Bucket analytics (object count + storage)
+  const { data: analyticsData } = useQuery({
+    queryKey: queryKeys.bucketAnalytics(bucketName),
+    queryFn: () =>
+      apiRequest<BucketAnalyticsResponse>(`/buckets/${encodeURIComponent(bucketName)}/analytics`),
+  });
 
   // Access keys scoped to this bucket
   const { data: accessKeysData, isPending: accessKeysLoading } = useQuery({
@@ -259,10 +272,17 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
       )}
 
       {/* Stat cards */}
-      {/* TODO: Replace N/A values with real data from Aurora analytics endpoint */}
       <div className="mb-6 grid grid-cols-3 gap-4">
-        <StatCard icon={CubeIcon} label="Objects" value="N/A" />
-        <StatCard icon={HardDrivesIcon} label="Storage used" value="N/A" />
+        <StatCard
+          icon={CubeIcon}
+          label="Objects"
+          value={analyticsData ? analyticsData.objectCount.toLocaleString() : '—'}
+        />
+        <StatCard
+          icon={HardDrivesIcon}
+          label="Storage used"
+          value={analyticsData ? formatBytes(analyticsData.bytesUsed) : '—'}
+        />
         <StatCard
           icon={KeyIcon}
           label="API keys"
