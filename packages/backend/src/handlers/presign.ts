@@ -38,8 +38,30 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 const dynamo = getDynamoClient();
 
 const PRESIGN_EXPIRY_SECONDS = 300;
+const MAX_GET_OBJECT_EXPIRY_SECONDS = 604800;
 
 const WRITE_OPS = new Set<string>(['putObject', 'deleteObject']);
+
+async function presignGetObject(
+  op: Extract<PresignOp, { op: 'getObject' }>,
+  endpointUrl: string,
+  credentials: { accessKeyId: string; secretAccessKey: string },
+): Promise<PresignResponseItem> {
+  const expiresIn = Math.min(op.expiresIn ?? PRESIGN_EXPIRY_SECONDS, MAX_GET_OBJECT_EXPIRY_SECONDS);
+  const url = await getPresignedGetObjectUrl({
+    endpointUrl,
+    credentials,
+    bucket: op.bucket,
+    key: op.key,
+    expiresIn,
+    versionId: op.versionId,
+  });
+  return {
+    url,
+    method: 'GET',
+    expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
+  };
+}
 
 async function presignOp(
   op: PresignOp,
@@ -85,7 +107,6 @@ async function presignOp(
         bucket: op.bucket,
         key: op.key,
         expiresIn: PRESIGN_EXPIRY_SECONDS,
-        includeFilMeta: op.includeFilMeta,
         versionId: op.versionId,
       });
       return { url, method: 'HEAD', expiresAt };
@@ -103,17 +124,8 @@ async function presignOp(
       return { url, method: 'GET', expiresAt };
     }
 
-    case 'getObject': {
-      const url = await getPresignedGetObjectUrl({
-        endpointUrl,
-        credentials,
-        bucket: op.bucket,
-        key: op.key,
-        expiresIn: PRESIGN_EXPIRY_SECONDS,
-        versionId: op.versionId,
-      });
-      return { url, method: 'GET', expiresAt };
-    }
+    case 'getObject':
+      return presignGetObject(op, endpointUrl, credentials);
 
     case 'putObject': {
       const metadata: Record<string, string> = { filename: op.fileName };

@@ -23,7 +23,6 @@ export const PresignHeadObjectOpSchema = z.object({
   op: z.literal('headObject'),
   bucket: z.string().min(1, 'Bucket name is required'),
   key: z.string().min(1, 'Object key is required'),
-  includeFilMeta: z.boolean().optional(),
   versionId: z.string().optional(),
 });
 
@@ -39,6 +38,12 @@ export const PresignGetObjectOpSchema = z.object({
   bucket: z.string().min(1, 'Bucket name is required'),
   key: z.string().min(1, 'Object key is required'),
   versionId: z.string().optional(),
+  expiresIn: z
+    .number()
+    .int()
+    .positive()
+    .max(604800, 'Expiry must be at most 7 days (604800 seconds)')
+    .optional(),
 });
 
 export const PresignPutObjectOpSchema = z.object({

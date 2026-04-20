@@ -55,17 +55,27 @@ export function useObjectActions({ bucketName, onDeleted }: UseObjectActionsOpti
   const [generatingUrl, setGeneratingUrl] = useState(false);
 
   const generatePresignedUrl = useCallback(
-    async (key: string, versionId?: string) => {
+    async (
+      key: string,
+      options: { versionId?: string; expiresIn?: number } = {},
+    ): Promise<{ url: string; expiresAt: string } | undefined> => {
+      const { versionId, expiresIn } = options;
       setGeneratingUrl(true);
       try {
         const { items } = await batchPresign([
-          { op: 'getObject', bucket: bucketName, key, ...(versionId && { versionId }) },
+          {
+            op: 'getObject',
+            bucket: bucketName,
+            key,
+            ...(versionId && { versionId }),
+            ...(expiresIn && { expiresIn }),
+          },
         ]);
-        await navigator.clipboard.writeText(items[0].url);
-        toast.success('Presigned URL copied to clipboard');
+        return { url: items[0].url, expiresAt: items[0].expiresAt };
       } catch (err) {
         console.error('Failed to generate presigned URL:', err);
         toast.error(err instanceof Error ? err.message : 'Failed to generate presigned URL');
+        return undefined;
       } finally {
         setGeneratingUrl(false);
       }

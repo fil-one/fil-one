@@ -223,7 +223,7 @@ describe('presign baseHandler', () => {
 
     const event = buildPresignEvent([
       { op: 'listObjects', bucket: 'b' },
-      { op: 'headObject', bucket: 'b', key: 'k', includeFilMeta: true },
+      { op: 'headObject', bucket: 'b', key: 'k' },
     ]);
     const result = await baseHandler(event);
 

@@ -280,30 +280,14 @@ export async function getPresignedListObjectVersionsUrl(
 
 export interface PresignHeadObjectOptions extends PresignBaseOptions {
   key: string;
-  includeFilMeta?: boolean;
   versionId?: string;
 }
 
 export async function getPresignedHeadObjectUrl(
   options: PresignHeadObjectOptions,
 ): Promise<string> {
-  const { endpointUrl, credentials, bucket, key, expiresIn, includeFilMeta, versionId } = options;
+  const { endpointUrl, credentials, bucket, key, expiresIn, versionId } = options;
   const s3 = createS3Client(endpointUrl, credentials);
-
-  // Inject fil-include-meta=1 query parameter so Aurora returns
-  // X-Fil-Cid and X-Fil-Offload-Status headers in the response.
-  if (includeFilMeta) {
-    s3.middlewareStack.add(
-      (next) => async (args) => {
-        const request = args.request as { query?: Record<string, string> };
-        if (request.query) {
-          request.query['fil-include-meta'] = '1';
-        }
-        return next(args);
-      },
-      { step: 'build', name: 'filIncludeMetaQuery' },
-    );
-  }
 
   return getSignedUrl(
     s3,

@@ -121,6 +121,23 @@ export function parseListObjectVersionsResponse(xml: string): ListObjectVersions
   };
 }
 
+// Preference order when multiple checksum headers are present.
+const CHECKSUM_HEADERS: ReadonlyArray<{ header: string; algorithm: string }> = [
+  { header: 'x-amz-checksum-sha256', algorithm: 'SHA-256' },
+  { header: 'x-amz-checksum-sha1', algorithm: 'SHA-1' },
+  { header: 'x-amz-checksum-crc64nvme', algorithm: 'CRC64NVME' },
+  { header: 'x-amz-checksum-crc32c', algorithm: 'CRC32C' },
+  { header: 'x-amz-checksum-crc32', algorithm: 'CRC32' },
+];
+
+function parseChecksum(headers: Headers): { algorithm: string; value: string } | undefined {
+  for (const { header, algorithm } of CHECKSUM_HEADERS) {
+    const value = headers.get(header);
+    if (value) return { algorithm, value };
+  }
+  return undefined;
+}
+
 /**
  * Parse an S3 HeadObject response (HTTP headers only) into metadata.
  */
@@ -134,7 +151,7 @@ export function parseHeadObjectResponse(
   etag?: string;
   contentType?: string;
   metadata: Record<string, string>;
-  filCid?: string;
+  checksum?: { algorithm: string; value: string };
 } {
   const headers = response.headers;
 
@@ -147,7 +164,7 @@ export function parseHeadObjectResponse(
 
   const etag = headers.get('etag') ?? undefined;
   const contentType = headers.get('content-type') ?? undefined;
-  const filCid = headers.get('x-fil-cid') ?? undefined;
+  const checksum = parseChecksum(headers);
 
   return {
     key,
@@ -158,7 +175,7 @@ export function parseHeadObjectResponse(
     ...(etag && { etag }),
     ...(contentType && { contentType }),
     metadata,
-    ...(filCid && { filCid }),
+    ...(checksum && { checksum }),
   };
 }
 

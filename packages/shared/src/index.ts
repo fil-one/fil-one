@@ -73,6 +73,7 @@ export type {
   ListObjectsResponse,
   ListObjectVersionsResponse,
   DeleteObjectRequest,
+  ObjectChecksum,
   ObjectMetadataResponse,
   ObjectRetentionInfo,
 } from './api/objects.js';

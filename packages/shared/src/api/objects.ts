@@ -58,6 +58,11 @@ export interface ObjectRetentionInfo {
   retainUntilDate: string;
 }
 
+export interface ObjectChecksum {
+  algorithm: string;
+  value: string;
+}
+
 export interface ObjectMetadataResponse {
   key: string;
   sizeBytes: number;
@@ -65,8 +70,8 @@ export interface ObjectMetadataResponse {
   etag?: string;
   contentType?: string;
   metadata: Record<string, string>;
-  filCid?: string;
   retention?: ObjectRetentionInfo;
+  checksum?: ObjectChecksum;
 }
 
 export const HeadObjectQuerySchema = z.object({
