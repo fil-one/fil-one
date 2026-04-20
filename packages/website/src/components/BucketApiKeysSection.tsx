@@ -4,7 +4,7 @@ import { KeyIcon, CaretDownIcon, CaretUpIcon, PlusIcon } from '@phosphor-icons/r
 import type { AccessKey } from '@filone/shared';
 import { getAccessKeys } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
-import type { useAccessKeyForm } from '../lib/use-access-key-form.js';
+import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyFormFields } from './AccessKeyFormFields';
 import { Badge } from './Badge';
 import { Tooltip } from './Tooltip';

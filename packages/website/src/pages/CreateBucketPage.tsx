@@ -40,7 +40,10 @@ export function CreateBucketPage() {
   const [name, setName] = useState('');
   const [region, setRegion] = useState(S3_REGION);
 
-  // Retention settings
+  // Object settings
+  const [versioning, setVersioning] = useState(false);
+  const [lock, setLock] = useState(false);
+  const [retentionEnabled, setRetentionEnabled] = useState(false);
   const [retentionMode, setRetentionMode] = useState<RetentionMode>('governance');
   const [retentionDuration, setRetentionDuration] = useState(15);
   const [retentionDurationType, setRetentionDurationType] = useState<RetentionDurationType>('d');
@@ -110,14 +113,16 @@ export function CreateBucketPage() {
     const bucketBody = {
       name: name.trim(),
       region,
-      versioning: true,
-      lock: true,
-      retention: {
-        enabled: true as const,
-        mode: retentionMode,
-        duration: retentionDuration,
-        durationType: retentionDurationType,
-      },
+      versioning,
+      lock,
+      retention: retentionEnabled
+        ? {
+            enabled: true as const,
+            mode: retentionMode,
+            duration: retentionDuration,
+            durationType: retentionDurationType,
+          }
+        : { enabled: false as const },
     };
 
     const parsed = CreateBucketSchema.safeParse(bucketBody);
@@ -263,6 +268,12 @@ export function CreateBucketPage() {
 
             {/* Object settings */}
             <ObjectSettingsFields
+              versioning={versioning}
+              onVersioningChange={setVersioning}
+              lock={lock}
+              onLockChange={setLock}
+              retentionEnabled={retentionEnabled}
+              onRetentionEnabledChange={setRetentionEnabled}
               retentionMode={retentionMode}
               onRetentionModeChange={setRetentionMode}
               retentionDuration={retentionDuration}
@@ -309,14 +320,6 @@ export function CreateBucketPage() {
               {
                 title: 'Private',
                 description: 'All buckets are private by default. Access requires an API key.',
-              },
-              {
-                title: 'Versioning',
-                description: 'Multiple versions of every object are kept automatically.',
-              },
-              {
-                title: 'Object Lock',
-                description: 'Objects are protected from deletion or modification by default.',
               },
             ]}
           />
