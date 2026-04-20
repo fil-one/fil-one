@@ -31,6 +31,7 @@ import type {
   ListObjectsResponse,
   GetBucketResponse,
   ListAccessKeysResponse,
+  BucketAnalyticsResponse,
 } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate, formatDateTime } from '../lib/time.js';
@@ -153,6 +154,13 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
   });
   const objects = objectsData?.objects ?? [];
 
+  // Bucket analytics (object count + storage)
+  const { data: analyticsData } = useQuery({
+    queryKey: queryKeys.bucketAnalytics(bucketName),
+    queryFn: () =>
+      apiRequest<BucketAnalyticsResponse>(`/buckets/${encodeURIComponent(bucketName)}/analytics`),
+  });
+
   // Access keys scoped to this bucket
   const { data: accessKeysData, isPending: accessKeysLoading } = useQuery({
     queryKey: queryKeys.bucketAccessKeys(bucketName),
@@ -264,10 +272,17 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
       )}
 
       {/* Stat cards */}
-      {/* TODO: Replace N/A values with real data from Aurora analytics endpoint */}
       <div className="mb-6 grid grid-cols-3 gap-4">
-        <StatCard icon={CubeIcon} label="Objects" value="N/A" />
-        <StatCard icon={HardDrivesIcon} label="Storage used" value="N/A" />
+        <StatCard
+          icon={CubeIcon}
+          label="Objects"
+          value={analyticsData ? analyticsData.objectCount.toLocaleString() : '—'}
+        />
+        <StatCard
+          icon={HardDrivesIcon}
+          label="Storage used"
+          value={analyticsData ? formatBytes(analyticsData.bytesUsed) : '—'}
+        />
         <StatCard
           icon={KeyIcon}
           label="API keys"
