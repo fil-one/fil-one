@@ -32,7 +32,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@sentry/vite-plugin": "^5.1.1",
+    "@sentry/vite-plugin": "^5.2.0",
     "@storybook/addon-a11y": "^10.3.3",
     "@storybook/addon-docs": "^10.3.3",
     "@storybook/addon-vitest": "^10.3.5",
