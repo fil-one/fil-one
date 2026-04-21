@@ -2,14 +2,21 @@
 Shared report formatting used by all test scripts.
 
 Callers build a list of entry dicts with at minimum:
-  {"op": str, "status": "ok" | "err", "elapsed_s": float, ...}
+  {"op": str, "status": "ok" | "skipped" | "err", "elapsed_s": float, ...}
 
-and call write_report() to produce the unified output.
+``skipped`` is for operations that could not be run for an expected reason
+(e.g. the provider refused GetBucketCors with AccessDenied). Skipped entries
+are reported separately and do not count as failures.
+
+Callers call write_report() to produce the unified output.
 """
 import json
 import os
 import statistics
 from pathlib import Path
+
+
+NON_FAILURE_STATUSES = frozenset({"ok", "skipped"})
 
 
 def _timing_stats(times: list) -> str:
@@ -34,14 +41,17 @@ def write_report(
 ) -> str:
     """Format a unified report, write it to disk, and return the text."""
     successes = [e for e in entries if e.get("status") == "ok"]
-    errors = [e for e in entries if e.get("status") != "ok"]
+    skipped = [e for e in entries if e.get("status") == "skipped"]
+    errors = [e for e in entries if e.get("status") not in NON_FAILURE_STATUSES]
 
-    # Per-op counts and timing
+    # Per-op counts and timing. Skipped entries are folded into the "ok"
+    # column so a skipped op does not look like a failure; the SUMMARY and
+    # dedicated SKIPPED section show the skip count separately.
     ops: dict = {}
     for e in entries:
         op = e.get("op", "unknown")
         rec = ops.setdefault(op, {"ok": 0, "err": 0, "times": []})
-        if e.get("status") == "ok":
+        if e.get("status") in NON_FAILURE_STATUSES:
             rec["ok"] += 1
         else:
             rec["err"] += 1
@@ -55,6 +65,15 @@ def write_report(
         timing = _timing_stats(rec["times"])
         op_lines.append(f"  {op:<30}  {counts}  {timing}")
 
+    summary_lines = [
+        "SUMMARY",
+        f"  Total  : {len(entries)}",
+        f"  OK     : {len(successes)}",
+    ]
+    if skipped:
+        summary_lines.append(f"  Skipped: {len(skipped)}")
+    summary_lines.append(f"  Failed : {len(errors)}")
+
     lines = [
         "=" * 70,
         f"  {title}",
@@ -62,10 +81,7 @@ def write_report(
         f"  Run    : {ts}",
         "=" * 70,
         "",
-        "SUMMARY",
-        f"  Total  : {len(entries)}",
-        f"  OK     : {len(successes)}",
-        f"  Failed : {len(errors)}",
+        *summary_lines,
         "",
         group_label,
         *op_lines,
@@ -78,6 +94,12 @@ def write_report(
     if show_successes and successes:
         lines.append("SUCCESSES")
         for s in successes:
+            lines.append(f"  {json.dumps(s)}")
+        lines.append("")
+
+    if skipped:
+        lines.append("SKIPPED")
+        for s in skipped:
             lines.append(f"  {json.dumps(s)}")
         lines.append("")
 

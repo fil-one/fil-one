@@ -1,11 +1,12 @@
-# Aurora S3 Testing
+# S3 On-Ramp Testing
 
-Two test suites against the Aurora S3-compatible API:
+Three test suites for validating FilOne S3 on-ramps (Aurora, Akave, …):
 
-1. **Upload, fetch, delete, and load tests** — targeted upload, fetch, delete, and load tests using the `harvard-lil/gov-data` dataset on source.coop. Files are streamed directly (source → Aurora) without writing to disk.
-2. **Compatibility Test** — runs the [ceph/s3-tests](https://github.com/ceph/s3-tests) suite (~750 tests) against Aurora to measure full S3 API compatibility.
+1. **Upload, fetch, delete, and load tests** — targeted upload, fetch, delete, and load tests using the `harvard-lil/gov-data` dataset on source.coop. Files are streamed directly (source → on-ramp) without writing to disk.
+2. **Compatibility Test** — runs the [ceph/s3-tests](https://github.com/ceph/s3-tests) suite (~750 tests) against an on-ramp to measure full S3 API compatibility.
+3. **Console presigned-URL test** — verifies an on-ramp supports the presigned URL operations the FilOne Console issues and that they are executable from a browser running on `https://app.fil.one` (CORS).
 
-All scripts share a unified report format: timestamped files in `aurora/logs/` and `aurora/reports/`.
+Each on-ramp has its own directory (`aurora/`, `akave/`, …) holding its `.env`, logs, and reports. All scripts share a unified report format: timestamped files in `<on-ramp>/logs/` and `<on-ramp>/reports/`.
 
 ---
 
@@ -218,6 +219,57 @@ The quarantine marks are configured in `_QUARANTINE_MARKS` in
   justified when only run 6 (155 tests) causes permanent damage.
 - **Skip object-lock tests entirely**: We still want to know their pass/fail
   status — we just don't want them to poison other tests.
+
+---
+
+## Console Presigned-URL Test
+
+Verifies that an on-ramp can sign (with AWS Sig V4) every S3 operation the FilOne Console issues via its batch presign endpoint, and that the resulting URLs are executable from a browser running on `https://app.fil.one` — i.e., the bucket's CORS configuration permits them. Works against any on-ramp.
+
+The operations tested are defined by the Console's [presign handler](../../packages/backend/src/handlers/presign.ts):
+
+| Operation            | HTTP   | Notes                                                             |
+| -------------------- | ------ | ----------------------------------------------------------------- |
+| `putObject`          | PUT    | Signs `Content-Type` + `x-amz-meta-*`; the browser must send them |
+| `listObjects`        | GET    | `?list-type=2&prefix=…`                                           |
+| `headObject`         | HEAD   | Plain head request                                                |
+| `headObjectFilMeta`  | HEAD   | `?fil-include-meta=1` — response must expose `x-fil-cid`          |
+| `getObject`          | GET    | Object download                                                   |
+| `getObjectRetention` | GET    | `?retention` — 400/404 accepted (bucket may lack Object Lock)     |
+| `deleteObject`       | DELETE | Delete by key                                                     |
+
+For each operation up to four log entries are written:
+
+1. `presign_<op>` — boto3 generated a Sig V4 URL.
+2. `preflight_<op>` — OPTIONS from `Origin: https://app.fil.one` returned `Access-Control-Allow-{Origin,Methods,Headers}` covering the method and any custom request headers. **Only emitted for `putObject` (PUT) and `deleteObject` (DELETE).** Per the Fetch spec, browsers don't send a preflight for _simple_ requests (GET/HEAD with only CORS-safelisted headers), so the server's OPTIONS handling is irrelevant for those ops in a real browser and we skip the check.
+3. `execute_<op>` — the signed URL succeeded over HTTP (or returned an S3 error listed as acceptable for that op).
+4. `response_cors_<op>` — the actual response carries `Access-Control-Allow-Origin`, and for HEAD/GET it also exposes the headers the browser needs to read (`ETag`, `Content-Length`, `Content-Type`, `Last-Modified`, plus `x-fil-cid` for the `fil-include-meta` variant; `x-amz-meta-*` must survive to the response for HEAD).
+
+```bash
+# Against the provider's default bucket (S3_BUCKET in <provider>/.env)
+python console_presign_test.py --provider aurora
+
+# Target a specific bucket
+python console_presign_test.py --provider aurora --bucket my-bucket
+
+# Simulate a different browser origin (for testing staging/dev domains)
+python console_presign_test.py --provider aurora --browser-origin https://console.dev.fil.one
+```
+
+The script uploads one small test object at a random key under `console-presign-test/` and deletes it in a `finally` block so repeated runs do not leave debris — even if one of the mid-sequence operations fails.
+
+### Bucket CORS configuration
+
+The Console operations only work from a browser if the bucket's CORS policy permits the origin, methods, request headers, and exposed response headers the test exercises. How that configuration is applied depends on the provider:
+
+| Provider   | CORS source                                  | Test behavior                                                                                                                                                                                                                                                |
+| ---------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Akave**  | S3 API (`PutBucketCors`)                     | The test captures the bucket's current CORS config, applies a rule tailored to the tested operations (origin, all methods, wildcard `AllowedHeaders`, the required `ExposeHeaders`), runs the checks, and restores the captured config in a `finally` block. |
+| **Aurora** | Configured out-of-band at the edge/CDN layer | The test does not call `put_bucket_cors` — Aurora rejects it. The operator must ensure the edge CORS rules match what the test asserts.                                                                                                                      |
+
+Providers that manage CORS via the S3 API are listed in `PROVIDERS_WITH_PUT_BUCKET_CORS` in `console_presign_test.py`.
+
+The report's header lists the bucket's CORS configuration as read via `GetBucketCors` before the test runs, and — for providers that apply CORS themselves — the config after the test-applied rule. The test then restores the pre-existing config in a `finally` block so repeated runs do not leave behind the test's rule. Mismatches between what the Console needs and what the provider has configured are visible in one place.
 
 ---
 
@@ -488,16 +540,17 @@ ERRORS
 
 ## File Reference
 
-| File                    | Purpose                                                           |
-| ----------------------- | ----------------------------------------------------------------- |
-| `client.py`             | boto3 client factory for Aurora and source.coop                   |
-| `report.py`             | Shared report formatting used by all scripts                      |
-| `logger.py`             | Per-operation JSONL logging + report generation for phase scripts |
-| `manifest.py`           | Upload resume state (`manifest.json`)                             |
-| `upload.py`             | Upload files from source.coop to Aurora                           |
-| `fetch.py`              | Head, get preview, and list versions                              |
-| `delete.py`             | Delete objects by key or version                                  |
-| `load_test.py`          | Concurrent load test with SQLite-backed resume                    |
-| `compatibility_test.py` | Full S3 compatibility test via ceph/s3-tests                      |
-| `manifest.json`         | Created at runtime — upload state                                 |
-| `load_test_state.db`    | Created at runtime — load test state                              |
+| File                      | Purpose                                                           |
+| ------------------------- | ----------------------------------------------------------------- |
+| `client.py`               | boto3 client factory for Aurora and source.coop                   |
+| `report.py`               | Shared report formatting used by all scripts                      |
+| `logger.py`               | Per-operation JSONL logging + report generation for phase scripts |
+| `manifest.py`             | Upload resume state (`manifest.json`)                             |
+| `upload.py`               | Upload files from source.coop to Aurora                           |
+| `fetch.py`                | Head, get preview, and list versions                              |
+| `delete.py`               | Delete objects by key or version                                  |
+| `load_test.py`            | Concurrent load test with SQLite-backed resume                    |
+| `compatibility_test.py`   | Full S3 compatibility test via ceph/s3-tests                      |
+| `console_presign_test.py` | Presigned URL + CORS test for the Console's operations            |
+| `manifest.json`           | Created at runtime — upload state                                 |
+| `load_test_state.db`      | Created at runtime — load test state                              |
