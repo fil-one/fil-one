@@ -660,7 +660,7 @@ describe('stripe-webhook handler', () => {
       expect(deleteCalls).toHaveLength(1);
     });
 
-    it('throws when invoice_settings.default_payment_method is null', async () => {
+    it('skips update when default_payment_method is null', async () => {
       setupStripeEvent(
         'customer.updated',
         mockCustomerObject({
@@ -669,14 +669,82 @@ describe('stripe-webhook handler', () => {
       );
 
       const result = await handler(buildWebhookEvent('{}'));
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+
+      // No billing-record update should have been attempted
+      const billingUpdates = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .filter(
+          (c) =>
+            c.args[0].input.Key?.pk?.S === `CUSTOMER#${MOCK_USER_ID}` &&
+            c.args[0].input.Key?.sk?.S === 'SUBSCRIPTION',
+        );
+      expect(billingUpdates).toHaveLength(0);
+
+      // Idempotency record must NOT be deleted
+      const deleteCalls = ddbMock
+        .commandCalls(DeleteItemCommand)
+        .filter((c) => c.args[0].input.Key?.pk?.S === `WEBHOOK#${MOCK_EVENT_ID}`);
+      expect(deleteCalls).toHaveLength(0);
+    });
+
+    it('skips update for trial-creation customer.updated event (currency null → usd, no default_payment_method)', async () => {
+      const TRIAL_USER_ID = '2bfd6596-4ccb-47a8-b508-bf64fdb44d4e';
+      const TRIAL_ORG_ID = '7d352bd8-ed9e-4f2a-8ec3-6ba7ae356525';
+      const TRIAL_CUSTOMER_ID = 'cus_UN4LxyuGMbKzKz';
+      const TRIAL_EVENT_ID = 'evt_1TOKCkAQEKri8lBk4HwPEKWK';
+
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      mockConstructEvent.mockReturnValue({
+        id: TRIAL_EVENT_ID,
+        type: 'customer.updated',
+        data: {
+          object: {
+            id: TRIAL_CUSTOMER_ID,
+            object: 'customer',
+            invoice_settings: {
+              default_payment_method: null,
+              custom_fields: null,
+              footer: null,
+              rendering_options: null,
+            },
+            metadata: {
+              userId: TRIAL_USER_ID,
+              orgId: TRIAL_ORG_ID,
+            },
+          },
+          previous_attributes: { currency: null },
+        },
       });
 
-      const deleteCalls = ddbMock.commandCalls(DeleteItemCommand);
-      expect(deleteCalls).toHaveLength(1);
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+
+      // No billing-record update for this user
+      const billingUpdates = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .filter(
+          (c) =>
+            c.args[0].input.Key?.pk?.S === `CUSTOMER#${TRIAL_USER_ID}` &&
+            c.args[0].input.Key?.sk?.S === 'SUBSCRIPTION',
+        );
+      expect(billingUpdates).toHaveLength(0);
+
+      // Idempotency record must be retained
+      const deleteCalls = ddbMock
+        .commandCalls(DeleteItemCommand)
+        .filter((c) => c.args[0].input.Key?.pk?.S === `WEBHOOK#${TRIAL_EVENT_ID}`);
+      expect(deleteCalls).toHaveLength(0);
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('customer.updated without default_payment_method'),
+        expect.objectContaining({ customerId: TRIAL_CUSTOMER_ID, userId: TRIAL_USER_ID }),
+      );
+
+      consoleSpy.mockRestore();
     });
   });
 
