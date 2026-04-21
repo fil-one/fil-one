@@ -690,7 +690,7 @@ describe('stripe-webhook handler', () => {
       const TRIAL_CUSTOMER_ID = 'cus_UN4LxyuGMbKzKz';
       const TRIAL_EVENT_ID = 'evt_1TOKCkAQEKri8lBk4HwPEKWK';
 
-      consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
 
       mockConstructEvent.mockReturnValue({
         id: TRIAL_EVENT_ID,
