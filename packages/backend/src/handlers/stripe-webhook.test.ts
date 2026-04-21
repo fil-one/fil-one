@@ -692,6 +692,7 @@ describe('stripe-webhook handler', () => {
           object: {
             id: TRIAL_CUSTOMER_ID,
             object: 'customer',
+            currency: 'usd',
             invoice_settings: {
               default_payment_method: null,
               custom_fields: null,
