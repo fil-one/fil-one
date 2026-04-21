@@ -493,7 +493,7 @@ export function ObjectBrowser({
           return onDelete(confirmDelete.key, confirmDelete.versionId);
         }}
         title="Delete object"
-        description="This will permanently delete this version. This action cannot be undone."
+        description="This object will be permanently deleted. This action cannot be undone."
         confirmLabel="Delete"
       />
     </div>
