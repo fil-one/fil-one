@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
@@ -594,6 +594,13 @@ describe('stripe-webhook handler', () => {
   // 4b. customer.updated
   // -----------------------------------------------------------------------
   describe('customer.updated', () => {
+    let consoleSpy: MockInstance | undefined;
+
+    afterEach(() => {
+      consoleSpy?.mockRestore();
+      consoleSpy = undefined;
+    });
+
     it('updates payment method in DynamoDB when default_payment_method is expanded object', async () => {
       setupStripeEvent('customer.updated', mockCustomerObject());
 
@@ -683,7 +690,7 @@ describe('stripe-webhook handler', () => {
       const TRIAL_CUSTOMER_ID = 'cus_UN4LxyuGMbKzKz';
       const TRIAL_EVENT_ID = 'evt_1TOKCkAQEKri8lBk4HwPEKWK';
 
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       mockConstructEvent.mockReturnValue({
         id: TRIAL_EVENT_ID,
@@ -720,8 +727,6 @@ describe('stripe-webhook handler', () => {
         expect.stringContaining('customer.updated without default_payment_method'),
         expect.objectContaining({ customerId: TRIAL_CUSTOMER_ID, userId: TRIAL_USER_ID }),
       );
-
-      consoleSpy.mockRestore();
     });
   });
 
