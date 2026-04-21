@@ -18,12 +18,21 @@ import { CopyableField } from '../components/CopyableField';
 import { Spinner } from '../components/Spinner';
 import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
 
-import type { ObjectMetadataResponse } from '@filone/shared';
+import type {
+  ObjectMetadataResponse,
+  GetBucketResponse,
+  ObjectRetentionInfo,
+} from '@filone/shared';
 import { FILONE_STAGE } from '../env';
-import { apiRequest } from '../lib/api.js';
 import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
-import { queryKeys } from '../lib/query-client.js';
+import { queryKeys, queryClient } from '../lib/query-client.js';
+import { batchPresign } from '../lib/use-presign.js';
+import {
+  parseHeadObjectResponse,
+  parseGetObjectRetentionResponse,
+  executePresignedUrl,
+} from '../lib/aurora-s3.js';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -33,6 +42,27 @@ export type ObjectDetailPageProps = {
   bucketName: string;
   objectKey: string;
 };
+
+async function fetchObjectRetention(
+  url: string,
+  method: string,
+): Promise<ObjectRetentionInfo | undefined> {
+  try {
+    const response = await executePresignedUrl(url, method);
+    const xml = await response.text();
+    return parseGetObjectRetentionResponse(xml) ?? undefined;
+  } catch (err) {
+    // Objects without retention configured return an S3 error — this is expected.
+    const msg = err instanceof Error ? err.message : '';
+    const isExpected =
+      msg.includes('NoSuchObjectLockConfiguration') ||
+      msg.includes('ObjectLockConfigurationNotFoundError');
+    if (!isExpected) {
+      console.error('Failed to fetch object retention:', err);
+    }
+    return undefined;
+  }
+}
 
 // eslint-disable-next-line max-lines-per-function, complexity/complexity
 export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProps) {
@@ -45,10 +75,39 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
     error,
   } = useQuery({
     queryKey: queryKeys.objectMetadata(bucketName, objectKey),
-    queryFn: () =>
-      apiRequest<ObjectMetadataResponse>(
-        `/buckets/${encodeURIComponent(bucketName)}/objects/metadata?key=${encodeURIComponent(objectKey)}`,
-      ),
+    queryFn: async (): Promise<ObjectMetadataResponse> => {
+      const cachedBucket = queryClient.getQueryData<GetBucketResponse>(
+        queryKeys.bucket(bucketName),
+      );
+      const hasObjectLock = cachedBucket?.bucket.objectLockEnabled ?? false;
+
+      const ops = [
+        { op: 'headObject' as const, bucket: bucketName, key: objectKey, includeFilMeta: true },
+        ...(hasObjectLock
+          ? [{ op: 'getObjectRetention' as const, bucket: bucketName, key: objectKey }]
+          : []),
+      ];
+      const { items } = await batchPresign(ops);
+
+      const headResponse = await executePresignedUrl(items[0].url, items[0].method);
+      const head = parseHeadObjectResponse(headResponse, objectKey);
+
+      const retention =
+        hasObjectLock && items[1]
+          ? await fetchObjectRetention(items[1].url, items[1].method)
+          : undefined;
+
+      return {
+        key: head.key,
+        sizeBytes: head.sizeBytes,
+        lastModified: head.lastModified,
+        ...(head.etag && { etag: head.etag }),
+        ...(head.contentType && { contentType: head.contentType }),
+        metadata: head.metadata,
+        ...(head.filCid && { filCid: head.filCid }),
+        ...(retention && { retention }),
+      };
+    },
   });
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);

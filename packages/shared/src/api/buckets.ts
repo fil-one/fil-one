@@ -65,6 +65,7 @@ export interface Bucket {
   region: string;
   createdAt: string;
   isPublic: boolean;
+  objectLockEnabled?: boolean;
 }
 
 export interface ListBucketsResponse {

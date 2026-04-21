@@ -538,40 +538,12 @@ export default $config({
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
     });
     addRoute({
-      method: 'GET',
-      routePath: '/api/buckets/{name}/objects',
-      handler: 'list-objects',
-      permissions: auroraS3GatewayPermissions,
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-      memory: '1024 MB',
-    });
-    addRoute({
       method: 'POST',
-      routePath: '/api/buckets/{name}/objects/presign',
-      handler: 'presign-upload',
+      routePath: '/api/presign',
+      handler: 'presign',
       permissions: auroraS3GatewayPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-    });
-    addRoute({
-      method: 'GET',
-      routePath: '/api/buckets/{name}/objects/download',
-      handler: 'download-object',
-      permissions: auroraS3GatewayPermissions,
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-    });
-    addRoute({
-      method: 'DELETE',
-      routePath: '/api/buckets/{name}/objects',
-      handler: 'delete-object',
-      permissions: auroraS3GatewayPermissions,
-    });
-    addRoute({
-      method: 'GET',
-      routePath: '/api/buckets/{name}/objects/metadata',
-      handler: 'head-object',
-      permissions: auroraS3GatewayPermissions,
-      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-      memory: '1024 MB',
+      memory: '512 MB',
     });
 
     // ── Auth routes ──────────────────────────────────────────────────
