@@ -1,4 +1,9 @@
+# Delay installations of recently published packages, allowing time for the community to discover
+# and report potential security issues or functional problems.
 minimumReleaseAge: 4320 # 3 days
+
+# Fail if a package's trust level has decreased
+trustPolicy: no-downgrade
 
 packages:
   - 'bin'
