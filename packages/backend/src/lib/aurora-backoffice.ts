@@ -2,6 +2,7 @@ import {
   createClient,
   createTenant,
   createTenantToken,
+  getBucketStorageMetrics,
   getTenant,
   getTenantOperationMetrics,
   getTenantStorageMetrics,
@@ -250,6 +251,38 @@ export async function getStorageSamples({
 
   if (error) {
     throw new Error(`Aurora storage API failed for tenant ${tenantId}`, {
+      cause: error,
+    });
+  }
+
+  return data?.samples ?? [];
+}
+
+export interface GetBucketStorageSamplesOptions {
+  bucketName: string;
+  from: string;
+  to: string;
+  window?: string;
+}
+
+export async function getBucketStorageSamples({
+  bucketName,
+  from,
+  to,
+  window = '1h',
+}: GetBucketStorageSamplesOptions): Promise<ModelStorageMetricsSample[]> {
+  const partnerId = process.env.AURORA_PARTNER_ID!;
+  const client = createBackofficeClient();
+
+  const { data, error } = await getBucketStorageMetrics({
+    client,
+    path: { partnerId, bucketName },
+    query: { from, to, window },
+    throwOnError: false,
+  });
+
+  if (error) {
+    throw new Error(`Aurora bucket storage API failed for bucket ${bucketName}`, {
       cause: error,
     });
   }
