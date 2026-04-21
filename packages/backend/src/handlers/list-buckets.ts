@@ -71,6 +71,8 @@ export async function baseHandler(
       region: S3_REGION,
       createdAt: b.createdAt,
       isPublic: false,
+      versioning: b.flags?.includes('versioned') ?? false,
+      encrypted: b.flags?.includes('encrypted') ?? true,
     }));
 
   return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets }).build();

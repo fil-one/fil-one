@@ -66,6 +66,11 @@ export interface Bucket {
   createdAt: string;
   isPublic: boolean;
   objectLockEnabled?: boolean;
+  versioning?: boolean;
+  encrypted?: boolean;
+  defaultRetention?: RetentionMode;
+  retentionDuration?: number;
+  retentionDurationType?: RetentionDurationType;
 }
 
 export interface ListBucketsResponse {
