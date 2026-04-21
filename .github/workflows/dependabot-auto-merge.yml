@@ -10,9 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.actor == 'dependabot[bot]' }}
     steps:
-      - name: Authenticate cli with a PAT
-        run: echo "${{ secrets.DEPENDABOT_TOKEN }}" | gh auth login --with-token
+      - name: Generate fil-one-bot app token
+        id: app-token
+        uses: actions/create-github-app-token@6c0f2b2b6b3f0e2f8f4b7f4d5d4f0d8b6d7d6a4d # v3
+        with:
+          client-id: ${{ secrets.FIL_ONE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.FIL_ONE_BOT_PRIVATE_KEY }}
       - name: Enable auto-merge for Dependabot PRs
         run: gh pr merge --auto --squash "$PR_URL"
         env:
-          PR_URL: ${{github.event.pull_request.html_url}}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
