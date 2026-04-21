@@ -672,21 +672,9 @@ describe('stripe-webhook handler', () => {
 
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
 
-      // No billing-record update should have been attempted
-      const billingUpdates = ddbMock
-        .commandCalls(UpdateItemCommand)
-        .filter(
-          (c) =>
-            c.args[0].input.Key?.pk?.S === `CUSTOMER#${MOCK_USER_ID}` &&
-            c.args[0].input.Key?.sk?.S === 'SUBSCRIPTION',
-        );
-      expect(billingUpdates).toHaveLength(0);
-
-      // Idempotency record must NOT be deleted
-      const deleteCalls = ddbMock
-        .commandCalls(DeleteItemCommand)
-        .filter((c) => c.args[0].input.Key?.pk?.S === `WEBHOOK#${MOCK_EVENT_ID}`);
-      expect(deleteCalls).toHaveLength(0);
+      // This handler path should not perform any DynamoDB updates or deletes.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
     });
 
     it('skips update for trial-creation customer.updated event (currency null → usd, no default_payment_method)', async () => {
@@ -723,21 +711,9 @@ describe('stripe-webhook handler', () => {
 
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
 
-      // No billing-record update for this user
-      const billingUpdates = ddbMock
-        .commandCalls(UpdateItemCommand)
-        .filter(
-          (c) =>
-            c.args[0].input.Key?.pk?.S === `CUSTOMER#${TRIAL_USER_ID}` &&
-            c.args[0].input.Key?.sk?.S === 'SUBSCRIPTION',
-        );
-      expect(billingUpdates).toHaveLength(0);
-
-      // Idempotency record must be retained
-      const deleteCalls = ddbMock
-        .commandCalls(DeleteItemCommand)
-        .filter((c) => c.args[0].input.Key?.pk?.S === `WEBHOOK#${TRIAL_EVENT_ID}`);
-      expect(deleteCalls).toHaveLength(0);
+      // This handler path should not perform any DynamoDB updates or deletes.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
 
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringContaining('customer.updated without default_payment_method'),
