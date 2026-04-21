@@ -5,7 +5,7 @@ import type {
   AccessKeyPermission,
   CreateAccessKeyResponse,
 } from '@filone/shared';
-import { CreateAccessKeySchema, KEY_NAME_MAX_LENGTH } from '@filone/shared';
+import { CreateAccessKeySchema } from '@filone/shared';
 import { createAccessKey } from './api.js';
 import { expiresAtFromForm } from './time.js';
 import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';
@@ -33,13 +33,14 @@ export function useAccessKeyForm({ defaultBucket, onSuccess }: UseAccessKeyFormO
   const [customDate, setCustomDate] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
-  const bucketsValid = bucketScope === 'all' || selectedBuckets.length > 0;
-  const canSubmit =
-    keyName.trim().length > 0 &&
-    keyName.trim().length <= KEY_NAME_MAX_LENGTH &&
-    permissions.length > 0 &&
-    bucketsValid &&
-    !creating;
+  const candidatePayload = {
+    keyName: keyName.trim(),
+    permissions,
+    bucketScope,
+    buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
+    expiresAt: expiresAtFromForm(expiration, customDate),
+  };
+  const canSubmit = !creating && CreateAccessKeySchema.safeParse(candidatePayload).success;
 
   function reset() {
     setKeyName('');
@@ -81,14 +82,7 @@ export function useAccessKeyForm({ defaultBucket, onSuccess }: UseAccessKeyFormO
 
   function handleSubmit(e?: { preventDefault(): void }) {
     e?.preventDefault();
-    if (!keyName.trim() || permissions.length === 0) return;
-    createKeyMutation.mutate({
-      keyName: keyName.trim(),
-      permissions,
-      bucketScope,
-      buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
-      expiresAt: expiresAtFromForm(expiration, customDate),
-    });
+    createKeyMutation.mutate(candidatePayload);
   }
 
   return {
@@ -104,7 +98,7 @@ export function useAccessKeyForm({ defaultBucket, onSuccess }: UseAccessKeyFormO
     setExpiration,
     customDate,
     setCustomDate,
-    expiresAt: expiresAtFromForm(expiration, customDate),
+    expiresAt: candidatePayload.expiresAt,
     creating,
     canSubmit,
     handleSubmit,
