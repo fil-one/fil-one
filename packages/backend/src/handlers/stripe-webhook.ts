@@ -53,7 +53,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       await getWebhookSecret(),
     );
   } catch (err) {
-    console.error('[stripe-webhook] Signature verification failed:', (err as Error).message);
+    console.error('[stripe-webhook] Signature verification failed:', err);
     return { statusCode: 400, body: JSON.stringify({ message: 'Invalid signature' }) };
   }
 
@@ -79,7 +79,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       console.warn('[stripe-webhook] Already processed event:', stripeEvent.id);
       return { statusCode: 200, body: JSON.stringify({ received: true }) };
     }
-    console.error('[stripe-webhook] Idempotency check failed:', (err as Error).message);
+    console.error('[stripe-webhook] Idempotency check failed:', err);
     return { statusCode: 500, body: JSON.stringify({ message: 'Idempotency check error' }) };
   }
 
@@ -121,15 +121,12 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         console.log('[stripe-webhook] Unhandled event type:', stripeEvent.type);
     }
   } catch (err) {
-    console.error('[stripe-webhook] Error processing event:', (err as Error).message);
+    console.error('[stripe-webhook] Error processing event:', err);
     // Release idempotency claim so Stripe retries can reprocess
     try {
       await dynamo.send(new DeleteItemCommand({ TableName: tableName, Key: idempotencyKey }));
     } catch (deleteErr) {
-      console.error(
-        '[stripe-webhook] Failed to release idempotency claim:',
-        (deleteErr as Error).message,
-      );
+      console.error('[stripe-webhook] Failed to release idempotency claim:', deleteErr);
     }
     return { statusCode: 500, body: JSON.stringify({ message: 'Processing error' }) };
   }
@@ -349,10 +346,7 @@ async function handleSubscriptionDeleted(
       });
     }
   } catch (error) {
-    console.error('[stripe-webhook] Failed to WRITE_LOCK Aurora tenant', {
-      userId,
-      error: (error as Error).message,
-    });
+    console.error('[stripe-webhook] Failed to WRITE_LOCK Aurora tenant', { userId, error });
   }
 }
 
@@ -396,10 +390,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
       });
     }
   } catch (error) {
-    console.error('[stripe-webhook] Failed to re-activate Aurora tenant', {
-      userId,
-      error: (error as Error).message,
-    });
+    console.error('[stripe-webhook] Failed to re-activate Aurora tenant', { userId, error });
   }
 }
 

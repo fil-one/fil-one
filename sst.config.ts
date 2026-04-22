@@ -68,9 +68,9 @@ export default $config({
       if ($app.stage === 'production') {
         args.transform = args.transform ?? {};
         args.transform.function = (fnArgs) => {
-          fnArgs.loggingConfig = $output(fnArgs.loggingConfig).apply((config) => ({
+          fnArgs.loggingConfig = $output(fnArgs.loggingConfig).apply((loggingConfig) => ({
             logFormat: 'JSON',
-            ...config,
+            ...loggingConfig,
             applicationLogLevel: 'WARN',
           }));
         };

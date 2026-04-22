@@ -114,7 +114,7 @@ async function exchangeRefreshToken(refreshToken: string): Promise<NewTokens | n
     const body = await res.text().catch(() => '');
     console.warn('[auth] Token refresh failed', { status: res.status, body });
   } catch (err) {
-    console.warn('[auth] Token refresh threw', { error: (err as Error).message });
+    console.warn('[auth] Token refresh threw', { error: err });
   }
   return null;
 }
@@ -176,9 +176,7 @@ async function extractIdTokenClaims({
       picture: (payload.picture as string) ?? null,
     };
   } catch (err) {
-    console.warn('[auth] ID token verification failed, continuing without email', {
-      error: (err as Error).message,
-    });
+    console.warn('[auth] ID token verification failed, continuing without email', { error: err });
     return { email: null, emailVerified: false, name: null, picture: null };
   }
 }
@@ -392,7 +390,7 @@ export function authMiddleware() {
         return; // Valid — continue to handler
       } catch (err) {
         // Expired or invalid — fall through to refresh
-        console.warn('[auth] Access token verification failed', { error: (err as Error).message });
+        console.warn('[auth] Access token verification failed', { error: err });
       }
     }
 
@@ -456,9 +454,7 @@ export function authMiddleware() {
         if (blocked) return blocked;
         return;
       } catch (err) {
-        console.warn('[auth] Fallback access token validation failed', {
-          error: (err as Error).message,
-        });
+        console.warn('[auth] Fallback access token validation failed', { error: err });
       }
     }
 

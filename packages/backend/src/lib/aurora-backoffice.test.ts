@@ -261,7 +261,7 @@ describe('createAuroraTenantApiKey', () => {
 
     await expect(
       createAuroraTenantApiKey({ tenantId: 'tenant-1', orgId: 'org-1' }),
-    ).rejects.toThrow('Aurora API did not return a token for org org-1: {"id":"token-id-1"}');
+    ).rejects.toThrow('Aurora API did not return a token for org org-1. Response fields: id');
   });
 });
 

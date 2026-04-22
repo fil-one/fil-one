@@ -513,7 +513,7 @@ describe('setup-integrations', () => {
 
       expect(capturedCfnBody).toEqual({
         Status: 'FAILED',
-        Reason: 'Auth0 token request failed (401): Unauthorized',
+        Reason: 'Auth0 management token request failed (401): Unauthorized',
         PhysicalResourceId: 'filone-setup-dev',
         ...BASE_CFN_FIELDS,
       });

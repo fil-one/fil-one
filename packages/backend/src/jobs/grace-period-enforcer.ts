@@ -162,7 +162,7 @@ export async function handler(): Promise<void> {
         userId: candidate.userId,
         orgId: candidate.orgId,
         action: candidate.action,
-        error: (error as Error).message,
+        error,
       });
     }
   }

@@ -34,7 +34,7 @@ export async function baseHandler(
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
   const setupStatus = orgProfile?.setupStatus?.S;
   if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    console.error('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
+    console.warn('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
     return new ResponseBuilder()
       .status(503)
       .body<ErrorResponse>({
