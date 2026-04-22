@@ -64,7 +64,6 @@ async function enforceTenantLocks({
   return desiredStatus;
 }
 
-// eslint-disable-next-line max-lines-per-function
 export async function handler(event: UsageReportingWorkerPayload): Promise<void> {
   const {
     orgId,
@@ -119,67 +118,109 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     totalEgressBytes,
   });
 
-  // Report metered usage to Stripe (in GB)
-  if (averageStorageGbUsed > 0) {
-    const stripe = getStripeClient();
-    await stripe.billing.meterEvents.create({
-      event_name: process.env.STRIPE_METER_EVENT_NAME ?? '',
-      payload: {
-        stripe_customer_id: stripeCustomerId,
-        value: String(averageStorageGbUsed),
-      },
-      timestamp: Math.floor(Date.now() / 1000),
-    });
-    console.log('[usage-worker] Stripe meter event created', {
-      stripeCustomerId,
-      averageStorageGbUsed,
-    });
-  }
+  await reportStorageToStripe(stripeCustomerId, averageStorageGbUsed);
 
-  // Enforce trial limits
-  let lockAction: string | undefined;
-  if (isTrial) {
-    try {
-      lockAction = await enforceTenantLocks({
+  const lockAction = isTrial
+    ? await safeEnforceTrialLocks({
         tenantId: auroraTenantId,
         orgId,
         currentStatus: tenantInfo!.status,
         currentStorageBytes,
         totalEgressBytes,
-      });
-    } catch (error) {
-      lockAction = `error:${(error as Error).message}`;
-      console.error('[usage-worker] Failed to enforce tenant locks', { orgId, error });
-    }
-  } else {
-    lockAction = 'skipped:paid';
-  }
+      })
+    : 'skipped:paid';
 
-  // Write audit record
+  await writeUsageAuditRecord({
+    orgId,
+    subscriptionId,
+    stripeCustomerId,
+    currentPeriodStart,
+    subscriptionStatus,
+    reportDate,
+    averageStorageBytesUsed: usage.averageStorageBytesUsed,
+    averageStorageGbUsed,
+    totalEgressBytes,
+    sampleCount: usage.sampleCount,
+    lockAction,
+  });
+
+  console.log('[usage-worker] Audit record written', { orgId, reportDate });
+}
+
+async function reportStorageToStripe(
+  stripeCustomerId: string,
+  averageStorageGbUsed: number,
+): Promise<void> {
+  if (averageStorageGbUsed <= 0) return;
+
+  const stripe = getStripeClient();
+  await stripe.billing.meterEvents.create({
+    event_name: process.env.STRIPE_METER_EVENT_NAME ?? '',
+    payload: {
+      stripe_customer_id: stripeCustomerId,
+      value: String(averageStorageGbUsed),
+    },
+    timestamp: Math.floor(Date.now() / 1000),
+  });
+  console.log('[usage-worker] Stripe meter event created', {
+    stripeCustomerId,
+    averageStorageGbUsed,
+  });
+}
+
+async function safeEnforceTrialLocks(params: {
+  tenantId: string;
+  orgId: string;
+  currentStatus: ModelsTenantStatus | undefined;
+  currentStorageBytes: number;
+  totalEgressBytes: number;
+}): Promise<string> {
+  try {
+    return await enforceTenantLocks(params);
+  } catch (error) {
+    console.error('[usage-worker] Failed to enforce tenant locks', {
+      orgId: params.orgId,
+      error,
+    });
+    return `error:${(error as Error).message}`;
+  }
+}
+
+async function writeUsageAuditRecord(params: {
+  orgId: string;
+  subscriptionId: string;
+  stripeCustomerId: string;
+  currentPeriodStart: string;
+  subscriptionStatus: string;
+  reportDate: string;
+  averageStorageBytesUsed: number;
+  averageStorageGbUsed: number;
+  totalEgressBytes: number;
+  sampleCount: number;
+  lockAction: string;
+}): Promise<void> {
   const ttl = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60; // 365 days
   await dynamo.send(
     new PutItemCommand({
       TableName: Resource.BillingTable.name,
       Item: marshall({
-        pk: `ORG#${orgId}`,
-        sk: `USAGE_REPORT#${reportDate}`,
-        orgId,
-        subscriptionId,
-        stripeCustomerId,
-        currentPeriodStart,
-        subscriptionStatus,
-        reportDate,
-        averageStorageBytesUsed: usage.averageStorageBytesUsed,
-        averageStorageGbUsed,
-        totalEgressBytes,
-        sampleCount: usage.sampleCount,
-        reportedToStripe: averageStorageGbUsed > 0,
-        lockAction,
+        pk: `ORG#${params.orgId}`,
+        sk: `USAGE_REPORT#${params.reportDate}`,
+        orgId: params.orgId,
+        subscriptionId: params.subscriptionId,
+        stripeCustomerId: params.stripeCustomerId,
+        currentPeriodStart: params.currentPeriodStart,
+        subscriptionStatus: params.subscriptionStatus,
+        reportDate: params.reportDate,
+        averageStorageBytesUsed: params.averageStorageBytesUsed,
+        averageStorageGbUsed: params.averageStorageGbUsed,
+        totalEgressBytes: params.totalEgressBytes,
+        sampleCount: params.sampleCount,
+        reportedToStripe: params.averageStorageGbUsed > 0,
+        lockAction: params.lockAction,
         createdAt: new Date().toISOString(),
         ttl,
       }),
     }),
   );
-
-  console.log('[usage-worker] Audit record written', { orgId, reportDate });
 }

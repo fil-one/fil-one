@@ -16,7 +16,6 @@ interface SubscriptionRecord {
   subscriptionStatus: string;
 }
 
-// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export async function handler(): Promise<void> {
   const billingTableName = Resource.BillingTable.name;
   const workerFunctionName = process.env.USAGE_WORKER_FUNCTION_NAME!;
@@ -24,7 +23,69 @@ export async function handler(): Promise<void> {
 
   console.log('[usage-orchestrator] Starting usage reporting', { reportDate });
 
-  // Step 1: Scan for non-canceled subscriptions
+  const records = await scanActiveSubscriptionRecords(billingTableName);
+
+  console.log('[usage-orchestrator] Found subscriptions', { count: records.length });
+
+  if (records.length === 0) return;
+
+  const orgSeen = new Map<string, { subscriptionId: string; stripeCustomerId: string }>();
+  let skippedDuplicate = 0;
+  let skippedNoTenant = 0;
+  let invoked = 0;
+  let failed = 0;
+
+  for (const record of records) {
+    const existing = orgSeen.get(record.orgId);
+    if (existing) {
+      skippedDuplicate++;
+      logDuplicateConflict(record, existing);
+      continue;
+    }
+    orgSeen.set(record.orgId, {
+      subscriptionId: record.subscriptionId,
+      stripeCustomerId: record.stripeCustomerId,
+    });
+
+    const auroraTenantId = await resolveAuroraTenantId(record.orgId);
+    if (!auroraTenantId) {
+      skippedNoTenant++;
+      console.warn('[usage-orchestrator] Missing auroraTenantId, skipping', {
+        orgId: record.orgId,
+      });
+      continue;
+    }
+
+    const payload: UsageReportingWorkerPayload = {
+      orgId: record.orgId,
+      auroraTenantId,
+      subscriptionId: record.subscriptionId,
+      stripeCustomerId: record.stripeCustomerId,
+      currentPeriodStart: record.currentPeriodStart,
+      subscriptionStatus: record.subscriptionStatus,
+      reportDate,
+    };
+
+    if (await invokeUsageWorker(workerFunctionName, payload)) {
+      invoked++;
+    } else {
+      failed++;
+    }
+  }
+
+  console.log('[usage-orchestrator] Complete', {
+    totalSubscriptions: records.length,
+    uniqueOrgs: orgSeen.size,
+    invoked,
+    failed,
+    skippedDuplicate,
+    skippedNoTenant,
+  });
+}
+
+async function scanActiveSubscriptionRecords(
+  billingTableName: string,
+): Promise<SubscriptionRecord[]> {
   const records: SubscriptionRecord[] = [];
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
 
@@ -76,100 +137,65 @@ export async function handler(): Promise<void> {
     lastEvaluatedKey = result.LastEvaluatedKey;
   } while (lastEvaluatedKey);
 
-  console.log('[usage-orchestrator] Found subscriptions', { count: records.length });
+  return records;
+}
 
-  if (records.length === 0) return;
+async function resolveAuroraTenantId(orgId: string): Promise<string | undefined> {
+  const profileResult = await dynamo.send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: {
+        pk: { S: `ORG#${orgId}` },
+        sk: { S: 'PROFILE' },
+      },
+      ProjectionExpression: 'auroraTenantId',
+    }),
+  );
 
-  // Step 2: Deduplicate by orgId, resolve auroraTenantId, invoke workers
-  const orgSeen = new Map<string, { subscriptionId: string; stripeCustomerId: string }>();
-  let skippedDuplicate = 0;
-  let skippedNoTenant = 0;
-  let invoked = 0;
-  let failed = 0;
+  return profileResult.Item?.auroraTenantId?.S;
+}
 
-  for (const record of records) {
-    const existing = orgSeen.get(record.orgId);
-    if (existing) {
-      skippedDuplicate++;
-      if (
-        existing.subscriptionId !== record.subscriptionId ||
-        existing.stripeCustomerId !== record.stripeCustomerId
-      ) {
-        console.warn('[usage-orchestrator] Conflicting duplicate for orgId', {
-          orgId: record.orgId,
-          first: {
-            subscriptionId: existing.subscriptionId,
-            stripeCustomerId: existing.stripeCustomerId,
-          },
-          duplicate: {
-            subscriptionId: record.subscriptionId,
-            stripeCustomerId: record.stripeCustomerId,
-          },
-        });
-      }
-      continue;
-    }
-    orgSeen.set(record.orgId, {
-      subscriptionId: record.subscriptionId,
-      stripeCustomerId: record.stripeCustomerId,
-    });
-
-    // Resolve auroraTenantId
-    const profileResult = await dynamo.send(
-      new GetItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: {
-          pk: { S: `ORG#${record.orgId}` },
-          sk: { S: 'PROFILE' },
-        },
-        ProjectionExpression: 'auroraTenantId',
+async function invokeUsageWorker(
+  workerFunctionName: string,
+  payload: UsageReportingWorkerPayload,
+): Promise<boolean> {
+  try {
+    await lambda.send(
+      new InvokeCommand({
+        FunctionName: workerFunctionName,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify(payload)),
       }),
     );
+    return true;
+  } catch (error) {
+    console.error('[usage-orchestrator] Failed to invoke worker', {
+      orgId: payload.orgId,
+      error,
+    });
+    return false;
+  }
+}
 
-    const auroraTenantId = profileResult.Item?.auroraTenantId?.S;
-    if (!auroraTenantId) {
-      skippedNoTenant++;
-      console.warn('[usage-orchestrator] Missing auroraTenantId, skipping', {
-        orgId: record.orgId,
-      });
-      continue;
-    }
-
-    // Invoke worker
-    const payload: UsageReportingWorkerPayload = {
-      orgId: record.orgId,
-      auroraTenantId,
+function logDuplicateConflict(
+  record: SubscriptionRecord,
+  existing: { subscriptionId: string; stripeCustomerId: string },
+): void {
+  if (
+    existing.subscriptionId === record.subscriptionId &&
+    existing.stripeCustomerId === record.stripeCustomerId
+  ) {
+    return;
+  }
+  console.warn('[usage-orchestrator] Conflicting duplicate for orgId', {
+    orgId: record.orgId,
+    first: {
+      subscriptionId: existing.subscriptionId,
+      stripeCustomerId: existing.stripeCustomerId,
+    },
+    duplicate: {
       subscriptionId: record.subscriptionId,
       stripeCustomerId: record.stripeCustomerId,
-      currentPeriodStart: record.currentPeriodStart,
-      subscriptionStatus: record.subscriptionStatus,
-      reportDate,
-    };
-
-    try {
-      await lambda.send(
-        new InvokeCommand({
-          FunctionName: workerFunctionName,
-          InvocationType: 'Event',
-          Payload: Buffer.from(JSON.stringify(payload)),
-        }),
-      );
-      invoked++;
-    } catch (error) {
-      failed++;
-      console.error('[usage-orchestrator] Failed to invoke worker', {
-        orgId: record.orgId,
-        error,
-      });
-    }
-  }
-
-  console.log('[usage-orchestrator] Complete', {
-    totalSubscriptions: records.length,
-    uniqueOrgs: orgSeen.size,
-    invoked,
-    failed,
-    skippedDuplicate,
-    skippedNoTenant,
+    },
   });
 }
