@@ -15,6 +15,7 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyableField } from '../components/CopyableField';
+import { ObjectChecksumCard } from '../components/ObjectChecksumCard';
 import { Spinner } from '../components/Spinner';
 import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
 
@@ -344,24 +345,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         </div>
       </div>
 
-      {metadata?.checksums?.sha256 && (
-        <div className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-          <h2 className="text-sm font-medium text-zinc-900">Checksum</h2>
-          <p className="mt-1 mb-4 text-xs text-zinc-500">
-            {`Verified at upload. Use this value to confirm the file hasn't been corrupted or tampered with.`}
-          </p>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between py-1">
-              <span className="text-[13px] text-zinc-500">Algorithm</span>
-              <span className="font-mono text-xs text-zinc-900">SHA-256</span>
-            </div>
-            <div className="flex items-center justify-between py-1">
-              <span className="text-[13px] text-zinc-500">Value</span>
-              <CopyableField label="" value={metadata.checksums.sha256} />
-            </div>
-          </div>
-        </div>
-      )}
+      <ObjectChecksumCard checksums={metadata?.checksums} />
 
       {metadata?.retention && metadata.retention.mode === 'COMPLIANCE' && (
         <div className="mt-6 rounded-lg border border-red-300/50 p-4">

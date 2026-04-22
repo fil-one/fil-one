@@ -330,6 +330,20 @@ describe('executePresignedUrl', () => {
     expect(fetch).toHaveBeenCalledWith('https://s3.example.com/obj?signed', { method: 'GET' });
   });
 
+  it('forwards headers to fetch when provided', async () => {
+    const mockResponse = new Response('', { status: 200 });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse);
+
+    await executePresignedUrl('https://s3.example.com/obj?signed', 'HEAD', {
+      'x-amz-checksum-mode': 'ENABLED',
+    });
+
+    expect(fetch).toHaveBeenCalledWith('https://s3.example.com/obj?signed', {
+      method: 'HEAD',
+      headers: { 'x-amz-checksum-mode': 'ENABLED' },
+    });
+  });
+
   it('throws with S3 error details on non-2xx with XML body', async () => {
     const errorXml = `<?xml version="1.0" encoding="UTF-8"?>
       <Error>
