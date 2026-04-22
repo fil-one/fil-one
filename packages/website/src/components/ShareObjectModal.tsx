@@ -100,7 +100,7 @@ export function ShareObjectModal({
         <p className="mb-2 text-[13px] font-medium text-zinc-900">Link expires in</p>
         <ExpirySelector selected={selected} onSelect={setSelected} disabled={generatingUrl} />
       </ModalBody>
-      <ModalFooter>
+      <ModalFooter fullWidth>
         <Button variant="ghost" onClick={onClose} disabled={generatingUrl}>
           Cancel
         </Button>
