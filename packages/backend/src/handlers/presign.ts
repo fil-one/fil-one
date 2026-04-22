@@ -63,7 +63,7 @@ async function presignOp(
     }
 
     case 'headObject': {
-      const url = await getPresignedHeadObjectUrl({
+      const { url, requiredHeaders } = await getPresignedHeadObjectUrl({
         endpointUrl,
         credentials,
         bucket: op.bucket,
@@ -71,7 +71,7 @@ async function presignOp(
         expiresIn: PRESIGN_EXPIRY_SECONDS,
         includeFilMeta: op.includeFilMeta,
       });
-      return { url, method: 'HEAD', expiresAt };
+      return { url, method: 'HEAD', expiresAt, requiredHeaders };
     }
 
     case 'getObjectRetention': {

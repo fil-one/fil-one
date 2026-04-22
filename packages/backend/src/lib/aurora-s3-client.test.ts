@@ -11,20 +11,24 @@ describe('getPresignedHeadObjectUrl', () => {
   };
 
   it('signs x-amz-checksum-mode as a header (appears in SignedHeaders, not hoisted)', async () => {
-    const url = new URL(await getPresignedHeadObjectUrl(baseOptions));
+    const { url, requiredHeaders } = await getPresignedHeadObjectUrl(baseOptions);
+    const parsed = new URL(url);
 
-    const signedHeaders = url.searchParams.get('X-Amz-SignedHeaders') ?? '';
+    const signedHeaders = parsed.searchParams.get('X-Amz-SignedHeaders') ?? '';
     expect(signedHeaders.split(';')).toContain('x-amz-checksum-mode');
 
-    expect(url.searchParams.has('X-Amz-Checksum-Mode')).toBe(false);
-    expect(url.searchParams.has('x-amz-checksum-mode')).toBe(false);
+    expect(parsed.searchParams.has('X-Amz-Checksum-Mode')).toBe(false);
+    expect(parsed.searchParams.has('x-amz-checksum-mode')).toBe(false);
+
+    expect(requiredHeaders).toEqual({ 'x-amz-checksum-mode': 'ENABLED' });
   });
 
   it('still adds fil-include-meta query param when includeFilMeta is true', async () => {
-    const url = new URL(await getPresignedHeadObjectUrl({ ...baseOptions, includeFilMeta: true }));
+    const { url } = await getPresignedHeadObjectUrl({ ...baseOptions, includeFilMeta: true });
+    const parsed = new URL(url);
 
-    expect(url.searchParams.get('fil-include-meta')).toBe('1');
-    const signedHeaders = url.searchParams.get('X-Amz-SignedHeaders') ?? '';
+    expect(parsed.searchParams.get('fil-include-meta')).toBe('1');
+    const signedHeaders = parsed.searchParams.get('X-Amz-SignedHeaders') ?? '';
     expect(signedHeaders.split(';')).toContain('x-amz-checksum-mode');
   });
 });

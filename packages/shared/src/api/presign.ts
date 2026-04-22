@@ -70,6 +70,7 @@ export interface PresignResponseItem {
   url: string;
   method: PresignHttpMethod;
   expiresAt: string;
+  requiredHeaders?: Record<string, string>;
 }
 
 export interface PresignResponse {

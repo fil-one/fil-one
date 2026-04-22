@@ -90,9 +90,11 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
       ];
       const { items } = await batchPresign(ops);
 
-      const headResponse = await executePresignedUrl(items[0].url, items[0].method, {
-        'x-amz-checksum-mode': 'ENABLED',
-      });
+      const headResponse = await executePresignedUrl(
+        items[0].url,
+        items[0].method,
+        items[0].requiredHeaders,
+      );
       const head = parseHeadObjectResponse(headResponse, objectKey);
 
       const retention =
