@@ -159,7 +159,7 @@ export async function handler(): Promise<void> {
       failed++;
       console.error('[usage-orchestrator] Failed to invoke worker', {
         orgId: record.orgId,
-        error: (error as Error).message,
+        error,
       });
     }
   }

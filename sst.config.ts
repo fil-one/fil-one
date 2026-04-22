@@ -68,11 +68,11 @@ export default $config({
       if ($app.stage === 'production') {
         args.transform = args.transform ?? {};
         args.transform.function = (fnArgs) => {
-          fnArgs.loggingConfig = {
+          fnArgs.loggingConfig = $output(fnArgs.loggingConfig).apply((loggingConfig) => ({
             logFormat: 'JSON',
-            ...fnArgs.loggingConfig,
+            ...loggingConfig,
             applicationLogLevel: 'WARN',
-          };
+          }));
         };
       }
     });

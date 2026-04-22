@@ -39,7 +39,7 @@ export async function baseHandler(
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
   const setupStatus = orgProfile?.setupStatus?.S;
   if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    console.error('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
+    console.warn('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
     return new ResponseBuilder()
       .status(503)
       .body<ErrorResponse>({
@@ -87,6 +87,12 @@ export async function baseHandler(
     createdAt: data.createdAt,
     isPublic: false,
     objectLockEnabled: data.objectLock ?? false,
+    versioning: data.versioning ?? false,
+    encrypted: data.encrypted ?? true,
+    defaultRetention:
+      data.defaultRetention && data.defaultRetention !== 'off' ? data.defaultRetention : undefined,
+    retentionDuration: data.retentionDuration ?? undefined,
+    retentionDurationType: data.retentionDurationType ?? undefined,
   };
 
   return new ResponseBuilder().status(200).body<GetBucketResponse>({ bucket }).build();

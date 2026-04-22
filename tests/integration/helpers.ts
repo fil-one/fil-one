@@ -40,23 +40,32 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export class PollTimeoutError extends Error {
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super(`pollUntil timed out after ${timeoutMs}ms`);
+    this.name = 'PollTimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 export async function pollUntil<T>(
   fn: () => Promise<T | null>,
   timeoutMs: number,
   opts?: { initialDelay?: number; maxDelay?: number },
 ): Promise<T> {
   const { initialDelay = 500, maxDelay = 2000 } = opts ?? {};
-  let elapsed = 0;
+  const deadline = Date.now() + timeoutMs;
   let delay = initialDelay;
 
-  while (elapsed < timeoutMs) {
+  while (Date.now() < deadline) {
     const result = await fn();
     if (result !== null) return result;
     await sleep(delay);
-    elapsed += delay;
     delay = Math.min(delay * 2, maxDelay);
   }
-  throw new Error(`pollUntil timed out after ${timeoutMs}ms`);
+  throw new PollTimeoutError(timeoutMs);
 }
 
 // =============================================================================

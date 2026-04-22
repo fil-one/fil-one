@@ -212,13 +212,15 @@ export async function createAuroraTenantApiKey({
 
   const apiToken = data?.token;
   if (!apiToken) {
-    throw new Error(`Aurora API did not return a token for org ${orgId}: ${JSON.stringify(data)}`);
+    throw new Error(
+      `Aurora API did not return a token for org ${orgId}. Response fields: ${Object.keys(data).join(', ')}`,
+    );
   }
 
   const tokenId = data.id;
   if (!tokenId) {
     throw new Error(
-      `Aurora API did not return a token ID for org ${orgId}: ${JSON.stringify(data)}`,
+      `Aurora API did not return a token ID for org ${orgId}. Response fields: ${Object.keys(data).join(', ')}`,
     );
   }
 

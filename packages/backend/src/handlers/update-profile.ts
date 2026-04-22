@@ -107,7 +107,7 @@ async function applyEmailUpdate(
     // Email was updated in Auth0 but verification send failed.
     // Log and continue — the user can resend from the UI.
     console.error('[update-profile] Failed to send verification email after email update', {
-      error: (err as Error).message,
+      error: err,
     });
   }
   return undefined;
