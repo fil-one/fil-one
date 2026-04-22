@@ -34,8 +34,15 @@ describe('Usage Reporting (meter events via test clock)', () => {
     // Attach valid card
     const pmId = await attachValidCard(cusId);
 
-    // Create active subscription with metered price
-    const anchorTime = frozenTime + 7 * 86400;
+    // Create active subscription with metered price.
+    // 1-hour anchor keeps the test-clock advance fast. Stripe's docs describe
+    // day/week/month/year as standard intervals (daily is the smallest documented
+    // interval), but `billing_cycle_anchor` accepts any second-precision timestamp
+    // and sub-day cycles are not forbidden. This test is safe at 1h because it
+    // calls `stripe.billing.meterEvents.create` directly with a hardcoded value,
+    // bypassing the production usage-reporting worker — so neither the worker's
+    // Aurora query window nor its 12h cron schedule apply here.
+    const anchorTime = frozenTime + 3600;
     const sub = await stripe.subscriptions.create({
       customer: cusId,
       items: [{ price: priceId }],
