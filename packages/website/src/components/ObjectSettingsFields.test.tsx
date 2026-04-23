@@ -39,10 +39,8 @@ describe('ObjectSettingsFields', () => {
   it('disables Object Lock and Retention switches when versioning is off', () => {
     renderWithDefaults({ versioning: false });
     const switches = screen.getAllByRole('switch');
-    // Object Lock switch (index 1)
     expect(switches[1]).toHaveAttribute('aria-checked', 'false');
     expect(switches[1]).toBeDisabled();
-    // Retention switch (index 2)
     expect(switches[2]).toHaveAttribute('aria-checked', 'false');
     expect(switches[2]).toBeDisabled();
   });
@@ -67,7 +65,6 @@ describe('ObjectSettingsFields', () => {
 
   it('cascades versioning off to lock and retention', () => {
     const props = renderWithDefaults({ versioning: true, lock: true, retentionEnabled: true });
-    // Toggle versioning off
     fireEvent.click(screen.getAllByRole('switch')[0]);
     expect(props.onVersioningChange).toHaveBeenCalledWith(false);
     expect(props.onLockChange).toHaveBeenCalledWith(false);
@@ -76,7 +73,6 @@ describe('ObjectSettingsFields', () => {
 
   it('cascades lock off to retention', () => {
     const props = renderWithDefaults({ versioning: true, lock: true, retentionEnabled: true });
-    // Toggle lock off
     fireEvent.click(screen.getAllByRole('switch')[1]);
     expect(props.onLockChange).toHaveBeenCalledWith(false);
     expect(props.onRetentionEnabledChange).toHaveBeenCalledWith(false);
@@ -95,7 +91,27 @@ describe('ObjectSettingsFields', () => {
     expect(screen.getByText('Lock period')).toBeInTheDocument();
   });
 
-  it('switches retention mode via radio buttons', () => {
+  it('renders lock period input and unit dropdown when retention is enabled', () => {
+    renderWithDefaults({ versioning: true, lock: true, retentionEnabled: true });
+    expect(screen.getByRole('spinbutton')).toHaveValue(15);
+    expect(screen.getByRole('combobox')).toBeInTheDocument();
+    expect(screen.getByText('Days')).toBeInTheDocument();
+    expect(screen.getByText('Years')).toBeInTheDocument();
+  });
+
+  it('selects the correct retention mode radio', () => {
+    renderWithDefaults({
+      versioning: true,
+      lock: true,
+      retentionEnabled: true,
+      retentionMode: 'governance',
+    });
+    const radios = screen.getAllByRole('radio');
+    expect(radios[0]).toBeChecked();
+    expect(radios[1]).not.toBeChecked();
+  });
+
+  it('calls onRetentionModeChange when switching mode', () => {
     const props = renderWithDefaults({
       versioning: true,
       lock: true,
@@ -106,22 +122,50 @@ describe('ObjectSettingsFields', () => {
     expect(props.onRetentionModeChange).toHaveBeenCalledWith('compliance');
   });
 
-  it('shows duration input with current value', () => {
-    renderWithDefaults({
+  it('calls onRetentionDurationChange when editing the number input', () => {
+    const props = renderWithDefaults({
       versioning: true,
       lock: true,
       retentionEnabled: true,
       retentionDuration: 15,
     });
-    const input = screen.getByRole('spinbutton');
-    expect(input).toHaveValue(15);
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '30' } });
+    expect(props.onRetentionDurationChange).toHaveBeenCalledWith(30);
   });
 
-  it('shows duration type dropdown with Days and Years options', () => {
-    renderWithDefaults({ versioning: true, lock: true, retentionEnabled: true });
-    const select = screen.getByRole('combobox');
-    expect(select).toBeInTheDocument();
-    expect(screen.getByText('Days')).toBeInTheDocument();
-    expect(screen.getByText('Years')).toBeInTheDocument();
+  it('shows trial hint when trialDaysLeft is provided and retention is enabled', () => {
+    renderWithDefaults({
+      versioning: true,
+      lock: true,
+      retentionEnabled: true,
+      trialDaysLeft: 14,
+      retentionDuration: 7,
+    });
+    expect(screen.getByText(/trial ends in/i)).toBeInTheDocument();
+    expect(screen.getByText('14 days')).toBeInTheDocument();
+  });
+
+  it('shows warning when retention period exceeds trial days', () => {
+    renderWithDefaults({
+      versioning: true,
+      lock: true,
+      retentionEnabled: true,
+      trialDaysLeft: 14,
+      retentionDuration: 30,
+      retentionDurationType: 'd',
+    });
+    expect(screen.getByText(/Exceeds your 14-day trial period/i)).toBeInTheDocument();
+  });
+
+  it('does not show trial warning when period is within trial', () => {
+    renderWithDefaults({
+      versioning: true,
+      lock: true,
+      retentionEnabled: true,
+      trialDaysLeft: 14,
+      retentionDuration: 7,
+      retentionDurationType: 'd',
+    });
+    expect(screen.queryByText(/Exceeds your/i)).not.toBeInTheDocument();
   });
 });

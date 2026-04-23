@@ -5,6 +5,7 @@ import { ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr';
 import type { CreateAccessKeyResponse } from '@filone/shared';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields.js';
 import { Button } from '../components/Button.js';
+import { InfoSidebar } from '../components/InfoSidebar.js';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal.js';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 
@@ -66,35 +67,30 @@ export function CreateApiKeyPage() {
             </Button>
           </form>
 
-          {/* Right: info panel */}
-          <div className="w-64 shrink-0">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-400">
-              Good to know
-            </p>
-            <p className="mb-4 text-sm font-medium text-zinc-700">
-              Keep these in mind when creating keys.
-            </p>
-            <div className="flex flex-col gap-4 text-sm text-zinc-600">
-              <div>
-                <p className="mb-1 font-medium text-zinc-800">Keep your secret safe</p>
-                <p>
-                  Your secret access key grants full access to your data. Never share it with
-                  anyone, including support. Store it in a secure location like a password manager
-                  or secrets vault.
-                </p>
-              </div>
-              <div>
-                <p className="mb-1 font-medium text-zinc-800">Scope by bucket</p>
-                <p>Restrict keys to specific buckets to follow the principle of least privilege.</p>
-              </div>
-              <div>
-                <p className="mb-1 font-medium text-zinc-800">Set an expiry</p>
-                <p>
-                  Keys can be set to expire automatically. Use short-lived keys for temporary
-                  access.
-                </p>
-              </div>
-            </div>
+          {/* Right: info sidebar */}
+          <div className="sticky top-0 w-60 shrink-0 self-start pt-1">
+            <InfoSidebar
+              heading="About API keys"
+              items={[
+                {
+                  title: 'Scoped access',
+                  description: 'Keys can be restricted to specific buckets and permissions.',
+                },
+                {
+                  title: 'Secure credentials',
+                  description:
+                    'The secret key is only shown once at creation time. Store it somewhere safe.',
+                },
+                {
+                  title: 'Revocable',
+                  description: 'Delete a key at any time to immediately revoke access.',
+                },
+                {
+                  title: 'Expiration',
+                  description: 'Optionally set an expiry date so keys rotate automatically.',
+                },
+              ]}
+            />
           </div>
         </div>
       </div>

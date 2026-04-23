@@ -1,21 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeftIcon, CheckIcon } from '@phosphor-icons/react/dist/ssr';
+
 import {
-  ArrowLeftIcon,
-  CaretDownIcon,
-  CaretUpIcon,
-  PlusIcon,
-  CheckIcon,
-} from '@phosphor-icons/react/dist/ssr';
-
-import { S3_REGION, CreateBucketSchema, CreateAccessKeySchema } from '@filone/shared';
+  S3_REGION,
+  CreateBucketSchema,
+  CreateAccessKeySchema,
+  SubscriptionStatus,
+} from '@filone/shared';
 import type { CreateBucketResponse, RetentionMode, RetentionDurationType } from '@filone/shared';
-import { apiRequest, createAccessKey } from '../lib/api.js';
+import { apiRequest, createAccessKey, getBilling } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
+import { daysUntil } from '../lib/time.js';
 
-import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
+import { BucketApiKeysSection } from '../components/BucketApiKeysSection';
+import { FormField } from '../components/FormField';
+import { InfoSidebar } from '../components/InfoSidebar';
+import { Heading } from '../components/Heading/Heading';
+import { IconButton } from '../components/IconButton';
 import { Input } from '../components/Input';
+import { Select } from '../components/Select';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
 import { useToast } from '../components/Toast';
@@ -43,8 +48,8 @@ export function CreateBucketPage() {
   const [retentionDuration, setRetentionDuration] = useState(15);
   const [retentionDurationType, setRetentionDurationType] = useState<RetentionDurationType>('d');
 
-  // Key section visibility
-  const [permissionsOpen, setPermissionsOpen] = useState(false);
+  // API key section visibility
+  const [createKeyOpen, setCreateKeyOpen] = useState(false);
 
   // Validation
   const [nameError, setNameError] = useState<string | null>(null);
@@ -58,11 +63,26 @@ export function CreateBucketPage() {
 
   const form = useAccessKeyForm({ onSuccess: () => {} });
 
+  // Billing — used to surface trial constraints on retention period
+  const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
+  const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
+  const trialDaysLeft =
+    isTrialing && billing?.subscription.trialEndsAt
+      ? daysUntil(billing.subscription.trialEndsAt)
+      : null;
+
+  // Default the lock period to the remaining trial length (once billing data loads)
+  useEffect(() => {
+    if (trialDaysLeft != null && trialDaysLeft > 0) {
+      setRetentionDuration(trialDaysLeft);
+    }
+  }, [trialDaysLeft]); // runs once when trialDaysLeft first becomes available
+
   // When the key section opens, default to specific scope for this bucket
   useEffect(() => {
-    if (!permissionsOpen) return;
+    if (!createKeyOpen) return;
     form.setBucketScope('specific');
-  }, [permissionsOpen]); // form.setBucketScope is a stable useState setter
+  }, [createKeyOpen]); // form.setBucketScope is a stable useState setter
 
   // Track the previous bucket name so we can swap it in selectedBuckets when it changes
   const prevBucketNameRef = useRef('');
@@ -71,7 +91,7 @@ export function CreateBucketPage() {
   // When the name changes while open, swap the old name for the new one so that
   // any other buckets the user has selected are preserved.
   useEffect(() => {
-    if (!permissionsOpen) return;
+    if (!createKeyOpen) return;
     const prev = prevBucketNameRef.current;
     const next = name.trim();
     prevBucketNameRef.current = next;
@@ -79,7 +99,7 @@ export function CreateBucketPage() {
       const withoutPrev = prev ? buckets.filter((b) => b !== prev) : buckets;
       return next ? [...withoutPrev, next] : withoutPrev;
     });
-  }, [name, permissionsOpen]); // form.setSelectedBuckets is a stable useState setter
+  }, [name, createKeyOpen]); // form.setSelectedBuckets is a stable useState setter
 
   function validateName(value: string) {
     const result = CreateBucketSchema.shape.name.safeParse(value);
@@ -91,7 +111,7 @@ export function CreateBucketPage() {
     return true;
   }
 
-  const wantsApiKey = permissionsOpen && form.keyName.trim().length > 0;
+  const wantsApiKey = createKeyOpen && form.keyName.trim().length > 0;
 
   // eslint-disable-next-line complexity/complexity
   async function handleSubmit() {
@@ -102,16 +122,14 @@ export function CreateBucketPage() {
       region,
       versioning,
       lock,
-      ...(retentionEnabled
+      retention: retentionEnabled
         ? {
-            retention: {
-              enabled: true as const,
-              mode: retentionMode,
-              duration: retentionDuration,
-              durationType: retentionDurationType,
-            },
+            enabled: true as const,
+            mode: retentionMode,
+            duration: retentionDuration,
+            durationType: retentionDurationType,
           }
-        : {}),
+        : { enabled: false as const },
     };
 
     const parsed = CreateBucketSchema.safeParse(bucketBody);
@@ -198,35 +216,35 @@ export function CreateBucketPage() {
   const canSubmit = name.trim().length > 0 && !nameError && !creating && accessKeyFormValid;
 
   return (
-    <div className="mx-auto flex max-w-[860px] flex-col gap-6 py-12">
+    <div className="mx-auto flex max-w-[860px] flex-col gap-6 py-6">
       {/* Back + header */}
       <div className="flex items-center gap-4">
-        <button
-          type="button"
+        <IconButton
+          icon={ArrowLeftIcon}
+          aria-label="Back to buckets"
           onClick={() => navigate({ to: '/buckets' })}
-          className="flex size-9 items-center justify-center rounded-full text-zinc-500 hover:text-zinc-900"
-        >
-          <ArrowLeftIcon size={16} aria-hidden="true" />
-        </button>
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-900">Create bucket</h1>
-          <p className="text-[13px] text-zinc-500">S3-compatible storage on Filecoin</p>
-        </div>
+        />
+        <Heading tag="h1" description="S3-compatible storage on Fil One">
+          Create bucket
+        </Heading>
       </div>
 
       {/* Two-column layout */}
       <div className="flex gap-10">
         {/* Left: White card with form */}
-        <div className="w-[520px] shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+        <div className="w-[520px] shrink-0 rounded-lg border border-(--input-border-color) bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-5">
             {/* Bucket name */}
-            <div className="flex flex-col gap-2.5">
-              <label htmlFor="bucket-name" className="text-xs font-medium text-zinc-900">
-                Bucket name
-              </label>
+            <FormField
+              htmlFor="bucket-name"
+              label="Bucket name"
+              description="3-63 characters. Lowercase letters, numbers, and hyphens only. Must be globally unique."
+              error={nameError ?? undefined}
+            >
               <Input
                 id="bucket-name"
                 value={name}
+                invalid={!!nameError}
                 onChange={(v) => {
                   setName(v);
                   if (nameError) validateName(v);
@@ -237,32 +255,23 @@ export function CreateBucketPage() {
                 placeholder="my-storage-bucket"
                 autoComplete="off"
               />
-              {nameError ? (
-                <p className="text-[11px] leading-relaxed text-red-600">{nameError}</p>
-              ) : (
-                <p className="text-[11px] leading-relaxed text-zinc-500">
-                  3-63 characters. Lowercase letters, numbers, and hyphens only. Must be globally
-                  unique.
-                </p>
-              )}
-            </div>
+            </FormField>
 
             {/* Region */}
-            <div className="flex flex-col gap-2.5">
-              <label htmlFor="bucket-region" className="text-xs font-medium text-zinc-900">
-                Region
-              </label>
-              <select
+            <FormField
+              htmlFor="bucket-region"
+              label="Region"
+              description="More regions coming soon."
+            >
+              <Select
                 id="bucket-region"
                 value={region}
-                onChange={(e) => setRegion(e.target.value as typeof S3_REGION)}
+                onChange={(value) => setRegion(value as typeof S3_REGION)}
                 disabled
-                className="block w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-[13px] text-zinc-900 opacity-50 focus:outline-2 focus:outline-brand-600"
               >
                 <option value={S3_REGION}>Europe (eu-west-1)</option>
-              </select>
-              <p className="text-[11px] text-zinc-500">More regions coming soon.</p>
-            </div>
+              </Select>
+            </FormField>
 
             {/* Object settings */}
             <ObjectSettingsFields
@@ -278,36 +287,16 @@ export function CreateBucketPage() {
               onRetentionDurationChange={setRetentionDuration}
               retentionDurationType={retentionDurationType}
               onRetentionDurationTypeChange={setRetentionDurationType}
+              trialDaysLeft={trialDaysLeft}
             />
 
             {/* API key section */}
-            <div className="flex flex-col gap-3">
-              <label className="text-xs font-medium text-zinc-900">API key</label>
-
-              {/* Clickable toggle header */}
-              <button
-                type="button"
-                onClick={() => setPermissionsOpen(!permissionsOpen)}
-                className="flex w-full items-center justify-between rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-left hover:bg-zinc-100"
-              >
-                <div className="flex items-center gap-2">
-                  <PlusIcon size={14} className="text-zinc-500" aria-hidden="true" />
-                  <span className="text-[13px] text-zinc-900">Create new key</span>
-                </div>
-                {permissionsOpen ? (
-                  <CaretUpIcon size={14} className="text-zinc-500" aria-hidden="true" />
-                ) : (
-                  <CaretDownIcon size={14} className="text-zinc-500" aria-hidden="true" />
-                )}
-              </button>
-
-              {/* Expanded form */}
-              {permissionsOpen && (
-                <div className="rounded-lg border border-zinc-200 p-4">
-                  <AccessKeyFormFields form={form} pinnedBucket={name.trim() || undefined} />
-                </div>
-              )}
-            </div>
+            <BucketApiKeysSection
+              bucketName={name.trim()}
+              form={form}
+              createOpen={createKeyOpen}
+              onCreateOpenChange={setCreateKeyOpen}
+            />
 
             {/* Submit button — full width */}
             <button
@@ -328,27 +317,19 @@ export function CreateBucketPage() {
 
         {/* Right: Info sidebar */}
         <div className="sticky top-0 w-60 shrink-0 self-start pt-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[1px] text-zinc-500">
-            Included by default
-          </p>
-
-          <div className="mt-3 flex flex-col">
-            {/* Encryption */}
-            <div className="flex flex-col gap-0.5 py-3">
-              <span className="text-[13px] font-semibold text-zinc-900">Encryption</span>
-              <p className="text-xs leading-relaxed text-zinc-500">
-                All data is encrypted at rest by default.
-              </p>
-            </div>
-
-            {/* Private */}
-            <div className="flex flex-col gap-0.5 border-t border-zinc-200/60 py-3">
-              <span className="text-[13px] font-semibold text-zinc-900">Private</span>
-              <p className="text-xs leading-relaxed text-zinc-500">
-                All buckets are private by default. Access requires an API key.
-              </p>
-            </div>
-          </div>
+          <InfoSidebar
+            heading="Included by default"
+            items={[
+              {
+                title: 'Encryption',
+                description: 'All data is encrypted at rest by default.',
+              },
+              {
+                title: 'Private',
+                description: 'All buckets are private by default. Access requires an API key.',
+              },
+            ]}
+          />
         </div>
       </div>
 

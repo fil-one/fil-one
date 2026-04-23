@@ -60,7 +60,7 @@ export function AccessKeyBucketScopeFields({
 
       {/* Bucket checklist (only when "specific" is selected) */}
       {bucketScope === 'specific' && (
-        <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
+        <div className="rounded-lg border border-(--input-border-color) bg-zinc-50 px-4 py-3">
           {loading && (
             <div className="flex items-center justify-center py-4" role="status">
               <span className="text-brand-700 animate-spin">
@@ -71,14 +71,18 @@ export function AccessKeyBucketScopeFields({
           )}
 
           {isError && (
-            <p className="text-sm text-red-600">{error?.message ?? 'Failed to load buckets'}</p>
+            <p className="text-sm text-(--color-brand-error)">
+              {error?.message ?? 'Failed to load buckets'}
+            </p>
           )}
 
           {!loading &&
             !isError &&
             buckets.length === 0 &&
             selectedBuckets.length === 0 &&
-            !pinnedBucket && <p className="text-sm text-zinc-500">No buckets found.</p>}
+            !pinnedBucket && (
+              <p className="text-xs text-(--color-paragraph-text-subtle)">No buckets found.</p>
+            )}
 
           {!loading &&
             !isError &&
@@ -97,7 +101,7 @@ export function AccessKeyBucketScopeFields({
                       checked={selectedBuckets.includes(name)}
                       onChange={() => toggleBucket(name)}
                     />
-                    <span className="text-sm font-normal text-zinc-900">{name}</span>
+                    <span className="text-sm font-normal text-(--color-text-base)">{name}</span>
                   </label>
                 ))}
               </div>

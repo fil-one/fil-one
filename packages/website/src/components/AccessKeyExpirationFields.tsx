@@ -51,7 +51,7 @@ export function AccessKeyExpirationFields({
           value={customDate ?? ''}
           min={new Date().toISOString().split('T')[0]}
           onChange={(e) => onDateChange(e.target.value || null)}
-          className="mt-1 block w-full rounded-lg border border-zinc-200 p-2.5 text-sm text-zinc-900 focus:outline-2 focus:outline-brand-600"
+          className="block w-full rounded-lg border border-(--input-border-color) p-2.5 text-xs text-(--color-text-base) focus:outline-2 focus:outline-brand-600"
         />
       )}
     </div>
