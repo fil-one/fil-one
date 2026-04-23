@@ -6,9 +6,15 @@ import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
 
 import { AccessKeyPermissionsFields } from './AccessKeyPermissionsFields';
 
+const noop = () => {};
+
 const meta: Meta<typeof AccessKeyPermissionsFields> = {
   title: 'Components/AccessKeyPermissionsFields',
   component: AccessKeyPermissionsFields,
+  args: {
+    onChange: noop,
+    onGranularPermissionsChange: noop,
+  },
 };
 
 export default meta;

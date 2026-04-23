@@ -6,11 +6,7 @@ import type {
   CreateAccessKeyResponse,
   GranularPermission,
 } from '@filone/shared';
-import {
-  CreateAccessKeySchema,
-  GRANULAR_PERMISSION_MAP,
-  KEY_NAME_MAX_LENGTH,
-} from '@filone/shared';
+import { CreateAccessKeySchema, GRANULAR_PERMISSION_MAP } from '@filone/shared';
 import { createAccessKey } from './api.js';
 import { expiresAtFromForm } from './time.js';
 import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';

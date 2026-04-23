@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { CaretDownIcon, CaretRightIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
@@ -35,6 +35,7 @@ export function AccessKeyPermissionsFields({
   const [expandedPermissions, setExpandedPermissions] = useState<Set<AccessKeyPermission>>(
     new Set(),
   );
+  const granularSectionIdPrefix = useId();
 
   function toggleBasic(permission: AccessKeyPermission) {
     if (value.includes(permission)) {
@@ -99,6 +100,8 @@ export function AccessKeyPermissionsFields({
                 <button
                   type="button"
                   onClick={() => toggleExpanded(option.value)}
+                  aria-expanded={isExpanded}
+                  aria-controls={`${granularSectionIdPrefix}-${option.value}`}
                   className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
                 >
                   {isExpanded ? (
@@ -112,7 +115,10 @@ export function AccessKeyPermissionsFields({
                 </button>
 
                 {isExpanded && (
-                  <div className="flex flex-col gap-0.5 pb-1 pt-0.5">
+                  <div
+                    id={`${granularSectionIdPrefix}-${option.value}`}
+                    className="flex flex-col gap-0.5 pb-1 pt-0.5"
+                  >
                     {granularOptions.map((granular) => {
                       const meta = GRANULAR_PERMISSION_LABELS[granular];
                       return (

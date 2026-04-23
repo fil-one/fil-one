@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
@@ -24,43 +24,51 @@ function StatusBadge({ status }: { status: AccessKey['status'] }) {
   );
 }
 
-function PermissionBadge({ permission }: { permission: string }) {
-  return (
-    <span className="rounded-full border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-[10px] font-medium uppercase text-zinc-600">
-      {permission}
-    </span>
-  );
-}
-
 function DataProtectionBadge({
   granularPermissions,
 }: {
   granularPermissions: GranularPermission[];
 }) {
-  const [hover, setHover] = useState(false);
+  const [visible, setVisible] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
-  const ref = useRef<HTMLSpanElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const tooltipId = useId();
 
-  function handleEnter() {
-    if (ref.current) {
-      const rect = ref.current.getBoundingClientRect();
+  function show() {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
       setPos({ top: rect.bottom + 6, left: rect.left + rect.width / 2 });
     }
-    setHover(true);
+    setVisible(true);
+  }
+
+  function hide() {
+    setVisible(false);
   }
 
   return (
-    <span
-      ref={ref}
-      onMouseEnter={handleEnter}
-      onMouseLeave={() => setHover(false)}
-      className="inline-block"
-    >
-      <span className="cursor-default rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+    <span className="inline-block">
+      <button
+        ref={buttonRef}
+        type="button"
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        onClick={() => (visible ? hide() : show())}
+        aria-describedby={visible ? tooltipId : undefined}
+        aria-expanded={visible}
+        className="inline-flex cursor-default items-center rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-xs font-normal text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
         Data protection
-      </span>
-      {hover && (
-        <div style={{ top: pos.top, left: pos.left }} className="fixed z-50 -translate-x-1/2">
+      </button>
+      {visible && (
+        <div
+          id={tooltipId}
+          role="tooltip"
+          style={{ top: pos.top, left: pos.left }}
+          className="fixed z-50 -translate-x-1/2"
+        >
           <div className="w-max max-w-56 rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-lg">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
               Data protection
