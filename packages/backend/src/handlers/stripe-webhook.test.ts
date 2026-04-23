@@ -9,6 +9,7 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { buildEvent } from '../test/lambda-test-utilities.js';
+import { type MetricEvent, reportMetric } from '../lib/metrics.js';
 import { SubscriptionStatus } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -43,6 +44,12 @@ vi.mock('../lib/stripe-client.js', () => ({
   }),
   getWebhookSecret: vi.fn().mockResolvedValue('whsec_test_fake'),
 }));
+
+vi.mock('../lib/metrics.js', () => ({
+  reportMetric: vi.fn(),
+}));
+
+const reportMetricMock = vi.mocked(reportMetric);
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -181,6 +188,12 @@ function setupAuroraTenantResolution() {
 // ---------------------------------------------------------------------------
 
 describe('stripe-webhook handler', () => {
+  function dunningEmissions(): MetricEvent[] {
+    return reportMetricMock.mock.calls
+      .map(([event]) => event)
+      .filter((e) => (e as { DunningEscalation?: unknown }).DunningEscalation === 1);
+  }
+
   beforeEach(() => {
     ddbMock.reset();
     ddbMock.on(PutItemCommand).resolves({});
@@ -192,6 +205,7 @@ describe('stripe-webhook handler', () => {
     mockPaymentMethodsRetrieve.mockReset();
     mockUpdateTenantStatus.mockReset();
     mockUpdateTenantStatus.mockResolvedValue(undefined);
+    reportMetricMock.mockReset();
   });
 
   // -----------------------------------------------------------------------
@@ -915,6 +929,7 @@ describe('stripe-webhook handler', () => {
           ':active': { S: SubscriptionStatus.Active },
           ':now': { S: expect.any(String) },
         },
+        ReturnValues: 'ALL_OLD',
       });
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
@@ -1131,6 +1146,200 @@ describe('stripe-webhook handler', () => {
         body: JSON.stringify({ message: 'Idempotency check error' }),
       });
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 10. DunningEscalation metric (EMF via reportMetric)
+  // -----------------------------------------------------------------------
+  describe('DunningEscalation metric', () => {
+    it('emits stage=entered on first payment_failed (attempt_count=1)', async () => {
+      setupStripeEvent(
+        'invoice.payment_failed',
+        mockInvoice({
+          attempt_count: 1,
+          last_finalization_error: { code: 'card_declined' },
+        }),
+      );
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      const emissions = dunningEmissions();
+      expect(emissions).toHaveLength(1);
+      expect(emissions[0]).toMatchObject({
+        stage: 'entered',
+        reason: 'card_declined',
+        attemptBucket: '1',
+        DunningEscalation: 1,
+      });
+      expect(emissions[0]._aws).toMatchObject({
+        CloudWatchMetrics: [
+          {
+            Namespace: 'FilOne',
+            Dimensions: [['stage', 'reason', 'attemptBucket']],
+            Metrics: [{ Name: 'DunningEscalation', Unit: 'Count' }],
+          },
+        ],
+      });
+    });
+
+    it('emits stage=retry on subsequent payment_failed (attempt_count>=2)', async () => {
+      setupStripeEvent(
+        'invoice.payment_failed',
+        mockInvoice({
+          attempt_count: 2,
+          last_finalization_error: { code: 'insufficient_funds' },
+        }),
+      );
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'retry',
+        reason: 'insufficient_funds',
+        attemptBucket: '2',
+      });
+    });
+
+    it('buckets attempt_count>=4 into "4+"', async () => {
+      setupStripeEvent(
+        'invoice.payment_failed',
+        mockInvoice({
+          attempt_count: 5,
+          last_finalization_error: { code: 'card_declined' },
+        }),
+      );
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'retry',
+        attemptBucket: '4+',
+      });
+    });
+
+    it('reports reason="unknown" when last_finalization_error missing', async () => {
+      setupStripeEvent('invoice.payment_failed', mockInvoice({ attempt_count: 1 }));
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'entered',
+        reason: 'unknown',
+      });
+    });
+
+    it('emits stage=canceled with cancellation_details.reason=payment_failed', async () => {
+      setupStripeEvent(
+        'customer.subscription.deleted',
+        mockSubscription({
+          cancellation_details: { reason: 'payment_failed' },
+          latest_invoice: { id: 'in_latest', attempt_count: 3 },
+        }),
+      );
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'canceled',
+        reason: 'payment_failed',
+        attemptBucket: '3',
+      });
+    });
+
+    it('labels canceled by cancellation_requested when voluntary', async () => {
+      setupStripeEvent(
+        'customer.subscription.deleted',
+        mockSubscription({
+          cancellation_details: { reason: 'cancellation_requested' },
+        }),
+      );
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'canceled',
+        reason: 'cancellation_requested',
+        attemptBucket: 'unknown',
+      });
+      // Grace-period behavior must still run regardless of reason
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+    });
+
+    it('labels canceled as reason="unknown" when cancellation_details absent', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'canceled',
+        reason: 'unknown',
+      });
+    });
+
+    it('emits stage=recovered when prior status was past_due', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 2 }));
+      setupCustomerRetrieve();
+      ddbMock.on(UpdateItemCommand).resolves({
+        Attributes: marshall({ subscriptionStatus: SubscriptionStatus.PastDue }),
+      });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'recovered',
+        reason: 'past_due',
+        attemptBucket: '2',
+      });
+    });
+
+    it('emits stage=recovered with reason=grace_period when prior status was grace_period', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 4 }));
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+      ddbMock.on(UpdateItemCommand, { TableName: TABLE_NAME }).resolves({
+        Attributes: marshall({ subscriptionStatus: SubscriptionStatus.GracePeriod }),
+      });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'recovered',
+        reason: 'grace_period',
+        attemptBucket: '4+',
+      });
+      // Aurora re-activation must still run
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: MOCK_AURORA_TENANT_ID,
+        status: 'ACTIVE',
+      });
+    });
+
+    it('does NOT emit recovered on normal renewal (prior status was active)', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 1 }));
+      setupCustomerRetrieve();
+      ddbMock.on(UpdateItemCommand).resolves({
+        Attributes: marshall({ subscriptionStatus: SubscriptionStatus.Active }),
+      });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()).toHaveLength(0);
+    });
+
+    it('does NOT emit on unrelated events (customer.subscription.created)', async () => {
+      setupStripeEvent('customer.subscription.created', mockSubscription());
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()).toHaveLength(0);
     });
   });
 });
