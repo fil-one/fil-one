@@ -96,7 +96,9 @@ describe('subscription-drift-checker', () => {
     expect(driftEmissions()).toHaveLength(0);
     expect(summaryEmission()).toMatchObject({
       SubscriptionDriftCheckScanned: 0,
-      SubscriptionDriftCheckSkipped: 0,
+      SubscriptionDriftCheckUniqueOrgs: 0,
+      SubscriptionDriftCheckSkippedDuplicate: 0,
+      SubscriptionDriftCheckSkippedNoTenant: 0,
       SubscriptionDriftCheckProbeFailed: 0,
     });
     expect(mockGetTenantStatus).not.toHaveBeenCalled();
@@ -166,6 +168,7 @@ describe('subscription-drift-checker', () => {
     expect(driftEmissions()).toHaveLength(0);
     expect(summaryEmission()).toMatchObject({
       SubscriptionDriftCheckScanned: 1,
+      SubscriptionDriftCheckUniqueOrgs: 1,
       SubscriptionDriftCheckProbeFailed: 1,
     });
   });
@@ -190,7 +193,8 @@ describe('subscription-drift-checker', () => {
     expect(driftEmissions()).toHaveLength(0);
     expect(summaryEmission()).toMatchObject({
       SubscriptionDriftCheckScanned: 1,
-      SubscriptionDriftCheckSkipped: 1,
+      SubscriptionDriftCheckUniqueOrgs: 1,
+      SubscriptionDriftCheckSkippedNoTenant: 1,
     });
   });
 
@@ -229,7 +233,35 @@ describe('subscription-drift-checker', () => {
     });
     expect(summaryEmission()).toMatchObject({
       SubscriptionDriftCheckScanned: 2,
+      SubscriptionDriftCheckUniqueOrgs: 2,
       SubscriptionDriftCheckProbeFailed: 1,
+    });
+  });
+
+  it('dedupes multiple billing records for the same orgId and probes Aurora once', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        activeBillingItem(ORG_ID, 'user-first'),
+        activeBillingItem(ORG_ID, 'user-second'),
+        activeBillingItem(ORG_ID, 'user-third'),
+      ],
+    });
+    seedReadyOrg();
+    mockGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
+
+    await handler();
+
+    expect(mockGetTenantStatus).toHaveBeenCalledTimes(1);
+    expect(driftEmissions()).toHaveLength(1);
+    expect(driftEmissions()[0]).toMatchObject({
+      classification: 'drift_disabled',
+      orgId: ORG_ID,
+      userId: 'user-first', // first-seen userId becomes the representative
+    });
+    expect(summaryEmission()).toMatchObject({
+      SubscriptionDriftCheckScanned: 3,
+      SubscriptionDriftCheckUniqueOrgs: 1,
+      SubscriptionDriftCheckSkippedDuplicate: 2,
     });
   });
 

@@ -35,7 +35,9 @@ interface ResolvedTenant {
 
 interface RunStats {
   scanned: number;
-  skipped: number;
+  uniqueOrgs: number;
+  skippedDuplicate: number;
+  skippedNoTenant: number;
   probeFailed: number;
 }
 
@@ -46,14 +48,34 @@ export async function handler(): Promise<void> {
   });
 
   const candidates = await scanActiveSubscriptions(Resource.BillingTable.name);
-  const stats: RunStats = { scanned: candidates.length, skipped: 0, probeFailed: 0 };
+  const uniqueCandidates = dedupeByOrgId(candidates);
+  const stats: RunStats = {
+    scanned: candidates.length,
+    uniqueOrgs: uniqueCandidates.length,
+    skippedDuplicate: candidates.length - uniqueCandidates.length,
+    skippedNoTenant: 0,
+    probeFailed: 0,
+  };
 
-  for (const candidate of candidates) {
+  for (const candidate of uniqueCandidates) {
     await evaluateCandidate(candidate, stats);
   }
 
   emitRunSummary(stats);
   console.log('[subscription-drift-checker] complete', stats);
+}
+
+// Multiple SUBSCRIPTION records can exist per orgId (e.g. user re-subscribed
+// after cancellation). We probe Aurora once per org so drift metrics are not
+// over-counted; the first userId encountered becomes the log/field
+// representative for that org.
+function dedupeByOrgId(candidates: ActiveCandidate[]): ActiveCandidate[] {
+  const seen = new Map<string, ActiveCandidate>();
+  for (const candidate of candidates) {
+    if (seen.has(candidate.orgId)) continue;
+    seen.set(candidate.orgId, candidate);
+  }
+  return [...seen.values()];
 }
 
 async function scanActiveSubscriptions(billingTableName: string): Promise<ActiveCandidate[]> {
@@ -92,7 +114,7 @@ async function evaluateCandidate(candidate: ActiveCandidate, stats: RunStats): P
   try {
     const tenant = await resolveTenant(candidate.orgId);
     if (!tenant.auroraTenantId || !isOrgSetupComplete(tenant.setupStatus)) {
-      stats.skipped += 1;
+      stats.skippedNoTenant += 1;
       return;
     }
 
@@ -181,14 +203,18 @@ function emitRunSummary(stats: RunStats): void {
           Dimensions: [[]],
           Metrics: [
             { Name: 'SubscriptionDriftCheckScanned', Unit: 'Count' },
-            { Name: 'SubscriptionDriftCheckSkipped', Unit: 'Count' },
+            { Name: 'SubscriptionDriftCheckUniqueOrgs', Unit: 'Count' },
+            { Name: 'SubscriptionDriftCheckSkippedDuplicate', Unit: 'Count' },
+            { Name: 'SubscriptionDriftCheckSkippedNoTenant', Unit: 'Count' },
             { Name: 'SubscriptionDriftCheckProbeFailed', Unit: 'Count' },
           ],
         },
       ],
     },
     SubscriptionDriftCheckScanned: stats.scanned,
-    SubscriptionDriftCheckSkipped: stats.skipped,
+    SubscriptionDriftCheckUniqueOrgs: stats.uniqueOrgs,
+    SubscriptionDriftCheckSkippedDuplicate: stats.skippedDuplicate,
+    SubscriptionDriftCheckSkippedNoTenant: stats.skippedNoTenant,
     SubscriptionDriftCheckProbeFailed: stats.probeFailed,
   });
 }

@@ -34,17 +34,21 @@ drift outcome. Specifically:
    `drift_*` cases. Keep the dimension set **low-cardinality** —
    entity identifiers (`orgId`, `userId`) go in non-dimension fields so they
    appear in Loki log search, not in metric cardinality.
-5. Per run, emit one summary datapoint (no dimensions) with counts for
-   `Scanned`, `Skipped`, `ProbeFailed`. Probe failures (transport errors
-   talking to the source of truth) are _separate_ from drift — lumping them
-   together would make alerts trigger on outages instead of on real drift.
-6. No new infrastructure for delivery: the existing CloudWatch Metric Stream
+5. When the source scan can produce multiple rows per logical entity (e.g.
+   several `SUBSCRIPTION` records for the same `orgId` after re-subscribes),
+   the checker **dedupes by the logical entity id** before probing the
+   source of truth. The first-seen row becomes the representative for
+   logging. Without dedupe the job over-probes and over-counts drift.
+6. Per run, emit one summary datapoint (no dimensions) with counts at
+   minimum for `Scanned` (raw rows), `UniqueEntities`, `SkippedDuplicate`,
+   `SkippedNoTenant` (or equivalent unresolvable-row bucket), and
+   `ProbeFailed`. Probe failures (transport errors talking to the source
+   of truth) are _separate_ from drift — lumping them together would make
+   alerts trigger on outages instead of on real drift.
+7. No new infrastructure for delivery: the existing CloudWatch Metric Stream
    → Firehose → Grafana Cloud Prometheus pipeline (see
    `2026-03-observability-architecture.md`) already includes the `FilOne`
    namespace, so new `FilOne/*` metrics appear automatically.
-7. Dashboards and alerts are authored in the Grafana UI, not in this repo.
-   PRs that introduce a new drift check link to the Grafana panel/alert in
-   the PR description.
 
 ## Drift-status rule of thumb
 
