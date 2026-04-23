@@ -741,6 +741,21 @@ export default $config({
       function: gracePeriodEnforcer.arn,
     });
 
+    // ── Subscription drift checker (cron-based, observe-only) ───────
+    const subscriptionDriftChecker = createFn('SubscriptionDriftChecker', {
+      handler: 'packages/backend/src/jobs/subscription-drift-checker.handler',
+      link: [billingTable, userInfoTable, auroraBackofficeToken],
+      environment: auroraEnv,
+      timeout: '300 seconds',
+      memory: '256 MB',
+    });
+
+    new sst.aws.CronV2('SubscriptionDriftCheckerCron', {
+      // run the Lambda every 12 hours, staggered 2h after grace-period (10:00 and 22:00 UTC).
+      schedule: 'cron(0 10/12 * * ? *)',
+      function: subscriptionDriftChecker.arn,
+    });
+
     return {
       baseUrl: siteUrl,
     };
