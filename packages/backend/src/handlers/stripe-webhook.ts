@@ -436,7 +436,7 @@ function emitDunningEscalation(args: {
       CloudWatchMetrics: [
         {
           Namespace: 'FilOne',
-          Dimensions: [['stage', 'reason', 'attemptBucket']],
+          Dimensions: [['stage', 'reason', 'attemptBucket', 'deployment']],
           Metrics: [{ Name: 'DunningEscalation', Unit: 'Count' }],
         },
       ],
@@ -444,6 +444,7 @@ function emitDunningEscalation(args: {
     stage: args.stage,
     reason: args.reason,
     attemptBucket: args.attemptBucket,
+    deployment: process.env.FILONE_STAGE ?? 'unknown',
     DunningEscalation: 1,
   });
 }

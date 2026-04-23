@@ -1177,11 +1177,12 @@ describe('stripe-webhook handler', () => {
         CloudWatchMetrics: [
           {
             Namespace: 'FilOne',
-            Dimensions: [['stage', 'reason', 'attemptBucket']],
+            Dimensions: [['stage', 'reason', 'attemptBucket', 'deployment']],
             Metrics: [{ Name: 'DunningEscalation', Unit: 'Count' }],
           },
         ],
       });
+      expect(emissions[0]).toMatchObject({ deployment: expect.any(String) });
     });
 
     it('emits stage=retry on subsequent payment_failed (attempt_count>=2)', async () => {
