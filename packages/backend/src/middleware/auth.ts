@@ -341,196 +341,153 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
 // ---------------------------------------------------------------------------
 // Middleware factory
 // ---------------------------------------------------------------------------
-
+// eslint-disable-next-line max-lines-per-function
 export function authMiddleware() {
-  return { before: runAuthBefore, after: runAuthAfter } satisfies MiddlewareObj<
-    APIGatewayProxyEventV2,
-    APIGatewayProxyResultV2
-  >;
-}
+  // eslint-disable-next-line max-lines-per-function, complexity/complexity
+  const before = async (
+    request: AuthMiddlewareRequest,
+  ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
+    const { event } = request;
+    const cookies = parseCookies(event.cookies);
 
-async function runAuthBefore(
-  request: AuthMiddlewareRequest,
-): Promise<APIGatewayProxyStructuredResultV2 | void> {
-  const { event } = request;
-  const cookies = parseCookies(event.cookies);
-  const accessToken = cookies[COOKIE_NAMES.ACCESS_TOKEN];
-  const idToken = cookies[COOKIE_NAMES.ID_TOKEN];
-  const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
+    const accessToken = cookies[COOKIE_NAMES.ACCESS_TOKEN];
+    const idToken = cookies[COOKIE_NAMES.ID_TOKEN];
+    const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
 
-  const domain = process.env.AUTH0_DOMAIN!;
-  const audience = process.env.AUTH0_AUDIENCE!;
-  const issuer = `https://${domain}/`;
-  const clientId = getAuthSecrets().AUTH0_CLIENT_ID;
-  const jwks = getJWKS(domain);
+    const domain = process.env.AUTH0_DOMAIN!;
+    const audience = process.env.AUTH0_AUDIENCE!;
+    const issuer = `https://${domain}/`;
+    const secrets = getAuthSecrets();
+    const jwks = getJWKS(domain);
 
-  // Stash refresh token so the after hook can force-refresh if a handler requests it
-  if (refreshToken) {
-    request.internal.refreshToken = refreshToken;
-  }
-
-  const forceRefresh = event.queryStringParameters?.forceRefresh === '1';
-
-  // Step 1: Validate existing access token (skip if forceRefresh — we need fresh claims)
-  if (accessToken && !forceRefresh) {
-    try {
-      // Valid — continue to handler
-      return await verifyAccessTokenAndAttach({
-        event,
-        accessToken,
-        idToken,
-        jwks,
-        audience,
-        issuer,
-        clientId,
-      });
-    } catch (err) {
-      // Expired or invalid — fall through to refresh
-      console.warn('[auth] Access token verification failed', { error: err });
+    // Stash refresh token so the after hook can force-refresh if a handler requests it
+    if (refreshToken) {
+      request.internal.refreshToken = refreshToken;
     }
-  }
 
-  // Step 2: Attempt token refresh (always runs when forceRefresh=1)
-  if (refreshToken) {
-    const refreshed = await refreshAndAttach({ request, refreshToken, jwks, clientId, issuer });
-    if (refreshed !== 'refresh_failed') {
-      // Continue to handler
-      return refreshed;
+    const forceRefresh = event.queryStringParameters?.forceRefresh === '1';
+
+    // Step 1: Validate existing access token (skip if forceRefresh — we need fresh claims)
+    if (accessToken && !forceRefresh) {
+      try {
+        const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
+        const sub = payload.sub!;
+        const idClaims = await extractIdTokenClaims({
+          idToken,
+          jwks,
+          clientId: secrets.AUTH0_CLIENT_ID,
+          issuer,
+        });
+        const blocked = await attachIdentity({
+          event,
+          sub,
+          email: idClaims.email,
+          emailVerified: idClaims.emailVerified,
+          name: idClaims.name,
+          picture: idClaims.picture,
+        });
+        if (blocked) return blocked;
+        return; // Valid — continue to handler
+      } catch (err) {
+        // Expired or invalid — fall through to refresh
+        console.warn('[auth] Access token verification failed', { error: err });
+      }
     }
-    if (forceRefresh) {
+
+    // Step 2: Attempt token refresh (always runs when forceRefresh=1)
+    if (refreshToken) {
+      const tokens = await exchangeRefreshToken(refreshToken);
+      if (tokens) {
+        request.internal.newTokens = tokens;
+        request.internal.refreshToken = tokens.refresh_token;
+        const refreshedPayload = decodeJwt(tokens.access_token);
+        const refreshedSub = refreshedPayload.sub!;
+        const refreshedClaims = await extractIdTokenClaims({
+          idToken: tokens.id_token,
+          jwks,
+          clientId: secrets.AUTH0_CLIENT_ID,
+          issuer,
+        });
+        const blocked = await attachIdentity({
+          event,
+          sub: refreshedSub,
+          email: refreshedClaims.email,
+          emailVerified: refreshedClaims.emailVerified,
+          name: refreshedClaims.name,
+          picture: refreshedClaims.picture,
+        });
+        if (blocked) return blocked;
+        return; // Continue to handler
+      }
+      if (forceRefresh) {
+        console.error(
+          '[auth] forceRefresh requested but token exchange failed, falling back to existing access token',
+        );
+      }
+    } else if (forceRefresh) {
       console.error(
-        '[auth] forceRefresh requested but token exchange failed, falling back to existing access token',
+        '[auth] forceRefresh requested but no refresh token present, falling back to existing access token',
       );
     }
-  } else if (forceRefresh) {
-    console.error(
-      '[auth] forceRefresh requested but no refresh token present, falling back to existing access token',
-    );
-  }
 
-  // Fallback: when forceRefresh fails (no refresh token or exchange error), try the existing
-  // access token rather than returning 401 — this prevents social-provider misconfigurations
-  // or transient refresh failures from locking out users in prod.
-  if (forceRefresh && accessToken) {
-    try {
-      return await verifyAccessTokenAndAttach({
-        event,
-        accessToken,
-        idToken,
-        jwks,
-        audience,
-        issuer,
-        clientId,
-      });
-    } catch (err) {
-      console.warn('[auth] Fallback access token validation failed', { error: err });
+    // Fallback: when forceRefresh fails (no refresh token or exchange error), try the existing
+    // access token rather than returning 401 — this prevents social-provider misconfigurations
+    // or transient refresh failures from locking out users in prod.
+    if (forceRefresh && accessToken) {
+      try {
+        const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
+        const sub = payload.sub!;
+        const idClaims = await extractIdTokenClaims({
+          idToken,
+          jwks,
+          clientId: secrets.AUTH0_CLIENT_ID,
+          issuer,
+        });
+        const blocked = await attachIdentity({
+          event,
+          sub,
+          email: idClaims.email,
+          emailVerified: idClaims.emailVerified,
+          name: idClaims.name,
+          picture: idClaims.picture,
+        });
+        if (blocked) return blocked;
+        return;
+      } catch (err) {
+        console.warn('[auth] Fallback access token validation failed', { error: err });
+      }
     }
-  }
 
-  console.warn('[auth] Returning 401 — no valid tokens');
-  return unauthorizedResponse();
-}
+    console.warn('[auth] Returning 401 — no valid tokens');
+    return unauthorizedResponse();
+  };
 
-async function runAuthAfter(request: AuthMiddlewareRequest): Promise<void> {
-  const { event } = request;
-  let { newTokens } = request.internal;
-  const response = request.response as APIGatewayProxyStructuredResultV2 | undefined;
-  if (!response) return;
+  const after = async (request: AuthMiddlewareRequest): Promise<void> => {
+    const { event } = request;
+    let { newTokens } = request.internal;
+    const response = request.response as APIGatewayProxyStructuredResultV2 | undefined;
+    if (!response) return;
 
-  // If a handler called requestTokenRefresh() and we don't already have fresh tokens,
-  // perform a refresh so the response includes updated ID token claims.
-  const forceRefresh = (
-    event.requestContext as APIGatewayProxyEventV2['requestContext'] & {
-      _forceTokenRefresh?: boolean;
+    // If a handler called requestTokenRefresh() and we don't already have fresh tokens,
+    // perform a refresh so the response includes updated ID token claims.
+    const forceRefresh = (
+      event.requestContext as APIGatewayProxyEventV2['requestContext'] & {
+        _forceTokenRefresh?: boolean;
+      }
+    )._forceTokenRefresh;
+
+    if (forceRefresh && request.internal.refreshToken) {
+      const refreshed = await exchangeRefreshToken(request.internal.refreshToken);
+      if (refreshed) {
+        newTokens = refreshed;
+        console.warn('[auth] Force token refresh succeeded');
+      }
     }
-  )._forceTokenRefresh;
 
-  if (forceRefresh && request.internal.refreshToken) {
-    const refreshed = await exchangeRefreshToken(request.internal.refreshToken);
-    if (refreshed) {
-      newTokens = refreshed;
-      console.warn('[auth] Force token refresh succeeded');
+    if (newTokens) {
+      setCookiesFromTokens(response, newTokens);
     }
-  }
+  };
 
-  if (newTokens) {
-    setCookiesFromTokens(response, newTokens);
-  }
-}
-
-/**
- * Verify the access token and attach identity. Throws if JWT verification
- * fails; otherwise returns a blocking response (e.g. ORG_NOT_CONFIRMED) or
- * undefined if the request should proceed to the handler.
- */
-async function verifyAccessTokenAndAttach({
-  event,
-  accessToken,
-  idToken,
-  jwks,
-  audience,
-  issuer,
-  clientId,
-}: {
-  event: APIGatewayProxyEventV2;
-  accessToken: string;
-  idToken: string | undefined;
-  jwks: ReturnType<typeof createRemoteJWKSet>;
-  audience: string;
-  issuer: string;
-  clientId: string;
-}): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
-  const sub = payload.sub!;
-  const idClaims = await extractIdTokenClaims({ idToken, jwks, clientId, issuer });
-  const blocked = await attachIdentity({
-    event,
-    sub,
-    email: idClaims.email,
-    emailVerified: idClaims.emailVerified,
-    name: idClaims.name,
-    picture: idClaims.picture,
-  });
-  return blocked ?? undefined;
-}
-
-/**
- * Exchange the refresh token, attach identity from the fresh claims, and
- * mutate `request.internal` with the new tokens. Returns 'refresh_failed' if
- * the token exchange failed, a blocking response, or undefined to proceed.
- */
-async function refreshAndAttach({
-  request,
-  refreshToken,
-  jwks,
-  clientId,
-  issuer,
-}: {
-  request: AuthMiddlewareRequest;
-  refreshToken: string;
-  jwks: ReturnType<typeof createRemoteJWKSet>;
-  clientId: string;
-  issuer: string;
-}): Promise<APIGatewayProxyStructuredResultV2 | 'refresh_failed' | undefined> {
-  const tokens = await exchangeRefreshToken(refreshToken);
-  if (!tokens) return 'refresh_failed';
-  request.internal.newTokens = tokens;
-  request.internal.refreshToken = tokens.refresh_token;
-  const refreshedPayload = decodeJwt(tokens.access_token);
-  const refreshedSub = refreshedPayload.sub!;
-  const refreshedClaims = await extractIdTokenClaims({
-    idToken: tokens.id_token,
-    jwks,
-    clientId,
-    issuer,
-  });
-  const blocked = await attachIdentity({
-    event: request.event,
-    sub: refreshedSub,
-    email: refreshedClaims.email,
-    emailVerified: refreshedClaims.emailVerified,
-    name: refreshedClaims.name,
-    picture: refreshedClaims.picture,
-  });
-  return blocked ?? undefined;
+  return { before, after } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;
 }
