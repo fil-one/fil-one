@@ -15,6 +15,7 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyableField } from '../components/CopyableField';
+import { ObjectChecksumCard } from '../components/ObjectChecksumCard';
 import { Spinner } from '../components/Spinner';
 import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
 
@@ -89,7 +90,11 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
       ];
       const { items } = await batchPresign(ops);
 
-      const headResponse = await executePresignedUrl(items[0].url, items[0].method);
+      const headResponse = await executePresignedUrl(
+        items[0].url,
+        items[0].method,
+        items[0].requiredHeaders,
+      );
       const head = parseHeadObjectResponse(headResponse, objectKey);
 
       const retention =
@@ -104,6 +109,7 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
         ...(head.etag && { etag: head.etag }),
         ...(head.contentType && { contentType: head.contentType }),
         metadata: head.metadata,
+        ...(Object.keys(head.checksums).length > 0 && { checksums: head.checksums }),
         ...(head.filCid && { filCid: head.filCid }),
         ...(retention && { retention }),
       };
@@ -272,26 +278,6 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         </div>
       </div>
 
-      {/* CID card */}
-      <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-        <div className="mb-2 flex items-center gap-2">
-          <h2 className="text-sm font-medium text-zinc-900">Content Identifier (CID)</h2>
-          <OffloadStatusBadge filCid={metadata?.filCid} />
-        </div>
-        <p className="mb-3 text-xs text-zinc-500">
-          A unique content identifier that lets anyone verify the exact data stored on Filecoin
-        </p>
-        {metadata?.filCid ? (
-          <CopyableField label="" value={metadata.filCid} />
-        ) : (
-          <div className="rounded-lg bg-zinc-100 px-3 py-2.5">
-            <span className="font-mono text-[11px] text-zinc-400">
-              CID will be available after Filecoin sealing
-            </span>
-          </div>
-        )}
-      </div>
-
       {/* Object details card */}
       <div className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
         <h2 className="mb-3 text-sm font-medium text-zinc-900">Object details</h2>
@@ -361,6 +347,8 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         </div>
       </div>
 
+      <ObjectChecksumCard checksums={metadata?.checksums} />
+
       {metadata?.retention && metadata.retention.mode === 'COMPLIANCE' && (
         <div className="mt-6 rounded-lg border border-red-300/50 p-4">
           <div className="flex items-start gap-3">
@@ -409,22 +397,5 @@ function DetailRow({ label, value, mono }: { label: string; value: string; mono?
       <span className="text-[13px] text-zinc-500">{label}</span>
       <span className={`text-xs text-zinc-900 ${mono ? 'font-mono' : ''}`}>{value}</span>
     </div>
-  );
-}
-
-function OffloadStatusBadge({ filCid }: { filCid?: string }) {
-  if (filCid) {
-    return (
-      <span className="rounded-full border border-green-200 bg-green-50 px-2.5 py-0.5 text-[11px] font-semibold text-green-600">
-        Sealed
-      </span>
-    );
-  }
-
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-2.5 py-0.5 text-[11px] font-semibold text-zinc-500">
-      <Spinner ariaLabel="Queued" size={10} />
-      Queued
-    </span>
   );
 }

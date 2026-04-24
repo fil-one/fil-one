@@ -236,9 +236,14 @@ export interface PresignHeadObjectOptions extends PresignBaseOptions {
   includeFilMeta?: boolean;
 }
 
+export interface PresignedHeadObjectResult {
+  url: string;
+  requiredHeaders: Record<string, string>;
+}
+
 export async function getPresignedHeadObjectUrl(
   options: PresignHeadObjectOptions,
-): Promise<string> {
+): Promise<PresignedHeadObjectResult> {
   const { endpointUrl, credentials, bucket, key, expiresIn, includeFilMeta } = options;
   const s3 = createS3Client(endpointUrl, credentials);
 
@@ -257,7 +262,13 @@ export async function getPresignedHeadObjectUrl(
     );
   }
 
-  return getSignedUrl(s3, new HeadObjectCommand({ Bucket: bucket, Key: key }), { expiresIn });
+  const url = await getSignedUrl(
+    s3,
+    new HeadObjectCommand({ Bucket: bucket, Key: key, ChecksumMode: 'ENABLED' }),
+    { expiresIn, unhoistableHeaders: new Set(['x-amz-checksum-mode']) },
+  );
+
+  return { url, requiredHeaders: { 'x-amz-checksum-mode': 'ENABLED' } };
 }
 
 export type PresignGetObjectRetentionOptions = PresignBaseOptions & { key: string };

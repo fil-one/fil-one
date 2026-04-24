@@ -54,14 +54,18 @@ export function parseHeadObjectResponse(
   etag?: string;
   contentType?: string;
   metadata: Record<string, string>;
+  checksums: Record<string, string>;
   filCid?: string;
 } {
   const headers = response.headers;
 
   const metadata: Record<string, string> = {};
+  const checksums: Record<string, string> = {};
   headers.forEach((value, name) => {
     if (name.startsWith('x-amz-meta-')) {
       metadata[name.slice('x-amz-meta-'.length)] = value;
+    } else if (name.startsWith('x-amz-checksum-') && name !== 'x-amz-checksum-type') {
+      checksums[name.slice('x-amz-checksum-'.length)] = value;
     }
   });
 
@@ -78,6 +82,7 @@ export function parseHeadObjectResponse(
     ...(etag && { etag }),
     ...(contentType && { contentType }),
     metadata,
+    checksums,
     ...(filCid && { filCid }),
   };
 }
@@ -123,8 +128,12 @@ export function parseS3ErrorResponse(xml: string): { code: string; message: stri
  * Execute a presigned URL and handle S3-level errors.
  * Throws an Error with the S3 error message on non-2xx responses.
  */
-export async function executePresignedUrl(url: string, method: string): Promise<Response> {
-  const response = await fetch(url, { method });
+export async function executePresignedUrl(
+  url: string,
+  method: string,
+  headers?: Record<string, string>,
+): Promise<Response> {
+  const response = await fetch(url, { method, ...(headers && { headers }) });
 
   if (!response.ok) {
     const body = await response.text();

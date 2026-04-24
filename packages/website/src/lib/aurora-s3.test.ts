@@ -144,6 +144,7 @@ describe('parseHeadObjectResponse', () => {
       etag: '"abc123"',
       contentType: 'application/pdf',
       metadata: {},
+      checksums: {},
     });
   });
 
@@ -162,6 +163,23 @@ describe('parseHeadObjectResponse', () => {
       filename: 'report.pdf',
       description: 'Quarterly report',
       tags: '["finance","q1"]',
+    });
+  });
+
+  it('extracts x-amz-checksum-* headers (excluding x-amz-checksum-type)', () => {
+    const response = buildResponse({
+      'content-length': '100',
+      'last-modified': 'Wed, 15 Jan 2026 10:30:00 GMT',
+      'x-amz-checksum-sha256': 'n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=',
+      'x-amz-checksum-crc32': 'AAAAAA==',
+      'x-amz-checksum-type': 'FULL_OBJECT',
+    });
+
+    const result = parseHeadObjectResponse(response, 'file.bin');
+
+    expect(result.checksums).toEqual({
+      sha256: 'n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=',
+      crc32: 'AAAAAA==',
     });
   });
 
@@ -189,6 +207,7 @@ describe('parseHeadObjectResponse', () => {
     expect(result.contentType).toBeUndefined();
     expect(result.filCid).toBeUndefined();
     expect(result.metadata).toEqual({});
+    expect(result.checksums).toEqual({});
   });
 });
 
@@ -309,6 +328,20 @@ describe('executePresignedUrl', () => {
 
     expect(result).toBe(mockResponse);
     expect(fetch).toHaveBeenCalledWith('https://s3.example.com/obj?signed', { method: 'GET' });
+  });
+
+  it('forwards headers to fetch when provided', async () => {
+    const mockResponse = new Response('', { status: 200 });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse);
+
+    await executePresignedUrl('https://s3.example.com/obj?signed', 'HEAD', {
+      'x-amz-checksum-mode': 'ENABLED',
+    });
+
+    expect(fetch).toHaveBeenCalledWith('https://s3.example.com/obj?signed', {
+      method: 'HEAD',
+      headers: { 'x-amz-checksum-mode': 'ENABLED' },
+    });
   });
 
   it('throws with S3 error details on non-2xx with XML body', async () => {

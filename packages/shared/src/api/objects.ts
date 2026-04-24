@@ -52,6 +52,7 @@ export interface ObjectMetadataResponse {
   etag?: string;
   contentType?: string;
   metadata: Record<string, string>;
+  checksums?: Record<string, string>;
   filCid?: string;
   retention?: ObjectRetentionInfo;
 }

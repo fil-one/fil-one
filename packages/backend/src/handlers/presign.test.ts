@@ -216,7 +216,10 @@ describe('presign baseHandler', () => {
   it('returns presigned URLs for a read-only batch', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
-    mockGetPresignedHeadObjectUrl.mockResolvedValue('https://s3.example.com/head?signed');
+    mockGetPresignedHeadObjectUrl.mockResolvedValue({
+      url: 'https://s3.example.com/head?signed',
+      requiredHeaders: { 'x-amz-checksum-mode': 'ENABLED' },
+    });
 
     const event = buildPresignEvent([
       { op: 'listObjects', bucket: 'b' },
@@ -237,6 +240,7 @@ describe('presign baseHandler', () => {
           url: 'https://s3.example.com/head?signed',
           method: 'HEAD',
           expiresAt: expect.any(String),
+          requiredHeaders: { 'x-amz-checksum-mode': 'ENABLED' },
         },
       ],
       endpoint: expect.any(String),
