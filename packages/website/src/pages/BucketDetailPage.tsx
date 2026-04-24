@@ -15,7 +15,7 @@ import { getS3Endpoint, S3_REGION, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 
 import type {
-  ListObjectsResponse,
+  ListObjectVersionsResponse,
   GetBucketResponse,
   ListAccessKeysResponse,
   BucketAnalyticsResponse,
@@ -25,7 +25,7 @@ import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { queryKeys } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
-import { parseListObjectsResponse, executePresignedUrl } from '../lib/aurora-s3.js';
+import { parseListObjectVersionsResponse, executePresignedUrl } from '../lib/aurora-s3.js';
 
 // ---------------------------------------------------------------------------
 // Stat card component
@@ -117,7 +117,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
   });
   const bucket = bucketData?.bucket ?? null;
 
-  // Objects (via presigned URL)
+  // Objects (via presigned URL — versioned listing)
   const {
     data: objectsData,
     isPending: objectsLoading,
@@ -125,13 +125,13 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
     error: objectsError,
   } = useQuery({
     queryKey: queryKeys.objects(bucketName),
-    queryFn: async (): Promise<ListObjectsResponse> => {
-      const { items } = await batchPresign([{ op: 'listObjects', bucket: bucketName }]);
+    queryFn: async (): Promise<ListObjectVersionsResponse> => {
+      const { items } = await batchPresign([{ op: 'listObjectVersions', bucket: bucketName }]);
       const response = await executePresignedUrl(items[0].url, items[0].method);
-      return parseListObjectsResponse(await response.text());
+      return parseListObjectVersionsResponse(await response.text());
     },
   });
-  const objects = objectsData?.objects ?? [];
+  const versions = objectsData?.versions ?? [];
 
   // Bucket analytics (object count + storage)
   const { data: analyticsData } = useQuery({
@@ -151,10 +151,17 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
   const [addKeyOpen, setAddKeyOpen] = useState(false);
 
   const invalidateObjectsCache = useCallback(
-    (key: string) => {
-      queryClient.setQueryData<ListObjectsResponse>(queryKeys.objects(bucketName), (old) =>
-        old ? { ...old, objects: old.objects.filter((o) => o.key !== key) } : old,
-      );
+    (key: string, versionId?: string) => {
+      if (versionId) {
+        queryClient.setQueryData<ListObjectVersionsResponse>(queryKeys.objects(bucketName), (old) =>
+          old
+            ? {
+                ...old,
+                versions: old.versions.filter((v) => !(v.key === key && v.versionId === versionId)),
+              }
+            : old,
+        );
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName) });
     },
     [queryClient, bucketName],
@@ -232,7 +239,8 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
           <TabPanel>
             <ObjectBrowser
               bucketName={bucketName}
-              objects={objects}
+              versions={versions}
+              versioningEnabled={bucket?.versioning ?? false}
               currentPrefix={currentPrefix}
               onPrefixChange={setCurrentPrefix}
               onDownload={objectActions.downloadObject}

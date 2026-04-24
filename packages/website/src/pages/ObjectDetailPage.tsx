@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ArrowLeftIcon,
-  DotsThreeIcon,
   DownloadSimpleIcon,
   LinkIcon,
   LockIcon,
@@ -15,16 +14,19 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyableField } from '../components/CopyableField';
+import { IconButton } from '../components/IconButton';
+import { ShareObjectModal } from '../components/ShareObjectModal';
 import { Spinner } from '../components/Spinner';
+import { VersionHistoryCard } from '../components/VersionHistoryCard';
 import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
 
 import type {
   ObjectMetadataResponse,
-  GetBucketResponse,
   ObjectRetentionInfo,
+  GetBucketResponse,
+  ListObjectVersionsResponse,
 } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
-import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { queryKeys, queryClient } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
@@ -35,12 +37,38 @@ import {
 } from '../lib/aurora-s3.js';
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const retentionDateFormat = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+});
+
+function buildMetadataResponse(
+  head: ReturnType<typeof parseHeadObjectResponse>,
+  retention?: ObjectRetentionInfo,
+): ObjectMetadataResponse {
+  return {
+    key: head.key,
+    sizeBytes: head.sizeBytes,
+    lastModified: head.lastModified,
+    ...(head.etag && { etag: head.etag }),
+    ...(head.contentType && { contentType: head.contentType }),
+    metadata: head.metadata,
+    ...(retention && { retention }),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export type ObjectDetailPageProps = {
   bucketName: string;
   objectKey: string;
+  versionId?: string;
 };
 
 async function fetchObjectRetention(
@@ -65,7 +93,7 @@ async function fetchObjectRetention(
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity/complexity
-export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProps) {
+export function ObjectDetailPage({ bucketName, objectKey, versionId }: ObjectDetailPageProps) {
   const navigate = useNavigate();
 
   const {
@@ -74,7 +102,7 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
     isError,
     error,
   } = useQuery({
-    queryKey: queryKeys.objectMetadata(bucketName, objectKey),
+    queryKey: queryKeys.objectMetadata(bucketName, objectKey, versionId),
     queryFn: async (): Promise<ObjectMetadataResponse> => {
       const cachedBucket = queryClient.getQueryData<GetBucketResponse>(
         queryKeys.bucket(bucketName),
@@ -82,9 +110,21 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
       const hasObjectLock = cachedBucket?.bucket.objectLockEnabled ?? false;
 
       const ops = [
-        { op: 'headObject' as const, bucket: bucketName, key: objectKey, includeFilMeta: true },
+        {
+          op: 'headObject' as const,
+          bucket: bucketName,
+          key: objectKey,
+          ...(versionId && { versionId }),
+        },
         ...(hasObjectLock
-          ? [{ op: 'getObjectRetention' as const, bucket: bucketName, key: objectKey }]
+          ? [
+              {
+                op: 'getObjectRetention' as const,
+                bucket: bucketName,
+                key: objectKey,
+                ...(versionId && { versionId }),
+              },
+            ]
           : []),
       ];
       const { items } = await batchPresign(ops);
@@ -97,23 +137,18 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
           ? await fetchObjectRetention(items[1].url, items[1].method)
           : undefined;
 
-      return {
-        key: head.key,
-        sizeBytes: head.sizeBytes,
-        lastModified: head.lastModified,
-        ...(head.etag && { etag: head.etag }),
-        ...(head.contentType && { contentType: head.contentType }),
-        metadata: head.metadata,
-        ...(head.filCid && { filCid: head.filCid }),
-        ...(retention && { retention }),
-      };
+      return buildMetadataResponse(head, retention);
     },
   });
 
+  // Pull version history from the bucket object listing cache (no extra fetch)
+  const cachedVersions = queryClient.getQueryData<ListObjectVersionsResponse>(
+    queryKeys.objects(bucketName),
+  );
+  const objectVersions = (cachedVersions?.versions ?? []).filter((v) => v.key === objectKey);
+
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuBtnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const objectActions = useObjectActions({
     bucketName,
@@ -124,23 +159,6 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
       });
     },
   });
-
-  // Close menu on outside click
-  useEffect(() => {
-    if (!menuOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(e.target as Node) &&
-        menuBtnRef.current &&
-        !menuBtnRef.current.contains(e.target as Node)
-      ) {
-        setMenuOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [menuOpen]);
 
   if (isPending) {
     return (
@@ -180,7 +198,7 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
     }
   }
 
-  // Strip surrounding quotes from ETag if present
+  // Strip surrounding quotes from ETag (S3 returns it wrapped in double-quotes).
   const etag = metadata?.etag?.replace(/^"|"$/g, '');
 
   const s3Path = `s3://${bucketName}/${objectKey}`;
@@ -190,11 +208,6 @@ export function ObjectDetailPage({ bucketName, objectKey }: ObjectDetailPageProp
   const apiExample = `# Retrieve via S3 API
 aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
   --endpoint-url ${s3Endpoint}`;
-
-  function handleMenuAction(action: () => void) {
-    setMenuOpen(false);
-    action();
-  }
 
   return (
     <div className="mx-auto max-w-2xl p-6">
@@ -213,105 +226,44 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
           type="button"
           onClick={() => void navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
           className="flex size-8 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900"
+          aria-label="Back to bucket"
         >
           <ArrowLeftIcon size={16} aria-hidden="true" />
         </button>
         <div className="flex-1">
           <h1 className="text-xl font-semibold tracking-tight text-zinc-900">{objectKey}</h1>
-          <p className="text-[13px] text-zinc-500">
-            <span className="underline">{metadata?.filCid ? 'Sealed on Filecoin' : 'Queued'}</span>
-            <span> &bull; {bucketName}</span>
-          </p>
+          <p className="text-[13px] text-zinc-500">{bucketName}</p>
         </div>
 
-        {/* Triple-dot action menu */}
-        <div className="relative">
-          <button
-            ref={menuBtnRef}
-            type="button"
-            onClick={() => setMenuOpen((o) => !o)}
-            className="flex size-8 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
-            aria-label="Object actions"
-          >
-            <DotsThreeIcon size={16} weight="bold" />
-          </button>
-          {menuOpen && (
-            <div
-              ref={menuRef}
-              className="absolute right-0 top-full z-50 mt-1 w-52 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
-            >
-              <button
-                type="button"
-                onClick={() => handleMenuAction(() => void objectActions.downloadObject(objectKey))}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-zinc-900 hover:bg-zinc-50"
-              >
-                <DownloadSimpleIcon size={14} />
-                Download
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  handleMenuAction(() => void objectActions.generatePresignedUrl(objectKey))
-                }
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-zinc-900 hover:bg-zinc-50"
-              >
-                <LinkIcon size={14} />
-                Generate presigned URL
-              </button>
-              <div className="my-1 border-t border-zinc-100" />
-              <button
-                type="button"
-                onClick={() => handleMenuAction(() => setConfirmDeleteOpen(true))}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-[13px] text-red-600 hover:bg-red-50"
-              >
-                <TrashIcon size={14} />
-                Delete
-              </button>
-            </div>
-          )}
+        <div className="flex items-center gap-1">
+          <IconButton
+            icon={DownloadSimpleIcon}
+            aria-label="Download object"
+            onClick={() => void objectActions.downloadObject(objectKey, versionId)}
+          />
+          <IconButton
+            icon={LinkIcon}
+            aria-label="Share object"
+            onClick={() => setShareOpen(true)}
+          />
+          <IconButton
+            icon={TrashIcon}
+            aria-label="Delete object"
+            onClick={() => setConfirmDeleteOpen(true)}
+          />
         </div>
-      </div>
-
-      {/* CID card */}
-      <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-        <div className="mb-2 flex items-center gap-2">
-          <h2 className="text-sm font-medium text-zinc-900">Content Identifier (CID)</h2>
-          <OffloadStatusBadge filCid={metadata?.filCid} />
-        </div>
-        <p className="mb-3 text-xs text-zinc-500">
-          A unique content identifier that lets anyone verify the exact data stored on Filecoin
-        </p>
-        {metadata?.filCid ? (
-          <CopyableField label="" value={metadata.filCid} />
-        ) : (
-          <div className="rounded-lg bg-zinc-100 px-3 py-2.5">
-            <span className="font-mono text-[11px] text-zinc-400">
-              CID will be available after Filecoin sealing
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Object details card */}
-      <div className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+      <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
         <h2 className="mb-3 text-sm font-medium text-zinc-900">Object details</h2>
         <div className="flex flex-col gap-2">
           <DetailRow label="Name" value={objectKey} mono />
           {metadata && <DetailRow label="Size" value={formatBytes(metadata.sizeBytes)} mono />}
           <DetailRow label="Bucket" value={bucketName} mono />
-          {metadata && (
-            <DetailRow label="Created" value={formatDateTime(metadata.lastModified)} mono />
-          )}
-          <div className="flex items-center justify-between py-1">
-            <span className="text-[13px] text-zinc-500">S3 Path</span>
-            <CopyableField label="" value={s3Path} />
-          </div>
-          {etag && (
-            <div className="flex items-center justify-between py-1">
-              <span className="text-[13px] text-zinc-500">ETag</span>
-              <CopyableField label="" value={etag} />
-            </div>
-          )}
+          <CopyableDetailRow label="S3 Path" value={s3Path} />
+          {versionId && <CopyableDetailRow label="Version ID" value={versionId} />}
+          {etag && <CopyableDetailRow label="ETag" value={etag} />}
           <div className="flex items-center justify-between py-1">
             <span className="text-[13px] text-zinc-500">Retention</span>
             {metadata?.retention ? (
@@ -319,11 +271,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
                 <LockIcon size={12} />
                 {metadata.retention.mode === 'COMPLIANCE' ? 'Compliance' : 'Governance'}
                 {' \u00b7 Expires '}
-                {new Date(metadata.retention.retainUntilDate).toLocaleDateString(undefined, {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
+                {retentionDateFormat.format(new Date(metadata.retention.retainUntilDate))}
               </span>
             ) : (
               <span className="flex items-center gap-1.5 font-mono text-xs text-zinc-400">
@@ -368,11 +316,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
             <p className="text-[13px] text-red-600">
               This object is protected by a compliance retention lock until{' '}
               <span className="font-bold">
-                {new Date(metadata.retention.retainUntilDate).toLocaleDateString(undefined, {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
+                {retentionDateFormat.format(new Date(metadata.retention.retainUntilDate))}
               </span>
               . It cannot be deleted before this date.
             </p>
@@ -380,17 +324,33 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         </div>
       )}
 
+      {/* Version history */}
+      <VersionHistoryCard
+        versions={objectVersions}
+        currentVersionId={versionId}
+        bucketName={bucketName}
+      />
+
       {/* API access example card */}
       <div className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
         <h2 className="mb-3 text-sm font-medium text-zinc-900">API access example</h2>
         <CodeBlock code={apiExample} language="bash" />
       </div>
 
+      {/* Share dialog */}
+      <ShareObjectModal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        bucketName={bucketName}
+        objectKey={objectKey}
+        versionId={versionId}
+      />
+
       {/* Delete confirmation */}
       <ConfirmDialog
         open={confirmDeleteOpen}
         onClose={() => setConfirmDeleteOpen(false)}
-        onConfirm={() => objectActions.deleteObject(objectKey)}
+        onConfirm={() => objectActions.deleteObject(objectKey, versionId)}
         title="Delete object"
         description="This object will be permanently deleted. This action cannot be undone."
         confirmLabel="Delete object"
@@ -412,19 +372,11 @@ function DetailRow({ label, value, mono }: { label: string; value: string; mono?
   );
 }
 
-function OffloadStatusBadge({ filCid }: { filCid?: string }) {
-  if (filCid) {
-    return (
-      <span className="rounded-full border border-green-200 bg-green-50 px-2.5 py-0.5 text-[11px] font-semibold text-green-600">
-        Sealed
-      </span>
-    );
-  }
-
+function CopyableDetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-2.5 py-0.5 text-[11px] font-semibold text-zinc-500">
-      <Spinner ariaLabel="Queued" size={10} />
-      Queued
-    </span>
+    <div className="flex items-center justify-between py-1">
+      <span className="text-[13px] text-zinc-500">{label}</span>
+      <CopyableField label="" value={value} />
+    </div>
   );
 }

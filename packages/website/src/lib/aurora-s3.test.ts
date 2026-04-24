@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   parseListObjectsResponse,
+  parseListObjectVersionsResponse,
   parseHeadObjectResponse,
   parseGetObjectRetentionResponse,
   parseS3ErrorResponse,
@@ -119,6 +120,151 @@ describe('parseListObjectsResponse', () => {
 });
 
 // ---------------------------------------------------------------------------
+// parseListObjectVersionsResponse
+// ---------------------------------------------------------------------------
+
+describe('parseListObjectVersionsResponse', () => {
+  it('parses versions and delete markers', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+      <ListVersionsResult>
+        <IsTruncated>false</IsTruncated>
+        <Version>
+          <Key>photo.jpg</Key>
+          <VersionId>v2</VersionId>
+          <IsLatest>true</IsLatest>
+          <Size>2400</Size>
+          <LastModified>2026-04-14T10:00:00.000Z</LastModified>
+          <ETag>"abc123"</ETag>
+        </Version>
+        <Version>
+          <Key>photo.jpg</Key>
+          <VersionId>v1</VersionId>
+          <IsLatest>false</IsLatest>
+          <Size>2100</Size>
+          <LastModified>2026-04-10T10:00:00.000Z</LastModified>
+          <ETag>"def456"</ETag>
+        </Version>
+        <DeleteMarker>
+          <Key>old-file.txt</Key>
+          <VersionId>dm1</VersionId>
+          <IsLatest>true</IsLatest>
+          <LastModified>2026-04-08T10:00:00.000Z</LastModified>
+        </DeleteMarker>
+      </ListVersionsResult>`;
+
+    const result = parseListObjectVersionsResponse(xml);
+
+    expect(result).toEqual({
+      versions: [
+        {
+          key: 'old-file.txt',
+          versionId: 'dm1',
+          isLatest: true,
+          isDeleteMarker: true,
+          sizeBytes: 0,
+          lastModified: '2026-04-08T10:00:00.000Z',
+        },
+        {
+          key: 'photo.jpg',
+          versionId: 'v2',
+          isLatest: true,
+          isDeleteMarker: false,
+          sizeBytes: 2400,
+          lastModified: '2026-04-14T10:00:00.000Z',
+          etag: '"abc123"',
+        },
+        {
+          key: 'photo.jpg',
+          versionId: 'v1',
+          isLatest: false,
+          isDeleteMarker: false,
+          sizeBytes: 2100,
+          lastModified: '2026-04-10T10:00:00.000Z',
+          etag: '"def456"',
+        },
+      ],
+      isTruncated: false,
+    });
+  });
+
+  it('parses an empty bucket', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+      <ListVersionsResult>
+        <IsTruncated>false</IsTruncated>
+      </ListVersionsResult>`;
+
+    const result = parseListObjectVersionsResponse(xml);
+
+    expect(result).toEqual({
+      versions: [],
+      isTruncated: false,
+    });
+  });
+
+  it('parses a truncated response with markers', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+      <ListVersionsResult>
+        <IsTruncated>true</IsTruncated>
+        <NextKeyMarker>photo.jpg</NextKeyMarker>
+        <NextVersionIdMarker>v1</NextVersionIdMarker>
+        <Version>
+          <Key>photo.jpg</Key>
+          <VersionId>v2</VersionId>
+          <IsLatest>true</IsLatest>
+          <Size>100</Size>
+          <LastModified>2026-02-01T00:00:00.000Z</LastModified>
+        </Version>
+      </ListVersionsResult>`;
+
+    const result = parseListObjectVersionsResponse(xml);
+
+    expect(result).toEqual({
+      versions: [
+        {
+          key: 'photo.jpg',
+          versionId: 'v2',
+          isLatest: true,
+          isDeleteMarker: false,
+          sizeBytes: 100,
+          lastModified: '2026-02-01T00:00:00.000Z',
+        },
+      ],
+      nextKeyMarker: 'photo.jpg',
+      nextVersionIdMarker: 'v1',
+      isTruncated: true,
+    });
+  });
+
+  it('skips entries without a Key', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+      <ListVersionsResult>
+        <IsTruncated>false</IsTruncated>
+        <Version>
+          <VersionId>no-key</VersionId>
+          <Size>100</Size>
+        </Version>
+        <Version>
+          <Key>valid.txt</Key>
+          <VersionId>v1</VersionId>
+          <IsLatest>true</IsLatest>
+          <Size>200</Size>
+          <LastModified>2026-01-01T00:00:00.000Z</LastModified>
+        </Version>
+      </ListVersionsResult>`;
+
+    const result = parseListObjectVersionsResponse(xml);
+    expect(result.versions).toHaveLength(1);
+    expect(result.versions[0].key).toBe('valid.txt');
+  });
+
+  it('throws on malformed XML', () => {
+    expect(() => parseListObjectVersionsResponse('not xml at all <>')).toThrow(
+      /Failed to parse S3 ListObjectVersions response/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // parseHeadObjectResponse
 // ---------------------------------------------------------------------------
 
@@ -165,18 +311,6 @@ describe('parseHeadObjectResponse', () => {
     });
   });
 
-  it('extracts x-fil-cid header', () => {
-    const response = buildResponse({
-      'content-length': '100',
-      'last-modified': 'Wed, 15 Jan 2026 10:30:00 GMT',
-      'x-fil-cid': 'bafy2bzacedtest',
-    });
-
-    const result = parseHeadObjectResponse(response, 'file.bin');
-
-    expect(result.filCid).toBe('bafy2bzacedtest');
-  });
-
   it('omits optional fields when headers are absent', () => {
     const response = buildResponse({
       'content-length': '50',
@@ -185,10 +319,12 @@ describe('parseHeadObjectResponse', () => {
 
     const result = parseHeadObjectResponse(response, 'minimal.txt');
 
-    expect(result.etag).toBeUndefined();
-    expect(result.contentType).toBeUndefined();
-    expect(result.filCid).toBeUndefined();
-    expect(result.metadata).toEqual({});
+    expect(result).toEqual({
+      key: 'minimal.txt',
+      sizeBytes: 50,
+      lastModified: new Date('Wed, 15 Jan 2026 10:30:00 GMT').toISOString(),
+      metadata: {},
+    });
   });
 });
 

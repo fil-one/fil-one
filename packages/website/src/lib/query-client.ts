@@ -30,8 +30,8 @@ export const queryKeys = {
   buckets: ['buckets'] as const,
   bucket: (bucketName: string) => ['bucket', bucketName] as const,
   objects: (bucketName: string) => ['objects', bucketName] as const,
-  objectMetadata: (bucketName: string, objectKey: string) =>
-    ['object-metadata', bucketName, objectKey] as const,
+  objectMetadata: (bucketName: string, objectKey: string, versionId?: string) =>
+    ['object-metadata', bucketName, objectKey, ...(versionId ? [versionId] : [])] as const,
   // ['access-keys'] is the prefix — invalidateQueries on this key also invalidates
   // all bucket-scoped access key queries (prefix match).
   accessKeys: ['access-keys'] as const,

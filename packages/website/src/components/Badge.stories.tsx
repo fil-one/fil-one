@@ -6,9 +6,9 @@ const meta: Meta<typeof Badge> = {
   title: 'Components/Badge',
   component: Badge,
   argTypes: {
-    color: { control: 'select', options: ['green', 'blue', 'red', 'grey'] },
+    color: { control: 'select', options: ['green', 'blue', 'red', 'grey', 'amber'] },
     size: { control: 'select', options: ['sm', 'md', 'lg'] },
-    weight: { control: 'select', options: ['regular', 'medium'] },
+    weight: { control: 'select', options: ['regular', 'medium', 'semibold'] },
     dot: { control: 'boolean' },
   },
 };
@@ -35,6 +35,9 @@ export const Sizes: Story = {
             size {size}
           </Badge>
           <Badge color="grey" size={size}>
+            size {size}
+          </Badge>
+          <Badge color="amber" size={size}>
             size {size}
           </Badge>
         </div>
@@ -65,7 +68,7 @@ export const WithDot: Story = {
 export const AllVariants: Story = {
   render: () => (
     <div className="flex flex-col gap-6">
-      {(['green', 'blue', 'red', 'grey'] as BadgeColor[]).map((color) => (
+      {(['green', 'blue', 'red', 'grey', 'amber'] as BadgeColor[]).map((color) => (
         <div key={color} className="flex flex-col gap-2">
           <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">{color}</p>
           <div className="flex flex-wrap items-center gap-2">
