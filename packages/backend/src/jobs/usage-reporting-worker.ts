@@ -211,7 +211,10 @@ async function safeSyncOrgMetadata(params: {
     await updateCustomerMetadata(params.stripeCustomerId, metadata);
     return 'ok';
   } catch (error) {
-    console.error('[usage-worker] Failed to sync org metadata', { error });
+    console.error('[usage-worker] Failed to sync org metadata', {
+      stripeCustomerId: params.stripeCustomerId,
+      error,
+    });
     return `error:${(error as Error).message}`;
   }
 }
