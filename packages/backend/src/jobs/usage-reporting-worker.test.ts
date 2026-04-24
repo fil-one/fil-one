@@ -15,10 +15,8 @@ vi.mock('sst', () => ({
 }));
 
 const mockSetOrgAuroraTenantStatus = vi.fn().mockResolvedValue(undefined);
-const mockGetOrgName = vi.fn().mockResolvedValue(undefined);
 vi.mock('../lib/org-profile.js', () => ({
   setOrgAuroraTenantStatus: (...args: unknown[]) => mockSetOrgAuroraTenantStatus(...args),
-  getOrgName: (...args: unknown[]) => mockGetOrgName(...args),
 }));
 
 const mockMeterEventsCreate = vi.fn().mockResolvedValue({});
@@ -58,6 +56,7 @@ import { handler } from './usage-reporting-worker.js';
 const basePayload: UsageReportingWorkerPayload = {
   orgId: 'org-1',
   auroraTenantId: 'aurora-tenant-123',
+  orgName: 'Acme Corp',
   subscriptionId: 'sub_123',
   stripeCustomerId: 'cus_123',
   currentPeriodStart: '2024-01-01T00:00:00Z',
@@ -388,7 +387,6 @@ describe('usage-reporting-worker', () => {
   // -----------------------------------------------------------------------
   describe('org metadata sync', () => {
     it('syncs organization_name and storage_gb to Stripe with latest snapshot', async () => {
-      mockGetOrgName.mockResolvedValueOnce('Acme Corp');
       mockGetStorageSamples.mockResolvedValue([
         { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500_000_000_000 },
         { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1_500_000_000_000 },
@@ -406,7 +404,6 @@ describe('usage-reporting-worker', () => {
     });
 
     it('sync failure is swallowed and recorded in audit', async () => {
-      mockGetOrgName.mockResolvedValueOnce('Acme Corp');
       mockGetStorageSamples.mockResolvedValue([
         { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
       ]);
@@ -419,10 +416,9 @@ describe('usage-reporting-worker', () => {
     });
 
     it('skips sync when no org name and zero storage', async () => {
-      mockGetOrgName.mockResolvedValueOnce(undefined);
       mockGetStorageSamples.mockResolvedValue([]);
 
-      await handler(basePayload);
+      await handler({ ...basePayload, orgName: undefined });
 
       expect(mockCustomersUpdate).not.toHaveBeenCalled();
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
@@ -430,12 +426,11 @@ describe('usage-reporting-worker', () => {
     });
 
     it('syncs storage_gb only when org name missing', async () => {
-      mockGetOrgName.mockResolvedValueOnce(undefined);
       mockGetStorageSamples.mockResolvedValue([
         { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 2_000_000_000_000 },
       ]);
 
-      await handler(basePayload);
+      await handler({ ...basePayload, orgName: undefined });
 
       expect(mockCustomersUpdate).toHaveBeenCalledOnce();
       expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
@@ -444,7 +439,6 @@ describe('usage-reporting-worker', () => {
     });
 
     it('audit record includes orgSyncAction on success', async () => {
-      mockGetOrgName.mockResolvedValueOnce('Acme Corp');
       mockGetStorageSamples.mockResolvedValue([
         { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
       ]);

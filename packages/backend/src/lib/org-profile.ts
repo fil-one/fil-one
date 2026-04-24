@@ -1,4 +1,4 @@
-import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 import { ModelsTenantStatus } from '@filone/aurora-backoffice-client';
@@ -23,19 +23,4 @@ export async function setOrgAuroraTenantStatus(
       },
     }),
   );
-}
-
-export async function getOrgName(orgId: string): Promise<string | undefined> {
-  const res = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: {
-        pk: { S: `ORG#${orgId}` },
-        sk: { S: 'PROFILE' },
-      },
-      ProjectionExpression: '#n',
-      ExpressionAttributeNames: { '#n': 'name' },
-    }),
-  );
-  return res.Item?.name?.S;
 }

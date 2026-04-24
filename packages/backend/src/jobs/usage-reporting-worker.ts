@@ -11,7 +11,7 @@ import {
   updateTenantStatus,
 } from '../lib/aurora-backoffice.js';
 import type { ModelsTenantStatus } from '../lib/aurora-backoffice.js';
-import { getOrgName, setOrgAuroraTenantStatus } from '../lib/org-profile.js';
+import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
 import { calculateAverageUsage } from '../lib/usage-calculator.js';
 
@@ -20,6 +20,7 @@ const dynamo = getDynamoClient();
 export interface UsageReportingWorkerPayload {
   orgId: string;
   auroraTenantId: string;
+  orgName?: string;
   subscriptionId: string;
   stripeCustomerId: string;
   currentPeriodStart: string;
@@ -69,6 +70,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const {
     orgId,
     auroraTenantId,
+    orgName,
     subscriptionId,
     stripeCustomerId,
     currentPeriodStart,
@@ -86,8 +88,8 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const now = new Date().toISOString();
   const isTrial = subscriptionStatus === 'trialing';
 
-  // Fetch storage, egress, (for trials) tenant info, and org name in parallel
-  const [storageSamples, operationsSamples, tenantInfo, orgName] = await Promise.all([
+  // Fetch storage, egress, and (for trials) tenant info in parallel
+  const [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
     getStorageSamples({
       tenantId: auroraTenantId,
       from: currentPeriodStart,
@@ -101,7 +103,6 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
       window: '24h',
     }),
     isTrial ? getTenantInfo({ tenantId: auroraTenantId }) : null,
-    getOrgName(orgId),
   ]);
 
   const usage = calculateAverageUsage(storageSamples);
