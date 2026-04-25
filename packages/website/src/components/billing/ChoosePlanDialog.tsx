@@ -1,5 +1,6 @@
 import { CheckIcon, ArrowRightIcon } from '@phosphor-icons/react/dist/ssr';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../Modal';
+import { Button } from '../Button';
 
 type ChoosePlanDialogProps = {
   open: boolean;
@@ -22,6 +23,19 @@ const BUSINESS_FEATURES = [
   'Capacity assurance and deployment SLAs',
 ];
 
+function FeatureList({ features }: { features: string[] }) {
+  return (
+    <ul className="flex flex-col gap-2.5">
+      {features.map((f) => (
+        <li key={f} className="flex items-center gap-2 text-xs leading-[18px] text-zinc-600">
+          <CheckIcon size={14} className="shrink-0 text-green-600" weight="bold" />
+          {f}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ChoosePlanDialog({
   open,
   onClose,
@@ -30,94 +44,72 @@ export function ChoosePlanDialog({
 }: ChoosePlanDialogProps) {
   return (
     <Modal open={open} onClose={onClose} size="lg">
-      <ModalHeader onClose={onClose}>Choose your plan</ModalHeader>
+      <ModalHeader
+        onClose={onClose}
+        description="Simple, transparent pricing for teams of all sizes"
+      >
+        Choose your plan
+      </ModalHeader>
       <ModalBody>
-        <p className="text-[13px] text-[#677183] mb-4">
-          Simple, transparent pricing for teams of all sizes
-        </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {/* Pay as you go */}
-          <div className="rounded-xl border-2 border-[rgba(0,128,255,0.2)] bg-gradient-to-b from-[rgba(0,128,255,0.03)] to-[rgba(0,128,255,0.06)] p-[22px] flex flex-col">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#677183]">
-              Pay-as-you-go
-            </p>
+          <div className="flex flex-col rounded-xl border-2 border-brand-200 bg-brand-50 p-5">
+            <p className="text-xs uppercase text-zinc-500">Pay-as-you-go</p>
             <div className="mt-2 flex items-baseline gap-1.5">
-              <span className="text-2xl font-bold text-[#14181f]">$4.99</span>
-              <span className="text-[13px] text-[#677183]">TB/month</span>
+              <span className="text-2xl font-bold text-zinc-950">$4.99</span>
+              <span className="text-sm text-zinc-500">TB/month</span>
             </div>
-            <p className="mt-2 text-[12px] leading-[18px] text-[#677183]">
+            <p className="mt-2 text-xs leading-[18px] text-zinc-600">
               Ideal for dynamic workloads or teams getting started with scalable, verifiable
               storage.
             </p>
 
-            <div className="mt-4 border-t border-[rgba(225,228,234,0.5)] pt-[19px]">
-              <ul className="flex flex-col gap-2.5">
-                {PAY_AS_YOU_GO_FEATURES.map((f) => (
-                  <li
-                    key={f}
-                    className="flex items-center gap-2 text-[12px] leading-[18px] text-[#677183]"
-                  >
-                    <CheckIcon size={14} className="text-[#677183] flex-shrink-0" weight="bold" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
+            <div className="mt-4 border-t border-brand-200 pt-5">
+              <FeatureList features={PAY_AS_YOU_GO_FEATURES} />
             </div>
 
             <div className="flex-1" />
 
-            <button
-              type="button"
-              onClick={onSelectPayAsYouGo}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-gradient-to-br from-[#0080ff] to-[#256af4] px-4 py-2 text-[13px] font-medium text-white shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] transition-opacity hover:opacity-90"
-            >
-              Upgrade now
-              <ArrowRightIcon size={16} weight="bold" />
-            </button>
+            <div className="mt-4">
+              <Button
+                variant="primary"
+                icon={ArrowRightIcon}
+                iconPosition="right"
+                onClick={onSelectPayAsYouGo}
+                className="w-full justify-center"
+              >
+                Upgrade now
+              </Button>
+            </div>
           </div>
 
           {/* Business */}
-          <div className="rounded-xl border border-[rgba(225,228,234,0.5)] bg-gradient-to-b from-[rgba(243,244,246,0.2)] to-[rgba(243,244,246,0.4)] p-[21px] flex flex-col">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#677183]">
-              Business plan
-            </p>
+          <div className="flex flex-col rounded-xl border border-zinc-200 bg-white p-5">
+            <p className="text-xs uppercase text-zinc-500">Business plan</p>
             <div className="mt-2">
-              <span className="text-2xl font-bold text-[#14181f]">Custom pricing</span>
+              <span className="text-2xl font-bold text-zinc-950">Custom pricing</span>
             </div>
-            <p className="mt-2 text-[12px] leading-[18px] text-[#677183]">
+            <p className="mt-2 text-xs leading-[18px] text-zinc-600">
               Ideal for enterprises with predictable storage needs or compliance-driven
               requirements.
             </p>
 
-            <div className="mt-4 border-t border-[rgba(225,228,234,0.5)] pt-[19px]">
-              <ul className="flex flex-col gap-2.5">
-                {BUSINESS_FEATURES.map((f) => (
-                  <li
-                    key={f}
-                    className="flex items-center gap-2 text-[12px] leading-[18px] text-[#677183]"
-                  >
-                    <CheckIcon size={14} className="text-[#677183] flex-shrink-0" weight="bold" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
+            <div className="mt-4 border-t border-zinc-200 pt-5">
+              <FeatureList features={BUSINESS_FEATURES} />
             </div>
 
             <div className="flex-1" />
 
-            <button
-              type="button"
-              onClick={onContactSales}
-              className="mt-4 flex w-full items-center justify-center rounded-md border border-[#e1e4ea] bg-[#f9fafb] px-4 py-2 text-[13px] font-medium text-[#14181f] shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] transition-colors hover:bg-[#f0f2f5]"
-            >
-              Contact sales team
-            </button>
+            <div className="mt-4">
+              <Button variant="ghost" onClick={onContactSales} className="w-full justify-center">
+                Contact sales team
+              </Button>
+            </div>
           </div>
         </div>
       </ModalBody>
       <ModalFooter>
-        <p className="text-center text-[11px] text-[#677183]">
+        <p className="w-full text-center text-xs text-zinc-500">
           All plans include unlimited buckets, API keys, and 24/7 support
         </p>
       </ModalFooter>

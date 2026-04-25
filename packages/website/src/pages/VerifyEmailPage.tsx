@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '../components/Button';
 import { logout, getMe, resendVerificationEmail } from '../lib/api.js';
 import type { MeResponse } from '@filone/shared';
+import { queryKeys } from '../lib/query-client.js';
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
@@ -11,6 +13,7 @@ type VerifyEmailPageProps = {
 };
 
 export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
+  const queryClient = useQueryClient();
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
   const [resending, setResending] = useState(false);
@@ -29,6 +32,8 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
       // Force a token refresh so we pick up the latest email_verified claim from Auth0
       const updated = await getMe({ forceRefresh: true });
       if (updated.emailVerified) {
+        // Force a hard reset so the cached me reflects the newly verified token
+        void queryClient.resetQueries({ queryKey: queryKeys.me });
         onVerified();
       } else {
         setError(
@@ -89,7 +94,7 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
           {error && <p className="text-xs text-red-600">{error}</p>}
 
           <Button
-            variant="filled"
+            variant="primary"
             type="button"
             className="w-full justify-center"
             disabled={checking}

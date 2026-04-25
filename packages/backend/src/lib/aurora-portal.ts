@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import QuickLRU from 'quick-lru';
 import {
   createClient,
   createBucket,
@@ -8,10 +9,12 @@ import {
   getS3AccessKey,
   listS3AccessKeys,
 } from '@filone/aurora-portal-client';
-import type { AccessKeyPermission } from '@filone/shared';
+import type { AccessKeyPermission, RetentionDurationType, RetentionMode } from '@filone/shared';
 import { instrumentClient } from './aurora-api-metrics.js';
 
 const ssm = new SSMClient({});
+const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
+export const _resetSsmCacheForTesting = () => ssmCache.clear();
 
 export class BucketAlreadyExistsError extends Error {
   constructor(bucketName: string) {
@@ -51,18 +54,46 @@ async function createPortalClient(tenantId: string) {
 export interface CreateAuroraBucketOptions {
   tenantId: string;
   bucketName: string;
+  versioning?: boolean;
+  lock?: boolean;
+  retention?: {
+    enabled: boolean;
+    mode: RetentionMode;
+    duration: number;
+    durationType: RetentionDurationType;
+  };
 }
 
 export async function createAuroraBucket({
   tenantId,
   bucketName,
+  versioning,
+  lock,
+  retention,
 }: CreateAuroraBucketOptions): Promise<void> {
   const client = await createPortalClient(tenantId);
 
   const { error, response } = await createBucket({
     client,
     path: { tenantId },
-    body: { name: bucketName },
+    body: {
+      name: bucketName,
+      encrypted: true,
+      ...(versioning ? { versioning: true } : {}),
+      ...(lock ? { lock: true } : {}),
+      ...(retention?.enabled
+        ? {
+            defaultRetention: {
+              enabled: true,
+              mode: retention.mode,
+              duration: {
+                duration: retention.duration,
+                type: retention.durationType,
+              },
+            },
+          }
+        : {}),
+    },
     throwOnError: false,
   });
 
@@ -161,21 +192,18 @@ export async function createAuroraAccessKey({
     `Aurora API returned invalid access key for tenant ${tenantId}: expected an object but got ${typeof accessKey}`,
   );
   const { id, accessKeyId, accessKeySecret, createdAt } = accessKey;
-  assert(
-    !!id,
-    `Aurora Portal API returned empty access key "id" for tenant ${tenantId}. Full response: ${JSON.stringify(data)}`,
-  );
+  assert(!!id, `Aurora Portal API returned empty access key "id" for tenant ${tenantId}`);
   assert(
     !!accessKeyId,
-    `Aurora Portal API returned empty access key "accessKeyId" for tenant ${tenantId}. Full response: ${JSON.stringify(data)}`,
+    `Aurora Portal API returned empty access key "accessKeyId" for tenant ${tenantId}. Response fields: ${Object.keys(data).join(', ')}`,
   );
   assert(
     !!accessKeySecret,
-    `Aurora Portal API returned empty access key "accessKeySecret" for tenant ${tenantId}. Full response: ${JSON.stringify(data)}`,
+    `Aurora Portal API returned empty access key "accessKeySecret" for tenant ${tenantId}. Response fields: ${Object.keys(data).join(', ')}`,
   );
   assert(
     !!createdAt,
-    `Aurora Portal API returned empty access key "createdAt" for tenant ${tenantId}. Full response: ${JSON.stringify(data)}`,
+    `Aurora Portal API returned empty access key "createdAt" for tenant ${tenantId}. Response fields: ${Object.keys(data).join(', ')}`,
   );
 
   console.log(
@@ -293,6 +321,10 @@ export async function deleteAuroraAccessKey({
 }
 
 export async function getAuroraPortalApiKey(stage: string, tenantId: string): Promise<string> {
+  const cacheKey = `${stage}/${tenantId}`;
+  const cached = ssmCache.get(cacheKey);
+  if (cached) return cached;
+
   let apiKey: string | undefined;
   try {
     const { Parameter } = await ssm.send(
@@ -313,5 +345,6 @@ export async function getAuroraPortalApiKey(stage: string, tenantId: string): Pr
     throw new Error(`Aurora API key not found in SSM for tenant ${tenantId}`);
   }
 
+  ssmCache.set(cacheKey, apiKey);
   return apiKey;
 }

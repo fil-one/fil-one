@@ -71,7 +71,6 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       error,
       orgId,
       userId,
-      email,
     });
   }
 

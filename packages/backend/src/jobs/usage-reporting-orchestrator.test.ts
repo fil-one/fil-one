@@ -225,4 +225,43 @@ describe('usage-reporting-orchestrator', () => {
     expect(payload.orgId).toBe('org-2');
     expect(payload.auroraTenantId).toBe('aurora-org-2');
   });
+
+  // -----------------------------------------------------------------------
+  // Idempotency — running twice
+  // -----------------------------------------------------------------------
+  describe('idempotency — running twice', () => {
+    it('invokes worker twice when orchestrator runs twice for same subscription', async () => {
+      ddbMock.on(ScanCommand).resolves({ Items: [subscriptionItem('org-1')] });
+      mockGetItemForOrgs(['org-1']);
+      lambdaMock.on(InvokeCommand).resolves({});
+
+      await handler();
+      await handler();
+
+      const invokeCalls = lambdaMock.commandCalls(InvokeCommand);
+      expect(invokeCalls).toHaveLength(2);
+      // Both invocations carry the same payload
+      const payloads = invokeCalls.map((c) =>
+        JSON.parse(Buffer.from(c.args[0].input.Payload as Uint8Array).toString()),
+      );
+      expect(payloads[0].orgId).toBe('org-1');
+      expect(payloads[1].orgId).toBe('org-1');
+      expect(payloads[0].auroraTenantId).toBe('aurora-org-1');
+      expect(payloads[1].auroraTenantId).toBe('aurora-org-1');
+    });
+
+    it('second run finds no candidates when subscription was canceled between runs', async () => {
+      ddbMock
+        .on(ScanCommand)
+        .resolvesOnce({ Items: [subscriptionItem('org-1')] })
+        .resolvesOnce({ Items: [] }); // canceled between runs — filtered out by scan
+      mockGetItemForOrgs(['org-1']);
+      lambdaMock.on(InvokeCommand).resolves({});
+
+      await handler();
+      await handler();
+
+      expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
+    });
+  });
 });

@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { PlusIcon, DatabaseIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Button } from '../components/Button';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 
-import type { Bucket, ListBucketsResponse } from '@filone/shared';
+import type { ListBucketsResponse } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
+import { queryKeys } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -17,47 +19,32 @@ import { formatDate } from '../lib/time.js';
 export function BucketsPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
-  const [buckets, setBuckets] = useState<Bucket[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, isPending, isError, error } = useQuery({
+    queryKey: queryKeys.buckets,
+    queryFn: () => apiRequest<ListBucketsResponse>('/buckets'),
+  });
+  const buckets = data?.buckets ?? [];
 
-  // Fetch buckets on mount
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchBuckets() {
-      try {
-        const data = await apiRequest<ListBucketsResponse>('/buckets');
-        if (!cancelled) {
-          setBuckets(data.buckets);
-          setLoading(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load buckets');
-          setLoading(false);
-        }
-      }
-    }
-    void fetchBuckets();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function handleDeleteBucket(bucketName: string) {
-    try {
-      await apiRequest(`/buckets/${encodeURIComponent(bucketName)}`, {
-        method: 'DELETE',
-      });
-      setBuckets((prev) => prev.filter((b) => b.name !== bucketName));
+  const deleteBucketMutation = useMutation({
+    mutationFn: (bucketName: string) =>
+      apiRequest(`/buckets/${encodeURIComponent(bucketName)}`, { method: 'DELETE' }),
+    onSuccess: (_, bucketName) => {
+      // Optimistically remove from cache, then confirm with a background refetch
+      queryClient.setQueryData<ListBucketsResponse>(queryKeys.buckets, (old) =>
+        old ? { buckets: old.buckets.filter((b) => b.name !== bucketName) } : old,
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       toast.success(`Bucket "${bucketName}" deleted`);
-    } catch (err) {
+    },
+    onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to delete bucket');
-    }
-  }
+    },
+  });
 
-  if (loading) {
+  if (isPending) {
     return (
       <div className="flex items-center justify-center p-16">
         <Spinner ariaLabel="Loading buckets" size={32} />
@@ -65,11 +52,11 @@ export function BucketsPage() {
     );
   }
 
-  if (error) {
+  if (isError) {
     return (
       <div className="p-6">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
+          {error?.message ?? 'Failed to load buckets'}
         </div>
       </div>
     );
@@ -81,7 +68,7 @@ export function BucketsPage() {
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-zinc-900">Buckets</h1>
         <Button
-          variant="filled"
+          variant="primary"
           icon={PlusIcon}
           onClick={() => navigate({ to: '/buckets/create' })}
         >
@@ -98,7 +85,7 @@ export function BucketsPage() {
             Create your first bucket to start storing objects
           </p>
           <Button
-            variant="filled"
+            variant="primary"
             icon={PlusIcon}
             onClick={() => navigate({ to: '/buckets/create' })}
           >
@@ -121,6 +108,9 @@ export function BucketsPage() {
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
                   Visibility
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
+                  Features
                 </th>
                 <th className="px-4 py-3" aria-label="Actions" />
               </tr>
@@ -153,12 +143,37 @@ export function BucketsPage() {
                       </span>
                     )}
                   </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      {bucket.versioning && (
+                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                          Versioned
+                        </span>
+                      )}
+                      {bucket.objectLockEnabled && (
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                          Object Lock
+                        </span>
+                      )}
+                      {!bucket.versioning && !bucket.objectLockEnabled && (
+                        <span className="text-xs text-zinc-400">&mdash;</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <button
                       type="button"
                       aria-label={`Delete bucket ${bucket.name}`}
-                      onClick={() => handleDeleteBucket(bucket.name)}
-                      className="text-zinc-400 hover:text-red-500"
+                      onClick={() => deleteBucketMutation.mutate(bucket.name)}
+                      // TODO: enable bucket deletion after Aurora implements this operation
+                      // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
+                      // disabled={
+                      //   deleteBucketMutation.isPending &&
+                      //   deleteBucketMutation.variables === bucket.name
+                      // }
+                      disabled
+                      title="Deleting buckets is not available yet"
+                      className="text-zinc-400 hover:text-red-500 disabled:opacity-50"
                     >
                       <TrashIcon size={16} aria-hidden="true" />
                     </button>

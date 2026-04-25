@@ -12,25 +12,18 @@ jobs:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           submodules: recursive
 
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+      - uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 24
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-
-      # sst.config.ts uses SST globals ($config, $app, sst, aws, etc.) whose
-      # type definitions live in .sst/platform/ and are not checked into git.
-      # Run `sst install` to generate them so oxlint's type-aware checks pass.
-      - name: Generate SST provider types
-        run: pnpm exec sst install
 
       - name: Lint
         run: pnpm lint
@@ -41,215 +34,69 @@ jobs:
       - name: Test
         run: pnpm test
 
-  deploy-preview:
-    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production' && github.event.pull_request.head.repo.full_name == github.repository
-    needs: [check-packages]
+  check-storybook:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    concurrency:
-      group: preview-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      STAGE: pr-${{ github.event.pull_request.number }}
-      AWS_REGION: us-east-2
-      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-    outputs:
-      url: ${{ steps.deploy.outputs.url }}
-      sst-env-dirty: ${{ steps.sst-env-check.outputs.dirty }}
-
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-noble
+      options: --user 1001
     steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+      - uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 24
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
-          aws-region: us-east-2
-
-      - name: Set SST secrets
-        run: |
-          pnpm exec sst secret set Auth0ClientId "$AUTH0_CLIENT_ID" --stage "$STAGE"
-          pnpm exec sst secret set Auth0ClientSecret "$AUTH0_CLIENT_SECRET" --stage "$STAGE"
-          pnpm exec sst secret set Auth0MgmtClientId "$AUTH0_MGMT_CLIENT_ID" --stage "$STAGE"
-          pnpm exec sst secret set Auth0MgmtClientSecret "$AUTH0_MGMT_CLIENT_SECRET" --stage "$STAGE"
-          pnpm exec sst secret set Auth0MgmtRuntimeClientId "$AUTH0_MGMT_RUNTIME_CLIENT_ID" --stage "$STAGE"
-          pnpm exec sst secret set Auth0MgmtRuntimeClientSecret "$AUTH0_MGMT_RUNTIME_CLIENT_SECRET" --stage "$STAGE"
-          pnpm exec sst secret set StripeSecretKey "$STRIPE_SECRET_KEY" --stage "$STAGE"
-          pnpm exec sst secret set StripePriceId "$STRIPE_PRICE_ID" --stage "$STAGE"
-          pnpm exec sst secret set AuroraBackofficeToken "$AURORA_BACKOFFICE_TOKEN" --stage "$STAGE"
-          pnpm exec sst secret set SendGridApiKey "$SENDGRID_API_KEY" --stage "$STAGE"
-          pnpm exec sst secret set GrafanaLokiAuth "$GRAFANA_LOKI_AUTH" --stage "$STAGE"
-          pnpm exec sst secret set GrafanaPrometheusAuth "$GRAFANA_PROMETHEUS_AUTH" --stage "$STAGE"
-          npx sst secret set StripePublishableKey "$STRIPE_PUBLISHABLE_KEY" --stage "$STAGE"
-        env:
-          AUTH0_CLIENT_ID: ${{ secrets.CI_AUTH0_CLIENT_ID }}
-          AUTH0_CLIENT_SECRET: ${{ secrets.CI_AUTH0_CLIENT_SECRET }}
-          AUTH0_MGMT_CLIENT_ID: ${{ secrets.CI_AUTH0_MGMT_CLIENT_ID }}
-          AUTH0_MGMT_CLIENT_SECRET: ${{ secrets.CI_AUTH0_MGMT_CLIENT_SECRET }}
-          AUTH0_MGMT_RUNTIME_CLIENT_ID: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_ID }}
-          AUTH0_MGMT_RUNTIME_CLIENT_SECRET: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_SECRET }}
-          STRIPE_SECRET_KEY: ${{ secrets.CI_STRIPE_SECRET_KEY }}
-          STRIPE_PRICE_ID: ${{ secrets.CI_STRIPE_PRICE_ID }}
-          AURORA_BACKOFFICE_TOKEN: ${{ secrets.CI_AURORA_BACKOFFICE_TOKEN }}
-          SENDGRID_API_KEY: ${{ secrets.CI_SENDGRID_API_KEY }}
-          GRAFANA_LOKI_AUTH: ${{ secrets.CI_GRAFANA_LOKI_AUTH }}
-          GRAFANA_PROMETHEUS_AUTH: ${{ secrets.CI_GRAFANA_PROMETHEUS_AUTH }}
-          STRIPE_PUBLISHABLE_KEY: ${{ secrets.CI_STRIPE_PUBLISHABLE_KEY }}
-
       - name: Build
         run: pnpm build
 
-      - name: Deploy SST stage
-        run: pnpm exec sst deploy --stage "$STAGE"
+      - name: Test Stories
+        run: pnpm test:storybook
 
-      - name: Extract preview URL
-        id: deploy
-        run: |
-          URL=$(pnpm exec sst state export --stage "$STAGE" | jq -r '.latest.resources[] | select(.type == "pulumi:pulumi:Stack") | .outputs.baseUrl')
-          URL_TRIMMED=$(printf '%s' "$URL" | xargs)
-          if [ -z "$URL_TRIMMED" ] || [ "$URL_TRIMMED" = "null" ]; then
-            echo "::error::Failed to extract preview URL from SST state"
-            exit 1
-          fi
-          echo "url=$URL_TRIMMED" >> "$GITHUB_OUTPUT"
-
-      - name: Check sst-env.d.ts files are up to date
-        id: sst-env-check
-        run: |
-          if [ -n "$(git status --porcelain -- ':(glob)**/sst-env.d.ts')" ]; then
-            echo "dirty=true" >> "$GITHUB_OUTPUT"
-          fi
-
-  check-sst-env:
-    needs: [deploy-preview]
-    if: needs.deploy-preview.outputs.sst-env-dirty == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "::error::sst-env.d.ts files are out of date. Please run 'sst deploy' locally and commit the updated sst-env.d.ts files."
-          exit 1
-
-  comment:
-    name: Add Preview Environment Comment on PR
-    if: github.event_name == 'pull_request' && needs.deploy-preview.outputs.url != ''
-    needs: [deploy-preview]
+  deploy-hint:
+    if: github.event_name == 'pull_request'
+    needs: [check-packages]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
     steps:
       - name: Find existing comment
-        uses: peter-evans/find-comment@v3
-        id: find_comment
+        uses: peter-evans/find-comment@b30e6a3c0ed37e7c023ccd3f1db5c6c0b0c23aad # v4
+        id: find
         with:
           issue-number: ${{ github.event.pull_request.number }}
-          body-includes: '🚀 Preview Environment'
+          comment-author: github-actions[bot]
+          body-includes: Preview deployment
 
-      - name: Create or update comment
-        uses: peter-evans/create-or-update-comment@v4
+      - name: Post deploy hint
+        if: >-
+          steps.find.outputs.comment-id == '' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.base.ref != 'production'
+        uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5
         with:
           issue-number: ${{ github.event.pull_request.number }}
-          comment-id: ${{ steps.find_comment.outputs.comment-id }}
-          edit-mode: replace
           body: |
-            ## 🚀 Preview Environment
+            **Preview deployments are available** for this PR.
 
-            | | |
-            |---|---|
-            | **Latest commit** | `${{ github.event.pull_request.head.sha }}` |
-            | **Status** | ✅ Deploy successful |
-            | **Preview URL** | [${{ needs.deploy-preview.outputs.url }}](${{ needs.deploy-preview.outputs.url }}) |
+            Comment `/deploy` to deploy a preview environment.
 
-  e2e-tests:
-    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production'
-    needs: [deploy-preview]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    concurrency:
-      group: preview-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-
-    steps:
-      - uses: actions/checkout@v5
+      - name: Post deploy unavailable hint
+        if: >-
+          steps.find.outputs.comment-id == '' &&
+          (github.event.pull_request.head.repo.full_name != github.repository ||
+          github.event.pull_request.base.ref == 'production')
+        uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5
         with:
-          submodules: recursive
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            **Preview deployments are not available** for this PR.
 
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright Browsers
-        run: pnpm exec playwright install --with-deps
-
-      - name: Run Playwright tests
-        run: pnpm test:e2e
-        env:
-          BASE_URL: ${{ needs.deploy-preview.outputs.url }}
-
-      - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 30
-
-  integration-tests:
-    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'production' && github.event.pull_request.head.repo.full_name == github.repository
-    needs: [deploy-preview]
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    concurrency:
-      group: preview-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      SST_STAGE: pr-${{ github.event.pull_request.number }}
-      AWS_REGION: us-east-2
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: arn:aws:iam::654654381893:role/filone-infra-staging-github
-          aws-region: us-east-2
-
-      - name: Run integration tests
-        run: pnpm test:integration
+            ${{ github.event.pull_request.head.repo.full_name != github.repository && 'Preview deployments cannot be created from forks.' || 'Preview deployments cannot be created for PRs targeting production.' }}
 
   deploy:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
@@ -267,21 +114,20 @@ jobs:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           submodules: recursive
 
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+      - uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 24
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: aws-actions/configure-aws-credentials@v6
+      - uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-2
@@ -298,7 +144,7 @@ jobs:
         run: echo "subject=$(git log -1 --format=%s)" >> "$GITHUB_OUTPUT"
 
       - if: failure()
-        uses: slackapi/slack-github-action@v2.1.1
+        uses: slackapi/slack-github-action@af78098f536edbc4de71162a307590698245be95 # v3.0.1
         with:
           method: chat.postMessage
           token: ${{ secrets.SLACK_BOT_TOKEN }}
@@ -324,8 +170,17 @@ jobs:
               ]
             }
 
+  test-staging:
+    if: github.ref == 'refs/heads/main'
+    needs: [deploy]
+    uses: ./.github/workflows/test-staging.yaml
+    permissions:
+      id-token: write
+      contents: read
+    secrets: inherit
+
   dispatch-telemetry:
-    needs: [check-packages, deploy-preview, comment, e2e-tests, integration-tests, deploy]
+    needs: [check-packages, check-storybook, deploy, test-staging]
     if: >-
       always() && (
         github.event_name == 'push' ||

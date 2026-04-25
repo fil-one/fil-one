@@ -1,0 +1,206 @@
+rules:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Custom rules tailored to the fil-one codebase
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # ── Authentication & JWT ──
+
+  - id: filone-no-decode-jwt-without-verify
+    patterns:
+      - pattern: |
+          decodeJwt($TOKEN)
+      - pattern-not-inside: |
+          await jwtVerify($TOKEN, ...)
+          ...
+          decodeJwt($TOKEN)
+      - pattern-not-inside: |
+          await jwtVerify(..., ...)
+          ...
+          decodeJwt($TOKEN)
+    paths:
+      include:
+        - packages/backend/src/
+      exclude:
+        - '*.test.ts'
+        - '*.test.js'
+    message: >
+      `decodeJwt()` is used without a preceding `jwtVerify()` call on the same
+      or related token. Decoded-but-unverified JWTs can be spoofed by attackers.
+      Always verify the signature with `jwtVerify()` before trusting any claims.
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      cwe:
+        - 'CWE-345: Insufficient Verification of Data Authenticity'
+      category: security
+      confidence: MEDIUM
+      finding: MEDIUM-001
+
+  # ── Authorization ──
+
+  - id: filone-no-fail-open-guard
+    patterns:
+      - pattern: |
+          default:
+            ...
+            return { statusCode: 200, ... }
+      - pattern-inside: |
+          switch ($STATUS) { ... }
+    paths:
+      include:
+        - packages/backend/src/middleware/
+    message: >
+      Authorization guard has a `default` case that returns HTTP 200 (success).
+      Unknown statuses should be denied by default (fail-closed). Return 403 or
+      throw an error for unrecognized values.
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      cwe:
+        - 'CWE-863: Incorrect Authorization'
+      category: security
+      confidence: HIGH
+      finding: HIGH-003
+
+  # ── S3 Presigned URLs ──
+
+  - id: filone-presigned-url-expiry
+    patterns:
+      - pattern: getSignedUrl($CLIENT, $CMD)
+      - pattern-not: 'getSignedUrl($CLIENT, $CMD, { ..., expiresIn: $EXPIRY, ... })'
+    paths:
+      include:
+        - packages/backend/src/
+      exclude:
+        - '*.test.ts'
+    message: >
+      S3 presigned URL created without explicit `expiresIn`. The default expiry
+      (15 minutes for STS credentials, up to 7 days for IAM users) may be too
+      long. Set an explicit short expiry (e.g., 300 seconds).
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      cwe:
+        - 'CWE-613: Insufficient Session Expiration'
+      category: security
+      confidence: HIGH
+      finding: MEDIUM-004
+
+  # ── Infrastructure as Code (SST/Pulumi) ──
+
+  - id: filone-no-admin-access-policy
+    patterns:
+      - pattern: |
+          policyArn: $ARN
+      - metavariable-pattern:
+          metavariable: $ARN
+          pattern: |
+            'arn:aws:iam::aws:policy/AdministratorAccess'
+    paths:
+      include:
+        - sst.config.ts
+        - infra/
+    message: >
+      IAM policy `AdministratorAccess` grants unrestricted access to all AWS
+      services and resources. Use a least-privilege policy scoped to the
+      specific services needed (SST, CloudFormation, S3, DynamoDB, Lambda, etc.).
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      cwe:
+        - 'CWE-250: Execution with Unnecessary Privileges'
+      category: security
+      confidence: HIGH
+      finding: HIGH-002
+
+  - id: filone-no-wildcard-oidc-subject
+    patterns:
+      - pattern: |
+          "repo:$ORG/$REPO:*"
+      - pattern-inside: |
+          Condition: { ..., StringLike: { ..., "token.actions.githubusercontent.com:sub": $SUB, ... }, ... }
+    paths:
+      include:
+        - sst.config.ts
+        - infra/
+    message: >
+      OIDC trust policy uses wildcard `*` in the subject condition. This allows
+      ANY branch or tag in the repository to assume the IAM role. Restrict to
+      specific branches (e.g., `ref:refs/heads/main`).
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      cwe:
+        - 'CWE-284: Improper Access Control'
+      category: security
+      confidence: HIGH
+
+  - id: filone-no-force-destroy-bucket
+    pattern: |
+      forceDestroy: true
+    paths:
+      include:
+        - sst.config.ts
+        - infra/
+    message: >
+      S3 bucket has `forceDestroy: true`, which allows deletion of the bucket
+      even when it contains objects. This risks accidental data loss during
+      `sst remove` or stack teardown. Remove for production stages.
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      cwe:
+        - 'CWE-1188: Initialization with an Insecure Default'
+      category: security
+      confidence: HIGH
+
+  - id: filone-dynamo-missing-pitr
+    patterns:
+      - pattern: |
+          new sst.aws.Dynamo($NAME, { ... })
+      - pattern-not: |
+          new sst.aws.Dynamo($NAME, { ..., pointInTimeRecovery: true, ... })
+    paths:
+      include:
+        - sst.config.ts
+    message: >
+      DynamoDB table created without Point-in-Time Recovery (PITR) enabled.
+      PITR provides continuous backups for the last 35 days. Enable it for
+      tables storing critical data (users, billing, uploads).
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      cwe:
+        - 'CWE-1188: Initialization with an Insecure Default'
+      category: security
+      confidence: MEDIUM
+      finding: MEDIUM-003
+
+  # ── Sensitive Data Logging ──
+
+  - id: filone-no-log-sensitive-data
+    patterns:
+      - pattern-either:
+          - pattern: console.log(<... $TOKEN ...>)
+          - pattern: console.info(<... $TOKEN ...>)
+          - pattern: console.debug(<... $TOKEN ...>)
+      - metavariable-regex:
+          metavariable: $TOKEN
+          regex: .*(access_token|id_token|refresh_token|client_secret|apiKey|webhook_secret|authorization).*
+    paths:
+      include:
+        - packages/backend/src/
+      exclude:
+        - '*.test.ts'
+    message: >
+      Potentially sensitive data (tokens, secrets, API keys) is being logged.
+      Sensitive values in CloudWatch logs can be exfiltrated if log access is
+      compromised. Redact or omit sensitive fields before logging.
+    languages: [typescript, javascript]
+    severity: WARNING
+    metadata:
+      cwe:
+        - 'CWE-532: Insertion of Sensitive Information into Log File'
+      category: security
+      confidence: MEDIUM
+      finding: MEDIUM-005

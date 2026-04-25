@@ -1,0 +1,137 @@
+======================================================================
+  Console Presigned-URL Test
+  Script : console_presign
+  Run    : 20260421_153000
+======================================================================
+
+SUMMARY
+  Total  : 25
+  OK     : 23
+  Failed : 2
+
+BY OPERATION
+  bucket_cors_apply                  1 ok     0 failed  (   1 total)  (no timing)
+  bucket_cors_restore                1 ok     0 failed  (   1 total)  (no timing)
+  execute_deleteObject               1 ok     0 failed  (   1 total)  avg 6.138s  stddev 0.000s  min 6.138s  max 6.138s
+  execute_getObject                  1 ok     0 failed  (   1 total)  avg 5.060s  stddev 0.000s  min 5.060s  max 5.060s
+  execute_getObjectRetention         1 ok     0 failed  (   1 total)  avg 4.991s  stddev 0.000s  min 4.991s  max 4.991s
+  execute_headObject                 1 ok     0 failed  (   1 total)  avg 5.001s  stddev 0.000s  min 5.001s  max 5.001s
+  execute_headObjectFilMeta          1 ok     0 failed  (   1 total)  avg 5.123s  stddev 0.000s  min 5.123s  max 5.123s
+  execute_listObjects                1 ok     0 failed  (   1 total)  avg 0.469s  stddev 0.000s  min 0.469s  max 0.469s
+  execute_putObject                  1 ok     0 failed  (   1 total)  avg 5.329s  stddev 0.000s  min 5.329s  max 5.329s
+  preflight_deleteObject             0 ok     1 failed  (   1 total)  avg 0.455s  stddev 0.000s  min 0.455s  max 0.455s
+  preflight_putObject                0 ok     1 failed  (   1 total)  avg 0.436s  stddev 0.000s  min 0.436s  max 0.436s
+  presign_deleteObject               1 ok     0 failed  (   1 total)  avg 0.001s  stddev 0.000s  min 0.001s  max 0.001s
+  presign_getObject                  1 ok     0 failed  (   1 total)  avg 0.002s  stddev 0.000s  min 0.002s  max 0.002s
+  presign_getObjectRetention         1 ok     0 failed  (   1 total)  avg 0.002s  stddev 0.000s  min 0.002s  max 0.002s
+  presign_headObject                 1 ok     0 failed  (   1 total)  avg 0.002s  stddev 0.000s  min 0.002s  max 0.002s
+  presign_headObjectFilMeta          1 ok     0 failed  (   1 total)  avg 0.002s  stddev 0.000s  min 0.002s  max 0.002s
+  presign_listObjects                1 ok     0 failed  (   1 total)  avg 0.006s  stddev 0.000s  min 0.006s  max 0.006s
+  presign_putObject                  1 ok     0 failed  (   1 total)  avg 0.003s  stddev 0.000s  min 0.003s  max 0.003s
+  response_cors_deleteObject         1 ok     0 failed  (   1 total)  (no timing)
+  response_cors_getObject            1 ok     0 failed  (   1 total)  (no timing)
+  response_cors_getObjectRetention     1 ok     0 failed  (   1 total)  (no timing)
+  response_cors_headObject           1 ok     0 failed  (   1 total)  (no timing)
+  response_cors_headObjectFilMeta     1 ok     0 failed  (   1 total)  (no timing)
+  response_cors_listObjects          1 ok     0 failed  (   1 total)  (no timing)
+  response_cors_putObject            1 ok     0 failed  (   1 total)  (no timing)
+
+TEST RUN
+  Provider         : akave
+  Endpoint         : https://o3-rc3.akave.xyz
+  Bucket           : mbx-2024-04-15-1
+  Test key         : console-presign-test/d885bee8-2a58-4894-87bb-f8d1b7ae0a66/probe.txt
+  Browser origin   : https://app.fil.one
+  Presign expiry   : 300s
+  CORS applied     : yes (via put_bucket_cors, restored after test)
+
+BUCKET CORS CONFIGURATION (before test)
+  [
+    {
+      "ID": "",
+      "AllowedHeaders": [
+        "*"
+      ],
+      "AllowedMethods": [
+        "GET",
+        "HEAD",
+        "PUT",
+        "POST",
+        "DELETE"
+      ],
+      "AllowedOrigins": [
+        "https://app.fil.one"
+      ],
+      "ExposeHeaders": [
+        "etag",
+        "content-length",
+        "content-type",
+        "last-modified",
+        "x-fil-cid",
+        "x-amz-meta-filename"
+      ],
+      "MaxAgeSeconds": 3000
+    }
+  ]
+
+BUCKET CORS CONFIGURATION (after test-applied rule)
+  [
+    {
+      "ID": "",
+      "AllowedHeaders": [
+        "*"
+      ],
+      "AllowedMethods": [
+        "GET",
+        "HEAD",
+        "PUT",
+        "POST",
+        "DELETE"
+      ],
+      "AllowedOrigins": [
+        "https://app.fil.one"
+      ],
+      "ExposeHeaders": [
+        "etag",
+        "content-length",
+        "content-type",
+        "last-modified",
+        "x-fil-cid",
+        "x-amz-meta-filename"
+      ],
+      "MaxAgeSeconds": 3000
+    }
+  ]
+
+SUCCESSES
+  {"ts": "2026-04-21T13:30:01.659331+00:00", "op": "bucket_cors_apply", "status": "ok", "bucket": "mbx-2024-04-15-1", "allowed_origins": ["https://app.fil.one"], "allowed_methods": ["GET", "HEAD", "PUT", "POST", "DELETE"], "expose_headers": ["etag", "content-length", "content-type", "last-modified", "x-fil-cid", "x-amz-meta-filename"]}
+  {"ts": "2026-04-21T13:30:01.821403+00:00", "op": "presign_putObject", "status": "ok", "elapsed_s": 0.003, "s3_op": "put_object", "http_method": "PUT", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-21T13:30:07.587181+00:00", "op": "execute_putObject", "status": "ok", "elapsed_s": 5.329, "status_code": 200, "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "etag": "\"3fa6f61e4062b664e24811f5d6045e9b\"", "date": "Tue, 21 Apr 2026 13:30:07 GMT", "content-length": "0"}}
+  {"ts": "2026-04-21T13:30:07.587735+00:00", "op": "response_cors_putObject", "status": "ok", "status_code": 200, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-21T13:30:07.595762+00:00", "op": "presign_listObjects", "status": "ok", "elapsed_s": 0.006, "s3_op": "list_objects_v2", "http_method": "GET", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-21T13:30:08.065195+00:00", "op": "execute_listObjects", "status": "ok", "elapsed_s": 0.469, "status_code": 200, "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "content-type": "application/xml; charset=utf-8", "date": "Tue, 21 Apr 2026 13:30:08 GMT", "content-length": "522"}}
+  {"ts": "2026-04-21T13:30:08.066582+00:00", "op": "response_cors_listObjects", "status": "ok", "status_code": 200, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-21T13:30:08.071058+00:00", "op": "presign_headObject", "status": "ok", "elapsed_s": 0.002, "s3_op": "head_object", "http_method": "HEAD", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-21T13:30:13.072159+00:00", "op": "execute_headObject", "status": "ok", "elapsed_s": 5.001, "status_code": 200, "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "content-length": "41", "content-type": "text/plain; charset=utf-8", "etag": "\"3fa6f61e4062b664e24811f5d6045e9b\"", "last-modified": "Tue, 21 Apr 2026 13:30:02 GMT", "x-amz-meta-filename": "probe.txt", "x-amz-meta-network-file-name": "console-presign-test/d885bee8-2a58-4894-87bb-f8d1b7ae0a66/probe.txt/V1/R1", "x-amz-meta-network-processed": "0", "x-amz-meta-network-root-cid": "Sync pending", "x-amz-meta-network-state": "PENDING", "date": "Tue, 21 Apr 2026 13:30:13 GMT"}}
+  {"ts": "2026-04-21T13:30:13.072945+00:00", "op": "response_cors_headObject", "status": "ok", "status_code": 200, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-21T13:30:13.077103+00:00", "op": "presign_headObjectFilMeta", "status": "ok", "elapsed_s": 0.002, "s3_op": "head_object", "http_method": "HEAD", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": true}
+  {"ts": "2026-04-21T13:30:18.199997+00:00", "op": "execute_headObjectFilMeta", "status": "ok", "elapsed_s": 5.123, "status_code": 200, "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "content-length": "41", "content-type": "text/plain; charset=utf-8", "etag": "\"3fa6f61e4062b664e24811f5d6045e9b\"", "last-modified": "Tue, 21 Apr 2026 13:30:02 GMT", "x-amz-meta-filename": "probe.txt", "x-amz-meta-network-file-name": "console-presign-test/d885bee8-2a58-4894-87bb-f8d1b7ae0a66/probe.txt/V1/R1", "x-amz-meta-network-processed": "0", "x-amz-meta-network-root-cid": "Sync pending", "x-amz-meta-network-state": "PENDING", "date": "Tue, 21 Apr 2026 13:30:18 GMT"}}
+  {"ts": "2026-04-21T13:30:18.200931+00:00", "op": "response_cors_headObjectFilMeta", "status": "ok", "status_code": 200, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-21T13:30:18.205883+00:00", "op": "presign_getObject", "status": "ok", "elapsed_s": 0.002, "s3_op": "get_object", "http_method": "GET", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-21T13:30:23.266562+00:00", "op": "execute_getObject", "status": "ok", "elapsed_s": 5.06, "status_code": 200, "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "content-length": "41", "content-type": "text/plain", "etag": "\"3fa6f61e4062b664e24811f5d6045e9b\"", "last-modified": "Tue, 21 Apr 2026 13:30:02 GMT", "x-amz-meta-filename": "probe.txt", "x-amz-meta-network-file-name": "console-presign-test/d885bee8-2a58-4894-87bb-f8d1b7ae0a66/probe.txt/V1/R1", "x-amz-meta-network-processed": "0", "x-amz-meta-network-root-cid": "Sync pending", "x-amz-meta-network-state": "PENDING", "date": "Tue, 21 Apr 2026 13:30:23 GMT"}}
+  {"ts": "2026-04-21T13:30:23.267291+00:00", "op": "response_cors_getObject", "status": "ok", "status_code": 200, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-21T13:30:23.271036+00:00", "op": "presign_getObjectRetention", "status": "ok", "elapsed_s": 0.002, "s3_op": "get_object_retention", "http_method": "GET", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-21T13:30:28.263617+00:00", "op": "execute_getObjectRetention", "status": "ok", "note": "acceptable S3 error (pipeline still validated)", "elapsed_s": 4.991, "status_code": 404, "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "content-type": "application/xml; charset=utf-8", "date": "Tue, 21 Apr 2026 13:30:28 GMT"}}
+  {"ts": "2026-04-21T13:30:28.264226+00:00", "op": "response_cors_getObjectRetention", "status": "ok", "status_code": 404, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-21T13:30:28.267246+00:00", "op": "presign_deleteObject", "status": "ok", "elapsed_s": 0.001, "s3_op": "delete_object", "http_method": "DELETE", "url_host": "o3-rc3.akave.xyz", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-21T13:30:34.861427+00:00", "op": "execute_deleteObject", "status": "ok", "elapsed_s": 6.138, "status_code": 204, "response_headers_lower": {"access-control-allow-credentials": "true", "access-control-allow-origin": "https://app.fil.one", "access-control-expose-headers": "Etag, Content-Length, Content-Type, Last-Modified, X-Fil-Cid, X-Amz-Meta-Filename", "date": "Tue, 21 Apr 2026 13:30:34 GMT"}}
+  {"ts": "2026-04-21T13:30:34.862180+00:00", "op": "response_cors_deleteObject", "status": "ok", "status_code": 204, "allow_origin": "https://app.fil.one", "expose_headers": ["content-length", "content-type", "etag", "last-modified", "x-amz-meta-filename", "x-fil-cid"], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": true, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-21T13:30:40.136120+00:00", "op": "bucket_cors_restore", "status": "ok", "bucket": "mbx-2024-04-15-1", "action": "put", "rules_count": 1}
+
+ERRORS
+  {"ts": "2026-04-21T13:30:02.257824+00:00", "op": "preflight_putObject", "status": "err", "error_code": "PreflightFailed", "error_message": "CORS preflight did not permit the request", "elapsed_s": 0.436, "request_method": "PUT", "request_headers": ["Content-Type", "x-amz-meta-filename"], "status_code": 403, "response_headers_lower": {"content-type": "application/xml; charset=utf-8", "date": "Tue, 21 Apr 2026 13:30:02 GMT"}, "allow_origin": "", "allow_methods": [], "allow_headers": [], "missing_request_headers": ["Content-Type", "x-amz-meta-filename"], "status_ok": false, "origin_ok": false, "method_ok": false, "headers_ok": false}
+  {"ts": "2026-04-21T13:30:28.723027+00:00", "op": "preflight_deleteObject", "status": "err", "error_code": "PreflightFailed", "error_message": "CORS preflight did not permit the request", "elapsed_s": 0.455, "request_method": "DELETE", "request_headers": [], "status_code": 403, "response_headers_lower": {"content-type": "application/xml; charset=utf-8", "date": "Tue, 21 Apr 2026 13:30:28 GMT"}, "allow_origin": "", "allow_methods": [], "allow_headers": [], "missing_request_headers": [], "status_ok": false, "origin_ok": false, "method_ok": false, "headers_ok": true}
+
+Log files:
+  Success : ../logs/20260421_153000_console_presign_success.jsonl
+  Errors  : ../logs/20260421_153000_console_presign_errors.jsonl

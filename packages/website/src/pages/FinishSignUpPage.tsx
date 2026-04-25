@@ -1,8 +1,11 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { confirmOrg, logout } from '../lib/api.js';
+import { ORG_NAME_PATTERN, ORG_NAME_MIN_LENGTH, ORG_NAME_MAX_LENGTH } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
+import { queryKeys } from '../lib/query-client.js';
 
 type FinishSignUpPageProps = {
   me: MeResponse;
@@ -10,6 +13,7 @@ type FinishSignUpPageProps = {
 };
 
 export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
+  const queryClient = useQueryClient();
   const [orgName, setOrgName] = useState(me.orgName || me.suggestedOrgName || '');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -21,12 +25,18 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
       setError('Organization name is required.');
       return;
     }
-    if (trimmed.length < 2) {
-      setError('Organization name must be at least 2 characters.');
+    if (trimmed.length < ORG_NAME_MIN_LENGTH) {
+      setError(`Organization name must be at least ${ORG_NAME_MIN_LENGTH} characters.`);
       return;
     }
-    if (trimmed.length > 100) {
-      setError('Organization name must be at most 100 characters.');
+    if (trimmed.length > ORG_NAME_MAX_LENGTH) {
+      setError(`Organization name must be at most ${ORG_NAME_MAX_LENGTH} characters.`);
+      return;
+    }
+    if (!ORG_NAME_PATTERN.test(trimmed)) {
+      setError(
+        'Organization name can only contain letters, numbers, spaces, hyphens, and periods.',
+      );
       return;
     }
 
@@ -34,6 +44,7 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
     setSubmitting(true);
     try {
       await confirmOrg(trimmed);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.me });
       onComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
@@ -107,7 +118,7 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
             </div>
 
             <Button
-              variant="filled"
+              variant="primary"
               type="submit"
               className="w-full justify-center"
               disabled={submitting}

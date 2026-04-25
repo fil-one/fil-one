@@ -7,10 +7,16 @@ import {
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
-import { PAID_GRACE_DAYS, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
+import {
+  PAID_GRACE_DAYS,
+  SubscriptionStatus,
+  TRIAL_GRACE_DAYS,
+  mapStripeStatus,
+} from '@filone/shared';
 import { Resource } from 'sst';
 import { updateTenantStatus } from '../lib/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { reportMetric } from '../lib/metrics.js';
 import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
@@ -48,7 +54,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       await getWebhookSecret(),
     );
   } catch (err) {
-    console.error('[stripe-webhook] Signature verification failed:', (err as Error).message);
+    console.error('[stripe-webhook] Signature verification failed:', err);
     return { statusCode: 400, body: JSON.stringify({ message: 'Invalid signature' }) };
   }
 
@@ -74,7 +80,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       console.warn('[stripe-webhook] Already processed event:', stripeEvent.id);
       return { statusCode: 200, body: JSON.stringify({ received: true }) };
     }
-    console.error('[stripe-webhook] Idempotency check failed:', (err as Error).message);
+    console.error('[stripe-webhook] Idempotency check failed:', err);
     return { statusCode: 500, body: JSON.stringify({ message: 'Idempotency check error' }) };
   }
 
@@ -116,15 +122,12 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         console.log('[stripe-webhook] Unhandled event type:', stripeEvent.type);
     }
   } catch (err) {
-    console.error('[stripe-webhook] Error processing event:', (err as Error).message);
+    console.error('[stripe-webhook] Error processing event:', err);
     // Release idempotency claim so Stripe retries can reprocess
     try {
       await dynamo.send(new DeleteItemCommand({ TableName: tableName, Key: idempotencyKey }));
     } catch (deleteErr) {
-      console.error(
-        '[stripe-webhook] Failed to release idempotency claim:',
-        (deleteErr as Error).message,
-      );
+      console.error('[stripe-webhook] Failed to release idempotency claim:', deleteErr);
     }
     return { statusCode: 500, body: JSON.stringify({ message: 'Processing error' }) };
   }
@@ -186,7 +189,11 @@ async function handleCustomerUpdated(tableName: string, customer: Stripe.Custome
 
   const defaultPm = customer.invoice_settings?.default_payment_method;
   if (!defaultPm) {
-    throw new Error('[stripe-webhook] No default_payment_method on customer.updated');
+    console.info('[stripe-webhook] customer.updated without default_payment_method; skipping', {
+      customerId: customer.id,
+      userId,
+    });
+    return;
   }
 
   const stripe = getStripeClient();
@@ -227,6 +234,16 @@ async function handleSubscriptionUpdate(
   subscription: Stripe.Subscription,
 ): Promise<void> {
   const customerId = getCustomerIdString(subscription.customer);
+  const mappedStatus = mapStripeStatus(subscription.status);
+
+  if (mappedStatus === null) {
+    console.warn('[stripe-webhook] Unmappable Stripe status, skipping update', {
+      stripeStatus: subscription.status,
+      subscriptionId: subscription.id,
+      customerId,
+    });
+    return;
+  }
 
   // Find billing record by Stripe customer ID — we need to scan or use a GSI.
   // For MVP, use metadata.userId set during customer creation.
@@ -244,17 +261,18 @@ async function handleSubscriptionUpdate(
       console.warn('[stripe-webhook] No userId in metadata for customer:', customerId);
       return;
     }
-    await updateBillingRecord(tableName, metaUserId, subscription);
+    await updateBillingRecord(tableName, metaUserId, subscription, mappedStatus);
     return;
   }
 
-  await updateBillingRecord(tableName, userId, subscription);
+  await updateBillingRecord(tableName, userId, subscription, mappedStatus);
 }
 
 async function updateBillingRecord(
   tableName: string,
   userId: string,
   subscription: Stripe.Subscription,
+  mappedStatus: SubscriptionStatus,
 ): Promise<void> {
   await dynamo.send(
     new UpdateItemCommand({
@@ -267,7 +285,7 @@ async function updateBillingRecord(
         'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now REMOVE gracePeriodEndsAt, canceledAt',
       ExpressionAttributeValues: {
         ':subId': { S: subscription.id },
-        ':status': { S: subscription.status },
+        ':status': { S: mappedStatus },
         ':periodEnd': {
           S: new Date((subscription.items.data[0]?.current_period_end ?? 0) * 1000).toISOString(),
         },
@@ -314,6 +332,15 @@ async function handleSubscriptionDeleted(
     }),
   );
 
+  const latestInvoice = subscription.latest_invoice;
+  const attemptCount =
+    latestInvoice && typeof latestInvoice !== 'string' ? latestInvoice.attempt_count : undefined;
+  emitDunningEscalation({
+    stage: 'canceled',
+    reason: subscription.cancellation_details?.reason ?? 'unknown',
+    attemptBucket: bucketAttempt(attemptCount),
+  });
+
   // Best-effort: set Aurora tenant to WRITE_LOCKED during grace period.
   // If this fails, the daily grace-period-enforcer cron will also attempt
   // WRITE_LOCK for active grace periods missing it.
@@ -329,10 +356,7 @@ async function handleSubscriptionDeleted(
       });
     }
   } catch (error) {
-    console.error('[stripe-webhook] Failed to WRITE_LOCK Aurora tenant', {
-      userId,
-      error: (error as Error).message,
-    });
+    console.error('[stripe-webhook] Failed to WRITE_LOCK Aurora tenant', { userId, error });
   }
 }
 
@@ -346,7 +370,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   const userId = customer.metadata?.userId;
   if (!userId) return;
 
-  await dynamo.send(
+  const updateResult = await dynamo.send(
     new UpdateItemCommand({
       TableName: tableName,
       Key: {
@@ -359,8 +383,21 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
         ':active': { S: SubscriptionStatus.Active },
         ':now': { S: new Date().toISOString() },
       },
+      ReturnValues: 'ALL_OLD',
     }),
   );
+
+  const priorStatus = updateResult.Attributes?.subscriptionStatus?.S;
+  if (
+    priorStatus === SubscriptionStatus.PastDue ||
+    priorStatus === SubscriptionStatus.GracePeriod
+  ) {
+    emitDunningEscalation({
+      stage: 'recovered',
+      reason: priorStatus,
+      attemptBucket: bucketAttempt(invoice.attempt_count),
+    });
+  }
 
   // Best-effort: re-enable Aurora tenant if recovering from PastDue/GracePeriod.
   // If this fails, the tenant may remain locked until manual intervention.
@@ -376,11 +413,39 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
       });
     }
   } catch (error) {
-    console.error('[stripe-webhook] Failed to re-activate Aurora tenant', {
-      userId,
-      error: (error as Error).message,
-    });
+    console.error('[stripe-webhook] Failed to re-activate Aurora tenant', { userId, error });
   }
+}
+
+type DunningStage = 'entered' | 'retry' | 'recovered' | 'canceled';
+
+function bucketAttempt(n: number | null | undefined): string {
+  if (!n || n < 1) return 'unknown';
+  if (n >= 4) return '4+';
+  return String(n);
+}
+
+function emitDunningEscalation(args: {
+  stage: DunningStage;
+  reason: string;
+  attemptBucket: string;
+}): void {
+  reportMetric({
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [['stage', 'reason', 'attemptBucket']],
+          Metrics: [{ Name: 'DunningEscalation', Unit: 'Count' }],
+        },
+      ],
+    },
+    stage: args.stage,
+    reason: args.reason,
+    attemptBucket: args.attemptBucket,
+    DunningEscalation: 1,
+  });
 }
 
 async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): Promise<void> {
@@ -413,4 +478,11 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
       },
     }),
   );
+
+  const attemptCount = invoice.attempt_count ?? 0;
+  emitDunningEscalation({
+    stage: attemptCount <= 1 ? 'entered' : 'retry',
+    reason: invoice.last_finalization_error?.code ?? 'unknown',
+    attemptBucket: bucketAttempt(attemptCount),
+  });
 }

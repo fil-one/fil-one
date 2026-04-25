@@ -4,6 +4,11 @@ function getDomain(): string {
   return process.env.AUTH0_DOMAIN!;
 }
 
+/** Canonical tenant domain for Management API — custom domains don't support /api/v2/. */
+function getMgmtDomain(): string {
+  return process.env.AUTH0_MGMT_DOMAIN ?? process.env.AUTH0_DOMAIN!;
+}
+
 // Module-level token cache — reused across Lambda warm starts.
 // Management tokens are not user-specific, so caching is safe.
 let cachedMgmtToken: { token: string; expiresAt: number } | null = null;
@@ -14,7 +19,7 @@ async function getManagementToken(): Promise<string> {
     return cachedMgmtToken.token;
   }
 
-  const domain = getDomain();
+  const domain = getMgmtDomain();
   const resp = await fetch(`https://${domain}/oauth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -41,7 +46,7 @@ async function getManagementToken(): Promise<string> {
 }
 
 export async function updateAuth0User(sub: string, data: Record<string, unknown>): Promise<void> {
-  const domain = getDomain();
+  const domain = getMgmtDomain();
   const token = await getManagementToken();
   const resp = await fetch(`https://${domain}/api/v2/users/${encodeURIComponent(sub)}`, {
     method: 'PATCH',
@@ -63,7 +68,7 @@ export async function updateAuth0User(sub: string, data: Record<string, unknown>
  * Requires the `create:user_tickets` scope on the M2M app.
  */
 export async function sendVerificationEmail(sub: string): Promise<void> {
-  const domain = getDomain();
+  const domain = getMgmtDomain();
   const token = await getManagementToken();
   const resp = await fetch(`https://${domain}/api/v2/jobs/verification-email`, {
     method: 'POST',

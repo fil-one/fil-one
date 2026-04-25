@@ -5,12 +5,13 @@ import { ObjectDetailPage } from '../../pages/ObjectDetailPage';
 
 const objectDetailSearchSchema = z.object({
   key: z.string(),
+  versionId: z.string().optional(),
 });
 
 function ObjectDetailRoute() {
   const { bucketName } = Route.useParams();
-  const { key: objectKey } = Route.useSearch();
-  return <ObjectDetailPage bucketName={bucketName} objectKey={objectKey} />;
+  const { key: objectKey, versionId } = Route.useSearch();
+  return <ObjectDetailPage bucketName={bucketName} objectKey={objectKey} versionId={versionId} />;
 }
 
 export const Route = createRoute({

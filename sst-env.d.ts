@@ -102,30 +102,6 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "DeleteMfaEnrollment": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "DeleteObject": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "DisableMfa": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "DownloadObject": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "EnrollEmailMfa": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "EnrollMfa": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
     "GetActivity": {
       "name": string
       "type": "sst.aws.Function"
@@ -135,6 +111,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "GetBucket": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "GetBucketAnalytics": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -154,10 +134,6 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
-    "HeadObject": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
     "ListAccessKeys": {
       "name": string
       "type": "sst.aws.Function"
@@ -170,15 +146,11 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "ListObjects": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
     "OtelFirehoseBackup": {
       "name": string
       "type": "sst.aws.Bucket"
     }
-    "PresignUpload": {
+    "Presign": {
       "name": string
       "type": "sst.aws.Function"
     }

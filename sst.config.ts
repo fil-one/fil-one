@@ -13,7 +13,7 @@ export default $config({
         : (process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? 'us-west-2');
 
     const awsProvider: aws.ProviderArgs & { version: string } = {
-      version: '7.20.0',
+      version: require('@pulumi/aws/package.json').version,
       region,
     };
 
@@ -61,6 +61,20 @@ export default $config({
     // ── Global Function settings ────────────────────────────
     $transform(sst.aws.Function, (args) => {
       args.runtime = args.runtime ?? 'nodejs24.x';
+      args.memory = args.memory ?? '512 MB';
+      args.architecture = args.architecture ?? 'arm64';
+
+      // In production, suppress console.log/info/debug — only WARN and above are emitted.
+      if ($app.stage === 'production') {
+        args.transform = args.transform ?? {};
+        args.transform.function = (fnArgs) => {
+          fnArgs.loggingConfig = $output(fnArgs.loggingConfig).apply((loggingConfig) => ({
+            logFormat: 'JSON',
+            ...loggingConfig,
+            applicationLogLevel: 'WARN',
+          }));
+        };
+      }
     });
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
@@ -129,6 +143,7 @@ export default $config({
     }
 
     const api = new sst.aws.ApiGatewayV2('Api', {
+      accessLog: { retention: '1 week' },
       cors: {
         allowOrigins: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -166,7 +181,7 @@ export default $config({
         securityHeadersConfig: {
           contentSecurityPolicy: {
             // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://plausible.io https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io/api ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
@@ -205,9 +220,6 @@ export default $config({
             },
           ],
         },
-        // Future: Plausible
-        //   script-src: add https://plausible.io (or self-hosted domain)
-        //   connect-src: add https://plausible.io/api
       },
     );
 
@@ -269,6 +281,8 @@ export default $config({
     const siteUrl = router.url;
 
     const auth0Domain = isProduction ? 'auth.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
+    // Auth0 Management API requires the canonical tenant domain — custom domains don't support /api/v2/
+    const auth0MgmtDomain = isProduction ? 'fil-one.us.auth0.com' : auth0Domain;
 
     // ── Deploy-time setup (Stripe webhook + Auth0 callbacks) ────────
     // This Lambda is intentionally NOT created via createFn(). Its ARN is embedded in the
@@ -286,6 +300,7 @@ export default $config({
       ],
       environment: {
         AUTH0_DOMAIN: auth0Domain,
+        AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
       },
       permissions: [
         {
@@ -293,7 +308,8 @@ export default $config({
           resources: [$interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/*`],
         },
       ],
-      timeout: '15 seconds',
+      logging: { retention: '1 week', format: 'json' },
+      timeout: '10 seconds',
     });
 
     new aws.cloudformation.Stack('SetupStack', {
@@ -383,6 +399,24 @@ export default $config({
     ];
 
     const { firehose, cwToFirehoseRole } = setupFirehoseLogPipeline(grafanaLokiAuth);
+
+    // Forward API Gateway access logs to Grafana Loki via the same Firehose
+    new aws.cloudwatch.LogSubscriptionFilter('ApiAccessLogFwd', {
+      logGroup: api.nodes.logGroup.name,
+      filterPattern: '',
+      destinationArn: firehose.arn,
+      roleArn: cwToFirehoseRole.arn,
+    });
+
+    // Forward SetupIntegrations logs to Grafana Loki. This function is not
+    // created via createFn() (see comment above), so wire up forwarding manually.
+    new aws.cloudwatch.LogSubscriptionFilter('SetupIntegrationsLogFwd', {
+      logGroup: setupFn.nodes.logGroup.apply((lg) => lg!.name),
+      filterPattern: '',
+      destinationArn: firehose.arn,
+      roleArn: cwToFirehoseRole.arn,
+    });
+
     const createFn = (fnName: string, args: Omit<sst.aws.FunctionArgs, 'name'>) =>
       createFunction(fnName, args, { firehose, cwToFirehoseRole });
 
@@ -393,6 +427,8 @@ export default $config({
       extraEnv?: Record<string, $util.Input<string>>;
       permissions?: sst.aws.FunctionPermissionArgs[];
       extraLink?: (typeof allResources)[number][];
+      provisionedConcurrency?: number;
+      memory?: sst.aws.FunctionArgs['memory'];
     }
 
     function addRoute({
@@ -402,6 +438,8 @@ export default $config({
       extraEnv,
       permissions,
       extraLink,
+      provisionedConcurrency,
+      memory,
     }: AddRouteProps) {
       // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
       const fnName = handler
@@ -418,20 +456,33 @@ export default $config({
         },
         permissions,
         timeout: '10 seconds',
+        ...(memory ? { memory } : {}),
+        ...(provisionedConcurrency && provisionedConcurrency > 0
+          ? {
+              versioning: true,
+              concurrency: { provisioned: provisionedConcurrency },
+            }
+          : {}),
       });
 
-      api.route(`${method} ${routePath}`, fn.arn);
+      const isVersioned = provisionedConcurrency != null && provisionedConcurrency > 0;
+      const invokeArn = isVersioned ? fn.nodes.function.qualifiedArn : fn.arn;
+
+      api.route(`${method} ${routePath}`, invokeArn);
 
       // SST's api.route() with an ARN creates lambda.Permission with
       // qualifier: "" (from undefined), which doesn't actually grant
       // API Gateway invoke access. Add an explicit permission.
       new aws.lambda.Permission(`${fnName}ApiPermission`, {
         action: 'lambda:InvokeFunction',
-        function: fn.nodes.function.name,
+        function: isVersioned ? fn.nodes.function.qualifiedArn : fn.nodes.function.name,
         principal: 'apigateway.amazonaws.com',
         sourceArn: $interpolate`${api.nodes.api.executionArn}/*`,
       });
     }
+
+    // ── Provisioned concurrency for critical-path endpoints ────────
+    const criticalPathLambdaProvisionedConcurrency = isProduction ? 1 : 0;
 
     // ── Data routes ──────────────────────────────────────────────────
     addRoute({
@@ -440,6 +491,8 @@ export default $config({
       handler: 'list-buckets',
       extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
     addRoute({
       method: 'POST',
@@ -447,6 +500,7 @@ export default $config({
       handler: 'create-bucket',
       extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
       method: 'GET',
@@ -454,6 +508,8 @@ export default $config({
       handler: 'get-bucket',
       extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
     addRoute({
       method: 'DELETE',
@@ -461,7 +517,12 @@ export default $config({
       handler: 'delete-bucket',
       permissions: auroraS3GatewayPermissions,
     });
-    addRoute({ method: 'GET', routePath: '/api/access-keys', handler: 'list-access-keys' });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/access-keys',
+      handler: 'list-access-keys',
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+    });
     addRoute({
       method: 'POST',
       routePath: '/api/access-keys',
@@ -477,34 +538,19 @@ export default $config({
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
     });
     addRoute({
-      method: 'GET',
-      routePath: '/api/buckets/{name}/objects',
-      handler: 'list-objects',
-      permissions: auroraS3GatewayPermissions,
-    });
-    addRoute({
       method: 'POST',
-      routePath: '/api/buckets/{name}/objects/presign',
-      handler: 'presign-upload',
+      routePath: '/api/presign',
+      handler: 'presign',
       permissions: auroraS3GatewayPermissions,
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '512 MB',
     });
     addRoute({
       method: 'GET',
-      routePath: '/api/buckets/{name}/objects/download',
-      handler: 'download-object',
-      permissions: auroraS3GatewayPermissions,
-    });
-    addRoute({
-      method: 'DELETE',
-      routePath: '/api/buckets/{name}/objects',
-      handler: 'delete-object',
-      permissions: auroraS3GatewayPermissions,
-    });
-    addRoute({
-      method: 'GET',
-      routePath: '/api/buckets/{name}/objects/metadata',
-      handler: 'head-object',
-      permissions: auroraS3GatewayPermissions,
+      routePath: '/api/buckets/{name}/analytics',
+      handler: 'get-bucket-analytics',
+      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: auroraEnv,
     });
 
     // ── Auth routes ──────────────────────────────────────────────────
@@ -514,12 +560,14 @@ export default $config({
       routePath: '/login',
       handler: 'auth-login',
       extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
       method: 'GET',
       routePath: '/api/auth/callback',
       handler: 'auth-callback',
       extraEnv: { WEBSITE_URL: siteUrl, ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins },
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
       method: 'GET',
@@ -529,12 +577,18 @@ export default $config({
     });
 
     // ── Me route ───────────────────────────────────────────────────
-    addRoute({ method: 'GET', routePath: '/api/me', handler: 'get-me' });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/me',
+      handler: 'get-me',
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+    });
     addRoute({
       method: 'PATCH',
       routePath: '/api/me/profile',
       handler: 'update-profile',
       extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
     addRoute({ method: 'POST', routePath: '/api/me/change-password', handler: 'change-password' });
     addRoute({
@@ -542,6 +596,7 @@ export default $config({
       routePath: '/api/me/resend-verification',
       handler: 'resend-verification',
       extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
 
     // ── MFA routes ──────────────────────────────────────────────────
@@ -574,17 +629,30 @@ export default $config({
     addRoute({ method: 'POST', routePath: '/api/org/confirm', handler: 'confirm-org' });
 
     // ── Usage + Dashboard routes ─────────────────────────────────────
-    addRoute({ method: 'GET', routePath: '/api/usage', handler: 'get-usage', extraEnv: auroraEnv });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/usage',
+      handler: 'get-usage',
+      extraEnv: auroraEnv,
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+    });
     addRoute({
       method: 'GET',
       routePath: '/api/activity',
       handler: 'get-activity',
       extraEnv: auroraEnv,
       permissions: auroraS3GatewayPermissions,
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      memory: '1024 MB',
     });
 
     // ── Billing routes ───────────────────────────────────────────────
-    addRoute({ method: 'GET', routePath: '/api/billing', handler: 'get-billing' });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/billing',
+      handler: 'get-billing',
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+    });
     addRoute({
       method: 'POST',
       routePath: '/api/billing/setup-intent',
@@ -652,21 +720,6 @@ export default $config({
 
     tenantSetupQueue.subscribe(tenantSetupFn.arn, { batch: { size: 1 } });
 
-    // ── CloudWatch alarm on DLQ ──────────────────────────────────
-    // TODO: Rework this alarm to trigger alert in Grafana IRM
-    new aws.cloudwatch.MetricAlarm('AuroraTenantSetupDlqAlarm', {
-      alarmDescription: 'Messages in tenant-setup DLQ — failed tenant setup needs investigation',
-      namespace: 'AWS/SQS',
-      metricName: 'ApproximateNumberOfMessagesVisible',
-      dimensions: { QueueName: tenantSetupDlq.nodes.queue.name },
-      statistic: 'Maximum',
-      period: 60,
-      evaluationPeriods: 1,
-      threshold: 1,
-      comparisonOperator: 'GreaterThanOrEqualToThreshold',
-      treatMissingData: 'notBreaching',
-    });
-
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
@@ -693,9 +746,9 @@ export default $config({
       ],
     });
 
-    new sst.aws.Cron('UsageReportingCron', {
-      // run the Lambda every day at 6:00 AM UTC.
-      schedule: 'cron(0 6 * * ? *)',
+    new sst.aws.CronV2('UsageReportingCron', {
+      // run the Lambda every 12 hours (07:00 and 19:00 UTC).
+      schedule: 'cron(0 7/12 * * ? *)',
       function: usageOrchestrator.arn,
     });
 
@@ -708,9 +761,9 @@ export default $config({
       memory: '256 MB',
     });
 
-    new sst.aws.Cron('GracePeriodEnforcerCron', {
-      // run the Lambda every day at 7:00 AM UTC (one hour after usage reporting).
-      schedule: 'cron(0 7 * * ? *)',
+    new sst.aws.CronV2('GracePeriodEnforcerCron', {
+      // run the Lambda every 12 hours, one hour after usage reporting (08:00 and 20:00 UTC).
+      schedule: 'cron(0 8/12 * * ? *)',
       function: gracePeriodEnforcer.arn,
     });
 

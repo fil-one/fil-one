@@ -3,6 +3,7 @@ import { Fragment } from 'react';
 import {
   Dialog,
   DialogPanel,
+  DialogTitle,
   DialogBackdrop,
   Transition,
   TransitionChild,
@@ -20,6 +21,7 @@ export type ModalProps = {
 
 export type ModalHeaderProps = {
   children: React.ReactNode;
+  description?: string;
   onClose?: () => void;
 };
 
@@ -29,6 +31,7 @@ export type ModalBodyProps = {
 
 export type ModalFooterProps = {
   children: React.ReactNode;
+  fullWidth?: boolean;
 };
 
 const sizeClasses = {
@@ -75,10 +78,15 @@ export function Modal({ open, onClose, children, size = 'md', panelClassName }: 
   );
 }
 
-export function ModalHeader({ children, onClose }: ModalHeaderProps) {
+export function ModalHeader({ children, description, onClose }: ModalHeaderProps) {
   return (
-    <div className="modal-header">
-      <span className="modal-header-title">{children}</span>
+    <div className={clsx('modal-header', description && 'modal-header--with-description')}>
+      <div className="modal-header-content">
+        <DialogTitle as="span" className="modal-header-title">
+          {children}
+        </DialogTitle>
+        {description && <p className="modal-header-description">{description}</p>}
+      </div>
       {onClose && (
         <button type="button" className="modal-header-close" onClick={onClose} aria-label="Close">
           <XIcon width={20} height={20} />
@@ -92,6 +100,8 @@ export function ModalBody({ children }: ModalBodyProps) {
   return <div className="modal-body">{children}</div>;
 }
 
-export function ModalFooter({ children }: ModalFooterProps) {
-  return <div className="modal-footer">{children}</div>;
+export function ModalFooter({ children, fullWidth }: ModalFooterProps) {
+  return (
+    <div className={clsx('modal-footer', fullWidth && 'modal-footer--full-width')}>{children}</div>
+  );
 }

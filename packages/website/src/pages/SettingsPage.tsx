@@ -1,23 +1,18 @@
 import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
+import { MfaSettings } from '../components/MfaSettings';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import {
-  getMe,
-  updateProfile,
-  changePassword,
-  enrollMfa,
-  enrollEmailMfa,
-  disableMfa,
-  deleteMfaEnrollment,
-} from '../lib/api.js';
+import { getMe, updateProfile, changePassword } from '../lib/api.js';
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
-import type { MeResponse, MfaEnrollment } from '@filone/shared';
+import type { MeResponse } from '@filone/shared';
+import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Section card wrapper
@@ -127,69 +122,34 @@ function SettingRow({
 }
 
 // ---------------------------------------------------------------------------
-// MFA helpers
-// ---------------------------------------------------------------------------
-
-function formatEnrollmentType(type: MfaEnrollment['type']): string {
-  switch (type) {
-    case 'authenticator':
-      return 'Authenticator app (OTP)';
-    case 'webauthn-roaming':
-      return 'Security key';
-    case 'webauthn-platform':
-      return 'Device biometrics';
-    case 'email':
-      return 'Email';
-    default:
-      return type;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export function SettingsPage() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const [me, setMe] = useState<MeResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: me, isPending } = useQuery({
+    queryKey: queryKeys.meWithMfa,
+    queryFn: () => getMe({ include: 'mfa' }),
+    staleTime: ME_STALE_TIME,
+  });
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [orgName, setOrgName] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [changingPassword, setChangingPassword] = useState(false);
-  const [enrollingMfa, setEnrollingMfa] = useState(false);
-  const [enrollingEmail, setEnrollingEmail] = useState(false);
-  const [disablingMfa, setDisablingMfa] = useState(false);
-  const [confirmDisable, setConfirmDisable] = useState(false);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
 
+  // Initialize form fields once when data first arrives
   useEffect(() => {
-    let cancelled = false;
-    async function fetch() {
-      try {
-        const data = await getMe({ include: 'mfa' });
-        if (!cancelled) {
-          setMe(data);
-          setName(data.name ?? '');
-          setEmail(data.email ?? '');
-          setOrgName(data.orgName ?? '');
-        }
-      } catch (err) {
-        if (!cancelled) {
-          toast.error(err instanceof Error ? err.message : 'Failed to load settings');
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+    if (me && !initialized) {
+      setName(me.name ?? '');
+      setEmail(me.email ?? '');
+      setOrgName(me.orgName ?? '');
+      setInitialized(true);
     }
-    void fetch();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [me, initialized]);
 
   const social = isSocialConnection(me?.connectionType);
   const provider = getProvider(me?.connectionType);
@@ -199,7 +159,47 @@ export function SettingsPage() {
   const orgNameChanged = orgName !== (me?.orgName ?? '');
   const hasChanges = nameChanged || emailChanged || orgNameChanged;
 
-  async function handleSaveProfile() {
+  const saveProfileMutation = useMutation({
+    mutationFn: updateProfile,
+    onSuccess: (result) => {
+      // Update local form state to reflect saved values
+      if (result.name !== undefined) setName(result.name);
+      if (result.email !== undefined) setEmail(result.email);
+      if (result.orgName !== undefined) setOrgName(result.orgName);
+
+      // Update the cache immediately so hasChanges goes false without waiting for refetch
+      const applyUpdate = (old: MeResponse | undefined): MeResponse | undefined => {
+        if (!old) return old;
+        return {
+          ...old,
+          ...(result.name !== undefined ? { name: result.name } : {}),
+          ...(result.email !== undefined ? { email: result.email } : {}),
+          ...(result.orgName !== undefined ? { orgName: result.orgName } : {}),
+        };
+      };
+      queryClient.setQueryData<MeResponse>(queryKeys.me, applyUpdate);
+      queryClient.setQueryData<MeResponse>(queryKeys.meWithMfa, applyUpdate);
+
+      if (result.email) {
+        toast.success('Profile updated. Check your inbox to verify your new email.');
+      } else {
+        toast.success('Profile updated');
+      }
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to update profile');
+    },
+  });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: () => changePassword(),
+    onSuccess: () => toast.success('Password reset email sent'),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to send password reset email');
+    },
+  });
+
+  function handleSaveProfile() {
     const payload: Record<string, string> = {};
     if (nameChanged) payload.name = name;
     if (emailChanged) payload.email = email;
@@ -211,104 +211,14 @@ export function SettingsPage() {
       return;
     }
 
-    setSaving(true);
-    try {
-      const result = await updateProfile(validated.data);
-      const updated = { ...me } as MeResponse;
-      if (result.name !== undefined) {
-        setName(result.name);
-        updated.name = result.name;
-      }
-      if (result.email !== undefined) {
-        setEmail(result.email);
-        updated.email = result.email;
-      }
-      if (result.orgName !== undefined) {
-        setOrgName(result.orgName);
-        updated.orgName = result.orgName;
-      }
-      setMe(updated);
-
-      if (result.email && result.email !== me?.email) {
-        toast.success('Profile updated. Check your inbox to verify your new email.');
-      } else {
-        toast.success('Profile updated');
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update profile');
-    } finally {
-      setSaving(false);
-    }
+    saveProfileMutation.mutate(validated.data);
   }
 
-  async function handleChangePassword() {
-    setChangingPassword(true);
-    try {
-      await changePassword();
-      toast.success('Password reset email sent');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to send password reset email');
-    } finally {
-      setChangingPassword(false);
-    }
+  function handleChangePassword() {
+    changePasswordMutation.mutate();
   }
 
-  async function handleEnrollMfa() {
-    setEnrollingMfa(true);
-    try {
-      await enrollMfa();
-      // enrollMfa() redirects to Auth0 for enrollment — page will navigate away
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to start MFA enrollment');
-      setEnrollingMfa(false);
-    }
-  }
-
-  async function handleEnrollEmail() {
-    setEnrollingEmail(true);
-    try {
-      await enrollEmailMfa();
-      // Refresh MFA enrollments to show the new email factor
-      const data = await getMe({ include: 'mfa' });
-      setMe(data);
-      toast.success('Email two-factor authentication enabled');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to enable email MFA');
-    } finally {
-      setEnrollingEmail(false);
-    }
-  }
-
-  async function handleDisableMfa() {
-    setDisablingMfa(true);
-    setConfirmDisable(false);
-    try {
-      await disableMfa();
-      setMe((prev) => (prev ? { ...prev, mfaEnrollments: [] } : prev));
-      toast.success('Two-factor authentication disabled');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to disable MFA');
-    } finally {
-      setDisablingMfa(false);
-    }
-  }
-
-  async function handleDeleteEnrollment(enrollment: MfaEnrollment) {
-    setConfirmDeleteId(null);
-    try {
-      await deleteMfaEnrollment(enrollment.id);
-      setMe((prev) => {
-        if (!prev) return prev;
-        const remaining = prev.mfaEnrollments.filter((e) => e.id !== enrollment.id);
-        return { ...prev, mfaEnrollments: remaining };
-      });
-      toast.success(`Removed ${formatEnrollmentType(enrollment.type)}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to remove enrollment');
-    }
-  }
-
-  if (loading) {
+  if (isPending) {
     return (
       <div className="flex items-center justify-center p-16">
         <Spinner ariaLabel="Loading settings" />
@@ -383,8 +293,12 @@ export function SettingsPage() {
             </div>
 
             <div className="flex items-center gap-3">
-              <Button variant="filled" onClick={handleSaveProfile} disabled={saving || !hasChanges}>
-                {saving ? 'Saving...' : 'Save changes'}
+              <Button
+                variant="primary"
+                onClick={handleSaveProfile}
+                disabled={saveProfileMutation.isPending || !hasChanges}
+              >
+                {saveProfileMutation.isPending ? 'Saving...' : 'Save changes'}
               </Button>
               {hasChanges && (
                 <p className="text-[11px] text-zinc-500">
@@ -433,137 +347,9 @@ export function SettingsPage() {
           description="Manage your account security"
         >
           <div className="flex flex-col gap-3">
-            {!social && (
+            {!social && me && (
               <>
-                {me?.mfaEnrollments && me.mfaEnrollments.length > 0 ? (
-                  <>
-                    <SettingRow
-                      label="Two-factor authentication"
-                      description="Your account is protected with two-factor authentication"
-                      action={
-                        <Button
-                          variant="ghost"
-                          size="compact"
-                          onClick={handleEnrollMfa}
-                          disabled={enrollingMfa}
-                        >
-                          {enrollingMfa ? 'Redirecting...' : 'Add authenticator or key'}
-                        </Button>
-                      }
-                    />
-                    <div className="flex flex-col gap-2 ml-0.5">
-                      {me.mfaEnrollments.map((enrollment) => (
-                        <div
-                          key={enrollment.id}
-                          className="flex items-center justify-between rounded-md border border-[#e1e4ea] bg-zinc-50 px-3 py-2"
-                        >
-                          <div>
-                            <p className="text-[13px] font-medium text-zinc-900">
-                              {formatEnrollmentType(enrollment.type)}
-                            </p>
-                            <p className="text-[11px] text-zinc-500">
-                              {enrollment.name ? `${enrollment.name} — ` : ''}
-                              Added {new Date(enrollment.createdAt).toLocaleDateString()}
-                            </p>
-                          </div>
-                          {confirmDeleteId === enrollment.id ? (
-                            <div className="flex items-center gap-2">
-                              <span className="text-[11px] text-zinc-500">Remove?</span>
-                              <button
-                                className="text-[11px] text-red-600 font-medium hover:text-red-700"
-                                onClick={() => handleDeleteEnrollment(enrollment)}
-                              >
-                                Yes
-                              </button>
-                              <button
-                                className="text-[11px] text-zinc-500 hover:text-zinc-700"
-                                onClick={() => setConfirmDeleteId(null)}
-                              >
-                                No
-                              </button>
-                            </div>
-                          ) : (
-                            <Button
-                              variant="ghost"
-                              size="compact"
-                              onClick={() => setConfirmDeleteId(enrollment.id)}
-                            >
-                              Remove
-                            </Button>
-                          )}
-                        </div>
-                      ))}
-                      {confirmDisable ? (
-                        <div className="flex items-center gap-2 self-start">
-                          <span className="text-[11px] text-zinc-500">
-                            Remove all MFA methods? This cannot be undone.
-                          </span>
-                          <button
-                            className="text-[11px] text-red-600 font-medium hover:text-red-700"
-                            onClick={handleDisableMfa}
-                            disabled={disablingMfa}
-                          >
-                            {disablingMfa ? 'Removing...' : 'Confirm'}
-                          </button>
-                          <button
-                            className="text-[11px] text-zinc-500 hover:text-zinc-700"
-                            onClick={() => setConfirmDisable(false)}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          className="text-[11px] text-red-500 hover:text-red-700 self-start"
-                          onClick={() => setConfirmDisable(true)}
-                          disabled={disablingMfa}
-                        >
-                          Remove all MFA methods
-                        </button>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <SettingRow
-                      label="Two-factor authentication"
-                      description="Add an extra layer of security to your account"
-                      action={<span />}
-                    />
-                    <div className="flex flex-col gap-2 ml-0.5">
-                      <button
-                        className="flex items-center justify-between rounded-md border border-[#e1e4ea] bg-zinc-50 px-3 py-2.5 hover:bg-zinc-100 transition-colors text-left w-full"
-                        onClick={handleEnrollEmail}
-                        disabled={enrollingEmail}
-                      >
-                        <div>
-                          <p className="text-[13px] font-medium text-zinc-900">
-                            {enrollingEmail ? 'Enabling...' : 'Enable with email'}
-                          </p>
-                          <p className="text-[11px] text-zinc-500">
-                            Receive a 6-digit code at your verified email address
-                          </p>
-                        </div>
-                      </button>
-                      <button
-                        className="flex items-center justify-between rounded-md border border-[#e1e4ea] bg-zinc-50 px-3 py-2.5 hover:bg-zinc-100 transition-colors text-left w-full"
-                        onClick={handleEnrollMfa}
-                        disabled={enrollingMfa}
-                      >
-                        <div>
-                          <p className="text-[13px] font-medium text-zinc-900">
-                            {enrollingMfa
-                              ? 'Redirecting...'
-                              : 'Enable with authenticator app or security key'}
-                          </p>
-                          <p className="text-[11px] text-zinc-500">
-                            Use an app like Google Authenticator, or a hardware security key
-                          </p>
-                        </div>
-                      </button>
-                    </div>
-                  </>
-                )}
+                <MfaSettings me={me} />
                 <div className="h-px bg-[#e1e4ea]" />
               </>
             )}
@@ -574,11 +360,10 @@ export function SettingsPage() {
                 action={
                   <Button
                     variant="ghost"
-                    size="compact"
                     onClick={handleChangePassword}
-                    disabled={changingPassword}
+                    disabled={changePasswordMutation.isPending}
                   >
-                    {changingPassword ? 'Sending...' : 'Change'}
+                    {changePasswordMutation.isPending ? 'Sending...' : 'Change'}
                   </Button>
                 }
               />

@@ -1,6 +1,7 @@
 {
   "name": "filone",
   "private": true,
+  "license": "(Apache-2.0 OR MIT)",
   "workspaces": [
     "packages/*"
   ],
@@ -15,18 +16,22 @@
     "deploy:infra:production": "cd infra && sst deploy --stage production",
     "generate:api-clients": "pnpm --filter @filone/aurora-backoffice-client --filter @filone/aurora-portal-client generate",
     "remove": "sst remove",
+    "prelint": "[ -f .sst/platform/config.d.ts ] || pnpm exec sst install",
     "lint": "oxlint --report-unused-disable-directives && oxfmt --check",
     "lint:fix": "oxlint --fix && oxfmt --write",
     "refresh": "sst refresh",
     "prepare": "husky",
+    "storybook": "pnpm --filter @filone/website storybook",
     "test": "pnpm lint && pnpm --filter @filone/shared --filter @filone/backend --filter @filone/website test",
-    "test:e2e": "pnpm exec playwright test",
+    "test:storybook": "pnpm --filter @filone/website test:storybook",
+    "test:e2e": "pnpm exec sst shell -- pnpm exec playwright test",
     "test:integration": "pnpm --filter @filone/integration test"
   },
   "dependencies": {
     "@filone/shared": "workspace:*"
   },
   "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1031.0",
     "@playwright/test": "^1.58.2",
     "@pulumi/aws": "^7.23.0",
     "@pulumi/command": "^1.2.1",
@@ -35,9 +40,10 @@
     "constructs": "^10.6.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
-    "oxfmt": "^0.42.0",
+    "oxfmt": "^0.45.0",
     "oxlint": "^1.57.0",
-    "oxlint-tsgolint": "^0.18.1",
+    "oxlint-plugin-complexity": "^2.1.1",
+    "oxlint-tsgolint": "^0.20.0",
     "sst": "^4.5.12"
   },
   "lint-staged": {
@@ -47,7 +53,7 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@10.32.1",
+  "packageManager": "pnpm@10.33.0",
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",

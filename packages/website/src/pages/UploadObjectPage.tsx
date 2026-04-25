@@ -26,6 +26,7 @@ export type UploadObjectPageProps = {
   bucketName: string;
 };
 
+// eslint-disable-next-line max-lines-per-function
 export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
   const navigate = useNavigate();
 
@@ -227,7 +228,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
 
             {/* Submit */}
             <Button
-              variant="filled"
+              variant="primary"
               icon={ArrowUpIcon}
               disabled={!canUpload}
               onClick={upload.handleUpload}
@@ -286,7 +287,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
               {upload.selectedFile?.name} has been stored on Filecoin.
             </p>
             <Button
-              variant="filled"
+              variant="primary"
               onClick={() => void navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
             >
               Back to bucket

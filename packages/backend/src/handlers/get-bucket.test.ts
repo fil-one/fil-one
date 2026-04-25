@@ -81,8 +81,131 @@ describe('get-bucket baseHandler', () => {
         region: S3_REGION,
         createdAt: '2026-01-15T10:00:00Z',
         isPublic: false,
+        objectLockEnabled: false,
+        versioning: false,
+        encrypted: true,
       },
     });
+  });
+
+  it('returns objectLockEnabled true when Aurora reports objectLock', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
+    mockGetBucket.mockResolvedValue({
+      data: { name: 'locked-bucket', createdAt: '2026-01-15T10:00:00Z', objectLock: true },
+      error: undefined,
+      response: { status: 200 },
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'locked-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body!);
+    expect(body).toStrictEqual({
+      bucket: {
+        name: 'locked-bucket',
+        region: S3_REGION,
+        createdAt: '2026-01-15T10:00:00Z',
+        isPublic: false,
+        objectLockEnabled: true,
+        versioning: false,
+        encrypted: true,
+      },
+    });
+  });
+
+  it('returns objectLockEnabled true when Aurora reports objectLock', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
+    mockGetBucket.mockResolvedValue({
+      data: { name: 'locked-bucket', createdAt: '2026-01-15T10:00:00Z', objectLock: true },
+      error: undefined,
+      response: { status: 200 },
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'locked-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body!);
+    expect(body).toStrictEqual({
+      bucket: {
+        name: 'locked-bucket',
+        region: S3_REGION,
+        createdAt: '2026-01-15T10:00:00Z',
+        isPublic: false,
+        objectLockEnabled: true,
+        versioning: false,
+        encrypted: true,
+      },
+    });
+  });
+
+  it('passes through versioning, encryption, and retention fields', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
+    mockGetBucket.mockResolvedValue({
+      data: {
+        name: 'full-bucket',
+        createdAt: '2026-01-15T10:00:00Z',
+        objectLock: true,
+        versioning: true,
+        encrypted: true,
+        defaultRetention: 'compliance',
+        retentionDuration: 365,
+        retentionDurationType: 'd',
+      },
+      error: undefined,
+      response: { status: 200 },
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'full-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body!);
+    expect(body).toStrictEqual({
+      bucket: {
+        name: 'full-bucket',
+        region: S3_REGION,
+        createdAt: '2026-01-15T10:00:00Z',
+        isPublic: false,
+        objectLockEnabled: true,
+        versioning: true,
+        encrypted: true,
+        defaultRetention: 'compliance',
+        retentionDuration: 365,
+        retentionDurationType: 'd',
+      },
+    });
+  });
+
+  it('maps defaultRetention "off" to undefined', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
+    mockGetBucket.mockResolvedValue({
+      data: {
+        name: 'no-retention',
+        createdAt: '2026-01-15T10:00:00Z',
+        defaultRetention: 'off',
+        retentionDuration: 0,
+        retentionDurationType: 'd',
+      },
+      error: undefined,
+      response: { status: 200 },
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'no-retention' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body!);
+    expect(body.bucket.defaultRetention).toBeUndefined();
   });
 
   it('calls Aurora portal API with correct params', async () => {

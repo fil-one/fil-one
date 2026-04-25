@@ -1,0 +1,17 @@
+[project]
+name = "filone-s3-compat-tests"
+version = "0.1.0"
+description = "S3 compatibility test harness for validating object storage behavior"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "boto3>=1.42.89",
+  "pytest>=9.0.3",
+  "pytest-json-report>=1.5.0",
+  "python-dotenv>=1.2.2",
+  "requests>=2.33.1",
+  "urllib3>=2.6.3",
+]
+
+[tool.uv]
+package = false

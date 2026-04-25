@@ -2,6 +2,7 @@ import {
   createClient,
   createTenant,
   createTenantToken,
+  getBucketStorageMetrics,
   getTenant,
   getTenantOperationMetrics,
   getTenantStorageMetrics,
@@ -211,13 +212,15 @@ export async function createAuroraTenantApiKey({
 
   const apiToken = data?.token;
   if (!apiToken) {
-    throw new Error(`Aurora API did not return a token for org ${orgId}: ${JSON.stringify(data)}`);
+    throw new Error(
+      `Aurora API did not return a token for org ${orgId}. Response fields: ${Object.keys(data).join(', ')}`,
+    );
   }
 
   const tokenId = data.id;
   if (!tokenId) {
     throw new Error(
-      `Aurora API did not return a token ID for org ${orgId}: ${JSON.stringify(data)}`,
+      `Aurora API did not return a token ID for org ${orgId}. Response fields: ${Object.keys(data).join(', ')}`,
     );
   }
 
@@ -250,6 +253,38 @@ export async function getStorageSamples({
 
   if (error) {
     throw new Error(`Aurora storage API failed for tenant ${tenantId}`, {
+      cause: error,
+    });
+  }
+
+  return data?.samples ?? [];
+}
+
+export interface GetBucketStorageSamplesOptions {
+  bucketName: string;
+  from: string;
+  to: string;
+  window?: string;
+}
+
+export async function getBucketStorageSamples({
+  bucketName,
+  from,
+  to,
+  window = '1h',
+}: GetBucketStorageSamplesOptions): Promise<ModelStorageMetricsSample[]> {
+  const partnerId = process.env.AURORA_PARTNER_ID!;
+  const client = createBackofficeClient();
+
+  const { data, error } = await getBucketStorageMetrics({
+    client,
+    path: { partnerId, bucketName },
+    query: { from, to, window },
+    throwOnError: false,
+  });
+
+  if (error) {
+    throw new Error(`Aurora bucket storage API failed for bucket ${bucketName}`, {
       cause: error,
     });
   }
