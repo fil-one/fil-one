@@ -2,26 +2,18 @@ import { GetItemCommand, ScanCommand, type AttributeValue } from '@aws-sdk/clien
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
-import {
-  getTenantStatus,
-  type ModelsTenantStatus,
-  type TenantStatusResult,
-} from '../lib/aurora-backoffice.js';
+import { getTenantStatus, type TenantStatusResult } from '../lib/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { reportMetric } from '../lib/metrics.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 
 const dynamo = getDynamoClient();
 
-// Paid (active) subscriptions are uncapped — quota-driven WRITE_LOCK applies
-// only to `trialing`. When scope is `active`, any Aurora status != 'ACTIVE'
-// is drift.
-type DriftStatus =
-  | 'in_sync'
-  | 'drift_write_locked'
-  | 'drift_locked'
-  | 'drift_disabled'
-  | 'drift_missing';
+// Active subs in DynamoDB are expected to map to ACTIVE tenants in Aurora.
+// Anything else — locked, disabled, missing, or any future Aurora state — is
+// out of sync. Triage uses orgId/userId from log fields, not metric
+// cardinality.
+type DriftStatus = 'in_sync' | 'out_of_sync';
 
 interface ActiveCandidate {
   userId: string;
@@ -34,11 +26,8 @@ interface ResolvedTenant {
 }
 
 interface RunStats {
-  scanned: number;
-  uniqueOrgs: number;
-  skippedDuplicate: number;
-  skippedNoTenant: number;
-  probeFailed: number;
+  notInSync: number;
+  missingTenant: number;
 }
 
 export async function handler(): Promise<void> {
@@ -50,11 +39,8 @@ export async function handler(): Promise<void> {
   const candidates = await scanActiveSubscriptions(Resource.BillingTable.name);
   const uniqueCandidates = dedupeByOrgId(candidates);
   const stats: RunStats = {
-    scanned: candidates.length,
-    uniqueOrgs: uniqueCandidates.length,
-    skippedDuplicate: candidates.length - uniqueCandidates.length,
-    skippedNoTenant: 0,
-    probeFailed: 0,
+    notInSync: 0,
+    missingTenant: 0,
   };
 
   for (const candidate of uniqueCandidates) {
@@ -114,13 +100,15 @@ async function evaluateCandidate(candidate: ActiveCandidate, stats: RunStats): P
   try {
     const tenant = await resolveTenant(candidate.orgId);
     if (!tenant.auroraTenantId || !isOrgSetupComplete(tenant.setupStatus)) {
-      stats.skippedNoTenant += 1;
+      stats.missingTenant += 1;
       return;
     }
 
     const tenantStatus = await getTenantStatus({ tenantId: tenant.auroraTenantId });
     if (tenantStatus.kind === 'error') {
-      stats.probeFailed += 1;
+      // No metric counter — total Aurora outages surface as a Grafana
+      // no-data alert on SubscriptionStatusDrift; transient failures are for
+      // log-based triage.
       console.error('[subscription-drift-checker] probe failed', {
         orgId: candidate.orgId,
         cause: tenantStatus.cause,
@@ -128,9 +116,10 @@ async function evaluateCandidate(candidate: ActiveCandidate, stats: RunStats): P
       return;
     }
 
-    emitDriftStatus(candidate, getTenantDriftStatus(tenantStatus));
+    const classification = getTenantDriftStatus(tenantStatus);
+    if (classification === 'out_of_sync') stats.notInSync += 1;
+    emitDriftStatus(candidate, classification);
   } catch (error) {
-    stats.probeFailed += 1;
     console.error('[subscription-drift-checker] candidate failed', {
       orgId: candidate.orgId,
       error,
@@ -153,25 +142,7 @@ async function resolveTenant(orgId: string): Promise<ResolvedTenant> {
 }
 
 function getTenantDriftStatus(tenantStatus: TenantStatusResult): DriftStatus {
-  if (tenantStatus.kind === 'not_found') return 'drift_missing';
-  if (tenantStatus.kind === 'ok') return getDriftStatus(tenantStatus.status);
-  // 'error' should be filtered by the caller; treat defensively.
-  return 'drift_missing';
-}
-
-function getDriftStatus(auroraStatus: ModelsTenantStatus | undefined): DriftStatus {
-  switch (auroraStatus) {
-    case 'ACTIVE':
-      return 'in_sync';
-    case 'WRITE_LOCKED':
-      return 'drift_write_locked';
-    case 'LOCKED':
-      return 'drift_locked';
-    case 'DISABLED':
-      return 'drift_disabled';
-    default:
-      return 'drift_missing';
-  }
+  return tenantStatus.kind === 'ok' && tenantStatus.status === 'ACTIVE' ? 'in_sync' : 'out_of_sync';
 }
 
 function emitDriftStatus(candidate: ActiveCandidate, classification: DriftStatus): void {
@@ -202,19 +173,13 @@ function emitRunSummary(stats: RunStats): void {
           Namespace: 'FilOne',
           Dimensions: [[]],
           Metrics: [
-            { Name: 'SubscriptionDriftCheckScanned', Unit: 'Count' },
-            { Name: 'SubscriptionDriftCheckUniqueOrgs', Unit: 'Count' },
-            { Name: 'SubscriptionDriftCheckSkippedDuplicate', Unit: 'Count' },
-            { Name: 'SubscriptionDriftCheckSkippedNoTenant', Unit: 'Count' },
-            { Name: 'SubscriptionDriftCheckProbeFailed', Unit: 'Count' },
+            { Name: 'SubscriptionsNotInSync', Unit: 'Count' },
+            { Name: 'SubscriptionsMissingTenant', Unit: 'Count' },
           ],
         },
       ],
     },
-    SubscriptionDriftCheckScanned: stats.scanned,
-    SubscriptionDriftCheckUniqueOrgs: stats.uniqueOrgs,
-    SubscriptionDriftCheckSkippedDuplicate: stats.skippedDuplicate,
-    SubscriptionDriftCheckSkippedNoTenant: stats.skippedNoTenant,
-    SubscriptionDriftCheckProbeFailed: stats.probeFailed,
+    SubscriptionsNotInSync: stats.notInSync,
+    SubscriptionsMissingTenant: stats.missingTenant,
   });
 }

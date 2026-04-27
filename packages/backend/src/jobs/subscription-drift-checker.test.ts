@@ -73,7 +73,7 @@ function driftEmissions() {
 function summaryEmission() {
   return mockReportMetric.mock.calls
     .map((c) => c[0] as Record<string, unknown>)
-    .find((e) => 'SubscriptionDriftCheckScanned' in e);
+    .find((e) => 'SubscriptionsNotInSync' in e);
 }
 
 // ---------------------------------------------------------------------------
@@ -88,18 +88,15 @@ describe('subscription-drift-checker', () => {
     mockReportMetric.mockReset();
   });
 
-  it('emits summary with zero scanned when billing table is empty', async () => {
+  it('emits zero counters when billing table is empty', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [] });
 
     await handler();
 
     expect(driftEmissions()).toHaveLength(0);
     expect(summaryEmission()).toMatchObject({
-      SubscriptionDriftCheckScanned: 0,
-      SubscriptionDriftCheckUniqueOrgs: 0,
-      SubscriptionDriftCheckSkippedDuplicate: 0,
-      SubscriptionDriftCheckSkippedNoTenant: 0,
-      SubscriptionDriftCheckProbeFailed: 0,
+      SubscriptionsNotInSync: 0,
+      SubscriptionsMissingTenant: 0,
     });
     expect(mockGetTenantStatus).not.toHaveBeenCalled();
   });
@@ -116,49 +113,36 @@ describe('subscription-drift-checker', () => {
       classification: 'in_sync',
       orgId: ORG_ID,
     });
+    expect(summaryEmission()).toMatchObject({
+      SubscriptionsNotInSync: 0,
+      SubscriptionsMissingTenant: 0,
+    });
   });
 
-  it('classifies Aurora WRITE_LOCKED as drift_write_locked (paid subs are uncapped)', async () => {
+  it.each([
+    ['WRITE_LOCKED', { kind: 'ok', status: 'WRITE_LOCKED' }],
+    ['LOCKED', { kind: 'ok', status: 'LOCKED' }],
+    ['DISABLED', { kind: 'ok', status: 'DISABLED' }],
+    ['not_found', { kind: 'not_found' }],
+  ])('classifies Aurora %s as out_of_sync', async (_label, tenantStatus) => {
     ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
     seedReadyOrg();
-    mockGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'WRITE_LOCKED' });
+    mockGetTenantStatus.mockResolvedValue(tenantStatus);
 
     await handler();
 
-    expect(driftEmissions()[0]).toMatchObject({ classification: 'drift_write_locked' });
+    expect(driftEmissions()).toHaveLength(1);
+    expect(driftEmissions()[0]).toMatchObject({
+      classification: 'out_of_sync',
+      orgId: ORG_ID,
+    });
+    expect(summaryEmission()).toMatchObject({
+      SubscriptionsNotInSync: 1,
+      SubscriptionsMissingTenant: 0,
+    });
   });
 
-  it('classifies Aurora DISABLED as drift_disabled', async () => {
-    ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
-    seedReadyOrg();
-    mockGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
-
-    await handler();
-
-    expect(driftEmissions()[0]).toMatchObject({ classification: 'drift_disabled' });
-  });
-
-  it('classifies Aurora LOCKED as drift_locked', async () => {
-    ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
-    seedReadyOrg();
-    mockGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'LOCKED' });
-
-    await handler();
-
-    expect(driftEmissions()[0]).toMatchObject({ classification: 'drift_locked' });
-  });
-
-  it('classifies Aurora 404 as drift_missing', async () => {
-    ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
-    seedReadyOrg();
-    mockGetTenantStatus.mockResolvedValue({ kind: 'not_found' });
-
-    await handler();
-
-    expect(driftEmissions()[0]).toMatchObject({ classification: 'drift_missing' });
-  });
-
-  it('counts Aurora transport errors as probe_failed without emitting a per-org drift datapoint', async () => {
+  it('emits no per-org datapoint on Aurora transport error (Grafana no-data alert covers outages)', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
     seedReadyOrg();
     mockGetTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('boom') });
@@ -167,13 +151,12 @@ describe('subscription-drift-checker', () => {
 
     expect(driftEmissions()).toHaveLength(0);
     expect(summaryEmission()).toMatchObject({
-      SubscriptionDriftCheckScanned: 1,
-      SubscriptionDriftCheckUniqueOrgs: 1,
-      SubscriptionDriftCheckProbeFailed: 1,
+      SubscriptionsNotInSync: 0,
+      SubscriptionsMissingTenant: 0,
     });
   });
 
-  it('skips org when auroraTenantId missing or setup incomplete', async () => {
+  it('counts org as missing tenant when auroraTenantId missing or setup incomplete', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
     ddbMock
       .on(GetItemCommand, {
@@ -192,9 +175,8 @@ describe('subscription-drift-checker', () => {
     expect(mockGetTenantStatus).not.toHaveBeenCalled();
     expect(driftEmissions()).toHaveLength(0);
     expect(summaryEmission()).toMatchObject({
-      SubscriptionDriftCheckScanned: 1,
-      SubscriptionDriftCheckUniqueOrgs: 1,
-      SubscriptionDriftCheckSkippedNoTenant: 1,
+      SubscriptionsNotInSync: 0,
+      SubscriptionsMissingTenant: 1,
     });
   });
 
@@ -232,9 +214,8 @@ describe('subscription-drift-checker', () => {
       orgId: orgId2,
     });
     expect(summaryEmission()).toMatchObject({
-      SubscriptionDriftCheckScanned: 2,
-      SubscriptionDriftCheckUniqueOrgs: 2,
-      SubscriptionDriftCheckProbeFailed: 1,
+      SubscriptionsNotInSync: 0,
+      SubscriptionsMissingTenant: 0,
     });
   });
 
@@ -254,14 +235,13 @@ describe('subscription-drift-checker', () => {
     expect(mockGetTenantStatus).toHaveBeenCalledTimes(1);
     expect(driftEmissions()).toHaveLength(1);
     expect(driftEmissions()[0]).toMatchObject({
-      classification: 'drift_disabled',
+      classification: 'out_of_sync',
       orgId: ORG_ID,
       userId: 'user-first', // first-seen userId becomes the representative
     });
     expect(summaryEmission()).toMatchObject({
-      SubscriptionDriftCheckScanned: 3,
-      SubscriptionDriftCheckUniqueOrgs: 1,
-      SubscriptionDriftCheckSkippedDuplicate: 2,
+      SubscriptionsNotInSync: 1,
+      SubscriptionsMissingTenant: 0,
     });
   });
 
@@ -279,7 +259,7 @@ describe('subscription-drift-checker', () => {
     await handler();
 
     expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(2);
-    expect(summaryEmission()).toMatchObject({ SubscriptionDriftCheckScanned: 1 });
+    expect(summaryEmission()).toMatchObject({ SubscriptionsNotInSync: 0 });
   });
 
   it('ignores records without orgId', async () => {
@@ -296,6 +276,9 @@ describe('subscription-drift-checker', () => {
     await handler();
 
     expect(mockGetTenantStatus).not.toHaveBeenCalled();
-    expect(summaryEmission()).toMatchObject({ SubscriptionDriftCheckScanned: 0 });
+    expect(summaryEmission()).toMatchObject({
+      SubscriptionsNotInSync: 0,
+      SubscriptionsMissingTenant: 0,
+    });
   });
 });
