@@ -66,9 +66,15 @@ importers:
       '@aws-sdk/client-ssm':
         specifier: ^3.1031.0
         version: 3.1031.0
+      '@filone/aurora-backoffice-client':
+        specifier: workspace:*
+        version: link:../packages/aurora-backoffice-client
       sst:
         specifier: ^4.5.12
         version: 4.5.12
+      stripe:
+        specifier: ^22.0.2
+        version: 22.0.2(@types/node@25.5.0)
 
   infra:
     devDependencies:
