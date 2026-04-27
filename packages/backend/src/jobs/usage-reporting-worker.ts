@@ -2,8 +2,8 @@ import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { Resource } from 'sst';
-import { GB_BYTES, TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT } from '@filone/shared';
-import { getStripeClient } from '../lib/stripe-client.js';
+import { GB_BYTES, TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT, formatBytes } from '@filone/shared';
+import { getStripeClient, updateCustomerMetadata } from '../lib/stripe-client.js';
 import {
   getStorageSamples,
   getOperationsSamples,
@@ -12,6 +12,7 @@ import {
 } from '../lib/aurora-backoffice.js';
 import type { ModelsTenantStatus } from '../lib/aurora-backoffice.js';
 import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
+import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
 import { calculateAverageUsage } from '../lib/usage-calculator.js';
 
 const dynamo = getDynamoClient();
@@ -19,6 +20,7 @@ const dynamo = getDynamoClient();
 export interface UsageReportingWorkerPayload {
   orgId: string;
   auroraTenantId: string;
+  orgName?: string;
   subscriptionId: string;
   stripeCustomerId: string;
   currentPeriodStart: string;
@@ -68,6 +70,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const {
     orgId,
     auroraTenantId,
+    orgName,
     subscriptionId,
     stripeCustomerId,
     currentPeriodStart,
@@ -125,6 +128,12 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     averageStorageGbUsed,
   });
 
+  const orgSyncAction = await syncOrgMetadata({
+    stripeCustomerId,
+    orgName,
+    currentStorageBytes,
+  });
+
   const lockAction = isTrial
     ? await safeEnforceTrialLocks({
         tenantId: auroraTenantId,
@@ -148,6 +157,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     sampleCount: usage.sampleCount,
     lockAction,
     reportedToStripe: reported,
+    orgSyncAction,
   });
 
   console.log('[usage-worker] Audit record written', { orgId, reportDate });
@@ -219,6 +229,28 @@ async function safeEnforceTrialLocks(params: {
   }
 }
 
+async function syncOrgMetadata(params: {
+  stripeCustomerId: string;
+  orgName: string | undefined;
+  currentStorageBytes: number;
+}): Promise<string> {
+  if (!params.orgName && params.currentStorageBytes === 0) return 'skipped:nothing-to-sync';
+  try {
+    const metadata: Record<string, string> = {
+      [STRIPE_METADATA_KEYS.storageUsed]: formatBytes(params.currentStorageBytes),
+    };
+    if (params.orgName) metadata[STRIPE_METADATA_KEYS.organizationName] = params.orgName;
+    await updateCustomerMetadata(params.stripeCustomerId, metadata);
+    return 'ok';
+  } catch (error) {
+    console.error('[usage-worker] Failed to sync org metadata', {
+      stripeCustomerId: params.stripeCustomerId,
+      error,
+    });
+    return `error:${(error as Error).message}`;
+  }
+}
+
 async function writeUsageAuditRecord(params: {
   orgId: string;
   subscriptionId: string;
@@ -232,6 +264,7 @@ async function writeUsageAuditRecord(params: {
   sampleCount: number;
   lockAction: string;
   reportedToStripe: boolean;
+  orgSyncAction: string;
 }): Promise<void> {
   const ttl = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60; // 365 days
   await dynamo.send(
@@ -252,6 +285,7 @@ async function writeUsageAuditRecord(params: {
         sampleCount: params.sampleCount,
         reportedToStripe: params.reportedToStripe,
         lockAction: params.lockAction,
+        orgSyncAction: params.orgSyncAction,
         createdAt: new Date().toISOString(),
         ttl,
       }),

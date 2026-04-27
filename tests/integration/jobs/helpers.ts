@@ -25,6 +25,7 @@ export const AURORA_TEST_TENANT_ID = '1ab311c9-b6ad-4d4d-b707-c07d8404eaa2';
 export async function invokeWorker(payload: {
   orgId: string;
   auroraTenantId: string;
+  orgName?: string;
   subscriptionId: string;
   stripeCustomerId: string;
   currentPeriodStart: string;

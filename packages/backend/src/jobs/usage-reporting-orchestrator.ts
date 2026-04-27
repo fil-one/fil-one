@@ -47,8 +47,8 @@ export async function handler(): Promise<void> {
       stripeCustomerId: record.stripeCustomerId,
     });
 
-    const auroraTenantId = await resolveAuroraTenantId(record.orgId);
-    if (!auroraTenantId) {
+    const profile = await resolveOrgProfile(record.orgId);
+    if (!profile) {
       skippedNoTenant++;
       console.warn('[usage-orchestrator] Missing auroraTenantId, skipping', {
         orgId: record.orgId,
@@ -58,7 +58,8 @@ export async function handler(): Promise<void> {
 
     const payload: UsageReportingWorkerPayload = {
       orgId: record.orgId,
-      auroraTenantId,
+      auroraTenantId: profile.auroraTenantId,
+      orgName: profile.orgName,
       subscriptionId: record.subscriptionId,
       stripeCustomerId: record.stripeCustomerId,
       currentPeriodStart: record.currentPeriodStart,
@@ -140,7 +141,9 @@ async function scanActiveSubscriptionRecords(
   return records;
 }
 
-async function resolveAuroraTenantId(orgId: string): Promise<string | undefined> {
+async function resolveOrgProfile(
+  orgId: string,
+): Promise<{ auroraTenantId: string; orgName: string | undefined } | undefined> {
   const profileResult = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
@@ -148,11 +151,14 @@ async function resolveAuroraTenantId(orgId: string): Promise<string | undefined>
         pk: { S: `ORG#${orgId}` },
         sk: { S: 'PROFILE' },
       },
-      ProjectionExpression: 'auroraTenantId',
+      ProjectionExpression: 'auroraTenantId, #n',
+      ExpressionAttributeNames: { '#n': 'name' },
     }),
   );
 
-  return profileResult.Item?.auroraTenantId?.S;
+  const auroraTenantId = profileResult.Item?.auroraTenantId?.S;
+  if (!auroraTenantId) return undefined;
+  return { auroraTenantId, orgName: profileResult.Item?.name?.S };
 }
 
 async function invokeUsageWorker(

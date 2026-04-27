@@ -51,6 +51,7 @@ describe('Usage Reporting Worker (direct Lambda invoke)', () => {
       sampleCount: { N: expect.any(String) },
       reportedToStripe: { BOOL: true },
       lockAction: { S: 'skipped:paid' },
+      orgSyncAction: { S: expect.any(String) },
       createdAt: { S: expect.any(String) },
       ttl: { N: expect.any(String) },
     });
@@ -89,11 +90,42 @@ describe('Usage Reporting Worker (direct Lambda invoke)', () => {
         sampleCount: { N: expect.any(String) },
         reportedToStripe: { BOOL: expect.any(Boolean) },
         lockAction: { S: 'ACTIVE' },
+        orgSyncAction: { S: expect.any(String) },
         createdAt: { S: expect.any(String) },
         ttl: { N: expect.any(String) },
       });
     } finally {
       await deleteAuditRecord(trialOrgId, trialReportDate);
+    }
+  });
+
+  it('syncs storage_gb and organization_name to Stripe customer metadata', async () => {
+    const syncOrgId = `test-urw-sync-${crypto.randomUUID().slice(0, 8)}`;
+    const orgName = `Integration Test Org ${crypto.randomUUID().slice(0, 8)}`;
+
+    try {
+      const result = await invokeWorker({
+        orgId: syncOrgId,
+        auroraTenantId: AURORA_TEST_TENANT_ID,
+        orgName,
+        subscriptionId: 'sub_test_sync',
+        stripeCustomerId: cusId,
+        currentPeriodStart: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        subscriptionStatus: 'active',
+        reportDate,
+      });
+
+      expect(result.functionError).toBeUndefined();
+
+      const customer = await getStripeClient().customers.retrieve(cusId);
+      if (customer.deleted) throw new Error('Customer was unexpectedly deleted');
+      expect(customer.metadata.organization_name).toBe(orgName);
+      expect(customer.metadata.storage_gb).toMatch(/^\d+$/);
+
+      const audit = await getAuditRecord(syncOrgId, reportDate);
+      expect(audit?.orgSyncAction).toStrictEqual({ S: 'ok' });
+    } finally {
+      await deleteAuditRecord(syncOrgId, reportDate);
     }
   });
 
