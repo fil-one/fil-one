@@ -87,7 +87,9 @@ test.describe('paid user', () => {
       .getByRole('button', { name: `${UPLOAD_FILE.name} ${UPLOAD_FILE_SIZE_LABEL}` })
       .click();
     await expect(page).toHaveURL(
-      new RegExp(`/buckets/${bucketName}/objects\\?key=${UPLOAD_FILE.name}$`),
+      (url) =>
+        url.pathname === `/buckets/${bucketName}/objects` &&
+        url.searchParams.get('key') === UPLOAD_FILE.name,
     );
   });
 });
@@ -114,7 +116,9 @@ test.describe('trial user', () => {
       .getByRole('button', { name: `${UPLOAD_FILE.name} ${UPLOAD_FILE_SIZE_LABEL}` })
       .click();
     await expect(page).toHaveURL(
-      new RegExp(`/buckets/${bucketName}/objects\\?key=${UPLOAD_FILE.name}$`),
+      (url) =>
+        url.pathname === `/buckets/${bucketName}/objects` &&
+        url.searchParams.get('key') === UPLOAD_FILE.name,
     );
   });
 });
