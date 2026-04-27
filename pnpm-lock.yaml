@@ -66,6 +66,9 @@ importers:
       '@aws-sdk/client-ssm':
         specifier: ^3.1031.0
         version: 3.1031.0
+      '@aws-sdk/util-dynamodb':
+        specifier: ^3.996.2
+        version: 3.996.2(@aws-sdk/client-dynamodb@3.1031.0)
       sst:
         specifier: ^4.5.12
         version: 4.5.12

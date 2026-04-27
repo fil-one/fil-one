@@ -65,6 +65,25 @@ export const WithDot: Story = {
   ),
 };
 
+export const WithDescription: Story = {
+  args: {
+    children: 'Data protection',
+    color: 'blue',
+    size: 'sm',
+    description: (
+      <>
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+          Data protection
+        </p>
+        <ul className="flex flex-col gap-0.5">
+          <li className="text-xs text-zinc-700">Prevent deletion</li>
+          <li className="text-xs text-zinc-700">Prevent overwrite</li>
+        </ul>
+      </>
+    ),
+  },
+};
+
 export const AllVariants: Story = {
   render: () => (
     <div className="flex flex-col gap-6">

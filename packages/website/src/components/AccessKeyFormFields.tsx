@@ -20,6 +20,8 @@ export function AccessKeyFormFields({ form, pinnedBucket }: AccessKeyFormFieldsP
     setKeyName,
     permissions,
     setPermissions,
+    granularPermissions,
+    setGranularPermissions,
     bucketScope,
     setBucketScope,
     selectedBuckets,
@@ -62,7 +64,12 @@ export function AccessKeyFormFields({ form, pinnedBucket }: AccessKeyFormFieldsP
         label="What can this key do?"
         error={permissions.length === 0 ? 'Select at least one permission.' : undefined}
       >
-        <AccessKeyPermissionsFields value={permissions} onChange={setPermissions} />
+        <AccessKeyPermissionsFields
+          value={permissions}
+          onChange={setPermissions}
+          granularPermissions={granularPermissions}
+          onGranularPermissionsChange={setGranularPermissions}
+        />
       </FormField>
 
       {/* Bucket scope */}
