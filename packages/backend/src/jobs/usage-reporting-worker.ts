@@ -2,7 +2,7 @@ import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { Resource } from 'sst';
-import { GB_BYTES, TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT } from '@filone/shared';
+import { GB_BYTES, TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT, formatBytes } from '@filone/shared';
 import { getStripeClient, updateCustomerMetadata } from '../lib/stripe-client.js';
 import {
   getStorageSamples,
@@ -123,7 +123,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
 
   await reportStorageToStripe(stripeCustomerId, averageStorageGbUsed);
 
-  const orgSyncAction = await safeSyncOrgMetadata({
+  const orgSyncAction = await syncOrgMetadata({
     stripeCustomerId,
     orgName,
     currentStorageBytes,
@@ -196,16 +196,15 @@ async function safeEnforceTrialLocks(params: {
   }
 }
 
-async function safeSyncOrgMetadata(params: {
+async function syncOrgMetadata(params: {
   stripeCustomerId: string;
   orgName: string | undefined;
   currentStorageBytes: number;
 }): Promise<string> {
   if (!params.orgName && params.currentStorageBytes === 0) return 'skipped:nothing-to-sync';
   try {
-    const storageGb = Math.round(params.currentStorageBytes / GB_BYTES);
     const metadata: Record<string, string> = {
-      [STRIPE_METADATA_KEYS.storageGb]: String(storageGb),
+      [STRIPE_METADATA_KEYS.storageUsed]: formatBytes(params.currentStorageBytes),
     };
     if (params.orgName) metadata[STRIPE_METADATA_KEYS.organizationName] = params.orgName;
     await updateCustomerMetadata(params.stripeCustomerId, metadata);

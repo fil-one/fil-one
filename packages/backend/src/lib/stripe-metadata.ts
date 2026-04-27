@@ -1,4 +1,4 @@
 export const STRIPE_METADATA_KEYS = {
-  storageGb: 'storage_gb',
+  storageUsed: 'storage_used',
   organizationName: 'organization_name',
 } as const;

@@ -386,7 +386,7 @@ describe('usage-reporting-worker', () => {
   // Org metadata sync to Stripe
   // -----------------------------------------------------------------------
   describe('org metadata sync', () => {
-    it('syncs organization_name and storage_gb to Stripe with latest snapshot', async () => {
+    it('syncs organization_name and storage to Stripe with latest snapshot', async () => {
       mockGetStorageSamples.mockResolvedValue([
         { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500_000_000_000 },
         { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1_500_000_000_000 },
@@ -397,7 +397,7 @@ describe('usage-reporting-worker', () => {
       expect(mockCustomersUpdate).toHaveBeenCalledOnce();
       expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
         metadata: {
-          storage_gb: '1500',
+          storage_used: '1.5 TB',
           organization_name: 'Acme Corp',
         },
       });
@@ -425,7 +425,7 @@ describe('usage-reporting-worker', () => {
       expect(item.orgSyncAction).toEqual({ S: 'skipped:nothing-to-sync' });
     });
 
-    it('syncs storage_gb only when org name missing', async () => {
+    it('syncs storage only when org name missing', async () => {
       mockGetStorageSamples.mockResolvedValue([
         { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 2_000_000_000_000 },
       ]);
@@ -434,7 +434,7 @@ describe('usage-reporting-worker', () => {
 
       expect(mockCustomersUpdate).toHaveBeenCalledOnce();
       expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
-        metadata: { storage_gb: '2000' },
+        metadata: { storage_used: '2 TB' },
       });
     });
 
@@ -449,7 +449,7 @@ describe('usage-reporting-worker', () => {
       expect(item.orgSyncAction).toEqual({ S: 'ok' });
     });
 
-    it('syncs sub-GB storage even when no org name (rounds to 0 but is not empty)', async () => {
+    it('syncs sub-GB storage with MB units', async () => {
       mockGetStorageSamples.mockResolvedValue([
         { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 100_000_000 }, // 100 MB
       ]);
@@ -458,10 +458,64 @@ describe('usage-reporting-worker', () => {
 
       expect(mockCustomersUpdate).toHaveBeenCalledOnce();
       expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
-        metadata: { storage_gb: '0' },
+        metadata: { storage_used: '100 MB' },
       });
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.orgSyncAction).toEqual({ S: 'ok' });
+    });
+
+    // ---------------------------------------------------------------------
+    // Adaptive unit selection — storage formatted in B / KB / MB / GB / TB
+    // ---------------------------------------------------------------------
+    describe('adaptive storage units', () => {
+      it.each([
+        { label: 'bytes', bytesUsed: 500, expected: '500 B' },
+        { label: 'kilobytes', bytesUsed: 1_000, expected: '1 KB' },
+        { label: 'kilobytes (fractional)', bytesUsed: 1_500, expected: '1.5 KB' },
+        { label: 'megabytes', bytesUsed: 5_200_000, expected: '5.2 MB' },
+        { label: 'megabytes (round)', bytesUsed: 100_000_000, expected: '100 MB' },
+        { label: 'gigabytes', bytesUsed: 10_000_000_000, expected: '10 GB' },
+        { label: 'gigabytes (fractional)', bytesUsed: 1_500_000_000, expected: '1.5 GB' },
+        { label: 'terabytes', bytesUsed: 1_000_000_000_000, expected: '1 TB' },
+        { label: 'terabytes (fractional)', bytesUsed: 2_500_000_000_000, expected: '2.5 TB' },
+      ])('formats $label as "$expected"', async ({ bytesUsed, expected }) => {
+        mockGetStorageSamples.mockResolvedValue([{ timestamp: '2024-01-01T00:00:00Z', bytesUsed }]);
+
+        await handler({ ...basePayload, orgName: undefined });
+
+        expect(mockCustomersUpdate).toHaveBeenCalledOnce();
+        expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
+          metadata: { storage_used: expected },
+        });
+      });
+
+      it('uses currentStorageBytes (latest sample), not the average', async () => {
+        // Two samples: average is 750 GB, latest snapshot is 1.5 TB
+        mockGetStorageSamples.mockResolvedValue([
+          { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 0 },
+          { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1_500_000_000_000 },
+        ]);
+
+        await handler({ ...basePayload, orgName: undefined });
+
+        expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
+          metadata: { storage_used: '1.5 TB' },
+        });
+      });
+
+      it('reports "0 B" when org name present and storage is zero', async () => {
+        mockGetStorageSamples.mockResolvedValue([]);
+
+        await handler(basePayload); // basePayload has orgName: 'Acme Corp'
+
+        expect(mockCustomersUpdate).toHaveBeenCalledOnce();
+        expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
+          metadata: {
+            storage_used: '0 B',
+            organization_name: 'Acme Corp',
+          },
+        });
+      });
     });
   });
 });
