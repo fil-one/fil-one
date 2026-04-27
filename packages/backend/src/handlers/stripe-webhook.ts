@@ -17,8 +17,8 @@ import {
   applyCancellationGracePeriod,
   resolveAuroraTenantId,
   resolveUserIdByStripeCustomer,
-} from './stripe-billing-helpers.js';
-import { bucketAttempt, emitDunningEscalation } from './stripe-dunning.js';
+} from '../lib/stripe-billing-helpers.js';
+import { bucketAttempt, emitDunningEscalation } from '../lib/stripe-dunning.js';
 
 const dynamo = getDynamoClient();
 

@@ -1,4 +1,4 @@
-import { reportMetric } from '../lib/metrics.js';
+import { reportMetric } from './metrics.js';
 
 export type DunningStage = 'entered' | 'retry' | 'recovered' | 'canceled';
 
