@@ -55,8 +55,8 @@ import { handler } from './usage-reporting-worker.js';
 
 const basePayload: UsageReportingWorkerPayload = {
   orgId: 'org-1',
-  auroraTenantId: 'aurora-tenant-123',
   orgName: 'Acme Corp',
+  auroraTenantId: 'aurora-tenant-123',
   subscriptionId: 'sub_123',
   stripeCustomerId: 'cus_123',
   currentPeriodStart: '2024-01-01T00:00:00Z',
