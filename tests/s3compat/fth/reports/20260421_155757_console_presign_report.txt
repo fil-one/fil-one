@@ -1,0 +1,78 @@
+======================================================================
+  Console Presigned-URL Test
+  Script : console_presign
+  Run    : 20260421_155757
+======================================================================
+
+SUMMARY
+  Total  : 23
+  OK     : 11
+  Failed : 12
+
+BY OPERATION
+  execute_deleteObject               0 ok     1 failed  (   1 total)  avg 0.398s  stddev 0.000s  min 0.398s  max 0.398s
+  execute_getObject                  0 ok     1 failed  (   1 total)  avg 0.389s  stddev 0.000s  min 0.389s  max 0.389s
+  execute_getObjectRetention         0 ok     1 failed  (   1 total)  avg 0.389s  stddev 0.000s  min 0.389s  max 0.389s
+  execute_headObject                 1 ok     0 failed  (   1 total)  avg 0.479s  stddev 0.000s  min 0.479s  max 0.479s
+  execute_headObjectFilMeta          1 ok     0 failed  (   1 total)  avg 0.485s  stddev 0.000s  min 0.485s  max 0.485s
+  execute_listObjects                1 ok     0 failed  (   1 total)  avg 0.403s  stddev 0.000s  min 0.403s  max 0.403s
+  execute_putObject                  1 ok     0 failed  (   1 total)  avg 0.460s  stddev 0.000s  min 0.460s  max 0.460s
+  preflight_deleteObject             0 ok     1 failed  (   1 total)  avg 0.393s  stddev 0.000s  min 0.393s  max 0.393s
+  preflight_putObject                0 ok     1 failed  (   1 total)  avg 0.402s  stddev 0.000s  min 0.402s  max 0.402s
+  presign_deleteObject               1 ok     0 failed  (   1 total)  avg 0.001s  stddev 0.000s  min 0.001s  max 0.001s
+  presign_getObject                  1 ok     0 failed  (   1 total)  avg 0.000s  stddev 0.000s  min 0.000s  max 0.000s
+  presign_getObjectRetention         1 ok     0 failed  (   1 total)  avg 0.001s  stddev 0.000s  min 0.001s  max 0.001s
+  presign_headObject                 1 ok     0 failed  (   1 total)  avg 0.001s  stddev 0.000s  min 0.001s  max 0.001s
+  presign_headObjectFilMeta          1 ok     0 failed  (   1 total)  avg 0.001s  stddev 0.000s  min 0.001s  max 0.001s
+  presign_listObjects                1 ok     0 failed  (   1 total)  avg 0.002s  stddev 0.000s  min 0.002s  max 0.002s
+  presign_putObject                  1 ok     0 failed  (   1 total)  avg 0.003s  stddev 0.000s  min 0.003s  max 0.003s
+  response_cors_deleteObject         0 ok     1 failed  (   1 total)  (no timing)
+  response_cors_getObject            0 ok     1 failed  (   1 total)  (no timing)
+  response_cors_getObjectRetention     0 ok     1 failed  (   1 total)  (no timing)
+  response_cors_headObject           0 ok     1 failed  (   1 total)  (no timing)
+  response_cors_headObjectFilMeta     0 ok     1 failed  (   1 total)  (no timing)
+  response_cors_listObjects          0 ok     1 failed  (   1 total)  (no timing)
+  response_cors_putObject            0 ok     1 failed  (   1 total)  (no timing)
+
+TEST RUN
+  Provider         : fth
+  Endpoint         : https://us-east-1.fortilyx.com
+  Bucket           : filone-mbajtos-04-21
+  Test key         : console-presign-test/3b8b0bc1-8766-43df-be38-3389b8fe66a3/probe.txt
+  Browser origin   : https://app.fil.one
+  Presign expiry   : 300s
+  CORS applied     : no (provider manages CORS out-of-band)
+
+BUCKET CORS CONFIGURATION (before test)
+  (provider returned NoSuchCORSConfiguration)
+
+SUCCESSES
+  {"ts": "2026-04-21T13:57:57.620402+00:00", "op": "presign_putObject", "status": "ok", "elapsed_s": 0.003, "s3_op": "put_object", "http_method": "PUT", "url_host": "us-east-1.fortilyx.com", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-21T13:57:58.482911+00:00", "op": "execute_putObject", "status": "ok", "elapsed_s": 0.46, "status_code": 200, "response_headers_lower": {"content-length": "0", "date": "Tue, 21 Apr 2026 13:57:56 GMT", "etag": "\"3fa6f61e4062b664e24811f5d6045e9b\""}}
+  {"ts": "2026-04-21T13:57:58.486566+00:00", "op": "presign_listObjects", "status": "ok", "elapsed_s": 0.002, "s3_op": "list_objects_v2", "http_method": "GET", "url_host": "us-east-1.fortilyx.com", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-21T13:57:58.890371+00:00", "op": "execute_listObjects", "status": "ok", "elapsed_s": 0.403, "status_code": 200, "response_headers_lower": {"content-length": "642", "content-type": "application/xml", "date": "Tue, 21 Apr 2026 13:57:57 GMT"}}
+  {"ts": "2026-04-21T13:57:58.892699+00:00", "op": "presign_headObject", "status": "ok", "elapsed_s": 0.001, "s3_op": "head_object", "http_method": "HEAD", "url_host": "us-east-1.fortilyx.com", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-21T13:57:59.372173+00:00", "op": "execute_headObject", "status": "ok", "elapsed_s": 0.479, "status_code": 200, "response_headers_lower": {"content-length": "41", "content-type": "text/plain", "date": "Tue, 21 Apr 2026 13:57:57 GMT", "etag": "\"3fa6f61e4062b664e24811f5d6045e9b\"", "last-modified": "Tue, 21 Apr 2026 13:57:56 GMT", "x-amz-meta-filename": "probe.txt"}}
+  {"ts": "2026-04-21T13:57:59.375316+00:00", "op": "presign_headObjectFilMeta", "status": "ok", "elapsed_s": 0.001, "s3_op": "head_object", "http_method": "HEAD", "url_host": "us-east-1.fortilyx.com", "signed_query_contains_fil_meta": true}
+  {"ts": "2026-04-21T13:57:59.860449+00:00", "op": "execute_headObjectFilMeta", "status": "ok", "elapsed_s": 0.485, "status_code": 200, "response_headers_lower": {"content-length": "41", "content-type": "text/plain", "date": "Tue, 21 Apr 2026 13:57:58 GMT", "etag": "\"3fa6f61e4062b664e24811f5d6045e9b\"", "last-modified": "Tue, 21 Apr 2026 13:57:56 GMT", "x-amz-meta-filename": "probe.txt"}}
+  {"ts": "2026-04-21T13:57:59.861659+00:00", "op": "presign_getObject", "status": "ok", "elapsed_s": 0.0, "s3_op": "get_object", "http_method": "GET", "url_host": "us-east-1.fortilyx.com", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-21T13:58:00.254130+00:00", "op": "presign_getObjectRetention", "status": "ok", "elapsed_s": 0.001, "s3_op": "get_object_retention", "http_method": "GET", "url_host": "us-east-1.fortilyx.com", "signed_query_contains_fil_meta": false}
+  {"ts": "2026-04-21T13:58:00.646448+00:00", "op": "presign_deleteObject", "status": "ok", "elapsed_s": 0.001, "s3_op": "delete_object", "http_method": "DELETE", "url_host": "us-east-1.fortilyx.com", "signed_query_contains_fil_meta": false}
+
+ERRORS
+  {"ts": "2026-04-21T13:57:58.022379+00:00", "op": "preflight_putObject", "status": "err", "error_code": "PreflightFailed", "error_message": "CORS preflight did not permit the request", "elapsed_s": 0.402, "request_method": "PUT", "request_headers": ["Content-Type", "x-amz-meta-filename"], "status_code": 403, "response_headers_lower": {"content-length": "9", "content-type": "text/plain; charset=utf-8", "date": "Tue, 21 Apr 2026 13:57:56 GMT"}, "allow_origin": "", "allow_methods": [], "allow_headers": [], "missing_request_headers": ["Content-Type", "x-amz-meta-filename"], "status_ok": false, "origin_ok": false, "method_ok": false, "headers_ok": false}
+  {"ts": "2026-04-21T13:57:58.483470+00:00", "op": "response_cors_putObject", "status": "err", "error_code": "ResponseCorsMissing", "error_message": "Response lacks CORS headers the browser needs", "status_code": 200, "allow_origin": "", "expose_headers": [], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": false, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-21T13:57:58.890733+00:00", "op": "response_cors_listObjects", "status": "err", "error_code": "ResponseCorsMissing", "error_message": "Response lacks CORS headers the browser needs", "status_code": 200, "allow_origin": "", "expose_headers": [], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": false, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-21T13:57:59.372660+00:00", "op": "response_cors_headObject", "status": "err", "error_code": "ResponseCorsMissing", "error_message": "Response lacks CORS headers the browser needs", "status_code": 200, "allow_origin": "", "expose_headers": [], "missing_expose_headers": ["etag", "content-length", "content-type", "last-modified"], "missing_response_meta_headers": [], "origin_ok": false, "expose_ok": false, "meta_ok": true}
+  {"ts": "2026-04-21T13:57:59.860714+00:00", "op": "response_cors_headObjectFilMeta", "status": "err", "error_code": "ResponseCorsMissing", "error_message": "Response lacks CORS headers the browser needs", "status_code": 200, "allow_origin": "", "expose_headers": [], "missing_expose_headers": ["etag", "content-length", "content-type", "last-modified", "x-fil-cid"], "missing_response_meta_headers": [], "origin_ok": false, "expose_ok": false, "meta_ok": true}
+  {"ts": "2026-04-21T13:58:00.251199+00:00", "op": "execute_getObject", "status": "err", "error_code": "HTTP 401", "error_message": "Unauthorized", "elapsed_s": 0.389, "status_code": 401, "response_headers_lower": {"content-length": "37", "content-type": "application/json", "date": "Tue, 21 Apr 2026 13:57:58 GMT"}}
+  {"ts": "2026-04-21T13:58:00.251694+00:00", "op": "response_cors_getObject", "status": "err", "error_code": "ResponseCorsMissing", "error_message": "Response lacks CORS headers the browser needs", "status_code": 401, "allow_origin": "", "expose_headers": [], "missing_expose_headers": ["etag", "content-length", "content-type", "last-modified"], "missing_response_meta_headers": [], "origin_ok": false, "expose_ok": false, "meta_ok": true}
+  {"ts": "2026-04-21T13:58:00.643807+00:00", "op": "execute_getObjectRetention", "status": "err", "error_code": "HTTP 401", "error_message": "Unauthorized", "elapsed_s": 0.389, "status_code": 401, "response_headers_lower": {"content-length": "37", "content-type": "application/json", "date": "Tue, 21 Apr 2026 13:57:58 GMT"}}
+  {"ts": "2026-04-21T13:58:00.644410+00:00", "op": "response_cors_getObjectRetention", "status": "err", "error_code": "ResponseCorsMissing", "error_message": "Response lacks CORS headers the browser needs", "status_code": 401, "allow_origin": "", "expose_headers": [], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": false, "expose_ok": true, "meta_ok": true}
+  {"ts": "2026-04-21T13:58:01.039837+00:00", "op": "preflight_deleteObject", "status": "err", "error_code": "PreflightFailed", "error_message": "CORS preflight did not permit the request", "elapsed_s": 0.393, "request_method": "DELETE", "request_headers": [], "status_code": 403, "response_headers_lower": {"content-length": "9", "content-type": "text/plain; charset=utf-8", "date": "Tue, 21 Apr 2026 13:57:59 GMT"}, "allow_origin": "", "allow_methods": [], "allow_headers": [], "missing_request_headers": [], "status_ok": false, "origin_ok": false, "method_ok": false, "headers_ok": true}
+  {"ts": "2026-04-21T13:58:01.438045+00:00", "op": "execute_deleteObject", "status": "err", "error_code": "HTTP 401", "error_message": "Unauthorized", "elapsed_s": 0.398, "status_code": 401, "response_headers_lower": {"content-length": "37", "content-type": "application/json", "date": "Tue, 21 Apr 2026 13:57:59 GMT"}}
+  {"ts": "2026-04-21T13:58:01.438599+00:00", "op": "response_cors_deleteObject", "status": "err", "error_code": "ResponseCorsMissing", "error_message": "Response lacks CORS headers the browser needs", "status_code": 401, "allow_origin": "", "expose_headers": [], "missing_expose_headers": [], "missing_response_meta_headers": [], "origin_ok": false, "expose_ok": true, "meta_ok": true}
+
+Log files:
+  Success : ../logs/20260421_155757_console_presign_success.jsonl
+  Errors  : ../logs/20260421_155757_console_presign_errors.jsonl

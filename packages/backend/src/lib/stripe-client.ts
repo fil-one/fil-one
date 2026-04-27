@@ -39,3 +39,11 @@ export function getStripeClient(): Stripe {
   cachedStripe = new Stripe(getBillingSecrets().STRIPE_SECRET_KEY);
   return cachedStripe;
 }
+
+export async function updateCustomerMetadata(
+  customerId: string,
+  metadata: Record<string, string>,
+): Promise<void> {
+  const stripe = getStripeClient();
+  await stripe.customers.update(customerId, { metadata });
+}

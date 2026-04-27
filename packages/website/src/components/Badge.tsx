@@ -1,8 +1,8 @@
 import clsx from 'clsx';
 
-export type BadgeColor = 'green' | 'blue' | 'red' | 'grey';
+export type BadgeColor = 'green' | 'blue' | 'red' | 'grey' | 'amber';
 export type BadgeSize = 'sm' | 'md' | 'lg';
-export type BadgeWeight = 'regular' | 'medium';
+export type BadgeWeight = 'regular' | 'medium' | 'semibold';
 
 type BadgeProps = {
   children: React.ReactNode;
@@ -18,6 +18,7 @@ const colorStyles: Record<BadgeColor, string> = {
   blue: 'bg-brand-50 text-brand-800',
   red: 'bg-red-50 text-red-800',
   grey: 'bg-zinc-100 text-zinc-700',
+  amber: 'bg-amber-50 text-amber-800',
 };
 
 const dotStyles: Record<BadgeColor, string> = {
@@ -25,6 +26,7 @@ const dotStyles: Record<BadgeColor, string> = {
   blue: 'bg-brand-500',
   red: 'bg-red-500',
   grey: 'bg-zinc-400',
+  amber: 'bg-amber-500',
 };
 
 const sizeStyles: Record<BadgeSize, string> = {
@@ -42,6 +44,7 @@ const dotSizeStyles: Record<BadgeSize, string> = {
 const weightStyles: Record<BadgeWeight, string> = {
   regular: 'font-normal',
   medium: 'font-medium',
+  semibold: 'font-semibold',
 };
 
 export function Badge({
