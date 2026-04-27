@@ -770,6 +770,7 @@ describe('stripe-webhook handler', () => {
         },
         UpdateExpression:
           'SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now',
+        ConditionExpression: 'attribute_exists(pk)',
         ExpressionAttributeValues: {
           ':status': { S: SubscriptionStatus.GracePeriod },
           ':now': { S: expect.any(String) },
@@ -890,6 +891,28 @@ describe('stripe-webhook handler', () => {
       expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
+
+    it('skips dunning metric and Aurora when no billing row exists (ConditionalCheckFailedException)', async () => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      const condError = new Error('Conditional check failed');
+      (condError as { name: string }).name = 'ConditionalCheckFailedException';
+      ddbMock.on(UpdateItemCommand, { TableName: TABLE_NAME }).rejects(condError);
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('No billing row to update for cancellation'),
+        expect.objectContaining({ userId: MOCK_USER_ID }),
+      );
+      expect(reportMetricMock).not.toHaveBeenCalled();
+      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      // Idempotency claim must NOT be released for an expected/handled outcome.
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      consoleSpy.mockRestore();
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -924,6 +947,7 @@ describe('stripe-webhook handler', () => {
         },
         UpdateExpression:
           'SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now',
+        ConditionExpression: 'attribute_exists(pk)',
         ExpressionAttributeValues: {
           ':status': { S: SubscriptionStatus.GracePeriod },
           ':now': { S: expect.any(String) },
