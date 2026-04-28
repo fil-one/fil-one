@@ -6,6 +6,7 @@ import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/
 
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
+import { MfaSettings } from '../components/MfaSettings';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { getMe, updateProfile, changePassword } from '../lib/api.js';
@@ -130,8 +131,8 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
 
   const { data: me, isPending } = useQuery({
-    queryKey: queryKeys.me,
-    queryFn: () => getMe(),
+    queryKey: queryKeys.meWithMfa,
+    queryFn: () => getMe({ include: 'mfa' }),
     staleTime: ME_STALE_TIME,
   });
 
@@ -167,7 +168,7 @@ export function SettingsPage() {
       if (result.orgName !== undefined) setOrgName(result.orgName);
 
       // Update the cache immediately so hasChanges goes false without waiting for refetch
-      queryClient.setQueryData<MeResponse>(queryKeys.me, (old) => {
+      const applyUpdate = (old: MeResponse | undefined): MeResponse | undefined => {
         if (!old) return old;
         return {
           ...old,
@@ -175,7 +176,9 @@ export function SettingsPage() {
           ...(result.email !== undefined ? { email: result.email } : {}),
           ...(result.orgName !== undefined ? { orgName: result.orgName } : {}),
         };
-      });
+      };
+      queryClient.setQueryData<MeResponse>(queryKeys.me, applyUpdate);
+      queryClient.setQueryData<MeResponse>(queryKeys.meWithMfa, applyUpdate);
 
       if (result.email) {
         toast.success('Profile updated. Check your inbox to verify your new email.');
@@ -344,20 +347,9 @@ export function SettingsPage() {
           description="Manage your account security"
         >
           <div className="flex flex-col gap-3">
-            {!social && (
+            {!social && me && (
               <>
-                <SettingRow
-                  label="Two-factor authentication"
-                  description="Add an extra layer of security to your account"
-                  action={
-                    <Button variant="ghost" disabled>
-                      Enable
-                    </Button>
-                  }
-                />
-                <p className="text-[11px] text-zinc-400 -mt-1">
-                  Requires Auth0 MFA configuration. Coming soon.
-                </p>
+                <MfaSettings me={me} />
                 <div className="h-px bg-[#e1e4ea]" />
               </>
             )}

@@ -323,7 +323,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              Version: '2.2',
+              Version: '2.3',
             },
           },
         },
@@ -597,6 +597,32 @@ export default $config({
       handler: 'resend-verification',
       extraLink: mgmtRuntimeResources,
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+
+    // ── MFA routes ──────────────────────────────────────────────────
+    addRoute({
+      method: 'POST',
+      routePath: '/api/mfa/enroll',
+      handler: 'enroll-mfa',
+      extraLink: mgmtRuntimeResources,
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/mfa/disable',
+      handler: 'disable-mfa',
+      extraLink: mgmtRuntimeResources,
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/mfa/enroll-email',
+      handler: 'enroll-email-mfa',
+      extraLink: mgmtRuntimeResources,
+    });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/mfa/enrollments/{enrollmentId}',
+      handler: 'delete-mfa-enrollment',
+      extraLink: mgmtRuntimeResources,
     });
 
     // ── Org routes ──────────────────────────────────────────────────

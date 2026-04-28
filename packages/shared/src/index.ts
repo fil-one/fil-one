@@ -24,6 +24,7 @@ export type { UsageLimits } from './constants.js';
 export { formatBytes, formatBytesShort } from './formatBytes.js';
 export type {
   MeResponse,
+  MfaEnrollment,
   ConfirmOrgRequest,
   ConfirmOrgResponse,
   UpdateProfileRequest,

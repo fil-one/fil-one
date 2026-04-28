@@ -259,6 +259,51 @@ pnpx sst dev
 
 Runs Lambda functions locally with live reload. Changes to handler code take effect immediately without redeploying.
 
+### Troubleshooting: CloudFormation Stack Stuck in Rollback
+
+The deploy-time setup Lambda (`setup-integrations`) runs as a CloudFormation custom resource. If it fails (e.g., missing Auth0 scopes, API errors), the CloudFormation stack enters `UPDATE_ROLLBACK_FAILED` state and blocks all future deploys.
+
+**To unblock:**
+
+1. Force the rollback to complete, skipping the failed resource:
+
+```bash
+aws cloudformation continue-update-rollback \
+  --stack-name <stack-name> \
+  --region us-east-2 \
+  --resources-to-skip Setup
+```
+
+The stack name is in the error output (e.g., `SetupStack-efd549a`).
+
+2. Wait for the stack to reach `UPDATE_ROLLBACK_COMPLETE`:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name <stack-name> \
+  --region us-east-2 \
+  --query 'Stacks[0].StackStatus'
+```
+
+3. Fix the underlying issue (grant missing scopes, etc.), then redeploy.
+
+### Troubleshooting: Auth0 Action / Login Issues
+
+If MFA enrollment or login flows aren't working as expected, check the Auth0 logs:
+
+1. Go to **Auth0 Dashboard > Monitoring > Logs**
+2. Look for recent login events — failed logins show as type `f` (Failed Login) or `fp` (Failed Login - Password)
+3. Expand the event to see:
+   - `description` — the error message (e.g., Action returned invalid data)
+   - `details.actions.executions` — confirms whether the Post-Login Action ran
+   - `details.error.message` — the specific failure reason
+
+Common issues:
+
+- **"Invalid MFA command"** — the `enrollWith()` / `challengeWith()` call signature is wrong. Auth0's Action runtime expects a single object (e.g., `{ type: 'otp' }`), not an array.
+- **Action not executing** — verify the Action is in the Login flow: **Actions > Triggers > Login**. Being in the Library is not enough — it must be dragged into the flow and **Apply** must be clicked.
+- **`mfa_enrolling` flag not set** — check the user's `app_metadata` in **User Management > Users > (user) > app_metadata**. The backend sets this when `POST /api/mfa/enroll` is called.
+
 ## ACM Certificate Provisioning & DNS Setup
 
 Custom domains require an ACM certificate in **us-east-1** (CloudFront requirement):
@@ -269,11 +314,12 @@ Example PR To add `staging.fil.one`: https://github.com/FilecoinFoundationWeb/Fi
 
 ## Auth0
 
-|                 |                                                                                                                   |
-| --------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Dev environment | **FilOneDev**                                                                                                     |
-| Tenant domain   | `dev-oar2nhqh58xf5pwf.us.auth0.com`                                                                               |
-| Dashboard       | https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ/settings |
+Two Auth0 tenants are used:
+
+| Environment | Tenant        | Domain                              | Dashboard                                                                                                                      |
+| ----------- | ------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Staging/dev | **FilOneDev** | `dev-oar2nhqh58xf5pwf.us.auth0.com` | [Dashboard](https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ/settings) |
+| Production  | **fil-one**   | `fil-one.us.auth0.com`              | [Dashboard](https://manage.auth0.com/dashboard/us/fil-one)                                                                     |
 
 Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecret`). See the "Set SST secrets" step above.
 
@@ -288,7 +334,9 @@ Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecre
 - **Identifier (audience)**: `app.fil.one` (prod) — this must match `AUTH0_AUDIENCE` in `sst.config.ts`. It's what makes Auth0 issue a JWT access token (instead of an opaque one) and is the `aud` claim the middleware validates.
 - Under the API's **Machine to Machine Applications** tab, authorize your application so it can exchange tokens.
 
-### Auth0 Machine-to-Machine (M2M) Application
+### Auth0 MFA Setup
+
+MFA is opt-in per user (database and social connections). Auth0 handles enrollment and challenge via Universal Login. See `docs/architectural-decisions/2026-03-mfa-enrollment.md` for the full architectural decision record.
 
 Two separate M2M applications are used to limit the scope of credentials exposed to Lambda functions.
 
@@ -296,14 +344,35 @@ Two separate M2M applications are used to limit the scope of credentials exposed
 
 Used only by the deploy-time setup Lambda to configure Auth0 on each deploy. Not available to runtime Lambda functions.
 
-**One-time setup in Auth0 Dashboard:**
+**1. Enable MFA factors** (Security > Multi-factor Auth) — manual, one-time per tenant:
 
-1. Go to **Applications > Create Application**
-2. Choose **Machine to Machine Applications**
-3. Name it something like `Fil.one Deploy Automation`
-4. Authorize it for the **Auth0 Management API** (`https://<tenant>.us.auth0.com/api/v2/`)
-5. Grant these scopes: `read:clients`, `update:clients`, `read:email_provider`, `create:email_provider`, `update:email_provider`
-6. Copy the **Client ID** and **Client Secret**
+- Enable **One-time Password** (authenticator apps)
+- Enable **WebAuthn with FIDO Security Keys** (passkeys/security keys)
+- Enable **WebAuthn with FIDO Device Biometrics** (fingerprint, Face ID)
+- Enable **Email** (one-time code)
+- Set policy to **"Never"** (MFA is controlled entirely by the Post-Login Action)
+- Under additional settings, enable **"Customize MFA Factors using Actions"**
+
+**2. Post-Login Action** — automated on deploy:
+
+The deploy-time setup Lambda (`setup-integrations`) automatically creates, deploys, and binds an `MFA Enrollment Trigger` Action to the Login flow (staging/production only). This Action checks `app_metadata.mfa_enrolling` on each login — when `true`, it triggers MFA enrollment via Universal Login and clears the flag after success. No manual Action setup is needed.
+
+### Auth0 Machine-to-Machine (M2M) Applications
+
+Two separate M2M applications per tenant limit the blast radius of credentials. The deploy-time app is only available to the setup Lambda; the runtime app is available to request-time handlers.
+
+#### Deploy automation (`Auth0MgmtClientId` / `Auth0MgmtClientSecret`)
+
+Used only by the deploy-time setup Lambda to configure Auth0 on each deploy.
+
+| Environment | App name          | Dashboard                                                                                                                     |
+| ----------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Staging     | `SSTSetupM2MApp`  | [Settings](https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/WaVEvlq7iAirQa15CPPZJX0leTKWPJgw/settings) |
+| Production  | Deploy Automation | [Settings](https://manage.auth0.com/dashboard/us/fil-one/applications/8t5J60CfojuktFBqppOseY8IzYQYYrcv/settings)              |
+
+**Required scopes** (Applications > M2M app > APIs > Auth0 Management API):
+
+`read:clients`, `update:clients`, `read:email_provider`, `create:email_provider`, `update:email_provider`, `create:actions`, `read:actions`, `update:actions`, `read:triggers`, `update:triggers`
 
 ```bash
 pnpx sst secret set Auth0MgmtClientId <M2M-client-id> [--stage <stage>]
@@ -312,16 +381,16 @@ pnpx sst secret set Auth0MgmtClientSecret <M2M-client-secret> [--stage <stage>]
 
 #### Runtime user management (`Auth0MgmtRuntimeClientId` / `Auth0MgmtRuntimeClientSecret`)
 
-Used by request-time Lambda handlers (`update-profile`, `resend-verification`) to manage user records and trigger verification emails.
+Used by request-time Lambda handlers (`update-profile`, `resend-verification`, `enroll-mfa`, `enroll-email-mfa`, `disable-mfa`, `delete-mfa-enrollment`) to manage user records, trigger verification emails, and manage MFA enrollments.
 
-**One-time setup in Auth0 Dashboard:**
+| Environment | App name    | Dashboard                                                                                                                     |
+| ----------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Staging     | Runtime M2M | [Settings](https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/CCONYSKqPecSTV8fxpfQJ7TLu6JseYSz/settings) |
+| Production  | Runtime M2M | [Settings](https://manage.auth0.com/dashboard/us/fil-one/applications/1VydX3EOVZDHmVF3IdKa7n7pzRuczj7O/settings)              |
 
-1. Go to **Applications > Create Application**
-2. Choose **Machine to Machine Applications**
-3. Name it something like `Fil.one Runtime`
-4. Authorize it for the **Auth0 Management API** (`https://<tenant>.us.auth0.com/api/v2/`)
-5. Grant these scopes: `update:users`, `create:user_tickets`
-6. Copy the **Client ID** and **Client Secret**
+**Required scopes** (Applications > M2M app > APIs > Auth0 Management API):
+
+`read:users`, `update:users`, `update:users_app_metadata`, `create:user_tickets`, `delete:users`, `delete:guardian_enrollments`, `read:authentication_methods`, `create:authentication_methods`, `delete:authentication_methods`
 
 ```bash
 pnpx sst secret set Auth0MgmtRuntimeClientId <M2M-client-id> [--stage <stage>]

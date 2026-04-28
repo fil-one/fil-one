@@ -10,8 +10,16 @@ export interface MeResponse {
   email?: string;
   orgSetupComplete: boolean;
   name?: string;
-  picture?: string;
   connectionType?: string;
+  mfaEnrollments: MfaEnrollment[];
+  picture?: string;
+}
+
+export interface MfaEnrollment {
+  id: string;
+  type: 'authenticator' | 'webauthn-roaming' | 'webauthn-platform' | 'email';
+  name?: string;
+  createdAt: string;
 }
 
 export const PROFILE_NAME_MAX_LENGTH = 200;

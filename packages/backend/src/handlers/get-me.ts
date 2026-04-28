@@ -9,7 +9,7 @@ import { triggerTenantSetup } from '../lib/trigger-tenant-setup.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { suggestOrgName } from '../lib/suggest-org-name.js';
-import { getConnectionType } from '../lib/auth0-management.js';
+import { getConnectionType, getMfaEnrollments } from '../lib/auth0-management.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -40,6 +40,11 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     }
   }
 
+  const connectionType = getConnectionType(sub);
+
+  const includeMfa = event.queryStringParameters?.include === 'mfa';
+  const enrollments = includeMfa ? await getMfaEnrollments(sub, { includeEmail: true }) : [];
+
   const body: MeResponse = {
     orgId,
     orgName,
@@ -48,6 +53,12 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     email,
     orgSetupComplete: isOrgSetupComplete(setupStatus),
     name,
+    mfaEnrollments: enrollments.map((e) => ({
+      id: e.id,
+      type: e.type as 'authenticator' | 'webauthn-roaming' | 'webauthn-platform' | 'email',
+      name: e.name,
+      createdAt: e.enrolled_at ?? '',
+    })),
     picture,
     connectionType: getConnectionType(sub),
   };

@@ -365,6 +365,11 @@ export function authMiddleware() {
       request.internal.refreshToken = refreshToken;
     }
 
+    // Stash refresh token so the after hook can force-refresh if a handler requests it
+    if (refreshToken) {
+      request.internal.refreshToken = refreshToken;
+    }
+
     const forceRefresh = event.queryStringParameters?.forceRefresh === '1';
 
     // Step 1: Validate existing access token (skip if forceRefresh — we need fresh claims)

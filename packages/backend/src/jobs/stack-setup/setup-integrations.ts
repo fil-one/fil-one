@@ -170,6 +170,13 @@ async function teardownStripeWebhook(
 
 // ── Auth0 helpers ─────────────────────────────────────────────────────
 
+async function throwIfNotOk(resp: Response, label: string): Promise<void> {
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`${label} (${resp.status}): ${body}`);
+  }
+}
+
 async function getAuth0ManagementToken(domain: string): Promise<string> {
   const resp = await fetch(`https://${domain}/oauth/token`, {
     method: 'POST',
@@ -182,10 +189,7 @@ async function getAuth0ManagementToken(domain: string): Promise<string> {
     }),
   });
 
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Auth0 management token request failed (${resp.status}): ${body}`);
-  }
+  await throwIfNotOk(resp, 'Auth0 management token request failed');
 
   const data = (await resp.json()) as { access_token: string };
   return data.access_token;
@@ -200,10 +204,7 @@ async function getAuth0Client(
     headers: { Authorization: `Bearer ${token}` },
   });
 
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Auth0 get client failed (${resp.status}): ${body}`);
-  }
+  await throwIfNotOk(resp, 'Auth0 get client failed');
 
   return (await resp.json()) as Auth0Client;
 }
@@ -223,10 +224,7 @@ async function patchAuth0Client(
     body: JSON.stringify(patch),
   });
 
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Auth0 update client failed (${resp.status}): ${body}`);
-  }
+  await throwIfNotOk(resp, 'Auth0 update client failed');
 }
 
 function addUnique(existing: string[], value: string): string[] {
@@ -317,16 +315,135 @@ async function setupAuth0EmailProvider(domain: string, isProduction: boolean): P
       body: JSON.stringify(payload),
     });
 
-    if (!postResp.ok) {
-      const body = await postResp.text();
-      throw new Error(`Auth0 email provider create failed (${postResp.status}): ${body}`);
-    }
+    await throwIfNotOk(postResp, 'Auth0 email provider create failed');
     return;
   }
 
-  if (!patchResp.ok) {
-    const body = await patchResp.text();
-    throw new Error(`Auth0 email provider update failed (${patchResp.status}): ${body}`);
+  await throwIfNotOk(patchResp, 'Auth0 email provider update failed');
+}
+
+// ── Auth0 MFA Action helper ──────────────────────────────────────────
+
+import { onExecutePostLogin } from './mfa-action.js';
+
+const MFA_ACTION_NAME = 'MFA Enrollment Trigger';
+
+// The handler is type-checked at compile time (see mfa-action.ts).
+// At runtime, Function.toString() returns the esbuild-compiled JS —
+// types stripped, ready for Auth0's Action sandbox.
+const MFA_ACTION_CODE = `exports.onExecutePostLogin = ${onExecutePostLogin.toString()}`;
+
+interface Auth0Action {
+  id: string;
+  name: string;
+  code: string;
+}
+
+interface Auth0Trigger {
+  bindings: { ref: { type: string; value: string }; display_name: string }[];
+}
+
+async function setupAuth0MfaAction(domain: string): Promise<void> {
+  const token = await getAuth0ManagementToken(domain);
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+
+  // Check if the action already exists
+  const listResp = await fetch(
+    `https://${domain}/api/v2/actions/actions?actionName=${encodeURIComponent(MFA_ACTION_NAME)}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+
+  await throwIfNotOk(listResp, 'Auth0 list actions failed');
+
+  const { actions } = (await listResp.json()) as { actions: Auth0Action[] };
+  const existing = actions.find((a) => a.name === MFA_ACTION_NAME);
+
+  let actionId: string;
+
+  if (existing) {
+    // Update if code has changed
+    if (existing.code.trim() !== MFA_ACTION_CODE) {
+      const updateResp = await fetch(`https://${domain}/api/v2/actions/actions/${existing.id}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ code: MFA_ACTION_CODE }),
+      });
+      await throwIfNotOk(updateResp, 'Auth0 update action failed');
+    }
+    actionId = existing.id;
+  } else {
+    // Create the action
+    const createResp = await fetch(`https://${domain}/api/v2/actions/actions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        name: MFA_ACTION_NAME,
+        supported_triggers: [{ id: 'post-login', version: 'v3' }],
+        code: MFA_ACTION_CODE,
+      }),
+    });
+    await throwIfNotOk(createResp, 'Auth0 create action failed');
+    const created = (await createResp.json()) as Auth0Action;
+    actionId = created.id;
+  }
+
+  // Wait for the action to be built before deploying.
+  // Auth0 compiles actions asynchronously after create/update.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const statusResp = await fetch(`https://${domain}/api/v2/actions/actions/${actionId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    await throwIfNotOk(statusResp, 'Auth0 get action status failed');
+    const action = (await statusResp.json()) as Auth0Action & { status: string };
+    if (action.status === 'built') break;
+    if (attempt === 9) {
+      throw new Error(
+        `Auth0 action did not reach 'built' state after 10 attempts (status: ${action.status})`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  // Deploy the action
+  const deployResp = await fetch(`https://${domain}/api/v2/actions/actions/${actionId}/deploy`, {
+    method: 'POST',
+    headers,
+  });
+  await throwIfNotOk(deployResp, 'Auth0 deploy action failed');
+
+  // Ensure the action is bound to the post-login trigger
+  const triggerResp = await fetch(`https://${domain}/api/v2/actions/triggers/post-login/bindings`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await throwIfNotOk(triggerResp, 'Auth0 get trigger bindings failed');
+
+  const trigger = (await triggerResp.json()) as Auth0Trigger;
+  const bindings = trigger.bindings ?? [];
+  const alreadyBound = bindings.some(
+    (b) => b.ref?.type === 'action_id' && b.ref?.value === actionId,
+  );
+
+  if (!alreadyBound) {
+    // Preserve existing bindings, filtering out any with missing refs
+    const existingBindings = bindings
+      .filter((b) => b.ref && b.display_name)
+      .map((b) => ({ ref: b.ref, display_name: b.display_name }));
+    const newBindings = [
+      ...existingBindings,
+      { ref: { type: 'action_id' as const, value: actionId }, display_name: MFA_ACTION_NAME },
+    ];
+
+    const bindResp = await fetch(`https://${domain}/api/v2/actions/triggers/post-login/bindings`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ bindings: newBindings }),
+    });
+    await throwIfNotOk(bindResp, 'Auth0 update trigger bindings failed');
   }
 }
 
@@ -395,6 +512,7 @@ async function handleSetup(
   ];
   if (ctx.isStagingOrProd) {
     tasks.push(setupAuth0EmailProvider(ctx.mgmtDomain, ctx.stage === 'production'));
+    tasks.push(setupAuth0MfaAction(ctx.mgmtDomain));
   }
 
   const [stripeResult] = await Promise.all(tasks);
