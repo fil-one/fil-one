@@ -44,7 +44,7 @@ The smoke suite verifies deploy-wiring concerns that unit and integration tests 
 We deliberately keep the destructive suite away from production. We have the following two layers of verification:
 
 1. **Staging as a proxy.** The cross-browser `full-*` run in `test-staging` exercises the same code on the same SST infrastructure that production uses. A green run there is the precondition for `deploy-production`.
-2. **Smoke against production.** The `smoke` project is non-destructive by design, so it can be pointed at `https://fil.one` to confirm the production stage actually serves traffic and is wired to the production Auth0 tenant.
+2. **Smoke against production.** The `smoke` project is non-destructive by design, so it can be pointed at `https://app.fil.one` to confirm the production stage actually serves traffic and is wired to the production Auth0 tenant.
 
 ## Consequences
 
