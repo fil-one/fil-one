@@ -25,6 +25,7 @@
     "test": "pnpm lint && pnpm --filter @filone/shared --filter @filone/backend --filter @filone/website test",
     "test:storybook": "pnpm --filter @filone/website test:storybook",
     "test:e2e": "pnpm exec sst shell -- pnpm exec playwright test",
+    "test:smoke": "pnpm exec playwright test --project=smoke",
     "test:integration": "pnpm --filter @filone/integration test"
   },
   "dependencies": {

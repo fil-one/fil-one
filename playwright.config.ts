@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 import { defineConfig, devices } from '@playwright/test';
 
 const isCI = !!process.env.CI;
@@ -6,26 +8,6 @@ const baseURL = process.env.BASE_URL;
 if (!baseURL) {
   throw new Error(
     'BASE_URL env var is required. Deploy an SST stage first, then run: BASE_URL=<url> pnpm test:e2e',
-  );
-}
-
-const REQUIRED_CREDENTIAL_VARS = [
-  'E2E_PAID_EMAIL',
-  'E2E_PAID_PASSWORD',
-  'E2E_PAID_USER_ID',
-  'E2E_UNPAID_EMAIL',
-  'E2E_UNPAID_PASSWORD',
-  'E2E_UNPAID_USER_ID',
-  'E2E_TRIAL_EMAIL',
-  'E2E_TRIAL_PASSWORD',
-  'E2E_TRIAL_USER_ID',
-] as const;
-
-const missingCredentials = REQUIRED_CREDENTIAL_VARS.filter((name) => !process.env[name]);
-if (missingCredentials.length > 0) {
-  throw new Error(
-    `Missing required E2E credential env vars: ${missingCredentials.join(', ')}. ` +
-      `See README.md for details.`,
   );
 }
 
@@ -42,24 +24,35 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
+    // setup for disruptive tests
     {
       name: 'setup',
       testMatch: /auth\.setup\.ts/,
     },
+    // `full-*` projects run both smoke and staging-only suites across all browsers.
     {
-      name: 'chromium',
+      name: 'full-chromium',
+      testDir: './tests/e2e',
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['setup'],
     },
     {
-      name: 'firefox',
+      name: 'full-firefox',
+      testDir: './tests/e2e',
       use: { ...devices['Desktop Firefox'] },
       dependencies: ['setup'],
     },
     {
-      name: 'webkit',
+      name: 'full-webkit',
+      testDir: './tests/e2e',
       use: { ...devices['Desktop Safari'] },
       dependencies: ['setup'],
+    },
+    // smoke tests executed in production
+    {
+      name: 'smoke',
+      testDir: './tests/e2e/smoke',
+      use: { ...devices['Desktop Chrome'] },
     },
   ],
 });

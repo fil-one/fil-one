@@ -40,11 +40,6 @@ jobs:
             echo "::error::Cannot deploy from fork ($HEAD_REPO)"
             exit 1
           fi
-          BASE_REF=$(echo "$PR_JSON" | jq -r '.baseRefName')
-          if [ "$BASE_REF" = "production" ]; then
-            echo "::error::Cannot deploy preview for PRs targeting production"
-            exit 1
-          fi
           echo "head-sha=$(echo "$PR_JSON" | jq -r '.headRefOid')" >> "$GITHUB_OUTPUT"
       - name: Post deployment started comment
         id: comment

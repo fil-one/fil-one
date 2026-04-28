@@ -6,6 +6,8 @@ import {
   UNLIMITED,
   getUsageLimits,
   getS3Endpoint,
+  getAuth0Domain,
+  getStageFromHostname,
   S3Region,
   Stage,
 } from './constants.js';
@@ -74,4 +76,38 @@ describe('getS3Endpoint', () => {
   it('returns the dev URL for arbitrary non-production stage strings', () => {
     expect(getS3Endpoint(S3Region.EuWest1, 'dev')).toBe('https://s3.dev.aur.lu');
   });
+});
+
+describe('getAuth0Domain', () => {
+  const nonProductionStages = [Stage.Staging, 'dev', 'pr-42', ''];
+
+  it('returns the production custom domain for Stage.Production', () => {
+    expect(getAuth0Domain(Stage.Production)).toBe('auth.fil.one');
+  });
+
+  for (const stage of nonProductionStages) {
+    it(`returns the shared dev tenant domain for stage "${stage}"`, () => {
+      expect(getAuth0Domain(stage)).toBe('dev-oar2nhqh58xf5pwf.us.auth0.com');
+    });
+  }
+});
+
+describe('getStageFromHostname', () => {
+  it('returns Production for "app.fil.one"', () => {
+    expect(getStageFromHostname('app.fil.one')).toBe(Stage.Production);
+  });
+
+  const nonProductionHostnames = [
+    'staging.fil.one',
+    'pr-42.fil.one',
+    'localhost',
+    'd123abc.cloudfront.net',
+    '',
+  ];
+
+  for (const hostname of nonProductionHostnames) {
+    it(`returns Staging for "${hostname}"`, () => {
+      expect(getStageFromHostname(hostname)).toBe(Stage.Staging);
+    });
+  }
 });

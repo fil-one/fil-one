@@ -163,7 +163,7 @@ export default $config({
       },
     });
 
-    const { getS3Endpoint, S3_REGION, Stage } = await import('@filone/shared');
+    const { getAuth0Domain, getS3Endpoint, S3_REGION, Stage } = await import('@filone/shared');
     const auroraS3GatewayUrl = getS3Endpoint(
       S3_REGION,
       isProduction ? Stage.Production : Stage.Staging,
@@ -280,7 +280,7 @@ export default $config({
 
     const siteUrl = router.url;
 
-    const auth0Domain = isProduction ? 'auth.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
+    const auth0Domain = getAuth0Domain($app.stage);
     // Auth0 Management API requires the canonical tenant domain — custom domains don't support /api/v2/
     const auth0MgmtDomain = isProduction ? 'fil-one.us.auth0.com' : auth0Domain;
 

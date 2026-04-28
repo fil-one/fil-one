@@ -4,6 +4,26 @@ import path from 'node:path';
 import { STORAGE_STATE, type Role } from './roles.ts';
 import { resetBillingState } from './billing-reset.ts';
 
+const REQUIRED_CREDENTIAL_VARS = [
+  'E2E_PAID_EMAIL',
+  'E2E_PAID_PASSWORD',
+  'E2E_PAID_USER_ID',
+  'E2E_UNPAID_EMAIL',
+  'E2E_UNPAID_PASSWORD',
+  'E2E_UNPAID_USER_ID',
+  'E2E_TRIAL_EMAIL',
+  'E2E_TRIAL_PASSWORD',
+  'E2E_TRIAL_USER_ID',
+] as const;
+
+const missingCredentials = REQUIRED_CREDENTIAL_VARS.filter((name) => !process.env[name]);
+if (missingCredentials.length > 0) {
+  throw new Error(
+    `Missing required E2E credential env vars: ${missingCredentials.join(', ')}. ` +
+      `See README.md for details.`,
+  );
+}
+
 const roles: ReadonlyArray<{
   name: Role;
   email: string;
