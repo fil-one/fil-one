@@ -98,7 +98,7 @@ jobs:
 
   deploy-staging:
     if: github.ref == 'refs/heads/main'
-    needs: [check-packages]
+    needs: [check-packages, check-storybook]
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-staging
