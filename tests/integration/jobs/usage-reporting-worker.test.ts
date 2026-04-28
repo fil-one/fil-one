@@ -99,7 +99,7 @@ describe('Usage Reporting Worker (direct Lambda invoke)', () => {
     }
   });
 
-  it('syncs storage_gb and organization_name to Stripe customer metadata', async () => {
+  it('syncs storage_used and organization_name to Stripe customer metadata', async () => {
     const syncOrgId = `test-urw-sync-${crypto.randomUUID().slice(0, 8)}`;
     const orgName = `Integration Test Org ${crypto.randomUUID().slice(0, 8)}`;
 
