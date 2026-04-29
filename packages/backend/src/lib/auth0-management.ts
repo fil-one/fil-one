@@ -148,18 +148,25 @@ export const MFA_GUARDIAN_TYPES = new Set([
   'webauthn-platform',
 ]);
 
-// Types to include when listing for the UI (includes email)
-const MFA_ALL_TYPES = new Set([...MFA_GUARDIAN_TYPES, 'email']);
+interface Auth0AuthenticationMethod {
+  id: string;
+  type: string;
+  name?: string;
+  email?: string;
+  confirmed?: boolean;
+  created_at?: string;
+}
 
 /**
- * List MFA Guardian enrollments for a user.
- * Uses /api/v2/users/{id}/enrollments — the only endpoint that returns
- * Guardian-enrolled factors. The /authentication-methods endpoint does NOT
- * reflect Guardian enrollments, and guardian_authenticators is not returned
- * by the Management API (only visible in the Dashboard UI).
+ * List MFA enrollments for a user.
  *
- * By default filters to independent MFA types (OTP, WebAuthn).
- * Pass includeEmail: true to also return email enrollments for the UI.
+ * Auth0 stores MFA factors in two places:
+ *   - Guardian enrollments (OTP, WebAuthn) live under /api/v2/users/{id}/enrollments
+ *   - Email factors live under /api/v2/users/{id}/authentication-methods
+ *
+ * The /authentication-methods endpoint does NOT mirror Guardian enrollments,
+ * and the Guardian /enrollments endpoint does not include email — so to get a
+ * complete picture for the UI we need to query both when includeEmail is true.
  */
 export async function getMfaEnrollments(
   sub: string,
@@ -167,19 +174,45 @@ export async function getMfaEnrollments(
 ): Promise<GuardianEnrollment[]> {
   const domain = getDomain();
   const token = await getManagementToken();
-  const resp = await fetch(
-    `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/enrollments`,
-    { headers: { Authorization: `Bearer ${token}` } },
+  const headers = { Authorization: `Bearer ${token}` };
+  const userPath = `/api/v2/users/${encodeURIComponent(sub)}`;
+
+  const guardianFetch = fetch(`https://${domain}${userPath}/enrollments`, { headers });
+  const emailFetch = options?.includeEmail
+    ? fetch(`https://${domain}${userPath}/authentication-methods`, { headers })
+    : null;
+
+  const guardianResp = await guardianFetch;
+  if (!guardianResp.ok) {
+    const body = await guardianResp.text();
+    throw new Error(`Auth0 list enrollments failed (${guardianResp.status}): ${body}`);
+  }
+  const guardianEnrollments = (await guardianResp.json()) as GuardianEnrollment[];
+  const result = guardianEnrollments.filter(
+    (e) => e.status === 'confirmed' && MFA_GUARDIAN_TYPES.has(e.type),
   );
 
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Auth0 list enrollments failed (${resp.status}): ${body}`);
+  if (emailFetch) {
+    const emailResp = await emailFetch;
+    if (!emailResp.ok) {
+      const body = await emailResp.text();
+      throw new Error(`Auth0 list authentication methods failed (${emailResp.status}): ${body}`);
+    }
+    const methods = (await emailResp.json()) as Auth0AuthenticationMethod[];
+    for (const m of methods) {
+      if (m.type === 'email' && m.confirmed !== false) {
+        result.push({
+          id: m.id,
+          type: 'email',
+          status: 'confirmed',
+          name: m.name ?? m.email,
+          enrolled_at: m.created_at,
+        });
+      }
+    }
   }
 
-  const types = options?.includeEmail ? MFA_ALL_TYPES : MFA_GUARDIAN_TYPES;
-  const enrollments = (await resp.json()) as GuardianEnrollment[];
-  return enrollments.filter((e) => e.status === 'confirmed' && types.has(e.type));
+  return result;
 }
 
 /**

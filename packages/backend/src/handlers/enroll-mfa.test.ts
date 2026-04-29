@@ -8,10 +8,12 @@ import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 
 const mockGetMfaEnrollments = vi.fn();
 const mockFlagMfaEnrollment = vi.fn();
+const mockDeleteAuthenticationMethod = vi.fn();
 vi.mock('../lib/auth0-management.js', () => ({
   getConnectionType: (sub: string) => sub.split('|')[0] ?? 'unknown',
   getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
   flagMfaEnrollment: (...args: unknown[]) => mockFlagMfaEnrollment(...args),
+  deleteAuthenticationMethod: (...args: unknown[]) => mockDeleteAuthenticationMethod(...args),
 }));
 
 vi.mock('sst', () => ({
@@ -145,7 +147,7 @@ describe('POST /api/mfa/enroll handler', () => {
     expect(mockFlagMfaEnrollment).toHaveBeenCalledWith(MOCK_SOCIAL_SUB);
   });
 
-  it('returns 400 and does not flag enrollment when MFA is already enabled', async () => {
+  it('returns 400 and does not flag enrollment when a strong MFA factor is already enabled', async () => {
     setupAuthMocks();
     mockGetMfaEnrollments.mockResolvedValue([
       { id: 'test', type: 'authenticator', status: 'confirmed' },
@@ -158,5 +160,26 @@ describe('POST /api/mfa/enroll handler', () => {
       body: JSON.stringify({ message: 'MFA is already enabled.' }),
     });
     expect(mockFlagMfaEnrollment).not.toHaveBeenCalled();
+    expect(mockDeleteAuthenticationMethod).not.toHaveBeenCalled();
+  });
+
+  it('removes the email factor and flags enrollment when only email MFA is enrolled', async () => {
+    setupAuthMocks();
+    mockGetMfaEnrollments.mockResolvedValue([
+      { id: 'email|am-1', type: 'email', status: 'confirmed' },
+    ]);
+    mockDeleteAuthenticationMethod.mockResolvedValue(undefined);
+    mockFlagMfaEnrollment.mockResolvedValue(undefined);
+
+    const result = await handler(enrollMfaEvent(), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({
+        message: 'MFA enrollment flag set. Client should redirect to Auth0.',
+      }),
+    });
+    expect(mockDeleteAuthenticationMethod).toHaveBeenCalledWith(MOCK_SUB, 'email|am-1');
+    expect(mockFlagMfaEnrollment).toHaveBeenCalledWith(MOCK_SUB);
   });
 });

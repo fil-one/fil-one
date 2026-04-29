@@ -122,14 +122,17 @@ describe('getMfaEnrollments', () => {
     vi.clearAllMocks();
   });
 
-  it('returns only confirmed MFA-type enrollments (excludes email by default)', async () => {
+  it('returns only confirmed Guardian MFA enrollments (does not query authentication-methods by default)', async () => {
     setupFetchMock([
+      {
+        match: '/authentication-methods',
+        response: new Response('Should not be called', { status: 500 }),
+      },
       {
         match: '/enrollments',
         response: new Response(
           JSON.stringify([
             { id: 'otp|1', type: 'authenticator', status: 'confirmed', name: 'My OTP' },
-            { id: 'email|2', type: 'email', status: 'confirmed', name: 'auto email' },
             { id: 'webauthn|3', type: 'webauthn-roaming', status: 'confirmed', name: 'My key' },
             { id: 'otp|4', type: 'authenticator', status: 'unconfirmed' },
           ]),
@@ -146,14 +149,30 @@ describe('getMfaEnrollments', () => {
     ]);
   });
 
-  it('includes email enrollments when includeEmail is true', async () => {
+  it('includes email authentication-methods when includeEmail is true', async () => {
     setupFetchMock([
+      {
+        match: '/authentication-methods',
+        response: new Response(
+          JSON.stringify([
+            {
+              id: 'email|am-1',
+              type: 'email',
+              name: 'Email',
+              email: 'user@example.com',
+              confirmed: true,
+              created_at: '2026-04-01T00:00:00.000Z',
+            },
+            { id: 'pwd|am-2', type: 'password', confirmed: true },
+          ]),
+          { status: 200 },
+        ),
+      },
       {
         match: '/enrollments',
         response: new Response(
           JSON.stringify([
             { id: 'otp|1', type: 'authenticator', status: 'confirmed', name: 'My OTP' },
-            { id: 'email|2', type: 'email', status: 'confirmed', name: 'auto email' },
             { id: 'webauthn|3', type: 'webauthn-roaming', status: 'confirmed', name: 'My key' },
           ]),
           { status: 200 },
@@ -165,8 +184,50 @@ describe('getMfaEnrollments', () => {
 
     expect(result).toEqual([
       { id: 'otp|1', type: 'authenticator', status: 'confirmed', name: 'My OTP' },
-      { id: 'email|2', type: 'email', status: 'confirmed', name: 'auto email' },
       { id: 'webauthn|3', type: 'webauthn-roaming', status: 'confirmed', name: 'My key' },
+      {
+        id: 'email|am-1',
+        type: 'email',
+        status: 'confirmed',
+        name: 'Email',
+        enrolled_at: '2026-04-01T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('returns email-only enrollment when no Guardian factors exist', async () => {
+    setupFetchMock([
+      {
+        match: '/authentication-methods',
+        response: new Response(
+          JSON.stringify([
+            {
+              id: 'email|am-1',
+              type: 'email',
+              email: 'user@example.com',
+              confirmed: true,
+              created_at: '2026-04-01T00:00:00.000Z',
+            },
+          ]),
+          { status: 200 },
+        ),
+      },
+      {
+        match: '/enrollments',
+        response: new Response(JSON.stringify([]), { status: 200 }),
+      },
+    ]);
+
+    const result = await getMfaEnrollments('auth0|abc123', { includeEmail: true });
+
+    expect(result).toEqual([
+      {
+        id: 'email|am-1',
+        type: 'email',
+        status: 'confirmed',
+        name: 'user@example.com',
+        enrolled_at: '2026-04-01T00:00:00.000Z',
+      },
     ]);
   });
 
@@ -174,10 +235,7 @@ describe('getMfaEnrollments', () => {
     setupFetchMock([
       {
         match: '/enrollments',
-        response: new Response(
-          JSON.stringify([{ id: 'email|1', type: 'email', status: 'confirmed' }]),
-          { status: 200 },
-        ),
+        response: new Response(JSON.stringify([]), { status: 200 }),
       },
     ]);
 
@@ -186,7 +244,7 @@ describe('getMfaEnrollments', () => {
     expect(result).toEqual([]);
   });
 
-  it('throws on API error', async () => {
+  it('throws on enrollments API error', async () => {
     setupFetchMock([
       {
         match: '/enrollments',
@@ -196,6 +254,23 @@ describe('getMfaEnrollments', () => {
 
     await expect(getMfaEnrollments('auth0|abc123')).rejects.toThrow(
       'Auth0 list enrollments failed (403): Forbidden',
+    );
+  });
+
+  it('throws on authentication-methods API error when includeEmail is true', async () => {
+    setupFetchMock([
+      {
+        match: '/authentication-methods',
+        response: new Response('Forbidden', { status: 403 }),
+      },
+      {
+        match: '/enrollments',
+        response: new Response(JSON.stringify([]), { status: 200 }),
+      },
+    ]);
+
+    await expect(getMfaEnrollments('auth0|abc123', { includeEmail: true })).rejects.toThrow(
+      'Auth0 list authentication methods failed (403): Forbidden',
     );
   });
 });
@@ -348,12 +423,16 @@ describe('deleteAllAuthenticators', () => {
     mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
       const urlStr = String(url);
       if (urlStr.includes('/oauth/token')) return mockTokenResponse();
+      if (urlStr.endsWith('/authentication-methods') && (!init?.method || init.method === 'GET')) {
+        return new Response(JSON.stringify([{ id: 'email|3', type: 'email', confirmed: true }]), {
+          status: 200,
+        });
+      }
       if (urlStr.includes('/enrollments') && (!init?.method || init.method === 'GET')) {
         return new Response(
           JSON.stringify([
             { id: 'otp|1', type: 'authenticator', status: 'confirmed' },
             { id: 'webauthn|2', type: 'webauthn-roaming', status: 'confirmed' },
-            { id: 'email|3', type: 'email', status: 'confirmed' },
           ]),
           { status: 200 },
         );
@@ -394,11 +473,13 @@ describe('deleteAllAuthenticators', () => {
     mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
       const urlStr = String(url);
       if (urlStr.includes('/oauth/token')) return mockTokenResponse();
+      if (urlStr.endsWith('/authentication-methods') && (!init?.method || init.method === 'GET')) {
+        return new Response(JSON.stringify([{ id: 'email|1', type: 'email', confirmed: true }]), {
+          status: 200,
+        });
+      }
       if (urlStr.includes('/enrollments') && (!init?.method || init.method === 'GET')) {
-        return new Response(
-          JSON.stringify([{ id: 'email|1', type: 'email', status: 'confirmed' }]),
-          { status: 200 },
-        );
+        return new Response(JSON.stringify([]), { status: 200 });
       }
       if (urlStr.includes('/authentication-methods/') && init?.method === 'DELETE') {
         authMethodDeletedUrls.push(urlStr);

@@ -46,12 +46,19 @@ export async function onExecutePostLogin(event: PostLoginEvent, api: PostLoginAp
   const hasMfa = enrolledFactors.length > 0;
   const mfaEnrolling = event.user.app_metadata?.mfa_enrolling === true;
 
+  // Email is the weakest factor (same channel as password reset). Only allow
+  // the email challenge when the user has nothing stronger enrolled — otherwise
+  // anyone with the password could downgrade to email.
+  const strongFactorTypes = new Set(['otp', 'webauthn-roaming', 'webauthn-platform']);
+  const hasStrongFactor = enrolledFactors.some((f) => strongFactorTypes.has(f.type));
   const challengeTypes: MfaFactor[] = [
     { type: 'otp' },
     { type: 'webauthn-roaming' },
     { type: 'webauthn-platform' },
-    { type: 'email' },
   ];
+  if (!hasStrongFactor) {
+    challengeTypes.push({ type: 'email' });
+  }
 
   if (mfaEnrolling && !hasMfa) {
     // User clicked "Enable with authenticator/key" — let them choose.

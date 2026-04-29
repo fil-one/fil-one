@@ -60,7 +60,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       createdAt: e.enrolled_at ?? '',
     })),
     picture,
-    connectionType: getConnectionType(sub),
+    connectionType,
   };
 
   // Only include suggested name if org is not yet confirmed

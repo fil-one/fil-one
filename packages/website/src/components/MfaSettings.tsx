@@ -42,6 +42,55 @@ function SettingRow({
   );
 }
 
+function EnrollmentRow({
+  enrollment,
+  isConfirming,
+  onRequestRemove,
+  onConfirmRemove,
+  onCancelRemove,
+}: {
+  enrollment: MfaEnrollment;
+  isConfirming: boolean;
+  onRequestRemove: () => void;
+  onConfirmRemove: () => void;
+  onCancelRemove: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-md border border-[#e1e4ea] bg-zinc-50 px-3 py-2">
+      <div>
+        <p className="text-[13px] font-medium text-zinc-900">
+          {formatEnrollmentType(enrollment.type)}
+        </p>
+        <p className="text-[11px] text-zinc-500">
+          {enrollment.name ? `${enrollment.name} — ` : ''}
+          Added {new Date(enrollment.createdAt).toLocaleDateString()}
+        </p>
+      </div>
+      {isConfirming ? (
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-zinc-500">Remove?</span>
+          <button
+            className="text-[11px] text-red-600 font-medium hover:text-red-700"
+            onClick={onConfirmRemove}
+          >
+            Yes
+          </button>
+          <button
+            className="text-[11px] text-zinc-500 hover:text-zinc-700"
+            onClick={onCancelRemove}
+          >
+            No
+          </button>
+        </div>
+      ) : (
+        <Button variant="ghost" size="sm" onClick={onRequestRemove}>
+          Remove
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // eslint-disable-next-line complexity/complexity
 export function MfaSettings({ me }: { me: MeResponse }) {
   const { toast } = useToast();
@@ -49,6 +98,10 @@ export function MfaSettings({ me }: { me: MeResponse }) {
 
   const [confirmDisable, setConfirmDisable] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmReplaceEmail, setConfirmReplaceEmail] = useState(false);
+
+  const onlyEmailEnrolled =
+    me.mfaEnrollments.length > 0 && me.mfaEnrollments.every((e) => e.type === 'email');
 
   const enrollMfaMutation = useMutation({
     mutationFn: () => enrollMfa(),
@@ -99,6 +152,15 @@ export function MfaSettings({ me }: { me: MeResponse }) {
   });
 
   function handleEnrollMfa() {
+    if (onlyEmailEnrolled) {
+      setConfirmReplaceEmail(true);
+      return;
+    }
+    enrollMfaMutation.mutate();
+  }
+
+  function handleConfirmReplaceEmail() {
+    setConfirmReplaceEmail(false);
     enrollMfaMutation.mutate();
   }
 
@@ -133,43 +195,39 @@ export function MfaSettings({ me }: { me: MeResponse }) {
             </Button>
           }
         />
+        {confirmReplaceEmail ? (
+          <div className="flex flex-col gap-1 ml-0.5 mb-1">
+            <span className="text-[11px] text-zinc-700">
+              Enabling an authenticator or security key will replace your email two-factor
+              authentication. Continue?
+            </span>
+            <div className="flex items-center gap-3">
+              <button
+                className="text-[11px] text-red-600 font-medium hover:text-red-700"
+                onClick={handleConfirmReplaceEmail}
+                disabled={enrollMfaMutation.isPending}
+              >
+                {enrollMfaMutation.isPending ? 'Redirecting...' : 'Replace email MFA'}
+              </button>
+              <button
+                className="text-[11px] text-zinc-500 hover:text-zinc-700"
+                onClick={() => setConfirmReplaceEmail(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
         <div className="flex flex-col gap-2 ml-0.5">
           {me.mfaEnrollments.map((enrollment) => (
-            <div
+            <EnrollmentRow
               key={enrollment.id}
-              className="flex items-center justify-between rounded-md border border-[#e1e4ea] bg-zinc-50 px-3 py-2"
-            >
-              <div>
-                <p className="text-[13px] font-medium text-zinc-900">
-                  {formatEnrollmentType(enrollment.type)}
-                </p>
-                <p className="text-[11px] text-zinc-500">
-                  {enrollment.name ? `${enrollment.name} — ` : ''}
-                  Added {new Date(enrollment.createdAt).toLocaleDateString()}
-                </p>
-              </div>
-              {confirmDeleteId === enrollment.id ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-zinc-500">Remove?</span>
-                  <button
-                    className="text-[11px] text-red-600 font-medium hover:text-red-700"
-                    onClick={() => handleDeleteEnrollment(enrollment)}
-                  >
-                    Yes
-                  </button>
-                  <button
-                    className="text-[11px] text-zinc-500 hover:text-zinc-700"
-                    onClick={() => setConfirmDeleteId(null)}
-                  >
-                    No
-                  </button>
-                </div>
-              ) : (
-                <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(enrollment.id)}>
-                  Remove
-                </Button>
-              )}
-            </div>
+              enrollment={enrollment}
+              isConfirming={confirmDeleteId === enrollment.id}
+              onRequestRemove={() => setConfirmDeleteId(enrollment.id)}
+              onConfirmRemove={() => handleDeleteEnrollment(enrollment)}
+              onCancelRemove={() => setConfirmDeleteId(null)}
+            />
           ))}
           {confirmDisable ? (
             <div className="flex items-center gap-2 self-start">
