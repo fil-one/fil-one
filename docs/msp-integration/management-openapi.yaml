@@ -1,0 +1,806 @@
+openapi: 3.1.0
+info:
+  title: FilOne MSP Management API
+  version: 0.1.0
+  description: |
+    Management API that an MSP (managed service provider) must implement
+    so FilOne can integrate it as a new region. Covers:
+
+      * Tenant lifecycle (create + setup, status, info)
+      * Per-tenant API key issuance
+      * S3 access-key management
+      * Usage metering (storage, egress)
+
+    Bucket and object operations are out of scope: clients drive them
+    over the MSP's S3 Gateway directly.
+
+    ## Authentication
+
+    Two API keys are used. Both are sent as bearer tokens in the
+    standard `Authorization: Bearer <token>` header.
+
+      * **Partner key** — global, partner-scoped admin credential. Used for
+        tenant lifecycle, status changes, per-tenant API-key issuance, and
+        metrics queries.
+      * **Tenant key** — tenant-scoped credential issued via
+        `POST /tenants/{tenantId}/api-keys`. Used for S3 access-key
+        management. The MSP must reject any request whose path
+        `tenantId` differs from the tenant the key was issued for.
+
+    ## Idempotency
+
+    Every operation is safely retryable end-to-end:
+
+      * `POST /tenants` returns the existing tenant when called with a
+        `tenantId` that already exists.
+      * `POST /tenants/{tenantId}/status` is a no-op when the tenant is
+        already in the requested status.
+      * `DELETE /tenants/{tenantId}` returns 204 even if the tenant is
+        already gone.
+      * `POST /tenants/{tenantId}/access-keys` returns 409 on duplicate
+        `name`; the caller can recover via list + get.
+      * `DELETE /tenants/{tenantId}/access-keys/{accessKeyId}` returns 204
+        even if the key was already deleted.
+
+    ## Out of scope
+
+      * Bucket and object operations — handled by the S3 Gateway.
+      * S3 Gateway telemetry (TTFB, error rates, RPS) — delivered via the
+        partner's observability stack, not this API.
+
+servers:
+  - url: https://{region}.api.example.com/v1
+    description: Per-region management API endpoint.
+    variables:
+      region:
+        default: example
+        description: Region identifier (matches the FilOne S3 region label).
+
+security:
+  - PartnerKey: []
+
+tags:
+  - name: Tenants
+    description: Tenant lifecycle and information.
+  - name: API Keys
+    description: Issuance of per-tenant management API keys.
+  - name: Access Keys
+    description: S3 access-key CRUD scoped to a single tenant.
+  - name: Metrics
+    description: Usage metering for storage and egress.
+
+paths:
+  /tenants:
+    post:
+      tags: [Tenants]
+      summary: Create and set up a tenant
+      description: |
+        Provisions a tenant and runs all setup steps synchronously. The
+        response is returned only after the tenant is fully operational —
+        the S3 gateway accepts traffic and access-key issuance is
+        available.
+
+        Idempotent on `tenantId`: a second call with the same identifier
+        returns the existing tenant rather than failing.
+      security:
+        - PartnerKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantRequest'
+      responses:
+        '200':
+          description: Tenant already existed (idempotent re-call).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '201':
+          description: Tenant created and set up.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /tenants/{tenantId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      tags: [Tenants]
+      summary: Get tenant info
+      description: |
+        Returns the operational state of the tenant: status, resource
+        counts, and resource limits. Used by FilOne to render the
+        dashboard quotas display and to read current status before
+        deciding whether a status update is necessary.
+      security:
+        - PartnerKey: []
+      responses:
+        '200':
+          description: Tenant info.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Tenants]
+      summary: Delete a tenant
+      description: |
+        Permanently deletes the tenant and all resources owned by it
+        (buckets, objects, S3 access keys, per-tenant API keys). The
+        operation is irreversible.
+
+        The tenant must be in the `disabled` state before deletion. The
+        caller is expected to first cut off all access via
+        `POST /tenants/{tenantId}/status` with `status: disabled`, then
+        invoke this endpoint to commit the deletion. Calls against a
+        tenant in any other status return 409.
+
+        Synchronous: the response is returned only after every owned
+        resource has been removed. Idempotent: a call against a tenant
+        that is already gone returns 204.
+      security:
+        - PartnerKey: []
+      responses:
+        '204':
+          description: Tenant deleted (or already deleted).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Tenant is not in the `disabled` state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /tenants/{tenantId}/status:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      tags: [Tenants]
+      summary: Set tenant status
+      description: |
+        Sets the operational status of the tenant. The MSP's S3
+        gateway must enforce these states:
+
+          * `active` — read/write access.
+          * `write-locked` — read-only; uploads and bucket creation
+            blocked, but reads, listings, and deletes succeed.
+          * `disabled` — all access blocked. Data is persisted and
+            recoverable by transitioning back to `active`.
+
+        Setting the same status twice is a no-op (still returns 204).
+      security:
+        - PartnerKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTenantStatusRequest'
+      responses:
+        '204':
+          description: Status updated (or unchanged).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /tenants/{tenantId}/api-keys:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      tags: [API Keys]
+      summary: Create a per-tenant API key
+      description: |
+        Issues a new tenant-scoped management API key. The secret is
+        returned only in this response and cannot be retrieved later.
+        FilOne stores the secret in its own secret store and presents it
+        as a bearer token on subsequent tenant-scoped calls.
+      security:
+        - PartnerKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApiKeyRequest'
+      responses:
+        '201':
+          description: API key created. Secret returned only in this response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedApiKey'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /tenants/{tenantId}/access-keys:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      tags: [Access Keys]
+      summary: Create an S3 access key
+      description: |
+        Provisions an AWS Sig V4 access-key pair scoped by the supplied
+        permissions and (optionally) a list of buckets. The
+        `secretAccessKey` is returned only in this response.
+      security:
+        - TenantKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccessKeyRequest'
+      responses:
+        '201':
+          description: Access key created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedAccessKey'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: An access key with this `name` already exists for the tenant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    get:
+      tags: [Access Keys]
+      summary: List S3 access keys
+      security:
+        - TenantKey: []
+      responses:
+        '200':
+          description: List of access keys (without secrets).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tenants/{tenantId}/access-keys/{accessKeyId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/AccessKeyId'
+    get:
+      tags: [Access Keys]
+      summary: Get an S3 access key
+      description: Returns the access key's metadata. The secret is never returned by this endpoint.
+      security:
+        - TenantKey: []
+      responses:
+        '200':
+          description: Access key details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKey'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Access Keys]
+      summary: Delete an S3 access key
+      description: |
+        Revokes the access key immediately. Subsequent S3 requests
+        signed with these credentials must fail. Returns 204 even if
+        the key was already deleted.
+      security:
+        - TenantKey: []
+      responses:
+        '204':
+          description: Deleted (or already deleted).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /tenants/{tenantId}/metrics/storage:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/MetricsFrom'
+      - $ref: '#/components/parameters/MetricsTo'
+      - $ref: '#/components/parameters/MetricsWindow'
+    get:
+      tags: [Metrics]
+      summary: Tenant storage time series
+      description: |
+        Returns time-bucketed samples of bytes stored and object count
+        for the tenant. Typical FilOne queries:
+
+          * `window=1h` over the current Stripe billing period — used to
+            compute average GB-hours for billing aggregation.
+          * `window=24h` over the last 7 or 30 days — used for the
+            dashboard trend chart.
+          * `window=720h` (30 days) with a single sample — used for the
+            dashboard usage snapshot.
+      security:
+        - PartnerKey: []
+      responses:
+        '200':
+          description: Storage samples.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageMetrics'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tenants/{tenantId}/metrics/egress:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/MetricsFrom'
+      - $ref: '#/components/parameters/MetricsTo'
+      - $ref: '#/components/parameters/MetricsWindow'
+    get:
+      tags: [Metrics]
+      summary: Tenant egress time series
+      description: |
+        Returns outbound (downloaded) bytes aggregated per window.
+        FilOne queries 24-hour windows over the current Stripe billing
+        period for trial enforcement and billing audits.
+      security:
+        - PartnerKey: []
+      responses:
+        '200':
+          description: Egress samples.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EgressMetrics'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tenants/{tenantId}/buckets/{bucketName}/metrics/storage:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BucketName'
+      - $ref: '#/components/parameters/MetricsFrom'
+      - $ref: '#/components/parameters/MetricsTo'
+      - $ref: '#/components/parameters/MetricsWindow'
+    get:
+      tags: [Metrics]
+      summary: Per-bucket storage time series
+      description: |
+        Same shape as the tenant-level storage metrics, but scoped to a
+        single bucket. The MSP must verify that the bucket belongs
+        to the path `tenantId` and return 404 otherwise.
+      security:
+        - PartnerKey: []
+      responses:
+        '200':
+          description: Storage samples for the bucket.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageMetrics'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    PartnerKey:
+      type: http
+      scheme: bearer
+      description: |
+        Global partner-scoped admin key, sent as `Authorization: Bearer
+        <token>`. Grants access across all tenants owned by this
+        partner. The MSP must scope this credential so it cannot reach
+        tenants belonging to other partners.
+    TenantKey:
+      type: http
+      scheme: bearer
+      description: |
+        Tenant-scoped API key issued via
+        `POST /tenants/{tenantId}/api-keys`, sent as `Authorization:
+        Bearer <token>`. Operations performed with this key apply only
+        to the tenant the key was issued for; the MSP must reject calls
+        whose path `tenantId` differs from the key's tenant.
+
+  parameters:
+    TenantId:
+      in: path
+      name: tenantId
+      required: true
+      schema:
+        $ref: '#/components/schemas/TenantId'
+    AccessKeyId:
+      in: path
+      name: accessKeyId
+      required: true
+      description: AWS-style access key ID (the value used by S3 clients).
+      schema:
+        type: string
+    BucketName:
+      in: path
+      name: bucketName
+      required: true
+      schema:
+        type: string
+        minLength: 3
+        maxLength: 63
+    MetricsFrom:
+      in: query
+      name: from
+      required: true
+      description: Start of the window (inclusive), RFC 3339.
+      schema:
+        type: string
+        format: date-time
+    MetricsTo:
+      in: query
+      name: to
+      required: true
+      description: End of the window (exclusive), RFC 3339.
+      schema:
+        type: string
+        format: date-time
+    MetricsWindow:
+      in: query
+      name: window
+      required: true
+      description: |
+        Sample bucket size, expressed as `<integer>h`. The MSP must
+        support `1h`, `24h`, and `720h` (30 days) at minimum. The MSP
+        may respond with HTTP 400 Bad Request for excessively dense
+        queries (a window so small relative to the `from`/`to` range
+        that it would produce too many samples).
+      schema:
+        type: string
+        pattern: '^[0-9]+h$'
+
+  responses:
+    BadRequest:
+      description: |
+        Malformed request — invalid query parameter, path parameter, or
+        unparseable JSON body. Body validation errors return 422 instead.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnprocessableEntity:
+      description: |
+        Request body is well-formed but fails semantic validation
+        (missing required field, value out of range, enum mismatch,
+        cross-field constraint, etc.).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid bearer token, or token not authorised for this tenant.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Internal:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    TenantId:
+      type: string
+      pattern: '^[a-zA-Z0-9_-]{1,128}$'
+      description: |
+        Client-supplied tenant identifier. Must be unique within the
+        partner. Used as the canonical ID in all subsequent calls. FilOne
+        uses its internal organisation ID here, so the MSP does not
+        need to expose a separate server-assigned ID.
+
+    TenantStatus:
+      type: string
+      enum: [active, write-locked, disabled]
+      description: |
+        * `active` — read/write
+        * `write-locked` — read-only; uploads and bucket creation blocked
+        * `disabled` — all access blocked, data persisted
+
+    CreateTenantRequest:
+      type: object
+      required: [tenantId, displayName]
+      properties:
+        tenantId:
+          $ref: '#/components/schemas/TenantId'
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Human-readable name shown in the MSP's tooling.
+
+    Tenant:
+      type: object
+      required: [tenantId, displayName, status, bucketCount, accessKeyCount, createdAt]
+      properties:
+        tenantId:
+          $ref: '#/components/schemas/TenantId'
+        displayName:
+          type: string
+        status:
+          $ref: '#/components/schemas/TenantStatus'
+        bucketCount:
+          type: integer
+          minimum: 0
+        bucketLimit:
+          type: integer
+          minimum: 0
+          description: Maximum number of buckets the tenant may create.
+        accessKeyCount:
+          type: integer
+          minimum: 0
+          description: |
+            Total number of S3 access keys, including any system keys
+            issued during onboarding (e.g. the FilOne console key).
+        accessKeyLimit:
+          type: integer
+          minimum: 0
+          description: Maximum number of S3 access keys the tenant may hold.
+        createdAt:
+          type: string
+          format: date-time
+
+    UpdateTenantStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/TenantStatus'
+
+    CreateApiKeyRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Human-readable name for the key (for partner audit/ops).
+
+    CreatedApiKey:
+      type: object
+      required: [keyId, secret, name, createdAt]
+      properties:
+        keyId:
+          type: string
+          description: Stable identifier for the API key (for audit/lookup).
+        secret:
+          type: string
+          description: |
+            The API-key secret. Returned only on creation. Presented as
+            a bearer token in the `Authorization` header on subsequent
+            tenant-scoped calls.
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    AccessKeyPermission:
+      type: string
+      enum:
+        - s3:CreateBucket
+        - s3:ListAllMyBuckets
+        - s3:DeleteBucket
+        - s3:GetObject
+        - s3:GetObjectVersion
+        - s3:GetObjectRetention
+        - s3:GetObjectLegalHold
+        - s3:PutObject
+        - s3:PutObjectRetention
+        - s3:PutObjectLegalHold
+        - s3:ListBucket
+        - s3:ListBucketVersions
+        - s3:DeleteObject
+        - s3:DeleteObjectVersion
+      description: |
+        Permission scope expressed as an AWS S3 IAM action.
+
+        **Bucket-level** — operating on buckets via the S3 Gateway:
+
+          * `s3:CreateBucket` — create a bucket.
+          * `s3:ListAllMyBuckets` — list the tenant's buckets.
+          * `s3:DeleteBucket` — delete a bucket.
+
+        **Object-level** — operating on objects within buckets. The
+        basic actions (`s3:GetObject`, `s3:PutObject`, `s3:ListBucket`,
+        `s3:DeleteObject`) cover the common case; the variant actions
+        opt in to operations on object versions, retention policies, and
+        legal holds.
+
+          * `s3:GetObject` — get an object and its metadata.
+          * `s3:GetObjectVersion` — get a specific object version.
+          * `s3:GetObjectRetention` — read an object's retention policy.
+          * `s3:GetObjectLegalHold` — read an object's legal-hold status.
+          * `s3:PutObject` — upload or overwrite an object.
+          * `s3:PutObjectRetention` — set or modify an object's retention policy.
+          * `s3:PutObjectLegalHold` — apply or remove an object's legal hold.
+          * `s3:ListBucket` — list objects in a bucket. (AWS quirk: this
+            action lists *objects*, not buckets — `s3:ListAllMyBuckets`
+            is the action that lists buckets.)
+          * `s3:ListBucketVersions` — list object versions in a bucket.
+          * `s3:DeleteObject` — delete an object.
+          * `s3:DeleteObjectVersion` — delete a specific object version.
+
+    CreateAccessKeyRequest:
+      type: object
+      required: [name, permissions]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Unique within the tenant.
+        permissions:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/AccessKeyPermission'
+        buckets:
+          type: array
+          description: |
+            Optional. When set and non-empty, the key may only operate on
+            these buckets. Omit (or pass an empty array) for tenant-wide
+            access.
+          items:
+            type: string
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Optional expiration. The MSP must reject the credentials
+            after this time.
+
+    AccessKey:
+      type: object
+      required: [accessKeyId, name, permissions, createdAt]
+      properties:
+        accessKeyId:
+          type: string
+          description: AWS-style access key ID, used by S3 clients.
+        name:
+          type: string
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccessKeyPermission'
+        buckets:
+          type: array
+          description: Empty or omitted when the key has tenant-wide access.
+          items:
+            type: string
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    CreatedAccessKey:
+      allOf:
+        - $ref: '#/components/schemas/AccessKey'
+        - type: object
+          required: [secretAccessKey]
+          properties:
+            secretAccessKey:
+              type: string
+              description: |
+                AWS-style secret. Returned only on creation; the MSP
+                must not expose it via subsequent reads.
+
+    AccessKeyList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccessKey'
+
+    StorageSample:
+      type: object
+      required: [timestamp, bytesUsed, objectCount]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: End of the sample window (RFC 3339).
+        bytesUsed:
+          type: integer
+          format: int64
+          minimum: 0
+        objectCount:
+          type: integer
+          format: int64
+          minimum: 0
+
+    EgressSample:
+      type: object
+      required: [timestamp, bytesEgressed]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: End of the sample window (RFC 3339).
+        bytesEgressed:
+          type: integer
+          format: int64
+          minimum: 0
+
+    StorageMetrics:
+      type: object
+      required: [samples]
+      properties:
+        samples:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageSample'
+
+    EgressMetrics:
+      type: object
+      required: [samples]
+      properties:
+        samples:
+          type: array
+          items:
+            $ref: '#/components/schemas/EgressSample'
+
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: Human-readable error description.
+        code:
+          type: string
+          description: Machine-readable error code (optional).
