@@ -7,6 +7,7 @@ import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { MfaSettings } from '../components/MfaSettings';
+import { SettingRow } from '../components/SettingRow';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { getMe, updateProfile, changePassword } from '../lib/api.js';
@@ -93,30 +94,6 @@ function ToggleRow({
           }`}
         />
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Setting row (for security section)
-// ---------------------------------------------------------------------------
-
-function SettingRow({
-  label,
-  description,
-  action,
-}: {
-  label: string;
-  description: string;
-  action: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between py-1">
-      <div>
-        <p className="text-[13px] font-medium text-zinc-900">{label}</p>
-        <p className="text-xs text-zinc-500">{description}</p>
-      </div>
-      {action}
     </div>
   );
 }

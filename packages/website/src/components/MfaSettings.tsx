@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { Button } from './Button';
+import { ConfirmDialog } from './ConfirmDialog';
+import { SettingRow } from './SettingRow';
 import { useToast } from './Toast';
 import { enrollMfa, enrollEmailMfa, disableMfa, deleteMfaEnrollment } from '../lib/api.js';
 import type { MeResponse, MfaEnrollment } from '@filone/shared';
@@ -22,38 +24,12 @@ function formatEnrollmentType(type: MfaEnrollment['type']): string {
   }
 }
 
-function SettingRow({
-  label,
-  description,
-  action,
-}: {
-  label: string;
-  description: string;
-  action: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between py-1">
-      <div>
-        <p className="text-[13px] font-medium text-zinc-900">{label}</p>
-        <p className="text-xs text-zinc-500">{description}</p>
-      </div>
-      {action}
-    </div>
-  );
-}
-
 function EnrollmentRow({
   enrollment,
-  isConfirming,
   onRequestRemove,
-  onConfirmRemove,
-  onCancelRemove,
 }: {
   enrollment: MfaEnrollment;
-  isConfirming: boolean;
   onRequestRemove: () => void;
-  onConfirmRemove: () => void;
-  onCancelRemove: () => void;
 }) {
   return (
     <div className="flex items-center justify-between rounded-md border border-[#e1e4ea] bg-zinc-50 px-3 py-2">
@@ -66,27 +42,9 @@ function EnrollmentRow({
           Added {new Date(enrollment.createdAt).toLocaleDateString()}
         </p>
       </div>
-      {isConfirming ? (
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-zinc-500">Remove?</span>
-          <button
-            className="text-[11px] text-red-600 font-medium hover:text-red-700"
-            onClick={onConfirmRemove}
-          >
-            Yes
-          </button>
-          <button
-            className="text-[11px] text-zinc-500 hover:text-zinc-700"
-            onClick={onCancelRemove}
-          >
-            No
-          </button>
-        </div>
-      ) : (
-        <Button variant="ghost" size="sm" onClick={onRequestRemove}>
-          Remove
-        </Button>
-      )}
+      <Button variant="ghost" size="sm" onClick={onRequestRemove}>
+        Remove
+      </Button>
     </div>
   );
 }
@@ -159,24 +117,25 @@ export function MfaSettings({ me }: { me: MeResponse }) {
     enrollMfaMutation.mutate();
   }
 
-  function handleConfirmReplaceEmail() {
-    setConfirmReplaceEmail(false);
-    enrollMfaMutation.mutate();
+  async function handleConfirmReplaceEmail() {
+    await enrollMfaMutation.mutateAsync();
   }
 
   function handleEnrollEmail() {
     enrollEmailMfaMutation.mutate();
   }
 
-  function handleDisableMfa() {
-    setConfirmDisable(false);
-    disableMfaMutation.mutate();
+  async function handleDisableMfa() {
+    await disableMfaMutation.mutateAsync();
   }
 
-  function handleDeleteEnrollment(enrollment: MfaEnrollment) {
-    setConfirmDeleteId(null);
-    deleteEnrollmentMutation.mutate(enrollment);
+  async function handleDeleteEnrollment() {
+    const enrollment = me.mfaEnrollments.find((e) => e.id === confirmDeleteId);
+    if (!enrollment) return;
+    await deleteEnrollmentMutation.mutateAsync(enrollment);
   }
+
+  const enrollmentBeingDeleted = me.mfaEnrollments.find((e) => e.id === confirmDeleteId);
 
   if (me.mfaEnrollments.length > 0) {
     return (
@@ -195,69 +154,50 @@ export function MfaSettings({ me }: { me: MeResponse }) {
             </Button>
           }
         />
-        {confirmReplaceEmail ? (
-          <div className="flex flex-col gap-1 ml-0.5 mb-1">
-            <span className="text-[11px] text-zinc-700">
-              Enabling an authenticator or security key will replace your email two-factor
-              authentication. Continue?
-            </span>
-            <div className="flex items-center gap-3">
-              <button
-                className="text-[11px] text-red-600 font-medium hover:text-red-700"
-                onClick={handleConfirmReplaceEmail}
-                disabled={enrollMfaMutation.isPending}
-              >
-                {enrollMfaMutation.isPending ? 'Redirecting...' : 'Replace email MFA'}
-              </button>
-              <button
-                className="text-[11px] text-zinc-500 hover:text-zinc-700"
-                onClick={() => setConfirmReplaceEmail(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : null}
         <div className="flex flex-col gap-2 ml-0.5">
           {me.mfaEnrollments.map((enrollment) => (
             <EnrollmentRow
               key={enrollment.id}
               enrollment={enrollment}
-              isConfirming={confirmDeleteId === enrollment.id}
               onRequestRemove={() => setConfirmDeleteId(enrollment.id)}
-              onConfirmRemove={() => handleDeleteEnrollment(enrollment)}
-              onCancelRemove={() => setConfirmDeleteId(null)}
             />
           ))}
-          {confirmDisable ? (
-            <div className="flex items-center gap-2 self-start">
-              <span className="text-[11px] text-zinc-500">
-                Remove all MFA methods? This cannot be undone.
-              </span>
-              <button
-                className="text-[11px] text-red-600 font-medium hover:text-red-700"
-                onClick={handleDisableMfa}
-                disabled={disableMfaMutation.isPending}
-              >
-                {disableMfaMutation.isPending ? 'Removing...' : 'Confirm'}
-              </button>
-              <button
-                className="text-[11px] text-zinc-500 hover:text-zinc-700"
-                onClick={() => setConfirmDisable(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <button
-              className="text-[11px] text-red-500 hover:text-red-700 self-start"
-              onClick={() => setConfirmDisable(true)}
-              disabled={disableMfaMutation.isPending}
-            >
-              Remove all MFA methods
-            </button>
-          )}
+          <button
+            className="text-[11px] text-red-500 hover:text-red-700 self-start"
+            onClick={() => setConfirmDisable(true)}
+            disabled={disableMfaMutation.isPending}
+          >
+            Remove all MFA methods
+          </button>
         </div>
+        <ConfirmDialog
+          open={confirmReplaceEmail}
+          onClose={() => setConfirmReplaceEmail(false)}
+          onConfirm={handleConfirmReplaceEmail}
+          title="Replace email two-factor authentication"
+          description="Enabling an authenticator or security key will replace your email two-factor authentication."
+          confirmLabel="Replace email MFA"
+        />
+        <ConfirmDialog
+          open={enrollmentBeingDeleted !== undefined}
+          onClose={() => setConfirmDeleteId(null)}
+          onConfirm={handleDeleteEnrollment}
+          title={
+            enrollmentBeingDeleted
+              ? `Remove ${formatEnrollmentType(enrollmentBeingDeleted.type)}`
+              : 'Remove method'
+          }
+          description="This two-factor authentication method will be removed from your account."
+          confirmLabel="Remove"
+        />
+        <ConfirmDialog
+          open={confirmDisable}
+          onClose={() => setConfirmDisable(false)}
+          onConfirm={handleDisableMfa}
+          title="Remove all MFA methods"
+          description="Two-factor authentication will be disabled and you will no longer be challenged on login. This cannot be undone."
+          confirmLabel="Remove all"
+        />
       </>
     );
   }

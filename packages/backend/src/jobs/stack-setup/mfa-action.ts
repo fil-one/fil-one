@@ -11,18 +11,18 @@
 
 // ── Auth0 Action runtime types ──────────────────────────────────────────
 
-interface MfaFactor {
+export interface MfaFactor {
   type: string;
 }
 
-interface PostLoginEvent {
+export interface PostLoginEvent {
   user: {
     enrolledFactors?: MfaFactor[];
     app_metadata?: Record<string, unknown>;
   };
 }
 
-interface PostLoginApi {
+export interface PostLoginApi {
   authentication: {
     enrollWithAny(factors: MfaFactor[]): void;
     challengeWithAny(factors: MfaFactor[]): void;

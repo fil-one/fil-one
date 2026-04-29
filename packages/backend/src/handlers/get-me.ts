@@ -9,7 +9,11 @@ import { triggerTenantSetup } from '../lib/trigger-tenant-setup.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { suggestOrgName } from '../lib/suggest-org-name.js';
-import { getConnectionType, getMfaEnrollments } from '../lib/auth0-management.js';
+import {
+  deleteAuthenticationMethod,
+  getConnectionType,
+  getMfaEnrollments,
+} from '../lib/auth0-management.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -43,7 +47,19 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const connectionType = getConnectionType(sub);
 
   const includeMfa = event.queryStringParameters?.include === 'mfa';
-  const enrollments = includeMfa ? await getMfaEnrollments(sub, { includeEmail: true }) : [];
+  let enrollments = includeMfa ? await getMfaEnrollments(sub, { includeEmail: true }) : [];
+
+  // Email cannot coexist with a strong factor — Auth0 may attach an email
+  // authentication-method automatically after OTP/WebAuthn enrollment because
+  // the user's email is verified. Drop and delete the orphan so settings and
+  // login both reflect the actual policy (strong factor wins).
+  if (enrollments.some((e) => e.type !== 'email')) {
+    const orphaned = enrollments.filter((e) => e.type === 'email');
+    if (orphaned.length > 0) {
+      await Promise.all(orphaned.map((e) => deleteAuthenticationMethod(sub, e.id)));
+      enrollments = enrollments.filter((e) => e.type !== 'email');
+    }
+  }
 
   const body: MeResponse = {
     orgId,

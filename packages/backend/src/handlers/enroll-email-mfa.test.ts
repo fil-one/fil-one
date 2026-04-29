@@ -142,4 +142,21 @@ describe('POST /api/mfa/enroll-email handler', () => {
     });
     expect(mockEnrollEmailMfa).not.toHaveBeenCalled();
   });
+
+  it('returns 400 when email MFA is already enrolled', async () => {
+    setupAuthMocks();
+    mockGetMfaEnrollments.mockResolvedValue([
+      { id: 'email|am-1', type: 'email', status: 'confirmed' },
+    ]);
+
+    const result = await handler(enrollEmailEvent(), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 400,
+      body: JSON.stringify({
+        message: 'Email MFA can only be enabled when no other MFA methods are active.',
+      }),
+    });
+    expect(mockEnrollEmailMfa).not.toHaveBeenCalled();
+  });
 });
