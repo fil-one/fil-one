@@ -18,7 +18,7 @@ Bucket creation, listing, deletion and all object operations are not in scope fo
 
 ## Decision
 
-Define a generic **MSP Management API** specified in `docs/msp-integration/management-openapi.yaml`. Each new MSP implements this contract; FilOne's backend talks to MSPs exclusively through it.
+Define a generic **MSP Management API** specified in [`../msp-integration/management-openapi.yaml`](../msp-integration/management-openapi.yaml). Each new MSP implements this contract; FilOne's backend talks to MSPs exclusively through it.
 
 ### Authentication
 
