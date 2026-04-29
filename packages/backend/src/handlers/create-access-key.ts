@@ -43,15 +43,9 @@ export async function baseHandler(
       .build();
   }
 
-  const {
-    keyName,
-    permissions,
-    bucketScope,
-    buckets: bucketList,
-    expiresAt: expiresAtRaw,
-  } = parsed.data;
-  const buckets = bucketScope === 'specific' ? (bucketList ?? []) : undefined;
-  const expiresAt = expiresAtRaw ?? null;
+  const { keyName, permissions, granularPermissions, bucketScope } = parsed.data;
+  const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
+  const expiresAt = parsed.data.expiresAt ?? null;
 
   const { orgId } = getUserInfo(event);
 
@@ -81,6 +75,7 @@ export async function baseHandler(
       tenantId: auroraTenantId,
       keyName,
       permissions,
+      granularPermissions,
       buckets,
       expiresAt,
     });
@@ -112,6 +107,7 @@ export async function baseHandler(
         createdAt: auroraKey.createdAt,
         status: 'active',
         permissions,
+        ...(granularPermissions?.length ? { granularPermissions } : {}),
         bucketScope,
         ...(buckets ? { buckets } : {}),
         ...(expiresAt ? { expiresAt } : {}),

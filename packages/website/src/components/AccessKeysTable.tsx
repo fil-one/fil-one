@@ -5,6 +5,7 @@ import { DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon } from '@phosphor-icons/rea
 import { IconBox } from './IconBox';
 
 import type { AccessKey } from '@filone/shared';
+import { GRANULAR_PERMISSION_LABELS } from '@filone/shared';
 
 import { Badge } from './Badge';
 import { Button } from './Button';
@@ -190,6 +191,28 @@ export function AccessKeysTable({
                         {p}
                       </Badge>
                     ))}
+                    {(key.granularPermissions ?? []).length > 0 && (
+                      <Badge
+                        color="blue"
+                        size="sm"
+                        description={
+                          <>
+                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                              Data protection
+                            </p>
+                            <ul className="flex flex-col gap-0.5">
+                              {key.granularPermissions!.map((g) => (
+                                <li key={g} className="text-xs text-zinc-700">
+                                  {GRANULAR_PERMISSION_LABELS[g].label}
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        }
+                      >
+                        Data protection
+                      </Badge>
+                    )}
                   </div>
                 </td>
               )}
