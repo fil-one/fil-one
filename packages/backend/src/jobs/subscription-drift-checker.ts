@@ -9,12 +9,6 @@ import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 
 const dynamo = getDynamoClient();
 
-// Active subs in DynamoDB are expected to map to ACTIVE tenants in Aurora.
-// Anything else — locked, disabled, missing, or any future Aurora state — is
-// out of sync. Triage uses orgId/userId from log fields, not metric
-// cardinality.
-type DriftStatus = 'in_sync' | 'out_of_sync';
-
 interface ActiveCandidate {
   userId: string;
   orgId: string;
@@ -28,19 +22,18 @@ interface ResolvedTenant {
 interface RunStats {
   notInSync: number;
   missingTenant: number;
+  probeFailed: number;
 }
 
 export async function handler(): Promise<void> {
-  const startedAt = new Date();
-  console.log('[subscription-drift-checker] start', {
-    timestamp: startedAt.toISOString(),
-  });
+  console.log('[subscription-drift-checker] start');
 
   const candidates = await scanActiveSubscriptions(Resource.BillingTable.name);
   const uniqueCandidates = dedupeByOrgId(candidates);
   const stats: RunStats = {
     notInSync: 0,
     missingTenant: 0,
+    probeFailed: 0,
   };
 
   for (const candidate of uniqueCandidates) {
@@ -52,9 +45,8 @@ export async function handler(): Promise<void> {
 }
 
 // Multiple SUBSCRIPTION records can exist per orgId (e.g. user re-subscribed
-// after cancellation). We probe Aurora once per org so drift metrics are not
-// over-counted; the first userId encountered becomes the log/field
-// representative for that org.
+// after cancellation). We probe Aurora once per org so drift counts are not
+// inflated; the first userId encountered becomes the log representative.
 function dedupeByOrgId(candidates: ActiveCandidate[]): ActiveCandidate[] {
   const seen = new Map<string, ActiveCandidate>();
   for (const candidate of candidates) {
@@ -83,7 +75,10 @@ async function scanActiveSubscriptions(billingTableName: string): Promise<Active
 
     for (const item of result.Items ?? []) {
       const record = unmarshall(item);
-      if (!record.orgId || typeof record.pk !== 'string') continue;
+      if (typeof record.pk !== 'string' || !record.orgId) {
+        console.error('[subscription-drift-checker] missing orgId', { pk: record.pk });
+        continue;
+      }
       out.push({
         userId: record.pk.replace('CUSTOMER#', ''),
         orgId: record.orgId,
@@ -106,22 +101,30 @@ async function evaluateCandidate(candidate: ActiveCandidate, stats: RunStats): P
 
     const tenantStatus = await getTenantStatus({ tenantId: tenant.auroraTenantId });
     if (tenantStatus.kind === 'error') {
-      // No metric counter — total Aurora outages surface as a Grafana
-      // no-data alert on SubscriptionStatusDrift; transient failures are for
-      // log-based triage.
+      stats.probeFailed += 1;
       console.error('[subscription-drift-checker] probe failed', {
         orgId: candidate.orgId,
+        userId: candidate.userId,
+        auroraTenantId: tenant.auroraTenantId,
         cause: tenantStatus.cause,
       });
       return;
     }
 
-    const classification = getTenantDriftStatus(tenantStatus);
-    if (classification === 'out_of_sync') stats.notInSync += 1;
-    emitDriftStatus(candidate, classification);
+    if (isInSync(tenantStatus)) return;
+
+    stats.notInSync += 1;
+    console.log('[subscription-drift-checker] out_of_sync', {
+      orgId: candidate.orgId,
+      userId: candidate.userId,
+      auroraTenantId: tenant.auroraTenantId,
+      auroraStatus: tenantStatus.kind === 'not_found' ? 'not_found' : tenantStatus.status,
+    });
   } catch (error) {
+    stats.probeFailed += 1;
     console.error('[subscription-drift-checker] candidate failed', {
       orgId: candidate.orgId,
+      userId: candidate.userId,
       error,
     });
   }
@@ -141,27 +144,8 @@ async function resolveTenant(orgId: string): Promise<ResolvedTenant> {
   };
 }
 
-function getTenantDriftStatus(tenantStatus: TenantStatusResult): DriftStatus {
-  return tenantStatus.kind === 'ok' && tenantStatus.status === 'ACTIVE' ? 'in_sync' : 'out_of_sync';
-}
-
-function emitDriftStatus(candidate: ActiveCandidate, classification: DriftStatus): void {
-  reportMetric({
-    _aws: {
-      Timestamp: Date.now(),
-      CloudWatchMetrics: [
-        {
-          Namespace: 'FilOne',
-          Dimensions: [['classification']],
-          Metrics: [{ Name: 'SubscriptionStatusDrift', Unit: 'Count' }],
-        },
-      ],
-    },
-    classification,
-    orgId: candidate.orgId,
-    userId: candidate.userId,
-    SubscriptionStatusDrift: 1,
-  });
+function isInSync(tenantStatus: TenantStatusResult): boolean {
+  return tenantStatus.kind === 'ok' && tenantStatus.status === 'ACTIVE';
 }
 
 function emitRunSummary(stats: RunStats): void {
@@ -175,11 +159,13 @@ function emitRunSummary(stats: RunStats): void {
           Metrics: [
             { Name: 'SubscriptionsNotInSync', Unit: 'Count' },
             { Name: 'SubscriptionsMissingTenant', Unit: 'Count' },
+            { Name: 'SubscriptionsProbeFailed', Unit: 'Count' },
           ],
         },
       ],
     },
     SubscriptionsNotInSync: stats.notInSync,
     SubscriptionsMissingTenant: stats.missingTenant,
+    SubscriptionsProbeFailed: stats.probeFailed,
   });
 }
