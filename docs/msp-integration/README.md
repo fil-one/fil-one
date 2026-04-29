@@ -6,33 +6,32 @@ This document describes what FilOne needs from a managed service provider (MSP) 
 
 APIs:
 
-* Tenant management (isolated per-organisation accounts)  
-* Tenant statuses (active; write-locked; disabled)  
-* Per-Tenant API keys management  
-* S3 Access Key management  
-* S3 Gateway  
-* Usage metrics at tenant level (storage bytes, object count, egress bytes)
+- Tenant management (isolated per-organisation accounts)
+- Tenant statuses (active; write-locked; disabled)
+- Per-Tenant API keys management
+- S3 Access Key management
+- S3 Gateway
+- Usage metrics at tenant level (storage bytes, object count, egress bytes)
 
 The MSP's S3 Gateway must implement the following features:
 
-* Bucket operations (create/list/delete)  
-* Object operations (put/get/head/list)  
-* Server-side encryption of object payloads  
-* Pre-signed URLs  
-* CORS configuration allowing (pre-signed) requests from app.fil.one and staging.fil.one  
-* Multi-part uploads  
-* Path-style addressing  
-* AWS Signature V4 authentication  
-* Metadata headers (x-amz-meta-\*)  
-* Versioning, Object Lock and Retention  
-* DNS-level forwarding (https://{region}.s3.fil.one)
+- Bucket operations (create/list/delete)
+- Object operations (put/get/head/list)
+- Server-side encryption of object payloads
+- Pre-signed URLs
+- CORS configuration allowing (pre-signed) requests from app.fil.one and staging.fil.one
+- Multi-part uploads
+- Path-style addressing
+- AWS Signature V4 authentication
+- Metadata headers (x-amz-meta-\*)
+- Versioning, Object Lock and Retention
+- DNS-level forwarding (https://{region}.s3.fil.one)
 
 Non-functional requirements:
 
-* Tenant isolation  
-* Idempotency for management API calls  
-* *(eventually should have)* Telemetry metrics for the S3 Gateway (TTFB, response times, 4xx/5xx error rates, etc.)
-
+- Tenant isolation
+- Idempotency for management API calls
+- _(eventually should have)_ Telemetry metrics for the S3 Gateway (TTFB, response times, 4xx/5xx error rates, etc.)
 
 ```
 +---------------------------------------------------------+
@@ -101,16 +100,16 @@ FilOne uses AWS S3 IAM action names as permission scopes. The MSP maps each valu
 
 Bucket-level scopes:
 
-* `s3:CreateBucket`, `s3:ListAllMyBuckets`, `s3:DeleteBucket`.
+- `s3:CreateBucket`, `s3:ListAllMyBuckets`, `s3:DeleteBucket`.
 
 Object-level scopes — the basic actions (`s3:GetObject`, `s3:PutObject`, `s3:ListBucket`, `s3:DeleteObject`) cover the common case, with variant actions for operations on versions, retention policies, and legal holds:
 
-* `s3:GetObject`, `s3:GetObjectVersion`, `s3:GetObjectRetention`, `s3:GetObjectLegalHold`
-* `s3:PutObject`, `s3:PutObjectRetention`, `s3:PutObjectLegalHold`
-* `s3:ListBucket`, `s3:ListBucketVersions`
-* `s3:DeleteObject`, `s3:DeleteObjectVersion`
+- `s3:GetObject`, `s3:GetObjectVersion`, `s3:GetObjectRetention`, `s3:GetObjectLegalHold`
+- `s3:PutObject`, `s3:PutObjectRetention`, `s3:PutObjectLegalHold`
+- `s3:ListBucket`, `s3:ListBucketVersions`
+- `s3:DeleteObject`, `s3:DeleteObjectVersion`
 
-Note the AWS quirk that `s3:ListBucket` lists *objects* in a bucket, while `s3:ListAllMyBuckets` lists buckets.
+Note the AWS quirk that `s3:ListBucket` lists _objects_ in a bucket, while `s3:ListAllMyBuckets` lists buckets.
 
 The MSP must support at least this level of granularity, or an equivalent permission scheme that lets keys be restricted to specific operations.
 
@@ -145,9 +144,9 @@ API key cannot operate on a different tenant's resources.
 
 **Telemetry metrics from the S3 Gateway**
 
-- S3 GetObject Time-to-First-Byte  
-- S3 Error Rate (4xx)  
-- S3 Error Rate (5xx)  
-- S3 Total Requests (count per second or per minute)  
-- S3 Egress (bytes per second or per minute)  
-- S3 Ingress (bytes per second or per minute)  
+- S3 GetObject Time-to-First-Byte
+- S3 Error Rate (4xx)
+- S3 Error Rate (5xx)
+- S3 Total Requests (count per second or per minute)
+- S3 Egress (bytes per second or per minute)
+- S3 Ingress (bytes per second or per minute)
