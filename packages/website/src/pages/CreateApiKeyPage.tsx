@@ -34,7 +34,7 @@ export function CreateApiKeyPage() {
 
   return (
     <>
-      <div className="mx-auto max-w-4xl p-8">
+      <div className="mx-auto max-w-4xl p-10">
         {/* Header */}
         <div className="mb-8 flex items-center gap-3">
           <button

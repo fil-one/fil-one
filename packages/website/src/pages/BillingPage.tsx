@@ -184,7 +184,7 @@ export function BillingPage() {
 
   if (loading && !billing) {
     return (
-      <div className="p-8">
+      <div className="p-10">
         <h1 className="text-2xl font-semibold text-[#14181f] mb-1">Billing</h1>
         <p className="text-sm text-[#677183] mb-6">Manage your plan, usage, and payment methods</p>
         <div className="flex gap-6">
@@ -203,7 +203,7 @@ export function BillingPage() {
 
   if (error && !billing) {
     return (
-      <div className="p-8">
+      <div className="p-10">
         <h1 className="text-2xl font-semibold text-[#14181f] mb-1">Billing</h1>
         <p className="text-sm text-[#677183] mb-6">Manage your plan, usage, and payment methods</p>
         <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
@@ -216,7 +216,7 @@ export function BillingPage() {
   // ── Render ───────────────────────────────────────────────────────
 
   return (
-    <div className="p-8">
+    <div className="p-10">
       <h1 className="text-2xl font-semibold text-[#14181f] mb-1">Billing</h1>
       <p className="text-sm text-[#677183] mb-6">Manage your plan, usage, and payment methods</p>
 

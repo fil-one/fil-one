@@ -399,7 +399,7 @@ export function ApiKeysPage() {
 
   if (isError) {
     return (
-      <div className="p-6">
+      <div className="p-10">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error?.message ?? 'Failed to load access keys'}
         </div>
@@ -408,7 +408,7 @@ export function ApiKeysPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-10">
       <h1 className="mb-1 text-2xl font-semibold text-zinc-900">API Keys</h1>
       <p className="mb-6 text-sm text-zinc-500">
         Manage credentials and connect via S3-compatible API

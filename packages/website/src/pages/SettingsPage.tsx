@@ -224,7 +224,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-10">
       <div className="mb-1">
         <h1 className="text-xl font-semibold tracking-tight text-zinc-900">Settings</h1>
         <p className="text-[13px] text-zinc-500">Manage your profile and preferences</p>
