@@ -133,12 +133,36 @@ export async function flagMfaEnrollment(sub: string): Promise<void> {
   });
 }
 
+/**
+ * Mark whether the user has explicitly opted into email MFA.
+ *
+ * Auth0 silently auto-enrolls every verified-email user into email MFA when
+ * the email factor is enabled tenant-wide, so `event.user.enrolledFactors` is
+ * not a reliable signal of intent. The Post-Login Action treats email as a
+ * real factor only when this flag is true. Set it on explicit enrollment via
+ * the Settings page; clear it whenever the email factor is removed.
+ */
+export async function setEmailMfaActive(sub: string, active: boolean): Promise<void> {
+  await updateAuth0User(sub, {
+    app_metadata: { email_mfa_active: active },
+  });
+}
+
 export interface GuardianEnrollment {
   id: string;
   type: string;
   status: string;
   name?: string;
   enrolled_at?: string;
+  /**
+   * Which Auth0 endpoint this entry came from. Determines which delete
+   * endpoint to use:
+   *   - 'guardian'     → DELETE /api/v2/guardian/enrollments/{id}
+   *   - 'auth-methods' → DELETE /api/v2/users/{sub}/authentication-methods/{id}
+   * The two endpoints assign different ids for the same factor, so the source
+   * cannot be inferred from `id` alone.
+   */
+  source?: 'guardian' | 'auth-methods';
 }
 
 // Guardian enrollment types that count as MFA (excludes auto-enrolled email)
@@ -158,15 +182,53 @@ interface Auth0AuthenticationMethod {
 }
 
 /**
+ * Map a row from /authentication-methods into the shared GuardianEnrollment
+ * shape, or return null if the row should not surface in settings.
+ *
+ * Auth0 reports TOTP as `type: 'totp'`; we normalize it to `'authenticator'`
+ * so the UI, action, and existing type definitions stay unchanged.
+ */
+function authMethodToEnrollment(
+  m: Auth0AuthenticationMethod,
+  includeEmail: boolean,
+): GuardianEnrollment | null {
+  if (m.confirmed === false) return null;
+
+  const base = {
+    id: m.id,
+    status: 'confirmed' as const,
+    name: m.name,
+    enrolled_at: m.created_at,
+    source: 'auth-methods' as const,
+  };
+
+  if (m.type === 'totp') return { ...base, type: 'authenticator' };
+  if (m.type === 'webauthn-roaming' || m.type === 'webauthn-platform') {
+    return { ...base, type: m.type };
+  }
+  if (m.type === 'email' && includeEmail) {
+    return { ...base, type: 'email', name: m.name ?? m.email };
+  }
+  return null;
+}
+
+/**
  * List MFA enrollments for a user.
  *
- * Auth0 stores MFA factors in two places:
- *   - Guardian enrollments (OTP, WebAuthn) live under /api/v2/users/{id}/enrollments
- *   - Email factors live under /api/v2/users/{id}/authentication-methods
+ * Auth0 splits MFA factors across two endpoints:
+ *   - /api/v2/users/{id}/enrollments  (Guardian, legacy)
+ *   - /api/v2/users/{id}/authentication-methods  (the unified, modern endpoint)
  *
- * The /authentication-methods endpoint does NOT mirror Guardian enrollments,
- * and the Guardian /enrollments endpoint does not include email — so to get a
- * complete picture for the UI we need to query both when includeEmail is true.
+ * Modern Auth0 puts every factor in /authentication-methods (TOTP appears as
+ * `type: 'totp'`, WebAuthn as `webauthn-roaming`/`webauthn-platform`, email as
+ * `email`). Guardian is only kept around for users with legacy enrollments
+ * that were never migrated. We prefer the modern source so newly-added factors
+ * (which Auth0 no longer mirrors into Guardian) are visible — without that,
+ * a user who enrolls TOTP after a WebAuthn factor will have their TOTP
+ * dropped from the settings UI.
+ *
+ * Each result is tagged with its source so the delete handlers know which
+ * endpoint to call (the two endpoints use different ids for the same factor).
  */
 export async function getMfaEnrollments(
   sub: string,
@@ -177,42 +239,71 @@ export async function getMfaEnrollments(
   const headers = { Authorization: `Bearer ${token}` };
   const userPath = `/api/v2/users/${encodeURIComponent(sub)}`;
 
-  const guardianFetch = fetch(`https://${domain}${userPath}/enrollments`, { headers });
-  const emailFetch = options?.includeEmail
-    ? fetch(`https://${domain}${userPath}/authentication-methods`, { headers })
-    : null;
+  const [guardianResp, methodsResp] = await Promise.all([
+    fetch(`https://${domain}${userPath}/enrollments`, { headers }),
+    fetch(`https://${domain}${userPath}/authentication-methods`, { headers }),
+  ]);
 
-  const guardianResp = await guardianFetch;
   if (!guardianResp.ok) {
     const body = await guardianResp.text();
     throw new Error(`Auth0 list enrollments failed (${guardianResp.status}): ${body}`);
   }
-  const guardianEnrollments = (await guardianResp.json()) as GuardianEnrollment[];
-  const result = guardianEnrollments.filter(
-    (e) => e.status === 'confirmed' && MFA_GUARDIAN_TYPES.has(e.type),
-  );
+  if (!methodsResp.ok) {
+    const body = await methodsResp.text();
+    throw new Error(`Auth0 list authentication methods failed (${methodsResp.status}): ${body}`);
+  }
 
-  if (emailFetch) {
-    const emailResp = await emailFetch;
-    if (!emailResp.ok) {
-      const body = await emailResp.text();
-      throw new Error(`Auth0 list authentication methods failed (${emailResp.status}): ${body}`);
-    }
-    const methods = (await emailResp.json()) as Auth0AuthenticationMethod[];
-    for (const m of methods) {
-      if (m.type === 'email' && m.confirmed !== false) {
-        result.push({
-          id: m.id,
-          type: 'email',
-          status: 'confirmed',
-          name: m.name ?? m.email,
-          enrolled_at: m.created_at,
-        });
-      }
-    }
+  const guardianEnrollments = (await guardianResp.json()) as GuardianEnrollment[];
+  const methods = (await methodsResp.json()) as Auth0AuthenticationMethod[];
+  const includeEmail = options?.includeEmail === true;
+
+  // Pull everything from /authentication-methods first — modern source, with
+  // ids that route to the auth-methods delete endpoint.
+  const result = methods
+    .map((m) => authMethodToEnrollment(m, includeEmail))
+    .filter((e): e is GuardianEnrollment => e !== null);
+
+  // Fallback: if /authentication-methods has no TOTP but Guardian does, the
+  // user has a legacy Guardian-only enrollment. Surface it so they can still
+  // see and delete it. Skipped when a modern record is present (Auth0
+  // sometimes mirrors, in which case we'd otherwise show duplicates).
+  const hasAuthenticator = result.some((e) => e.type === 'authenticator');
+  if (!hasAuthenticator) {
+    const legacyAuthenticators = guardianEnrollments
+      .filter((e) => e.status === 'confirmed' && e.type === 'authenticator')
+      .map((e) => ({ ...e, source: 'guardian' as const }));
+    result.push(...legacyAuthenticators);
   }
 
   return result;
+}
+
+/**
+ * Delete every Guardian email enrollment for the user.
+ *
+ * Auth0 mirrors email factors created via the authentication-methods API into
+ * Guardian. Deleting the authentication-method does NOT cascade to Guardian,
+ * so the orphan keeps `event.user.enrolledFactors` populated and the
+ * Post-Login Action keeps challenging with email. This sweep removes those
+ * orphans so MFA truly turns off when email is removed.
+ */
+export async function deleteEmailGuardianEnrollments(sub: string): Promise<void> {
+  const domain = getDomain();
+  const token = await getManagementToken();
+  const resp = await fetch(
+    `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/enrollments`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`Auth0 list enrollments failed (${resp.status}): ${body}`);
+  }
+
+  const enrollments = (await resp.json()) as GuardianEnrollment[];
+  const emailIds = enrollments.filter((e) => e.type === 'email').map((e) => e.id);
+
+  await Promise.all(emailIds.map((id) => deleteGuardianEnrollment(id)));
 }
 
 /**
@@ -301,24 +392,31 @@ export async function deleteAuthenticationMethod(sub: string, methodId: string):
  */
 export async function deleteAllAuthenticators(sub: string): Promise<void> {
   const enrollments = await getMfaEnrollments(sub, { includeEmail: true });
+  const hasEmail = enrollments.some((e) => e.type === 'email');
 
-  const results = await Promise.allSettled(
-    enrollments.map((enrollment) =>
-      enrollment.type === 'email'
-        ? deleteAuthenticationMethod(sub, enrollment.id)
-        : deleteGuardianEnrollment(enrollment.id),
-    ),
+  const operations: Array<Promise<void>> = enrollments.map((enrollment) =>
+    enrollment.source === 'guardian'
+      ? deleteGuardianEnrollment(enrollment.id)
+      : deleteAuthenticationMethod(sub, enrollment.id),
   );
+  // Email factors are mirrored into Guardian and the auth-methods delete does
+  // not cascade. Sweep any orphan Guardian email rows so the user is not
+  // re-challenged with email after MFA is "removed".
+  if (hasEmail) {
+    operations.push(deleteEmailGuardianEnrollments(sub));
+  }
+
+  const results = await Promise.allSettled(operations);
 
   const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
   if (failures.length > 0) {
     const reasons = failures.map((f) => String(f.reason)).join('; ');
     throw new Error(
-      `Failed to delete ${failures.length} of ${enrollments.length} MFA factor(s): ${reasons}`,
+      `Failed to delete ${failures.length} of ${operations.length} MFA factor(s): ${reasons}`,
     );
   }
 
   await updateAuth0User(sub, {
-    app_metadata: { mfa_enrolling: false },
+    app_metadata: { mfa_enrolling: false, email_mfa_active: false },
   });
 }

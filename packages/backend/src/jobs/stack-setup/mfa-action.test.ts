@@ -30,11 +30,15 @@ function buildApi(): CapturedApi {
 function buildEvent(opts: {
   enrolledFactors?: { type: string }[];
   mfaEnrolling?: boolean;
+  emailMfaActive?: boolean;
 }): PostLoginEvent {
+  const app_metadata: Record<string, unknown> = {};
+  if (opts.mfaEnrolling !== undefined) app_metadata.mfa_enrolling = opts.mfaEnrolling;
+  if (opts.emailMfaActive !== undefined) app_metadata.email_mfa_active = opts.emailMfaActive;
   return {
     user: {
       enrolledFactors: opts.enrolledFactors,
-      app_metadata: opts.mfaEnrolling === undefined ? {} : { mfa_enrolling: opts.mfaEnrolling },
+      app_metadata,
     },
   };
 }
@@ -65,19 +69,26 @@ describe('onExecutePostLogin', () => {
     expect(api.authentication.challengeWithAny).not.toHaveBeenCalled();
   });
 
-  it('clears the enrolling flag and enrolls another strong factor when mfa_enrolling and a factor already exist', async () => {
+  it('challenges the existing factor and then enrolls a new one when mfa_enrolling and a factor already exist', async () => {
+    // Auth0 rejects enrollWithAny on already-enrolled users without a prior
+    // challenge in the same action ("Something went wrong"). Both calls queue
+    // and execute in order within one login transaction.
     await onExecutePostLogin(
       buildEvent({ enrolledFactors: [{ type: 'otp' }], mfaEnrolling: true }),
       api,
     );
 
     expect(api.user.setAppMetadata).toHaveBeenCalledWith('mfa_enrolling', false);
+    expect(api.authentication.challengeWithAny).toHaveBeenCalledWith([
+      { type: 'otp' },
+      { type: 'webauthn-roaming' },
+      { type: 'webauthn-platform' },
+    ]);
     expect(api.authentication.enrollWithAny).toHaveBeenCalledWith([
       { type: 'otp' },
       { type: 'webauthn-roaming' },
       { type: 'webauthn-platform' },
     ]);
-    expect(api.authentication.challengeWithAny).not.toHaveBeenCalled();
   });
 
   it('clears the enrolling flag when triggering first-time enrollment', async () => {
@@ -86,14 +97,41 @@ describe('onExecutePostLogin', () => {
     expect(api.user.setAppMetadata).toHaveBeenCalledWith('mfa_enrolling', false);
   });
 
-  it('challenges with email only when email is the only enrolled factor', async () => {
-    await onExecutePostLogin(buildEvent({ enrolledFactors: [{ type: 'email' }] }), api);
+  it('challenges with email only when email is the only enrolled factor and the user explicitly opted in', async () => {
+    await onExecutePostLogin(
+      buildEvent({ enrolledFactors: [{ type: 'email' }], emailMfaActive: true }),
+      api,
+    );
 
     expect(api.authentication.challengeWithAny).toHaveBeenCalledWith([
       { type: 'otp' },
       { type: 'webauthn-roaming' },
       { type: 'webauthn-platform' },
       { type: 'email' },
+    ]);
+  });
+
+  it('skips MFA entirely for an auto-enrolled email factor when email_mfa_active is not set', async () => {
+    // Auth0 silently includes {type:'email'} in enrolledFactors for every
+    // user with a verified email when the email factor is enabled tenant-wide.
+    // Without the explicit opt-in flag, the action must treat this as no MFA
+    // — otherwise every login of every test/prod user gets an email challenge.
+    await onExecutePostLogin(buildEvent({ enrolledFactors: [{ type: 'email' }] }), api);
+
+    expect(api.authentication.challengeWithAny).not.toHaveBeenCalled();
+    expect(api.authentication.enrollWithAny).not.toHaveBeenCalled();
+  });
+
+  it('still challenges the strong factor when an auto-enrolled email is present alongside it', async () => {
+    await onExecutePostLogin(
+      buildEvent({ enrolledFactors: [{ type: 'otp' }, { type: 'email' }] }),
+      api,
+    );
+
+    expect(api.authentication.challengeWithAny).toHaveBeenCalledWith([
+      { type: 'otp' },
+      { type: 'webauthn-roaming' },
+      { type: 'webauthn-platform' },
     ]);
   });
 
@@ -128,7 +166,10 @@ describe('onExecutePostLogin', () => {
 
   it('ignores recovery-code when deciding the challenge list', async () => {
     await onExecutePostLogin(
-      buildEvent({ enrolledFactors: [{ type: 'email' }, { type: 'recovery-code' }] }),
+      buildEvent({
+        enrolledFactors: [{ type: 'email' }, { type: 'recovery-code' }],
+        emailMfaActive: true,
+      }),
       api,
     );
 

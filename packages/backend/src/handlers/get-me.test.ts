@@ -30,12 +30,14 @@ vi.mock('../lib/trigger-tenant-setup.js', () => ({
 
 const mockGetMfaEnrollments = vi.fn();
 const mockDeleteAuthenticationMethod = vi.fn();
+const mockSetEmailMfaActive = vi.fn();
 vi.mock('../lib/auth0-management.js', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
     deleteAuthenticationMethod: (...args: unknown[]) => mockDeleteAuthenticationMethod(...args),
+    setEmailMfaActive: (...args: unknown[]) => mockSetEmailMfaActive(...args),
   };
 });
 
@@ -398,6 +400,7 @@ describe('GET /api/me handler', () => {
       },
     ]);
     mockDeleteAuthenticationMethod.mockResolvedValue(undefined);
+    mockSetEmailMfaActive.mockResolvedValue(undefined);
 
     ddbMock
       .on(GetItemCommand, {
@@ -417,6 +420,7 @@ describe('GET /api/me handler', () => {
     const result = await handler(authenticatedEvent({ include: 'mfa' }), buildContext());
 
     expect(mockDeleteAuthenticationMethod).toHaveBeenCalledWith(MOCK_SUB, 'email|am-1');
+    expect(mockSetEmailMfaActive).toHaveBeenCalledWith(MOCK_SUB, false);
     expect(result).toMatchObject({
       statusCode: 200,
       body: JSON.stringify({

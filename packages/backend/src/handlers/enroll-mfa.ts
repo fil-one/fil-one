@@ -6,6 +6,7 @@ import {
   deleteAuthenticationMethod,
   flagMfaEnrollment,
   getMfaEnrollments,
+  setEmailMfaActive,
 } from '../lib/auth0-management.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -20,10 +21,18 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   // allowed as the sole MFA method (it shares a channel with password reset),
   // so once a strong factor is added it must not remain.
   const enrollments = await getMfaEnrollments(sub, { includeEmail: true });
+  let removedEmail = false;
   for (const enrollment of enrollments) {
     if (enrollment.type === 'email') {
       await deleteAuthenticationMethod(sub, enrollment.id);
+      removedEmail = true;
     }
+  }
+  // Clear the opt-in flag if we removed an email factor — leaving it set
+  // would let the Post-Login Action re-treat the auto-enrolled email factor
+  // as a real one once the strong factor is later removed.
+  if (removedEmail) {
+    await setEmailMfaActive(sub, false);
   }
 
   // Flag the user for enrollment. The Post-Login Action will detect

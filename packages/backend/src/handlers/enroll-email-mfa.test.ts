@@ -8,10 +8,12 @@ import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 
 const mockGetMfaEnrollments = vi.fn();
 const mockEnrollEmailMfa = vi.fn();
+const mockSetEmailMfaActive = vi.fn();
 vi.mock('../lib/auth0-management.js', () => ({
   getConnectionType: (sub: string) => sub.split('|')[0] ?? 'unknown',
   getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
   enrollEmailMfa: (...args: unknown[]) => mockEnrollEmailMfa(...args),
+  setEmailMfaActive: (...args: unknown[]) => mockSetEmailMfaActive(...args),
 }));
 
 vi.mock('sst', () => ({
@@ -112,10 +114,11 @@ describe('POST /api/mfa/enroll-email handler', () => {
     ddbMock.reset();
   });
 
-  it('enrolls email MFA when user has no existing MFA factors', async () => {
+  it('enrolls email MFA and sets the explicit-opt-in flag when user has no existing MFA factors', async () => {
     setupAuthMocks();
     mockGetMfaEnrollments.mockResolvedValue([]);
     mockEnrollEmailMfa.mockResolvedValue(undefined);
+    mockSetEmailMfaActive.mockResolvedValue(undefined);
 
     const result = await handler(enrollEmailEvent(), buildContext());
 
@@ -124,6 +127,7 @@ describe('POST /api/mfa/enroll-email handler', () => {
       body: JSON.stringify({ message: 'Email MFA has been enabled.' }),
     });
     expect(mockEnrollEmailMfa).toHaveBeenCalledWith(MOCK_SUB, MOCK_EMAIL);
+    expect(mockSetEmailMfaActive).toHaveBeenCalledWith(MOCK_SUB, true);
   });
 
   it('returns 400 when user already has MFA factors enrolled', async () => {

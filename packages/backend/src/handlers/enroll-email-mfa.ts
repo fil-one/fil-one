@@ -3,7 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.js';
-import { enrollEmailMfa, getMfaEnrollments } from '../lib/auth0-management.js';
+import { enrollEmailMfa, getMfaEnrollments, setEmailMfaActive } from '../lib/auth0-management.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -33,6 +33,10 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   }
 
   await enrollEmailMfa(sub, email);
+  // Mark explicit opt-in. Without this flag the Post-Login Action ignores the
+  // email factor (Auth0 auto-enrolls every verified-email user, so the flag is
+  // the only reliable signal of user intent).
+  await setEmailMfaActive(sub, true);
 
   return new ResponseBuilder().status(200).body({ message: 'Email MFA has been enabled.' }).build();
 }

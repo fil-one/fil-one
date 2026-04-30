@@ -4,9 +4,11 @@ import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import {
-  deleteGuardianEnrollment,
   deleteAuthenticationMethod,
+  deleteEmailGuardianEnrollments,
+  deleteGuardianEnrollment,
   getMfaEnrollments,
+  setEmailMfaActive,
   updateAuth0User,
 } from '../lib/auth0-management.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -37,10 +39,23 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  if (enrollment.type === 'email') {
-    await deleteAuthenticationMethod(sub, enrollmentId);
-  } else {
+  // Each enrollment carries the source endpoint it came from — Guardian and
+  // /authentication-methods assign different ids for the same factor, so we
+  // must delete via the matching endpoint.
+  if (enrollment.source === 'guardian') {
     await deleteGuardianEnrollment(enrollmentId);
+  } else {
+    await deleteAuthenticationMethod(sub, enrollmentId);
+  }
+
+  // Email factors are mirrored into Guardian. The auth-methods delete does
+  // not cascade, so sweep any orphan Guardian email rows or Auth0 keeps
+  // challenging via email even though our settings page shows nothing. Also
+  // clear the explicit-opt-in flag — otherwise the auto-enrolled email factor
+  // (which Auth0 manufactures from email_verified) would re-trigger challenges.
+  if (enrollment.type === 'email') {
+    await deleteEmailGuardianEnrollments(sub);
+    await setEmailMfaActive(sub, false);
   }
 
   // If this was the last MFA enrollment, clear the enrolling flag
