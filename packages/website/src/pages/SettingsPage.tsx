@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Spinner } from '../components/Spinner';
@@ -45,13 +46,9 @@ function SectionCard({
           <IconComp size={16} className={danger ? 'text-red-600' : 'text-zinc-500'} />
         </div>
         <div>
-          <h2
-            className={`text-sm font-medium tracking-tight ${
-              danger ? 'text-red-600' : 'text-zinc-900'
-            }`}
-          >
+          <Heading tag="h2" size="sm" className={danger ? 'text-red-600' : undefined}>
             {title}
-          </h2>
+          </Heading>
           <p className="text-[13px] text-zinc-500">{description}</p>
         </div>
       </div>
@@ -225,9 +222,10 @@ export function SettingsPage() {
 
   return (
     <div className="p-8">
-      <div className="mb-1">
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-900">Settings</h1>
-        <p className="text-[13px] text-zinc-500">Manage your profile and preferences</p>
+      <div className="mb-6">
+        <Heading tag="h1" size="xl" description="Manage your profile and preferences">
+          Settings
+        </Heading>
       </div>
 
       <div className="mt-6 flex max-w-[672px] flex-col gap-6">

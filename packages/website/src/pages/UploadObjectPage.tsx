@@ -11,6 +11,7 @@ import {
 
 import { formatBytes } from '@filone/shared';
 
+import { Heading } from '../components/Heading/Heading';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -94,7 +95,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
           <ArrowLeftIcon size={16} aria-hidden="true" />
         </button>
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-900">Upload object</h1>
+          <Heading tag="h1">Upload object</Heading>
           <p className="text-[13px] text-zinc-500">Upload files to store on Filecoin</p>
         </div>
       </div>
