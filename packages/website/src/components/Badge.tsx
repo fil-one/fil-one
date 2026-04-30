@@ -1,3 +1,4 @@
+import { useId, useRef, useState } from 'react';
 import clsx from 'clsx';
 
 export type BadgeColor = 'green' | 'blue' | 'red' | 'grey' | 'amber';
@@ -10,6 +11,7 @@ type BadgeProps = {
   size?: BadgeSize;
   weight?: BadgeWeight;
   dot?: boolean;
+  description?: React.ReactNode;
   className?: string;
 };
 
@@ -53,22 +55,70 @@ export function Badge({
   size = 'md',
   weight = 'regular',
   dot,
+  description,
   className,
 }: BadgeProps) {
+  const [visible, setVisible] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLElement>(null);
+  const tooltipId = useId();
+  const hasTooltip = description !== undefined;
+
+  function show() {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setPos({ top: rect.bottom + 6, left: rect.left + rect.width / 2 });
+    }
+    setVisible(true);
+  }
+
+  function hide() {
+    setVisible(false);
+  }
+
+  const Tag = hasTooltip ? 'button' : 'span';
+
   return (
-    <span
-      className={clsx(
-        'inline-flex items-center rounded-full',
-        colorStyles[color],
-        sizeStyles[size],
-        weightStyles[weight],
-        className,
+    <>
+      <Tag
+        ref={triggerRef as React.RefObject<HTMLButtonElement & HTMLSpanElement>}
+        {...(hasTooltip && {
+          type: 'button' as const,
+          onMouseEnter: show,
+          onMouseLeave: hide,
+          onFocus: show,
+          onBlur: hide,
+          onClick: () => (visible ? hide() : show()),
+          'aria-describedby': visible ? tooltipId : undefined,
+          'aria-expanded': visible,
+        })}
+        className={clsx(
+          'inline-flex items-center rounded-full',
+          colorStyles[color],
+          sizeStyles[size],
+          weightStyles[weight],
+          hasTooltip &&
+            'cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400',
+          className,
+        )}
+      >
+        {dot && (
+          <span className={clsx('rounded-full shrink-0', dotStyles[color], dotSizeStyles[size])} />
+        )}
+        {children}
+      </Tag>
+      {hasTooltip && visible && (
+        <div
+          id={tooltipId}
+          role="tooltip"
+          style={{ top: pos.top, left: pos.left }}
+          className="fixed z-50 -translate-x-1/2"
+        >
+          <div className="w-max max-w-56 rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-lg">
+            {description}
+          </div>
+        </div>
       )}
-    >
-      {dot && (
-        <span className={clsx('rounded-full shrink-0', dotStyles[color], dotSizeStyles[size])} />
-      )}
-      {children}
-    </span>
+    </>
   );
 }
