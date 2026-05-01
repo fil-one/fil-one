@@ -182,7 +182,7 @@ export function DashboardPage() {
   const quickSetupTotal = quickSetupTasks.length;
 
   return (
-    <div className="p-10">
+    <div className="px-10 pt-10">
       {/* 1. Page header */}
       <div className="mb-5 flex items-center justify-between">
         <h1 className="text-lg font-semibold text-zinc-900">Dashboard</h1>

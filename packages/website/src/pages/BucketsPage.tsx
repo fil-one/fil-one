@@ -54,7 +54,7 @@ export function BucketsPage() {
 
   if (isError) {
     return (
-      <div className="p-10">
+      <div className="px-10 pt-10">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error?.message ?? 'Failed to load buckets'}
         </div>
@@ -63,7 +63,7 @@ export function BucketsPage() {
   }
 
   return (
-    <div className="p-10">
+    <div className="px-10 pt-10">
       {/* Page header */}
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-zinc-900">Buckets</h1>

@@ -71,7 +71,7 @@ export function SupportPage() {
   }
 
   return (
-    <div className="p-10">
+    <div className="px-10 pt-10">
       <h1 className="text-2xl font-semibold text-zinc-900 mb-6">Talk to an Expert</h1>
       <p className="text-sm text-zinc-600 mb-6">We typically respond within 1 business day.</p>
 

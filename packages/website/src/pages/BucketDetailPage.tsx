@@ -184,7 +184,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
 
   if (objectsIsError) {
     return (
-      <div className="p-10">
+      <div className="px-10 pt-10">
         <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
         <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {objectsError?.message ?? 'Failed to load objects'}
@@ -196,7 +196,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
   const bucketRegion = bucket?.region ?? S3_REGION;
 
   return (
-    <div className="p-10">
+    <div className="px-10 pt-10">
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
 
       <div className="mt-2 mb-2 flex items-center justify-between">
