@@ -110,10 +110,6 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "EnrollEmailMfa": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
     "EnrollMfa": {
       "name": string
       "type": "sst.aws.Function"

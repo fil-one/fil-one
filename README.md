@@ -349,7 +349,7 @@ Used only by the deploy-time setup Lambda to configure Auth0 on each deploy. Not
 - Enable **One-time Password** (authenticator apps)
 - Enable **WebAuthn with FIDO Security Keys** (passkeys/security keys)
 - Enable **WebAuthn with FIDO Device Biometrics** (fingerprint, Face ID)
-- Enable **Email** (one-time code)
+- Do **not** enable **Email** or **SMS** — turning Email on tenant-wide causes Auth0 to auto-enroll every verified-email user into email MFA, defeating the strong-factor-only design
 - Set policy to **"Never"** (MFA is controlled entirely by the Post-Login Action)
 - Under additional settings, enable **"Customize MFA Factors using Actions"**
 
@@ -381,7 +381,7 @@ pnpx sst secret set Auth0MgmtClientSecret <M2M-client-secret> [--stage <stage>]
 
 #### Runtime user management (`Auth0MgmtRuntimeClientId` / `Auth0MgmtRuntimeClientSecret`)
 
-Used by request-time Lambda handlers (`update-profile`, `resend-verification`, `enroll-mfa`, `enroll-email-mfa`, `disable-mfa`, `delete-mfa-enrollment`) to manage user records, trigger verification emails, and manage MFA enrollments.
+Used by request-time Lambda handlers (`update-profile`, `resend-verification`, `enroll-mfa`, `disable-mfa`, `delete-mfa-enrollment`, `get-me`) to manage user records, trigger verification emails, and manage MFA enrollments.
 
 | Environment | App name    | Dashboard                                                                                                                     |
 | ----------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------- |
