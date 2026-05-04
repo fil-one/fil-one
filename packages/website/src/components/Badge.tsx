@@ -1,26 +1,38 @@
-import { useId, useRef, useState } from 'react';
 import clsx from 'clsx';
+
+import { Tooltip } from './Tooltip';
 
 export type BadgeColor = 'green' | 'blue' | 'red' | 'grey' | 'amber';
 export type BadgeSize = 'sm' | 'md' | 'lg';
 export type BadgeWeight = 'regular' | 'medium' | 'semibold';
+export type BadgeStrength = 'subtle' | 'strong';
 
 type BadgeProps = {
   children: React.ReactNode;
   color?: BadgeColor;
   size?: BadgeSize;
   weight?: BadgeWeight;
+  strength?: BadgeStrength;
   dot?: boolean;
   description?: React.ReactNode;
   className?: string;
 };
 
-const colorStyles: Record<BadgeColor, string> = {
-  green: 'bg-green-50 text-green-800',
-  blue: 'bg-brand-50 text-brand-800',
-  red: 'bg-red-50 text-red-800',
-  grey: 'bg-zinc-100 text-zinc-700',
-  amber: 'bg-amber-50 text-amber-800',
+const colorStyles: Record<BadgeStrength, Record<BadgeColor, string>> = {
+  subtle: {
+    green: 'bg-green-50 text-green-800',
+    blue: 'bg-brand-50 text-brand-800',
+    red: 'bg-red-50 text-red-800',
+    grey: 'bg-zinc-100 text-zinc-700',
+    amber: 'bg-amber-50 text-amber-800',
+  },
+  strong: {
+    green: 'bg-green-100 text-green-900',
+    blue: 'bg-brand-100 text-brand-900',
+    red: 'bg-red-100 text-red-900',
+    grey: 'bg-zinc-200 text-zinc-800',
+    amber: 'bg-amber-100 text-amber-900',
+  },
 };
 
 const dotStyles: Record<BadgeColor, string> = {
@@ -53,72 +65,36 @@ export function Badge({
   children,
   color = 'grey',
   size = 'md',
-  weight = 'regular',
+  weight = 'medium',
+  strength = 'subtle',
   dot,
   description,
   className,
 }: BadgeProps) {
-  const [visible, setVisible] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  const triggerRef = useRef<HTMLElement>(null);
-  const tooltipId = useId();
-  const hasTooltip = description !== undefined;
-
-  function show() {
-    if (triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 6, left: rect.left + rect.width / 2 });
-    }
-    setVisible(true);
-  }
-
-  function hide() {
-    setVisible(false);
-  }
-
-  const Tag = hasTooltip ? 'button' : 'span';
-
-  return (
-    <>
-      <Tag
-        ref={triggerRef as React.RefObject<HTMLButtonElement & HTMLSpanElement>}
-        {...(hasTooltip && {
-          type: 'button' as const,
-          onMouseEnter: show,
-          onMouseLeave: hide,
-          onFocus: show,
-          onBlur: hide,
-          onClick: () => (visible ? hide() : show()),
-          'aria-describedby': visible ? tooltipId : undefined,
-          'aria-expanded': visible,
-        })}
-        className={clsx(
-          'inline-flex items-center rounded-full',
-          colorStyles[color],
-          sizeStyles[size],
-          weightStyles[weight],
-          hasTooltip &&
-            'cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400',
-          className,
-        )}
-      >
-        {dot && (
-          <span className={clsx('rounded-full shrink-0', dotStyles[color], dotSizeStyles[size])} />
-        )}
-        {children}
-      </Tag>
-      {hasTooltip && visible && (
-        <div
-          id={tooltipId}
-          role="tooltip"
-          style={{ top: pos.top, left: pos.left }}
-          className="fixed z-50 -translate-x-1/2"
-        >
-          <div className="w-max max-w-56 rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-lg">
-            {description}
-          </div>
-        </div>
+  const badge = (
+    <span
+      className={clsx(
+        'inline-flex items-center rounded-full',
+        colorStyles[strength][color],
+        sizeStyles[size],
+        weightStyles[weight],
+        className,
       )}
-    </>
+    >
+      {dot && (
+        <span className={clsx('rounded-full shrink-0', dotStyles[color], dotSizeStyles[size])} />
+      )}
+      {children}
+    </span>
   );
+
+  if (description !== undefined) {
+    return (
+      <Tooltip content={description} side="bottom">
+        {badge}
+      </Tooltip>
+    );
+  }
+
+  return badge;
 }
