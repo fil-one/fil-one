@@ -23,9 +23,8 @@ export function AppShell({ children }: AppShellProps) {
         </Banner>
       )}
       {tenantStatus === 'DISABLED' && (
-        <Banner variant="error" action={{ label: 'Upgrade', href: '/billing' }}>
-          Egress limit exceeded. Your account has been temporarily disabled. Upgrade to restore
-          access.
+        <Banner variant="error" action={{ label: 'Reactivate', href: '/billing' }}>
+          Account canceled. Reactivate to regain access.
         </Banner>
       )}
       <div className="flex flex-1 overflow-hidden">
