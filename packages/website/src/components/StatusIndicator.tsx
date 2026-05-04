@@ -1,11 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 
-import {
-  INSTATUS_PAGE_URL,
-  fetchInstatusSummary,
-  getStatusDisplay,
-} from '../lib/instatus.js';
+import { INSTATUS_PAGE_URL, fetchInstatusSummary, getStatusDisplay } from '../lib/instatus.js';
 import { queryKeys } from '../lib/query-client.js';
 import { Tooltip } from './Tooltip.js';
 
@@ -27,11 +23,11 @@ const textColorStyles = {
   grey: 'text-zinc-500',
 } as const;
 
-type StatusBadgeProps = {
+type StatusIndicatorProps = {
   collapsed: boolean;
 };
 
-export function StatusBadge({ collapsed }: StatusBadgeProps) {
+export function StatusIndicator({ collapsed }: StatusIndicatorProps) {
   const { data, isPending } = useQuery({
     queryKey: queryKeys.instatusSummary,
     queryFn: fetchInstatusSummary,
