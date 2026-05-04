@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
+import { IconButton } from '../components/IconButton';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 
@@ -71,7 +72,8 @@ export function BucketsPage() {
           Buckets
         </Heading>
         <Button
-          variant="primary"
+          variant="ghost"
+          size="sm"
           icon={PlusIcon}
           onClick={() => navigate({ to: '/buckets/create' })}
         >
@@ -164,22 +166,15 @@ export function BucketsPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
+                    <IconButton
+                      icon={TrashIcon}
                       aria-label={`Delete bucket ${bucket.name}`}
                       onClick={() => deleteBucketMutation.mutate(bucket.name)}
                       // TODO: enable bucket deletion after Aurora implements this operation
                       // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
-                      // disabled={
-                      //   deleteBucketMutation.isPending &&
-                      //   deleteBucketMutation.variables === bucket.name
-                      // }
                       disabled
                       title="Deleting buckets is not available yet"
-                      className="text-zinc-400 hover:text-red-500 disabled:opacity-50"
-                    >
-                      <TrashIcon size={16} aria-hidden="true" />
-                    </button>
+                    />
                   </td>
                 </tr>
               ))}

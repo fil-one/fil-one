@@ -6,6 +6,7 @@ import type { CreateAccessKeyResponse } from '@filone/shared';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields.js';
 import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button.js';
+import { IconButton } from '../components/IconButton.js';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal.js';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 
@@ -38,14 +39,11 @@ export function CreateApiKeyPage() {
       <div className="mx-auto max-w-4xl px-10 pt-10">
         {/* Header */}
         <div className="mb-8 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => void navigate({ to: '/api-keys' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+          <IconButton
+            icon={ArrowLeftIcon}
             aria-label="Back to API keys"
-          >
-            <ArrowLeftIcon size={16} />
-          </button>
+            onClick={() => void navigate({ to: '/api-keys' })}
+          />
           <div>
             <Heading tag="h1">Create API key</Heading>
             <p className="text-sm text-zinc-500">

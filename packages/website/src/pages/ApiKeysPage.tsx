@@ -34,13 +34,10 @@ type AccessKeysTabProps = {
 function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
   return (
     <>
-      <div className="mt-4 mb-4 flex items-center justify-between">
+      <div className="mt-4 mb-4">
         <span className="text-sm text-zinc-600">
           {keys.length === 1 ? '1 key' : `${keys.length} keys`}
         </span>
-        <Button variant="primary" icon={PlusIcon} onClick={onCreateOpen}>
-          Create new key
-        </Button>
       </div>
 
       <AccessKeysTable
@@ -416,7 +413,7 @@ export function ApiKeysPage() {
 
   return (
     <div className="px-10 pt-10">
-      <div className="mb-6">
+      <div className="mb-6 flex items-center justify-between">
         <Heading
           tag="h1"
           size="xl"
@@ -424,6 +421,14 @@ export function ApiKeysPage() {
         >
           API Keys
         </Heading>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={PlusIcon}
+          onClick={() => void navigate({ to: '/api-keys/create' })}
+        >
+          Create new key
+        </Button>
       </div>
 
       <Tabs>

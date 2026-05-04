@@ -206,6 +206,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
         </Heading>
         <Button
           variant="primary"
+          size="md"
           icon={ArrowUpIcon}
           onClick={() =>
             void navigate({

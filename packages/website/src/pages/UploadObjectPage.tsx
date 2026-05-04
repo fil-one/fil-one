@@ -14,6 +14,7 @@ import { formatBytes } from '@filone/shared';
 import { Heading } from '../components/Heading/Heading';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Button } from '../components/Button';
+import { IconButton } from '../components/IconButton';
 import { Input } from '../components/Input';
 import { ProgressBar } from '../components/ProgressBar';
 import { Spinner } from '../components/Spinner';
@@ -87,13 +88,11 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
 
       {/* Back + header */}
       <div className="mt-2 mb-6 flex items-center gap-4">
-        <button
-          type="button"
+        <IconButton
+          icon={ArrowLeftIcon}
+          aria-label="Back to bucket"
           onClick={() => navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
-          className="flex size-9 items-center justify-center rounded-full text-zinc-500 hover:text-zinc-900"
-        >
-          <ArrowLeftIcon size={16} aria-hidden="true" />
-        </button>
+        />
         <div>
           <Heading tag="h1">Upload object</Heading>
           <p className="text-[13px] text-zinc-500">Upload files to store on Filecoin</p>

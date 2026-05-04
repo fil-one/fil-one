@@ -15,6 +15,8 @@ import { apiRequest, createAccessKey } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
+import { Button } from '../components/Button';
+import { IconButton } from '../components/IconButton';
 import { Heading } from '../components/Heading/Heading';
 import { Input } from '../components/Input';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
@@ -200,13 +202,11 @@ export function CreateBucketPage() {
     <div className="mx-auto flex max-w-[860px] flex-col gap-6 py-12">
       {/* Back + header */}
       <div className="flex items-center gap-4">
-        <button
-          type="button"
+        <IconButton
+          icon={ArrowLeftIcon}
+          aria-label="Back to buckets"
           onClick={() => navigate({ to: '/buckets' })}
-          className="flex size-9 items-center justify-center rounded-full text-zinc-500 hover:text-zinc-900"
-        >
-          <ArrowLeftIcon size={16} aria-hidden="true" />
-        </button>
+        />
         <div>
           <Heading tag="h1">Create bucket</Heading>
           <p className="text-[13px] text-zinc-500">S3-compatible storage on Filecoin</p>
@@ -308,20 +308,20 @@ export function CreateBucketPage() {
               )}
             </div>
 
-            {/* Submit button — full width */}
-            <button
-              type="button"
+            {/* Submit button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={CheckIcon}
               disabled={!canSubmit}
               onClick={handleSubmit}
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-700 px-4 pb-2 pt-3 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <CheckIcon size={16} aria-hidden="true" />
               {creating
                 ? 'Creating...'
                 : createKeyToggled
                   ? 'Create bucket and access key'
                   : 'Create bucket'}
-            </button>
+            </Button>
           </div>
         </div>
 
