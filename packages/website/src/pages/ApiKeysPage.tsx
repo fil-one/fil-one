@@ -406,7 +406,7 @@ export function ApiKeysPage() {
 
   if (isError) {
     return (
-      <div className="p-6">
+      <div className="px-10 pt-10">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error?.message ?? 'Failed to load access keys'}
         </div>
@@ -415,7 +415,7 @@ export function ApiKeysPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="px-10 pt-10">
       <div className="mb-6">
         <Heading
           tag="h1"

@@ -186,7 +186,7 @@ export function BillingPage() {
 
   if (loading && !billing) {
     return (
-      <div className="p-8">
+      <div className="px-10 pt-10">
         <div className="mb-6">
           <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
             Billing
@@ -208,7 +208,7 @@ export function BillingPage() {
 
   if (error && !billing) {
     return (
-      <div className="p-8">
+      <div className="px-10 pt-10">
         <div className="mb-6">
           <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
             Billing
@@ -224,7 +224,7 @@ export function BillingPage() {
   // ── Render ───────────────────────────────────────────────────────
 
   return (
-    <div className="p-8">
+    <div className="px-10 pt-10">
       <div className="mb-6">
         <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
           Billing

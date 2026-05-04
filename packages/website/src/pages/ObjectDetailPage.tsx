@@ -171,7 +171,7 @@ export function ObjectDetailPage({ bucketName, objectKey, versionId }: ObjectDet
 
   if (isError) {
     return (
-      <div className="p-6">
+      <div className="p-10">
         <Breadcrumb
           items={[
             { label: 'Buckets', href: '/buckets' },
@@ -211,7 +211,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
   --endpoint-url ${s3Endpoint}`;
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-2xl px-10 pt-10">
       {/* Breadcrumb */}
       <Breadcrumb
         items={[

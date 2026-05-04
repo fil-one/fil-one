@@ -72,12 +72,10 @@ export function SupportPage() {
   }
 
   return (
-    <div className="p-8">
-      <div className="mb-6">
-        <Heading tag="h1" size="xl" description="We typically respond within 1 business day.">
-          Talk to an Expert
-        </Heading>
-      </div>
+    <div className="px-10 pt-10">
+      <Heading tag="h1" size="xl" description="We typically respond within 1 business day.">
+        Talk to an Expert
+      </Heading>
 
       <div className="max-w-xl">
         <div className="rounded-lg border border-zinc-200 bg-white p-6">
