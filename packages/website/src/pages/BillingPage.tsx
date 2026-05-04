@@ -186,9 +186,11 @@ export function BillingPage() {
   if (loading && !billing) {
     return (
       <div className="px-10 pt-10">
-        <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
-          Billing
-        </Heading>
+        <div className="mb-6">
+          <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
+            Billing
+          </Heading>
+        </div>
         <div className="flex gap-6">
           <div className="flex-1 flex flex-col gap-4">
             <SkeletonCard height="h-40" />
