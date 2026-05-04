@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '../components/Input';
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { confirmOrg, logout } from '../lib/api.js';
 import { ORG_NAME_PATTERN, ORG_NAME_MIN_LENGTH, ORG_NAME_MAX_LENGTH } from '@filone/shared';
@@ -91,7 +92,9 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
 
           {/* Heading */}
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold text-zinc-950">Finish setting up your account</h1>
+            <Heading tag="h1" size="xl">
+              Finish setting up your account
+            </Heading>
             <p className="text-sm text-zinc-500">
               Give your organization a name to get started. You can change this later in settings.
             </p>
@@ -135,9 +138,9 @@ export function FinishSignUpPage({ me, onComplete }: FinishSignUpPageProps) {
           Almost there!
         </div>
 
-        <h2 className="mb-4 max-w-sm text-center text-3xl font-semibold text-zinc-950">
+        <Heading tag="h2" size="3xl" balance className="mb-4 max-w-sm text-center">
           Welcome to Fil One
-        </h2>
+        </Heading>
 
         <p className="mb-10 max-w-sm text-center text-base text-zinc-600">
           S3-compatible storage on Filecoin. Start storing objects with integrity you can verify.

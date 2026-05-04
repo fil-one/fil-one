@@ -1,3 +1,5 @@
+import { Heading } from '../components/Heading/Heading';
+
 type LoginErrorPageProps = {
   error: string;
 };
@@ -15,7 +17,9 @@ export function LoginErrorPage({ error }: LoginErrorPageProps) {
 
       {/* Heading */}
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold text-zinc-950">Something went wrong</h1>
+        <Heading tag="h1" size="xl">
+          Something went wrong
+        </Heading>
         <p className="text-sm text-zinc-500">{error}</p>
       </div>
 
