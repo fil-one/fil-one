@@ -34,6 +34,7 @@ process.env.FILONE_STAGE = 'test';
 const ssmMock = mockClient(SSMClient);
 
 import {
+  buildAuroraAccessArray,
   createAuroraAccessKey,
   createAuroraBucket,
   DuplicateKeyNameError,
@@ -303,23 +304,73 @@ describe('getAuroraPortalApiKey', () => {
 // createAuroraAccessKey
 // ---------------------------------------------------------------------------
 
-// Full-access array produced by buildAuroraAccessArray(['read','write','list','delete'])
-const EXPECTED_ACCESS = [
+// Base-only access array produced by buildAuroraAccessArray(['read','write','list','delete'])
+// (no granular permissions — new default behavior)
+const EXPECTED_BASE_ACCESS = [
   'Default',
   'GetBucketVersioning',
   'GetBucketObjectLockConfiguration',
   'Read',
-  'GetObjectVersion',
-  'GetObjectRetention',
-  'GetObjectLegalHold',
   'Write',
-  'PutObjectRetention',
-  'PutObjectLegalHold',
   'List',
-  'ListBucketVersions',
   'Delete',
-  'DeleteObjectVersion',
 ];
+
+// ---------------------------------------------------------------------------
+// buildAuroraAccessArray
+// ---------------------------------------------------------------------------
+
+describe('buildAuroraAccessArray', () => {
+  it('returns always-included + base actions without granular permissions', () => {
+    expect(buildAuroraAccessArray(['read', 'write', 'list', 'delete'])).toStrictEqual(
+      EXPECTED_BASE_ACCESS,
+    );
+  });
+
+  it('returns only always-included + single base action for one permission', () => {
+    expect(buildAuroraAccessArray(['read'])).toStrictEqual([
+      'Default',
+      'GetBucketVersioning',
+      'GetBucketObjectLockConfiguration',
+      'Read',
+    ]);
+  });
+
+  it('includes granular permissions when provided', () => {
+    expect(
+      buildAuroraAccessArray(['read'], ['GetObjectVersion', 'GetObjectRetention']),
+    ).toStrictEqual([
+      'Default',
+      'GetBucketVersioning',
+      'GetBucketObjectLockConfiguration',
+      'Read',
+      'GetObjectVersion',
+      'GetObjectRetention',
+    ]);
+  });
+
+  it('includes all granular permissions for full access', () => {
+    const allGranular = [
+      'GetObjectVersion',
+      'GetObjectRetention',
+      'GetObjectLegalHold',
+      'PutObjectRetention',
+      'PutObjectLegalHold',
+      'ListBucketVersions',
+      'DeleteObjectVersion',
+    ] as const;
+
+    expect(
+      buildAuroraAccessArray(['read', 'write', 'list', 'delete'], [...allGranular]),
+    ).toStrictEqual([...EXPECTED_BASE_ACCESS, ...allGranular]);
+  });
+
+  it('treats undefined granularPermissions the same as empty', () => {
+    expect(buildAuroraAccessArray(['read'], undefined)).toStrictEqual(
+      buildAuroraAccessArray(['read']),
+    );
+  });
+});
 
 const VALID_ACCESS_KEY_RESPONSE = {
   data: {
@@ -374,7 +425,36 @@ describe('createAuroraAccessKey', () => {
     expect(mockPostAccessKeys).toHaveBeenCalledWith({
       client: 'mock-portal-client',
       path: { tenantId: 'tenant-1' },
-      body: { name: 'my-key', access: EXPECTED_ACCESS },
+      body: { name: 'my-key', access: EXPECTED_BASE_ACCESS },
+      throwOnError: false,
+    });
+  });
+
+  it('includes granular permissions in Aurora access array when provided', async () => {
+    setupSsmMock();
+    mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
+
+    await createAuroraAccessKey({
+      tenantId: 'tenant-1',
+      keyName: 'my-key',
+      permissions: ['read'],
+      granularPermissions: ['GetObjectVersion', 'GetObjectRetention'],
+    });
+
+    expect(mockPostAccessKeys).toHaveBeenCalledWith({
+      client: 'mock-portal-client',
+      path: { tenantId: 'tenant-1' },
+      body: {
+        name: 'my-key',
+        access: [
+          'Default',
+          'GetBucketVersioning',
+          'GetBucketObjectLockConfiguration',
+          'Read',
+          'GetObjectVersion',
+          'GetObjectRetention',
+        ],
+      },
       throwOnError: false,
     });
   });
