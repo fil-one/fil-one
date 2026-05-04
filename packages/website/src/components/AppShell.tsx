@@ -23,29 +23,34 @@ export function AppShell({ children }: AppShellProps) {
       </div>
 
       {/* Main content */}
-      <main className="min-h-full flex-1 overflow-auto bg-zinc-50 p-6">
+      <main className="flex-1 overflow-auto bg-zinc-50">
         {tenantStatus === 'WRITE_LOCKED' && (
-          <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
-            <p className="text-sm font-medium text-amber-800">
-              Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.{' '}
-              <Link to="/billing" className="font-semibold underline">
-                Upgrade &rarr;
-              </Link>
-            </p>
+          <div className="px-10 pt-10">
+            <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
+              <p className="text-sm font-medium text-amber-800">
+                Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.{' '}
+                <Link to="/billing" className="font-semibold underline">
+                  Upgrade &rarr;
+                </Link>
+              </p>
+            </div>
           </div>
         )}
         {tenantStatus === 'DISABLED' && (
-          <div className="mb-4 rounded-md border border-red-300 bg-red-50 px-4 py-3">
-            <p className="text-sm font-medium text-red-800">
-              Egress limit exceeded. Your account has been temporarily disabled. Upgrade to restore
-              access.{' '}
-              <Link to="/billing" className="font-semibold underline">
-                Upgrade &rarr;
-              </Link>
-            </p>
+          <div className="px-10 pt-10">
+            <div className="mb-4 rounded-md border border-red-300 bg-red-50 px-4 py-3">
+              <p className="text-sm font-medium text-red-800">
+                Egress limit exceeded. Your account has been temporarily disabled. Upgrade to
+                restore access.{' '}
+                <Link to="/billing" className="font-semibold underline">
+                  Upgrade &rarr;
+                </Link>
+              </p>
+            </div>
           </div>
         )}
         {children}
+        <div className="h-10 shrink-0" aria-hidden="true" />
       </main>
     </div>
   );
