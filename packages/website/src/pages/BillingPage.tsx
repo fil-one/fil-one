@@ -209,9 +209,11 @@ export function BillingPage() {
   if (error && !billing) {
     return (
       <div className="px-10 pt-10">
-        <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
-          Billing
-        </Heading>
+        <div className="mb-6">
+          <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
+            Billing
+          </Heading>
+        </div>
         <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
           Failed to load billing information: {error}
         </div>
@@ -223,9 +225,11 @@ export function BillingPage() {
 
   return (
     <div className="px-10 pt-10">
-      <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
-        Billing
-      </Heading>
+      <div className="mb-6">
+        <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
+          Billing
+        </Heading>
+      </div>
 
       {/* Past due warning banner */}
       {isPastDue && (
