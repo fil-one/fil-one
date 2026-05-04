@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { ArrowUpIcon, KeyIcon, CubeIcon, HardDrivesIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from '../components/Tabs';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -200,7 +201,9 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
 
       <div className="mt-2 mb-2 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-zinc-900">{bucketName}</h1>
+        <Heading tag="h1" size="xl">
+          {bucketName}
+        </Heading>
         <Button
           variant="primary"
           icon={ArrowUpIcon}

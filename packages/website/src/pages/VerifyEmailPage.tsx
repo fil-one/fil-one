@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { logout, getMe, resendVerificationEmail } from '../lib/api.js';
 import type { MeResponse } from '@filone/shared';
@@ -83,7 +84,9 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
           )}
 
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold text-zinc-950">Verify your email</h1>
+            <Heading tag="h1" size="xl">
+              Verify your email
+            </Heading>
             <p className="text-sm text-zinc-500">
               We sent a verification email to{' '}
               <span className="font-medium text-zinc-700">{me.email}</span>. Please click the link
@@ -142,9 +145,9 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
           One more step
         </div>
 
-        <h2 className="mb-4 max-w-sm text-center text-3xl font-semibold text-zinc-950">
+        <Heading tag="h2" size="3xl" balance className="mb-4 max-w-sm text-center">
           Verify your email
-        </h2>
+        </Heading>
 
         <p className="mb-10 max-w-sm text-center text-base text-zinc-600">
           Email verification helps us keep your account secure and ensures you receive important

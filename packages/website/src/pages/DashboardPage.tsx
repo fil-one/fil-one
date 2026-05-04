@@ -11,6 +11,7 @@ import { useQuery } from '@tanstack/react-query';
 
 const UsageTrends = lazy(() => import('./UsageTrends'));
 
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
@@ -185,7 +186,9 @@ export function DashboardPage() {
     <div className="p-6">
       {/* 1. Page header */}
       <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-zinc-900">Dashboard</h1>
+        <Heading tag="h1" size="xl">
+          Dashboard
+        </Heading>
         <Link
           to="/buckets"
           className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-900 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] hover:bg-zinc-50"

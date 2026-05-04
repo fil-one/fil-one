@@ -99,7 +99,7 @@ describe('Usage Reporting Worker (direct Lambda invoke)', () => {
     }
   });
 
-  it('syncs storage_gb and organization_name to Stripe customer metadata', async () => {
+  it('syncs storage_used and organization_name to Stripe customer metadata', async () => {
     const syncOrgId = `test-urw-sync-${crypto.randomUUID().slice(0, 8)}`;
     const orgName = `Integration Test Org ${crypto.randomUUID().slice(0, 8)}`;
 
@@ -119,8 +119,12 @@ describe('Usage Reporting Worker (direct Lambda invoke)', () => {
 
       const customer = await getStripeClient().customers.retrieve(cusId);
       if (customer.deleted) throw new Error('Customer was unexpectedly deleted');
-      expect(customer.metadata.organization_name).toBe(orgName);
-      expect(customer.metadata.storage_gb).toMatch(/^\d+$/);
+      expect(customer.metadata).toEqual({
+        orgId: expect.any(String),
+        userId: expect.any(String),
+        organization_name: orgName,
+        storage_used: expect.stringMatching(/^\d+(\.\d+)? (B|KB|MB|GB|TB)$/),
+      });
 
       const audit = await getAuditRecord(syncOrgId, reportDate);
       expect(audit?.orgSyncAction).toStrictEqual({ S: 'ok' });

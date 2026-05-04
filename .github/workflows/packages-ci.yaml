@@ -2,7 +2,7 @@ name: 'CI [packages]'
 
 on:
   push:
-    branches: [main, production]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -75,8 +75,7 @@ jobs:
       - name: Post deploy hint
         if: >-
           steps.find.outputs.comment-id == '' &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          github.event.pull_request.base.ref != 'production'
+          github.event.pull_request.head.repo.full_name == github.repository
         uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5
         with:
           issue-number: ${{ github.event.pull_request.number }}
@@ -88,29 +87,28 @@ jobs:
       - name: Post deploy unavailable hint
         if: >-
           steps.find.outputs.comment-id == '' &&
-          (github.event.pull_request.head.repo.full_name != github.repository ||
-          github.event.pull_request.base.ref == 'production')
+          github.event.pull_request.head.repo.full_name != github.repository
         uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5
         with:
           issue-number: ${{ github.event.pull_request.number }}
           body: |
             **Preview deployments are not available** for this PR.
 
-            ${{ github.event.pull_request.head.repo.full_name != github.repository && 'Preview deployments cannot be created from forks.' || 'Preview deployments cannot be created for PRs targeting production.' }}
+            Preview deployments cannot be created from forks.
 
-  deploy:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
-    needs: [check-packages]
+  deploy-staging:
+    if: github.ref == 'refs/heads/main'
+    needs: [check-packages, check-storybook]
     runs-on: ubuntu-latest
     concurrency:
-      group: deploy-${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
+      group: deploy-staging
       cancel-in-progress: false
-    environment: ${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
+    environment: staging
     permissions:
       id-token: write
       contents: read
     env:
-      DEPLOY_STAGE: ${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
+      DEPLOY_STAGE: staging
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
     steps:
@@ -171,16 +169,164 @@ jobs:
             }
 
   test-staging:
-    if: github.ref == 'refs/heads/main'
-    needs: [deploy]
+    needs: [deploy-staging]
     uses: ./.github/workflows/test-staging.yaml
     permissions:
       id-token: write
       contents: read
     secrets: inherit
 
+  deploy-production:
+    needs: [test-staging]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      DEPLOY_STAGE: production
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+
+      - run: pnpm build
+        env:
+          SENTRY_DEPLOY_ENV: ${{ env.DEPLOY_STAGE }}
+          SENTRY_RELEASE_DIST: ${{ github.run_number }}
+
+      - run: pnpm exec sst deploy --stage "$DEPLOY_STAGE"
+
+      - if: failure()
+        id: commit_info
+        run: echo "subject=$(git log -1 --format=%s)" >> "$GITHUB_OUTPUT"
+
+      - if: failure()
+        uses: slackapi/slack-github-action@af78098f536edbc4de71162a307590698245be95 # v3.0.1
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "filone-alerts",
+              "text": ${{ toJSON(format('Deployment of `{0}` to `{1}` failed. Commit: {2} by @{3}. Details: {4}/{5}/actions/runs/{6}', github.event.repository.name, env.DEPLOY_STAGE, steps.commit_info.outputs.subject, github.actor, github.server_url, github.repository, github.run_id)) }},
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format(':warning: *Deployment of `{0}` to `{1}` failed* · <{2}/{3}/actions/runs/{4}|Details>', github.event.repository.name, env.DEPLOY_STAGE, github.server_url, github.repository, github.run_id)) }}
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format('Commit: `{0}` by <https://github.com/{1}|@{1}>', steps.commit_info.outputs.subject, github.actor)) }}
+                  }
+                }
+              ]
+            }
+
+  test-production:
+    needs: [deploy-production]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+    env:
+      BASE_URL: https://app.fil.one
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run smoke tests
+        run: pnpm test:smoke
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report-production-${{ github.run_id }}
+          path: playwright-report/
+          retention-days: 14
+
+      - if: failure()
+        id: commit_info
+        run: echo "subject=$(git log -1 --format=%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@af78098f536edbc4de71162a307590698245be95 # v3.0.1
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "filone-alerts",
+              "text": ${{ toJSON(format('Smoke tests failed after production deploy. Commit: {0} by @{1}. Details: {2}/{3}/actions/runs/{4}', steps.commit_info.outputs.subject, github.actor, github.server_url, github.repository, github.run_id)) }},
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format(':warning: *Smoke tests failed after production deploy* · <{0}/{1}/actions/runs/{2}|Details>', github.server_url, github.repository, github.run_id)) }}
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ${{ toJSON(format('Commit: `{0}` by <https://github.com/{1}|@{1}>', steps.commit_info.outputs.subject, github.actor)) }}
+                  }
+                }
+              ]
+            }
+
   dispatch-telemetry:
-    needs: [check-packages, check-storybook, deploy, test-staging]
+    needs:
+      [
+        check-packages,
+        check-storybook,
+        deploy-staging,
+        test-staging,
+        deploy-production,
+        test-production,
+      ]
     if: >-
       always() && (
         github.event_name == 'push' ||

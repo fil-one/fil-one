@@ -4,8 +4,9 @@ import type {
   AccessKeyBucketScope,
   AccessKeyPermission,
   CreateAccessKeyResponse,
+  GranularPermission,
 } from '@filone/shared';
-import { CreateAccessKeySchema } from '@filone/shared';
+import { CreateAccessKeySchema, GRANULAR_PERMISSION_MAP } from '@filone/shared';
 import { createAccessKey } from './api.js';
 import { expiresAtFromForm } from './time.js';
 import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';
@@ -15,14 +16,24 @@ import { queryClient, queryKeys } from './query-client.js';
 
 export type UseAccessKeyFormOptions = {
   defaultBucket?: string;
+  defaultPermissions?: AccessKeyPermission[];
   onSuccess: (response: CreateAccessKeyResponse) => void;
 };
 
-export function useAccessKeyForm({ defaultBucket, onSuccess }: UseAccessKeyFormOptions) {
+const FALLBACK_PERMISSIONS: AccessKeyPermission[] = ['read', 'write', 'list'];
+
+export function useAccessKeyForm({
+  defaultBucket,
+  defaultPermissions,
+  onSuccess,
+}: UseAccessKeyFormOptions) {
   const { toast } = useToast();
 
+  const initialPermissions = defaultPermissions ?? FALLBACK_PERMISSIONS;
+
   const [keyName, setKeyName] = useState('');
-  const [permissions, setPermissions] = useState<AccessKeyPermission[]>(['read', 'write', 'list']);
+  const [permissions, setPermissions] = useState<AccessKeyPermission[]>(initialPermissions);
+  const [granularPermissions, setGranularPermissions] = useState<GranularPermission[]>([]);
   const [bucketScope, setBucketScope] = useState<AccessKeyBucketScope>(
     defaultBucket ? 'specific' : 'all',
   );
@@ -36,15 +47,24 @@ export function useAccessKeyForm({ defaultBucket, onSuccess }: UseAccessKeyFormO
   const candidatePayload = {
     keyName: keyName.trim(),
     permissions,
+    granularPermissions: granularPermissions.length > 0 ? granularPermissions : undefined,
     bucketScope,
     buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
     expiresAt: expiresAtFromForm(expiration, customDate),
   };
   const canSubmit = !creating && CreateAccessKeySchema.safeParse(candidatePayload).success;
 
+  function handlePermissionsChange(newPermissions: AccessKeyPermission[]) {
+    setPermissions(newPermissions);
+    // Remove granular permissions that no longer belong to any selected basic permission
+    const validGranular = new Set(newPermissions.flatMap((p) => GRANULAR_PERMISSION_MAP[p]));
+    setGranularPermissions((prev) => prev.filter((g) => validGranular.has(g)));
+  }
+
   function reset() {
     setKeyName('');
-    setPermissions(['read', 'write', 'list']);
+    setPermissions(initialPermissions);
+    setGranularPermissions([]);
     setBucketScope(defaultBucket ? 'specific' : 'all');
     setSelectedBuckets(defaultBucket ? [defaultBucket] : []);
     setExpiration('never');
@@ -56,6 +76,7 @@ export function useAccessKeyForm({ defaultBucket, onSuccess }: UseAccessKeyFormO
     mutationFn: (body: {
       keyName: string;
       permissions: AccessKeyPermission[];
+      granularPermissions?: GranularPermission[];
       bucketScope: AccessKeyBucketScope;
       buckets?: string[];
       expiresAt?: string | null;
@@ -89,7 +110,9 @@ export function useAccessKeyForm({ defaultBucket, onSuccess }: UseAccessKeyFormO
     keyName,
     setKeyName,
     permissions,
-    setPermissions,
+    setPermissions: handlePermissionsChange,
+    granularPermissions,
+    setGranularPermissions,
     bucketScope,
     setBucketScope,
     selectedBuckets,
