@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { AppHeader } from './AppHeader';
 import { SidebarNav } from './SidebarNav';
 import { getUsage } from '../lib/api';
 import { queryKeys } from '../lib/query-client.js';
@@ -23,12 +22,10 @@ export function AppShell({ children }: AppShellProps) {
         <SidebarNav collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
       </div>
 
-      {/* Header + main content */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <AppHeader />
-
-        <main className="min-h-full flex-1 overflow-auto bg-zinc-50 p-6">
-          {tenantStatus === 'WRITE_LOCKED' && (
+      {/* Main content */}
+      <main className="flex-1 overflow-auto bg-zinc-50">
+        {tenantStatus === 'WRITE_LOCKED' && (
+          <div className="px-10 pt-10">
             <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
               <p className="text-sm font-medium text-amber-800">
                 Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.{' '}
@@ -37,8 +34,10 @@ export function AppShell({ children }: AppShellProps) {
                 </Link>
               </p>
             </div>
-          )}
-          {tenantStatus === 'DISABLED' && (
+          </div>
+        )}
+        {tenantStatus === 'DISABLED' && (
+          <div className="px-10 pt-10">
             <div className="mb-4 rounded-md border border-red-300 bg-red-50 px-4 py-3">
               <p className="text-sm font-medium text-red-800">
                 Egress limit exceeded. Your account has been temporarily disabled. Upgrade to
@@ -48,10 +47,11 @@ export function AppShell({ children }: AppShellProps) {
                 </Link>
               </p>
             </div>
-          )}
-          {children}
-        </main>
-      </div>
+          </div>
+        )}
+        {children}
+        <div className="h-10 shrink-0" aria-hidden="true" />
+      </main>
     </div>
   );
 }

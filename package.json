@@ -48,7 +48,7 @@
     "sst": "^4.5.12"
   },
   "lint-staged": {
-    "*.{js,jsx,ts,tsx,mjs,cjs}": "oxlint --report-unused-disable-directives",
+    "*.{js,jsx,ts,tsx,mjs,cjs}": "oxlint --disable-nested-config --report-unused-disable-directives",
     "*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc}": "oxfmt --no-error-on-unmatched-pattern --check"
   },
   "engines": {
