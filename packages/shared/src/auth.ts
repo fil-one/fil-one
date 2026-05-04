@@ -16,6 +16,8 @@ export interface Auth0LoginUrlOptions {
   screenHint?: 'signup';
   /** Auth0 connection name (e.g. 'google-oauth2', 'github') to skip Universal Login. */
   connection?: string;
+  /** OIDC acr_values — e.g. PAPE multi-factor URI to request MFA via Auth0. */
+  acrValues?: string;
 }
 
 /**
@@ -37,5 +39,6 @@ export function buildAuth0AuthorizeUrl(options: Auth0LoginUrlOptions): string {
   if (options.loginHint) params.set('login_hint', options.loginHint);
   if (options.screenHint) params.set('screen_hint', options.screenHint);
   if (options.connection) params.set('connection', options.connection);
+  if (options.acrValues) params.set('acr_values', options.acrValues);
   return `https://${options.domain}/authorize?${params.toString()}`;
 }

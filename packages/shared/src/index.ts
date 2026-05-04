@@ -29,6 +29,8 @@ export type {
   ConfirmOrgResponse,
   UpdateProfileRequest,
   UpdateProfileResponse,
+  RegenerateRecoveryCodeResponse,
+  StepUpRequiredResponse,
 } from './api/me.js';
 export { UpdateProfileSchema } from './api/me.js';
 

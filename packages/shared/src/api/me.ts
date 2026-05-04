@@ -55,3 +55,12 @@ export interface ConfirmOrgResponse {
   orgId: string;
   orgName: string;
 }
+
+export interface RegenerateRecoveryCodeResponse {
+  recoveryCode: string;
+  message: string;
+}
+
+export interface StepUpRequiredResponse {
+  error: 'step_up_required';
+}

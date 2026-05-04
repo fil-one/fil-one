@@ -1,13 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
+import { RecoveryCodeModal } from './RecoveryCodeModal';
 import { SettingRow } from './SettingRow';
 import { useToast } from './Toast';
-import { enrollMfa, disableMfa, deleteMfaEnrollment } from '../lib/api.js';
+import { enrollMfa, disableMfa, deleteMfaEnrollment, regenerateRecoveryCode } from '../lib/api.js';
 import type { MeResponse, MfaEnrollment } from '@filone/shared';
 import { queryKeys } from '../lib/query-client.js';
+
+const REGENERATE_ACTION = 'regenerate-recovery-code';
 
 function formatEnrollmentType(type: MfaEnrollment['type']): string {
   switch (type) {
@@ -132,6 +136,67 @@ function EnrolledDialogs({
   );
 }
 
+function RecoveryCodeSection() {
+  const { toast } = useToast();
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const [recoveryCodeShown, setRecoveryCodeShown] = useState<string | null>(null);
+
+  const regenerate = useMutation({
+    mutationFn: () => regenerateRecoveryCode({ stepUpAction: REGENERATE_ACTION }),
+    onSuccess: (data) => {
+      setRecoveryCodeShown(data.recoveryCode);
+      toast.success(data.message);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to regenerate recovery code');
+    },
+  });
+
+  // Resume after a step-up redirect: the app root reads sessionStorage and
+  // bounces here with ?action=regenerate-recovery-code.
+  const search = useSearch({ strict: false }) as { action?: string };
+  const navigate = useNavigate();
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (resumed.current || search.action !== REGENERATE_ACTION) return;
+    resumed.current = true;
+    void navigate({ to: '/settings', replace: true });
+    regenerate.mutate();
+  }, [search.action, navigate, regenerate]);
+
+  return (
+    <>
+      <SettingRow
+        label="Recovery code"
+        description="Generate a single-use code for signing in if you lose access to your authenticator"
+        action={
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setConfirmRegenerate(true)}
+            disabled={regenerate.isPending}
+          >
+            {regenerate.isPending ? 'Generating...' : 'Regenerate'}
+          </Button>
+        }
+      />
+      <ConfirmDialog
+        open={confirmRegenerate}
+        onClose={() => setConfirmRegenerate(false)}
+        onConfirm={() => regenerate.mutateAsync().then(() => undefined)}
+        title="Regenerate recovery code"
+        description="Your existing recovery code will be invalidated. The new code will be shown only once."
+        confirmLabel="Regenerate"
+      />
+      <RecoveryCodeModal
+        open={recoveryCodeShown !== null}
+        onDone={() => setRecoveryCodeShown(null)}
+        code={recoveryCodeShown ?? ''}
+      />
+    </>
+  );
+}
+
 function EnrolledView({ me }: { me: MeResponse }) {
   const [confirmDisable, setConfirmDisable] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -171,6 +236,7 @@ function EnrolledView({ me }: { me: MeResponse }) {
           Remove all MFA methods
         </button>
       </div>
+      <RecoveryCodeSection />
       <EnrolledDialogs
         enrollmentBeingDeleted={enrollmentBeingDeleted}
         closeDelete={() => setConfirmDeleteId(null)}

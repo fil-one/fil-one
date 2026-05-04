@@ -15,7 +15,7 @@ async function baseHandler(
   const audience = process.env.AUTH0_AUDIENCE!;
 
   const state = crypto.randomUUID();
-  const { screen_hint, connection } = event.queryStringParameters ?? {};
+  const { screen_hint, connection, acr_values } = event.queryStringParameters ?? {};
 
   const authorizeUrl = buildAuth0AuthorizeUrl({
     domain,
@@ -25,6 +25,7 @@ async function baseHandler(
     state,
     screenHint: screen_hint === 'signup' ? 'signup' : undefined,
     connection: connection || undefined,
+    acrValues: acr_values || undefined,
   });
 
   return {

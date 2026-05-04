@@ -30,6 +30,7 @@ function buildApi(): CapturedApi {
 function buildEvent(opts: {
   enrolledFactors?: { type: string }[];
   mfaEnrolling?: boolean;
+  authMethods?: { name: string; timestamp?: string }[];
 }): PostLoginEvent {
   const app_metadata: Record<string, unknown> = {};
   if (opts.mfaEnrolling !== undefined) app_metadata.mfa_enrolling = opts.mfaEnrolling;
@@ -38,14 +39,17 @@ function buildEvent(opts: {
       enrolledFactors: opts.enrolledFactors,
       app_metadata,
     },
+    ...(opts.authMethods ? { authentication: { methods: opts.authMethods } } : {}),
   };
 }
 
-const STRONG_FACTORS = [
+const ENROLLABLE_FACTORS = [
   { type: 'otp' },
   { type: 'webauthn-roaming' },
   { type: 'webauthn-platform' },
 ];
+
+const CHALLENGE_FACTORS = [...ENROLLABLE_FACTORS, { type: 'recovery-code' }];
 
 describe('onExecutePostLogin', () => {
   let api: CapturedApi;
@@ -65,7 +69,7 @@ describe('onExecutePostLogin', () => {
   it('triggers strong-factor enrollment when mfa_enrolling is set and no factor exists', async () => {
     await onExecutePostLogin(buildEvent({ enrolledFactors: [], mfaEnrolling: true }), api);
 
-    expect(api.authentication.enrollWithAny).toHaveBeenCalledWith(STRONG_FACTORS);
+    expect(api.authentication.enrollWithAny).toHaveBeenCalledWith(ENROLLABLE_FACTORS);
     expect(api.authentication.challengeWithAny).not.toHaveBeenCalled();
   });
 
@@ -79,8 +83,8 @@ describe('onExecutePostLogin', () => {
     );
 
     expect(api.user.setAppMetadata).toHaveBeenCalledWith('mfa_enrolling', false);
-    expect(api.authentication.challengeWithAny).toHaveBeenCalledWith(STRONG_FACTORS);
-    expect(api.authentication.enrollWithAny).toHaveBeenCalledWith(STRONG_FACTORS);
+    expect(api.authentication.challengeWithAny).toHaveBeenCalledWith(CHALLENGE_FACTORS);
+    expect(api.authentication.enrollWithAny).toHaveBeenCalledWith(ENROLLABLE_FACTORS);
   });
 
   it('clears the enrolling flag when triggering first-time enrollment', async () => {
@@ -105,25 +109,25 @@ describe('onExecutePostLogin', () => {
       api,
     );
 
-    expect(api.authentication.challengeWithAny).toHaveBeenCalledWith(STRONG_FACTORS);
+    expect(api.authentication.challengeWithAny).toHaveBeenCalledWith(CHALLENGE_FACTORS);
   });
 
   it.each([['webauthn-roaming'], ['webauthn-platform'], ['otp']])(
-    'challenges with the strong-factor list when %s is enrolled',
+    'challenges with the full factor list (including recovery-code) when %s is enrolled',
     async (strongFactor) => {
       await onExecutePostLogin(buildEvent({ enrolledFactors: [{ type: strongFactor }] }), api);
 
-      expect(api.authentication.challengeWithAny).toHaveBeenCalledWith(STRONG_FACTORS);
+      expect(api.authentication.challengeWithAny).toHaveBeenCalledWith(CHALLENGE_FACTORS);
     },
   );
 
-  it('does not challenge on a recovery-code-only user', async () => {
+  it('challenges with the recovery-code option present even for a recovery-code-only user', async () => {
     // recovery-code is counted in hasMfa so the user is challenged with the
-    // strong-factor list — recovery codes are only valid as a backup during
-    // a strong-factor challenge, never on their own.
+    // full factor list. They have no strong factor enrolled, so Universal
+    // Login surfaces only the recovery-code option for redemption.
     await onExecutePostLogin(buildEvent({ enrolledFactors: [{ type: 'recovery-code' }] }), api);
 
-    expect(api.authentication.challengeWithAny).toHaveBeenCalledWith(STRONG_FACTORS);
+    expect(api.authentication.challengeWithAny).toHaveBeenCalledWith(CHALLENGE_FACTORS);
   });
 
   it('ignores unknown factor types when computing hasMfa', async () => {
@@ -149,9 +153,29 @@ describe('onExecutePostLogin', () => {
       api,
     );
 
-    expect(api.authentication.challengeWithAny).toHaveBeenCalledWith(STRONG_FACTORS);
+    expect(api.authentication.challengeWithAny).toHaveBeenCalledWith(CHALLENGE_FACTORS);
     expect(api.user.setAppMetadata).not.toHaveBeenCalled();
     expect(api.authentication.enrollWithAny).not.toHaveBeenCalled();
+  });
+
+  it('forces re-enrollment after a recovery-code redemption without challenging the lost factor', async () => {
+    // The user just used their recovery code to log in — their original device
+    // is gone. Don't challenge it (it can't respond); just enroll a fresh
+    // strong factor in the same transaction.
+    await onExecutePostLogin(
+      buildEvent({
+        enrolledFactors: [{ type: 'otp' }],
+        authMethods: [
+          { name: 'pwd', timestamp: '2026-05-04T11:59:00.000Z' },
+          { name: 'recovery-code', timestamp: '2026-05-04T11:59:30.000Z' },
+        ],
+      }),
+      api,
+    );
+
+    expect(api.user.setAppMetadata).toHaveBeenCalledWith('mfa_enrolling', false);
+    expect(api.authentication.enrollWithAny).toHaveBeenCalledWith(ENROLLABLE_FACTORS);
+    expect(api.authentication.challengeWithAny).not.toHaveBeenCalled();
   });
 });
 

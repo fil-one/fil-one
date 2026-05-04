@@ -326,3 +326,27 @@ export async function deleteAllAuthenticators(sub: string): Promise<void> {
     app_metadata: { mfa_enrolling: false },
   });
 }
+
+/**
+ * Regenerate the user's MFA recovery code. Auth0 invalidates any prior
+ * recovery code on file and returns a new 24-char single-use code.
+ */
+export async function regenerateRecoveryCode(sub: string): Promise<string> {
+  const domain = getMgmtDomain();
+  const token = await getManagementToken();
+  const resp = await fetch(
+    `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/recovery-code-regeneration`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`Auth0 regenerate recovery code failed (${resp.status}): ${body}`);
+  }
+
+  const data = (await resp.json()) as { recovery_code: string };
+  return data.recovery_code;
+}

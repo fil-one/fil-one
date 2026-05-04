@@ -1,8 +1,17 @@
 import { API_URL } from '../env.js';
 import { ApiErrorCode, CSRF_COOKIE_NAME } from '@filone/shared';
+import type { StepUpRequiredResponse } from '@filone/shared';
+import { redirectToStepUp } from './step-up.js';
 
 // Prevents multiple simultaneous 401 responses from each triggering a redirect.
 let isRedirecting = false;
+
+/** Sentinel error subclass thrown when the backend returns step_up_required. */
+export class StepUpRequiredError extends Error {
+  constructor() {
+    super('Step-up authentication required');
+  }
+}
 
 function getCsrfToken(): string | undefined {
   return document.cookie
@@ -49,6 +58,13 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   });
 
   if (response.status === 401) {
+    const body = (await response
+      .clone()
+      .json()
+      .catch(() => ({}))) as Partial<StepUpRequiredResponse>;
+    if (body.error === 'step_up_required') {
+      throw new StepUpRequiredError();
+    }
     redirectToLogin();
     // Throw so the caller's promise chain stops — the page is navigating away
     throw Object.assign(new Error('Session expired. Redirecting to login...'), { status: 401 });
@@ -99,6 +115,7 @@ import type {
   ConfirmOrgResponse,
   UpdateProfileRequest,
   UpdateProfileResponse,
+  RegenerateRecoveryCodeResponse,
 } from '@filone/shared';
 
 export function getMe(options?: { forceRefresh?: boolean; include?: 'mfa' }): Promise<MeResponse> {
@@ -148,6 +165,30 @@ export function deleteMfaEnrollment(enrollmentId: string): Promise<{ message: st
   return apiRequest<{ message: string }>(`/mfa/enrollments/${encodeURIComponent(enrollmentId)}`, {
     method: 'DELETE',
   });
+}
+
+/**
+ * Regenerate the user's MFA recovery code. The backend gates this on the
+ * `amr: ["mfa"]` claim in the ID token. When missing, this catches the
+ * StepUpRequiredError and redirects through Auth0 with `acr_values=...
+ * :multi-factor` so the next attempt passes the gate. The redirect navigates
+ * the page away — the returned promise never resolves on the step-up path.
+ */
+export async function regenerateRecoveryCode(
+  options: { stepUpAction?: string } = {},
+): Promise<RegenerateRecoveryCodeResponse> {
+  try {
+    return await apiRequest<RegenerateRecoveryCodeResponse>('/mfa/recovery-code/regenerate', {
+      method: 'POST',
+    });
+  } catch (err) {
+    if (err instanceof StepUpRequiredError) {
+      redirectToStepUp(options.stepUpAction ?? 'regenerate-recovery-code');
+      // Hold the promise — the page is navigating away.
+      return new Promise<RegenerateRecoveryCodeResponse>(() => {});
+    }
+    throw err;
+  }
 }
 
 // ── Usage API ────────────────────────────────────────────────────────────

@@ -323,7 +323,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              Version: '2.5',
+              Version: '3.1',
             },
           },
         },
@@ -624,6 +624,13 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/mfa/enrollments/{enrollmentId}',
       handler: 'delete-mfa-enrollment',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/mfa/recovery-code/regenerate',
+      handler: 'regenerate-recovery-code',
       extraLink: mgmtRuntimeResources,
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
