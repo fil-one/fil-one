@@ -17,6 +17,7 @@ import { queryKeys } from '../lib/query-client.js';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
+import { Heading } from '../components/Heading/Heading';
 import { Input } from '../components/Input';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
@@ -207,7 +208,7 @@ export function CreateBucketPage() {
           onClick={() => navigate({ to: '/buckets' })}
         />
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-900">Create bucket</h1>
+          <Heading tag="h1">Create bucket</Heading>
           <p className="text-[13px] text-zinc-500">S3-compatible storage on Filecoin</p>
         </div>
       </div>

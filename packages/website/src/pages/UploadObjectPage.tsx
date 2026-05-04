@@ -11,6 +11,7 @@ import {
 
 import { formatBytes } from '@filone/shared';
 
+import { Heading } from '../components/Heading/Heading';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
@@ -75,7 +76,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
   const canUpload = !!upload.selectedFile && !!upload.objectName.trim();
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-2xl px-10 pt-10">
       {/* Breadcrumb */}
       <Breadcrumb
         items={[
@@ -93,7 +94,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
           onClick={() => navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
         />
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-900">Upload object</h1>
+          <Heading tag="h1">Upload object</Heading>
           <p className="text-[13px] text-zinc-500">Upload files to store on Filecoin</p>
         </div>
       </div>
