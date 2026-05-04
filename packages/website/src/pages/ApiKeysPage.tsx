@@ -416,13 +416,13 @@ export function ApiKeysPage() {
 
   return (
     <div className="px-10 pt-10">
-        <Heading
-          tag="h1"
-          size="xl"
-          description="Manage credentials and connect via S3-compatible API"
-        >
-          API Keys
-        </Heading>
+      <Heading
+        tag="h1"
+        size="xl"
+        description="Manage credentials and connect via S3-compatible API"
+      >
+        API Keys
+      </Heading>
 
       <Tabs>
         <TabList>
