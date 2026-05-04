@@ -399,6 +399,8 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
     });
   }
 
+  emitInvoicePaid();
+
   // Best-effort: re-enable Aurora tenant if recovering from PastDue/GracePeriod.
   // If this fails, the tenant may remain locked until manual intervention.
   try {
@@ -445,6 +447,22 @@ function emitDunningEscalation(args: {
     reason: args.reason,
     attemptBucket: args.attemptBucket,
     DunningEscalation: 1,
+  });
+}
+
+function emitInvoicePaid(): void {
+  reportMetric({
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [[]],
+          Metrics: [{ Name: 'InvoicePaid', Unit: 'Count' }],
+        },
+      ],
+    },
+    InvoicePaid: 1,
   });
 }
 
