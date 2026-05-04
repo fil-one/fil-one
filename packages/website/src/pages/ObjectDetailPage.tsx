@@ -10,6 +10,7 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 
+import { Heading } from '../components/Heading/Heading';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -231,7 +232,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
           <ArrowLeftIcon size={16} aria-hidden="true" />
         </button>
         <div className="flex-1">
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-900">{objectKey}</h1>
+          <Heading tag="h1">{objectKey}</Heading>
           <p className="text-[13px] text-zinc-500">{bucketName}</p>
         </div>
 
@@ -256,7 +257,9 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
 
       {/* Object details card */}
       <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-medium text-zinc-900">Object details</h2>
+        <Heading tag="h2" size="sm" className="mb-3">
+          Object details
+        </Heading>
         <div className="flex flex-col gap-2">
           <DetailRow label="Name" value={objectKey} mono />
           {metadata && <DetailRow label="Size" value={formatBytes(metadata.sizeBytes)} mono />}
@@ -333,7 +336,9 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
 
       {/* API access example card */}
       <div className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-medium text-zinc-900">API access example</h2>
+        <Heading tag="h2" size="sm" className="mb-3">
+          API access example
+        </Heading>
         <CodeBlock code={apiExample} language="bash" />
       </div>
 
