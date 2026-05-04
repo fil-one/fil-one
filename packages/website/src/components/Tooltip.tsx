@@ -1,43 +1,71 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 
 type TooltipSide = 'right' | 'top' | 'bottom' | 'left';
 
 type TooltipProps = {
   children: React.ReactNode;
-  content: string;
+  content: React.ReactNode;
   side?: TooltipSide;
   className?: string;
 };
 
-const sideStyles: Record<TooltipSide, string> = {
-  right: 'left-full top-1/2 -translate-y-1/2 ml-2',
-  left: 'right-full top-1/2 -translate-y-1/2 mr-2',
-  top: 'bottom-full left-1/2 -translate-x-1/2 mb-2',
-  bottom: 'top-full left-1/2 -translate-x-1/2 mt-2',
+function getPosition(rect: DOMRect, side: TooltipSide) {
+  const gap = 6;
+  switch (side) {
+    case 'bottom':
+      return { top: rect.bottom + gap, left: rect.left + rect.width / 2 };
+    case 'top':
+      return { top: rect.top - gap, left: rect.left + rect.width / 2 };
+    case 'right':
+      return { top: rect.top + rect.height / 2, left: rect.right + gap };
+    case 'left':
+      return { top: rect.top + rect.height / 2, left: rect.left - gap };
+  }
+}
+
+const transformStyles: Record<TooltipSide, string> = {
+  bottom: '-translate-x-1/2',
+  top: '-translate-x-1/2 -translate-y-full',
+  right: '-translate-y-1/2',
+  left: '-translate-x-full -translate-y-1/2',
 };
 
 export function Tooltip({ children, content, side = 'right', className }: TooltipProps) {
   const [visible, setVisible] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLDivElement>(null);
+
+  function show() {
+    if (triggerRef.current) {
+      setPos(getPosition(triggerRef.current.getBoundingClientRect(), side));
+    }
+    setVisible(true);
+  }
 
   return (
     <div
-      className={clsx('relative', className)}
-      onMouseEnter={() => setVisible(true)}
+      ref={triggerRef}
+      className={clsx('relative inline-flex', className)}
+      onMouseEnter={show}
       onMouseLeave={() => setVisible(false)}
     >
       {children}
-      {visible && (
-        <div
-          role="tooltip"
-          className={clsx(
-            'pointer-events-none absolute z-50 whitespace-nowrap rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs text-zinc-900 shadow-md',
-            sideStyles[side],
-          )}
-        >
-          {content}
-        </div>
-      )}
+      {visible &&
+        createPortal(
+          <div
+            role="tooltip"
+            style={{ top: pos.top, left: pos.left }}
+            className={clsx(
+              'pointer-events-none fixed z-50 w-max rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs text-zinc-900 shadow-md',
+              transformStyles[side],
+            )}
+          >
+            {content}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
