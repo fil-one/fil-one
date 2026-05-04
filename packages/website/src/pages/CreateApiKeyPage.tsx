@@ -4,6 +4,7 @@ import { ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { CreateAccessKeyResponse } from '@filone/shared';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields.js';
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button.js';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal.js';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
@@ -34,7 +35,7 @@ export function CreateApiKeyPage() {
 
   return (
     <>
-      <div className="mx-auto max-w-4xl p-8">
+      <div className="mx-auto max-w-4xl px-10 pt-10">
         {/* Header */}
         <div className="mb-8 flex items-center gap-3">
           <button
@@ -46,7 +47,7 @@ export function CreateApiKeyPage() {
             <ArrowLeftIcon size={16} />
           </button>
           <div>
-            <h1 className="text-xl font-semibold text-zinc-900">Create API key</h1>
+            <Heading tag="h1">Create API key</Heading>
             <p className="text-sm text-zinc-500">
               Generate credentials for S3-compatible API access
             </p>

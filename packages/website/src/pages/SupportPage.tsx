@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { TextArea } from '../components/TextArea';
@@ -71,9 +72,10 @@ export function SupportPage() {
   }
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-semibold text-zinc-900 mb-6">Talk to an Expert</h1>
-      <p className="text-sm text-zinc-600 mb-6">We typically respond within 1 business day.</p>
+    <div className="px-10 pt-10">
+      <Heading tag="h1" size="xl" description="We typically respond within 1 business day.">
+        Talk to an Expert
+      </Heading>
 
       <div className="max-w-xl">
         <div className="rounded-lg border border-zinc-200 bg-white p-6">

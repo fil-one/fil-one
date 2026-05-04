@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { PlusIcon, DatabaseIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
@@ -54,7 +55,7 @@ export function BucketsPage() {
 
   if (isError) {
     return (
-      <div className="p-6">
+      <div className="px-10 pt-10">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error?.message ?? 'Failed to load buckets'}
         </div>
@@ -63,10 +64,12 @@ export function BucketsPage() {
   }
 
   return (
-    <div className="p-6">
+    <div className="px-10 pt-10">
       {/* Page header */}
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-zinc-900">Buckets</h1>
+      <div className="mb-6 flex items-start justify-between">
+        <Heading tag="h1" size="xl" description="Organize and manage your storage containers">
+          Buckets
+        </Heading>
         <Button
           variant="primary"
           icon={PlusIcon}

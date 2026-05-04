@@ -11,6 +11,7 @@ import { useQuery } from '@tanstack/react-query';
 
 const UsageTrends = lazy(() => import('./UsageTrends'));
 
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
@@ -82,7 +83,7 @@ function estimateMonthlyCost(usedBytes: number, pricePerTbCents: number): string
 
 function DashboardSkeleton() {
   return (
-    <div className="p-6 animate-pulse">
+    <div className="p-8 animate-pulse">
       <div className="mb-6 h-8 w-40 rounded bg-zinc-200" />
       <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="h-[157px] rounded-xl bg-zinc-100" />
@@ -182,10 +183,12 @@ export function DashboardPage() {
   const quickSetupTotal = quickSetupTasks.length;
 
   return (
-    <div className="p-6">
+    <div className="px-10 pt-10">
       {/* 1. Page header */}
       <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-zinc-900">Dashboard</h1>
+        <Heading tag="h1" size="xl">
+          Dashboard
+        </Heading>
         <Link
           to="/buckets"
           className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-900 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] hover:bg-zinc-50"
