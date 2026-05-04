@@ -14,7 +14,7 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
   await page.goto('/dashboard');
   await expect(page.getByText('Dashboard')).toBeVisible();
 
-  await page.getByRole('button', { name: 'User menu' }).click();
+  await page.getByRole('button', { name: new RegExp(process.env.E2E_PAID_EMAIL!) }).click();
   await page.getByRole('button', { name: 'Log out' }).click();
 
   // Wait for the full /logout -> Auth0 /v2/logout -> returnTo chain to settle.
