@@ -44,7 +44,9 @@ function formatCents(cents: number): string {
 
 function SkeletonCard({ height = 'h-36' }: { height?: string }) {
   return (
-    <div className={`animate-pulse rounded-xl border border-[#e1e4ea] bg-white p-6 ${height}`}>
+    <div
+      className={`animate-pulse rounded-lg border border-zinc-200 bg-white p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] ${height}`}
+    >
       <div className="h-3 w-24 rounded bg-zinc-200 mb-4" />
       <div className="h-4 w-48 rounded bg-zinc-200 mb-2" />
       <div className="h-3 w-36 rounded bg-zinc-200" />
@@ -279,16 +281,16 @@ export function BillingPage() {
         <div className="flex-1 min-w-0 flex flex-col gap-6">
           {/* Plan card */}
           <div
-            className={`rounded-lg border bg-white flex flex-col gap-4 py-4 px-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] ${isActive || isPastDue ? 'border-[rgba(16,183,127,0.3)]' : 'border-[rgba(0,128,255,0.2)]'}`}
+            className={`rounded-lg border bg-white flex flex-col gap-4 py-4 px-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] ${isActive || isPastDue ? 'border-green-200' : 'border-brand-200'}`}
           >
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-[#14181f]">
+                <h2 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
                   {isActive || isPastDue || isGracePeriod || isCanceled
                     ? 'Pay-as-you-go'
                     : 'Free Trial'}
                 </h2>
-                <p className="text-[13px] text-[#677183] leading-[19.5px]">
+                <p className="text-[13px] text-zinc-500 leading-[19.5px]">
                   {isActive || isPastDue
                     ? 'Unlimited storage, pay only for what you use'
                     : isGracePeriod
@@ -328,8 +330,8 @@ export function BillingPage() {
 
             {/* Trial CTA banner */}
             {isTrialing && (
-              <div className="rounded-lg bg-[rgba(243,244,246,0.5)] border border-[rgba(225,228,234,0.5)] p-[13px] flex items-center justify-between">
-                <p className="text-[13px] font-medium text-[#14181f]">
+              <div className="rounded-lg bg-zinc-50 border border-zinc-200/50 p-[13px] flex items-center justify-between">
+                <p className="text-[13px] font-medium text-zinc-900">
                   Ready to unlock unlimited storage?
                 </p>
                 <button
@@ -344,6 +346,16 @@ export function BillingPage() {
               </div>
             )}
 
+            {/* Manage plan — active subscribers */}
+            {(isActive || isPastDue) && (
+              <div className="flex items-center justify-between border-t border-zinc-100 pt-3">
+                <span className="text-[12px] text-zinc-500">Billed monthly</span>
+                <Button variant="ghost" size="sm" onClick={handleUpdatePayment}>
+                  Manage plan
+                </Button>
+              </div>
+            )}
+
             {/* Grace period / Canceled reactivation CTA */}
             {(isGracePeriod || isCanceled) && (
               <div
@@ -353,7 +365,7 @@ export function BillingPage() {
                     : 'bg-amber-50 border border-amber-200'
                 }`}
               >
-                <p className="text-[13px] font-medium text-[#14181f]">
+                <p className="text-[13px] font-medium text-zinc-900">
                   {isCanceled
                     ? 'Reactivate your subscription to regain full access'
                     : isTrialExpiredGrace
@@ -374,12 +386,12 @@ export function BillingPage() {
           </div>
 
           {/* Current usage card */}
-          <div className="rounded-lg border border-[#e1e4ea] bg-white flex flex-col gap-5 p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+          <div className="rounded-lg border border-zinc-200 bg-white flex flex-col gap-5 p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
             <div>
-              <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-[#14181f]">
+              <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
                 Current usage
               </h3>
-              <p className="text-[13px] text-[#677183] leading-[19.5px] mt-1">
+              <p className="text-[13px] text-zinc-500 leading-[19.5px] mt-1">
                 {isTrialing
                   ? 'Storage and egress during your free trial'
                   : isActive || isPastDue || isGracePeriod
@@ -394,8 +406,8 @@ export function BillingPage() {
               {/* Storage bar */}
               <div className="flex flex-col gap-[10px] w-full">
                 <div className="flex items-center justify-between">
-                  <span className="text-[13px] text-[#677183]">Storage used</span>
-                  <span className="text-[13px] font-medium text-[#14181f]">
+                  <span className="text-[13px] text-zinc-500">Storage used</span>
+                  <span className="text-[13px] font-medium text-zinc-900">
                     {formatBytes(storageUsed)}
                     {storageLimit > 0 && ` / ${formatBytes(storageLimit)}`}
                   </span>
@@ -407,14 +419,14 @@ export function BillingPage() {
               {isTrialing && (
                 <div className="flex flex-col gap-[10px] w-full">
                   <div className="flex items-center justify-between">
-                    <span className="text-[13px] text-[#677183]">Egress used</span>
-                    <span className="text-[13px] font-medium text-[#14181f]">
+                    <span className="text-[13px] text-zinc-500">Egress used</span>
+                    <span className="text-[13px] font-medium text-zinc-900">
                       {formatBytes(egressUsed)}
                       {egressLimit > 0 && ` / ${formatBytes(egressLimit)}`}
                     </span>
                   </div>
                   <ProgressBar value={egressPct} size="md" label="Egress usage" />
-                  <p className="text-xs text-[#677183]">
+                  <p className="text-xs text-zinc-500">
                     No egress fees after upgrading to pay-as-you-go
                   </p>
                 </div>
@@ -422,11 +434,11 @@ export function BillingPage() {
 
               {/* Estimated cost (active/grace) */}
               {(isActive || isPastDue || isGracePeriod) && (
-                <div className="w-full rounded-lg bg-[rgba(243,244,246,0.5)] p-3 flex items-center justify-between">
-                  <span className="text-[13px] font-normal text-[#677183]">
+                <div className="w-full rounded-lg bg-zinc-50 p-3 flex items-center justify-between">
+                  <span className="text-[13px] font-normal text-zinc-500">
                     Estimated monthly cost
                   </span>
-                  <span className="text-[18px] font-semibold leading-[28px] text-[#14181f]">
+                  <span className="text-[18px] font-semibold leading-[28px] text-zinc-900">
                     {formatCents(estimatedCost)}
                   </span>
                 </div>
@@ -435,12 +447,12 @@ export function BillingPage() {
           </div>
 
           {/* Payment method card */}
-          <div className="rounded-lg border border-[#e1e4ea] bg-white flex flex-col gap-5 p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+          <div className="rounded-lg border border-zinc-200 bg-white flex flex-col gap-5 p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
             <div>
-              <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-[#14181f]">
+              <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
                 Payment method
               </h3>
-              <p className="text-[13px] text-[#677183] leading-[19.5px] mt-1">
+              <p className="text-[13px] text-zinc-500 leading-[19.5px] mt-1">
                 {billing?.paymentMethod
                   ? 'Your active payment method'
                   : 'Add a payment method to continue after your trial'}
@@ -448,14 +460,14 @@ export function BillingPage() {
             </div>
 
             {billing?.paymentMethod ? (
-              <div className="w-full rounded-lg border border-[#e1e4ea] p-[13px] flex items-center gap-3">
+              <div className="w-full rounded-lg border border-zinc-200 p-[13px] flex items-center gap-3">
                 <IconBox icon={CreditCardIcon} color="blue" size="sm" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-medium leading-[19.5px] text-[#14181f]">
+                  <p className="text-[13px] font-medium leading-[19.5px] text-zinc-900">
                     &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull;{' '}
                     {billing.paymentMethod.last4}
                   </p>
-                  <p className="text-xs text-[#677183] leading-[18px]">
+                  <p className="text-xs text-zinc-500 leading-[18px]">
                     Expires {String(billing.paymentMethod.expMonth).padStart(2, '0')}/
                     {String(billing.paymentMethod.expYear).slice(-2)}
                   </p>
@@ -465,9 +477,9 @@ export function BillingPage() {
                 </Button>
               </div>
             ) : (
-              <div className="flex items-center gap-3 rounded-lg border border-dashed border-[rgba(225,228,234,0.8)] bg-[rgba(243,244,246,0.3)] p-[13px] w-full">
+              <div className="flex items-center gap-3 rounded-lg border border-dashed border-zinc-200 bg-zinc-50/30 p-[13px] w-full">
                 <IconBox icon={CreditCardIcon} color="grey" size="sm" />
-                <span className="flex-1 text-[13px] text-[#677183]">No payment method added</span>
+                <span className="flex-1 text-[13px] text-zinc-500">No payment method added</span>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -482,7 +494,7 @@ export function BillingPage() {
 
           {/* Invoice history card */}
           {!isTrialing && invoicesLoading && (
-            <div className="animate-pulse rounded-xl border border-[#e1e4ea] bg-white p-6">
+            <div className="animate-pulse rounded-lg border border-zinc-200 bg-white p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
               <div className="h-3 w-28 rounded bg-zinc-200 mb-2" />
               <div className="h-3 w-44 rounded bg-zinc-200 mb-4" />
               <div className="h-4 w-full rounded bg-zinc-200 mb-3" />
@@ -491,9 +503,13 @@ export function BillingPage() {
             </div>
           )}
           {!isTrialing && !invoicesLoading && (
-            <div className="rounded-xl border border-[#e1e4ea] bg-white p-6">
-              <h3 className="text-[13px] font-semibold text-[#14181f] mb-0.5">Invoice history</h3>
-              <p className="text-[13px] text-[#99a0ae] mb-4">Recent billing statements</p>
+            <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+              <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
+                Invoice history
+              </h3>
+              <p className="text-[13px] text-zinc-500 leading-[19.5px] mt-1 mb-4">
+                Recent billing statements
+              </p>
 
               {invoicesError && (
                 <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
@@ -503,7 +519,7 @@ export function BillingPage() {
               )}
 
               {!invoicesError && invoices && invoices.invoices.length === 0 && (
-                <p className="text-sm text-[#99a0ae]">
+                <p className="text-sm text-zinc-400">
                   No invoices yet. Your invoices will appear here after your first billing cycle.
                 </p>
               )}
@@ -514,17 +530,17 @@ export function BillingPage() {
                     <div
                       key={inv.id}
                       className={`flex items-center justify-between py-3 ${
-                        idx > 0 ? 'border-t border-[#e1e4ea]' : ''
+                        idx > 0 ? 'border-t border-zinc-200' : ''
                       }`}
                     >
                       <div className="flex flex-col">
-                        <span className="text-[13px] font-medium text-[#14181f]">
+                        <span className="text-[13px] font-medium text-zinc-900">
                           {formatDate(inv.createdAt)}
                         </span>
-                        <span className="text-[11px] text-[#99a0ae] capitalize">{inv.status}</span>
+                        <span className="text-[11px] text-zinc-400 capitalize">{inv.status}</span>
                       </div>
                       <div className="flex items-center gap-4">
-                        <span className="text-[14px] font-semibold text-[#14181f]">
+                        <span className="text-[14px] font-semibold text-zinc-900">
                           {formatCents(inv.amountDueInCents)}
                         </span>
                         {inv.invoicePdfUrl && (
@@ -532,13 +548,9 @@ export function BillingPage() {
                             href={inv.invoicePdfUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-[13px] font-medium text-[#0066ff] hover:underline"
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] transition-colors hover:bg-zinc-50"
                           >
-                            <DownloadSimpleIcon
-                              size={14}
-                              className="text-[#677183]"
-                              aria-hidden="true"
-                            />
+                            <DownloadSimpleIcon size={13} aria-hidden="true" />
                             PDF
                           </a>
                         )}
@@ -553,15 +565,15 @@ export function BillingPage() {
 
         {/* ── Right column (pricing sidebar) ─────────────────── */}
         <div className="w-[368px] flex-shrink-0">
-          <div className="rounded-lg border border-[#e1e4ea] bg-white shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] overflow-hidden p-px">
+          <div className="rounded-lg border border-zinc-200 bg-white shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] overflow-hidden p-px">
             {/* Header */}
-            <div className="flex flex-col gap-[6px] px-4 pt-4 pb-[13px] border-b border-[rgba(225,228,234,0.5)] bg-zinc-50">
-              <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-[#677183]">
+            <div className="flex flex-col gap-[6px] px-4 pt-4 pb-[13px] border-b border-zinc-200/50 bg-zinc-50">
+              <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-zinc-500">
                 Pay-as-you-go
               </p>
               <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-bold leading-9 text-[#14181f]">$4.99</span>
-                <span className="text-[12px] leading-[18px] text-[#677183]">/ TB / month</span>
+                <span className="text-3xl font-bold leading-9 text-zinc-900">$4.99</span>
+                <span className="text-[12px] leading-[18px] text-zinc-500">/ TB / month</span>
               </div>
             </div>
 
@@ -575,12 +587,9 @@ export function BillingPage() {
                   'Data integrity guarantees',
                   'Enterprise-grade security',
                 ].map((item) => (
-                  <li
-                    key={item}
-                    className="flex items-center gap-[10px] text-[13px] text-[#677183]"
-                  >
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#f3f4f6] flex-shrink-0">
-                      <CheckIcon size={12} className="text-[#3a4252]" weight="bold" />
+                  <li key={item} className="flex items-center gap-[10px] text-[13px] text-zinc-500">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-100 flex-shrink-0">
+                      <CheckIcon size={12} className="text-zinc-700" weight="bold" />
                     </span>
                     {item}
                   </li>
@@ -604,17 +613,17 @@ export function BillingPage() {
 
           {/* Need more? section */}
           <div className="flex flex-col gap-1 mt-5 px-1">
-            <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-[#677183]">
+            <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-zinc-500">
               Need more?
             </p>
-            <p className="text-[12px] leading-[19.5px] text-[#677183]">
-              The <strong className="font-medium text-[#14181f]">Business plan</strong> offers
-              volume discounts, SLA guarantees, and dedicated support.
+            <p className="text-[12px] leading-[19.5px] text-zinc-500">
+              The <strong className="font-medium text-zinc-900">Business plan</strong> offers volume
+              discounts, SLA guarantees, and dedicated support.
             </p>
             <button
               type="button"
               onClick={() => setContactSalesOpen(true)}
-              className="text-[12px] font-medium leading-[18px] text-[#0080ff] hover:underline text-left"
+              className="text-[12px] font-medium leading-[18px] text-brand-600 hover:underline text-left"
             >
               Contact sales &rarr;
             </button>
