@@ -1,24 +1,24 @@
-# ADR: MSP Management API
+# ADR: Service Orchestrator Management API
 
 **Status:** Accepted
 **Date:** 2026-04-29
 
 ## Context
 
-FilOne currently integrates with a single managed service provider (MSP) — Aurora — and the backend is wired directly to Aurora's two-API split (Backoffice + Portal) with Aurora-specific request/response shapes, permission strings, and onboarding semantics. To onboard additional MSPs in the future without rewriting the backend, we need a stable, vendor-neutral API contract that any MSP can implement.
+FilOne currently integrates with a single Service Orchestrator — Aurora — and the backend is wired directly to Aurora's two-API split (Backoffice + Portal) with Aurora-specific request/response shapes, permission strings, and onboarding semantics. To onboard additional Service Orchestrators in the future without rewriting the backend, we need a stable, vendor-neutral API contract that any Service Orchestrator can implement.
 
 The contract must cover the same capabilities the FilOne backend exercises against Aurora today:
 
 - Tenant lifecycle (create, set up, query, status changes).
-- Issuance of credentials FilOne uses to call the MSP on behalf of a tenant.
+- Issuance of credentials FilOne uses to call the Service Orchestrator on behalf of a tenant.
 - S3 access-key CRUD scoped to a tenant.
 - Usage metering for billing, dashboards, and trial enforcement.
 
-Bucket creation, listing, deletion and all object operations are not in scope for this API: the MSP exposes them through the standard S3 API and FilOne drives them over S3 directly (typically via pre-signed URLs).
+Bucket creation, listing, deletion and all object operations are not in scope for this API: the Service Orchestrator exposes them through the standard S3 API and FilOne drives them over S3 directly (typically via pre-signed URLs).
 
 ## Decision
 
-Define a generic **MSP Management API** specified in `docs/msp-integration/management-openapi.yaml`. Each new MSP implements this contract; FilOne's backend talks to MSPs exclusively through it.
+Define a generic **Service Orchestrator Management API** specified in `docs/service-orchestrator-integration/management-openapi.yaml`. Each new Service Orchestrator implements this contract; FilOne's backend talks to Service Orchestrators exclusively through it.
 
 ### Authentication
 
@@ -27,7 +27,7 @@ Bearer tokens via the standard `Authorization: Bearer <token>` header.
 Two scopes:
 
 - **Partner key** — global, partner-scoped admin credential. Used for tenant lifecycle, status changes, per-tenant API-key issuance, and metrics queries.
-- **Tenant key** — tenant-scoped credential issued by the MSP, used for S3 access-key CRUD. The MSP must reject any request whose path `tenantId` does not match the tenant the key was issued for.
+- **Tenant key** — tenant-scoped credential issued by the Service Orchestrator, used for S3 access-key CRUD. The Service Orchestrator must reject any request whose path `tenantId` does not match the tenant the key was issued for.
 
 ### Tenant lifecycle
 
@@ -40,7 +40,7 @@ Two scopes:
 
 `POST /tenants/{tenantId}/api-keys` issues a tenant-scoped bearer token. The secret is returned only on creation. FilOne stores it in its own secret store and uses it for all subsequent tenant-scoped management calls.
 
-`DELETE /tenants/{tenantId}/api-keys/{keyId}` revokes a specific key by its identifier. Idempotent (204 if already revoked). Multiple API keys may be active for a tenant at the same time, which is the property rotation depends on: issue a new key, switch callers over, then revoke the old one. The MSP may impose a per-tenant cap on concurrently-active keys.
+`DELETE /tenants/{tenantId}/api-keys/{keyId}` revokes a specific key by its identifier. Idempotent (204 if already revoked). Multiple API keys may be active for a tenant at the same time, which is the property rotation depends on: issue a new key, switch callers over, then revoke the old one. The Service Orchestrator may impose a per-tenant cap on concurrently-active keys.
 
 ### S3 access keys
 
@@ -60,7 +60,7 @@ Three time-series endpoints under the partner key, all parameterised by `from` /
 - `GET /tenants/{tenantId}/metrics/egress` — tenant egress (bytes downloaded).
 - `GET /tenants/{tenantId}/buckets/{bucketName}/metrics/storage` — per-bucket storage.
 
-MSPs must support at least `1h`, `24h`, and `720h` windows.
+Service Orchestrators must support at least `1h`, `24h`, and `720h` windows.
 
 ### Idempotency
 
@@ -77,27 +77,27 @@ Every operation is safely retryable end-to-end:
 
 ### Re-use Aurora's two-API split (Backoffice + Portal)
 
-Mirror Aurora's separation between a global "backoffice" and a per-tenant "portal" with different base URLs and overlapping resources. Rejected because it imposes Aurora's specific architecture on every future MSP. The same authorization split can be expressed with a single base URL and two security schemes, which is simpler to document, simpler to implement, and avoids leaking one vendor's internals into the contract.
+Mirror Aurora's separation between a global "backoffice" and a per-tenant "portal" with different base URLs and overlapping resources. Rejected because it imposes Aurora's specific architecture on every future Service Orchestrator. The same authorization split can be expressed with a single base URL and two security schemes, which is simpler to document, simpler to implement, and avoids leaking one vendor's internals into the contract.
 
 ### Async tenant setup with a separate readiness endpoint
 
-`POST /tenants` would return immediately with `setupStatus: "in_progress"`, and the caller would poll either `GET /tenants/{id}` or a dedicated `GET /tenants/{id}/setup-status` until ready. This matches Aurora's actual behaviour. Rejected because it pushes complexity onto every MSP integrator (state machine, polling, retry semantics) and onto the FilOne backend (orchestration, status persistence). A synchronous create+setup is the simplest contract that meets the requirement, and MSPs whose internal setup is asynchronous can still hold the HTTP request open or short-poll internally before responding.
+`POST /tenants` would return immediately with `setupStatus: "in_progress"`, and the caller would poll either `GET /tenants/{id}` or a dedicated `GET /tenants/{id}/setup-status` until ready. This matches Aurora's actual behaviour. Rejected because it pushes complexity onto every Service Orchestrator integrator (state machine, polling, retry semantics) and onto the FilOne backend (orchestration, status persistence). A synchronous create+setup is the simplest contract that meets the requirement, and Service Orchestrators whose internal setup is asynchronous can still hold the HTTP request open or short-poll internally before responding.
 
 ### Drop `GET /tenants/{id}` entirely
 
-Once `setupStatus` was removed, the tenant-info endpoint became technically optional: the FilOne backend caches status locally and could derive bucket/key counts by listing. Rejected because resource limits (`bucketLimit`, `accessKeyLimit`) are MSP-defined and have no other source, and a thin tenant-info read is a natural part of any tenant management API. Dropping it would either move limits onto an unrelated endpoint or hardcode them into the FilOne backend, both of which are worse.
+Once `setupStatus` was removed, the tenant-info endpoint became technically optional: the FilOne backend caches status locally and could derive bucket/key counts by listing. Rejected because resource limits (`bucketLimit`, `accessKeyLimit`) are Service Orchestrator-defined and have no other source, and a thin tenant-info read is a natural part of any tenant management API. Dropping it would either move limits onto an unrelated endpoint or hardcode them into the FilOne backend, both of which are worse.
 
 ### Single global key for everything (no per-tenant keys)
 
-Use the partner key for every operation, including S3 access-key CRUD. Rejected. The blast-radius argument against the global key is largely theoretical given that all FilOne secrets share an SSM tree and similar IAM permissions, but per-tenant keys provide a concrete defence-in-depth property: a FilOne backend bug that passes the wrong `tenantId` in the URL is rejected by the MSP rather than silently leaking one tenant's resources to another. The complexity cost is bounded — one extra endpoint, one extra SSM read per call (cached) — and the scoping primitive is required if FilOne ever wants to delegate tenant-scoped management access externally.
+Use the partner key for every operation, including S3 access-key CRUD. Rejected. The blast-radius argument against the global key is largely theoretical given that all FilOne secrets share an SSM tree and similar IAM permissions, but per-tenant keys provide a concrete defence-in-depth property: a FilOne backend bug that passes the wrong `tenantId` in the URL is rejected by the Service Orchestrator rather than silently leaking one tenant's resources to another. The complexity cost is bounded — one extra endpoint, one extra SSM read per call (cached) — and the scoping primitive is required if FilOne ever wants to delegate tenant-scoped management access externally.
 
 ### Bucket management endpoints in the management API
 
-Mirror Aurora's Portal API and expose `createBucket` / `listBuckets` / `getBucketInfo` / `deleteBucket` over the management contract. Rejected because the standard S3 API already covers all of this, and requiring an MSP to implement bucket CRUD in two places (S3 Gateway and management API) is duplicative.
+Mirror Aurora's Portal API and expose `createBucket` / `listBuckets` / `getBucketInfo` / `deleteBucket` over the management contract. Rejected because the standard S3 API already covers all of this, and requiring an Service Orchestrator to implement bucket CRUD in two places (S3 Gateway and management API) is duplicative.
 
 ### Custom `X-Api-Key` header for authentication
 
-Match Aurora's existing convention. Rejected in favour of standard `Authorization: Bearer <token>`, which is more idiomatic, has first-class support in HTTP clients and OpenAPI tooling, and does not require MSPs to invent a custom header.
+Match Aurora's existing convention. Rejected in favour of standard `Authorization: Bearer <token>`, which is more idiomatic, has first-class support in HTTP clients and OpenAPI tooling, and does not require Service Orchestrators to invent a custom header.
 
 ### Server-assigned tenant IDs with a separate `name` slug
 
@@ -109,9 +109,9 @@ Aurora expresses permissions as bare AWS action names — `GetObject`, `PutObjec
 
 ## Consequences
 
-- New MSPs can be onboarded by implementing a single OpenAPI contract; the FilOne backend integration becomes generic rather than vendor-specific.
+- New Service Orchestrators can be onboarded by implementing a single OpenAPI contract; the FilOne backend integration becomes generic rather than vendor-specific.
 - Bucket and object operations move entirely to the standard S3 API. Existing Aurora Portal calls for bucket management (`create-bucket`, `list-buckets`, `get-bucket`, `get-bucket-analytics` ownership check) will be reworked to use S3.
-- The contract requires MSPs to support synchronous `POST /tenants` (potentially long-running) and to honour idempotency on every mutating endpoint. MSPs whose native setup flow is fully asynchronous must adapt internally.
-- The access-key permission enum gains bucket-management permissions (`bucket:create`, `bucket:list`, `bucket:delete`) that Aurora's permission strings did not surface as first-class options. MSPs map these to whatever native primitives they expose.
+- The contract requires Service Orchestrators to support synchronous `POST /tenants` (potentially long-running) and to honour idempotency on every mutating endpoint. Service Orchestrators whose native setup flow is fully asynchronous must adapt internally.
+- The access-key permission enum gains bucket-management permissions (`bucket:create`, `bucket:list`, `bucket:delete`) that Aurora's permission strings did not surface as first-class options. Service Orchestrators map these to whatever native primitives they expose.
 - Per-tenant API keys remain part of the integration cost: each tenant has a credential that FilOne stores in SSM and looks up on every tenant-scoped call. The defence-in-depth benefit is preserved.
 - Telemetry (TTFB, error rates, RPS) and S3 Gateway observability are explicitly out of scope for this contract; they are delivered through the partner's observability stack.

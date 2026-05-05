@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: FilOne MSP Management API
+  title: FilOne Service Orchestrator Management API
   version: 0.1.0
   description: |
-    Management API that an MSP (managed service provider) must implement
+    Management API that an Service Orchestrator (Service Orchestrator) must implement
     so FilOne can integrate it as a new region. Covers:
 
       * Tenant lifecycle (create + setup, status, info)
@@ -12,7 +12,7 @@ info:
       * Usage metering (storage, egress)
 
     Bucket and object operations are out of scope: clients drive them
-    over the MSP's S3 Gateway directly.
+    over the Service Orchestrator's S3 Gateway directly.
 
     ## Authentication
 
@@ -24,7 +24,7 @@ info:
         metrics queries.
       * **Tenant key** — tenant-scoped credential issued via
         `POST /tenants/{tenantId}/api-keys`. Used for S3 access-key
-        management. The MSP must reject any request whose path
+        management. The Service Orchestrator must reject any request whose path
         `tenantId` differs from the tenant the key was issued for.
 
     ## Idempotency
@@ -174,7 +174,7 @@ paths:
       tags: [Tenants]
       summary: Set tenant status
       description: |
-        Sets the operational status of the tenant. The MSP's S3
+        Sets the operational status of the tenant. The Service Orchestrator's S3
         gateway must enforce these states:
 
           * `active` — read/write access.
@@ -223,7 +223,7 @@ paths:
              `DELETE /tenants/{tenantId}/api-keys/{keyId}`.
 
         During step 2 both keys are valid, so callers can roll over
-        without downtime. The MSP may impose a per-tenant cap on the
+        without downtime. The Service Orchestrator may impose a per-tenant cap on the
         number of concurrently-active keys.
       security:
         - PartnerKey: []
@@ -432,7 +432,7 @@ paths:
       summary: Per-bucket storage time series
       description: |
         Same shape as the tenant-level storage metrics, but scoped to a
-        single bucket. The MSP must verify that the bucket belongs
+        single bucket. The Service Orchestrator must verify that the bucket belongs
         to the path `tenantId` and return 404 otherwise.
       security:
         - PartnerKey: []
@@ -458,7 +458,7 @@ components:
       description: |
         Global partner-scoped admin key, sent as `Authorization: Bearer
         <token>`. Grants access across all tenants owned by this
-        partner. The MSP must scope this credential so it cannot reach
+        partner. The Service Orchestrator must scope this credential so it cannot reach
         tenants belonging to other partners.
     TenantKey:
       type: http
@@ -467,7 +467,7 @@ components:
         Tenant-scoped API key issued via
         `POST /tenants/{tenantId}/api-keys`, sent as `Authorization:
         Bearer <token>`. Operations performed with this key apply only
-        to the tenant the key was issued for; the MSP must reject calls
+        to the tenant the key was issued for; the Service Orchestrator must reject calls
         whose path `tenantId` differs from the key's tenant.
 
   parameters:
@@ -520,8 +520,8 @@ components:
       name: window
       required: true
       description: |
-        Sample bucket size, expressed as `<integer>h`. The MSP must
-        support `1h`, `24h`, and `720h` (30 days) at minimum. The MSP
+        Sample bucket size, expressed as `<integer>h`. The Service Orchestrator must
+        support `1h`, `24h`, and `720h` (30 days) at minimum. The Service Orchestrator
         may respond with HTTP 400 Bad Request for excessively dense
         queries (a window so small relative to the `from`/`to` range
         that it would produce too many samples).
@@ -573,7 +573,7 @@ components:
       description: |
         Client-supplied tenant identifier. Must be unique within the
         partner. Used as the canonical ID in all subsequent calls. FilOne
-        uses its internal organisation ID here, so the MSP does not
+        uses its internal organisation ID here, so the Service Orchestrator does not
         need to expose a separate server-assigned ID.
 
     TenantStatus:
@@ -594,7 +594,7 @@ components:
           type: string
           minLength: 1
           maxLength: 200
-          description: Human-readable name shown in the MSP's tooling.
+          description: Human-readable name shown in the Service Orchestrator's tooling.
 
     Tenant:
       type: object
@@ -736,7 +736,7 @@ components:
           format: date-time
           nullable: true
           description: |
-            Optional expiration. The MSP must reject the credentials
+            Optional expiration. The Service Orchestrator must reject the credentials
             after this time.
 
     AccessKey:
@@ -774,7 +774,7 @@ components:
             secretAccessKey:
               type: string
               description: |
-                AWS-style secret. Returned only on creation; the MSP
+                AWS-style secret. Returned only on creation; the Service Orchestrator
                 must not expose it via subsequent reads.
 
     AccessKeyList:
