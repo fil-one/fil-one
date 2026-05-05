@@ -7,11 +7,13 @@ import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/
 import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
+import { MfaSettings } from '../components/MfaSettings';
+import { SettingRow } from '../components/SettingRow';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { getMe, updateProfile, changePassword } from '../lib/api.js';
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
-import type { MeResponse } from '@filone/shared';
+import type { ConnectionProvider, MeResponse } from '@filone/shared';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
@@ -94,52 +96,66 @@ function ToggleRow({
 }
 
 // ---------------------------------------------------------------------------
-// Setting row (for security section)
+// Managed-by-provider field (read-only with provider link)
 // ---------------------------------------------------------------------------
 
-function SettingRow({
-  label,
-  description,
-  action,
+function ProviderManagedField({
+  value,
+  provider,
 }: {
-  label: string;
-  description: string;
-  action: React.ReactNode;
+  value: string;
+  provider?: ConnectionProvider;
 }) {
   return (
-    <div className="flex items-center justify-between py-1">
-      <div>
-        <p className="text-[13px] font-medium text-zinc-900">{label}</p>
-        <p className="text-xs text-zinc-500">{description}</p>
-      </div>
-      {action}
-    </div>
+    <>
+      <Input value={value} onChange={() => {}} disabled />
+      <p className="text-[11px] text-zinc-500">
+        Managed by {provider?.label}.{' '}
+        <a
+          href={provider?.profileUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-500 hover:underline"
+        >
+          Update at {provider?.label}
+        </a>
+      </p>
+    </>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Page
+// Profile section
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line max-lines-per-function, complexity/complexity
-export function SettingsPage() {
+function applyProfileUpdate(result: {
+  name?: string;
+  email?: string;
+  orgName?: string;
+}): (old: MeResponse | undefined) => MeResponse | undefined {
+  return (old) => {
+    if (!old) return old;
+    return {
+      ...old,
+      ...(result.name !== undefined ? { name: result.name } : {}),
+      ...(result.email !== undefined ? { email: result.email } : {}),
+      ...(result.orgName !== undefined ? { orgName: result.orgName } : {}),
+    };
+  };
+}
+
+function useProfileForm(me: MeResponse) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-
-  const { data: me, isPending } = useQuery({
-    queryKey: queryKeys.me,
-    queryFn: () => getMe(),
-    staleTime: ME_STALE_TIME,
-  });
+  const social = isSocialConnection(me.connectionType);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [orgName, setOrgName] = useState('');
   const [initialized, setInitialized] = useState(false);
 
-  // Initialize form fields once when data first arrives
   useEffect(() => {
-    if (me && !initialized) {
+    if (!initialized) {
       setName(me.name ?? '');
       setEmail(me.email ?? '');
       setOrgName(me.orgName ?? '');
@@ -147,53 +163,34 @@ export function SettingsPage() {
     }
   }, [me, initialized]);
 
-  const social = isSocialConnection(me?.connectionType);
-  const provider = getProvider(me?.connectionType);
-
-  const nameChanged = !social && name !== (me?.name ?? '');
-  const emailChanged = !social && email !== (me?.email ?? '');
-  const orgNameChanged = orgName !== (me?.orgName ?? '');
+  const nameChanged = !social && name !== (me.name ?? '');
+  const emailChanged = !social && email !== (me.email ?? '');
+  const orgNameChanged = orgName !== (me.orgName ?? '');
   const hasChanges = nameChanged || emailChanged || orgNameChanged;
 
-  const saveProfileMutation = useMutation({
+  const mutation = useMutation({
     mutationFn: updateProfile,
     onSuccess: (result) => {
-      // Update local form state to reflect saved values
       if (result.name !== undefined) setName(result.name);
       if (result.email !== undefined) setEmail(result.email);
       if (result.orgName !== undefined) setOrgName(result.orgName);
 
-      // Update the cache immediately so hasChanges goes false without waiting for refetch
-      queryClient.setQueryData<MeResponse>(queryKeys.me, (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          ...(result.name !== undefined ? { name: result.name } : {}),
-          ...(result.email !== undefined ? { email: result.email } : {}),
-          ...(result.orgName !== undefined ? { orgName: result.orgName } : {}),
-        };
-      });
+      const update = applyProfileUpdate(result);
+      queryClient.setQueryData<MeResponse>(queryKeys.me, update);
+      queryClient.setQueryData<MeResponse>(queryKeys.meWithMfa, update);
 
-      if (result.email) {
-        toast.success('Profile updated. Check your inbox to verify your new email.');
-      } else {
-        toast.success('Profile updated');
-      }
+      toast.success(
+        result.email
+          ? 'Profile updated. Check your inbox to verify your new email.'
+          : 'Profile updated',
+      );
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to update profile');
     },
   });
 
-  const changePasswordMutation = useMutation({
-    mutationFn: () => changePassword(),
-    onSuccess: () => toast.success('Password reset email sent'),
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to send password reset email');
-    },
-  });
-
-  function handleSaveProfile() {
+  function save() {
     const payload: Record<string, string> = {};
     if (nameChanged) payload.name = name;
     if (emailChanged) payload.email = email;
@@ -205,14 +202,205 @@ export function SettingsPage() {
       return;
     }
 
-    saveProfileMutation.mutate(validated.data);
+    mutation.mutate(validated.data);
   }
 
-  function handleChangePassword() {
-    changePasswordMutation.mutate();
-  }
+  return {
+    name,
+    setName,
+    email,
+    setEmail,
+    orgName,
+    setOrgName,
+    nameChanged,
+    emailChanged,
+    orgNameChanged,
+    hasChanges,
+    isSaving: mutation.isPending,
+    save,
+  };
+}
 
-  if (isPending) {
+function ProfileSection({ me }: { me: MeResponse }) {
+  const social = isSocialConnection(me.connectionType);
+  const provider = getProvider(me.connectionType);
+  const form = useProfileForm(me);
+
+  return (
+    <SectionCard icon={UserIcon} title="Profile" description="Your personal information">
+      <div className="flex flex-col gap-4">
+        <div className="flex gap-3">
+          <div className="flex flex-1 flex-col gap-1.5">
+            <label className="text-[13px] font-medium text-zinc-900">Full name</label>
+            {social ? (
+              <ProviderManagedField value={form.name} provider={provider} />
+            ) : (
+              <Input value={form.name} onChange={form.setName} placeholder="Your full name" />
+            )}
+          </div>
+          <div className="flex flex-1 flex-col gap-1.5">
+            <label className="text-[13px] font-medium text-zinc-900">Company name</label>
+            <Input value={form.orgName} onChange={form.setOrgName} placeholder="Your company" />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[13px] font-medium text-zinc-900">Email</label>
+          {social ? (
+            <ProviderManagedField value={form.email} provider={provider} />
+          ) : (
+            <>
+              <Input value={form.email} onChange={form.setEmail} placeholder="you@example.com" />
+              <p className="text-[11px] text-zinc-500">You will need to verify any email change.</p>
+            </>
+          )}
+        </div>
+
+        <ProfileSaveBar form={form} />
+      </div>
+    </SectionCard>
+  );
+}
+
+function ProfileSaveBar({ form }: { form: ReturnType<typeof useProfileForm> }) {
+  const changedLabels = [
+    form.nameChanged && 'name',
+    form.emailChanged && 'email',
+    form.orgNameChanged && 'company name',
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  return (
+    <div className="flex items-center gap-3">
+      <Button variant="primary" onClick={form.save} disabled={form.isSaving || !form.hasChanges}>
+        {form.isSaving ? 'Saving...' : 'Save changes'}
+      </Button>
+      {form.hasChanges && <p className="text-[11px] text-zinc-500">Saving: {changedLabels}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Notifications section
+// ---------------------------------------------------------------------------
+
+function NotificationsSection() {
+  return (
+    <SectionCard
+      icon={BellIcon}
+      title="Notifications"
+      description="Manage your notification preferences"
+    >
+      <div className="flex flex-col gap-3 opacity-50">
+        <ToggleRow
+          label="Email notifications"
+          description="Get notified about your uploads and when approaching storage limits"
+          enabled={false}
+          disabled
+        />
+        <div className="h-px bg-[#e1e4ea]" />
+        <ToggleRow
+          label="Marketing emails"
+          description="Receive updates about new features"
+          enabled={false}
+          disabled
+        />
+        <p className="text-xs text-zinc-400 italic">Coming soon</p>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Security section
+// ---------------------------------------------------------------------------
+
+function SecuritySection({ me }: { me: MeResponse }) {
+  const { toast } = useToast();
+  const social = isSocialConnection(me.connectionType);
+  const provider = getProvider(me.connectionType);
+
+  const changePasswordMutation = useMutation({
+    mutationFn: () => changePassword(),
+    onSuccess: () => toast.success('Password reset email sent'),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to send password reset email');
+    },
+  });
+
+  return (
+    <SectionCard icon={ShieldCheckIcon} title="Security" description="Manage your account security">
+      <div className="flex flex-col gap-3">
+        <MfaSettings me={me} />
+        <div className="h-px bg-[#e1e4ea]" />
+        {!social && (
+          <SettingRow
+            label="Password"
+            description="Change your account password"
+            action={
+              <Button
+                variant="ghost"
+                onClick={() => changePasswordMutation.mutate()}
+                disabled={changePasswordMutation.isPending}
+              >
+                {changePasswordMutation.isPending ? 'Sending...' : 'Change'}
+              </Button>
+            }
+          />
+        )}
+        {social && provider && (
+          <p className="text-xs text-zinc-500">
+            Password is managed by {provider.label}.{' '}
+            <a
+              href={provider.profileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-500 hover:underline"
+            >
+              Visit {provider.label} settings
+            </a>
+          </p>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Danger zone
+// ---------------------------------------------------------------------------
+
+function DangerSection() {
+  return (
+    <SectionCard icon={TrashIcon} title="Danger zone" description="Irreversible actions" danger>
+      <div className="rounded-lg border border-red-200 bg-red-50/50 p-3.5">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[13px] font-medium text-zinc-900">Delete account</p>
+            <p className="text-xs text-zinc-500">Permanently delete your account and all data</p>
+          </div>
+          <Button variant="ghost" className="cursor-not-allowed opacity-40" disabled>
+            Delete account
+          </Button>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+export function SettingsPage() {
+  const { data: me, isPending } = useQuery({
+    queryKey: queryKeys.meWithMfa,
+    queryFn: () => getMe({ include: 'mfa' }),
+    staleTime: ME_STALE_TIME,
+  });
+
+  if (isPending || !me) {
     return (
       <div className="flex items-center justify-center p-16">
         <Spinner ariaLabel="Loading settings" />
@@ -229,183 +417,10 @@ export function SettingsPage() {
       </div>
 
       <div className="mt-6 flex max-w-[672px] flex-col gap-6">
-        {/* Profile */}
-        <SectionCard icon={UserIcon} title="Profile" description="Your personal information">
-          <div className="flex flex-col gap-4">
-            <div className="flex gap-3">
-              <div className="flex flex-1 flex-col gap-1.5">
-                <label className="text-[13px] font-medium text-zinc-900">Full name</label>
-                {social ? (
-                  <>
-                    <Input value={name} onChange={() => {}} disabled />
-                    <p className="text-[11px] text-zinc-500">
-                      Managed by {provider?.label}.{' '}
-                      <a
-                        href={provider?.profileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-500 hover:underline"
-                      >
-                        Update at {provider?.label}
-                      </a>
-                    </p>
-                  </>
-                ) : (
-                  <Input value={name} onChange={setName} placeholder="Your full name" />
-                )}
-              </div>
-              <div className="flex flex-1 flex-col gap-1.5">
-                <label className="text-[13px] font-medium text-zinc-900">Company name</label>
-                <Input value={orgName} onChange={setOrgName} placeholder="Your company" />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[13px] font-medium text-zinc-900">Email</label>
-              {social ? (
-                <>
-                  <Input value={email} onChange={() => {}} disabled />
-                  <p className="text-[11px] text-zinc-500">
-                    Managed by {provider?.label}.{' '}
-                    <a
-                      href={provider?.profileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-500 hover:underline"
-                    >
-                      Update at {provider?.label}
-                    </a>
-                  </p>
-                </>
-              ) : (
-                <>
-                  <Input value={email} onChange={setEmail} placeholder="you@example.com" />
-                  <p className="text-[11px] text-zinc-500">
-                    You will need to verify any email change.
-                  </p>
-                </>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Button
-                variant="primary"
-                onClick={handleSaveProfile}
-                disabled={saveProfileMutation.isPending || !hasChanges}
-              >
-                {saveProfileMutation.isPending ? 'Saving...' : 'Save changes'}
-              </Button>
-              {hasChanges && (
-                <p className="text-[11px] text-zinc-500">
-                  Saving:{' '}
-                  {[
-                    nameChanged && 'name',
-                    emailChanged && 'email',
-                    orgNameChanged && 'company name',
-                  ]
-                    .filter(Boolean)
-                    .join(', ')}
-                </p>
-              )}
-            </div>
-          </div>
-        </SectionCard>
-
-        {/* Notifications */}
-        <SectionCard
-          icon={BellIcon}
-          title="Notifications"
-          description="Manage your notification preferences"
-        >
-          <div className="flex flex-col gap-3 opacity-50">
-            <ToggleRow
-              label="Email notifications"
-              description="Get notified about your uploads and when approaching storage limits"
-              enabled={false}
-              disabled
-            />
-            <div className="h-px bg-[#e1e4ea]" />
-            <ToggleRow
-              label="Marketing emails"
-              description="Receive updates about new features"
-              enabled={false}
-              disabled
-            />
-            <p className="text-xs text-zinc-400 italic">Coming soon</p>
-          </div>
-        </SectionCard>
-
-        {/* Security */}
-        <SectionCard
-          icon={ShieldCheckIcon}
-          title="Security"
-          description="Manage your account security"
-        >
-          <div className="flex flex-col gap-3">
-            {!social && (
-              <>
-                <SettingRow
-                  label="Two-factor authentication"
-                  description="Add an extra layer of security to your account"
-                  action={
-                    <Button variant="ghost" disabled>
-                      Enable
-                    </Button>
-                  }
-                />
-                <p className="text-[11px] text-zinc-400 -mt-1">
-                  Requires Auth0 MFA configuration. Coming soon.
-                </p>
-                <div className="h-px bg-[#e1e4ea]" />
-              </>
-            )}
-            {!social && (
-              <SettingRow
-                label="Password"
-                description="Change your account password"
-                action={
-                  <Button
-                    variant="ghost"
-                    onClick={handleChangePassword}
-                    disabled={changePasswordMutation.isPending}
-                  >
-                    {changePasswordMutation.isPending ? 'Sending...' : 'Change'}
-                  </Button>
-                }
-              />
-            )}
-            {social && provider && (
-              <p className="text-xs text-zinc-500">
-                Security settings are managed by {provider.label}.{' '}
-                <a
-                  href={provider.profileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-500 hover:underline"
-                >
-                  Visit {provider.label} settings
-                </a>
-              </p>
-            )}
-          </div>
-        </SectionCard>
-
-        {/* Danger Zone */}
-        <SectionCard icon={TrashIcon} title="Danger zone" description="Irreversible actions" danger>
-          <div className="rounded-lg border border-red-200 bg-red-50/50 p-3.5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[13px] font-medium text-zinc-900">Delete account</p>
-                <p className="text-xs text-zinc-500">
-                  Permanently delete your account and all data
-                </p>
-              </div>
-              <Button variant="ghost" className="cursor-not-allowed opacity-40" disabled>
-                Delete account
-              </Button>
-            </div>
-          </div>
-        </SectionCard>
+        <ProfileSection me={me} />
+        <NotificationsSection />
+        <SecuritySection me={me} />
+        <DangerSection />
       </div>
     </div>
   );

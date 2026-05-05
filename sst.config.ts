@@ -323,7 +323,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              Version: '2.2',
+              Version: '2.5',
             },
           },
         },
@@ -581,6 +581,8 @@ export default $config({
       method: 'GET',
       routePath: '/api/me',
       handler: 'get-me',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
@@ -595,6 +597,29 @@ export default $config({
       method: 'POST',
       routePath: '/api/me/resend-verification',
       handler: 'resend-verification',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+
+    // ── MFA routes ──────────────────────────────────────────────────
+    addRoute({
+      method: 'POST',
+      routePath: '/api/mfa/enroll',
+      handler: 'enroll-mfa',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/mfa/disable',
+      handler: 'disable-mfa',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/mfa/enrollments/{enrollmentId}',
+      handler: 'delete-mfa-enrollment',
       extraLink: mgmtRuntimeResources,
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });

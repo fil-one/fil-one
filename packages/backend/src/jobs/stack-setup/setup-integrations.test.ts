@@ -85,6 +85,8 @@ function buildCfnEvent(
 let capturedCfnBody: Record<string, unknown> | undefined;
 let capturedAuth0PatchBody: Record<string, unknown> | undefined;
 let capturedEmailProviderBody: Record<string, unknown> | undefined;
+let capturedMfaActionBody: Record<string, unknown> | undefined;
+let capturedMfaBindingsBody: Record<string, unknown> | undefined;
 
 function stubAuth0Fetch(
   clientState = {
@@ -99,6 +101,8 @@ function stubAuth0Fetch(
   capturedCfnBody = undefined;
   capturedAuth0PatchBody = undefined;
   capturedEmailProviderBody = undefined;
+  capturedMfaActionBody = undefined;
+  capturedMfaBindingsBody = undefined;
 
   mockFetch.mockImplementation(async (url, init) => {
     const urlStr = String(url);
@@ -130,6 +134,47 @@ function stubAuth0Fetch(
       if (postStatus !== 200) {
         return new Response('Provider create error', { status: postStatus });
       }
+      return new Response('{}', { status: 200 });
+    }
+    // MFA Action endpoints
+    if (
+      urlStr.includes('/api/v2/actions/actions') &&
+      urlStr.includes('actionName=') &&
+      (!init?.method || init.method === 'GET')
+    ) {
+      return new Response(JSON.stringify({ actions: [] }), { status: 200 });
+    }
+    if (
+      urlStr.includes('/api/v2/actions/actions') &&
+      !urlStr.includes('/deploy') &&
+      init?.method === 'POST'
+    ) {
+      capturedMfaActionBody = JSON.parse(init.body!);
+      return new Response(JSON.stringify({ id: 'action-123', name: 'MFA Enrollment Trigger' }), {
+        status: 201,
+      });
+    }
+    if (
+      urlStr.includes('/api/v2/actions/actions/action-123') &&
+      !urlStr.includes('actionName') &&
+      (!init?.method || init.method === 'GET')
+    ) {
+      return new Response(JSON.stringify({ id: 'action-123', status: 'built' }), { status: 200 });
+    }
+    if (urlStr.includes('/deploy') && init?.method === 'POST') {
+      return new Response('{}', { status: 200 });
+    }
+    if (
+      urlStr.includes('/api/v2/actions/triggers/post-login/bindings') &&
+      (!init?.method || init.method === 'GET')
+    ) {
+      return new Response(JSON.stringify({ bindings: [] }), { status: 200 });
+    }
+    if (
+      urlStr.includes('/api/v2/actions/triggers/post-login/bindings') &&
+      init?.method === 'PATCH'
+    ) {
+      capturedMfaBindingsBody = JSON.parse(init.body!);
       return new Response('{}', { status: 200 });
     }
     if (init?.method === 'PUT') {
@@ -830,6 +875,72 @@ describe('setup-integrations', () => {
         credentials: { api_key: 'SG.test-api-key' },
         default_from_address: 'no-reply+staging@filone.ai',
       });
+    });
+  });
+
+  // ── Auth0 MFA Action ───────────────────────────────────────────────
+
+  describe('Auth0 MFA Action', () => {
+    it('creates MFA action, deploys it, and binds to post-login trigger on Create for staging', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://staging.fil.one',
+            Stage: 'staging',
+          },
+        }),
+      );
+
+      expect(capturedMfaActionBody).toMatchObject({
+        name: 'MFA Enrollment Trigger',
+        supported_triggers: [{ id: 'post-login', version: 'v3' }],
+      });
+      expect(capturedMfaBindingsBody).toEqual({
+        bindings: [
+          {
+            ref: { type: 'action_id', value: 'action-123' },
+            display_name: 'MFA Enrollment Trigger',
+          },
+        ],
+      });
+    });
+
+    it('does not create MFA action for dev stages', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      await handler(buildCfnEvent({ RequestType: 'Create' }));
+
+      expect(capturedMfaActionBody).toBeUndefined();
+    });
+
+    it('does not create MFA action on Delete', async () => {
+      ssmMock.on(DeleteParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Delete',
+          PhysicalResourceId: 'filone-setup-dev',
+        }),
+      );
+
+      expect(capturedMfaActionBody).toBeUndefined();
     });
   });
 

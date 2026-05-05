@@ -101,9 +101,12 @@ import type {
   UpdateProfileResponse,
 } from '@filone/shared';
 
-export function getMe(options?: { forceRefresh?: boolean }): Promise<MeResponse> {
-  const qs = options?.forceRefresh ? '?forceRefresh=1' : '';
-  return apiRequest<MeResponse>(`/me${qs}`);
+export function getMe(options?: { forceRefresh?: boolean; include?: 'mfa' }): Promise<MeResponse> {
+  const params = new URLSearchParams();
+  if (options?.forceRefresh) params.set('forceRefresh', '1');
+  if (options?.include) params.set('include', options.include);
+  const qs = params.toString();
+  return apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
 }
 
 export function confirmOrg(orgName: string): Promise<ConfirmOrgResponse> {
@@ -126,6 +129,25 @@ export function changePassword(): Promise<{ message: string }> {
 
 export function resendVerificationEmail(): Promise<{ message: string }> {
   return apiRequest<{ message: string }>('/me/resend-verification', { method: 'POST' });
+}
+
+// ── MFA API ──────────────────────────────────────────────────────────────
+
+export async function enrollMfa(): Promise<void> {
+  await apiRequest<{ message: string }>('/mfa/enroll', { method: 'POST' });
+  // Force a fresh login. The backend has set app_metadata.mfa_enrolling = true,
+  // so the Post-Login Action will trigger MFA enrollment via Universal Login.
+  redirectToLogin();
+}
+
+export function disableMfa(): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>('/mfa/disable', { method: 'POST' });
+}
+
+export function deleteMfaEnrollment(enrollmentId: string): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>(`/mfa/enrollments/${encodeURIComponent(enrollmentId)}`, {
+    method: 'DELETE',
+  });
 }
 
 // ── Usage API ────────────────────────────────────────────────────────────
