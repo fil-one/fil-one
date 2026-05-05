@@ -31,7 +31,7 @@ function VerifyEmailRoute() {
 
   useEffect(() => {
     if (me?.emailVerified) {
-      void navigate({ to: me.orgConfirmed ? '/dashboard' : '/finish-sign-up' });
+      void navigate({ to: '/dashboard' });
     }
   }, [me, navigate]);
 
@@ -55,7 +55,7 @@ function VerifyEmailRoute() {
     <VerifyEmailPage
       me={me}
       onVerified={() => {
-        void navigate({ to: me.orgConfirmed ? '/dashboard' : '/finish-sign-up' });
+        void navigate({ to: '/dashboard' });
       }}
     />
   );

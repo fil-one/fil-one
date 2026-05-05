@@ -9,7 +9,7 @@ import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynam
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { OrgRole } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import {
   COOKIE_NAMES,
@@ -21,7 +21,9 @@ import {
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { suggestOrgName } from '../lib/suggest-org-name.js';
+import { deriveOrgName } from '../lib/suggest-org-name.js';
+import { triggerTenantSetup } from '../lib/trigger-tenant-setup.js';
+import { createBillingTrial } from '../lib/create-billing-trial.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,16 +70,6 @@ import { CSRF_COOKIE_NAME } from '@filone/shared';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
-}
-
-function orgNotConfirmedResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({
-      message: 'Please create an organization to continue.',
-      code: ApiErrorCode.ORG_NOT_CONFIRMED,
-    })
-    .build();
 }
 
 /**
@@ -134,16 +126,6 @@ function setCookiesFromTokens(
   ];
 }
 
-/**
- * Routes that are allowed through even when the user's org is not yet confirmed.
- * All other authenticated routes will return 403 ORG_NOT_CONFIRMED.
- */
-const ORG_CONFIRM_BYPASS_ROUTES = new Set([
-  '/api/me',
-  '/api/org/confirm',
-  '/api/me/resend-verification',
-]);
-
 interface IdTokenClaims {
   email: string | null;
   emailVerified: boolean;
@@ -182,10 +164,7 @@ async function extractIdTokenClaims({
 }
 
 /**
- * Resolve user identity from sub+email, attach userInfo to the request context,
- * and enforce the org-confirmed gate.
- * Returns a 403 response if the org is not confirmed and the route is gated,
- * or undefined to let the request continue.
+ * Resolve user identity from sub+email and attach userInfo to the request context.
  */
 async function attachIdentity({
   event,
@@ -201,8 +180,8 @@ async function attachIdentity({
   emailVerified: boolean;
   name: string | null;
   picture: string | null;
-}): Promise<APIGatewayProxyStructuredResultV2 | null> {
-  const resolved = await resolveUserAndOrg(sub, email);
+}): Promise<void> {
+  const resolved = await resolveUserAndOrg(sub, email, name);
   (
     event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
   ).userInfo = {
@@ -214,10 +193,6 @@ async function attachIdentity({
     name: name ?? undefined,
     picture: picture ?? undefined,
   };
-  if (!resolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
-    return orgNotConfirmedResponse();
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,11 +202,14 @@ async function attachIdentity({
 interface ResolvedIdentity {
   userId: string;
   orgId: string;
-  orgConfirmed: boolean;
   email: string | null;
 }
 
-async function resolveUserAndOrg(sub: string, email: string | null): Promise<ResolvedIdentity> {
+async function resolveUserAndOrg(
+  sub: string,
+  email: string | null,
+  name: string | null,
+): Promise<ResolvedIdentity> {
   const tableName = Resource.UserInfoTable.name;
 
   // Look up existing mapping
@@ -245,34 +223,22 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
     }),
   );
 
-  const orgName = (email && suggestOrgName(email)) ?? 'My Organization';
-
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
     const userId = result.Item.userId.S;
     const orgId = result.Item.orgId.S;
-    const resolvedEmail = email;
-    if (!resolvedEmail) {
+    if (!email) {
       console.error(
         '[auth] Existing user authenticated without email claim — ID token verification may have failed',
         { userId },
       );
     }
-
-    const { Item: orgItem } = await getDynamoClient().send(
-      new GetItemCommand({
-        TableName: tableName,
-        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      }),
-    );
-
-    const orgConfirmed = orgItem?.orgConfirmed?.BOOL === true;
-
-    return { userId, orgId, orgConfirmed, email: resolvedEmail };
+    return { userId, orgId, email };
   }
 
   // New user — create user, org, and membership records atomically
   const userId = crypto.randomUUID();
   const orgId = crypto.randomUUID();
+  const orgName = deriveOrgName(name ?? undefined, email ?? undefined);
   const now = new Date().toISOString();
 
   await getDynamoClient().send(
@@ -310,7 +276,9 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
               pk: { S: `ORG#${orgId}` },
               sk: { S: 'PROFILE' },
               name: { S: orgName },
-              orgConfirmed: { BOOL: false },
+              // Retained only so the legacy self-heal path in /me can detect older
+              // unconfirmed rows. New rows are always written confirmed=true.
+              orgConfirmed: { BOOL: true },
               setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: userId },
               createdAt: { S: now },
@@ -332,10 +300,19 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
     }),
   );
 
-  // Do NOT enqueue tenant setup here — org is not yet confirmed.
-  // Tenant setup will be triggered when the user confirms their org via POST /api/org/confirm.
+  try {
+    await triggerTenantSetup({ orgId, orgName });
+  } catch (error) {
+    console.error('[auth] Failed to trigger tenant setup for new org', { error, orgId });
+  }
 
-  return { userId, orgId, orgConfirmed: false, email };
+  try {
+    await createBillingTrial({ userId, orgId, email: email ?? undefined });
+  } catch (error) {
+    console.error('[auth] Failed to create billing trial for new org', { error, orgId, userId });
+  }
+
+  return { userId, orgId, email };
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +320,6 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
 // ---------------------------------------------------------------------------
 // eslint-disable-next-line max-lines-per-function
 export function authMiddleware() {
-  // eslint-disable-next-line max-lines-per-function, complexity/complexity
   const before = async (
     request: AuthMiddlewareRequest,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
@@ -378,7 +354,7 @@ export function authMiddleware() {
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
         });
-        const blocked = await attachIdentity({
+        await attachIdentity({
           event,
           sub,
           email: idClaims.email,
@@ -386,7 +362,6 @@ export function authMiddleware() {
           name: idClaims.name,
           picture: idClaims.picture,
         });
-        if (blocked) return blocked;
         return; // Valid — continue to handler
       } catch (err) {
         // Expired or invalid — fall through to refresh
@@ -408,7 +383,7 @@ export function authMiddleware() {
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
         });
-        const blocked = await attachIdentity({
+        await attachIdentity({
           event,
           sub: refreshedSub,
           email: refreshedClaims.email,
@@ -416,7 +391,6 @@ export function authMiddleware() {
           name: refreshedClaims.name,
           picture: refreshedClaims.picture,
         });
-        if (blocked) return blocked;
         return; // Continue to handler
       }
       if (forceRefresh) {
@@ -443,7 +417,7 @@ export function authMiddleware() {
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
         });
-        const blocked = await attachIdentity({
+        await attachIdentity({
           event,
           sub,
           email: idClaims.email,
@@ -451,7 +425,6 @@ export function authMiddleware() {
           name: idClaims.name,
           picture: idClaims.picture,
         });
-        if (blocked) return blocked;
         return;
       } catch (err) {
         console.warn('[auth] Fallback access token validation failed', { error: err });

@@ -22,13 +22,7 @@ export {
 } from './constants.js';
 export type { UsageLimits } from './constants.js';
 export { formatBytes, formatBytesShort } from './formatBytes.js';
-export type {
-  MeResponse,
-  ConfirmOrgRequest,
-  ConfirmOrgResponse,
-  UpdateProfileRequest,
-  UpdateProfileResponse,
-} from './api/me.js';
+export type { MeResponse, UpdateProfileRequest, UpdateProfileResponse } from './api/me.js';
 export { UpdateProfileSchema } from './api/me.js';
 
 export { getProvider, isSocialConnection } from './connection-providers.js';
@@ -36,7 +30,6 @@ export type { ConnectionProvider } from './connection-providers.js';
 export {
   OrgRole,
   OrgNameSchema,
-  ConfirmOrgSchema,
   ORG_NAME_MIN_LENGTH,
   ORG_NAME_MAX_LENGTH,
   ORG_NAME_PATTERN,

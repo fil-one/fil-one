@@ -8,6 +8,8 @@
 import * as psl from 'psl';
 import { ORG_NAME_DISALLOWED_CHARS, ORG_NAME_MIN_LENGTH } from '@filone/shared';
 
+const DEFAULT_ORG_NAME = 'My Organization';
+
 export const PUBLIC_EMAIL_DOMAINS = new Set([
   // Google
   'gmail.com',
@@ -60,7 +62,7 @@ function kebabToTitleCase(s: string): string {
   return s.split('-').map(capitalize).join(' ');
 }
 
-export function suggestOrgName(email: string): string | undefined {
+export function suggestOrgNameByEmail(email: string): string | undefined {
   const [localPart, rawDomain] = email.split('@');
   const domain = rawDomain?.toLowerCase();
   if (!domain || !localPart) return undefined;
@@ -77,4 +79,23 @@ export function suggestOrgName(email: string): string | undefined {
   if ('error' in parsed || !parsed.sld) return undefined;
 
   return kebabToTitleCase(parsed.sld);
+}
+
+/**
+ * Derive an org name to auto-assign on first signup. Prefers the user's first name
+ * (from the JWT `name` claim), falling back to an email-derived suggestion.
+ */
+export function deriveOrgName(name?: string, email?: string): string {
+  if (name) {
+    const firstWord = name.trim().split(/\s+/)[0] ?? '';
+    const cleaned = firstWord.replace(ORG_NAME_DISALLOWED_CHARS, '');
+    if (cleaned.length >= ORG_NAME_MIN_LENGTH) {
+      return `${capitalize(cleaned.toLowerCase())} Org`;
+    }
+  }
+  if (email) {
+    const fromEmail = suggestOrgNameByEmail(email);
+    if (fromEmail) return fromEmail;
+  }
+  return DEFAULT_ORG_NAME;
 }
