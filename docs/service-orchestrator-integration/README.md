@@ -64,9 +64,9 @@ Non-functional requirements:
 
 ## **Tenant Management**
 
-FilOne provisions one tenant per customer organisation. When a user signs up, FilOne kicks off an asynchronous onboarding flow that creates a new tenant with the Service Orchestrator. The Service Orchestrator must expose an API to create a tenant given a unique identifier (the FilOne org ID) and a human-readable display name. If the creation request is retried and the tenant already exists, the Service Orchestrator must return the existing tenant rather than failing.
+FilOne provisions one tenant per customer organisation on demand — typically when the user creates their first bucket in a region managed by a given Service Orchestrator. Provisioning is synchronous: FilOne calls `POST /tenants` and waits for the tenant to be fully operational before proceeding.
 
-FilOne supports asynchronous tenant setup taking seconds to minutes to complete, as long as there is a way for FilOne to determine when the tenant is fully operational.
+The Service Orchestrator must expose an API to create a tenant given FilOne's organisation ID (passed as `externalId`) and a human-readable display name. The Service Orchestrator generates and returns its own tenant ID; FilOne stores the returned ID and uses it as the identifier in all subsequent management API calls. `externalId` values are scoped per partner: two different Service Orchestrator partners may use the same `externalId` without collision, because the Service Orchestrator must scope tenant identifiers to the partner whose key was used for the request. If the creation request is retried with the same `externalId`, the Service Orchestrator must return the existing tenant rather than failing.
 
 The Service Orchestrator must support three tenant states: active (read/write), write-locked (read-only; uploads and bucket creation blocked), and disabled (all access blocked; data persisted). These restrictions must be enforced by the S3 gateway.
 
