@@ -19,7 +19,3 @@ export const OrgNameSchema = z
     ORG_NAME_PATTERN,
     'Organization name can only contain letters, numbers, spaces, hyphens, and periods',
   );
-
-export const ConfirmOrgSchema = z.object({
-  orgName: OrgNameSchema,
-});
