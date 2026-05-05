@@ -881,7 +881,7 @@ describe('setup-integrations', () => {
   // ── Auth0 MFA Action ───────────────────────────────────────────────
 
   describe('Auth0 MFA Action', () => {
-    it('creates MFA action, deploys it, and binds to post-login trigger on Create for joemuoio (temp dev-tenant deployer)', async () => {
+    it('creates MFA action, deploys it, and binds to post-login trigger on Create for staging', async () => {
       ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
       ssmMock.on(PutParameterCommand).resolves({});
       mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
@@ -896,7 +896,7 @@ describe('setup-integrations', () => {
           ResourceProperties: {
             ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
             SiteUrl: 'https://staging.fil.one',
-            Stage: 'joemuoio',
+            Stage: 'staging',
           },
         }),
       );

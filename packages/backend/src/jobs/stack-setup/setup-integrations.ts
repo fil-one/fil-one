@@ -511,11 +511,6 @@ async function handleSetup(
   ];
   if (ctx.isStagingOrProd) {
     tasks.push(setupAuth0EmailProvider(ctx.mgmtDomain, ctx.stage === 'production'));
-  }
-  // TEMP: while MFA work is in flight, deploy the dev-tenant Action from
-  // the joemuoio personal stage instead of staging. Revert to isStagingOrProd
-  // before merging to main.
-  if (ctx.stage === 'joemuoio' || ctx.stage === 'production') {
     tasks.push(setupAuth0MfaAction(ctx.mgmtDomain));
   }
 
