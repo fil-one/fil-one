@@ -207,6 +207,30 @@ export async function invokeEnforcer(): Promise<{
   };
 }
 
+export async function invokeDriftChecker(): Promise<{
+  payload: string | undefined;
+  functionError: string | undefined;
+  logTail: string | undefined;
+}> {
+  const result = await lambda.send(
+    new InvokeCommand({
+      FunctionName: (Resource as unknown as Record<string, { name: string }>)
+        .SubscriptionDriftChecker.name,
+      InvocationType: 'RequestResponse',
+      LogType: 'Tail',
+      Payload: Buffer.from(JSON.stringify({})),
+    }),
+  );
+
+  return {
+    payload: result.Payload ? new TextDecoder().decode(result.Payload) : undefined,
+    functionError: result.FunctionError,
+    logTail: result.LogResult
+      ? Buffer.from(result.LogResult, 'base64').toString('utf8')
+      : undefined,
+  };
+}
+
 export async function seedOrgProfile(orgId: string, auroraTenantId: string): Promise<void> {
   await getDynamoClient().send(
     new PutItemCommand({
