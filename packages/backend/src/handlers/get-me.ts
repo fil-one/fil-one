@@ -2,7 +2,7 @@ import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { MeResponse } from '@filone/shared';
+import type { ErrorResponse, MeResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { createBillingTrial } from '../lib/create-billing-trial.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
@@ -31,9 +31,11 @@ interface FinalizeResult {
 }
 
 /**
- * Self-heal a legacy org row that was created before auto-confirmation. Sets the
- * derived name + orgConfirmed=true, then kicks off tenant setup and billing trial.
- * All downstream helpers are idempotent so retries are safe.
+ * Self-heal a legacy org row that was created before auto-confirmation. Marks
+ * orgConfirmed=true and ensures the org has a name (preserves any existing
+ * name; only derives one when the row's name attribute was empty), then kicks
+ * off tenant setup and billing trial. All downstream helpers are idempotent so
+ * retries are safe.
  */
 async function finalizeLegacyOrg(args: FinalizeArgs): Promise<FinalizeResult> {
   const { userId, orgId, email, jwtName, currentOrgName, currentSetupStatus } = args;
@@ -65,21 +67,20 @@ async function finalizeLegacyOrg(args: FinalizeArgs): Promise<FinalizeResult> {
     console.error('[get-me] Legacy self-heal: failed to update org row', { error, orgId, userId });
   }
 
-  try {
-    await triggerTenantSetup({ orgId, orgName });
-  } catch (error) {
+  const [tenantResult, billingResult] = await Promise.allSettled([
+    triggerTenantSetup({ orgId, orgName }),
+    createBillingTrial({ userId, orgId, email }),
+  ]);
+  if (tenantResult.status === 'rejected') {
     console.error('[get-me] Legacy self-heal: failed to trigger tenant setup', {
-      error,
+      error: tenantResult.reason,
       orgId,
       userId,
     });
   }
-
-  try {
-    await createBillingTrial({ userId, orgId, email });
-  } catch (error) {
+  if (billingResult.status === 'rejected') {
     console.error('[get-me] Legacy self-heal: failed to create billing trial', {
-      error,
+      error: billingResult.reason,
       orgId,
       userId,
     });
@@ -101,11 +102,25 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     }),
   );
 
-  const orgConfirmed = Item?.orgConfirmed?.BOOL === true;
-  let setupStatus = Item?.setupStatus?.S;
-  let orgName = Item?.name?.S ?? '';
+  // Auth middleware always writes the org row before this handler can run, so a
+  // missing row indicates either an aborted TransactWrite or a read against an
+  // out-of-sync replica. Fail fast rather than enqueue tenant setup with garbage.
+  if (!Item) {
+    console.error('[get-me] Org profile row missing — auth middleware should have created it', {
+      orgId,
+      userId,
+    });
+    return new ResponseBuilder()
+      .status(500)
+      .body<ErrorResponse>({ message: 'Organization profile not found' })
+      .build();
+  }
 
-  if (Item && !orgConfirmed) {
+  const orgConfirmed = Item.orgConfirmed?.BOOL === true;
+  let setupStatus = Item.setupStatus?.S;
+  let orgName = Item.name?.S ?? '';
+
+  if (!orgConfirmed) {
     const result = await finalizeLegacyOrg({
       userId,
       orgId,

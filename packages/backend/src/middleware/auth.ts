@@ -205,6 +205,39 @@ interface ResolvedIdentity {
   email: string | null;
 }
 
+/**
+ * Run the SQS enqueue and Stripe call for a freshly created org in parallel —
+ * both are external network calls with no ordering dependency. Failures are
+ * logged but never propagated; the /me self-heal path retries tenant setup,
+ * and createBillingTrial is idempotent on subsequent attempts via its DDB
+ * conditional put.
+ */
+async function kickoffNewOrgSetup(args: {
+  userId: string;
+  orgId: string;
+  orgName: string;
+  email: string | null;
+}): Promise<void> {
+  const { userId, orgId, orgName, email } = args;
+  const [tenantResult, billingResult] = await Promise.allSettled([
+    triggerTenantSetup({ orgId, orgName }),
+    createBillingTrial({ userId, orgId, email: email ?? undefined }),
+  ]);
+  if (tenantResult.status === 'rejected') {
+    console.error('[auth] Failed to trigger tenant setup for new org', {
+      error: tenantResult.reason,
+      orgId,
+    });
+  }
+  if (billingResult.status === 'rejected') {
+    console.error('[auth] Failed to create billing trial for new org', {
+      error: billingResult.reason,
+      orgId,
+      userId,
+    });
+  }
+}
+
 async function resolveUserAndOrg(
   sub: string,
   email: string | null,
@@ -300,17 +333,7 @@ async function resolveUserAndOrg(
     }),
   );
 
-  try {
-    await triggerTenantSetup({ orgId, orgName });
-  } catch (error) {
-    console.error('[auth] Failed to trigger tenant setup for new org', { error, orgId });
-  }
-
-  try {
-    await createBillingTrial({ userId, orgId, email: email ?? undefined });
-  } catch (error) {
-    console.error('[auth] Failed to create billing trial for new org', { error, orgId, userId });
-  }
+  await kickoffNewOrgSetup({ userId, orgId, orgName, email });
 
   return { userId, orgId, email };
 }
