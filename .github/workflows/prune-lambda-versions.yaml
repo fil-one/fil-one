@@ -1,0 +1,56 @@
+name: 'Prune old Lambda versions'
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [production, staging]
+    concurrency:
+      group: prune-lambda-versions-${{ matrix.stage }}
+      cancel-in-progress: false
+    environment: ${{ matrix.stage }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      REGION: us-east-2
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.REGION }}
+
+      - name: Prune old Lambda versions
+        run: bin/prune-lambda-versions.sh "${{ matrix.stage }}"
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@af78098f536edbc4de71162a307590698245be95 # v3.0.1
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "filone-alerts",
+              "text": "Lambda version pruning failed for ${{ matrix.stage }}. Details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":warning: *Lambda version pruning failed* (`${{ matrix.stage }}`) · <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Details>"
+                  }
+                }
+              ]
+            }

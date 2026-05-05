@@ -221,8 +221,8 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="p-8">
-      <div className="mb-6">
+    <div className="px-10 pt-10">
+      <div className="mb-1">
         <Heading tag="h1" size="xl" description="Manage your profile and preferences">
           Settings
         </Heading>

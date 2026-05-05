@@ -22,6 +22,7 @@ import { daysUntil, formatDateTime } from '../lib/time.js';
 
 import { Button } from './Button.js';
 import { ProgressBar } from './ProgressBar.js';
+import { StatusIndicator } from './StatusIndicator.js';
 import { Tooltip } from './Tooltip.js';
 
 type SidebarNavProps = {
@@ -358,6 +359,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           <button
             ref={userButtonRef}
             type="button"
+            data-testid="user-profile"
             onClick={() => setUserMenuOpen((o) => !o)}
             className={[
               'flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-zinc-100',
@@ -448,6 +450,9 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           helpButtonRef={helpButtonRef}
           onToggle={() => setHelpMenuOpen((o) => !o)}
         />
+
+        {/* System status */}
+        <StatusIndicator collapsed={collapsed} />
       </nav>
     </div>
   );
