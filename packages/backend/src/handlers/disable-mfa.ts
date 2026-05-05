@@ -21,7 +21,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  await deleteAllAuthenticators(sub);
+  await deleteAllAuthenticators(sub, enrollments);
 
   return new ResponseBuilder().status(200).body({ message: 'MFA has been disabled.' }).build();
 }

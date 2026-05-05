@@ -9,6 +9,13 @@ function getMgmtDomain(): string {
   return process.env.AUTH0_MGMT_DOMAIN ?? process.env.AUTH0_DOMAIN!;
 }
 
+async function throwIfNotOk(resp: Response, label: string): Promise<void> {
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`${label} (${resp.status}): ${body}`);
+  }
+}
+
 // Module-level token cache — reused across Lambda warm starts.
 // Management tokens are not user-specific, so caching is safe.
 let cachedMgmtToken: { token: string; expiresAt: number } | null = null;
@@ -31,10 +38,7 @@ async function getManagementToken(): Promise<string> {
     }),
   });
 
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Auth0 management token request failed (${resp.status}): ${body}`);
-  }
+  await throwIfNotOk(resp, 'Auth0 management token request failed');
 
   const data = (await resp.json()) as { access_token: string; expires_in: number };
   // Cache with 60-second buffer before actual expiry
@@ -57,10 +61,7 @@ export async function updateAuth0User(sub: string, data: Record<string, unknown>
     body: JSON.stringify(data),
   });
 
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Auth0 update user failed (${resp.status}): ${body}`);
-  }
+  await throwIfNotOk(resp, 'Auth0 update user failed');
 }
 
 /**
@@ -104,10 +105,7 @@ export async function initiatePasswordReset(email: string, clientId: string): Pr
     }),
   });
 
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Auth0 change_password failed (${resp.status}): ${body}`);
-  }
+  await throwIfNotOk(resp, 'Auth0 change_password failed');
 }
 
 /**
@@ -219,14 +217,8 @@ export async function getMfaEnrollments(sub: string): Promise<GuardianEnrollment
     fetch(`https://${domain}${userPath}/authentication-methods`, { headers }),
   ]);
 
-  if (!guardianResp.ok) {
-    const body = await guardianResp.text();
-    throw new Error(`Auth0 list enrollments failed (${guardianResp.status}): ${body}`);
-  }
-  if (!methodsResp.ok) {
-    const body = await methodsResp.text();
-    throw new Error(`Auth0 list authentication methods failed (${methodsResp.status}): ${body}`);
-  }
+  await throwIfNotOk(guardianResp, 'Auth0 list enrollments failed');
+  await throwIfNotOk(methodsResp, 'Auth0 list authentication methods failed');
 
   const guardianEnrollments = (await guardianResp.json()) as GuardianEnrollment[];
   const methods = (await methodsResp.json()) as Auth0AuthenticationMethod[];
@@ -266,10 +258,7 @@ export async function deleteGuardianEnrollment(enrollmentId: string): Promise<vo
     },
   );
 
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Auth0 delete enrollment failed (${resp.status}): ${body}`);
-  }
+  await throwIfNotOk(resp, 'Auth0 delete enrollment failed');
 }
 
 /**
@@ -287,10 +276,7 @@ export async function deleteAuthenticationMethod(sub: string, methodId: string):
     },
   );
 
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Auth0 delete authentication method failed (${resp.status}): ${body}`);
-  }
+  await throwIfNotOk(resp, 'Auth0 delete authentication method failed');
 }
 
 /**
@@ -303,8 +289,11 @@ export async function deleteAuthenticationMethod(sub: string, methodId: string):
  * set on partial failure keeps the Post-Login Action protective until the
  * caller retries.
  */
-export async function deleteAllAuthenticators(sub: string): Promise<void> {
-  const enrollments = await getMfaEnrollments(sub);
+export async function deleteAllAuthenticators(
+  sub: string,
+  prefetchedEnrollments?: GuardianEnrollment[],
+): Promise<void> {
+  const enrollments = prefetchedEnrollments ?? (await getMfaEnrollments(sub));
 
   const operations: Array<Promise<void>> = enrollments.map((enrollment) =>
     enrollment.source === 'guardian'
