@@ -33,10 +33,9 @@ vi.mock('../lib/auth-secrets.js', () => ({
 }));
 
 const mockJwtVerify = vi.fn();
-const mockDecodeJwt = vi.fn();
 vi.mock('jose', () => ({
   jwtVerify: (token: unknown, jwks: unknown, opts: unknown) => mockJwtVerify(token, jwks, opts),
-  decodeJwt: (token: unknown) => mockDecodeJwt(token),
+  decodeJwt: vi.fn(),
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
 }));
 
@@ -73,12 +72,10 @@ function regenerateEvent() {
   return event;
 }
 
-function setupAuthMocks(idTokenClaims: Record<string, unknown> = { amr: ['mfa'] }) {
-  mockJwtVerify
-    .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-    .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
-
-  mockDecodeJwt.mockReturnValue(idTokenClaims);
+function setupAuthMocks(idTokenPayload: Record<string, unknown> = { amr: ['mfa'] }) {
+  mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+    payload: { email: MOCK_EMAIL, email_verified: true, ...idTokenPayload },
+  });
 
   ddbMock
     .on(GetItemCommand, {

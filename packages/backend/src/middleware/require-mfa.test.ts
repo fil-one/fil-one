@@ -1,26 +1,26 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-const mockDecodeJwt = vi.fn();
-vi.mock('jose', () => ({
-  decodeJwt: (token: unknown) => mockDecodeJwt(token),
-}));
+import { describe, it, expect } from 'vitest';
 
 import { requireMfa } from './require-mfa.js';
+import type { IdTokenClaims } from './auth.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
 
-function buildRequest(claims?: Record<string, unknown>) {
-  if (claims !== undefined) {
-    mockDecodeJwt.mockReturnValueOnce(claims);
+function buildRequest(claims?: Partial<IdTokenClaims>) {
+  const event = buildEvent({ method: 'POST' });
+  const internal: Record<string, unknown> = {};
+  if (claims) {
+    internal.idTokenClaims = {
+      email: null,
+      emailVerified: false,
+      name: null,
+      picture: null,
+      amr: [],
+      ...claims,
+    } satisfies IdTokenClaims;
   }
-  const event = buildEvent({ cookies: ['hs_id_token=id-token'], method: 'POST' });
-  return buildMiddyRequest(event);
+  return buildMiddyRequest(event, { internal });
 }
 
 describe('requireMfa', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('passes when amr contains "mfa"', async () => {
     const result = await requireMfa().before(buildRequest({ amr: ['mfa'] }));
 
@@ -33,8 +33,8 @@ describe('requireMfa', () => {
     expect(result).toBeUndefined();
   });
 
-  it('returns 401 step_up_required when amr is missing', async () => {
-    const result = await requireMfa().before(buildRequest({}));
+  it('returns 401 step_up_required when amr is empty', async () => {
+    const result = await requireMfa().before(buildRequest({ amr: [] }));
 
     expect(result).toMatchObject({
       statusCode: 401,
@@ -51,31 +51,8 @@ describe('requireMfa', () => {
     });
   });
 
-  it('returns 401 when amr is not an array', async () => {
-    const result = await requireMfa().before(buildRequest({ amr: 'mfa' }));
-
-    expect(result).toMatchObject({
-      statusCode: 401,
-      body: JSON.stringify({ error: 'step_up_required' }),
-    });
-  });
-
-  it('returns 401 when id_token cookie is missing', async () => {
-    const event = buildEvent({ method: 'POST' });
-    const result = await requireMfa().before(buildMiddyRequest(event));
-
-    expect(result).toMatchObject({
-      statusCode: 401,
-      body: JSON.stringify({ error: 'step_up_required' }),
-    });
-  });
-
-  it('returns 401 when decodeJwt throws', async () => {
-    mockDecodeJwt.mockImplementationOnce(() => {
-      throw new Error('malformed');
-    });
-    const event = buildEvent({ cookies: ['hs_id_token=garbage'], method: 'POST' });
-    const result = await requireMfa().before(buildMiddyRequest(event));
+  it('returns 401 when authMiddleware did not stash any claims', async () => {
+    const result = await requireMfa().before(buildRequest());
 
     expect(result).toMatchObject({
       statusCode: 401,

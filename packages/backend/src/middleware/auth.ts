@@ -37,6 +37,13 @@ export interface AuthInternal extends Record<string, unknown> {
   newTokens?: NewTokens;
   /** Stashed by the before hook so the after hook can force-refresh if needed. */
   refreshToken?: string;
+  /**
+   * Verified ID token claims, set by the before hook after `jwtVerify`.
+   * Defaulted (with `amr: []`) when the id_token cookie is missing or
+   * verification fails — downstream gates on `amr` see an empty list and
+   * fail closed. Read via `getVerifiedIdTokenClaims`.
+   */
+  idTokenClaims?: IdTokenClaims;
 }
 
 type AuthMiddlewareRequest = Request<
@@ -46,6 +53,20 @@ type AuthMiddlewareRequest = Request<
   Context,
   AuthInternal
 >;
+
+/**
+ * Read verified ID token claims stashed by `authMiddleware`. Returns the
+ * empty-claims default (with `amr: []`) when the auth middleware ran but
+ * no valid id_token cookie was present, so callers can read fields without
+ * null checks.
+ *
+ * Must only be called from middleware/handlers downstream of `authMiddleware`.
+ */
+export function getVerifiedIdTokenClaims(
+  request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
+): IdTokenClaims {
+  return (request.internal as AuthInternal).idTokenClaims ?? EMPTY_ID_CLAIMS;
+}
 
 // ---------------------------------------------------------------------------
 // Module-level JWKS cache — reused across Lambda warm starts
@@ -144,16 +165,28 @@ const ORG_CONFIRM_BYPASS_ROUTES = new Set([
   '/api/me/resend-verification',
 ]);
 
-interface IdTokenClaims {
+export interface IdTokenClaims {
   email: string | null;
   emailVerified: boolean;
   name: string | null;
   picture: string | null;
+  /** OIDC Authentication Methods References — empty when not asserted/verified. */
+  amr: string[];
 }
 
+const EMPTY_ID_CLAIMS: IdTokenClaims = {
+  email: null,
+  emailVerified: false,
+  name: null,
+  picture: null,
+  amr: [],
+};
+
 /**
- * Verify the ID token and extract email + email_verified claims.
- * Returns defaults if the token is missing or invalid (non-fatal).
+ * Verify the ID token and extract claims. Returns defaults (including
+ * `amr: []`) if the token is missing or invalid — callers gating on `amr`
+ * see an empty array, which fails their check just like a verified token
+ * without `amr` would.
  */
 async function extractIdTokenClaims({
   idToken,
@@ -166,18 +199,20 @@ async function extractIdTokenClaims({
   clientId: string;
   issuer: string;
 }): Promise<IdTokenClaims> {
-  if (!idToken) return { email: null, emailVerified: false, name: null, picture: null };
+  if (!idToken) return EMPTY_ID_CLAIMS;
   try {
     const { payload } = await jwtVerify(idToken, jwks, { audience: clientId, issuer });
+    const rawAmr = payload.amr;
     return {
       email: (payload.email as string) ?? null,
       emailVerified: (payload.email_verified as boolean) ?? false,
       name: (payload.name as string) ?? null,
       picture: (payload.picture as string) ?? null,
+      amr: Array.isArray(rawAmr) ? rawAmr.filter((v): v is string => typeof v === 'string') : [],
     };
   } catch (err) {
     console.warn('[auth] ID token verification failed, continuing without email', { error: err });
-    return { email: null, emailVerified: false, name: null, picture: null };
+    return EMPTY_ID_CLAIMS;
   }
 }
 
@@ -378,6 +413,7 @@ export function authMiddleware() {
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
         });
+        request.internal.idTokenClaims = idClaims;
         const blocked = await attachIdentity({
           event,
           sub,
@@ -408,6 +444,7 @@ export function authMiddleware() {
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
         });
+        request.internal.idTokenClaims = refreshedClaims;
         const blocked = await attachIdentity({
           event,
           sub: refreshedSub,
@@ -443,6 +480,7 @@ export function authMiddleware() {
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
         });
+        request.internal.idTokenClaims = idClaims;
         const blocked = await attachIdentity({
           event,
           sub,
