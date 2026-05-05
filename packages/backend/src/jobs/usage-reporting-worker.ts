@@ -121,7 +121,12 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     totalEgressBytes,
   });
 
-  await reportStorageToStripe(stripeCustomerId, averageStorageGbUsed);
+  const { reported } = await reportStorageToStripe({
+    orgId,
+    subscriptionId,
+    stripeCustomerId,
+    averageStorageGbUsed,
+  });
 
   const orgSyncAction = await syncOrgMetadata({
     stripeCustomerId,
@@ -151,31 +156,59 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     totalEgressBytes,
     sampleCount: usage.sampleCount,
     lockAction,
+    reportedToStripe: reported,
     orgSyncAction,
   });
 
   console.log('[usage-worker] Audit record written', { orgId, reportDate });
 }
 
-async function reportStorageToStripe(
-  stripeCustomerId: string,
-  averageStorageGbUsed: number,
-): Promise<void> {
-  if (averageStorageGbUsed <= 0) return;
+// Stripe SDK errors expose `code` on the error object; matches StripeInvalidRequestError 404s.
+const isStripeResourceMissing = (err: unknown): boolean =>
+  typeof err === 'object' && err !== null && (err as { code?: string }).code === 'resource_missing';
+
+async function reportStorageToStripe(params: {
+  orgId: string;
+  subscriptionId: string;
+  stripeCustomerId: string;
+  averageStorageGbUsed: number;
+}): Promise<{ reported: boolean }> {
+  const { orgId, subscriptionId, stripeCustomerId, averageStorageGbUsed } = params;
+  if (averageStorageGbUsed <= 0) return { reported: false };
+
+  const eventName = process.env.STRIPE_METER_EVENT_NAME;
+  if (!eventName) {
+    throw new Error('STRIPE_METER_EVENT_NAME env var is not set');
+  }
 
   const stripe = getStripeClient();
-  await stripe.billing.meterEvents.create({
-    event_name: process.env.STRIPE_METER_EVENT_NAME ?? '',
-    payload: {
-      stripe_customer_id: stripeCustomerId,
-      value: String(averageStorageGbUsed),
-    },
-    timestamp: Math.floor(Date.now() / 1000),
-  });
+  try {
+    await stripe.billing.meterEvents.create({
+      event_name: eventName,
+      payload: {
+        stripe_customer_id: stripeCustomerId,
+        value: String(averageStorageGbUsed),
+      },
+      timestamp: Math.floor(Date.now() / 1000),
+    });
+  } catch (error) {
+    if (isStripeResourceMissing(error)) {
+      console.warn('[usage-worker] Stripe customer missing — skipping meter event', {
+        orgId,
+        subscriptionId,
+        stripeCustomerId,
+        averageStorageGbUsed,
+        code: 'resource_missing',
+      });
+      return { reported: false };
+    }
+    throw error;
+  }
   console.log('[usage-worker] Stripe meter event created', {
     stripeCustomerId,
     averageStorageGbUsed,
   });
+  return { reported: true };
 }
 
 async function safeEnforceTrialLocks(params: {
@@ -230,6 +263,7 @@ async function writeUsageAuditRecord(params: {
   totalEgressBytes: number;
   sampleCount: number;
   lockAction: string;
+  reportedToStripe: boolean;
   orgSyncAction: string;
 }): Promise<void> {
   const ttl = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60; // 365 days
@@ -249,7 +283,7 @@ async function writeUsageAuditRecord(params: {
         averageStorageGbUsed: params.averageStorageGbUsed,
         totalEgressBytes: params.totalEgressBytes,
         sampleCount: params.sampleCount,
-        reportedToStripe: params.averageStorageGbUsed > 0,
+        reportedToStripe: params.reportedToStripe,
         lockAction: params.lockAction,
         orgSyncAction: params.orgSyncAction,
         createdAt: new Date().toISOString(),
