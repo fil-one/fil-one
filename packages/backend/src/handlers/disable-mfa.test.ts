@@ -126,7 +126,9 @@ describe('POST /api/mfa/disable handler', () => {
       statusCode: 200,
       body: JSON.stringify({ message: 'MFA has been disabled.' }),
     });
-    expect(mockDeleteAllAuthenticators).toHaveBeenCalledWith(MOCK_SUB);
+    expect(mockDeleteAllAuthenticators).toHaveBeenCalledWith(MOCK_SUB, [
+      { id: 'test', type: 'authenticator', status: 'confirmed' },
+    ]);
   });
 
   it('disables MFA for social login users', async () => {
@@ -142,7 +144,9 @@ describe('POST /api/mfa/disable handler', () => {
       statusCode: 200,
       body: JSON.stringify({ message: 'MFA has been disabled.' }),
     });
-    expect(mockDeleteAllAuthenticators).toHaveBeenCalledWith(MOCK_SOCIAL_SUB);
+    expect(mockDeleteAllAuthenticators).toHaveBeenCalledWith(MOCK_SOCIAL_SUB, [
+      { id: 'test', type: 'authenticator', status: 'confirmed' },
+    ]);
   });
 
   it('returns 400 when MFA is not currently enabled', async () => {

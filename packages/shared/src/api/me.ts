@@ -19,7 +19,7 @@ export interface MfaEnrollment {
   id: string;
   type: 'authenticator' | 'webauthn-roaming' | 'webauthn-platform';
   name?: string;
-  createdAt: string;
+  createdAt?: string;
 }
 
 export const PROFILE_NAME_MAX_LENGTH = 200;

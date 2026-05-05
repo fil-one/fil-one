@@ -18,15 +18,20 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId, email, emailVerified, sub, name, picture } = getUserInfo(event);
 
-  const { Item } = await getDynamoClient().send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: {
-        pk: { S: `ORG#${orgId}` },
-        sk: { S: 'PROFILE' },
-      },
-    }),
-  );
+  const includeMfa = event.queryStringParameters?.include === 'mfa';
+
+  const [{ Item }, enrollments] = await Promise.all([
+    getDynamoClient().send(
+      new GetItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: {
+          pk: { S: `ORG#${orgId}` },
+          sk: { S: 'PROFILE' },
+        },
+      }),
+    ),
+    includeMfa ? getMfaEnrollments(sub) : Promise.resolve([]),
+  ]);
 
   const setupStatus = Item?.setupStatus?.S;
   const orgName = Item?.name?.S ?? '';
@@ -42,9 +47,6 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   const connectionType = getConnectionType(sub);
 
-  const includeMfa = event.queryStringParameters?.include === 'mfa';
-  const enrollments = includeMfa ? await getMfaEnrollments(sub) : [];
-
   const body: MeResponse = {
     orgId,
     orgName,
@@ -57,7 +59,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       id: e.id,
       type: e.type as 'authenticator' | 'webauthn-roaming' | 'webauthn-platform',
       name: e.name,
-      createdAt: e.enrolled_at ?? '',
+      ...(e.enrolled_at && { createdAt: e.enrolled_at }),
     })),
     picture,
     connectionType,

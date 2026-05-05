@@ -41,7 +41,9 @@ function EnrollmentRow({
         </p>
         <p className="text-[11px] text-zinc-500">
           {enrollment.name ? `${enrollment.name} — ` : ''}
-          Added {new Date(enrollment.createdAt).toLocaleDateString()}
+          {enrollment.createdAt
+            ? `Added ${new Date(enrollment.createdAt).toLocaleDateString()}`
+            : 'Enrolled'}
         </p>
       </div>
       <Button variant="ghost" size="sm" onClick={onRequestRemove}>

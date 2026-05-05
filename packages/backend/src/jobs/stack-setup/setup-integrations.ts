@@ -366,7 +366,7 @@ async function setupAuth0MfaAction(domain: string): Promise<void> {
 
   if (existing) {
     // Update if code has changed
-    if (existing.code.trim() !== MFA_ACTION_CODE) {
+    if (existing.code.trim() !== MFA_ACTION_CODE.trim()) {
       const updateResp = await fetch(`https://${domain}/api/v2/actions/actions/${existing.id}`, {
         method: 'PATCH',
         headers,
@@ -393,6 +393,7 @@ async function setupAuth0MfaAction(domain: string): Promise<void> {
 
   // Wait for the action to be built before deploying.
   // Auth0 compiles actions asynchronously after create/update.
+  // Exponential backoff: ~1s, 2s, 3s, ... up to ~13s — total ~66s budget.
   for (let attempt = 0; attempt < 10; attempt++) {
     const statusResp = await fetch(`https://${domain}/api/v2/actions/actions/${actionId}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -405,7 +406,7 @@ async function setupAuth0MfaAction(domain: string): Promise<void> {
         `Auth0 action did not reach 'built' state after 10 attempts (status: ${action.status})`,
       );
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, (attempt + 1) ** 1.1 * 1000));
   }
 
   // Deploy the action

@@ -287,22 +287,7 @@ aws cloudformation describe-stacks \
 
 3. Fix the underlying issue (grant missing scopes, etc.), then redeploy.
 
-### Troubleshooting: Auth0 Action / Login Issues
-
-If MFA enrollment or login flows aren't working as expected, check the Auth0 logs:
-
-1. Go to **Auth0 Dashboard > Monitoring > Logs**
-2. Look for recent login events — failed logins show as type `f` (Failed Login) or `fp` (Failed Login - Password)
-3. Expand the event to see:
-   - `description` — the error message (e.g., Action returned invalid data)
-   - `details.actions.executions` — confirms whether the Post-Login Action ran
-   - `details.error.message` — the specific failure reason
-
-Common issues:
-
-- **"Invalid MFA command"** — the `enrollWith()` / `challengeWith()` call signature is wrong. Auth0's Action runtime expects a single object (e.g., `{ type: 'otp' }`), not an array.
-- **Action not executing** — verify the Action is in the Login flow: **Actions > Triggers > Login**. Being in the Library is not enough — it must be dragged into the flow and **Apply** must be clicked.
-- **`mfa_enrolling` flag not set** — check the user's `app_metadata` in **User Management > Users > (user) > app_metadata**. The backend sets this when `POST /api/mfa/enroll` is called.
+For MFA-specific troubleshooting, see [`docs/architectural-decisions/2026-03-mfa-enrollment.md`](docs/architectural-decisions/2026-03-mfa-enrollment.md#troubleshooting).
 
 ## ACM Certificate Provisioning & DNS Setup
 

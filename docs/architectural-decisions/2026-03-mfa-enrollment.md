@@ -162,31 +162,6 @@ Social login users (Google, GitHub) can enroll in Auth0 MFA. Auth0 is the sessio
 | `read:triggers`                 | Deploy-time setup — reads the Login flow bindings                                           |
 | `update:triggers`               | Deploy-time setup — binds the Action to the Login flow                                      |
 
-### Backend Changes
-
-- **`auth0-management.ts`** — `getMfaEnrollments(sub)` queries `/authentication-methods` (primary) and Guardian `/enrollments` (legacy fallback) in parallel; pulls TOTP and WebAuthn from auth-methods; falls back to Guardian `authenticator` only when no `totp` is present in auth-methods. Each entry carries an internal `source: 'guardian' | 'auth-methods'` for delete routing. `flagMfaEnrollment(sub)` sets `mfa_enrolling`; `deleteGuardianEnrollment(id)` removes a Guardian-sourced entry; `deleteAuthenticationMethod(sub, id)` removes an auth-methods-sourced entry; `deleteAllAuthenticators(sub)` deletes every factor by source and clears `mfa_enrolling` in one PATCH
-- **`enroll-mfa.ts`** — `POST /api/mfa/enroll` — sets `mfa_enrolling: true`. Does **not** reject when a strong factor already exists — adding a second strong factor is supported (the Action chains challenge+enroll within one login)
-- **`disable-mfa.ts`** — `POST /api/mfa/disable` — calls `deleteAllAuthenticators` which removes Guardian and auth-methods enrollments by source and clears `mfa_enrolling`
-- **`delete-mfa-enrollment.ts`** — `DELETE /api/mfa/enrollments/{enrollmentId}` — verifies ownership, routes by `enrollment.source`, clears `mfa_enrolling` if it was the last enrollment
-- **`get-me.ts`** — returns `mfaEnrollments` when `?include=mfa` is passed
-- **`MeResponse`** (shared types) — `MfaEnrollment` interface (`id`, `type`, `name?`, `createdAt`) and `mfaEnrollments: MfaEnrollment[]` (always present, populated only when `?include=mfa` is requested). The internal `source` field on `GuardianEnrollment` is server-side only and not exposed to the client
-- **`sst.config.ts`** — three MFA routes registered: `/mfa/enroll`, `/mfa/disable`, `/mfa/enrollments/{enrollmentId}`
-- **`setup-integrations.ts`** — deploy-time Lambda creates the Post-Login Action, polls for `built` status, deploys it, and ensures it is bound to the post-login trigger while preserving any existing bindings (staging/production only — dev stages share an Auth0 tenant and would race on the global Action name). Email provider setup is fatal — without it, email verification and password reset both break.
-
-### Frontend Changes
-
-- **`api.ts`** — `enrollMfa(): Promise<void>` posts to `/mfa/enroll` then calls `redirectToLogin()`; `disableMfa()` removes all; `deleteMfaEnrollment(id)` removes a single enrollment
-- **`MfaSettings.tsx`** (extracted component) — renders the MFA section under the Security `SectionCard`. When no factor is enrolled, shows an "Enable" CTA. When factors are enrolled, lists each one (`EnrollmentRow`) with a Remove button and shows "Add authenticator or key" plus "Remove all MFA methods". Confirmations use the shared `ConfirmDialog` modal: per-method removal and remove-all
-- **`SettingRow.tsx`** (extracted shared component) — used by `SettingsPage` (for Password) and `MfaSettings` (for the MFA header row)
-- **`SettingsPage.tsx`** — fetches `getMe({ include: 'mfa' })` and renders `<MfaSettings>` inside the Security section
-
-## Future Enhancements (Out of Scope)
-
-- **Step-up auth** — require fresh MFA for sensitive actions (disable MFA, delete account)
-- **Org-level MFA enforcement** — org setting `requireMfa: boolean` that forces all members to enroll
-- **View recovery codes** — custom UI to regenerate/display recovery codes post-enrollment
-- **Remember device** — Auth0 can skip MFA on trusted devices for 30 days
-
 ## Risks
 
 ### Auth0 Management API Rate Limits
@@ -216,6 +191,23 @@ If an operator turns the Auth0 email factor back on at the tenant level, every v
 ### No Step-Up Auth and No Rate Limiting on MFA Endpoints
 
 Any authenticated session can disable MFA without re-verifying. The endpoints rely on the same auth + CSRF protection as other API routes; there is no per-user throttling. Mitigated by CSRF (an attacker needs the token) and 1-hour access-token expiry. Step-up auth is listed in Future Enhancements.
+
+## Troubleshooting
+
+If MFA enrollment or login flows aren't working as expected, check the Auth0 logs:
+
+1. Go to **Auth0 Dashboard > Monitoring > Logs**
+2. Look for recent login events — failed logins show as type `f` (Failed Login) or `fp` (Failed Login - Password)
+3. Expand the event to see:
+   - `description` — the error message (e.g., Action returned invalid data)
+   - `details.actions.executions` — confirms whether the Post-Login Action ran
+   - `details.error.message` — the specific failure reason
+
+Common issues:
+
+- **"Invalid MFA command"** — the `enrollWith()` / `challengeWith()` call signature is wrong. Auth0's Action runtime expects a single object (e.g., `{ type: 'otp' }`), not an array.
+- **Action not executing** — the Action binding is automated by `setup-integrations`, but the deploy only runs when the `Version` property in `sst.config.ts` is bumped. If you changed `mfa-action.ts` without bumping `Version`, the old code is still bound. Verify what is actually deployed under **Actions > Triggers > Login** in the Auth0 dashboard. If the wrong code is bound, bump `Version` in `sst.config.ts` and redeploy.
+- **`mfa_enrolling` flag not set** — check the user's `app_metadata` in **User Management > Users > (user) > app_metadata**. The backend sets this when `POST /api/mfa/enroll` is called.
 
 ## Consequences
 
