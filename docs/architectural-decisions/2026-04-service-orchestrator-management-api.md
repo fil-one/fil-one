@@ -75,9 +75,24 @@ Every operation is safely retryable end-to-end:
 
 ## Alternatives Considered
 
-### Re-use Aurora's two-API split (Backoffice + Portal)
+### Authentication scoping
 
-Mirror Aurora's separation between a global "backoffice" and a per-tenant "portal" with different base URLs and overlapping resources. Rejected because it imposes Aurora's specific architecture on every future Service Orchestrator. The same authorization split can be expressed with a single base URL and two security schemes, which is simpler to document, simpler to implement, and avoids leaking one vendor's internals into the contract.
+Four points on the auth-scoping axis were considered:
+
+| | URL surface | Credentials |
+|---|---|---|
+| Two-API split (Aurora) | two base URLs (Backoffice + Portal) | one credential each |
+| Single API, two scopes (chosen) | one base URL, `{tenantId}` in path | partner key + per-tenant key |
+| Single API, single global key | one base URL, `{tenantId}` in path | partner key only |
+| Flat URLs + tenant header (Stripe Connect) | one base URL, tenant in header | partner key only |
+
+**Two-API split** was rejected because separate base URLs impose Aurora's specific architecture on every future Service Orchestrator. The same authorization split can be expressed with a single base URL and two security schemes, which is simpler to document, simpler to implement, and avoids leaking one vendor's internals into the contract.
+
+**Single global key** was rejected because per-tenant keys give a concrete, if narrow, defence-in-depth property: a FilOne backend bug that passes the wrong `tenantId` to `/tenants/{tenantId}/access-keys/*` is rejected by the Service Orchestrator rather than silently issuing access keys against the wrong tenant. The protection is narrow — other tenant-scoped endpoints (`status`, `metrics`, info) still trust the partner key — but `access-keys` is the most sensitive endpoint group because the keys it issues grant direct access to tenant data. The blast-radius argument against a global key is otherwise weak (all FilOne secrets share an SSM tree and similar IAM permissions), and the complexity cost of two scopes is bounded: one extra issuance endpoint and one extra cached SSM read per access-key call.
+
+**Flat URLs + tenant header** (Stripe Connect's pattern — a single platform key plus a `Stripe-Account`-style context header) was rejected for the same defence-in-depth reason as the single global key: a header is as easy to mis-set in a backend bug as a URL parameter. Keeping `tenantId` in the path is also more explicit, plays better with per-tenant rate limiting and audit logging, and reads more clearly in OpenAPI-generated documentation.
+
+The chosen partner-key + tenant-key split mirrors GitHub Apps, which require a JWT signed with the app's private key for app-level endpoints (mint installation tokens, list installations) and a separate installation access token for installation-scoped endpoints, with the API enforcing the mismatch.
 
 ### Async tenant setup with a separate readiness endpoint
 
@@ -86,10 +101,6 @@ Mirror Aurora's separation between a global "backoffice" and a per-tenant "porta
 ### Drop `GET /tenants/{id}` entirely
 
 Once `setupStatus` was removed, the tenant-info endpoint became technically optional: the FilOne backend caches status locally and could derive bucket/key counts by listing. Rejected because resource limits (`bucketLimit`, `accessKeyLimit`) are Service Orchestrator-defined and have no other source, and a thin tenant-info read is a natural part of any tenant management API. Dropping it would either move limits onto an unrelated endpoint or hardcode them into the FilOne backend, both of which are worse.
-
-### Single global key for everything (no per-tenant keys)
-
-Use the partner key for every operation, including S3 access-key CRUD. Rejected. The blast-radius argument against the global key is largely theoretical given that all FilOne secrets share an SSM tree and similar IAM permissions, but per-tenant keys provide a concrete defence-in-depth property: a FilOne backend bug that passes the wrong `tenantId` in the URL is rejected by the Service Orchestrator rather than silently leaking one tenant's resources to another. The complexity cost is bounded — one extra endpoint, one extra SSM read per call (cached) — and the scoping primitive is required if FilOne ever wants to delegate tenant-scoped management access externally.
 
 ### Bucket management endpoints in the management API
 
