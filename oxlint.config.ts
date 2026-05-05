@@ -2,7 +2,7 @@ import { defineConfig } from 'oxlint';
 
 export default defineConfig({
   plugins: ['typescript'],
-  jsPlugins: ['oxlint-plugin-complexity'],
+  jsPlugins: ['oxlint-plugin-complexity', '@filone/oxlint-rules'],
   rules: {
     'max-lines': ['error', { max: 500, skipBlankLines: true, skipComments: true }],
     'max-lines-per-function': [
@@ -57,6 +57,12 @@ export default defineConfig({
           'error',
           { max: 200, skipBlankLines: true, skipComments: true, IIFEs: false },
         ],
+      },
+    },
+    {
+      files: ['tests/e2e/**/*.ts', 'tests/e2e/**/*.tsx'],
+      rules: {
+        '@filone/oxlint-rules/no-text-locators': 'error',
       },
     },
   ],

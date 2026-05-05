@@ -51,6 +51,11 @@ updates:
       middy:
         patterns:
           - '@middy/*'
+      oxlint:
+        patterns:
+          - 'oxlint'
+          - 'oxlint-*'
+          - '@oxlint/*'
 
   # ── GitHub Actions ──
   - package-ecosystem: github-actions
