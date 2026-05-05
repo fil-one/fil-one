@@ -366,7 +366,7 @@ async function setupAuth0MfaAction(domain: string): Promise<void> {
 
   if (existing) {
     // Update if code has changed
-    if (existing.code.trim() !== MFA_ACTION_CODE) {
+    if (existing.code.trim() !== MFA_ACTION_CODE.trim()) {
       const updateResp = await fetch(`https://${domain}/api/v2/actions/actions/${existing.id}`, {
         method: 'PATCH',
         headers,
