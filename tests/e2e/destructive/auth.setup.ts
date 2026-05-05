@@ -58,8 +58,11 @@ for (const role of roles) {
     await resetBillingState(role.name, role.userId);
 
     await page.goto('/');
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page.getByRole('textbox', { name: 'Email address' }).fill(role.email);
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page.getByRole('textbox', { name: 'Password' }).fill(role.password);
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
 
     await expect(page).toHaveURL(/\/dashboard$/);

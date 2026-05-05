@@ -12,9 +12,12 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
   const page = await context.newPage();
 
   await page.goto('/dashboard');
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await expect(page.getByText('Dashboard')).toBeVisible();
 
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('button', { name: 'User menu' }).click();
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('button', { name: 'Log out' }).click();
 
   // Wait for the full /logout -> Auth0 /v2/logout -> returnTo chain to settle.
@@ -31,6 +34,7 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
 
   // Server-side: a protected route should bounce to sign-in.
   await page.goto('/dashboard');
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await expect(page.getByText('Sign in')).toBeVisible();
 
   await context.close();
