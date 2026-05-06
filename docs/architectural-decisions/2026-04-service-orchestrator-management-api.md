@@ -120,6 +120,10 @@ Once `setupStatus` was removed, the tenant-info endpoint became technically opti
 
 Mirror Aurora's Portal API and expose `createBucket` / `listBuckets` / `getBucketInfo` / `deleteBucket` over the management contract. Rejected because the standard S3 API already covers all of this, and requiring an Service Orchestrator to implement bucket CRUD in two places (S3 Gateway and management API) is duplicative.
 
+### Path-versioned URLs (e.g. `/v1/tenants/…`)
+
+Prefix all routes with a version segment so that a future breaking revision can live at `/v2/…` alongside the existing `/v1/…` routes. Rejected for now: there is no concrete need for a second version, and adding the prefix prematurely locks the version into every integration before the contract has stabilised. If breaking changes are needed in the future, both paths remain open: a `/v2/` prefix can be introduced alongside the existing unversioned (implicitly v1) routes, or HTTP content negotiation (`Accept`/`Content-Type` version parameters) can be used without touching the URL surface at all.
+
 ### Custom `X-Api-Key` header for authentication
 
 Match Aurora's existing convention. Rejected in favour of standard `Authorization: Bearer <token>`, which is more idiomatic, has first-class support in HTTP clients and OpenAPI tooling, and does not require Service Orchestrators to invent a custom header.
