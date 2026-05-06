@@ -314,11 +314,13 @@ describe('usage-reporting-worker', () => {
       expect(mockMeterEventsCreate).not.toHaveBeenCalled();
     });
 
-    it('does not validate env var when usage is zero (Stripe call skipped)', async () => {
+    it('validates env var even when usage is zero (fails fast on misconfig)', async () => {
       vi.stubEnv('STRIPE_METER_EVENT_NAME', '');
       mockGetStorageSamples.mockResolvedValue([]);
 
-      await expect(handler(basePayload)).resolves.toBeUndefined();
+      await expect(handler(basePayload)).rejects.toThrow(
+        'STRIPE_METER_EVENT_NAME env var is not set',
+      );
       expect(mockMeterEventsCreate).not.toHaveBeenCalled();
     });
   });

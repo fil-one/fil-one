@@ -85,6 +85,11 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     reportDate,
   });
 
+  const meterEventName = process.env.STRIPE_METER_EVENT_NAME;
+  if (!meterEventName) {
+    throw new Error('STRIPE_METER_EVENT_NAME env var is not set');
+  }
+
   const now = new Date().toISOString();
   const isTrial = subscriptionStatus === 'trialing';
 
@@ -126,6 +131,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     subscriptionId,
     stripeCustomerId,
     averageStorageGbUsed,
+    meterEventName,
   });
 
   const orgSyncAction = await syncOrgMetadata({
@@ -172,19 +178,15 @@ async function reportStorageToStripe(params: {
   subscriptionId: string;
   stripeCustomerId: string;
   averageStorageGbUsed: number;
+  meterEventName: string;
 }): Promise<{ reported: boolean }> {
-  const { orgId, subscriptionId, stripeCustomerId, averageStorageGbUsed } = params;
+  const { orgId, subscriptionId, stripeCustomerId, averageStorageGbUsed, meterEventName } = params;
   if (averageStorageGbUsed <= 0) return { reported: false };
-
-  const eventName = process.env.STRIPE_METER_EVENT_NAME;
-  if (!eventName) {
-    throw new Error('STRIPE_METER_EVENT_NAME env var is not set');
-  }
 
   const stripe = getStripeClient();
   try {
     await stripe.billing.meterEvents.create({
-      event_name: eventName,
+      event_name: meterEventName,
       payload: {
         stripe_customer_id: stripeCustomerId,
         value: String(averageStorageGbUsed),
