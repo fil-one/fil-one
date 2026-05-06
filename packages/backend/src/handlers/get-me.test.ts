@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -26,11 +26,6 @@ vi.mock('../lib/auth-secrets.js', () => ({
 const mockTriggerTenantSetup = vi.fn();
 vi.mock('../lib/trigger-tenant-setup.js', () => ({
   triggerTenantSetup: (...args: unknown[]) => mockTriggerTenantSetup(...args),
-}));
-
-const mockCreateBillingTrial = vi.fn();
-vi.mock('../lib/create-billing-trial.js', () => ({
-  createBillingTrial: (...args: unknown[]) => mockCreateBillingTrial(...args),
 }));
 
 const mockJwtVerify = vi.fn();
@@ -73,8 +68,6 @@ describe('GET /api/me handler', () => {
     vi.clearAllMocks();
     ddbMock.reset();
     mockTriggerTenantSetup.mockResolvedValue({});
-    mockCreateBillingTrial.mockResolvedValue({});
-    ddbMock.on(UpdateItemCommand).resolves({});
 
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
@@ -108,7 +101,6 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
           setupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
@@ -139,7 +131,6 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
           setupStatus: { S: 'FILONE_ORG_CREATED' },
         },
       });
@@ -170,7 +161,6 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
         },
       });
 
@@ -189,7 +179,7 @@ describe('GET /api/me handler', () => {
     });
   });
 
-  it('triggers tenant setup when org is confirmed but setup is incomplete', async () => {
+  it('triggers tenant setup when setup is incomplete', async () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
@@ -200,7 +190,6 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
           setupStatus: { S: 'FILONE_ORG_CREATED' },
         },
       });
@@ -224,7 +213,6 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
           setupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
@@ -247,7 +235,6 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
           setupStatus: { S: 'FILONE_ORG_CREATED' },
         },
       });
@@ -267,50 +254,30 @@ describe('GET /api/me handler', () => {
     });
   });
 
-  it('legacy self-heal: when orgConfirmed=false, finalizes org and triggers setup + billing trial', async () => {
+  it('degrades gracefully when org profile row is missing (eventual consistency)', async () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
         Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
       })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: false },
-          setupStatus: { S: 'FILONE_ORG_CREATED' },
-        },
-      });
-    ddbMock.on(UpdateItemCommand).resolves({
-      Attributes: {
-        name: { S: 'Example Corp' },
-        orgConfirmed: { BOOL: true },
-        setupStatus: { S: 'FILONE_ORG_CREATED' },
-      },
-    });
+      .resolves({});
 
-    await handler(authenticatedEvent(), buildContext());
+    const result = await handler(authenticatedEvent(), buildContext());
 
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1);
-    expect(updateCalls[0].args[0].input).toMatchObject({
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      UpdateExpression: 'SET #name = :name, orgConfirmed = :confirmed',
-      ExpressionAttributeValues: {
-        ':name': { S: 'Example Corp' },
-        ':confirmed': { BOOL: true },
-      },
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({
+        orgId: MOCK_ORG_ID,
+        orgName: '',
+        emailVerified: true,
+        email: MOCK_EMAIL,
+        orgSetupComplete: false,
+        connectionType: 'auth0',
+      }),
     });
     expect(mockTriggerTenantSetup).toHaveBeenCalledWith({
       orgId: MOCK_ORG_ID,
-      orgName: 'Example Corp',
-    });
-    expect(mockCreateBillingTrial).toHaveBeenCalledWith({
-      userId: MOCK_USER_ID,
-      orgId: MOCK_ORG_ID,
-      email: MOCK_EMAIL,
+      orgName: '',
     });
   });
 });

@@ -156,7 +156,6 @@ describe('authMiddleware', () => {
             pk: { S: `ORG#${existingOrgId}` },
             sk: { S: 'PROFILE' },
             name: { S: 'example.com' },
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: FINAL_SETUP_STATUS },
           },
         });
@@ -227,7 +226,6 @@ describe('authMiddleware', () => {
             pk: { S: `ORG#${existingOrgId}` },
             sk: { S: 'PROFILE' },
             name: { S: 'example.com' },
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: FINAL_SETUP_STATUS },
           },
         });
@@ -299,7 +297,6 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
           },
         });
@@ -353,7 +350,6 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
           },
         });
@@ -468,7 +464,7 @@ describe('authMiddleware', () => {
             },
           },
         },
-        // Org profile — derived from JWT name claim, auto-confirmed
+        // Org profile — derived from JWT name claim
         {
           Put: {
             TableName: 'UserInfoTable',
@@ -476,7 +472,6 @@ describe('authMiddleware', () => {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: 'PROFILE' },
               name: { S: 'Alice Org' },
-              orgConfirmed: { BOOL: true },
               setupStatus: { S: 'FILONE_ORG_CREATED' },
               createdBy: { S: MOCK_USER_ID },
               createdAt: { S: expect.any(String) },
@@ -528,7 +523,7 @@ describe('authMiddleware', () => {
       const transactCalls = ddbMock.commandCalls(TransactWriteItemsCommand);
       const orgItem = transactCalls[0].args[0].input.TransactItems?.[2].Put?.Item;
       expect(orgItem?.name).toEqual({ S: 'Example' });
-      expect(orgItem?.orgConfirmed).toEqual({ BOOL: true });
+      expect(orgItem?.orgConfirmed).toBeUndefined();
       expect(mockTriggerTenantSetup).toHaveBeenCalledWith({
         orgId: MOCK_ORG_ID,
         orgName: 'Example',
@@ -577,7 +572,6 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
           },
         });
@@ -639,7 +633,6 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
           },
         });
@@ -675,7 +668,6 @@ describe('authMiddleware', () => {
         .resolvesOnce({ Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } } })
         .resolvesOnce({
           Item: {
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
           },
         });
@@ -758,7 +750,6 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
           },
         });

@@ -205,6 +205,7 @@ interface ResolvedIdentity {
   email: string | null;
 }
 
+// eslint-disable-next-line max-lines-per-function
 async function resolveUserAndOrg(
   sub: string,
   email: string | null,
@@ -276,9 +277,6 @@ async function resolveUserAndOrg(
               pk: { S: `ORG#${orgId}` },
               sk: { S: 'PROFILE' },
               name: { S: orgName },
-              // Retained only so the legacy self-heal path in /me can detect older
-              // unconfirmed rows. New rows are always written confirmed=true.
-              orgConfirmed: { BOOL: true },
               setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: userId },
               createdAt: { S: now },
@@ -300,25 +298,10 @@ async function resolveUserAndOrg(
     }),
   );
 
-  await kickoffNewOrgSetup({ userId, orgId, orgName, email });
-
-  return { userId, orgId, email };
-}
-
-/**
- * Run the SQS enqueue and Stripe call for a freshly created org in parallel —
- * both are external network calls with no ordering dependency. Failures are
- * logged but never propagated; the /me self-heal path retries tenant setup,
- * and createBillingTrial is idempotent on subsequent attempts via its DDB
- * conditional put.
- */
-async function kickoffNewOrgSetup(args: {
-  userId: string;
-  orgId: string;
-  orgName: string;
-  email: string | null;
-}): Promise<void> {
-  const { userId, orgId, orgName, email } = args;
+  // Fire SQS enqueue + Stripe trial in parallel; both are safe to retry.
+  // triggerTenantSetup is deduped server-side by SQS via MessageDeduplicationId: orgId.
+  // createBillingTrial passes idempotencyKey to Stripe customer/subscription creation,
+  // so duplicate calls return the cached response without creating new resources.
   const [tenantResult, billingResult] = await Promise.allSettled([
     triggerTenantSetup({ orgId, orgName }),
     createBillingTrial({ userId, orgId, email: email ?? undefined }),
@@ -336,6 +319,8 @@ async function kickoffNewOrgSetup(args: {
       userId,
     });
   }
+
+  return { userId, orgId, email };
 }
 
 // ---------------------------------------------------------------------------
