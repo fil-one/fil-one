@@ -6,7 +6,11 @@
  */
 
 import * as psl from 'psl';
-import { ORG_NAME_DISALLOWED_CHARS, ORG_NAME_MIN_LENGTH } from '@filone/shared';
+import {
+  ORG_NAME_DISALLOWED_CHARS,
+  ORG_NAME_MAX_LENGTH,
+  ORG_NAME_MIN_LENGTH,
+} from '@filone/shared';
 
 const DEFAULT_ORG_NAME = 'My Organization';
 
@@ -90,12 +94,12 @@ export function deriveOrgName(name?: string, email?: string): string {
     const firstWord = name.trim().split(/\s+/)[0] ?? '';
     const cleaned = firstWord.replace(ORG_NAME_DISALLOWED_CHARS, '');
     if (cleaned.length >= ORG_NAME_MIN_LENGTH) {
-      return `${capitalize(cleaned.toLowerCase())} Org`;
+      return `${capitalize(cleaned.toLowerCase())} Org`.slice(0, ORG_NAME_MAX_LENGTH);
     }
   }
   if (email) {
     const fromEmail = suggestOrgNameByEmail(email);
-    if (fromEmail) return fromEmail;
+    if (fromEmail) return fromEmail.slice(0, ORG_NAME_MAX_LENGTH);
   }
   return DEFAULT_ORG_NAME;
 }

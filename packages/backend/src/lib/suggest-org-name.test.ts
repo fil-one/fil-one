@@ -134,4 +134,25 @@ describe('deriveOrgName', () => {
       expect(deriveOrgName('Charlie Smith', 'someone@acme.com')).toBe('Charlie Org');
     });
   });
+
+  describe('max-length enforcement', () => {
+    it('truncates a very long name-derived value to ORG_NAME_MAX_LENGTH', () => {
+      const longName = 'A'.repeat(150);
+      const result = deriveOrgName(longName);
+      expect(result.length).toBeLessThanOrEqual(100);
+    });
+
+    it('truncates a very long email-derived value to ORG_NAME_MAX_LENGTH', () => {
+      // Construct a public-email-domain address whose local part is > 100 chars
+      const longLocal = 'a'.repeat(101);
+      const result = deriveOrgName(undefined, `${longLocal}@gmail.com`);
+      expect(result.length).toBeLessThanOrEqual(100);
+    });
+
+    it('result always matches ORG_NAME_PATTERN after truncation', () => {
+      const longName = 'A'.repeat(150);
+      const result = deriveOrgName(longName);
+      expect(/^[A-Za-z0-9 .-]+$/.test(result)).toBe(true);
+    });
+  });
 });
