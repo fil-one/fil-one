@@ -705,6 +705,8 @@ components:
             action lists *objects*, not buckets — `s3:ListAllMyBuckets`
             is the action that lists buckets.)
           * `s3:ListBucketVersions` — list object versions in a bucket.
+            (Same AWS quirk as `s3:ListBucket` above: the name says
+            "Bucket" but the action operates on object versions.)
           * `s3:DeleteObject` — delete an object.
           * `s3:DeleteObjectVersion` — delete a specific object version.
 
