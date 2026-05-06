@@ -34,32 +34,33 @@ Non-functional requirements:
 - _(eventually should have)_ Telemetry metrics for the S3 Gateway (TTFB, response times, 4xx/5xx error rates, etc.)
 
 ```
-+---------------------------------------------------------+
-|  Service Orchestrator APIs                                               |
-|                                                         |
-|  +---------------------+  +--------------------------+  |
-|  | Admin API           |  | Tenant Management API    |  |
-|  | (global API key)    |  | (per-tenant API key)     |  |
-|  |                     |  |                          |  |
-|  | - Create tenant     |  | - Create/list/get/delete |  |
-|  | - Setup tenant      |  |   access keys            |  |
-|  | - Get tenant info   |  |                          |  |
-|  | - Set tenant status |  |                          |  |
-|  | - Create API key    |  |                          |  |
-|  | - Query usage       |  |                          |  |
-|  +---------------------+  +--------------------------+  |
-|                                                         |
-|  +----------------------------------------------------+ |
-|  | S3 Gateway                                         | |
-|  | (per-tenant access key + secret, AWS Sig V4)       | |
-|  |                                                    | |
-|  | - PutObject / GetObject (pre-signed URLs)          | |
-|  | - ListObjectsV2, HeadObject, DeleteObject          | |
-|  | - CreateBucket, ListBuckets, DeleteBucket          | |
-|  | - GetObjectRetention                               | |
-|  +----------------------------------------------------+ |
-|                                                         |
-+---------------------------------------------------------+
++-----------------------------------------------------------+
+|  Service Orchestrator APIs                                |
+|                                                           |
+|  +-----------------------+  +--------------------------+  |
+|  | Admin API             |  | Tenant Management API    |  |
+|  | (global API key)      |  | (per-tenant API key)     |  |
+|  |                       |  |                          |  |
+|  | - Create tenant       |  | - Create/list/get/delete |  |
+|  | - Get tenant info     |  |   access keys            |  |
+|  | - Set tenant status   |  |                          |  |
+|  | - Delete tenant       |  |                          |  |
+|  | - Create API key      |  |                          |  |
+|  | - Revoke API key      |  |                          |  |
+|  | - Query usage metrics |  |                          |  |
+|  +-----------------------+  +--------------------------+  |
+|                                                           |
+|  +------------------------------------------------------+ |
+|  | S3 Gateway                                           | |
+|  | (per-tenant access key + secret, AWS Sig V4)         | |
+|  |                                                      | |
+|  | - PutObject / GetObject (pre-signed URLs)            | |
+|  | - ListObjectsV2, HeadObject, DeleteObject            | |
+|  | - CreateBucket, ListBuckets, DeleteBucket            | |
+|  | - GetObjectRetention                                 | |
+|  +------------------------------------------------------+ |
+|                                                           |
++-----------------------------------------------------------+
 ```
 
 ## **Tenant Management**
