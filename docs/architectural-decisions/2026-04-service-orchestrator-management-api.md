@@ -70,7 +70,11 @@ Two time-series endpoints, both parameterised by `from` / `to` / `window`, each 
 - `GET /tenants/{tenantId}/metrics` — tenant-level storage (bytes used + object count), egress (bytes downloaded), and ingress (bytes uploaded).
 - `GET /tenants/{tenantId}/buckets/{bucketName}/metrics` — per-bucket equivalent; the Service Orchestrator must verify that the bucket belongs to the path `tenantId`.
 
-Service Orchestrators must support at least `1h`, `24h`, and `720h` windows.
+Service Orchestrators must support at least:
+
+- A query range (`to` − `from`) of 32 days (covers a 31-day billing period with a one-day buffer).
+- Window values of `1h`, `24h`, and `720h`.
+- 768 data points per response (32 days at 1 h granularity — the highest-resolution, longest-range query FilOne issues).
 
 ### Idempotency
 

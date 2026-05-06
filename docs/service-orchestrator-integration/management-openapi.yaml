@@ -481,7 +481,9 @@ components:
       in: query
       name: from
       required: true
-      description: Start of the window (inclusive), RFC 3339.
+      description: |
+        Start of the query range (inclusive), RFC 3339. Service Orchestrators
+        must support ranges (`to` − `from`) of at least 32 days.
       schema:
         type: string
         format: date-time
@@ -489,7 +491,7 @@ components:
       in: query
       name: to
       required: true
-      description: End of the window (exclusive), RFC 3339.
+      description: End of the query range (exclusive), RFC 3339.
       schema:
         type: string
         format: date-time
@@ -498,11 +500,10 @@ components:
       name: window
       required: true
       description: |
-        Sample bucket size, expressed as `<integer>h`. The Service Orchestrator must
-        support `1h`, `24h`, and `720h` (30 days) at minimum. The Service Orchestrator
-        may respond with HTTP 400 Bad Request for excessively dense
-        queries (a window so small relative to the `from`/`to` range
-        that it would produce too many samples).
+        Sample bucket size, expressed as `<integer>h`. Service Orchestrators
+        must support `1h`, `24h`, and `720h` (30 days) at minimum, and must
+        be able to return at least 768 samples per response (covers a 32-day
+        range at 1 h granularity — the most demanding query FilOne issues).
       schema:
         type: string
         pattern: '^[0-9]+h$'

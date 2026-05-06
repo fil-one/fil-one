@@ -131,6 +131,12 @@ snapshot.
 For egress (outbound data transfer), FilOne queries egress consumption in bytes aggregated in
 24-hour windows.
 
+Minimum requirements for metrics endpoints:
+
+- Query range (`to` − `from`): at least 32 days (covers a 31-day billing period with a one-day buffer).
+- Supported windows: at least `1h`, `24h`, and `720h`.
+- Response capacity: at least 768 samples per request (32 days ÷ 1 h — the highest-resolution, longest-range query FilOne issues).
+
 Reliability of these endpoints is important.
 
 ## Non-Functional Requirements
