@@ -118,7 +118,7 @@ Once `setupStatus` was removed, the tenant-info endpoint became technically opti
 
 ### Bucket management endpoints in the management API
 
-Mirror Aurora's Portal API and expose `createBucket` / `listBuckets` / `getBucketInfo` / `deleteBucket` over the management contract. Rejected because the standard S3 API already covers all of this, and requiring an Service Orchestrator to implement bucket CRUD in two places (S3 Gateway and management API) is duplicative.
+Mirror Aurora's Portal API and expose `createBucket` / `listBuckets` / `getBucketInfo` / `deleteBucket` over the management contract. Rejected because the standard S3 API already covers all of this, and requiring a Service Orchestrator to implement bucket CRUD in two places (S3 Gateway and management API) is duplicative.
 
 ### Path-versioned URLs (e.g. `/v1/tenants/…`)
 

@@ -3,7 +3,7 @@ info:
   title: FilOne Service Orchestrator Management API
   version: 0.1.0
   description: |
-    Management API that an Service Orchestrator (Service Orchestrator) must implement
+    Management API that a Service Orchestrator (Service Orchestrator) must implement
     so FilOne can integrate it as a new region. Covers:
 
       * Tenant lifecycle (create + setup, status, info)
@@ -51,12 +51,8 @@ info:
         partner's observability stack, not this API.
 
 servers:
-  - url: https://{region}.api.example.com/v1
-    description: Per-region management API endpoint.
-    variables:
-      region:
-        default: example
-        description: Region identifier (matches the FilOne S3 region label).
+  - url: https://api.example.com/
+    description: Service Orchestrator management API endpoint.
 
 security:
   - PartnerKey: []
@@ -259,14 +255,21 @@ paths:
       description: |
         Revokes the API key identified by `keyId`. Subsequent requests
         signed with that key must fail. Returns 204 even if the key was
-        already deleted (idempotent).
+        already deleted (idempotent). Returns 404 if the tenant does not
+        exist.
       security:
         - PartnerKey: []
       responses:
         '204':
-          description: Revoked (or already revoked).
+          description: Revoked (or already revoked — returns 204 even if the key was already deleted).
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Tenant not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /tenants/{tenantId}/access-keys:
     parameters:
@@ -546,6 +549,11 @@ components:
             $ref: '#/components/schemas/Error'
 
   schemas:
+    ExternalId:
+      type: string
+      pattern: '^[a-zA-Z0-9_-]{1,128}$'
+      description: FilOne's stable organisation ID.
+
     TenantId:
       type: string
       pattern: '^[a-zA-Z0-9_-]{1,128}$'
@@ -575,13 +583,12 @@ components:
       required: [externalId, displayName]
       properties:
         externalId:
-          type: string
-          pattern: '^[a-zA-Z0-9_-]{1,128}$'
+          $ref: '#/components/schemas/ExternalId'
           description: |
-            FilOne's stable organisation ID. Used as the idempotency key:
-            a second call with the same `externalId` returns the existing
-            tenant. The Service Orchestrator may use any primary key
-            internally; this field carries the caller's identifier.
+            Used as the idempotency key: a second call with the same
+            `externalId` returns the existing tenant. The Service Orchestrator
+            may use any primary key internally; this field carries the
+            caller's identifier.
         displayName:
           type: string
           minLength: 1
@@ -610,7 +617,7 @@ components:
             Store and use this as the `{tenantId}` path parameter in all
             subsequent calls.
         externalId:
-          type: string
+          $ref: '#/components/schemas/ExternalId'
           description: The `externalId` supplied in the `POST /tenants` request.
         displayName:
           type: string
@@ -767,7 +774,7 @@ components:
           type: array
           description: Empty or omitted when the key has tenant-wide access.
           items:
-            type: string
+            $ref: '#/components/schemas/BucketName'
         expiresAt:
           type: [string, 'null']
           format: date-time
