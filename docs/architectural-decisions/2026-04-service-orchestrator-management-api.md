@@ -65,11 +65,10 @@ Permissions use AWS S3 IAM action names verbatim (e.g. `s3:GetObject`, `s3:Creat
 
 All endpoints in this section require a **partner key**.
 
-Three time-series endpoints, all parameterised by `from` / `to` / `window`:
+Two time-series endpoints, both parameterised by `from` / `to` / `window`, each returning storage, egress, and ingress samples in a single response:
 
-- `GET /tenants/{tenantId}/metrics/storage` — tenant storage (bytes used + object count).
-- `GET /tenants/{tenantId}/metrics/egress` — tenant egress (bytes downloaded).
-- `GET /tenants/{tenantId}/buckets/{bucketName}/metrics/storage` — per-bucket storage.
+- `GET /tenants/{tenantId}/metrics` — tenant-level storage (bytes used + object count), egress (bytes downloaded), and ingress (bytes uploaded).
+- `GET /tenants/{tenantId}/buckets/{bucketName}/metrics` — per-bucket equivalent; the Service Orchestrator must verify that the bucket belongs to the path `tenantId`.
 
 Service Orchestrators must support at least `1h`, `24h`, and `720h` windows.
 

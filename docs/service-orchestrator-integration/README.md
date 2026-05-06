@@ -11,7 +11,7 @@ APIs:
 - Per-Tenant API keys management
 - S3 Access Key management
 - S3 Gateway
-- Usage metrics at tenant level (storage bytes, object count, egress bytes)
+- Usage metrics at tenant and bucket level (storage bytes, object count, egress bytes, ingress bytes)
 
 The Service Orchestrator's S3 Gateway must implement the following features:
 
@@ -31,36 +31,37 @@ Non-functional requirements:
 
 - Tenant isolation
 - Idempotency for management API calls
-- _(eventually should have)_ Telemetry metrics for the S3 Gateway (TTFB, response times, 4xx/5xx error rates, etc.)
+- _(eventually should have)_ metrics for the S3 Gateway (TTFB, response times, 4xx/5xx error rates, etc.)
 
 ```
-+-----------------------------------------------------------+
-|  Service Orchestrator APIs                                |
-|                                                           |
-|  +-----------------------+  +--------------------------+  |
-|  | Admin API             |  | Tenant Management API    |  |
-|  | (global API key)      |  | (per-tenant API key)     |  |
-|  |                       |  |                          |  |
-|  | - Create tenant       |  | - Create/list/get/delete |  |
-|  | - Get tenant info     |  |   access keys            |  |
-|  | - Set tenant status   |  |                          |  |
-|  | - Delete tenant       |  |                          |  |
-|  | - Create API key      |  |                          |  |
-|  | - Revoke API key      |  |                          |  |
-|  | - Query usage metrics |  |                          |  |
-|  +-----------------------+  +--------------------------+  |
-|                                                           |
-|  +------------------------------------------------------+ |
-|  | S3 Gateway                                           | |
-|  | (per-tenant access key + secret, AWS Sig V4)         | |
-|  |                                                      | |
-|  | - PutObject / GetObject (pre-signed URLs)            | |
-|  | - ListObjectsV2, HeadObject, DeleteObject            | |
-|  | - CreateBucket, ListBuckets, DeleteBucket            | |
-|  | - GetObjectRetention                                 | |
-|  +------------------------------------------------------+ |
-|                                                           |
-+-----------------------------------------------------------+
++-----------------------------------------------------------------+
+|  Service Orchestrator APIs                                      |
+|                                                                 |
+|  +-----------------------------+  +--------------------------+  |
+|  | Admin API                   |  | Tenant Management API    |  |
+|  | (global API key)            |  | (per-tenant API key)     |  |
+|  |                             |  |                          |  |
+|  | - Create tenant             |  | - Create/list/get/delete |  |
+|  | - Get tenant info           |  |   access keys            |  |
+|  | - Set tenant status         |  |                          |  |
+|  | - Delete tenant             |  |                          |  |
+|  | - Create API key            |  |                          |  |
+|  | - Revoke API key            |  |                          |  |
+|  | - Query usage metrics       |  |                          |  |
+|  |   (per-tenant & per-bucket) |  |                          |  |
+|  +-----------------------------+  +--------------------------+  |
+|                                                                 |
+|  +------------------------------------------------------------+ |
+|  | S3 Gateway                                                 | |
+|  | (per-tenant access key + secret, AWS Sig V4)               | |
+|  |                                                            | |
+|  | - PutObject / GetObject (pre-signed URLs)                  | |
+|  | - ListObjectsV2, HeadObject, DeleteObject                  | |
+|  | - CreateBucket, ListBuckets, DeleteBucket                  | |
+|  | - GetObjectRetention                                       | |
+|  +------------------------------------------------------------+ |
+|                                                                 |
++-----------------------------------------------------------------+
 ```
 
 ## Tenant Management
@@ -118,16 +119,19 @@ Deleting an access key should revoke the key immediately so that subsequent S3 r
 
 ## Usage Metrics API
 
-FilOne relies on the Service Orchestrator for all usage data. The Service Orchestrator must expose a time-series metrics API that returns storage and egress data for a given tenant over a specified time range.
+FilOne relies on the Service Orchestrator for all usage data. The Service Orchestrator must expose two time-series metrics endpoints, each returning storage, egress, and ingress data together for a specified time range:
 
-For storage, FilOne queries hourly samples of bytes used and object count. The dashboard also  
-queries storage metrics with a wider window (30 days, single sample) for a quick current-usage  
+- `GET /tenants/{tenantId}/metrics` — tenant-level usage.
+- `GET /tenants/{tenantId}/buckets/{bucketName}/metrics` — per-bucket usage.
+
+For storage, FilOne queries hourly samples of bytes used and object count. The dashboard also
+queries storage metrics with a wider window (30 days, single sample) for a quick current-usage
 snapshot.
 
-For egress (outbound data transfer), FilOne queries egress consumption in bytes aggregated in  
+For egress (outbound data transfer), FilOne queries egress consumption in bytes aggregated in
 24-hour windows.
 
-Reliability of this endpoint is important.
+Reliability of these endpoints is important.
 
 ## Non-Functional Requirements
 

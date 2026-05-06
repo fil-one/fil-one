@@ -9,7 +9,7 @@ info:
       * Tenant lifecycle (create + setup, status, info)
       * Per-tenant API key issuance
       * S3 access-key management
-      * Usage metering (storage, egress)
+      * Usage metering (storage, egress, ingress)
 
     Bucket and object operations are out of scope: clients drive them
     over the Service Orchestrator's S3 Gateway directly.
@@ -69,7 +69,7 @@ tags:
   - name: Access Keys
     description: S3 access-key CRUD scoped to a single tenant.
   - name: Metrics
-    description: Usage metering for storage and egress.
+    description: Usage metering for storage, egress, and ingress.
 
 paths:
   /tenants:
@@ -361,7 +361,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tenants/{tenantId}/metrics/storage:
+  /tenants/{tenantId}/metrics:
     parameters:
       - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/MetricsFrom'
@@ -369,10 +369,14 @@ paths:
       - $ref: '#/components/parameters/MetricsWindow'
     get:
       tags: [Metrics]
-      summary: Tenant storage time series
+      summary: Tenant usage time series
       description: |
-        Returns time-bucketed samples of bytes stored and object count
-        for the tenant. Typical FilOne queries:
+        Returns time-bucketed samples of storage, egress, and ingress
+        for the tenant. All three metric types share the same `from` /
+        `to` / `window` parameters and are returned in a single
+        response.
+
+        Typical FilOne queries:
 
           * `window=1h` over the current Stripe billing period — used to
             compute average GB-hours for billing aggregation.
@@ -384,11 +388,11 @@ paths:
         - PartnerKey: []
       responses:
         '200':
-          description: Storage samples.
+          description: Usage samples for the tenant.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StorageMetrics'
+                $ref: '#/components/schemas/Metrics'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -396,36 +400,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tenants/{tenantId}/metrics/egress:
-    parameters:
-      - $ref: '#/components/parameters/TenantId'
-      - $ref: '#/components/parameters/MetricsFrom'
-      - $ref: '#/components/parameters/MetricsTo'
-      - $ref: '#/components/parameters/MetricsWindow'
-    get:
-      tags: [Metrics]
-      summary: Tenant egress time series
-      description: |
-        Returns outbound (downloaded) bytes aggregated per window.
-        FilOne queries 24-hour windows over the current Stripe billing
-        period for trial enforcement and billing audits.
-      security:
-        - PartnerKey: []
-      responses:
-        '200':
-          description: Egress samples.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EgressMetrics'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /tenants/{tenantId}/buckets/{bucketName}/metrics/storage:
+  /tenants/{tenantId}/buckets/{bucketName}/metrics:
     parameters:
       - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/BucketName'
@@ -434,20 +409,20 @@ paths:
       - $ref: '#/components/parameters/MetricsWindow'
     get:
       tags: [Metrics]
-      summary: Per-bucket storage time series
+      summary: Per-bucket usage time series
       description: |
-        Same shape as the tenant-level storage metrics, but scoped to a
-        single bucket. The Service Orchestrator must verify that the bucket belongs
-        to the path `tenantId` and return 404 otherwise.
+        Same shape as the tenant-level metrics, but scoped to a single
+        bucket. The Service Orchestrator must verify that the bucket
+        belongs to the path `tenantId` and return 404 otherwise.
       security:
         - PartnerKey: []
       responses:
         '200':
-          description: Storage samples for the bucket.
+          description: Usage samples for the bucket.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StorageMetrics'
+                $ref: '#/components/schemas/Metrics'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -854,6 +829,39 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EgressSample'
+
+    IngressSample:
+      type: object
+      required: [timestamp, bytesIngested]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: End of the sample window (RFC 3339).
+        bytesIngested:
+          type: integer
+          format: int64
+          minimum: 0
+
+    IngressMetrics:
+      type: object
+      required: [samples]
+      properties:
+        samples:
+          type: array
+          items:
+            $ref: '#/components/schemas/IngressSample'
+
+    Metrics:
+      type: object
+      required: [storage, egress, ingress]
+      properties:
+        storage:
+          $ref: '#/components/schemas/StorageMetrics'
+        egress:
+          $ref: '#/components/schemas/EgressMetrics'
+        ingress:
+          $ref: '#/components/schemas/IngressMetrics'
 
     Error:
       type: object
