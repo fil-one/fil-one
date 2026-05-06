@@ -22,6 +22,7 @@ import { daysUntil, formatDateTime } from '../lib/time.js';
 
 import { Button } from './Button.js';
 import { ProgressBar } from './ProgressBar.js';
+import { StatusIndicator } from './StatusIndicator.js';
 import { Tooltip } from './Tooltip.js';
 
 type SidebarNavProps = {
@@ -449,6 +450,9 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           helpButtonRef={helpButtonRef}
           onToggle={() => setHelpMenuOpen((o) => !o)}
         />
+
+        {/* System status */}
+        <StatusIndicator collapsed={collapsed} />
       </nav>
     </div>
   );
