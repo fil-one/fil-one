@@ -11,7 +11,7 @@ The contract must cover the same capabilities the FilOne backend exercises again
 
 - Tenant lifecycle (create, set up, query, status changes).
 - Issuance of credentials FilOne uses to call the Service Orchestrator on behalf of a tenant.
-- S3 access-key CRUD scoped to a tenant.
+- S3 access-key management (create, list, get, and delete) scoped to a tenant.
 - Usage metering for billing, dashboards, and trial enforcement.
 
 Bucket creation, listing, deletion and all object operations are not in scope for this API: the Service Orchestrator exposes them through the standard S3 API and FilOne drives them over S3 directly (typically via pre-signed URLs).
@@ -27,7 +27,7 @@ Bearer tokens via the standard `Authorization: Bearer <token>` header.
 Two scopes:
 
 - **Partner key** — global, partner-scoped admin credential. Used for tenant lifecycle, status changes, per-tenant API-key issuance, and metrics queries.
-- **Tenant key** — tenant-scoped credential issued by the Service Orchestrator, used for S3 access-key CRUD. The Service Orchestrator must reject any request whose path `tenantId` does not match the tenant the key was issued for.
+- **Tenant key** — tenant-scoped credential issued by the Service Orchestrator, used for S3 access-key management. The Service Orchestrator must reject any request whose path `tenantId` does not match the tenant the key was issued for.
 
 ### Tenant lifecycle
 
@@ -44,13 +44,18 @@ Two scopes:
 
 ### S3 access keys
 
-CRUD under `/tenants/{tenantId}/access-keys`, authenticated by a tenant key. Permissions use AWS S3 IAM action names verbatim (e.g. `s3:GetObject`, `s3:CreateBucket`, `s3:PutObjectRetention`) rather than custom abstractions. The full set covers:
+All endpoints under `/tenants/{tenantId}/access-keys` are authenticated by a tenant key:
+
+- `POST /tenants/{tenantId}/access-keys` provisions an AWS Sig V4 access-key pair scoped to the supplied permissions. Optional `buckets` list restricts the key to specific buckets; optional `expiresAt` sets a hard expiry. The `secretAccessKey` is returned only in this response. Returns 409 on duplicate `name`.
+- `GET /tenants/{tenantId}/access-keys` lists all access keys for the tenant (secrets omitted).
+- `GET /tenants/{tenantId}/access-keys/{accessKeyId}` returns metadata for a single key; the secret is never returned.
+- `DELETE /tenants/{tenantId}/access-keys/{accessKeyId}` revokes the key immediately; returns 204 even if the key was already deleted.
+
+Permissions use AWS S3 IAM action names verbatim (e.g. `s3:GetObject`, `s3:CreateBucket`, `s3:PutObjectRetention`) rather than custom abstractions. The full set covers:
 
 - Bucket-level: `s3:CreateBucket`, `s3:ListAllMyBuckets`, `s3:DeleteBucket`.
 - Object-level basic: `s3:GetObject`, `s3:PutObject`, `s3:ListBucket`, `s3:DeleteObject`.
 - Object-level variants for versions, retention, and legal hold: `s3:GetObjectVersion`, `s3:GetObjectRetention`, `s3:GetObjectLegalHold`, `s3:PutObjectRetention`, `s3:PutObjectLegalHold`, `s3:ListBucketVersions`, `s3:DeleteObjectVersion`.
-
-Optional `buckets` list scopes the key; optional `expiresAt` enforces a hard deadline. Duplicate `name` returns 409. `DELETE` returns 204 even if the key was already deleted.
 
 ### Usage metering
 
