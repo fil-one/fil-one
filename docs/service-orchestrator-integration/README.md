@@ -1,8 +1,8 @@
-# **Service Orchestrator Integration Requirements**
+# Service Orchestrator Integration Requirements
 
 This document describes what FilOne needs from a Service Orchestrator to integrate it as a new FilOne region.
 
-## **Summary**
+## Summary
 
 APIs:
 
@@ -63,7 +63,7 @@ Non-functional requirements:
 +-----------------------------------------------------------+
 ```
 
-## **Tenant Management**
+## Tenant Management
 
 FilOne provisions one tenant per customer organisation on demand — typically when the user creates their first bucket in a region managed by a given Service Orchestrator. Provisioning is synchronous: FilOne calls `POST /tenants` and waits for the tenant to be fully operational before proceeding.
 
@@ -77,7 +77,7 @@ All tenant management operations are authenticated with a single global API key.
 
 The entire tenant lifecycle — from creation through credential provisioning to full readiness — must be API-driven with no manual steps (no portal clicks, email verification, or human-in-the-loop approvals).
 
-## **Per-Tenant API Keys**
+## Per-Tenant API Keys
 
 After the tenant is created and set up, FilOne creates a per-tenant API key through the Service Orchestrator's admin API. This key is scoped to a single tenant and is used for S3 access key management: creating, listing, retrieving, and deleting access keys. The Service Orchestrator must return a secret token that FilOne can present in an HTTP header to authenticate these calls.
 
@@ -85,7 +85,7 @@ This separation limits the blast radius if a per-tenant key is compromised.
 
 The Service Orchestrator must also support **key rotation**: a tenant must be able to hold more than one active API key at the same time, so that FilOne can issue a new key, switch callers over to it, and only then revoke the old one. The standard flow is issue → switch → revoke; both keys are valid during the overlap window. Revocation is a separate endpoint that takes the key's identifier (returned by the create call) and is idempotent — calling it twice for the same key is not an error.
 
-## **Bucket Management**
+## Bucket Management
 
 FilOne web Console manages buckets via the standard S3 API. FilOne's UI lets users create, list, inspect, and delete buckets.
 
@@ -93,7 +93,7 @@ Bucket creation accepts a name and several optional settings: versioning enabled
 
 Deleting a bucket should fail if the bucket still contains objects. If the Service Orchestrator does not yet support bucket deletion, it should communicate this so that FilOne can adapt its UI accordingly.
 
-## **S3 Access Key Management**
+## S3 Access Key Management
 
 End-users manage their own S3 access keys through the FilOne console. The Service Orchestrator must support creating, listing, retrieving, and deleting access keys through the tenant-scoped management API (authenticated with the per-tenant API key). When a user creates an access key, FilOne sends the key name, a set of permissions, an optional list of buckets (for scoped access), and an optional expiration date.
 
@@ -116,7 +116,7 @@ The Service Orchestrator must support at least this level of granularity, or an 
 
 Deleting an access key should revoke the key immediately so that subsequent S3 requests using those credentials fail.
 
-## **Usage Metrics API**
+## Usage Metrics API
 
 FilOne relies on the Service Orchestrator for all usage data. The Service Orchestrator must expose a time-series metrics API that returns storage and egress data for a given tenant over a specified time range.
 
@@ -129,7 +129,7 @@ For egress (outbound data transfer), FilOne queries egress consumption in bytes 
 
 Reliability of this endpoint is important.
 
-## **Non-Functional Requirements**
+## Non-Functional Requirements
 
 **Idempotency.** Several operations must be safely retried: tenant creation (return existing on  
 conflict), access key creation (return conflict error so FilOne can recover), access key deletion  
@@ -143,7 +143,7 @@ credentials for one tenant must not grant access to another tenant's buckets
 or objects. The management API must enforce tenant scoping so that a per-tenant  
 API key cannot operate on a different tenant's resources.
 
-**Telemetry metrics from the S3 Gateway**
+**Telemetry metrics from the S3 Gateway.**
 
 - S3 GetObject Time-to-First-Byte
 - S3 Error Rate (4xx)

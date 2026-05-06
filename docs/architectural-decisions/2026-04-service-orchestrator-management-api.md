@@ -31,6 +31,8 @@ Two scopes:
 
 ### Tenant lifecycle
 
+All endpoints in this section require a **partner key**.
+
 - `POST /tenants` performs create & setup synchronously and returns only after the tenant is fully operational. The Service Orchestrator generates and returns a tenant `id`. FilOne passes its organisation ID as `externalId` (the idempotency key): re-calling with the same `externalId` returns the existing tenant. FilOne stores the SO-assigned `id` and uses it as the `{tenantId}` path parameter in all subsequent calls.
 - `GET /tenants/{tenantId}` returns operational state: status, resource counts, and resource limits.
 - `POST /tenants/{tenantId}/status` sets `active` / `write-locked` / `disabled`; setting the same status twice is a no-op.
@@ -38,13 +40,15 @@ Two scopes:
 
 ### Per-tenant API keys
 
+All endpoints in this section require a **partner key**.
+
 `POST /tenants/{tenantId}/api-keys` issues a tenant-scoped bearer token. The secret is returned only on creation. FilOne stores it in its own secret store and uses it for all subsequent tenant-scoped management calls.
 
 `DELETE /tenants/{tenantId}/api-keys/{keyId}` revokes a specific key by its identifier. Idempotent (204 if already revoked). Multiple API keys may be active for a tenant at the same time, which is the property rotation depends on: issue a new key, switch callers over, then revoke the old one. The Service Orchestrator may impose a per-tenant cap on concurrently-active keys.
 
 ### S3 access keys
 
-All endpoints under `/tenants/{tenantId}/access-keys` are authenticated by a tenant key:
+All endpoints in this section require a **tenant key**.
 
 - `POST /tenants/{tenantId}/access-keys` provisions an AWS Sig V4 access-key pair scoped to the supplied permissions. Optional `buckets` list restricts the key to specific buckets; optional `expiresAt` sets a hard expiry. The `secretAccessKey` is returned only in this response. Returns 409 on duplicate `name`.
 - `GET /tenants/{tenantId}/access-keys` lists all access keys for the tenant (secrets omitted).
@@ -59,7 +63,9 @@ Permissions use AWS S3 IAM action names verbatim (e.g. `s3:GetObject`, `s3:Creat
 
 ### Usage metering
 
-Three time-series endpoints under the partner key, all parameterised by `from` / `to` / `window`:
+All endpoints in this section require a **partner key**.
+
+Three time-series endpoints, all parameterised by `from` / `to` / `window`:
 
 - `GET /tenants/{tenantId}/metrics/storage` — tenant storage (bytes used + object count).
 - `GET /tenants/{tenantId}/metrics/egress` — tenant egress (bytes downloaded).
@@ -84,12 +90,12 @@ Every operation is safely retryable end-to-end:
 
 Four points on the auth-scoping axis were considered:
 
-| | URL surface | Credentials |
-|---|---|---|
-| Two-API split (Aurora) | two base URLs (Backoffice + Portal) | one credential each |
-| Single API, two scopes (chosen) | one base URL, `{tenantId}` in path | partner key + per-tenant key |
-| Single API, single global key | one base URL, `{tenantId}` in path | partner key only |
-| Flat URLs + tenant header (Stripe Connect) | one base URL, tenant in header | partner key only |
+|                                            | URL surface                         | Credentials                  |
+| ------------------------------------------ | ----------------------------------- | ---------------------------- |
+| Two-API split (Aurora)                     | two base URLs (Backoffice + Portal) | one credential each          |
+| Single API, two scopes (chosen)            | one base URL, `{tenantId}` in path  | partner key + per-tenant key |
+| Single API, single global key              | one base URL, `{tenantId}` in path  | partner key only             |
+| Flat URLs + tenant header (Stripe Connect) | one base URL, tenant in header      | partner key only             |
 
 **Two-API split** was rejected because separate base URLs impose Aurora's specific architecture on every future Service Orchestrator. The same authorization split can be expressed with a single base URL and two security schemes, which is simpler to document, simpler to implement, and avoids leaking one vendor's internals into the contract.
 
