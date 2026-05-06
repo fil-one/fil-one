@@ -78,7 +78,7 @@ The entire tenant lifecycle — from creation through credential provisioning to
 
 ## **Per-Tenant API Keys**
 
-After the tenant is created and set up, FilOne creates a per-tenant API key through the Service Orchestrator's admin API. This key is scoped to a single tenant and is used for all subsequent tenant-level management calls: creating buckets, creating and deleting access keys, listing buckets, and so on. The Service Orchestrator must return a secret token that FilOne can present in an HTTP header to authenticate these calls.
+After the tenant is created and set up, FilOne creates a per-tenant API key through the Service Orchestrator's admin API. This key is scoped to a single tenant and is used for S3 access key management: creating, listing, retrieving, and deleting access keys. The Service Orchestrator must return a secret token that FilOne can present in an HTTP header to authenticate these calls.
 
 This separation limits the blast radius if a per-tenant key is compromised.
 

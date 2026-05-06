@@ -349,7 +349,8 @@ paths:
       description: |
         Revokes the access key immediately. Subsequent S3 requests
         signed with these credentials must fail. Returns 204 even if
-        the key was already deleted.
+        the key was already deleted. Returns 404 if the tenant does
+        not exist.
       security:
         - TenantKey: []
       responses:
@@ -357,6 +358,8 @@ paths:
           description: Deleted (or already deleted).
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /tenants/{tenantId}/metrics/storage:
     parameters:
@@ -498,9 +501,7 @@ components:
       name: bucketName
       required: true
       schema:
-        type: string
-        minLength: 3
-        maxLength: 63
+        $ref: '#/components/schemas/BucketName'
     MetricsFrom:
       in: query
       name: from
@@ -578,6 +579,13 @@ components:
         response. Used as the canonical ID in all subsequent calls
         (`{tenantId}` path parameter). Must be unique within the partner.
 
+    BucketName:
+      type: string
+      minLength: 3
+      maxLength: 63
+      description: |
+        S3 bucket name. Length bounds match the S3 bucket-naming rules.
+
     TenantStatus:
       type: string
       enum: [active, write-locked, disabled]
@@ -606,7 +614,7 @@ components:
 
     Tenant:
       type: object
-      required: [id, externalId, displayName, status, bucketCount, accessKeyCount, createdAt]
+      required: [id, externalId, displayName, status, bucketCount, bucketLimit, accessKeyCount, accessKeyLimit, createdAt]
       properties:
         id:
           $ref: '#/components/schemas/TenantId'
@@ -745,11 +753,10 @@ components:
             these buckets. Omit (or pass an empty array) for tenant-wide
             access.
           items:
-            type: string
+            $ref: '#/components/schemas/BucketName'
         expiresAt:
-          type: string
+          type: [string, 'null']
           format: date-time
-          nullable: true
           description: |
             Optional expiration. The Service Orchestrator must reject the credentials
             after this time.
@@ -773,9 +780,8 @@ components:
           items:
             type: string
         expiresAt:
-          type: string
+          type: [string, 'null']
           format: date-time
-          nullable: true
         createdAt:
           type: string
           format: date-time
