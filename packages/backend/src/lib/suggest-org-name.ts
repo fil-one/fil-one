@@ -94,7 +94,11 @@ export function deriveOrgName(name?: string, email?: string): string {
     const firstWord = name.trim().split(/\s+/)[0] ?? '';
     const cleaned = firstWord.replace(ORG_NAME_DISALLOWED_CHARS, '');
     if (cleaned.length >= ORG_NAME_MIN_LENGTH) {
-      return `${capitalize(cleaned.toLowerCase())} Org`.slice(0, ORG_NAME_MAX_LENGTH);
+      const base = capitalize(cleaned.toLowerCase());
+      const withSuffix = `${base} Org`;
+      return withSuffix.length <= ORG_NAME_MAX_LENGTH
+        ? withSuffix
+        : base.slice(0, ORG_NAME_MAX_LENGTH);
     }
   }
   if (email) {

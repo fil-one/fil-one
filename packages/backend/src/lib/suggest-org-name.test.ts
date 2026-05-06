@@ -136,10 +136,24 @@ describe('deriveOrgName', () => {
   });
 
   describe('max-length enforcement', () => {
-    it('truncates a very long name-derived value to ORG_NAME_MAX_LENGTH', () => {
+    it('truncates a very long name-derived value to ORG_NAME_MAX_LENGTH without a partial suffix', () => {
       const longName = 'A'.repeat(150);
       const result = deriveOrgName(longName);
       expect(result.length).toBeLessThanOrEqual(100);
+      // Should not end with a partial " Org" suffix like " O" or " Or"
+      expect(result.endsWith(' Org') || !result.includes(' Org')).toBe(true);
+    });
+
+    it('appends " Org" suffix when the name is short enough to fit within the limit', () => {
+      expect(deriveOrgName('Alice')).toBe('Alice Org');
+    });
+
+    it('omits " Org" suffix (returns truncated name) when adding it would exceed the limit', () => {
+      // A 97-char name + " Org" (4 chars) = 101 chars > 100
+      const longName = 'A'.repeat(97);
+      const result = deriveOrgName(longName);
+      expect(result.length).toBeLessThanOrEqual(100);
+      expect(result.endsWith('org')).toBe(false);
     });
 
     it('truncates a very long email-derived value to ORG_NAME_MAX_LENGTH', () => {
