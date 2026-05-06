@@ -378,7 +378,7 @@ paths:
 
         Typical FilOne queries:
 
-          * `window=1h` over the current Stripe billing period — used to
+          * `window=1h` over the current billing period — used to
             compute average GB-hours for billing aggregation.
           * `window=24h` over the last 7 or 30 days — used for the
             dashboard trend chart.
