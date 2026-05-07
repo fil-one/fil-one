@@ -391,22 +391,23 @@ async function setupAuth0MfaAction(domain: string): Promise<void> {
     actionId = created.id;
   }
 
-  // Wait for the action to be built before deploying.
+  // Wait briefly for the action to be built before deploying.
   // Auth0 compiles actions asynchronously after create/update.
-  // Exponential backoff: ~1s, 2s, 3s, ... up to ~13s — total ~66s budget.
-  for (let attempt = 0; attempt < 10; attempt++) {
+  // Keep the polling budget comfortably below the SetupIntegrations Lambda timeout.
+  const buildWaitMs = [500, 1000, 2000];
+  for (let attempt = 0; attempt <= buildWaitMs.length; attempt++) {
     const statusResp = await fetch(`https://${domain}/api/v2/actions/actions/${actionId}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     await throwIfNotOk(statusResp, 'Auth0 get action status failed');
     const action = (await statusResp.json()) as Auth0Action & { status: string };
     if (action.status === 'built') break;
-    if (attempt === 9) {
+    if (attempt === buildWaitMs.length) {
       throw new Error(
-        `Auth0 action did not reach 'built' state after 10 attempts (status: ${action.status})`,
+        `Auth0 action did not reach 'built' state after ${buildWaitMs.length + 1} attempts (status: ${action.status})`,
       );
     }
-    await new Promise((resolve) => setTimeout(resolve, (attempt + 1) ** 1.1 * 1000));
+    await new Promise((resolve) => setTimeout(resolve, buildWaitMs[attempt]));
   }
 
   // Deploy the action
