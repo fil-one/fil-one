@@ -121,30 +121,32 @@ function StatusBanners({
   return (
     <>
       {!collapsed && isTrialing && (
-        <div className="border-t border-zinc-200 px-3 py-4">
-          <p className="text-xs font-medium text-zinc-900" title={trialEndsLabel}>
-            {trialDays !== null ? `${trialDays} days left in trial` : 'Trial active'}
-          </p>
-          <div className="mt-2.5 space-y-2.5">
-            <div>
-              <div className="mb-1 flex items-center justify-between text-xs">
-                <span className="text-zinc-500">Storage</span>
-                <span className="text-zinc-700">{formatBytes(storageUsed)} / 1 TB</span>
+        <div className="border-t border-zinc-200 px-3 py-3">
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+            <p className="text-xs font-medium text-zinc-900" title={trialEndsLabel}>
+              {trialDays !== null ? `${trialDays} days left in trial` : 'Trial active'}
+            </p>
+            <div className="mt-2.5 space-y-2.5">
+              <div>
+                <div className="mb-1 flex items-center justify-between text-xs">
+                  <span className="text-zinc-500">Storage</span>
+                  <span className="text-zinc-700">{formatBytes(storageUsed)} / 1 TB</span>
+                </div>
+                <ProgressBar value={storagePct} size="sm" label="Storage usage" />
               </div>
-              <ProgressBar value={storagePct} size="sm" label="Storage usage" />
-            </div>
-            <div>
-              <div className="mb-1 flex items-center justify-between text-xs">
-                <span className="text-zinc-500">Egress</span>
-                <span className="text-zinc-700">{formatBytes(egressUsed)} / 2 TB</span>
+              <div>
+                <div className="mb-1 flex items-center justify-between text-xs">
+                  <span className="text-zinc-500">Egress</span>
+                  <span className="text-zinc-700">{formatBytes(egressUsed)} / 2 TB</span>
+                </div>
+                <ProgressBar value={egressPct} size="sm" label="Egress usage" />
               </div>
-              <ProgressBar value={egressPct} size="sm" label="Egress usage" />
             </div>
-          </div>
-          <div className="mt-3">
-            <Button variant="primary" href="/billing" className="w-full justify-center text-xs">
-              Upgrade
-            </Button>
+            <div className="mt-3">
+              <Button variant="ghost" size="sm" href="/billing" className="w-full justify-center">
+                Upgrade
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -219,7 +221,7 @@ export function HelpMenu({
   onToggle,
 }: HelpMenuProps) {
   return (
-    <div className="relative border-t border-zinc-200 p-2">
+    <div className="relative">
       {collapsed ? (
         <Tooltip content="Help" side="right">
           <button
@@ -237,9 +239,9 @@ export function HelpMenu({
           ref={helpButtonRef}
           type="button"
           onClick={onToggle}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-100"
         >
-          <QuestionIcon size={18} className="flex-shrink-0 text-zinc-400" />
+          <QuestionIcon size={16} className="flex-shrink-0 text-zinc-400" />
           Help
         </button>
       )}
@@ -442,17 +444,17 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           isCanceled={isCanceled}
         />
 
-        {/* Help button */}
-        <HelpMenu
-          collapsed={collapsed}
-          helpMenuOpen={helpMenuOpen}
-          helpMenuRef={helpMenuRef}
-          helpButtonRef={helpButtonRef}
-          onToggle={() => setHelpMenuOpen((o) => !o)}
-        />
-
-        {/* System status */}
-        <StatusIndicator collapsed={collapsed} />
+        {/* Footer: Help + System status */}
+        <div className="border-t border-zinc-200 p-2 flex flex-col gap-0.5">
+          <HelpMenu
+            collapsed={collapsed}
+            helpMenuOpen={helpMenuOpen}
+            helpMenuRef={helpMenuRef}
+            helpButtonRef={helpButtonRef}
+            onToggle={() => setHelpMenuOpen((o) => !o)}
+          />
+          <StatusIndicator collapsed={collapsed} />
+        </div>
       </nav>
     </div>
   );
