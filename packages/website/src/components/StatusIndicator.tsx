@@ -40,43 +40,44 @@ export function StatusIndicator({ collapsed }: StatusIndicatorProps) {
   const display = getStatusDisplay(data.page.status);
 
   const dot = (
-    <span className="flex size-[18px] flex-shrink-0 items-center justify-center" aria-hidden="true">
-      <span className={clsx('size-2 rounded-full', dotColorStyles[display.color])} />
+    <span className="flex size-4 flex-shrink-0 items-center justify-center" aria-hidden="true">
+      <span className="relative flex size-2">
+        {display.color === 'green' && (
+          <span className="absolute -inset-0.5 inline-flex animate-ping rounded-full bg-green-400 opacity-40 [animation-duration:2s]" />
+        )}
+        <span className={clsx('relative size-2 rounded-full', dotColorStyles[display.color])} />
+      </span>
     </span>
   );
 
   if (collapsed) {
     return (
-      <div className="border-t border-zinc-200 p-2">
-        <Tooltip content={display.label} side="right">
-          <a
-            href={INSTATUS_PAGE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={`System status: ${display.label}`}
-            className="flex w-full items-center justify-center rounded-lg px-3 py-2 hover:bg-zinc-100"
-          >
-            {dot}
-          </a>
-        </Tooltip>
-      </div>
+      <Tooltip content={display.label} side="right">
+        <a
+          href={INSTATUS_PAGE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`System status: ${display.label}`}
+          className="flex w-full items-center justify-center rounded-lg px-3 py-2 hover:bg-zinc-100"
+        >
+          {dot}
+        </a>
+      </Tooltip>
     );
   }
 
   return (
-    <div className="border-t border-zinc-200 p-2">
-      <a
-        href={INSTATUS_PAGE_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={clsx(
-          'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-zinc-100',
-          textColorStyles[display.color],
-        )}
-      >
-        {dot}
-        {display.label}
-      </a>
-    </div>
+    <a
+      href={INSTATUS_PAGE_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={clsx(
+        'flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-zinc-100',
+        textColorStyles[display.color],
+      )}
+    >
+      {dot}
+      {display.label}
+    </a>
   );
 }
