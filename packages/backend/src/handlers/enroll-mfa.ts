@@ -20,7 +20,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   return new ResponseBuilder()
     .status(200)
-    .body({ message: 'Redirecting to enroll your authenticator.' })
+    .body({ message: 'Redirecting to enroll MFA.' })
     .build();
 }
 
