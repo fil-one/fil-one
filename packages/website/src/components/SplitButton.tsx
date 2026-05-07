@@ -74,17 +74,10 @@ export function SplitButton({
         >
           <Icon component={CaretDownIcon} size={iconSize} />
         </MenuButton>
-        <MenuItems
-          anchor="top end"
-          className="z-[9999] min-w-[160px] overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-md [--anchor-gap:4px]"
-        >
+        <MenuItems anchor="top end" className="split-button__menu">
           {items.map((item) => (
             <MenuItem key={item.label}>
-              <button
-                type="button"
-                onClick={item.onClick}
-                className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-900 data-[focus]:bg-zinc-50 data-[focus]:text-zinc-900"
-              >
+              <button type="button" onClick={item.onClick} className="split-button__item">
                 {item.icon && <Icon component={item.icon} size={14} />}
                 <span>{item.label}</span>
               </button>
