@@ -211,7 +211,9 @@ async function extractIdTokenClaims({
       amr: Array.isArray(rawAmr) ? rawAmr.filter((v): v is string => typeof v === 'string') : [],
     };
   } catch (err) {
-    console.warn('[auth] ID token verification failed, continuing without email', { error: err });
+    console.warn('[auth] ID token verification failed, continuing without verified ID token claims', {
+      error: err,
+    });
     return EMPTY_ID_CLAIMS;
   }
 }
