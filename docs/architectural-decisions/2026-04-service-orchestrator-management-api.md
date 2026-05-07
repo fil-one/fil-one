@@ -37,11 +37,7 @@ A single **partner key** authenticates every endpoint. It is a global, partner-s
 - `GET /tenants/{tenantId}/access-keys/{accessKeyId}` returns metadata for a single key; the secret is never returned.
 - `DELETE /tenants/{tenantId}/access-keys/{accessKeyId}` revokes the key immediately; returns 204 even if the key was already deleted.
 
-Permissions use AWS S3 IAM action names verbatim (e.g. `s3:GetObject`, `s3:CreateBucket`, `s3:PutObjectRetention`) rather than custom abstractions. The full set covers:
-
-- Bucket-level: `s3:CreateBucket`, `s3:ListAllMyBuckets`, `s3:DeleteBucket`.
-- Object-level basic: `s3:GetObject`, `s3:PutObject`, `s3:ListBucket`, `s3:DeleteObject`.
-- Object-level variants for versions, retention, and legal hold: `s3:GetObjectVersion`, `s3:GetObjectRetention`, `s3:GetObjectLegalHold`, `s3:PutObjectRetention`, `s3:PutObjectLegalHold`, `s3:ListBucketVersions`, `s3:DeleteObjectVersion`.
+Permissions use AWS S3 IAM action names verbatim (e.g. `s3:GetObject`, `s3:CreateBucket`, `s3:PutObjectRetention`) rather than custom abstractions. We preserve AWS quirks like`s3:ListBucket` permission for listing _objects_ in a bucket and `s3:ListAllMyBuckets` permission to lists buckets.
 
 ### Usage metering
 
@@ -105,7 +101,7 @@ Prefix all routes with a version segment so that a future breaking revision can 
 
 Match Aurora's existing convention. Rejected in favour of standard `Authorization: Bearer <token>`, which is more idiomatic, has first-class support in HTTP clients and OpenAPI tooling, and does not require Service Orchestrators to invent a custom header.
 
-### Client-supplied `tenantId`
+### Partner-supplied `tenantId`
 
 FilOne passes its organisation ID as the canonical `tenantId` in `POST /tenants`, and the Service Orchestrator uses it as its primary key. Rejected because it imposes FilOne's ID format and character-set constraints on the Service Orchestrator's database schema. It also risks silent collisions when two different Service Orchestrator partners (e.g. FilOne and another integrator) use organisation IDs that happen to match — per-partner scoping in the Service Orchestrator prevents this only if the Service Orchestrator is already aware of the problem. Allowing the Service Orchestrator to generate its own ID (with FilOne's org ID carried as `externalId`) keeps the primary key under the Service Orchestrator's control and makes the scoping explicit.
 

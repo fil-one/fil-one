@@ -16,7 +16,7 @@ The Service Orchestrator's S3 Gateway must implement the following features:
 
 - Bucket operations (create/list/delete)
 - Object operations (put/get/head/list)
-- Server-side encryption of object payloads
+- Server-side encryption of object payloads; must be enabled by default
 - Pre-signed URLs
 - CORS configuration allowing (pre-signed) requests from app.fil.one and staging.fil.one
 - Multi-part uploads
@@ -24,39 +24,39 @@ The Service Orchestrator's S3 Gateway must implement the following features:
 - AWS Signature V4 authentication
 - Metadata headers (x-amz-meta-\*)
 - Versioning, Object Lock and Retention
-- DNS-level forwarding (https://{region}.s3.fil.one)
+- DNS-level forwarding (`https://{region}.s3.fil.one`)
 
 Non-functional requirements:
 
 - Tenant isolation
 - Idempotency for management API calls
-- _(eventually should have)_ metrics for the S3 Gateway (TTFB, response times, 4xx/5xx error rates, etc.)
+- Telemetry metrics for the S3 Gateway (TTFB, response times, 4xx/5xx error rates, etc.)
 
 ```
-+-----------------------------------------------------------------+
-|  Service Orchestrator APIs                                      |
-|                                                                 |
-|  +------------------------------------------------------------+ |
-|  | Management API                                             | |
-|  | (partner API key)                                          | |
-|  |                                                            | |
-|  | - Create / get / delete tenant                             | |
-|  | - Set tenant status                                        | |
-|  | - Create / list / get / delete S3 access keys              | |
-|  | - Query usage metrics (per-tenant & per-bucket)            | |
-|  +------------------------------------------------------------+ |
-|                                                                 |
-|  +------------------------------------------------------------+ |
-|  | S3 Gateway                                                 | |
-|  | (per-tenant access key + secret, AWS Sig V4)               | |
-|  |                                                            | |
-|  | - PutObject / GetObject (pre-signed URLs)                  | |
-|  | - ListObjectsV2, HeadObject, DeleteObject                  | |
-|  | - CreateBucket, ListBuckets, DeleteBucket                  | |
-|  | - GetObjectRetention                                       | |
-|  +------------------------------------------------------------+ |
-|                                                                 |
-+-----------------------------------------------------------------+
++-------------------------------------------------------+
+|  Service Orchestrator APIs                            |
+|                                                       |
+|  +--------------------------------------------------+ |
+|  | Management API                                   | |
+|  | (partner API key)                                | |
+|  |                                                  | |
+|  | - Create / get / delete tenant                   | |
+|  | - Set tenant status                              | |
+|  | - Create / list / get / delete S3 access keys    | |
+|  | - Query usage metrics (per-tenant & per-bucket)  | |
+|  +--------------------------------------------------+ |
+|                                                       |
+|  +--------------------------------------------------+ |
+|  | S3 Gateway                                       | |
+|  | (per-tenant access key + secret, AWS Sig V4)     | |
+|  |                                                  | |
+|  | - PutObject / GetObject (pre-signed URLs)        | |
+|  | - ListObjectsV2, HeadObject, DeleteObject        | |
+|  | - CreateBucket, ListBuckets, DeleteBucket        | |
+|  | - GetObjectRetention                             | |
+|  +--------------------------------------------------+ |
+|                                                       |
++-------------------------------------------------------+
 ```
 
 ## Tenant Management
@@ -79,7 +79,7 @@ FilOne web Console manages buckets via the standard S3 API. FilOne's UI lets use
 
 Bucket creation accepts a name and several optional settings: versioning enabled, Object Lock enabled, and a default retention policy (mode – either GOVERNANCE or COMPLIANCE – plus a duration with its unit). Buckets are always created with server-side encryption enabled. The Service Orchestrator should return a clear error (HTTP 409 or equivalent) if a bucket with the same name already exists within the tenant, so that FilOne can show a user-friendly message.
 
-Deleting a bucket should fail if the bucket still contains objects. If the Service Orchestrator does not yet support bucket deletion, it should communicate this so that FilOne can adapt its UI accordingly.
+Deleting a bucket should fail if the bucket still contains objects.
 
 ## S3 Access Key Management
 
@@ -98,9 +98,7 @@ Object-level scopes — the basic actions (`s3:GetObject`, `s3:PutObject`, `s3:L
 - `s3:ListBucket`, `s3:ListBucketVersions`
 - `s3:DeleteObject`, `s3:DeleteObjectVersion`
 
-Note the AWS quirk that `s3:ListBucket` lists _objects_ in a bucket, while `s3:ListAllMyBuckets` lists buckets.
-
-The Service Orchestrator must support at least this level of granularity, or an equivalent permission scheme that lets keys be restricted to specific operations.
+Note the AWS quirk that `s3:ListBucket` lists _objects_ in a bucket, while `s3:ListAllMyBuckets` lists buckets. Similarly, `s3:ListBucketVersions` allows listing _object_ versions in a bucket.
 
 Deleting an access key should revoke the key immediately so that subsequent S3 requests using those credentials fail.
 
@@ -122,7 +120,7 @@ Minimum requirements for metrics endpoints:
 
 - Query range (`to` − `from`): at least 32 days (covers a 31-day billing period with a one-day buffer).
 - Supported windows: at least `1h`, `24h`, and `720h`.
-- Response capacity: at least 768 samples per request (32 days ÷ 1 h — the highest-resolution, longest-range query FilOne issues).
+- Response capacity: at least 768 samples per request (32 days with 1 h windows — the highest-resolution, longest-range query FilOne issues).
 
 Reliability of these endpoints is important.
 
@@ -137,14 +135,13 @@ effects.
 **Tenant isolation.** Each tenant's data must be invisible and inaccessible to  
 other tenants, even if they share the same underlying infrastructure. S3  
 credentials for one tenant must not grant access to another tenant's buckets  
-or objects. The management API must enforce tenant scoping so that a per-tenant  
-API key cannot operate on a different tenant's resources.
+or objects. The management API must enforce partner scoping so that one partner's key cannot operate on tenants of a different partner.
 
 **Telemetry metrics from the S3 Gateway.**
 
 - S3 GetObject Time-to-First-Byte
-- S3 Error Rate (4xx)
-- S3 Error Rate (5xx)
+- S3 4xx Responses (count per second or per minute)
+- S3 5xx Responses (count per second or per minute)
 - S3 Total Requests (count per second or per minute)
 - S3 Egress (bytes per second or per minute)
 - S3 Ingress (bytes per second or per minute)
