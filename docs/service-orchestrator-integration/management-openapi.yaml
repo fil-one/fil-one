@@ -141,6 +141,11 @@ paths:
         Synchronous: the response is returned only after every owned
         resource has been removed. Idempotent: a call against a tenant
         that is already gone returns 204.
+
+        If cleanup of one or more owned resources fails partway through,
+        the Service Orchestrator must return 5xx and the tenant must
+        remain deletable on retry — there must be no half-deleted,
+        undeletable state.
       security:
         - PartnerKey: []
       responses:
@@ -154,6 +159,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/Internal'
 
   /tenants/{tenantId}/status:
     parameters:
@@ -537,8 +544,10 @@ components:
           type: integer
           minimum: 0
           description: |
-            Total number of S3 access keys, including any system keys
-            issued during onboarding (e.g. the FilOne console key).
+            Total number of S3 access keys for this tenant, including a
+            per-tenant system key issued by FilOne for Console use. The
+            Service Orchestrator does not need to treat the system key
+            specially; it is counted alongside user-created keys.
         accessKeyLimit:
           type: integer
           minimum: 0

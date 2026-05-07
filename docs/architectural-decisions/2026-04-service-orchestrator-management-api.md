@@ -37,7 +37,7 @@ A single **partner key** authenticates every endpoint. It is a global, partner-s
 - `GET /tenants/{tenantId}/access-keys/{accessKeyId}` returns metadata for a single key; the secret is never returned.
 - `DELETE /tenants/{tenantId}/access-keys/{accessKeyId}` revokes the key immediately; returns 204 even if the key was already deleted.
 
-Permissions use AWS S3 IAM action names verbatim (e.g. `s3:GetObject`, `s3:CreateBucket`, `s3:PutObjectRetention`) rather than custom abstractions. We preserve AWS quirks like`s3:ListBucket` permission for listing _objects_ in a bucket and `s3:ListAllMyBuckets` permission to lists buckets.
+Permissions use AWS S3 IAM action names verbatim (e.g. `s3:GetObject`, `s3:CreateBucket`, `s3:PutObjectRetention`) rather than custom abstractions. We preserve AWS quirks like `s3:ListBucket` permission for listing _objects_ in a bucket and `s3:ListAllMyBuckets` permission to list buckets.
 
 ### Usage metering
 

@@ -53,23 +53,37 @@ Non-functional requirements:
 |  | - PutObject / GetObject (pre-signed URLs)        | |
 |  | - ListObjectsV2, HeadObject, DeleteObject        | |
 |  | - CreateBucket, ListBuckets, DeleteBucket        | |
-|  | - GetObjectRetention                             | |
 |  +--------------------------------------------------+ |
 |                                                       |
 +-------------------------------------------------------+
 ```
 
+## Out of Scope
+
+These items are intentionally not part of this contract:
+
+- Bucket and object operations — handled by the S3 Gateway, not the management API.
+- S3 Gateway telemetry (TTFB, error rates, RPS) — delivered through the partner's observability stack, not this API.
+
+## Authentication
+
+A single **partner key** authenticates every management API endpoint. It is sent as a bearer token in the standard `Authorization: Bearer <token>` header. The key is a global, partner-scoped admin credential — not tenant-specific. The Service Orchestrator must scope it so that it cannot reach tenants belonging to other partners.
+
+All API traffic must be served over HTTPS/TLS.
+
+The API is unversioned at this stage. Future breaking revisions will be introduced via a `/v2` URL prefix or HTTP content negotiation; partners do not need to plan for versioning today.
+
 ## Tenant Management
 
 FilOne provisions one tenant per customer organisation on demand — typically when the user creates their first bucket in a region managed by a given Service Orchestrator. Provisioning is synchronous: FilOne calls `POST /tenants` and waits for the tenant to be fully operational before proceeding.
 
-The Service Orchestrator must expose an API to create a tenant given FilOne's organisation ID (passed as `externalId`) and a human-readable display name. The Service Orchestrator generates and returns its own tenant ID; FilOne stores the returned ID and uses it as the identifier in all subsequent management API calls. `externalId` values are scoped per partner: two different Service Orchestrator partners may use the same `externalId` without collision, because the Service Orchestrator must scope tenant identifiers to the partner whose key was used for the request. If the creation request is retried with the same `externalId`, the Service Orchestrator must return the existing tenant rather than failing.
+The Service Orchestrator must expose an API to create a tenant given FilOne's organisation ID (passed as `externalId`) and a human-readable display name. The Service Orchestrator generates and returns its own tenant ID; FilOne stores the returned ID and uses it as the identifier in all subsequent management API calls. The Service Orchestrator generates the ID — rather than reusing FilOne's organisation ID — so that the Service Orchestrator retains control over its own primary key and so that two different Service Orchestrator partners cannot collide on identical organisation IDs. `externalId` values are scoped per partner: two different Service Orchestrator partners may use the same `externalId` without collision, because the Service Orchestrator must scope tenant identifiers to the partner whose key was used for the request. If the creation request is retried with the same `externalId`, the Service Orchestrator must return the existing tenant rather than failing.
+
+The Service Orchestrator must also expose a tenant info endpoint (`GET /tenants/{tenantId}`) that returns the tenant's current status, resource counts (buckets, access keys), and resource limits (`bucketLimit`, `accessKeyLimit`). These limits are Service Orchestrator–defined: the Service Orchestrator is the only source of truth for what a given tenant is allowed to hold, and FilOne's dashboard reads them directly from this endpoint.
 
 The Service Orchestrator must support three tenant states: active (read/write), write-locked (read-only; uploads and bucket creation blocked), and disabled (all access blocked; data persisted). These restrictions must be enforced by the S3 gateway.
 
-The Service Orchestrator must also expose a tenant deletion endpoint that permanently removes the tenant and all owned resources (buckets, objects, access keys). Deletion requires the tenant to be in the disabled state first, so the caller has to consciously cut off all access before committing to the destructive operation.
-
-All management API operations are authenticated with a single partner API key. This key is not tenant-specific and grants administrative access across all tenants belonging to the FilOne partner account. The Service Orchestrator must scope this key so that it cannot access tenants belonging to other partners.
+The Service Orchestrator must also expose a tenant deletion endpoint that permanently removes the tenant and all owned resources (buckets, objects, access keys). Deletion requires the tenant to be in the disabled state first, so the caller has to consciously cut off all access before committing to the destructive operation. The endpoint is synchronous and irreversible: if cleanup of one or more owned resources fails partway through, the Service Orchestrator must return a 5xx and the tenant must remain deletable on retry — there must be no half-deleted, undeletable state.
 
 The entire tenant lifecycle — from creation through credential provisioning to full readiness — must be API-driven with no manual steps (no portal clicks, email verification, or human-in-the-loop approvals).
 
@@ -85,7 +99,9 @@ Deleting a bucket should fail if the bucket still contains objects.
 
 End-users manage their own S3 access keys through the FilOne console. The Service Orchestrator must support creating, listing, retrieving, and deleting access keys through the management API. When a user creates an access key, FilOne sends the key name, a set of permissions, an optional list of buckets (for scoped access), and an optional expiration date.
 
-FilOne uses AWS S3 IAM action names as permission scopes. The Service Orchestrator maps each value to its native permission model when creating the key.
+In addition to user-created keys, FilOne creates one system S3 access key per tenant during onboarding. This key is used by the FilOne Console UI to perform bucket and object operations on the user's behalf (create/list/delete buckets, upload/download/list/delete objects, etc.). The system key is created via the same `POST /tenants/{tenantId}/access-keys` endpoint and is transparent to the Service Orchestrator: from the Service Orchestrator's perspective, a tenant has `1 + X` access keys at any moment — one created by FilOne and `X` created by the end user. The Service Orchestrator does not need to treat the system key specially.
+
+FilOne uses AWS S3 IAM action names as permission scopes. The Service Orchestrator maps each value to its native permission model when creating the key. Permission strings include the `s3:` prefix (e.g. `s3:GetObject`, not bare `GetObject`) so they are copy-paste compatible with AWS IAM and MinIO policy documents (`"Action": "s3:GetObject"`).
 
 Bucket-level scopes:
 
@@ -107,7 +123,7 @@ Deleting an access key should revoke the key immediately so that subsequent S3 r
 FilOne relies on the Service Orchestrator for all usage data. The Service Orchestrator must expose two time-series metrics endpoints, each returning storage, egress, and ingress data together for a specified time range:
 
 - `GET /tenants/{tenantId}/metrics` — tenant-level usage.
-- `GET /tenants/{tenantId}/buckets/{bucketName}/metrics` — per-bucket usage.
+- `GET /tenants/{tenantId}/buckets/{bucketName}/metrics` — per-bucket usage. The Service Orchestrator must verify that the bucket belongs to the path `tenantId` and return 404 otherwise.
 
 For storage, FilOne queries hourly samples of bytes used and object count. The dashboard also
 queries storage metrics with a wider window (30 days, single sample) for a quick current-usage
@@ -116,21 +132,23 @@ snapshot.
 For egress (outbound data transfer), FilOne queries egress consumption in bytes aggregated in
 24-hour windows.
 
-Minimum requirements for metrics endpoints:
+For ingress (inbound data transfer), FilOne queries ingress consumption in bytes alongside the
+storage and egress data — all three metric types share the same `from` / `to` / `window`
+parameters and are returned in a single response.
 
-- Query range (`to` − `from`): at least 32 days (covers a 31-day billing period with a one-day buffer).
-- Supported windows: at least `1h`, `24h`, and `720h`.
-- Response capacity: at least 768 samples per request (32 days with 1 h windows — the highest-resolution, longest-range query FilOne issues).
+The endpoints must support a full 31-day billing period at hourly resolution. See the `from`,
+`to`, and `window` query parameters in [`management-openapi.yaml`](./management-openapi.yaml)
+for the canonical minimum range, supported windows, and per-response sample capacity.
 
 Reliability of these endpoints is important.
 
 ## Non-Functional Requirements
 
 **Idempotency.** Several operations must be safely retried: tenant creation (return existing on  
-conflict), access key creation (return conflict error so FilOne can recover), access key deletion  
-(succeed if already deleted), and tenant status updates (setting the same status twice is a no-op).  
-Every step of the onboarding and every background job must handle duplicate invocations without side  
-effects.
+conflict), tenant deletion (succeed if already deleted), access key creation (return conflict error  
+so FilOne can recover), access key deletion (succeed if already deleted), and tenant status updates  
+(setting the same status twice is a no-op). Every step of the onboarding and every background job  
+must handle duplicate invocations without side effects.
 
 **Tenant isolation.** Each tenant's data must be invisible and inaccessible to  
 other tenants, even if they share the same underlying infrastructure. S3  
