@@ -3,13 +3,8 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CreateAccessKeySchema, getAvailableRegions } from '@filone/shared';
-import type {
-  CreateAccessKeyResponse,
-  ErrorResponse,
-  GranularPermission,
-  S3Region,
-} from '@filone/shared';
+import { CreateAccessKeySchema, S3_REGION } from '@filone/shared';
+import type { CreateAccessKeyResponse, ErrorResponse, GranularPermission } from '@filone/shared';
 import { Resource } from 'sst';
 import {
   AuroraValidationError,
@@ -52,10 +47,11 @@ export async function baseHandler(
   const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
   const expiresAt = parsed.data.expiresAt ?? null;
 
-  const allowedRegions = getAvailableRegions(process.env.FILONE_STAGE!);
-  if (region !== undefined && !allowedRegions.includes(region as S3Region)) {
-    const message = `Unsupported region. Supported: ${allowedRegions.join(', ')}`;
-    return new ResponseBuilder().status(400).body<ErrorResponse>({ message }).build();
+  if (region !== undefined && region !== S3_REGION) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: `Unsupported region. Supported: ${S3_REGION}` })
+      .build();
   }
 
   const { orgId } = getUserInfo(event);
@@ -80,7 +76,7 @@ export async function baseHandler(
     });
   } catch (err) {
     if (err instanceof DuplicateKeyNameError) {
-      await recoverDuplicateKey(orgId, auroraTenantId, keyName, region);
+      await recoverDuplicateKey(orgId, auroraTenantId, keyName);
       return new ResponseBuilder()
         .status(409)
         .body<ErrorResponse>({ message: 'An access key with this name already exists' })
@@ -98,7 +94,6 @@ export async function baseHandler(
   const optionalFields = buildOptionalAccessKeyFields({
     granularPermissions,
     buckets,
-    region,
     expiresAt,
   });
 
@@ -135,7 +130,6 @@ async function recoverDuplicateKey(
   orgId: string,
   auroraTenantId: string,
   keyName: string,
-  region: S3Region | undefined,
 ): Promise<void> {
   // Check if we already have a DynamoDB record for this key
   const { Items: existingKeys } = await getDynamoClient().send(
@@ -180,7 +174,6 @@ async function recoverDuplicateKey(
         accessKeyId: auroraKey.accessKeyId,
         createdAt: auroraKey.createdAt,
         status: 'active',
-        ...(region ? { region } : {}),
       }),
     }),
   );
@@ -193,14 +186,12 @@ async function recoverDuplicateKey(
 function buildOptionalAccessKeyFields(fields: {
   granularPermissions: GranularPermission[] | undefined;
   buckets: string[] | undefined;
-  region: S3Region | undefined;
   expiresAt: string | null;
 }) {
-  const { granularPermissions, buckets, region, expiresAt } = fields;
+  const { granularPermissions, buckets, expiresAt } = fields;
   return {
     ...(granularPermissions?.length ? { granularPermissions } : {}),
     ...(buckets ? { buckets } : {}),
-    ...(region ? { region } : {}),
     ...(expiresAt ? { expiresAt } : {}),
   };
 }
