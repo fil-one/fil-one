@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { S3Region } from '../constants.js';
 
 export type AccessKeyStatus = 'active' | 'inactive';
 
@@ -80,6 +81,7 @@ export const CreateAccessKeySchema = z
     granularPermissions: z.array(z.enum(GRANULAR_PERMISSIONS)).optional(),
     bucketScope: z.enum(ACCESS_KEY_BUCKET_SCOPES).default('all'),
     buckets: z.array(z.string()).optional(),
+    region: z.enum(S3Region).optional(),
     expiresAt: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, 'expiresAt must be in YYYY-MM-DD format')
@@ -115,6 +117,7 @@ export interface AccessKey {
   granularPermissions?: GranularPermission[];
   bucketScope: AccessKeyBucketScope;
   buckets?: string[];
+  region?: S3Region;
   expiresAt?: string | null;
 }
 

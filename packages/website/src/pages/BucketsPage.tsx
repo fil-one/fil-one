@@ -9,7 +9,8 @@ import { IconButton } from '../components/IconButton';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 
-import type { ListBucketsResponse } from '@filone/shared';
+import type { ListBucketsResponse, S3Region } from '@filone/shared';
+import { REGION_LABELS, S3_REGION } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -135,7 +136,12 @@ export function BucketsPage() {
                       {bucket.name}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-zinc-600">{bucket.region}</td>
+                  <td className="px-4 py-3 text-xs">
+                    <span className="font-medium text-zinc-900">
+                      {REGION_LABELS[(bucket.region as S3Region) ?? S3_REGION]}
+                    </span>{' '}
+                    <span className="text-zinc-500">{bucket.region ?? S3_REGION}</span>
+                  </td>
                   <td className="px-4 py-3 text-zinc-600">{formatDate(bucket.createdAt)}</td>
                   <td className="px-4 py-3">
                     {bucket.isPublic ? (

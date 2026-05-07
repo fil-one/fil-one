@@ -5,8 +5,9 @@ import type {
   AccessKeyPermission,
   CreateAccessKeyResponse,
   GranularPermission,
+  S3Region,
 } from '@filone/shared';
-import { CreateAccessKeySchema, GRANULAR_PERMISSION_MAP } from '@filone/shared';
+import { CreateAccessKeySchema, GRANULAR_PERMISSION_MAP, S3_REGION } from '@filone/shared';
 import { createAccessKey } from './api.js';
 import { expiresAtFromForm } from './time.js';
 import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';
@@ -17,6 +18,7 @@ import { queryClient, queryKeys } from './query-client.js';
 export type UseAccessKeyFormOptions = {
   defaultBucket?: string;
   defaultPermissions?: AccessKeyPermission[];
+  defaultRegion?: S3Region;
   onSuccess: (response: CreateAccessKeyResponse) => void;
 };
 
@@ -25,6 +27,7 @@ const FALLBACK_PERMISSIONS: AccessKeyPermission[] = ['read', 'write', 'list'];
 export function useAccessKeyForm({
   defaultBucket,
   defaultPermissions,
+  defaultRegion,
   onSuccess,
 }: UseAccessKeyFormOptions) {
   const { toast } = useToast();
@@ -40,6 +43,7 @@ export function useAccessKeyForm({
   const [selectedBuckets, setSelectedBuckets] = useState<string[]>(
     defaultBucket ? [defaultBucket] : [],
   );
+  const [region, setRegion] = useState<S3Region>(defaultRegion ?? S3_REGION);
   const [expiration, setExpiration] = useState<ExpirationOption>('never');
   const [customDate, setCustomDate] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -50,6 +54,7 @@ export function useAccessKeyForm({
     granularPermissions: granularPermissions.length > 0 ? granularPermissions : undefined,
     bucketScope,
     buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
+    region,
     expiresAt: expiresAtFromForm(expiration, customDate),
   };
   const canSubmit = !creating && CreateAccessKeySchema.safeParse(candidatePayload).success;
@@ -67,6 +72,7 @@ export function useAccessKeyForm({
     setGranularPermissions([]);
     setBucketScope(defaultBucket ? 'specific' : 'all');
     setSelectedBuckets(defaultBucket ? [defaultBucket] : []);
+    setRegion(defaultRegion ?? S3_REGION);
     setExpiration('never');
     setCustomDate(null);
     setCreating(false);
@@ -79,6 +85,7 @@ export function useAccessKeyForm({
       granularPermissions?: GranularPermission[];
       bucketScope: AccessKeyBucketScope;
       buckets?: string[];
+      region?: S3Region;
       expiresAt?: string | null;
     }) => {
       const parsed = CreateAccessKeySchema.safeParse(body);
@@ -117,6 +124,8 @@ export function useAccessKeyForm({
     setBucketScope,
     selectedBuckets,
     setSelectedBuckets,
+    region,
+    setRegion,
     expiration,
     setExpiration,
     customDate,

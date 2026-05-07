@@ -5,6 +5,7 @@ import { AccessKeyExpirationFields } from './AccessKeyExpirationFields.js';
 import { AccessKeyPermissionsFields } from './AccessKeyPermissionsFields.js';
 import { FormField } from './FormField.js';
 import { Input } from './Input.js';
+import { RegionSelect } from './RegionSelect.js';
 
 // Inverse of KEY_NAME_PATTERN's character class — finds disallowed chars
 const INVALID_KEY_CHAR = /[^a-zA-Z0-9 _\-.]/g;
@@ -12,9 +13,11 @@ const INVALID_KEY_CHAR = /[^a-zA-Z0-9 _\-.]/g;
 type AccessKeyFormFieldsProps = {
   form: ReturnType<typeof useAccessKeyForm>;
   pinnedBucket?: string;
+  /** When true, the region field is hidden (caller controls region externally). */
+  hideRegion?: boolean;
 };
 
-export function AccessKeyFormFields({ form, pinnedBucket }: AccessKeyFormFieldsProps) {
+export function AccessKeyFormFields({ form, pinnedBucket, hideRegion }: AccessKeyFormFieldsProps) {
   const {
     keyName,
     setKeyName,
@@ -26,6 +29,8 @@ export function AccessKeyFormFields({ form, pinnedBucket }: AccessKeyFormFieldsP
     setBucketScope,
     selectedBuckets,
     setSelectedBuckets,
+    region,
+    setRegion,
     expiration,
     setExpiration,
     customDate,
@@ -59,6 +64,17 @@ export function AccessKeyFormFields({ form, pinnedBucket }: AccessKeyFormFieldsP
         />
       </FormField>
 
+      {/* Region — hidden when caller controls it externally (e.g. bucket creation flow) */}
+      {!hideRegion && (
+        <FormField
+          htmlFor="key-region"
+          label="Region"
+          description="This key only works with buckets in this region."
+        >
+          <RegionSelect id="key-region" value={region} onChange={setRegion} />
+        </FormField>
+      )}
+
       {/* Permissions */}
       <FormField
         label="What can this key do?"
@@ -83,6 +99,7 @@ export function AccessKeyFormFields({ form, pinnedBucket }: AccessKeyFormFieldsP
           selectedBuckets={selectedBuckets}
           onSelectedBucketsChange={setSelectedBuckets}
           pinnedBucket={pinnedBucket}
+          region={region}
         />
       </FormField>
 

@@ -3,7 +3,8 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
-import { CreateBucketSchema, S3_REGION } from '@filone/shared';
+import { CreateBucketSchema, getAvailableRegions } from '@filone/shared';
+import type { S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { createAuroraBucket, BucketAlreadyExistsError } from '../lib/aurora-portal.js';
@@ -42,10 +43,13 @@ export async function baseHandler(
 
   const { name, region, versioning, lock, retention } = parsed.data;
 
-  if (region !== S3_REGION) {
+  const allowedRegions = getAvailableRegions(process.env.FILONE_STAGE ?? '');
+  if (!allowedRegions.includes(region as S3Region)) {
     return new ResponseBuilder()
       .status(400)
-      .body<ErrorResponse>({ message: `Unsupported region. Supported: ${S3_REGION}` })
+      .body<ErrorResponse>({
+        message: `Unsupported region. Supported: ${allowedRegions.join(', ')}`,
+      })
       .build();
   }
 

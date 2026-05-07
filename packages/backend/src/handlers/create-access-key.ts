@@ -22,6 +22,7 @@ import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
+// eslint-disable-next-line complexity/complexity
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -43,7 +44,7 @@ export async function baseHandler(
       .build();
   }
 
-  const { keyName, permissions, granularPermissions, bucketScope } = parsed.data;
+  const { keyName, permissions, granularPermissions, bucketScope, region } = parsed.data;
   const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
   const expiresAt = parsed.data.expiresAt ?? null;
 
@@ -96,6 +97,13 @@ export async function baseHandler(
     throw err;
   }
 
+  const optionalFields = {
+    ...(granularPermissions?.length ? { granularPermissions } : {}),
+    ...(buckets ? { buckets } : {}),
+    ...(region ? { region } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
+  };
+
   await getDynamoClient().send(
     new PutItemCommand({
       TableName: Resource.UserInfoTable.name,
@@ -107,10 +115,8 @@ export async function baseHandler(
         createdAt: auroraKey.createdAt,
         status: 'active',
         permissions,
-        ...(granularPermissions?.length ? { granularPermissions } : {}),
         bucketScope,
-        ...(buckets ? { buckets } : {}),
-        ...(expiresAt ? { expiresAt } : {}),
+        ...optionalFields,
       }),
     }),
   );

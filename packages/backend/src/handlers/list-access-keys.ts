@@ -54,6 +54,7 @@ export async function baseHandler(
         (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
       bucketScope: record.bucketScope as AccessKey['bucketScope'],
       buckets: record.buckets as string[] | undefined,
+      region: record.region as AccessKey['region'],
       expiresAt: (record.expiresAt as string | undefined) ?? null,
     };
   });
