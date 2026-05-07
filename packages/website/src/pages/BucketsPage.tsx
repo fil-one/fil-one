@@ -4,10 +4,13 @@ import { PlusIcon, DatabaseIcon, TrashIcon } from '@phosphor-icons/react/dist/ss
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Heading } from '../components/Heading/Heading';
+import { Alert } from '../components/Alert';
+import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { Spinner } from '../components/Spinner';
 import { Tooltip } from '../components/Tooltip';
+import { Table } from '../components/Table/Table';
 import { useToast } from '../components/Toast';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 
@@ -60,9 +63,7 @@ export function BucketsPage() {
   if (isError) {
     return (
       <div className="px-10 pt-10">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error?.message ?? 'Failed to load buckets'}
-        </div>
+        <Alert variant="red" description={error?.message ?? 'Failed to load buckets'} />
       </div>
     );
   }
@@ -100,99 +101,79 @@ export function BucketsPage() {
           </Button>
         </EmptyStateCard>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="border-b border-zinc-200 bg-zinc-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Name
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Region
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Created
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Visibility
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Features
-                </th>
-                <th className="px-4 py-3" aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {buckets.map((bucket) => (
-                <tr
-                  key={bucket.bucketName}
-                  className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50"
-                >
-                  <td className="px-4 py-3">
-                    <Link
-                      to="/buckets/$bucketName"
-                      params={{ bucketName: bucket.bucketName }}
-                      className="font-medium text-zinc-900 hover:text-brand-600"
-                    >
-                      {bucket.bucketName}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-xs">
-                    <span className="font-medium text-zinc-900">
-                      {getRegionLabel(bucket.region)}
-                    </span>{' '}
-                    <span className="text-zinc-500">{bucket.region ?? S3_REGION}</span>
-                  </td>
-                  <td className="px-4 py-3 text-zinc-600">{formatDate(bucket.createdAt)}</td>
-                  <td className="px-4 py-3">
-                    {bucket.isPublic ? (
-                      <span className="rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
-                        Public
-                      </span>
-                    ) : (
-                      <span className="rounded-full border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
-                        Private
-                      </span>
+        <Table>
+          <Table.Header>
+            <tr>
+              <Table.Head>Name</Table.Head>
+              <Table.Head>Region</Table.Head>
+              <Table.Head>Created</Table.Head>
+              <Table.Head>Visibility</Table.Head>
+              <Table.Head>Features</Table.Head>
+              <Table.Head aria-label="Actions" />
+            </tr>
+          </Table.Header>
+          <Table.Body>
+            {buckets.map((bucket) => (
+              <Table.Row key={bucket.bucketName}>
+                <Table.Cell>
+                  <Link
+                    to="/buckets/$bucketName"
+                    params={{ bucketName: bucket.bucketName }}
+                    className="font-medium text-zinc-900 hover:text-brand-600"
+                  >
+                    {bucket.bucketName}
+                  </Link>
+                </Table.Cell>
+                <Table.Cell className="text-zinc-600">{bucket.region}</Table.Cell>
+                <Table.Cell className="text-zinc-600">{formatDate(bucket.createdAt)}</Table.Cell>
+                <Table.Cell>
+                  {bucket.isPublic ? (
+                    <Badge color="green" size="sm" weight="medium">
+                      Public
+                    </Badge>
+                  ) : (
+                    <Badge color="grey" size="sm" weight="medium">
+                      Private
+                    </Badge>
+                  )}
+                </Table.Cell>
+                <Table.Cell>
+                  <div className="flex flex-wrap gap-1.5">
+                    {bucket.versioning && (
+                      <Badge color="blue" size="sm" weight="medium">
+                        Versioned
+                      </Badge>
                     )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1.5">
-                      {bucket.versioning && (
-                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
-                          Versioned
-                        </span>
-                      )}
-                      {bucket.objectLockEnabled && (
-                        <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
-                          Object Lock
-                        </span>
-                      )}
-                      {!bucket.versioning && !bucket.objectLockEnabled && (
-                        <span className="text-xs text-zinc-400">&mdash;</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Tooltip
-                      content="Deleting buckets is not available yet"
-                      side="left"
-                      className="align-middle"
-                    >
-                      <IconButton
-                        icon={TrashIcon}
-                        aria-label={`Delete bucket ${bucket.bucketName}`}
-                        onClick={() => deleteBucketMutation.mutate(bucket.bucketName)}
-                        // TODO: enable bucket deletion after Aurora implements this operation
-                        // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
-                        disabled
-                      />
-                    </Tooltip>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    {bucket.objectLockEnabled && (
+                      <Badge color="amber" size="sm" weight="medium">
+                        Object Lock
+                      </Badge>
+                    )}
+                    {!bucket.versioning && !bucket.objectLockEnabled && (
+                      <span className="text-xs text-zinc-400">&mdash;</span>
+                    )}
+                  </div>
+                </Table.Cell>
+                <Table.Cell className="text-right">
+                  <Tooltip
+                    content="Deleting buckets is not available yet"
+                    side="left"
+                    className="align-middle"
+                  >
+                    <IconButton
+                      icon={TrashIcon}
+                      aria-label={`Delete bucket ${bucket.bucketName}`}
+                      onClick={() => deleteBucketMutation.mutate(bucket.bucketName)}
+                      // TODO: enable bucket deletion after Aurora implements this operation
+                      // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
+                      disabled
+                    />
+                  </Tooltip>
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
       )}
     </div>
   );

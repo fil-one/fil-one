@@ -10,6 +10,7 @@ import { GRANULAR_PERMISSION_LABELS, S3_REGION, getRegionLabel } from '@filone/s
 import { Badge } from './Badge';
 import { Button } from './Button';
 import { CopyButton } from './CopyButton';
+import { Table } from './Table/Table';
 import { formatDate } from '../lib/time.js';
 
 function StatusBadge({ status }: { status: AccessKey['status'] }) {
@@ -102,10 +103,6 @@ export type AccessKeysTableProps = {
   emptyDescription?: string;
 };
 
-const thClass =
-  'border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-left text-xs font-normal text-zinc-600';
-const tdClass = 'px-4 py-3';
-
 export function AccessKeysTable({
   keys,
   showBuckets = false,
@@ -131,121 +128,110 @@ export function AccessKeysTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-      <table className="min-w-full">
-        <thead>
-          <tr>
-            <th className={thClass}>Name</th>
-            <th className={`${thClass} hidden md:table-cell`}>Region</th>
-            {showBuckets && <th className={`${thClass} hidden lg:table-cell`}>Buckets</th>}
-            {showPermissions && <th className={`${thClass} hidden md:table-cell`}>Permissions</th>}
-            <th className={`${thClass} hidden sm:table-cell`}>Status</th>
-            <th className={`${thClass} hidden md:table-cell`}>Last Used</th>
-            {onDelete && (
-              <th className={thClass}>
-                <span className="sr-only">Actions</span>
-              </th>
-            )}
-          </tr>
-        </thead>
-        <tbody>
-          {keys.map((key) => (
-            <tr key={key.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
-              {/* Name + Access Key ID */}
-              <td className={tdClass}>
-                <p className="text-xs font-medium text-zinc-900">{key.keyName}</p>
-                <div className="flex items-center gap-1">
-                  <p className="font-mono text-xs text-zinc-500">{key.accessKeyId}</p>
-                  <CopyButton value={key.accessKeyId} />
-                </div>
-                {/* Status shown inline on small screens */}
-                <div className="mt-1 sm:hidden">
-                  <StatusBadge status={key.status} />
-                </div>
-              </td>
-
-              {/* Region */}
-              <td className={`${tdClass} hidden md:table-cell`}>
-                <p className="text-xs font-medium text-zinc-900">{getRegionLabel(key.region)}</p>
-                <div className="flex items-center gap-1">
-                  <p className="text-xs text-zinc-500">{key.region ?? S3_REGION}</p>
-                </div>
-              </td>
-
-              {/* Buckets */}
-              {showBuckets && (
-                <td className={`${tdClass} hidden lg:table-cell`}>
-                  <div className="flex flex-wrap gap-1">
-                    {key.bucketScope === 'all' ? (
-                      <Badge color="grey" size="sm">
-                        All Buckets
-                      </Badge>
-                    ) : (
-                      (key.buckets ?? []).map((b) => (
-                        <Badge key={b} color="grey" size="sm">
-                          {b}
-                        </Badge>
-                      ))
-                    )}
-                  </div>
-                </td>
-              )}
-
-              {/* Permissions */}
-              {showPermissions && (
-                <td className={`${tdClass} hidden md:table-cell`}>
-                  <div className="flex flex-wrap gap-1">
-                    {(key.permissions ?? []).map((p) => (
-                      <Badge key={p} color="blue" size="sm" className="capitalize">
-                        {p}
-                      </Badge>
-                    ))}
-                    {(key.granularPermissions ?? []).length > 0 && (
-                      <Badge
-                        color="blue"
-                        size="sm"
-                        description={
-                          <>
-                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-                              Data protection
-                            </p>
-                            <ul className="flex flex-col gap-0.5">
-                              {key.granularPermissions!.map((g) => (
-                                <li key={g} className="text-xs text-zinc-700">
-                                  {GRANULAR_PERMISSION_LABELS[g].label}
-                                </li>
-                              ))}
-                            </ul>
-                          </>
-                        }
-                      >
-                        Data protection
-                      </Badge>
-                    )}
-                  </div>
-                </td>
-              )}
-
-              {/* Status */}
-              <td className={`${tdClass} hidden sm:table-cell`}>
+    <Table>
+      <Table.Header>
+        <tr>
+          <Table.Head>Name</Table.Head>
+          {showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
+          {showPermissions && <Table.Head className="hidden md:table-cell">Permissions</Table.Head>}
+          <Table.Head className="hidden sm:table-cell">Status</Table.Head>
+          <Table.Head className="hidden md:table-cell">Last Used</Table.Head>
+          {onDelete && (
+            <Table.Head>
+              <span className="sr-only">Actions</span>
+            </Table.Head>
+          )}
+        </tr>
+      </Table.Header>
+      <Table.Body>
+        {keys.map((key) => (
+          <Table.Row key={key.id}>
+            {/* Name + Access Key ID */}
+            <Table.Cell>
+              <p className="text-xs font-medium text-zinc-900">{key.keyName}</p>
+              <div className="flex items-center gap-1">
+                <p className="font-mono text-xs text-zinc-500">{key.accessKeyId}</p>
+                <CopyButton value={key.accessKeyId} />
+              </div>
+              {/* Status shown inline on small screens */}
+              <div className="mt-1 sm:hidden">
                 <StatusBadge status={key.status} />
-              </td>
+              </div>
+            </Table.Cell>
 
-              {/* Last Used */}
-              <td className={`${tdClass} hidden md:table-cell text-xs text-zinc-500`}>
-                {key.lastUsedAt ? formatDate(key.lastUsedAt) : 'Never'}
-              </td>
+            {/* Buckets */}
+            {showBuckets && (
+              <Table.Cell className="hidden lg:table-cell">
+                <div className="flex flex-wrap gap-1">
+                  {key.bucketScope === 'all' ? (
+                    <Badge color="grey" size="sm">
+                      All Buckets
+                    </Badge>
+                  ) : (
+                    (key.buckets ?? []).map((b) => (
+                      <Badge key={b} color="grey" size="sm">
+                        {b}
+                      </Badge>
+                    ))
+                  )}
+                </div>
+              </Table.Cell>
+            )}
 
-              {/* Actions */}
-              {onDelete && (
-                <td className={`${tdClass} text-right`}>
-                  <ActionMenu onDelete={() => void onDelete(key.id)} />
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+            {/* Permissions */}
+            {showPermissions && (
+              <Table.Cell className="hidden md:table-cell">
+                <div className="flex flex-wrap gap-1">
+                  {(key.permissions ?? []).map((p) => (
+                    <Badge key={p} color="blue" size="sm" className="capitalize">
+                      {p}
+                    </Badge>
+                  ))}
+                  {(key.granularPermissions ?? []).length > 0 && (
+                    <Badge
+                      color="blue"
+                      size="sm"
+                      description={
+                        <>
+                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                            Data protection
+                          </p>
+                          <ul className="flex flex-col gap-0.5">
+                            {key.granularPermissions!.map((g) => (
+                              <li key={g} className="text-xs text-zinc-700">
+                                {GRANULAR_PERMISSION_LABELS[g].label}
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      }
+                    >
+                      Data protection
+                    </Badge>
+                  )}
+                </div>
+              </Table.Cell>
+            )}
+
+            {/* Status */}
+            <Table.Cell className="hidden sm:table-cell">
+              <StatusBadge status={key.status} />
+            </Table.Cell>
+
+            {/* Last Used */}
+            <Table.Cell className="hidden md:table-cell text-xs text-zinc-500">
+              {key.lastUsedAt ? formatDate(key.lastUsedAt) : 'Never'}
+            </Table.Cell>
+
+            {/* Actions */}
+            {onDelete && (
+              <Table.Cell className="text-right">
+                <ActionMenu onDelete={() => void onDelete(key.id)} />
+              </Table.Cell>
+            )}
+          </Table.Row>
+        ))}
+      </Table.Body>
+    </Table>
   );
 }
