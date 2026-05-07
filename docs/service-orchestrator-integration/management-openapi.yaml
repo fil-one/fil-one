@@ -3,15 +3,14 @@ info:
   title: FilOne Service Orchestrator Management API
   version: 0.1.0
   description: |
-    Management API that a Service Orchestrator (Service Orchestrator) must implement
-    so FilOne can integrate it as a new region. Covers:
+    Management API that a Service Orchestrator must implement so FilOne
+    can integrate it as a new region. Covers tenant lifecycle, S3
+    access-key management, and usage metering (storage, egress,
+    ingress).
 
-      * Tenant lifecycle (create + setup, status, info)
-      * S3 access-key management
-      * Usage metering (storage, egress, ingress)
-
-    Bucket and object operations are out of scope: clients drive them
-    over the Service Orchestrator's S3 Gateway directly.
+    The Service Orchestrator must also operate an S3 Gateway for
+    bucket and object operations; that surface is outside this
+    contract.
 
     ## Authentication
 
@@ -35,12 +34,6 @@ info:
         `name`; the caller can recover via list + get.
       * `DELETE /tenants/{tenantId}/access-keys/{accessKeyId}` returns 204
         even if the key was already deleted.
-
-    ## Out of scope
-
-      * Bucket and object operations — handled by the S3 Gateway.
-      * S3 Gateway telemetry (TTFB, error rates, RPS) — delivered via the
-        partner's observability stack, not this API.
 
 servers:
   - url: https://api.example.com/
