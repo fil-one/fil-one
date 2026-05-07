@@ -166,6 +166,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "RegenerateRecoveryCode": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "ResendVerification": {
       "name": string
       "type": "sst.aws.Function"
