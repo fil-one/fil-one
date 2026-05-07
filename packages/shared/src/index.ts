@@ -92,6 +92,9 @@ export { PresignOpSchema, PresignRequestSchema } from './api/presign.js';
 export {
   ACCESS_KEY_PERMISSIONS,
   ACCESS_KEY_BUCKET_SCOPES,
+  GRANULAR_PERMISSIONS,
+  GRANULAR_PERMISSION_MAP,
+  GRANULAR_PERMISSION_LABELS,
   KEY_NAME_MAX_LENGTH,
   KEY_NAME_PATTERN,
   CreateAccessKeySchema,
@@ -100,6 +103,7 @@ export type {
   AccessKeyStatus,
   AccessKeyPermission,
   AccessKeyBucketScope,
+  GranularPermission,
   AccessKey,
   ListAccessKeysResponse,
   CreateAccessKeyRequest,

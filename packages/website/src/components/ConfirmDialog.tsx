@@ -55,15 +55,15 @@ export function ConfirmDialog({
           <Button variant="ghost" className="flex-1" onClick={onClose} disabled={loading}>
             {cancelLabel}
           </Button>
-          <button
-            type="button"
+          <Button
+            variant="destructive"
+            className="flex-1"
             disabled={loading}
             onClick={() => void handleConfirm()}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
           >
             {loading && <Spinner ariaLabel="Processing" size={14} />}
             {confirmLabel}
-          </button>
+          </Button>
         </div>
       </ModalFooter>
     </Modal>
