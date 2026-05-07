@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router';
@@ -9,9 +10,19 @@ import {
 import { Banner, type BannerVariant } from './Banner';
 
 function withRouter(Story: React.ComponentType) {
-  const rootRoute = createRootRoute({ component: () => <Story /> });
+  const rootRoute = createRootRoute();
+  const billingRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/billing',
+    component: () => null,
+  });
+  const indexRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/',
+    component: () => <Story />,
+  });
   const router = createRouter({
-    routeTree: rootRoute,
+    routeTree: rootRoute.addChildren([indexRoute, billingRoute]),
     history: createMemoryHistory({ initialEntries: ['/'] }),
   });
   return <RouterProvider router={router} />;
@@ -61,7 +72,7 @@ export const AllVariants: Story = {
   render: () => (
     <div className="flex flex-col">
       {(['error', 'warning', 'info'] as BannerVariant[]).map((variant) => (
-        <Banner key={variant} variant={variant} action={{ label: 'Action', href: '#' }}>
+        <Banner key={variant} variant={variant} action={{ label: 'Action', onClick: () => {} }}>
           This is a <strong>{variant}</strong> banner message spanning the full width.
         </Banner>
       ))}
