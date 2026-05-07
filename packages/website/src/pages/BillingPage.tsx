@@ -45,7 +45,7 @@ function formatCents(cents: number): string {
 function SkeletonCard({ height = 'h-36' }: { height?: string }) {
   return (
     <div
-      className={`animate-pulse rounded-lg border border-zinc-200 bg-white p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] ${height}`}
+      className={`animate-pulse rounded-lg border border-zinc-200 bg-white p-5 shadow-sm ${height}`}
     >
       <div className="h-3 w-24 rounded bg-zinc-200 mb-4" />
       <div className="h-4 w-48 rounded bg-zinc-200 mb-2" />
@@ -281,7 +281,7 @@ export function BillingPage() {
         <div className="flex-1 min-w-0 flex flex-col gap-6">
           {/* Plan card */}
           <div
-            className={`rounded-lg border bg-white flex flex-col gap-4 py-4 px-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] ${isActive || isPastDue ? 'border-green-200' : 'border-brand-200'}`}
+            className={`rounded-lg border bg-white flex flex-col gap-4 py-4 px-5 shadow-sm ${isActive || isPastDue ? 'border-green-200' : 'border-brand-200'}`}
           >
             <div className="flex items-center justify-between">
               <div>
@@ -337,7 +337,7 @@ export function BillingPage() {
                 <button
                   type="button"
                   onClick={handleUpgradeClick}
-                  className="flex items-center gap-1.5 rounded-[6px] h-8 px-4 py-2 text-[12px] font-medium leading-[18px] text-white shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] transition-opacity hover:opacity-90"
+                  className="flex items-center gap-1.5 rounded-[6px] h-8 px-4 py-2 text-[12px] font-medium leading-[18px] text-white shadow-sm transition-opacity hover:opacity-90"
                   style={{ backgroundImage: 'linear-gradient(135deg, #0080FF 0%, #256AF4 100%)' }}
                 >
                   Upgrade
@@ -375,7 +375,7 @@ export function BillingPage() {
                 <button
                   type="button"
                   onClick={handleUpgradeClick}
-                  className="flex items-center gap-1.5 rounded-[6px] h-8 px-4 py-2 text-[12px] font-medium leading-[18px] text-white shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] transition-opacity hover:opacity-90"
+                  className="flex items-center gap-1.5 rounded-[6px] h-8 px-4 py-2 text-[12px] font-medium leading-[18px] text-white shadow-sm transition-opacity hover:opacity-90"
                   style={{ backgroundImage: 'linear-gradient(135deg, #0080FF 0%, #256AF4 100%)' }}
                 >
                   {isTrialExpiredGrace ? 'Upgrade' : 'Reactivate'}
@@ -386,7 +386,7 @@ export function BillingPage() {
           </div>
 
           {/* Current usage card */}
-          <div className="rounded-lg border border-zinc-200 bg-white flex flex-col gap-5 p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+          <div className="rounded-lg border border-zinc-200 bg-white flex flex-col gap-5 p-5 shadow-sm">
             <div>
               <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
                 Current usage
@@ -447,7 +447,7 @@ export function BillingPage() {
           </div>
 
           {/* Payment method card */}
-          <div className="rounded-lg border border-zinc-200 bg-white flex flex-col gap-5 p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+          <div className="rounded-lg border border-zinc-200 bg-white flex flex-col gap-5 p-5 shadow-sm">
             <div>
               <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
                 Payment method
@@ -494,7 +494,7 @@ export function BillingPage() {
 
           {/* Invoice history card */}
           {!isTrialing && invoicesLoading && (
-            <div className="animate-pulse rounded-lg border border-zinc-200 bg-white p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+            <div className="animate-pulse rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
               <div className="h-3 w-28 rounded bg-zinc-200 mb-2" />
               <div className="h-3 w-44 rounded bg-zinc-200 mb-4" />
               <div className="h-4 w-full rounded bg-zinc-200 mb-3" />
@@ -503,7 +503,7 @@ export function BillingPage() {
             </div>
           )}
           {!isTrialing && !invoicesLoading && (
-            <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+            <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
               <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
                 Invoice history
               </h3>
@@ -548,7 +548,8 @@ export function BillingPage() {
                             href={inv.invoicePdfUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] transition-colors hover:bg-zinc-50"
+                            aria-label={`Download PDF invoice from ${formatDate(inv.createdAt)} for ${formatCents(inv.amountDueInCents)}`}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
                           >
                             <DownloadSimpleIcon size={13} aria-hidden="true" />
                             PDF
@@ -565,7 +566,7 @@ export function BillingPage() {
 
         {/* ── Right column (pricing sidebar) ─────────────────── */}
         <div className="w-[368px] flex-shrink-0">
-          <div className="rounded-lg border border-zinc-200 bg-white shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] overflow-hidden p-px">
+          <div className="rounded-lg border border-zinc-200 bg-white shadow-sm overflow-hidden p-px">
             {/* Header */}
             <div className="flex flex-col gap-[6px] px-4 pt-4 pb-[13px] border-b border-zinc-200/50 bg-zinc-50">
               <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-zinc-500">
@@ -601,7 +602,7 @@ export function BillingPage() {
                 <button
                   type="button"
                   onClick={handleUpgradeClick}
-                  className="flex w-full items-center justify-center gap-2 rounded-[6px] h-[36px] px-4 py-2 text-[13px] font-medium text-white shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] transition-opacity hover:opacity-90"
+                  className="flex w-full items-center justify-center gap-2 rounded-[6px] h-[36px] px-4 py-2 text-[13px] font-medium text-white shadow-sm transition-opacity hover:opacity-90"
                   style={{ backgroundImage: 'linear-gradient(135deg, #0080FF 0%, #256AF4 100%)' }}
                 >
                   <LightningIcon size={16} weight="fill" />
