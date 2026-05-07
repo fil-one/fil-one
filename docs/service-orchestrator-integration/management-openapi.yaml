@@ -7,7 +7,6 @@ info:
     so FilOne can integrate it as a new region. Covers:
 
       * Tenant lifecycle (create + setup, status, info)
-      * Per-tenant API key issuance
       * S3 access-key management
       * Usage metering (storage, egress, ingress)
 
@@ -16,16 +15,11 @@ info:
 
     ## Authentication
 
-    Two API keys are used. Both are sent as bearer tokens in the
-    standard `Authorization: Bearer <token>` header.
-
-      * **Partner key** — global, partner-scoped admin credential. Used for
-        tenant lifecycle, status changes, per-tenant API-key issuance, and
-        metrics queries.
-      * **Tenant key** — tenant-scoped credential issued via
-        `POST /tenants/{tenantId}/api-keys`. Used for S3 access-key
-        management. The Service Orchestrator must reject any request whose path
-        `tenantId` differs from the tenant the key was issued for.
+    A single **partner key** authenticates every endpoint. It is a
+    global, partner-scoped admin credential, sent as a bearer token in
+    the standard `Authorization: Bearer <token>` header. The Service
+    Orchestrator must scope this credential so it cannot reach tenants
+    belonging to other partners.
 
     ## Idempotency
 
@@ -37,8 +31,6 @@ info:
         already in the requested status.
       * `DELETE /tenants/{tenantId}` returns 204 even if the tenant is
         already gone.
-      * `DELETE /tenants/{tenantId}/api-keys/{keyId}` returns 204 even if
-        the API key was already revoked.
       * `POST /tenants/{tenantId}/access-keys` returns 409 on duplicate
         `name`; the caller can recover via list + get.
       * `DELETE /tenants/{tenantId}/access-keys/{accessKeyId}` returns 204
@@ -60,8 +52,6 @@ security:
 tags:
   - name: Tenants
     description: Tenant lifecycle and information.
-  - name: API Keys
-    description: Issuance of per-tenant management API keys.
   - name: Access Keys
     description: S3 access-key CRUD scoped to a single tenant.
   - name: Metrics
@@ -139,8 +129,8 @@ paths:
       summary: Delete a tenant
       description: |
         Permanently deletes the tenant and all resources owned by it
-        (buckets, objects, S3 access keys, per-tenant API keys). The
-        operation is irreversible.
+        (buckets, objects, S3 access keys). The operation is
+        irreversible.
 
         The tenant must be in the `disabled` state before deletion. The
         caller is expected to first cut off all access via
@@ -200,77 +190,6 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
-  /tenants/{tenantId}/api-keys:
-    parameters:
-      - $ref: '#/components/parameters/TenantId'
-    post:
-      tags: [API Keys]
-      summary: Create a per-tenant API key
-      description: |
-        Issues a new tenant-scoped management API key. The secret is
-        returned only in this response and cannot be retrieved later.
-        FilOne stores the secret in its own secret store and presents it
-        as a bearer token on subsequent tenant-scoped calls.
-
-        Multiple API keys may be active for a tenant simultaneously.
-        This is the property key rotation depends on:
-
-          1. Issue a new key with `POST /tenants/{tenantId}/api-keys`.
-          2. Switch all callers to use the new key.
-          3. Revoke the old key with
-             `DELETE /tenants/{tenantId}/api-keys/{keyId}`.
-
-        During step 2 both keys are valid, so callers can roll over
-        without downtime. The Service Orchestrator may impose a per-tenant cap on the
-        number of concurrently-active keys.
-      security:
-        - PartnerKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateApiKeyRequest'
-      responses:
-        '201':
-          description: API key created. Secret returned only in this response.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CreatedApiKey'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-
-  /tenants/{tenantId}/api-keys/{keyId}:
-    parameters:
-      - $ref: '#/components/parameters/TenantId'
-      - $ref: '#/components/parameters/ApiKeyId'
-    delete:
-      tags: [API Keys]
-      summary: Revoke a per-tenant API key
-      description: |
-        Revokes the API key identified by `keyId`. Subsequent requests
-        signed with that key must fail. Returns 204 even if the key was
-        already deleted (idempotent). Returns 404 if the tenant does not
-        exist.
-      security:
-        - PartnerKey: []
-      responses:
-        '204':
-          description: Revoked (or already revoked — returns 204 even if the key was already deleted).
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          description: Tenant not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
   /tenants/{tenantId}/access-keys:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -282,7 +201,7 @@ paths:
         permissions and (optionally) a list of buckets. The
         `secretAccessKey` is returned only in this response.
       security:
-        - TenantKey: []
+        - PartnerKey: []
       requestBody:
         required: true
         content:
@@ -312,7 +231,7 @@ paths:
       tags: [Access Keys]
       summary: List S3 access keys
       security:
-        - TenantKey: []
+        - PartnerKey: []
       responses:
         '200':
           description: List of access keys (without secrets).
@@ -334,7 +253,7 @@ paths:
       summary: Get an S3 access key
       description: Returns the access key's metadata. The secret is never returned by this endpoint.
       security:
-        - TenantKey: []
+        - PartnerKey: []
       responses:
         '200':
           description: Access key details.
@@ -355,7 +274,7 @@ paths:
         the key was already deleted. Returns 404 if the tenant does
         not exist.
       security:
-        - TenantKey: []
+        - PartnerKey: []
       responses:
         '204':
           description: Deleted (or already deleted).
@@ -443,15 +362,6 @@ components:
         <token>`. Grants access across all tenants owned by this
         partner. The Service Orchestrator must scope this credential so it cannot reach
         tenants belonging to other partners.
-    TenantKey:
-      type: http
-      scheme: bearer
-      description: |
-        Tenant-scoped API key issued via
-        `POST /tenants/{tenantId}/api-keys`, sent as `Authorization:
-        Bearer <token>`. Operations performed with this key apply only
-        to the tenant the key was issued for; the Service Orchestrator must reject calls
-        whose path `tenantId` differs from the key's tenant.
 
   parameters:
     TenantId:
@@ -465,13 +375,6 @@ components:
       name: accessKeyId
       required: true
       description: AWS-style access key ID (the value used by S3 clients).
-      schema:
-        type: string
-    ApiKeyId:
-      in: path
-      name: keyId
-      required: true
-      description: Stable identifier returned by `POST /tenants/{tenantId}/api-keys`.
       schema:
         type: string
     BucketName:
@@ -650,35 +553,6 @@ components:
       properties:
         status:
           $ref: '#/components/schemas/TenantStatus'
-
-    CreateApiKeyRequest:
-      type: object
-      required: [name]
-      properties:
-        name:
-          type: string
-          minLength: 1
-          maxLength: 100
-          description: Human-readable name for the key (for partner audit/ops).
-
-    CreatedApiKey:
-      type: object
-      required: [keyId, secret, name, createdAt]
-      properties:
-        keyId:
-          type: string
-          description: Stable identifier for the API key (for audit/lookup).
-        secret:
-          type: string
-          description: |
-            The API-key secret. Returned only on creation. Presented as
-            a bearer token in the `Authorization` header on subsequent
-            tenant-scoped calls.
-        name:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
 
     AccessKeyPermission:
       type: string

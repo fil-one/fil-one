@@ -10,7 +10,6 @@ FilOne currently integrates with a single Service Orchestrator — Aurora — an
 The contract must cover the same capabilities the FilOne backend exercises against Aurora today:
 
 - Tenant lifecycle (create, set up, query, status changes).
-- Issuance of credentials FilOne uses to call the Service Orchestrator on behalf of a tenant.
 - S3 access-key management (create, list, get, and delete) scoped to a tenant.
 - Usage metering for billing, dashboards, and trial enforcement.
 
@@ -22,33 +21,16 @@ Define a generic **Service Orchestrator Management API** specified in `docs/serv
 
 ### Authentication
 
-Bearer tokens via the standard `Authorization: Bearer <token>` header.
-
-Two scopes:
-
-- **Partner key** — global, partner-scoped admin credential. Used for tenant lifecycle, status changes, per-tenant API-key issuance, and metrics queries.
-- **Tenant key** — tenant-scoped credential issued by the Service Orchestrator, used for S3 access-key management. The Service Orchestrator must reject any request whose path `tenantId` does not match the tenant the key was issued for.
+A single **partner key** authenticates every endpoint. It is a global, partner-scoped admin credential, sent as a bearer token in the standard `Authorization: Bearer <token>` header. The Service Orchestrator must scope this credential so it cannot reach tenants belonging to other partners.
 
 ### Tenant lifecycle
-
-All endpoints in this section require a **partner key**.
 
 - `POST /tenants` performs create & setup synchronously and returns only after the tenant is fully operational. The Service Orchestrator generates and returns a tenant `id`. FilOne passes its organisation ID as `externalId` (the idempotency key): re-calling with the same `externalId` returns the existing tenant. FilOne stores the SO-assigned `id` and uses it as the `{tenantId}` path parameter in all subsequent calls.
 - `GET /tenants/{tenantId}` returns operational state: status, resource counts, and resource limits.
 - `POST /tenants/{tenantId}/status` sets `active` / `write-locked` / `disabled`; setting the same status twice is a no-op.
-- `DELETE /tenants/{tenantId}` permanently deletes the tenant and all resources owned by it (buckets, objects, S3 access keys, per-tenant API keys). The tenant must be in the `disabled` state — the call returns 409 otherwise. The two-phase pattern (disable, then delete) forces the caller to consciously cut off all access before committing to a destructive, irreversible operation. The endpoint is synchronous (matching `POST /tenants`) and idempotent: a call against an already-deleted tenant returns 204.
-
-### Per-tenant API keys
-
-All endpoints in this section require a **partner key**.
-
-`POST /tenants/{tenantId}/api-keys` issues a tenant-scoped bearer token. The secret is returned only on creation. FilOne stores it in its own secret store and uses it for all subsequent tenant-scoped management calls.
-
-`DELETE /tenants/{tenantId}/api-keys/{keyId}` revokes a specific key by its identifier. Idempotent (204 if already revoked). Multiple API keys may be active for a tenant at the same time, which is the property rotation depends on: issue a new key, switch callers over, then revoke the old one. The Service Orchestrator may impose a per-tenant cap on concurrently-active keys.
+- `DELETE /tenants/{tenantId}` permanently deletes the tenant and all resources owned by it (buckets, objects, S3 access keys). The tenant must be in the `disabled` state — the call returns 409 otherwise. The two-phase pattern (disable, then delete) forces the caller to consciously cut off all access before committing to a destructive, irreversible operation. The endpoint is synchronous (matching `POST /tenants`) and idempotent: a call against an already-deleted tenant returns 204.
 
 ### S3 access keys
-
-All endpoints in this section require a **tenant key**.
 
 - `POST /tenants/{tenantId}/access-keys` provisions an AWS Sig V4 access-key pair scoped to the supplied permissions. Optional `buckets` list restricts the key to specific buckets; optional `expiresAt` sets a hard expiry. The `secretAccessKey` is returned only in this response. Returns 409 on duplicate `name`.
 - `GET /tenants/{tenantId}/access-keys` lists all access keys for the tenant (secrets omitted).
@@ -62,8 +44,6 @@ Permissions use AWS S3 IAM action names verbatim (e.g. `s3:GetObject`, `s3:Creat
 - Object-level variants for versions, retention, and legal hold: `s3:GetObjectVersion`, `s3:GetObjectRetention`, `s3:GetObjectLegalHold`, `s3:PutObjectRetention`, `s3:PutObjectLegalHold`, `s3:ListBucketVersions`, `s3:DeleteObjectVersion`.
 
 ### Usage metering
-
-All endpoints in this section require a **partner key**.
 
 Two time-series endpoints, both parameterised by `from` / `to` / `window`, each returning storage, egress, and ingress samples in a single response:
 
@@ -81,11 +61,10 @@ Service Orchestrators must support at least:
 Every operation is safely retryable end-to-end:
 
 - `POST /tenants` returns the existing tenant on duplicate `externalId`.
-- `POST /tenants/{id}/status` is a no-op when already in the requested status.
-- `DELETE /tenants/{id}` returns 204 if the tenant is already gone.
-- `DELETE /tenants/{id}/api-keys/{keyId}` returns 204 if the API key is already revoked.
-- `POST .../access-keys` returns 409 on duplicate name; the caller can recover via list + get.
-- `DELETE .../access-keys/{id}` returns 204 if already gone.
+- `POST /tenants/{tenantId}/status` is a no-op when already in the requested status.
+- `DELETE /tenants/{tenantId}` returns 204 if the tenant is already gone.
+- `POST /tenants/{tenantId}/access-keys` returns 409 on duplicate name; the caller can recover via list + get.
+- `DELETE /tenants/{tenantId}/access-keys/{accessKeyId}` returns 204 if already gone.
 
 ## Alternatives Considered
 
@@ -96,17 +75,15 @@ Four points on the auth-scoping axis were considered:
 |                                            | URL surface                         | Credentials                  |
 | ------------------------------------------ | ----------------------------------- | ---------------------------- |
 | Two-API split (Aurora)                     | two base URLs (Backoffice + Portal) | one credential each          |
-| Single API, two scopes (chosen)            | one base URL, `{tenantId}` in path  | partner key + per-tenant key |
-| Single API, single global key              | one base URL, `{tenantId}` in path  | partner key only             |
+| Single API, single partner key (chosen)    | one base URL, `{tenantId}` in path  | partner key only             |
+| Single API, two scopes                     | one base URL, `{tenantId}` in path  | partner key + per-tenant key |
 | Flat URLs + tenant header (Stripe Connect) | one base URL, tenant in header      | partner key only             |
 
-**Two-API split** was rejected because separate base URLs impose Aurora's specific architecture on every future Service Orchestrator. The same authorization split can be expressed with a single base URL and two security schemes, which is simpler to document, simpler to implement, and avoids leaking one vendor's internals into the contract.
+**Two-API split** was rejected because separate base URLs impose Aurora's specific architecture on every future Service Orchestrator. The same surface can be expressed with a single base URL, which is simpler to document, simpler to implement, and avoids leaking one vendor's internals into the contract.
 
-**Single global key** was rejected because per-tenant keys give a concrete, if narrow, defence-in-depth property: a FilOne backend bug that passes the wrong `tenantId` to `/tenants/{tenantId}/access-keys/*` is rejected by the Service Orchestrator rather than silently issuing access keys against the wrong tenant. The protection is narrow — other tenant-scoped endpoints (`status`, `metrics`, info) still trust the partner key — but `access-keys` is the most sensitive endpoint group because the keys it issues grant direct access to tenant data. The blast-radius argument against a global key is otherwise weak (all FilOne secrets share an SSM tree and similar IAM permissions), and the complexity cost of two scopes is bounded: one extra issuance endpoint and one extra cached SSM read per access-key call.
+**Two scopes (partner key + per-tenant key)** was rejected because the defence-in-depth benefit is too narrow to justify the integration cost. The argument for a tenant-scoped key was that a FilOne backend bug that passes the wrong `tenantId` in the URL would be rejected by the Service Orchestrator rather than silently acting on another tenant's resources. In practice the protection only covers access-key CRUD: the other tenant-scoped endpoints (`status`, `metrics`, tenant info, deletion) already use the partner key, and the Service Orchestrator must enforce per-partner tenant scoping on the partner key in any case (otherwise tenants belonging to other partners would be reachable). Once that scoping is in place, FilOne's own `tenantId` mismatches are caught uniformly across every endpoint, not just access keys. Adding a second credential adds a key-issuance endpoint to the contract, key-rotation semantics every Service Orchestrator must implement, and one extra secret per tenant for FilOne to store and rotate — disproportionate cost for a partial mitigation that is better addressed by the Service Orchestrator's existing partner-scoping check and by FilOne's own tenant-isolation tests.
 
-**Flat URLs + tenant header** (Stripe Connect's pattern — a single platform key plus a `Stripe-Account`-style context header) was rejected for the same defence-in-depth reason as the single global key: a header is as easy to mis-set in a backend bug as a URL parameter. Keeping `tenantId` in the path is also more explicit, plays better with per-tenant rate limiting and audit logging, and reads more clearly in OpenAPI-generated documentation.
-
-The chosen partner-key + tenant-key split mirrors GitHub Apps, which require a JWT signed with the app's private key for app-level endpoints (mint installation tokens, list installations) and a separate installation access token for installation-scoped endpoints, with the API enforcing the mismatch.
+**Flat URLs + tenant header** (Stripe Connect's pattern — a single platform key plus a `Stripe-Account`-style context header) was rejected because keeping `tenantId` in the path is more explicit, plays better with per-tenant rate limiting and audit logging on the Service Orchestrator side, and reads more clearly in OpenAPI-generated documentation. The credential count is the same either way.
 
 ### Async tenant setup with a separate readiness endpoint
 
@@ -143,5 +120,5 @@ Aurora expresses permissions as bare AWS action names — `GetObject`, `PutObjec
 - The contract requires Service Orchestrators to support synchronous `POST /tenants` (potentially long-running) and to honour idempotency on every mutating endpoint. Service Orchestrators whose native setup flow is fully asynchronous must adapt internally.
 - The access-key permission enum gains bucket-management permissions (`s3:CreateBucket`, `s3:ListAllMyBuckets`, `s3:DeleteBucket`) that Aurora's permission strings did not surface as first-class options. Service Orchestrators map these to whatever native primitives they expose.
 - FilOne must persist the Service Orchestrator–assigned tenant `id` (returned by `POST /tenants`) alongside its own organisation ID and use it as the `{tenantId}` path parameter in all subsequent management API calls.
-- Per-tenant API keys remain part of the integration cost: each tenant has a credential that FilOne stores in SSM and looks up on every tenant-scoped call. The defence-in-depth benefit is preserved.
+- A single partner key authenticates every endpoint, including tenant-scoped operations. The Service Orchestrator must enforce per-partner tenant scoping so the partner key cannot reach tenants belonging to other partners.
 - Telemetry (TTFB, error rates, RPS) and S3 Gateway observability are explicitly out of scope for this contract; they are delivered through the partner's observability stack.

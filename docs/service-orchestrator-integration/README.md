@@ -8,7 +8,6 @@ APIs:
 
 - Tenant management (isolated per-organisation accounts)
 - Tenant statuses (active; write-locked; disabled)
-- Per-Tenant API keys management
 - S3 Access Key management
 - S3 Gateway
 - Usage metrics at tenant and bucket level (storage bytes, object count, egress bytes, ingress bytes)
@@ -37,19 +36,15 @@ Non-functional requirements:
 +-----------------------------------------------------------------+
 |  Service Orchestrator APIs                                      |
 |                                                                 |
-|  +-----------------------------+  +--------------------------+  |
-|  | Admin API                   |  | Tenant Management API    |  |
-|  | (global API key)            |  | (per-tenant API key)     |  |
-|  |                             |  |                          |  |
-|  | - Create tenant             |  | - Create/list/get/delete |  |
-|  | - Get tenant info           |  |   access keys            |  |
-|  | - Set tenant status         |  |                          |  |
-|  | - Delete tenant             |  |                          |  |
-|  | - Create API key            |  |                          |  |
-|  | - Revoke API key            |  |                          |  |
-|  | - Query usage metrics       |  |                          |  |
-|  |   (per-tenant & per-bucket) |  |                          |  |
-|  +-----------------------------+  +--------------------------+  |
+|  +------------------------------------------------------------+ |
+|  | Management API                                             | |
+|  | (partner API key)                                          | |
+|  |                                                            | |
+|  | - Create / get / delete tenant                             | |
+|  | - Set tenant status                                        | |
+|  | - Create / list / get / delete S3 access keys              | |
+|  | - Query usage metrics (per-tenant & per-bucket)            | |
+|  +------------------------------------------------------------+ |
 |                                                                 |
 |  +------------------------------------------------------------+ |
 |  | S3 Gateway                                                 | |
@@ -72,19 +67,11 @@ The Service Orchestrator must expose an API to create a tenant given FilOne's or
 
 The Service Orchestrator must support three tenant states: active (read/write), write-locked (read-only; uploads and bucket creation blocked), and disabled (all access blocked; data persisted). These restrictions must be enforced by the S3 gateway.
 
-The Service Orchestrator must also expose a tenant deletion endpoint that permanently removes the tenant and all owned resources (buckets, objects, access keys, per-tenant API keys). Deletion requires the tenant to be in the disabled state first, so the caller has to consciously cut off all access before committing to the destructive operation.
+The Service Orchestrator must also expose a tenant deletion endpoint that permanently removes the tenant and all owned resources (buckets, objects, access keys). Deletion requires the tenant to be in the disabled state first, so the caller has to consciously cut off all access before committing to the destructive operation.
 
-All tenant management operations are authenticated with a single global API key. This key is not tenant-specific and grants administrative access across all tenants belonging to the FilOne partner account. The Service Orchestrator should scope this key so that it cannot access tenants belonging to other partners.
+All management API operations are authenticated with a single partner API key. This key is not tenant-specific and grants administrative access across all tenants belonging to the FilOne partner account. The Service Orchestrator must scope this key so that it cannot access tenants belonging to other partners.
 
 The entire tenant lifecycle — from creation through credential provisioning to full readiness — must be API-driven with no manual steps (no portal clicks, email verification, or human-in-the-loop approvals).
-
-## Per-Tenant API Keys
-
-After the tenant is created and set up, FilOne creates a per-tenant API key through the Service Orchestrator's admin API. This key is scoped to a single tenant and is used for S3 access key management: creating, listing, retrieving, and deleting access keys. The Service Orchestrator must return a secret token that FilOne can present in an HTTP header to authenticate these calls.
-
-This separation limits the blast radius if a per-tenant key is compromised.
-
-The Service Orchestrator must also support **key rotation**: a tenant must be able to hold more than one active API key at the same time, so that FilOne can issue a new key, switch callers over to it, and only then revoke the old one. The standard flow is issue → switch → revoke; both keys are valid during the overlap window. Revocation is a separate endpoint that takes the key's identifier (returned by the create call) and is idempotent — calling it twice for the same key is not an error.
 
 ## Bucket Management
 
@@ -96,7 +83,7 @@ Deleting a bucket should fail if the bucket still contains objects. If the Servi
 
 ## S3 Access Key Management
 
-End-users manage their own S3 access keys through the FilOne console. The Service Orchestrator must support creating, listing, retrieving, and deleting access keys through the tenant-scoped management API (authenticated with the per-tenant API key). When a user creates an access key, FilOne sends the key name, a set of permissions, an optional list of buckets (for scoped access), and an optional expiration date.
+End-users manage their own S3 access keys through the FilOne console. The Service Orchestrator must support creating, listing, retrieving, and deleting access keys through the management API. When a user creates an access key, FilOne sends the key name, a set of permissions, an optional list of buckets (for scoped access), and an optional expiration date.
 
 FilOne uses AWS S3 IAM action names as permission scopes. The Service Orchestrator maps each value to its native permission model when creating the key.
 
