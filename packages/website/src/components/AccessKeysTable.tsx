@@ -165,9 +165,9 @@ export function AccessKeysTable({
               </td>
 
               {/* Region */}
-              <td className={tdClass}>
+              <td className={`${tdClass} hidden md:table-cell`}>
                 <p className="text-xs font-medium text-zinc-900">
-                  {REGION_LABELS[key.region ?? S3_REGION]}
+                  {REGION_LABELS[key.region ?? S3_REGION] ?? key.region ?? S3_REGION}
                 </p>
                 <div className="flex items-center gap-1">
                   <p className="text-xs text-zinc-500">{key.region ?? S3_REGION}</p>

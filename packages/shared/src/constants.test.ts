@@ -8,9 +8,12 @@ import {
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
+  getAvailableRegions,
+  formatRegion,
+  REGION_LABELS,
   S3Region,
   Stage,
-} from './constants.js';
+} from './constants.ts';
 
 describe('constants', () => {
   it('TB_BYTES equals 10^12', () => {
@@ -110,4 +113,35 @@ describe('getStageFromHostname', () => {
       expect(getStageFromHostname(hostname)).toBe(Stage.Staging);
     });
   }
+});
+
+describe('getAvailableRegions', () => {
+  it('returns only eu-west-1 in production', () => {
+    expect(getAvailableRegions(Stage.Production)).toEqual([S3Region.EuWest1]);
+  });
+
+  it('returns both regions in staging', () => {
+    expect(getAvailableRegions(Stage.Staging)).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
+  });
+
+  const nonProductionStages = ['dev', 'pr-42', ''];
+  for (const stage of nonProductionStages) {
+    it(`returns both regions for non-production stage "${stage}"`, () => {
+      expect(getAvailableRegions(stage)).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
+    });
+  }
+});
+
+describe('formatRegion', () => {
+  it('formats a known region as "<label> <code>"', () => {
+    expect(formatRegion(S3Region.EuWest1)).toBe(`${REGION_LABELS[S3Region.EuWest1]} eu-west-1`);
+  });
+
+  it('formats us-east-1 as "<label> <code>"', () => {
+    expect(formatRegion(S3Region.UsEast1)).toBe(`${REGION_LABELS[S3Region.UsEast1]} us-east-1`);
+  });
+
+  it('returns the raw region for unknown values', () => {
+    expect(formatRegion('ap-south-1')).toBe('ap-south-1');
+  });
 });

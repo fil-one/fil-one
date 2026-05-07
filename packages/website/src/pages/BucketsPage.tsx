@@ -138,7 +138,9 @@ export function BucketsPage() {
                   </td>
                   <td className="px-4 py-3 text-xs">
                     <span className="font-medium text-zinc-900">
-                      {REGION_LABELS[(bucket.region as S3Region) ?? S3_REGION] ?? bucket.region ?? S3_REGION}
+                      {REGION_LABELS[(bucket.region as S3Region) ?? S3_REGION] ??
+                        bucket.region ??
+                        S3_REGION}
                     </span>{' '}
                     <span className="text-zinc-500">{bucket.region ?? S3_REGION}</span>
                   </td>

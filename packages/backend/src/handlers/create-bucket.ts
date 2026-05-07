@@ -43,7 +43,7 @@ export async function baseHandler(
 
   const { name, region, versioning, lock, retention } = parsed.data;
 
-  const allowedRegions = getAvailableRegions(process.env.FILONE_STAGE ?? '');
+  const allowedRegions = getAvailableRegions(process.env.FILONE_STAGE!);
   if (!allowedRegions.includes(region as S3Region)) {
     return new ResponseBuilder()
       .status(400)

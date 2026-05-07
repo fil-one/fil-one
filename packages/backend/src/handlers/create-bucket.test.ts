@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
@@ -220,5 +220,54 @@ describe('create-bucket baseHandler', () => {
     const body = JSON.parse(result.body as string);
     expect(body.message).toContain('Unsupported region');
     expect(mockCreateAuroraBucket).not.toHaveBeenCalled();
+  });
+
+  describe('region availability by stage', () => {
+    const originalStage = process.env.FILONE_STAGE;
+
+    beforeEach(() => {
+      ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+      mockCreateAuroraBucket.mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      process.env.FILONE_STAGE = originalStage;
+    });
+
+    it('accepts us-east-1 on staging', async () => {
+      process.env.FILONE_STAGE = 'staging';
+      const event = buildEvent({
+        body: JSON.stringify({ name: 'my-bucket', region: 'us-east-1' }),
+        userInfo: USER_INFO,
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('accepts eu-west-1 on production', async () => {
+      process.env.FILONE_STAGE = 'production';
+      const event = buildEvent({
+        body: JSON.stringify({ name: 'my-bucket', region: 'eu-west-1' }),
+        userInfo: USER_INFO,
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('rejects us-east-1 on production', async () => {
+      process.env.FILONE_STAGE = 'production';
+      const event = buildEvent({
+        body: JSON.stringify({ name: 'my-bucket', region: 'us-east-1' }),
+        userInfo: USER_INFO,
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(400);
+      const body = JSON.parse(result.body as string);
+      expect(body.message).toContain('Unsupported region');
+      expect(mockCreateAuroraBucket).not.toHaveBeenCalled();
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
@@ -370,6 +370,107 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: { S: 'AKIA1234567890' },
       createdAt: { S: '2026-03-10T00:00:00Z' },
       status: { S: 'active' },
+    });
+  });
+
+  describe('region', () => {
+    const originalStage = process.env.FILONE_STAGE;
+
+    beforeEach(() => {
+      ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+      ddbMock.on(PutItemCommand).resolves({});
+      mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+    });
+
+    afterEach(() => {
+      process.env.FILONE_STAGE = originalStage;
+    });
+
+    it('succeeds when region is missing (back-compat with legacy callers)', async () => {
+      process.env.FILONE_STAGE = 'production';
+      const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('persists region in DynamoDB when provided', async () => {
+      process.env.FILONE_STAGE = 'staging';
+      const event = buildEvent({
+        body: JSON.stringify({
+          keyName: 'My Key',
+          permissions: ['read'],
+          bucketScope: 'all',
+          region: 'us-east-1',
+        }),
+        userInfo: USER_INFO,
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(201);
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.region.S).toBe('us-east-1');
+    });
+
+    it('accepts eu-west-1 on production', async () => {
+      process.env.FILONE_STAGE = 'production';
+      const event = buildEvent({
+        body: JSON.stringify({
+          keyName: 'My Key',
+          permissions: ['read'],
+          bucketScope: 'all',
+          region: 'eu-west-1',
+        }),
+        userInfo: USER_INFO,
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('rejects us-east-1 on production', async () => {
+      process.env.FILONE_STAGE = 'production';
+      const event = buildEvent({
+        body: JSON.stringify({
+          keyName: 'My Key',
+          permissions: ['read'],
+          bucketScope: 'all',
+          region: 'us-east-1',
+        }),
+        userInfo: USER_INFO,
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(400);
+      const body = JSON.parse(result.body!);
+      expect(body.message).toContain('Unsupported region');
+      expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
+    });
+
+    it('persists region in the recovery path on partial failure', async () => {
+      process.env.FILONE_STAGE = 'staging';
+      mockCreateAuroraAccessKey.mockRejectedValue(new DuplicateKeyNameError());
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+      mockFindAuroraAccessKeyByName.mockResolvedValue({
+        id: 'aurora-key-1',
+        accessKeyId: 'AKIA1234567890',
+        createdAt: '2026-03-10T00:00:00Z',
+      });
+
+      const event = buildEvent({
+        body: JSON.stringify({
+          keyName: 'My Key',
+          permissions: ['read'],
+          bucketScope: 'all',
+          region: 'us-east-1',
+        }),
+        userInfo: USER_INFO,
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(409);
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.region.S).toBe('us-east-1');
     });
   });
 });
