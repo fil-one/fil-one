@@ -19,7 +19,7 @@ import { getVerifiedIdTokenClaims } from './auth.js';
  * (~1 hour) and forces a fresh step-up.
  *
  * 401 step_up_required signals the frontend wrapper to redirect through
- * `/api/login?acr_values=...:multi-factor`.
+ * `/login?acr_values=...:multi-factor`.
  *
  * Must be installed AFTER `authMiddleware` so verified claims are available.
  */
