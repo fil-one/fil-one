@@ -225,7 +225,7 @@
     }
 
     & .split-button__menu {
-      @apply absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-md;
+      @apply z-50 min-w-[160px] overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-md [--anchor-gap:4px];
     }
 
     & .split-button__item {
