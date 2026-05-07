@@ -81,6 +81,7 @@ export const CreateAccessKeySchema = z
     granularPermissions: z.array(z.enum(GRANULAR_PERMISSIONS)).optional(),
     bucketScope: z.enum(ACCESS_KEY_BUCKET_SCOPES).default('all'),
     buckets: z.array(z.string()).optional(),
+    // TODO: Make region required after the first deployment
     region: z.enum(S3Region).optional(),
     expiresAt: z
       .string()

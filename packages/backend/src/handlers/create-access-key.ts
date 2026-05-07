@@ -55,14 +55,14 @@ export async function baseHandler(
   }
 
   const { orgId } = getUserInfo(event);
-  const tenant = await getOrgAuroraTenant(orgId);
-  if (!tenant.ok) {
+  const tenantResult = await getOrgAuroraTenant(orgId);
+  if (!tenantResult.ok) {
     return new ResponseBuilder()
       .status(503)
-      .body<ErrorResponse>({ message: tenant.message })
+      .body<ErrorResponse>({ message: tenantResult.errorMessage })
       .build();
   }
-  const auroraTenantId = tenant.auroraTenantId;
+  const auroraTenantId = tenantResult.auroraTenantId;
 
   let auroraKey;
   try {

@@ -13,7 +13,7 @@ export enum S3Region {
 }
 
 /** Default S3 region for Fil One. */
-export const S3_REGION = S3Region.EuWest1;
+export const S3_REGION = S3Region.EuWest1 satisfies S3Region;
 
 /** Human-readable region labels. */
 export const REGION_LABELS: Record<S3Region, string> = {

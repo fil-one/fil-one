@@ -14,10 +14,14 @@ type AccessKeyFormFieldsProps = {
   form: ReturnType<typeof useAccessKeyForm>;
   pinnedBucket?: string;
   /** When true, the region field is hidden (caller controls region externally). */
-  hideRegion?: boolean;
+  hideRegionSelector?: boolean;
 };
 
-export function AccessKeyFormFields({ form, pinnedBucket, hideRegion }: AccessKeyFormFieldsProps) {
+export function AccessKeyFormFields({
+  form,
+  pinnedBucket,
+  hideRegionSelector,
+}: AccessKeyFormFieldsProps) {
   const {
     keyName,
     setKeyName,
@@ -65,7 +69,7 @@ export function AccessKeyFormFields({ form, pinnedBucket, hideRegion }: AccessKe
       </FormField>
 
       {/* Region — hidden when caller controls it externally (e.g. bucket creation flow) */}
-      {!hideRegion && (
+      {!hideRegionSelector && (
         <FormField
           htmlFor="key-region"
           label="Region"
