@@ -9,7 +9,7 @@ type FormFieldProps = {
 export function FormField({ label, htmlFor, description, error, children }: FormFieldProps) {
   return (
     <div className="flex flex-col gap-2.5">
-      <label htmlFor={htmlFor} className="text-sm font-medium text-zinc-700">
+      <label htmlFor={htmlFor} className="text-xs font-medium text-zinc-900">
         {label}
       </label>
       {children}
