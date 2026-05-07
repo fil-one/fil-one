@@ -1,11 +1,10 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
-import { CreateBucketSchema } from '@filone/shared';
+import type { CreateBucketResponse, ErrorResponse, S3Region } from '@filone/shared';
+import { CreateBucketSchema, getAvailableRegions } from '@filone/shared';
 import { createAuroraBucket, BucketAlreadyExistsError } from '../lib/aurora-portal.js';
 import { getOrgAuroraTenant } from '../lib/org-profile.js';
-import { validateRegion } from '../lib/region.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -38,16 +37,17 @@ export async function baseHandler(
 
   const { name, region, versioning, lock, retention } = parsed.data;
 
-  const regionError = validateRegion(region, process.env.FILONE_STAGE!);
-  if (regionError) {
-    return new ResponseBuilder().status(400).body<ErrorResponse>({ message: regionError }).build();
+  const allowedRegions = getAvailableRegions(process.env.FILONE_STAGE!);
+  if (region !== undefined && !allowedRegions.includes(region as S3Region)) {
+    const message = `Unsupported region. Supported: ${allowedRegions.join(', ')}`;
+    return new ResponseBuilder().status(400).body<ErrorResponse>({ message }).build();
   }
 
   const { orgId } = getUserInfo(event);
   const tenant = await getOrgAuroraTenant(orgId);
   if (!tenant.ok) {
     return new ResponseBuilder()
-      .status(tenant.status)
+      .status(503)
       .body<ErrorResponse>({ message: tenant.message })
       .build();
   }

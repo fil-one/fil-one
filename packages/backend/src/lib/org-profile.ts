@@ -28,7 +28,7 @@ export async function setOrgAuroraTenantStatus(
 
 export type OrgAuroraTenantResult =
   | { ok: true; auroraTenantId: string }
-  | { ok: false; status: 503; message: string };
+  | { ok: false; message: string };
 
 export async function getOrgAuroraTenant(orgId: string): Promise<OrgAuroraTenantResult> {
   const { Item } = await getDynamoClient().send(
@@ -43,7 +43,6 @@ export async function getOrgAuroraTenant(orgId: string): Promise<OrgAuroraTenant
     console.warn('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
     return {
       ok: false,
-      status: 503,
       message: 'Aurora tenant setup is not complete, please try again later',
     };
   }
