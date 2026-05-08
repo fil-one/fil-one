@@ -10,9 +10,9 @@ transparently.
 
 Env vars
 --------
-AURORA_PORTAL_ORIGIN  – e.g. https://dashboard.dev.aur.lu
-AURORA_TENANT_ID      – UUID of the tenant whose buckets we manage
-AURORA_NO_VERIFY_SSL  – set to "true" to skip TLS cert verification
+AURORA_PORTAL_ORIGIN  - e.g. https://api.portal.dev.aur.lu
+AURORA_TENANT_ID      - UUID of the tenant whose buckets we manage
+AURORA_NO_VERIFY_SSL  - set to "true" to skip TLS cert verification
 
 Token
 -----
@@ -83,7 +83,7 @@ def _load_token() -> str:
 
 def _headers() -> dict:
     return {
-        "Authorization": f"Bearer {_load_token()}",
+        "X-Api-Key": _load_token(),
         "Content-Type": "application/json",
     }
 
@@ -99,27 +99,36 @@ def _url(path: str) -> str:
 # ── Portal API wrappers ─────────────────────────────────────────────────
 
 def portal_list_buckets() -> dict:
-    """GET /tenants/{tenantId}/bucket → S3-shaped ListBuckets response."""
+    """GET /tenants/{tenantId}/buckets → S3-shaped ListBuckets response.
+
+    Paginates through bucket.PaginatedBucketListResponse pages.
+    """
     _suppress_insecure_warnings()
     tenant = _tenant_id()
-    url = _url(f"/tenants/{tenant}/bucket")
-    log.debug("Portal list_buckets: GET %s", url)
+    url = _url(f"/tenants/{tenant}/buckets")
 
-    resp = requests.get(url, headers=_headers(), **_req_kwargs())
-    resp.raise_for_status()
-    data = resp.json()
+    page = 1
+    page_size = 100
+    raw_items: list = []
+    while True:
+        params = {"page": page, "pageSize": page_size}
+        log.debug("Portal list_buckets: GET %s page=%d", url, page)
+        resp = requests.get(url, headers=_headers(), params=params, **_req_kwargs())
+        resp.raise_for_status()
+        data = resp.json() or {}
 
-    # The Portal API returns something like {"buckets": [{"name": "...", ...}, ...]}
-    # Normalise to boto3 shape: {"Buckets": [{"Name": "...", "CreationDate": ...}]}
-    raw_buckets = data if isinstance(data, list) else data.get("buckets", data.get("Buckets", []))
-    if isinstance(raw_buckets, dict):
-        # Fallback: maybe the entire response is a single-bucket dict
-        raw_buckets = [raw_buckets]
+        items = data.get("items") or []
+        raw_items.extend(items)
+
+        total = data.get("totalCount", len(raw_items))
+        if not items or len(raw_items) >= total:
+            break
+        page += 1
 
     buckets = []
-    for b in raw_buckets:
-        name = b.get("name") or b.get("Name") or b.get("bucketName", "")
-        created = b.get("creationDate") or b.get("CreationDate") or b.get("createdAt")
+    for b in raw_items:
+        name = b.get("name", "")
+        created = b.get("createdAt")
         if created and isinstance(created, str):
             try:
                 created = datetime.fromisoformat(created.replace("Z", "+00:00"))
@@ -144,18 +153,20 @@ def portal_list_buckets() -> dict:
 
 
 def portal_create_bucket(bucket_name: str, **kwargs) -> dict:
-    """POST /tenants/{tenantId}/bucket → create a bucket via Portal API.
+    """POST /tenants/{tenantId}/buckets → create a bucket via Portal API.
+
+    Body shape is buckets.BucketCreateRequest:
+        {name, lock, encrypted, versioning, defaultRetention}
 
     Returns an S3-shaped CreateBucket response.
     """
     _suppress_insecure_warnings()
     tenant = _tenant_id()
-    url = _url(f"/tenants/{tenant}/bucket")
-    body = {"name": bucket_name}
+    url = _url(f"/tenants/{tenant}/buckets")
+    body: dict = {"name": bucket_name}
 
-    # Pass through ObjectLockEnabledForBucket if set
     if kwargs.get("ObjectLockEnabledForBucket"):
-        body["objectLockEnabled"] = True
+        body["lock"] = True
 
     log.debug("Portal create_bucket: POST %s  body=%s", url, body)
 
@@ -167,7 +178,7 @@ def portal_create_bucket(bucket_name: str, **kwargs) -> dict:
         error_response = {
             "Error": {
                 "Code": "BucketAlreadyOwnedByYou",
-                "Message": f"Your previous request to create the named bucket succeeded and you already own it.",
+                "Message": "Your previous request to create the named bucket succeeded and you already own it.",
                 "BucketName": bucket_name,
             },
             "ResponseMetadata": {
@@ -185,36 +196,38 @@ def portal_create_bucket(bucket_name: str, **kwargs) -> dict:
         "Location": f"/{bucket_name}",
         "ResponseMetadata": {
             "RequestId": "aurora-portal-bridge",
-            "HTTPStatusCode": 200,
+            "HTTPStatusCode": resp.status_code,
             "HTTPHeaders": {"location": f"/{bucket_name}"},
             "RetryAttempts": 0,
         },
     }
-    log.info("Portal create_bucket: created %r", bucket_name)
+    log.info("Portal create_bucket: created %r (HTTP %d)", bucket_name, resp.status_code)
     return result
 
 
 def portal_delete_bucket(bucket_name: str) -> dict:
-    """DELETE /tenants/{tenantId}/bucket/{name} → delete bucket via Portal API.
+    """DELETE /tenants/{tenantId}/buckets/{bucketName} → delete bucket via Portal API.
 
-    Best-effort: if the endpoint doesn't exist (404/405), logs a warning
-    and returns success so cleanup doesn't block test runs.
+    204 on success; 404 not found; 409 if bucket still has objects/versions.
+    Best-effort on transport errors so cleanup doesn't block test runs.
     """
     _suppress_insecure_warnings()
     tenant = _tenant_id()
-    url = _url(f"/tenants/{tenant}/bucket/{bucket_name}")
+    url = _url(f"/tenants/{tenant}/buckets/{bucket_name}")
     log.debug("Portal delete_bucket: DELETE %s", url)
 
+    status = 204
     try:
         resp = requests.delete(url, headers=_headers(), **_req_kwargs())
-        if resp.status_code in (200, 204):
+        status = resp.status_code
+        if status in (200, 204):
             log.info("Portal delete_bucket: deleted %r", bucket_name)
-        elif resp.status_code in (404, 405):
+        elif status == 404:
+            log.warning("Portal delete_bucket: %r not found", bucket_name)
+        elif status == 409:
             log.warning(
-                "Portal delete_bucket: endpoint returned %d for %r — "
-                "DELETE bucket may not be supported via Portal API. "
-                "Bucket will need manual cleanup.",
-                resp.status_code, bucket_name,
+                "Portal delete_bucket: %r has remaining objects/versions (HTTP 409)",
+                bucket_name,
             )
         else:
             resp.raise_for_status()
@@ -224,7 +237,7 @@ def portal_delete_bucket(bucket_name: str) -> dict:
     return {
         "ResponseMetadata": {
             "RequestId": "aurora-portal-bridge",
-            "HTTPStatusCode": 204,
+            "HTTPStatusCode": status,
             "HTTPHeaders": {},
             "RetryAttempts": 0,
         },
