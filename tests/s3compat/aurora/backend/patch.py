@@ -1,17 +1,9 @@
-"""
-aurora_s3_bridge — Pytest plugin that redirects S3 bucket-management
-calls to the Aurora Portal API.
+"""Aurora portal patch layer — redirects S3 bucket management to the Portal API.
 
-Aurora access keys cannot ListBuckets, CreateBucket, or DeleteBucket.
-Those operations are portal-only (Bearer-token REST API).  This plugin
-monkey-patches every boto3 S3 client so the ceph/s3-tests suite works
-without any modifications to the submodule.
-
-Activation
-----------
-Only activates when the ``AURORA_PORTAL_ORIGIN`` env var is set.
-Load it with ``pytest -p aurora_s3_bridge ...`` (requires ``tests/s3compat/``
-on PYTHONPATH).
+Aurora access keys cannot ListBuckets, CreateBucket, or DeleteBucket. Those
+operations are portal-only (Bearer-token REST API). This module monkey-patches
+every boto3 S3 client so the ceph/s3-tests suite works without modifications
+to the submodule.
 
 What gets patched
 -----------------
@@ -23,28 +15,23 @@ What gets patched
   → the ``Bucket.create()`` method on every S3 resource is wrapped so
     ``get_new_bucket_resource()`` works.
 
-- Tests that explicitly test ListBuckets behaviour are auto-skipped.
+Activation is owned by ``backend_loader`` (top-level pytest plugin); this
+module's ``activate()`` is invoked when ``S3COMPAT_BACKEND=aurora``.
 """
 import functools
 import logging
 import os
 
 import boto3
-import pytest
 
-log = logging.getLogger("aurora_s3_bridge")
+from .portal_api import (
+    portal_create_bucket,
+    portal_delete_bucket,
+    portal_list_buckets,
+    validate_connection,
+)
 
-# ── Guard: only activate for Aurora ─────────────────────────────────────
-
-_ACTIVE = bool(os.environ.get("AURORA_PORTAL_ORIGIN"))
-
-if _ACTIVE:
-    from aurora_portal_bridge import (
-        portal_create_bucket,
-        portal_delete_bucket,
-        portal_list_buckets,
-        validate_connection,
-    )
+log = logging.getLogger("aurora.backend.patch")
 
 
 # ── S3 Client patching ──────────────────────────────────────────────────
@@ -233,53 +220,40 @@ def _patched_session_resource(self, *args, **kwargs):
 
 # ── Install patches ──────────────────────────────────────────────────────
 
+_INSTALLED = False
+
+
 def _install_patches():
+    global _INSTALLED
+    if _INSTALLED:
+        return
     boto3.client = _patched_boto3_client
     boto3.session.Session.client = _patched_session_client
     boto3.resource = _patched_boto3_resource
     boto3.session.Session.resource = _patched_session_resource
-    log.info("Aurora S3 bridge patches installed")
+    _INSTALLED = True
+    log.info("aurora.backend.patch: boto3 patches installed")
 
 
-# ── Tests to auto-skip ───────────────────────────────────────────────────
+# ── Tests to auto-skip (consumed by backend_loader) ──────────────────────
 
-_SKIP_TESTS = {
+SKIP_TESTS = {
     "test_list_buckets_anonymous",
     "test_list_buckets_invalid_auth",
     "test_list_buckets_bad_auth",
     "test_list_buckets_paginated",
 }
 
-_SKIP_REASON = (
+SKIP_REASON = (
     "Aurora: ListBuckets is handled by the Portal API bridge; "
     "this test exercises raw S3 ListBuckets behaviour which is not applicable."
 )
 
 
-# ── Pytest hooks ─────────────────────────────────────────────────────────
+# ── Activation entry point ───────────────────────────────────────────────
 
-def pytest_configure(config):
-    """Called early in pytest startup — install monkey-patches."""
-    if not _ACTIVE:
-        return
-    log.info("Aurora S3 bridge plugin activating (AURORA_PORTAL_ORIGIN is set)")
-    try:
-        validate_connection()
-        log.info("Aurora Portal API connection validated")
-    except RuntimeError as exc:
-        log.error("Aurora Portal API validation failed: %s", exc)
-        raise pytest.UsageError(str(exc)) from exc
+def activate():
+    """Entry point invoked by `backend_loader._load_backend('aurora')`."""
+    validate_connection()
+    log.info("aurora.backend.patch: portal API connection validated")
     _install_patches()
-
-
-def pytest_collection_modifyitems(config, items):
-    """Auto-skip tests that explicitly test ListBuckets behaviour."""
-    if not _ACTIVE:
-        return
-    skip_marker = pytest.mark.skip(reason=_SKIP_REASON)
-    for item in items:
-        # Match on the test function name (last part of the nodeid)
-        test_name = item.name
-        if test_name in _SKIP_TESTS:
-            item.add_marker(skip_marker)
-            log.debug("Auto-skipping %s", item.nodeid)

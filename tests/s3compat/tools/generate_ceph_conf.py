@@ -1,8 +1,8 @@
 """Generate s3tests.conf from a provider's .env file.
 
 Usage:
-  python generate_ceph_conf.py akave
-  python generate_ceph_conf.py aurora
+  python tools/generate_ceph_conf.py akave
+  python tools/generate_ceph_conf.py aurora
 
 Writes ceph-s3-tests/s3tests.conf, ready for use with pytest:
   cd ceph-s3-tests
@@ -11,8 +11,10 @@ Writes ceph-s3-tests/s3tests.conf, ready for use with pytest:
 import sys
 from pathlib import Path
 
-from client import resolve_provider
-from compatibility_test import _generate_conf
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from lib.client import resolve_provider  # noqa: E402
+from compatibility_test import _generate_conf  # noqa: E402
 
 if len(sys.argv) != 2:
     print(f"Usage: {sys.argv[0]} <provider>", file=sys.stderr)

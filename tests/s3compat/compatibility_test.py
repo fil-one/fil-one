@@ -34,8 +34,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
-import report as _report
-from client import get_s3_client, resolve_provider
+from lib import report as _report
+from lib.client import get_s3_client, resolve_provider
 
 _SCRIPTS_DIR = Path(__file__).parent
 S3TESTS_DIR = _SCRIPTS_DIR / "ceph-s3-tests"
@@ -182,9 +182,9 @@ def _run_pytest(conf_path: Path, marks: str, test_target: str, json_out: Path,
         "-q",
     ]
 
-    # Aurora: load the S3 bridge plugin to redirect bucket ops to Portal API
-    if provider == "aurora" and os.environ.get("AURORA_PORTAL_ORIGIN"):
-        cmd += ["-p", "aurora_s3_bridge"]
+    # Always load the backend loader plugin; it no-ops if S3COMPAT_BACKEND
+    # is unset or names an on-ramp without a `<provider>/backend/` package.
+    cmd += ["-p", "lib.backend_loader"]
 
     if marks:
         cmd += ["-m", marks]
@@ -192,22 +192,21 @@ def _run_pytest(conf_path: Path, marks: str, test_target: str, json_out: Path,
         cmd += ["-k", filter_expr]
     cmd.append(test_target)
 
-    env = {**os.environ, "S3TEST_CONF": str(conf_path)}
-
-    # Aurora: ensure the plugin is importable and Portal env vars are forwarded
-    if provider == "aurora":
-        testing_dir = str(_SCRIPTS_DIR)
-        env["PYTHONPATH"] = testing_dir + os.pathsep + env.get("PYTHONPATH", "")
-        # Forward Portal API env vars (already in os.environ from .env load)
-        for var in ("AURORA_PORTAL_ORIGIN", "AURORA_TENANT_ID", "AURORA_NO_VERIFY_SSL"):
-            if var in os.environ:
-                env[var] = os.environ[var]
+    # Make tests/s3compat/ importable so `backend_loader` can find the
+    # provider package, and so provider env vars already loaded by
+    # client.resolve_provider() reach the pytest subprocess.
+    testing_dir = str(_SCRIPTS_DIR)
+    env = {
+        **os.environ,
+        "S3TEST_CONF": str(conf_path),
+        "S3COMPAT_BACKEND": provider,
+        "PYTHONPATH": testing_dir + os.pathsep + os.environ.get("PYTHONPATH", ""),
+    }
 
     print(f"Command : {' '.join(str(c) for c in cmd)}")
     print(f"CWD     : {S3TESTS_DIR}")
     print(f"Marks   : {marks or '(none)'}")
-    if provider == "aurora" and os.environ.get("AURORA_PORTAL_ORIGIN"):
-        print(f"Plugin  : aurora_s3_bridge (Portal API bridge)")
+    print(f"Backend : {provider}")
     print()
 
     result = subprocess.run(cmd, cwd=S3TESTS_DIR, env=env)

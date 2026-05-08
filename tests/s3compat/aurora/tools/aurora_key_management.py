@@ -15,25 +15,25 @@ USAGE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   # Step 1: Discover Auth0 settings from the portal
-  python aurora_key_management.py --origin https://backoffice.dev.aur.lu --no-verify env
+  python aurora/tools/aurora_key_management.py --origin https://backoffice.dev.aur.lu --no-verify env
 
   # Step 2: Log in (paste Bearer token from browser devtools)
-  python aurora_key_management.py login
+  python aurora/tools/aurora_key_management.py login
 
   # Step 3: List tenants
-  python aurora_key_management.py --origin https://backoffice.dev.aur.lu --no-verify tenants
+  python aurora/tools/aurora_key_management.py --origin https://backoffice.dev.aur.lu --no-verify tenants
 
   # Step 4: List access keys for a tenant
-  python aurora_key_management.py --origin https://backoffice.dev.aur.lu --no-verify keys --tenant <TENANT_ID>
+  python aurora/tools/aurora_key_management.py --origin https://backoffice.dev.aur.lu --no-verify keys --tenant <TENANT_ID>
 
   # Step 5: Get details for a specific key
-  python aurora_key_management.py --origin https://backoffice.dev.aur.lu --no-verify get-key --tenant <TENANT_ID> --key-id <KEY_ID>
+  python aurora/tools/aurora_key_management.py --origin https://backoffice.dev.aur.lu --no-verify get-key --tenant <TENANT_ID> --key-id <KEY_ID>
 
   # Step 6: Create a new key with full S3 permissions
-  python aurora_key_management.py --origin https://backoffice.dev.aur.lu --no-verify create-key --tenant <TENANT_ID> --name "compat-test-full" --access '["s3:*"]'
+  python aurora/tools/aurora_key_management.py --origin https://backoffice.dev.aur.lu --no-verify create-key --tenant <TENANT_ID> --name "compat-test-full" --access '["s3:*"]'
 
   # Step 7: Delete a key
-  python aurora_key_management.py --origin https://backoffice.dev.aur.lu --no-verify delete-key --tenant <TENANT_ID> --key-id <KEY_ID>
+  python aurora/tools/aurora_key_management.py --origin https://backoffice.dev.aur.lu --no-verify delete-key --tenant <TENANT_ID> --key-id <KEY_ID>
 
   # Tip: to get the Bearer token, open the Aurora backoffice in Chrome,
   # open DevTools (F12) → Network tab → perform any action → click a

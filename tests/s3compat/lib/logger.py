@@ -3,7 +3,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import report as _report
+from . import report as _report
 
 
 def _now() -> str:
@@ -74,6 +74,8 @@ class Logger:
         print(f" ERR  [{op}] {code}: {msg}", file=sys.stderr)
 
     def write_report(self, title: str, extra_lines: list = None):
+        # Writes three sibling files: <ts>_<script>_report.{txt,md,html}.
+        # `self.report_file` is the .txt path; .md/.html are derived from it.
         text = _report.write_report(
             title=title,
             script_name=self.script,

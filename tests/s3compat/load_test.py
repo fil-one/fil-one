@@ -25,8 +25,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from client import resolve_provider, get_s3_client, get_source_client
-from logger import Logger
+from lib.client import resolve_provider, get_s3_client, get_source_client
+from lib.logger import Logger
 
 MULTIPART_THRESHOLD = 50 * 1024 * 1024
 PART_SIZE = 50 * 1024 * 1024
