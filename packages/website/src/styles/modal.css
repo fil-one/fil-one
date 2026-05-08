@@ -8,7 +8,7 @@
   }
 
   .modal-panel {
-    @apply relative w-full rounded-xl bg-white shadow-xl;
+    @apply relative flex w-full max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-xl bg-white shadow-xl;
   }
 
   .modal-panel--sm {
@@ -52,7 +52,7 @@
   }
 
   .modal-body {
-    @apply px-6 py-3 text-(--color-paragraph-text);
+    @apply min-h-0 flex-1 overflow-y-auto px-6 py-3 text-(--color-paragraph-text);
   }
 
   .modal-footer {

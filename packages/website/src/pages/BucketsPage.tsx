@@ -3,9 +3,12 @@ import { Link } from '@tanstack/react-router';
 import { PlusIcon, DatabaseIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
+import { IconButton } from '../components/IconButton';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
+import { EmptyStateCard } from '../components/EmptyStateCard';
 
 import type { ListBucketsResponse } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
@@ -54,7 +57,7 @@ export function BucketsPage() {
 
   if (isError) {
     return (
-      <div className="p-6">
+      <div className="px-10 pt-10">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error?.message ?? 'Failed to load buckets'}
         </div>
@@ -63,12 +66,15 @@ export function BucketsPage() {
   }
 
   return (
-    <div className="p-6">
+    <div className="px-10 pt-10">
       {/* Page header */}
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-zinc-900">Buckets</h1>
+      <div className="mb-6 flex items-start justify-between">
+        <Heading tag="h1" size="xl" description="Organize and manage your storage containers">
+          Buckets
+        </Heading>
         <Button
-          variant="primary"
+          variant="ghost"
+          size="sm"
           icon={PlusIcon}
           onClick={() => navigate({ to: '/buckets/create' })}
         >
@@ -78,12 +84,11 @@ export function BucketsPage() {
 
       {/* Content: empty state or table */}
       {buckets.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
-          <DatabaseIcon size={48} className="mb-4 text-zinc-300" aria-hidden="true" />
-          <p className="mb-1 text-base font-medium text-zinc-700">No buckets yet</p>
-          <p className="mb-6 text-sm text-zinc-500">
-            Create your first bucket to start storing objects
-          </p>
+        <EmptyStateCard
+          icon={DatabaseIcon}
+          title="No buckets yet"
+          description="Create your first bucket to start storing objects"
+        >
           <Button
             variant="primary"
             icon={PlusIcon}
@@ -91,7 +96,7 @@ export function BucketsPage() {
           >
             Create bucket
           </Button>
-        </div>
+        </EmptyStateCard>
       ) : (
         <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
           <table className="w-full text-sm">
@@ -161,22 +166,15 @@ export function BucketsPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
+                    <IconButton
+                      icon={TrashIcon}
                       aria-label={`Delete bucket ${bucket.name}`}
                       onClick={() => deleteBucketMutation.mutate(bucket.name)}
                       // TODO: enable bucket deletion after Aurora implements this operation
                       // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
-                      // disabled={
-                      //   deleteBucketMutation.isPending &&
-                      //   deleteBucketMutation.variables === bucket.name
-                      // }
                       disabled
                       title="Deleting buckets is not available yet"
-                      className="text-zinc-400 hover:text-red-500 disabled:opacity-50"
-                    >
-                      <TrashIcon size={16} aria-hidden="true" />
-                    </button>
+                    />
                   </td>
                 </tr>
               ))}

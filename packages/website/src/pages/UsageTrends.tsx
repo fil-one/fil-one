@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import type { UsageTrendsResponse } from '@filone/shared';
 
+import { Heading } from '../components/Heading/Heading';
 import { formatBytes, formatBytesShort } from '@filone/shared';
 import { getActivity } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
@@ -40,7 +41,9 @@ export function UsageTrends() {
     <div className="mb-6">
       {/* Section header */}
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-zinc-900">Usage Trends</h2>
+        <Heading tag="h2" size="sm">
+          Usage Trends
+        </Heading>
         <div className="flex items-center gap-1 rounded-lg bg-[rgba(243,244,246,0.6)] p-0.5">
           <button
             type="button"
