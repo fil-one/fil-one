@@ -27,9 +27,11 @@ import argparse
 import configparser
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -263,12 +265,13 @@ def _parse_results(json_out: Path) -> tuple:
         }
 
         if outcome in ("failed", "error"):
-            # Prefer call phase, fall back to setup/teardown
+            # Prefer call phase, fall back to setup/teardown. Keep full text —
+            # the report renderer puts it in collapsible <details> blocks.
             for phase in ("call", "setup", "teardown"):
                 phase_data = test.get(phase)
                 if phase_data and phase_data.get("longrepr"):
-                    # Trim long tracebacks — full detail is in the raw JSON log
-                    entry["longrepr"] = phase_data["longrepr"][:600]
+                    entry["longrepr"] = phase_data["longrepr"]
+                    entry["failed_phase"] = phase
                     break
 
         entries.append(entry)
@@ -361,6 +364,118 @@ def _merge_results(json_paths: list) -> tuple:
 
     total_meta["duration_s"] = round(total_meta["duration_s"], 1)
     return all_entries, total_meta
+
+
+# Pytest "E   <Exception>: <message>" lines — the canonical fingerprint for
+# clustering identical-cause failures across many tests.
+_PYTEST_E_LINE = re.compile(r"^E\s+([\w.]+(?:Error|Exception|AssertionError)?)(?::\s*(.*))?$")
+
+
+def _fingerprint(longrepr: str) -> str:
+    """Return a short, stable signature for grouping similar failures.
+
+    Strategy:
+      1. Last "E   <ExceptionClass>: <message>" line (pytest's traceback marker)
+      2. Otherwise, the last non-empty line of the longrepr
+      3. Otherwise, "unknown"
+    Boto3 ClientError messages embed bucket/key names that we strip so otherwise-
+    identical failures cluster together.
+    """
+    if not longrepr:
+        return "unknown"
+    last_e = None
+    last_nonempty = None
+    for raw in longrepr.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+        last_nonempty = line.strip()
+        m = _PYTEST_E_LINE.match(line)
+        if m:
+            last_e = m.group(0).lstrip("E ").strip()
+    fp = last_e or last_nonempty or "unknown"
+    # Strip volatile bits (random bucket prefix, hex ids, timestamps) so similar
+    # errors collapse into one cluster.
+    fp = re.sub(r"[a-z0-9]+-compat-[a-z0-9-]+", "<bucket>", fp)
+    fp = re.sub(r"\b[0-9a-f]{16,}\b", "<hex>", fp)
+    fp = re.sub(r"\b\d{10,}\b", "<num>", fp)
+    return fp[:240]
+
+
+def _failure_clusters(entries: list) -> list:
+    """Group failed entries by traceback fingerprint, sorted by frequency."""
+    clusters: "OrderedDict[str, dict]" = OrderedDict()
+    for e in entries:
+        if e.get("status") in _report.NON_FAILURE_STATUSES:
+            continue
+        fp = _fingerprint(e.get("longrepr", ""))
+        c = clusters.setdefault(fp, {
+            "fingerprint": fp,
+            "count": 0,
+            "tests": [],
+            "sample_traceback": e.get("longrepr", ""),
+            "sample_test": e.get("test", ""),
+        })
+        c["count"] += 1
+        c["tests"].append(e.get("test", ""))
+    return sorted(clusters.values(), key=lambda c: c["count"], reverse=True)
+
+
+def _clusters_section_md(clusters: list) -> str:
+    """Render the failure-clusters section body as Markdown.
+
+    Each cluster: a heading line with count + fingerprint, then a collapsible
+    block with the sample traceback and the full list of failing nodeids.
+    """
+    if not clusters:
+        return "_No failures._"
+    lines = [
+        f"**{len(clusters)} distinct failure pattern(s)** across "
+        f"{sum(c['count'] for c in clusters)} failing test(s).",
+        "",
+    ]
+    for i, c in enumerate(clusters, 1):
+        lines.append(f"### {i}. {c['count']}× — `{c['fingerprint']}`")
+        lines.append("")
+        lines.append("<details>")
+        lines.append(f"<summary>Sample traceback ({c['sample_test']})</summary>")
+        lines.append("")
+        lines.append("```pytb")
+        lines.append(c["sample_traceback"] or "(no traceback captured)")
+        lines.append("```")
+        lines.append("")
+        lines.append("</details>")
+        lines.append("")
+        lines.append("<details>")
+        lines.append(f"<summary>All {c['count']} failing test(s)</summary>")
+        lines.append("")
+        for t in c["tests"]:
+            lines.append(f"- `{t}`")
+        lines.append("")
+        lines.append("</details>")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _category_progress(entries: list) -> dict:
+    """Per-category {pct: int} for the BY CATEGORY ops table.
+
+    report.py already aggregates entries into ok/err counts per `op`; we just
+    compute a pass-rate percentage to overlay onto the table. Skipped folds
+    into ok (matching report.py's grouping), so this represents
+    "non-failing / total" — the same shape as the ok/total columns shown.
+    """
+    counts: dict = {}
+    for e in entries:
+        op = e.get("op", "unknown")
+        rec = counts.setdefault(op, {"ok": 0, "total": 0})
+        rec["total"] += 1
+        if e.get("status") in _report.NON_FAILURE_STATUSES:
+            rec["ok"] += 1
+    return {
+        op: {"pct": round(100 * rec["ok"] / rec["total"]) if rec["total"] else 0}
+        for op, rec in counts.items()
+    }
 
 
 def main():
@@ -461,6 +576,12 @@ def main():
         f"  Raw JSON  : {json_refs}",
     ]
 
+    clusters = _failure_clusters(entries)
+    cluster_section = _report.Section(
+        title="Failure clusters",
+        markdown=_clusters_section_md(clusters),
+    )
+
     text = _report.write_report(
         title=f"S3 Compatibility Test — {args.provider}",
         script_name="compatibility_test",
@@ -470,6 +591,8 @@ def main():
         extra_lines=extra,
         group_label="BY CATEGORY",
         show_successes=False,  # Hundreds of passing tests — errors are what matter
+        sections=[cluster_section],
+        op_decorations=_category_progress(entries),
     )
 
     print(f"\n{text}")

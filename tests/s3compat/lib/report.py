@@ -8,23 +8,420 @@ Callers build a list of entry dicts with at minimum:
 (e.g. the provider refused GetBucketCors with AccessDenied). Skipped entries
 are reported separately and do not count as failures.
 
-Callers call write_report() to produce the unified output.
+Callers call write_report() to produce three artefacts side-by-side:
+  - <ts>_<script>_report.txt  — plain text (legacy format, byte-stable)
+  - <ts>_<script>_report.md   — Markdown (canonical, agent-friendly, GitHub-renderable)
+  - <ts>_<script>_report.html — Styled HTML (human-friendly, collapsible details)
+
+Markdown is rendered from a Jinja2 template (templates/report.md.j2). HTML is
+the rendered Markdown wrapped in a small CSS shell. Inline HTML in the Markdown
+(e.g. <details>, the progress-bar div) survives both via md_in_html.
 """
 import json
 import os
 import statistics
+from dataclasses import dataclass, field
 from pathlib import Path
+
+import markdown as _markdown
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 
 NON_FAILURE_STATUSES = frozenset({"ok", "skipped"})
 
+_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
-def _timing_stats(times: list) -> str:
+_jinja_env = Environment(
+    loader=FileSystemLoader(_TEMPLATES_DIR),
+    autoescape=select_autoescape(disabled_extensions=("md", "j2"), default=False),
+    trim_blocks=True,
+    lstrip_blocks=True,
+    keep_trailing_newline=True,
+)
+
+
+@dataclass
+class Section:
+    """Caller-supplied rich content rendered between the ops table and Skipped/Successes."""
+    title: str
+    markdown: str
+
+
+@dataclass
+class _OpRow:
+    op: str
+    ok: int
+    err: int
+    total: int
+    avg: str
+    stddev: str
+    min: str
+    max: str
+    timing: str  # combined string for legacy text format
+    pct: int | None = None
+
+
+@dataclass
+class _ReportModel:
+    title: str
+    script_name: str
+    ts: str
+    summary: dict
+    group_label: str
+    group_field: str
+    op_rows: list
+    has_pass_rate: bool
+    sections: list
+    successes: list  # list of pre-serialized JSON strings
+    skipped: list
+    errors_raw: list  # original error entry dicts (for legacy .txt)
+    errors: list  # list of {"summary", "body"} dicts (for .md/.html)
+    extra_lines: list
+    log_paths: dict
+    show_successes: bool
+
+
+def _timing_stats(times: list) -> tuple:
+    """Returns (avg, stddev, min, max, combined_str)."""
     if not times:
-        return "(no timing)"
+        return ("—", "—", "—", "—", "(no timing)")
     avg = statistics.mean(times)
     std = statistics.pstdev(times)
-    return f"avg {avg:.3f}s  stddev {std:.3f}s  min {min(times):.3f}s  max {max(times):.3f}s"
+    mn = min(times)
+    mx = max(times)
+    combined = f"avg {avg:.3f}s  stddev {std:.3f}s  min {mn:.3f}s  max {mx:.3f}s"
+    return (f"{avg:.3f}s", f"{std:.3f}s", f"{mn:.3f}s", f"{mx:.3f}s", combined)
+
+
+def _group_field_label(group_label: str) -> str:
+    """'BY OPERATION' -> 'Operation', 'BY CATEGORY' -> 'Category'."""
+    if group_label.upper().startswith("BY "):
+        return group_label[3:].title()
+    return group_label.title()
+
+
+def _render_error(entry: dict) -> dict:
+    """Produce {"summary", "body"} for an error entry.
+
+    If the entry carries a pytest-style ``longrepr``/``test`` (compatibility_test
+    output), render the full traceback in a fenced ``pytb`` block. Otherwise,
+    fall back to a JSON dump of the entry.
+    """
+    op = entry.get("op", "unknown")
+    test = entry.get("test")
+    longrepr = entry.get("longrepr")
+
+    if test and longrepr:
+        outcome = entry.get("outcome", "failed")
+        elapsed = entry.get("elapsed_s")
+        meta = f"**{op}** — `{outcome}`"
+        if elapsed is not None:
+            meta += f" — {elapsed}s"
+        body = f"{meta}\n\n```pytb\n{longrepr}\n```"
+        return {"summary": test, "body": body}
+
+    code = entry.get("error_code") or entry.get("error_type")
+    msg = entry.get("error_message") or entry.get("error_msg") or entry.get("error")
+    summary = f"{op}"
+    if code:
+        summary += f" — {code}"
+    if msg:
+        summary += f": {msg}"
+    body = f"```json\n{json.dumps(entry, indent=2, default=str)}\n```"
+    return {"summary": summary, "body": body}
+
+
+def _build_model(
+    title: str,
+    script_name: str,
+    ts: str,
+    entries: list,
+    success_log: Path = None,
+    error_log: Path = None,
+    extra_lines: list = None,
+    group_label: str = "BY OPERATION",
+    show_successes: bool = True,
+    sections: list = None,
+    op_decorations: dict = None,
+    report_file: Path = None,
+) -> _ReportModel:
+    successes = [e for e in entries if e.get("status") == "ok"]
+    skipped = [e for e in entries if e.get("status") == "skipped"]
+    error_entries = [e for e in entries if e.get("status") not in NON_FAILURE_STATUSES]
+
+    # Per-op aggregation. Skipped entries fold into the "ok" column so a skipped
+    # op does not look like a failure; the SUMMARY/SKIPPED section show separately.
+    ops: dict = {}
+    for e in entries:
+        op = e.get("op", "unknown")
+        rec = ops.setdefault(op, {"ok": 0, "err": 0, "times": []})
+        if e.get("status") in NON_FAILURE_STATUSES:
+            rec["ok"] += 1
+        else:
+            rec["err"] += 1
+        if "elapsed_s" in e:
+            rec["times"].append(e["elapsed_s"])
+
+    op_decorations = op_decorations or {}
+    has_pass_rate = bool(op_decorations) and any(
+        d.get("pct") is not None for d in op_decorations.values()
+    )
+
+    op_rows = []
+    for op, rec in sorted(ops.items()):
+        total = rec["ok"] + rec["err"]
+        avg, stddev, mn, mx, combined = _timing_stats(rec["times"])
+        deco = op_decorations.get(op, {})
+        op_rows.append(_OpRow(
+            op=op,
+            ok=rec["ok"],
+            err=rec["err"],
+            total=total,
+            avg=avg,
+            stddev=stddev,
+            min=mn,
+            max=mx,
+            timing=combined,
+            pct=deco.get("pct"),
+        ))
+
+    summary = {
+        "total": len(entries),
+        "ok": len(successes),
+        "skipped": len(skipped),
+        "failed": len(error_entries),
+    }
+
+    log_paths = {"success": None, "error": None}
+    if report_file is not None:
+        report_parent = report_file.parent
+        if success_log:
+            log_paths["success"] = os.path.relpath(success_log, report_parent)
+        if error_log:
+            log_paths["error"] = os.path.relpath(error_log, report_parent)
+
+    return _ReportModel(
+        title=title,
+        script_name=script_name,
+        ts=ts,
+        summary=summary,
+        group_label=group_label,
+        group_field=_group_field_label(group_label),
+        op_rows=op_rows,
+        has_pass_rate=has_pass_rate,
+        sections=sections or [],
+        successes=[json.dumps(s, default=str) for s in successes],
+        skipped=[json.dumps(s, default=str) for s in skipped],
+        errors_raw=error_entries,
+        errors=[_render_error(e) for e in error_entries],
+        extra_lines=extra_lines or [],
+        log_paths=log_paths,
+        show_successes=show_successes,
+    )
+
+
+def _render_text(m: _ReportModel) -> str:
+    """Legacy plain-text format. Output kept byte-stable for back-compat."""
+    op_lines = []
+    for r in m.op_rows:
+        counts = f"{r.ok:>4} ok  {r.err:>4} failed  ({r.total:>4} total)"
+        op_lines.append(f"  {r.op:<30}  {counts}  {r.timing}")
+
+    summary_lines = [
+        "SUMMARY",
+        f"  Total  : {m.summary['total']}",
+        f"  OK     : {m.summary['ok']}",
+    ]
+    if m.summary["skipped"]:
+        summary_lines.append(f"  Skipped: {m.summary['skipped']}")
+    summary_lines.append(f"  Failed : {m.summary['failed']}")
+
+    lines = [
+        "=" * 70,
+        f"  {m.title}",
+        f"  Script : {m.script_name}",
+        f"  Run    : {m.ts}",
+        "=" * 70,
+        "",
+        *summary_lines,
+        "",
+        m.group_label,
+        *op_lines,
+        "",
+    ]
+
+    if m.extra_lines:
+        lines += list(m.extra_lines) + [""]
+
+    if m.show_successes and m.successes:
+        lines.append("SUCCESSES")
+        for s in m.successes:
+            lines.append(f"  {s}")
+        lines.append("")
+
+    if m.skipped:
+        lines.append("SKIPPED")
+        for s in m.skipped:
+            lines.append(f"  {s}")
+        lines.append("")
+
+    if m.errors_raw:
+        lines.append("ERRORS")
+        for e in m.errors_raw:
+            lines.append(f"  {json.dumps(e, default=str)}")
+        lines.append("")
+
+    if m.log_paths["success"] or m.log_paths["error"]:
+        lines.append("Log files:")
+        if m.log_paths["success"]:
+            lines.append(f"  Success : {m.log_paths['success']}")
+        if m.log_paths["error"]:
+            lines.append(f"  Errors  : {m.log_paths['error']}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _render_markdown(m: _ReportModel) -> str:
+    template = _jinja_env.get_template("report.md.j2")
+    return template.render(
+        title=m.title,
+        script_name=m.script_name,
+        ts=m.ts,
+        summary=m.summary,
+        group_label=m.group_label,
+        group_field=m.group_field,
+        op_rows=[
+            {
+                "op": r.op,
+                "ok": r.ok,
+                "err": r.err,
+                "total": r.total,
+                "avg": r.avg,
+                "stddev": r.stddev,
+                "min": r.min,
+                "max": r.max,
+                "pct": r.pct if r.pct is not None else 0,
+            }
+            for r in m.op_rows
+        ],
+        has_pass_rate=m.has_pass_rate,
+        sections=m.sections,
+        successes=m.successes,
+        skipped=m.skipped,
+        errors=m.errors,
+        extra_lines=m.extra_lines,
+        log_paths=m.log_paths,
+        show_successes=m.show_successes,
+    )
+
+
+_HTML_CSS = """
+:root {
+  color-scheme: light dark;
+  --fg: #1f2328;
+  --muted: #57606a;
+  --bg: #ffffff;
+  --bg-muted: #f6f8fa;
+  --border: #d0d7de;
+  --accent: #0969da;
+  --ok: #1a7f37;
+  --err: #cf222e;
+  --warn: #9a6700;
+  --bar-bg: #e6e8ec;
+  --bar-fill: #1a7f37;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --bg: #0d1117;
+    --bg-muted: #161b22;
+    --border: #30363d;
+    --accent: #58a6ff;
+    --ok: #3fb950;
+    --err: #f85149;
+    --warn: #d29922;
+    --bar-bg: #21262d;
+    --bar-fill: #3fb950;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--fg);
+  background: var(--bg);
+  margin: 0;
+  padding: 24px;
+}
+.container { max-width: 1100px; margin: 0 auto; }
+h1, h2, h3 { line-height: 1.25; margin-top: 1.6em; }
+h1 { font-size: 1.9rem; border-bottom: 1px solid var(--border); padding-bottom: .3em; margin-top: 0; }
+h2 { font-size: 1.35rem; border-bottom: 1px solid var(--border); padding-bottom: .25em; }
+h3 { font-size: 1.1rem; }
+p, li { color: var(--fg); }
+code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+code { background: var(--bg-muted); padding: 2px 5px; border-radius: 3px; font-size: 90%; }
+pre { background: var(--bg-muted); padding: 12px 14px; border-radius: 6px; overflow-x: auto; font-size: 12.5px; line-height: 1.45; }
+pre code { background: transparent; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 13.5px; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: middle; }
+th { background: var(--bg-muted); font-weight: 600; }
+tbody tr:nth-child(even) { background: var(--bg-muted); }
+details { margin: .5em 0; border: 1px solid var(--border); border-radius: 6px; padding: 0 12px; background: var(--bg-muted); }
+details > summary { cursor: pointer; padding: 8px 0; font-weight: 500; list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: "▸ "; color: var(--muted); }
+details[open] > summary::before { content: "▾ "; }
+details[open] { background: var(--bg); }
+.bar { display: inline-block; width: 90px; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; vertical-align: middle; margin-right: 6px; }
+.bar::before { content: ""; display: block; width: var(--pct, 0%); height: 100%; background: var(--bar-fill); transition: width .25s ease; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
+a { color: var(--accent); }
+"""
+
+
+def _render_html(title: str, md_text: str) -> str:
+    body = _markdown.markdown(
+        md_text,
+        extensions=[
+            "tables",
+            "fenced_code",
+            "toc",
+            "attr_list",
+            "md_in_html",
+            "sane_lists",
+            "codehilite",
+        ],
+        extension_configs={
+            "codehilite": {"css_class": "highlight", "guess_lang": False},
+            "toc": {"permalink": False},
+        },
+        output_format="html5",
+    )
+    # Escape only the document title (safe text inside <title>); md_text body
+    # has been processed by Python-Markdown which sanitizes appropriately.
+    safe_title = (
+        title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+    return (
+        "<!doctype html>\n"
+        '<html lang="en">\n<head>\n'
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"<title>{safe_title}</title>\n"
+        f"<style>{_HTML_CSS}</style>\n"
+        "</head>\n<body>\n"
+        '<div class="container">\n'
+        f"{body}\n"
+        "</div>\n</body>\n</html>\n"
+    )
+
+
+def _sibling_path(report_file: Path, suffix: str) -> Path:
+    return report_file.with_suffix(suffix)
 
 
 def write_report(
@@ -38,90 +435,46 @@ def write_report(
     extra_lines: list = None,
     group_label: str = "BY OPERATION",
     show_successes: bool = True,
+    sections: list = None,
+    op_decorations: dict = None,
 ) -> str:
-    """Format a unified report, write it to disk, and return the text."""
-    successes = [e for e in entries if e.get("status") == "ok"]
-    skipped = [e for e in entries if e.get("status") == "skipped"]
-    errors = [e for e in entries if e.get("status") not in NON_FAILURE_STATUSES]
+    """Format a unified report, write .txt/.md/.html to disk, and return the text form.
 
-    # Per-op counts and timing. Skipped entries are folded into the "ok"
-    # column so a skipped op does not look like a failure; the SUMMARY and
-    # dedicated SKIPPED section show the skip count separately.
-    ops: dict = {}
-    for e in entries:
-        op = e.get("op", "unknown")
-        rec = ops.setdefault(op, {"ok": 0, "err": 0, "times": []})
-        if e.get("status") in NON_FAILURE_STATUSES:
-            rec["ok"] += 1
-        else:
-            rec["err"] += 1
-        if "elapsed_s" in e:
-            rec["times"].append(e["elapsed_s"])
+    New optional kwargs:
+      - sections: list of Section(title, markdown) — extra rich content rendered
+        between the ops table and the Skipped/Success/Errors blocks. Used by
+        compatibility_test.py to inject Failure-clusters etc. without coupling
+        report.py to pytest specifics.
+      - op_decorations: dict[op_name -> {"pct": int}] — overlays per-op pass-rate
+        percentages onto the ops table (HTML gets a visual bar; MD shows percent).
+    """
+    model = _build_model(
+        title=title,
+        script_name=script_name,
+        ts=ts,
+        entries=entries,
+        success_log=success_log,
+        error_log=error_log,
+        extra_lines=extra_lines,
+        group_label=group_label,
+        show_successes=show_successes,
+        sections=sections,
+        op_decorations=op_decorations,
+        report_file=report_file,
+    )
 
-    op_lines = []
-    for op, rec in sorted(ops.items()):
-        total = rec["ok"] + rec["err"]
-        counts = f"{rec['ok']:>4} ok  {rec['err']:>4} failed  ({total:>4} total)"
-        timing = _timing_stats(rec["times"])
-        op_lines.append(f"  {op:<30}  {counts}  {timing}")
+    text = _render_text(model)
+    md = _render_markdown(model)
+    html = _render_html(title, md)
 
-    summary_lines = [
-        "SUMMARY",
-        f"  Total  : {len(entries)}",
-        f"  OK     : {len(successes)}",
-    ]
-    if skipped:
-        summary_lines.append(f"  Skipped: {len(skipped)}")
-    summary_lines.append(f"  Failed : {len(errors)}")
+    md_path = _sibling_path(report_file, ".md")
+    html_path = _sibling_path(report_file, ".html")
 
-    lines = [
-        "=" * 70,
-        f"  {title}",
-        f"  Script : {script_name}",
-        f"  Run    : {ts}",
-        "=" * 70,
-        "",
-        *summary_lines,
-        "",
-        group_label,
-        *op_lines,
-        "",
-    ]
-
-    if extra_lines:
-        lines += extra_lines + [""]
-
-    if show_successes and successes:
-        lines.append("SUCCESSES")
-        for s in successes:
-            lines.append(f"  {json.dumps(s)}")
-        lines.append("")
-
-    if skipped:
-        lines.append("SKIPPED")
-        for s in skipped:
-            lines.append(f"  {json.dumps(s)}")
-        lines.append("")
-
-    if errors:
-        lines.append("ERRORS")
-        for e in errors:
-            lines.append(f"  {json.dumps(e)}")
-        lines.append("")
-
-    if success_log or error_log:
-        # Use paths relative to the report file's directory so reports are
-        # portable and don't leak local filesystem details.
-        report_parent = report_file.parent
-        lines.append("Log files:")
-        if success_log:
-            lines.append(f"  Success : {os.path.relpath(success_log, report_parent)}")
-        if error_log:
-            lines.append(f"  Errors  : {os.path.relpath(error_log, report_parent)}")
-        lines.append("")
-
-    text = "\n".join(lines)
     with open(report_file, "w") as f:
         f.write(text)
+    with open(md_path, "w") as f:
+        f.write(md)
+    with open(html_path, "w") as f:
+        f.write(html)
 
     return text
