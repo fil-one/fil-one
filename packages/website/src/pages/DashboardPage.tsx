@@ -5,6 +5,7 @@ import {
   KeyIcon,
   ArrowUpIcon,
   XIcon,
+  CheckIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
@@ -258,11 +259,17 @@ export function DashboardPage() {
                       : 'bg-[rgba(0,128,255,0.08)] text-[#0080ff]'
                   }`}
                 >
-                  <Icon size={18} />
+                  {done ? <CheckIcon size={18} /> : <Icon size={18} />}
                 </span>
                 <div className="min-w-0">
-                  <p className="text-[13px] font-medium text-zinc-900">{title}</p>
-                  <p className="text-[11px] text-[#677183]">{subtitle}</p>
+                  <p
+                    className={`text-[13px] font-medium ${done ? 'text-green-900' : 'text-zinc-900'}`}
+                  >
+                    {title}
+                  </p>
+                  <p className={`text-[11px] ${done ? 'text-green-700' : 'text-[#677183]'}`}>
+                    {subtitle}
+                  </p>
                 </div>
               </Link>
             ))}
