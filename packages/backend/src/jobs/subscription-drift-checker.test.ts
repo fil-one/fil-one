@@ -123,6 +123,7 @@ describe('subscription-drift-checker', () => {
       SubscriptionsNotInSync: 0,
       SubscriptionsMissingTenant: 0,
       SubscriptionsProbeFailed: 0,
+      SubscriptionsTotal: 1,
     });
   });
 
@@ -193,6 +194,7 @@ describe('subscription-drift-checker', () => {
       SubscriptionsNotInSync: 0,
       SubscriptionsMissingTenant: 1,
       SubscriptionsProbeFailed: 0,
+      SubscriptionsTotal: 1,
     });
   });
 
@@ -229,6 +231,7 @@ describe('subscription-drift-checker', () => {
       SubscriptionsNotInSync: 0,
       SubscriptionsMissingTenant: 0,
       SubscriptionsProbeFailed: 1,
+      SubscriptionsTotal: 2,
     });
   });
 
@@ -257,6 +260,7 @@ describe('subscription-drift-checker', () => {
       SubscriptionsNotInSync: 1,
       SubscriptionsMissingTenant: 0,
       SubscriptionsProbeFailed: 0,
+      SubscriptionsTotal: 1,
     });
   });
 
@@ -298,6 +302,7 @@ describe('subscription-drift-checker', () => {
       SubscriptionsNotInSync: 1,
       SubscriptionsMissingTenant: 0,
       SubscriptionsProbeFailed: 0,
+      SubscriptionsTotal: 2,
     });
   });
 
@@ -323,6 +328,7 @@ describe('subscription-drift-checker', () => {
       SubscriptionsNotInSync: 0,
       SubscriptionsMissingTenant: 0,
       SubscriptionsProbeFailed: 0,
+      SubscriptionsTotal: 0,
     });
   });
 });

@@ -23,6 +23,7 @@ interface RunStats {
   notInSync: number;
   missingTenant: number;
   probeFailed: number;
+  total: number;
 }
 
 export async function handler(): Promise<void> {
@@ -34,6 +35,7 @@ export async function handler(): Promise<void> {
     notInSync: 0,
     missingTenant: 0,
     probeFailed: 0,
+    total: uniqueCandidates.length,
   };
 
   for (const candidate of uniqueCandidates) {
@@ -56,6 +58,10 @@ function dedupeByOrgId(candidates: ActiveCandidate[]): ActiveCandidate[] {
   return [...seen.values()];
 }
 
+// Scan filters are applied after consuming RCUs for the full table; at scale
+// a GSI on subscriptionStatus would be cheaper (and shareable with the other
+// SUBSCRIPTION-status scanners — grace-period-enforcer, usage-reporting-orchestrator).
+// Deferred to a follow-up tech-debt ticket.
 async function scanActiveSubscriptions(billingTableName: string): Promise<ActiveCandidate[]> {
   const out: ActiveCandidate[] = [];
   let cursor: Record<string, AttributeValue> | undefined;
@@ -130,6 +136,9 @@ async function evaluateCandidate(candidate: ActiveCandidate, stats: RunStats): P
   }
 }
 
+// One GetItem per org (1+N relative to the scan above). Acceptable at current
+// scale on a 12h cadence; a BatchGetItem rewrite is deferred to a follow-up
+// tech-debt ticket.
 async function resolveTenant(orgId: string): Promise<ResolvedTenant> {
   const result = await dynamo.send(
     new GetItemCommand({
@@ -160,6 +169,7 @@ function emitRunSummary(stats: RunStats): void {
             { Name: 'SubscriptionsNotInSync', Unit: 'Count' },
             { Name: 'SubscriptionsMissingTenant', Unit: 'Count' },
             { Name: 'SubscriptionsProbeFailed', Unit: 'Count' },
+            { Name: 'SubscriptionsTotal', Unit: 'Count' },
           ],
         },
       ],
@@ -167,5 +177,6 @@ function emitRunSummary(stats: RunStats): void {
     SubscriptionsNotInSync: stats.notInSync,
     SubscriptionsMissingTenant: stats.missingTenant,
     SubscriptionsProbeFailed: stats.probeFailed,
+    SubscriptionsTotal: stats.total,
   });
 }
