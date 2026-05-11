@@ -25,10 +25,10 @@ A single **partner key** authenticates every endpoint. It is a global, partner-s
 
 ### Tenant lifecycle
 
-- `POST /tenants` performs create & setup synchronously and returns only after the tenant is fully operational. The call is idempotent on a client-supplied `tenantId`: re-calling with the same identifier returns the existing tenant. The `tenantId` must be a UUID. UUID lets every Service Orchestrator persist the value efficiently and rules out cross-partner collisions by construction. FilOne's organisation IDs are already UUIDs, so FilOne uses its organisation ID verbatim as the `tenantId` without minting or persisting a separate identifier.
+- `PUT /tenants/{tenantId}` performs create & setup synchronously and returns only after the tenant is fully operational. The call is idempotent on the client-supplied `tenantId` in the URL path: re-calling with the same identifier returns the existing tenant. The `tenantId` must be a UUID. UUID lets every Service Orchestrator persist the value efficiently and rules out cross-partner collisions by construction. FilOne's organisation IDs are already UUIDs, so FilOne uses its organisation ID verbatim as the `tenantId` without minting or persisting a separate identifier. PUT is the natural verb: the client supplies the identifier and the operation is idempotent by definition.
 - `GET /tenants/{tenantId}` returns operational state: status, resource counts, and resource limits.
 - `POST /tenants/{tenantId}/status` sets `active` / `write-locked` / `disabled`; setting the same status twice is a no-op.
-- `DELETE /tenants/{tenantId}` permanently deletes the tenant and all resources owned by it (buckets, objects, S3 access keys). The tenant must be in the `disabled` state — the call returns 409 otherwise. The two-phase pattern (disable, then delete) forces the caller to consciously cut off all access before committing to a destructive, irreversible operation. The endpoint is synchronous (matching `POST /tenants`) and idempotent: a call against an already-deleted tenant returns 204.
+- `DELETE /tenants/{tenantId}` permanently deletes the tenant and all resources owned by it (buckets, objects, S3 access keys). The tenant must be in the `disabled` state — the call returns 409 otherwise. The two-phase pattern (disable, then delete) forces the caller to consciously cut off all access before committing to a destructive, irreversible operation. The endpoint is synchronous (matching `PUT /tenants/{tenantId}`) and idempotent: a call against an already-deleted tenant returns 204.
 
 ### S3 access keys
 
@@ -56,7 +56,7 @@ Service Orchestrators must support at least:
 
 Every operation is safely retryable end-to-end:
 
-- `POST /tenants` returns the existing tenant on duplicate `tenantId`.
+- `PUT /tenants/{tenantId}` returns the existing tenant on duplicate `tenantId`.
 - `POST /tenants/{tenantId}/status` is a no-op when already in the requested status.
 - `DELETE /tenants/{tenantId}` returns 204 if the tenant is already gone.
 - `POST /tenants/{tenantId}/access-keys` returns 409 on duplicate name; the caller can recover via list + get.
@@ -83,7 +83,7 @@ Four points on the auth-scoping axis were considered:
 
 ### Async tenant setup with a separate readiness endpoint
 
-`POST /tenants` would return immediately with `setupStatus: "in_progress"`, and the caller would poll either `GET /tenants/{id}` or a dedicated `GET /tenants/{id}/setup-status` until ready. This matches Aurora's actual behaviour. Rejected because it pushes complexity onto every Service Orchestrator integrator (state machine, polling, retry semantics) and onto the FilOne backend (orchestration, status persistence). A synchronous create+setup is the simplest contract that meets the requirement, and Service Orchestrators whose internal setup is asynchronous can still hold the HTTP request open or short-poll internally before responding.
+`PUT /tenants/{tenantId}` would return immediately with `setupStatus: "in_progress"`, and the caller would poll either `GET /tenants/{tenantId}` or a dedicated `GET /tenants/{tenantId}/setup-status` until ready. This matches Aurora's actual behaviour. Rejected because it pushes complexity onto every Service Orchestrator integrator (state machine, polling, retry semantics) and onto the FilOne backend (orchestration, status persistence). A synchronous create+setup is the simplest contract that meets the requirement, and Service Orchestrators whose internal setup is asynchronous can still hold the HTTP request open or short-poll internally before responding.
 
 ### Drop `GET /tenants/{id}` entirely
 
@@ -113,7 +113,7 @@ Aurora expresses permissions as bare AWS action names — `GetObject`, `PutObjec
 
 - New Service Orchestrators can be onboarded by implementing a single OpenAPI contract; the FilOne backend integration becomes generic rather than vendor-specific.
 - Bucket and object operations move entirely to the standard S3 API. Existing Aurora Portal calls for bucket management (`create-bucket`, `list-buckets`, `get-bucket`, `get-bucket-analytics` ownership check) will be reworked to use S3.
-- The contract requires Service Orchestrators to support synchronous `POST /tenants` (potentially long-running) and to honour idempotency on every mutating endpoint. Service Orchestrators whose native setup flow is fully asynchronous must adapt internally.
+- The contract requires Service Orchestrators to support synchronous `PUT /tenants/{tenantId}` (potentially long-running) and to honour idempotency on every mutating endpoint. Service Orchestrators whose native setup flow is fully asynchronous must adapt internally.
 - The access-key permission enum gains bucket-management permissions (`s3:CreateBucket`, `s3:ListAllMyBuckets`, `s3:DeleteBucket`) that Aurora's permission strings did not surface as first-class options. Service Orchestrators map these to whatever native primitives they expose.
 - A single partner key authenticates every endpoint, including tenant-scoped operations. The Service Orchestrator must enforce per-partner tenant scoping so the partner key cannot reach tenants belonging to other partners.
 - Telemetry (TTFB, error rates, RPS) and S3 Gateway observability are explicitly out of scope for this contract; they are delivered through the partner's observability stack.
