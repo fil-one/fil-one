@@ -1,10 +1,10 @@
-import { PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { CreateAccessKeySchema, S3_REGION } from '@filone/shared';
-import type { CreateAccessKeyResponse, ErrorResponse, GranularPermission } from '@filone/shared';
+import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import {
   AuroraValidationError,
@@ -13,7 +13,7 @@ import {
   findAuroraAccessKeyByName,
 } from '../lib/aurora-portal.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getOrgAuroraTenant } from '../lib/org-profile.js';
+import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -22,6 +22,9 @@ import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
+// TODO: Refactor the handler, reducing it's complexity and removing the ignore eslint directive.
+// https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -55,14 +58,26 @@ export async function baseHandler(
   }
 
   const { orgId } = getUserInfo(event);
-  const tenantResult = await getOrgAuroraTenant(orgId);
-  if (!tenantResult.ok) {
+
+  // Look up org profile to get auroraTenantId
+  const { Item: orgProfile } = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+    }),
+  );
+
+  const auroraTenantId = orgProfile?.auroraTenantId?.S;
+  const setupStatus = orgProfile?.setupStatus?.S;
+  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
+    console.warn('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
     return new ResponseBuilder()
       .status(503)
-      .body<ErrorResponse>({ message: tenantResult.errorMessage })
+      .body<ErrorResponse>({
+        message: 'Aurora tenant setup is not complete, please try again later',
+      })
       .build();
   }
-  const auroraTenantId = tenantResult.auroraTenantId;
 
   let auroraKey;
   try {
@@ -91,12 +106,6 @@ export async function baseHandler(
     throw err;
   }
 
-  const optionalFields = buildOptionalAccessKeyFields({
-    granularPermissions,
-    buckets,
-    expiresAt,
-  });
-
   await getDynamoClient().send(
     new PutItemCommand({
       TableName: Resource.UserInfoTable.name,
@@ -108,8 +117,10 @@ export async function baseHandler(
         createdAt: auroraKey.createdAt,
         status: 'active',
         permissions,
+        ...(granularPermissions?.length ? { granularPermissions } : {}),
         bucketScope,
-        ...optionalFields,
+        ...(buckets ? { buckets } : {}),
+        ...(expiresAt ? { expiresAt } : {}),
       }),
     }),
   );
@@ -181,19 +192,6 @@ async function recoverDuplicateKey(
   console.log(
     `Recovered DynamoDB record for Aurora access key "${keyName}" (id=${auroraKey.id}) for org ${orgId}`,
   );
-}
-
-function buildOptionalAccessKeyFields(fields: {
-  granularPermissions: GranularPermission[] | undefined;
-  buckets: string[] | undefined;
-  expiresAt: string | null;
-}) {
-  const { granularPermissions, buckets, expiresAt } = fields;
-  return {
-    ...(granularPermissions?.length ? { granularPermissions } : {}),
-    ...(buckets ? { buckets } : {}),
-    ...(expiresAt ? { expiresAt } : {}),
-  };
 }
 
 export const handler = middy(baseHandler)
