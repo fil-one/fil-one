@@ -342,7 +342,7 @@ def _render_markdown(m: _ReportModel) -> str:
                 "pct": (
                     r.pct
                     if r.pct is not None
-                    else ((100.0 * r.ok) / r.total if r.total else None)
+                    else (int(round((100.0 * r.ok) / r.total)) if r.total else None)
                 ),
             }
             for r in m.op_rows
