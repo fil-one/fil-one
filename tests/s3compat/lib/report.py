@@ -225,13 +225,18 @@ def _build_model(
         "failed": len(error_entries),
     }
 
-    log_paths = {"success": 'success.jsonl', "error": 'errors.jsonl'}
+    log_paths = {}
     if report_file is not None:
         report_parent = report_file.parent
         if success_log:
             log_paths["success"] = os.path.relpath(success_log, report_parent)
         if error_log:
             log_paths["error"] = os.path.relpath(error_log, report_parent)
+    else:
+        if success_log:
+            log_paths["success"] = success_log
+        if error_log:
+            log_paths["error"] = error_log
 
     return _ReportModel(
         title=title,
