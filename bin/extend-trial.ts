@@ -52,7 +52,7 @@ if (PROTECTED_STAGES.includes(stage)) {
 // Aurora backoffice config — non-prod only. The stage guard above blocks
 // production; we deliberately do not encode the production URL here.
 // `sst shell` does not export Lambda-scoped env vars, so we set them locally.
-const AURORA_BACKOFFICE_URL = 'https://api.backoffice.dev.aur.lu/api';
+const AURORA_BACKOFFICE_URL = 'https://api-backoffice.dev.aur.lu/api';
 const AURORA_PARTNER_ID = 'ff';
 
 const dynamo = new DynamoDBClient({});

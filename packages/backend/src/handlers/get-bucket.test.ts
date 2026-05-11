@@ -24,7 +24,7 @@ vi.mock('@filone/aurora-portal-client', () => ({
   getBucketInfo: (...args: unknown[]) => mockGetBucket(...args),
 }));
 
-process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu';
+process.env.AURORA_PORTAL_URL = 'https://api-portal.dev.aur.lu/api';
 process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
