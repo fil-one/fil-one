@@ -443,13 +443,7 @@ def write_report(
         compatibility_test.py to inject Failure-clusters etc. without coupling
         report.py to pytest specifics.
       - op_decorations: dict[op_name -> {"pct": int}] — overlays per-op pass-rate
-<<<<<<< write-report-after-interrupted
-        percentages onto the ops table (HTML gets a visual bar; MD shows percent).
-      - interrupted: when True, renders a prominent "incomplete results" banner at
-        the top of every output format, signalling that the run did not finish.
-=======
         percentages onto the ops table.
->>>>>>> fil-259-reporting
     """
     model = _build_model(
         title=title,
