@@ -1,11 +1,11 @@
 """Aurora Portal API — HTTP wrappers for bucket operations.
 
-The Aurora S3 gateway does not support ListBuckets, CreateBucket, or
-DeleteBucket via access-key auth.  These operations are only available
-through the Aurora Dashboard (Portal) REST API using a Bearer token.
+The Aurora S3 gateway does not support CreateBucket or DeleteBucket via
+access-key auth. These operations are only available through the Aurora
+Dashboard (Portal) REST API using a Bearer token.
 
 This module provides thin wrappers that return responses shaped like
-their boto3/S3 equivalents so ``aurora.backend.patch`` can swap them in
+their boto3/S3 equivalents so ``lib.backend-aurora.patch`` can swap them in
 transparently.
 
 Env vars
@@ -17,19 +17,18 @@ AURORA_NO_VERIFY_SSL  - set to "true" to skip TLS cert verification
 Token
 -----
 Reuses the cached Bearer token at ~/.aurora_token written by
-``python aurora/tools/aurora_key_management.py login``.
+``python tools/aurora_key_management.py login``.
 """
 import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
 import urllib3
 
-log = logging.getLogger("aurora.backend.portal_api")
+log = logging.getLogger("backend-aurora.portal_api")
 
 TOKEN_CACHE = Path.home() / ".aurora_token"
 API_BASE = "/api/v1"
@@ -67,13 +66,13 @@ def _load_token() -> str:
     if not TOKEN_CACHE.exists():
         raise RuntimeError(
             f"No Aurora token found at {TOKEN_CACHE}. "
-            "Run: python aurora/tools/aurora_key_management.py login"
+            "Run: python tools/aurora_key_management.py login"
         )
     data = json.loads(TOKEN_CACHE.read_text())
     if "expires_at" in data and time.time() > data["expires_at"]:
         raise RuntimeError(
             "Aurora Bearer token has expired. "
-            "Run: python aurora/tools/aurora_key_management.py login"
+            "Run: python tools/aurora_key_management.py login"
         )
     token = data.get("access_token", "")
     if not token:
@@ -97,60 +96,6 @@ def _url(path: str) -> str:
 
 
 # ── Portal API wrappers ─────────────────────────────────────────────────
-
-def portal_list_buckets() -> dict:
-    """GET /tenants/{tenantId}/buckets → S3-shaped ListBuckets response.
-
-    Paginates through bucket.PaginatedBucketListResponse pages.
-    """
-    _suppress_insecure_warnings()
-    tenant = _tenant_id()
-    url = _url(f"/tenants/{tenant}/buckets")
-
-    page = 1
-    page_size = 100
-    raw_items: list = []
-    while True:
-        params = {"page": page, "pageSize": page_size}
-        log.debug("Portal list_buckets: GET %s page=%d", url, page)
-        resp = requests.get(url, headers=_headers(), params=params, **_req_kwargs())
-        resp.raise_for_status()
-        data = resp.json() or {}
-
-        items = data.get("items") or []
-        raw_items.extend(items)
-
-        total = data.get("totalCount", len(raw_items))
-        if not items or len(raw_items) >= total:
-            break
-        page += 1
-
-    buckets = []
-    for b in raw_items:
-        name = b.get("name", "")
-        created = b.get("createdAt")
-        if created and isinstance(created, str):
-            try:
-                created = datetime.fromisoformat(created.replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                created = datetime.now(timezone.utc)
-        elif not created:
-            created = datetime.now(timezone.utc)
-        buckets.append({"Name": name, "CreationDate": created})
-
-    result = {
-        "Buckets": buckets,
-        "Owner": {"DisplayName": "", "ID": ""},
-        "ResponseMetadata": {
-            "RequestId": "aurora-portal-bridge",
-            "HTTPStatusCode": 200,
-            "HTTPHeaders": {},
-            "RetryAttempts": 0,
-        },
-    }
-    log.debug("Portal list_buckets: %d buckets", len(buckets))
-    return result
-
 
 def portal_create_bucket(bucket_name: str, **kwargs) -> dict:
     """POST /tenants/{tenantId}/buckets → create a bucket via Portal API.
@@ -245,20 +190,8 @@ def portal_delete_bucket(bucket_name: str) -> dict:
 
 
 def validate_connection():
-    """Quick sanity check: load token and hit list_buckets.
+    """Validate the cached Portal Bearer token exists and is unexpired.
 
     Raises RuntimeError with a clear message on failure.
     """
-    _suppress_insecure_warnings()
-    _load_token()  # validates token exists and isn't expired
-    try:
-        portal_list_buckets()
-    except requests.HTTPError as exc:
-        raise RuntimeError(
-            f"Aurora Portal API check failed ({exc.response.status_code}): "
-            f"{exc.response.text[:200]}"
-        ) from exc
-    except requests.ConnectionError as exc:
-        raise RuntimeError(
-            f"Cannot reach Aurora Portal at {_origin()}: {exc}"
-        ) from exc
+    _load_token()

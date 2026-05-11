@@ -81,7 +81,7 @@ function outOfSyncLogs(spy: ReturnType<typeof vi.spyOn>) {
 
 describe('subscription-drift-checker', () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     ddbMock.reset();
@@ -89,12 +89,12 @@ describe('subscription-drift-checker', () => {
     mockGetTenantStatus.mockReset();
     mockReportMetric.mockReset();
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
     logSpy.mockRestore();
-    errorSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it('emits zero counters when billing table is empty', async () => {
@@ -306,7 +306,7 @@ describe('subscription-drift-checker', () => {
     });
   });
 
-  it('logs an error and skips records without orgId', async () => {
+  it('logs an warn and skips records without orgId', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
         marshall({
@@ -320,7 +320,7 @@ describe('subscription-drift-checker', () => {
     await handler();
 
     expect(mockGetTenantStatus).not.toHaveBeenCalled();
-    expect(errorSpy).toHaveBeenCalledWith(
+    expect(warnSpy).toHaveBeenCalledWith(
       '[subscription-drift-checker] missing orgId',
       expect.objectContaining({ pk: `CUSTOMER#${USER_ID}` }),
     );
