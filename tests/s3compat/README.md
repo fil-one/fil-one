@@ -555,27 +555,27 @@ ERRORS
 
 ## File Reference
 
-| File                                        | Purpose                                                                                  |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `lib/client.py`                             | boto3 client factory; `resolve_provider()` loads `<provider>/.env`                       |
-| `lib/report.py`                             | Shared report formatting used by all scripts                                             |
-| `lib/logger.py`                             | Per-operation JSONL logging + report generation for phase scripts                        |
-| `lib/manifest.py`                           | Upload resume state (`manifest.json`)                                                    |
-| `tools/upload.py`                           | Upload files from source.coop to the on-ramp                                             |
-| `tools/fetch.py`                            | Head, get preview, and list versions                                                     |
-| `tools/delete.py`                           | Delete objects by key or version                                                         |
-| `tools/create_bucket.py`                    | Create a bucket with optional versioning, object lock, and encryption                    |
-| `tools/generate_ceph_conf.py`               | Generate `ceph-s3-tests/s3tests.conf` from a provider's `.env`                           |
-| `tools/aurora_key_management.py`            | Aurora CLI: SSM-based Portal token login, Back Office `tenants`, Portal access-key admin |
-| `load_test.py`                              | Concurrent load test with SQLite-backed resume                                           |
-| `compatibility_test.py`                     | Full S3 compatibility test via ceph/s3-tests                                             |
-| `console_presign_test.py`                   | Presigned URL + CORS test for the Console's operations                                   |
-| `lib/backend_loader.py`                     | Pytest plugin; activates `<S3COMPAT_BACKEND>.backend` at startup                         |
-| `lib/backend-aurora/__init__.py`            | Aurora backend entry point — re-exports `activate`                                       |
-| `lib/backend-aurora/patch.py`               | Aurora boto3 monkey-patches (create/delete bucket)                                       |
-| `lib/backend-aurora/portal_api.py`          | Aurora Portal HTTP wrappers                                                              |
-| `manifest.json`                             | Created at runtime — upload state                                                        |
-| `load_test_state.db`                        | Created at runtime — load test state                                                     |
+| File                               | Purpose                                                                                  |
+| ---------------------------------- | ---------------------------------------------------------------------------------------- |
+| `lib/client.py`                    | boto3 client factory; `resolve_provider()` loads `<provider>/.env`                       |
+| `lib/report.py`                    | Shared report formatting used by all scripts                                             |
+| `lib/logger.py`                    | Per-operation JSONL logging + report generation for phase scripts                        |
+| `lib/manifest.py`                  | Upload resume state (`manifest.json`)                                                    |
+| `tools/upload.py`                  | Upload files from source.coop to the on-ramp                                             |
+| `tools/fetch.py`                   | Head, get preview, and list versions                                                     |
+| `tools/delete.py`                  | Delete objects by key or version                                                         |
+| `tools/create_bucket.py`           | Create a bucket with optional versioning, object lock, and encryption                    |
+| `tools/generate_ceph_conf.py`      | Generate `ceph-s3-tests/s3tests.conf` from a provider's `.env`                           |
+| `tools/aurora_key_management.py`   | Aurora CLI: SSM-based Portal token login, Back Office `tenants`, Portal access-key admin |
+| `load_test.py`                     | Concurrent load test with SQLite-backed resume                                           |
+| `compatibility_test.py`            | Full S3 compatibility test via ceph/s3-tests                                             |
+| `console_presign_test.py`          | Presigned URL + CORS test for the Console's operations                                   |
+| `lib/backend_loader.py`            | Pytest plugin; activates `<S3COMPAT_BACKEND>.backend` at startup                         |
+| `lib/backend-aurora/__init__.py`   | Aurora backend entry point — re-exports `activate`                                       |
+| `lib/backend-aurora/patch.py`      | Aurora boto3 monkey-patches (create/delete bucket)                                       |
+| `lib/backend-aurora/portal_api.py` | Aurora Portal HTTP wrappers                                                              |
+| `manifest.json`                    | Created at runtime — upload state                                                        |
+| `load_test_state.db`               | Created at runtime — load test state                                                     |
 
 ### Adding per-onramp patches
 
