@@ -21,7 +21,6 @@ import { CopyableField } from '../components/CopyableField';
 import { IconButton } from '../components/IconButton';
 import { ShareObjectModal } from '../components/ShareObjectModal';
 import { Spinner } from '../components/Spinner';
-import { Tooltip } from '../components/Tooltip';
 import { VersionHistoryCard } from '../components/VersionHistoryCard';
 import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
 
@@ -238,27 +237,27 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         </div>
 
         <div className="flex items-center gap-1">
-          <Tooltip content="Download" side="bottom">
-            <IconButton
-              icon={DownloadSimpleIcon}
-              aria-label="Download object"
-              onClick={() => void objectActions.downloadObject(objectKey, versionId)}
-            />
-          </Tooltip>
-          <Tooltip content="Share object" side="bottom">
-            <IconButton
-              icon={LinkIcon}
-              aria-label="Share object"
-              onClick={() => setShareOpen(true)}
-            />
-          </Tooltip>
-          <Tooltip content="Delete" side="bottom">
-            <IconButton
-              icon={TrashIcon}
-              aria-label="Delete object"
-              onClick={() => setConfirmDeleteOpen(true)}
-            />
-          </Tooltip>
+          <IconButton
+            icon={DownloadSimpleIcon}
+            aria-label="Download object"
+            tooltip="Download"
+            tooltipSide="bottom"
+            onClick={() => void objectActions.downloadObject(objectKey, versionId)}
+          />
+          <IconButton
+            icon={LinkIcon}
+            aria-label="Share object"
+            tooltip="Share object"
+            tooltipSide="bottom"
+            onClick={() => setShareOpen(true)}
+          />
+          <IconButton
+            icon={TrashIcon}
+            aria-label="Delete object"
+            tooltip="Delete"
+            tooltipSide="bottom"
+            onClick={() => setConfirmDeleteOpen(true)}
+          />
         </div>
       </div>
 
