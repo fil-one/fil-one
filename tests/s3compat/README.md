@@ -40,7 +40,7 @@ cd tests/s3compat
 
 The Aurora S3 gateway does not expose `ListBuckets` / `CreateBucket` / `DeleteBucket` via S3 access-key auth; those operations go through the Aurora Portal API and require a per-tenant API key. The compatibility test (which creates/deletes buckets per test) and `tools/create_bucket.py` rely on this token being cached at `~/.aurora_token`.
 
-The per-tenant key is provisioned during tenant creation and stored in AWS SSM. Fetching it requires the [AWS CLI](https://aws.amazon.com/cli/) on `PATH` and credentials configured for the AWS account that owns the parameter. Then run:
+The per-tenant key is provisioned by FilOne Console backend during tenant creation and stored in AWS SSM. Fetching it requires the [AWS CLI](https://aws.amazon.com/cli/) on `PATH` and credentials configured for the AWS account that owns the parameter. Then run:
 
 ```bash
 python tools/aurora_key_management.py login \
