@@ -225,7 +225,7 @@ def _build_model(
         "failed": len(error_entries),
     }
 
-    log_paths = {"success": 'success.jsonl', "error": 'errors.jsonl'}
+    log_paths: dict = {"success": None, "error": None}
     if report_file is not None:
         report_parent = report_file.parent
         if success_log:
@@ -419,7 +419,7 @@ def write_report(
         compatibility_test.py to inject Failure-clusters etc. without coupling
         report.py to pytest specifics.
       - op_decorations: dict[op_name -> {"pct": int}] — overlays per-op pass-rate
-        percentages onto the ops table (HTML gets a visual bar; MD shows percent).
+        percentages onto the ops table.
     """
     model = _build_model(
         title=title,

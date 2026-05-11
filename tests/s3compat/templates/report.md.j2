@@ -68,7 +68,7 @@
 
 {% for e in errors %}
 <details>
-<summary>{{ e.summary }}</summary>
+<summary>{{ e.summary | e }}</summary>
 
 {{ e.body }}
 
