@@ -23,4 +23,4 @@ if len(sys.argv) != 2:
 provider = sys.argv[1]
 resolve_provider(provider)
 conf_path = _generate_conf(Path("ceph-s3-tests"), provider)
-print(conf_path.relative_to(Path.cwd()))
+print(conf_path)
