@@ -2,6 +2,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from . import report as _report
 
@@ -73,7 +74,7 @@ class Logger:
         msg = kwargs.get("error_message") or kwargs.get("error_msg", "")
         print(f" ERR  [{op}] {code}: {msg}", file=sys.stderr)
 
-    def write_report(self, title: str, extra_lines: list = None):
+    def write_report(self, title: str, extra_lines: Optional[list] = None):
         # Writes three sibling files: <ts>_<script>_report.{txt,md,html}.
         # `self.report_file` is the .txt path; .md/.html are derived from it.
         text = _report.write_report(
@@ -84,7 +85,7 @@ class Logger:
             report_file=self.report_file,
             success_log=self.success_log,
             error_log=self.error_log,
-            extra_lines=extra_lines,
+            extra_lines=extra_lines or [],
         )
         print(f"\n{text}")
         print(f"Report written to: {self.report_file}")

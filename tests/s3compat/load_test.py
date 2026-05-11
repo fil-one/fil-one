@@ -24,6 +24,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from lib.client import resolve_provider, get_s3_client, get_source_client
 from lib.logger import Logger
@@ -78,7 +79,7 @@ def mark_done(conn: sqlite3.Connection, source_key: str, etag: str, version_id: 
 
 
 def mark_failed(conn: sqlite3.Connection, source_key: str,
-                error_code: str, error_msg: str, status_code: int = None):
+                error_code: str, error_msg: str, status_code: Optional[int] = None):
     conn.execute(
         """UPDATE uploads
            SET status='failed', error_code=?, error_msg=?, status_code=?, finished_at=?
