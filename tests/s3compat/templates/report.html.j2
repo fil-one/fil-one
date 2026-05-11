@@ -68,6 +68,11 @@ details[open] { background: var(--bg); }
 .bar::before { content: ""; display: block; width: var(--pct, 0%); height: 100%; background: var(--bar-fill); transition: width .25s ease; }
 hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
 a { color: var(--accent); }
+/* Pygments — light (default) */
+{{ pygments_css_light }}
+@media (prefers-color-scheme: dark) {
+{{ pygments_css_dark }}
+}
 </style>
 </head>
 <body>

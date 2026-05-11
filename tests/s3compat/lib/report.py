@@ -24,11 +24,43 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import bleach
 import markdown as _markdown
+from bleach.css_sanitizer import CSSSanitizer
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from pygments.formatters import HtmlFormatter
 
 
 NON_FAILURE_STATUSES = frozenset({"ok", "skipped"})
+
+_HTML_ALLOWED_TAGS = frozenset({
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "p", "br", "hr", "strong", "em", "b", "i", "u", "s", "sub", "sup",
+    "code", "pre", "blockquote",
+    "ul", "ol", "li",
+    "table", "thead", "tbody", "tr", "th", "td",
+    "a", "span", "div",
+    "details", "summary",
+})
+
+_HTML_ALLOWED_ATTRS = {
+    "*": ["id", "class"],
+    "a": ["href", "title"],
+    "div": ["style"],
+    "th": ["align"],
+    "td": ["align"],
+}
+
+_HTML_ALLOWED_PROTOCOLS = ["http", "https", "mailto"]
+
+_HTML_CSS_SANITIZER = CSSSanitizer(allowed_css_properties=["--pct"])
+
+_PYGMENTS_CSS_LIGHT = HtmlFormatter(
+    style="default", nobackground=True
+).get_style_defs(".highlight")
+_PYGMENTS_CSS_DARK = HtmlFormatter(
+    style="github-dark", nobackground=True
+).get_style_defs(".highlight")
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -334,13 +366,31 @@ def _render_html(title: str, md_text: str) -> str:
         },
         output_format="html",
     )
-    # Escape only the document title (safe text inside <title>); md_text body
-    # has been processed by Python-Markdown which sanitizes appropriately.
+    # Python-Markdown does NOT XSS-sanitize: raw HTML (and md_in_html blocks)
+    # pass through unchanged. Run the output through a strict bleach allowlist
+    # so attacker-controlled error messages / op names / tracebacks can't
+    # inject script or unexpected markup. The allowlist preserves the
+    # template's load-bearing <details>/<summary> blocks and the progress-bar
+    # <div class="bar" style="--pct:N%">.
+    body = bleach.clean(
+        body,
+        tags=_HTML_ALLOWED_TAGS,
+        attributes=_HTML_ALLOWED_ATTRS,
+        protocols=_HTML_ALLOWED_PROTOCOLS,
+        css_sanitizer=_HTML_CSS_SANITIZER,
+        strip=True,
+        strip_comments=True,
+    )
     safe_title = (
         title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     )
     template = _jinja_env.get_template("report.html.j2")
-    return template.render(safe_title=safe_title, body=body)
+    return template.render(
+        safe_title=safe_title,
+        body=body,
+        pygments_css_light=_PYGMENTS_CSS_LIGHT,
+        pygments_css_dark=_PYGMENTS_CSS_DARK,
+    )
 
 
 def _sibling_path(report_file: Path, suffix: str) -> Path:
