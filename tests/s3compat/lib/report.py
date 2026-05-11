@@ -339,7 +339,11 @@ def _render_markdown(m: _ReportModel) -> str:
                 "stddev": r.stddev,
                 "min": r.min,
                 "max": r.max,
-                "pct": r.pct if r.pct is not None else 0,
+                "pct": (
+                    r.pct
+                    if r.pct is not None
+                    else ((100.0 * r.ok) / r.total if r.total else None)
+                ),
             }
             for r in m.op_rows
         ],
