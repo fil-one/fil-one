@@ -1,5 +1,5 @@
 """
-Persistent manifest tracking upload state for upload.py.
+Persistent manifest tracking upload state for tools/upload.py.
 
 Schema (manifest.json):
   {
