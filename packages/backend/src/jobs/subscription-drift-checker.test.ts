@@ -306,7 +306,7 @@ describe('subscription-drift-checker', () => {
     });
   });
 
-  it('logs an error and skips records without orgId', async () => {
+  it('logs an warn and skips records without orgId', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
         marshall({
