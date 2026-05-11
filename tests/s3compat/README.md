@@ -571,8 +571,8 @@ ERRORS
 | `compatibility_test.py`                     | Full S3 compatibility test via ceph/s3-tests                                             |
 | `console_presign_test.py`                   | Presigned URL + CORS test for the Console's operations                                   |
 | `lib/backend_loader.py`                     | Pytest plugin; activates `<S3COMPAT_BACKEND>.backend` at startup                         |
-| `lib/backend-aurora/__init__.py`            | Aurora backend entry point — re-exports `activate`, `SKIP_TESTS`                         |
-| `lib/backend-aurora/patch.py`               | Aurora boto3 monkey-patches (list/create/delete bucket)                                  |
+| `lib/backend-aurora/__init__.py`            | Aurora backend entry point — re-exports `activate`                                       |
+| `lib/backend-aurora/patch.py`               | Aurora boto3 monkey-patches (create/delete bucket)                                       |
 | `lib/backend-aurora/portal_api.py`          | Aurora Portal HTTP wrappers                                                              |
 | `manifest.json`                             | Created at runtime — upload state                                                        |
 | `load_test_state.db`                        | Created at runtime — load test state                                                     |

@@ -14,6 +14,6 @@ Required env vars (loaded from aurora/.env):
 The Bearer token is loaded from ~/.aurora_token, written by
 `python tools/aurora_key_management.py login`.
 """
-from .patch import activate, SKIP_REASON, SKIP_TESTS
+from .patch import activate
 
-__all__ = ["activate", "SKIP_TESTS", "SKIP_REASON"]
+__all__ = ["activate"]
