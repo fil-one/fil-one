@@ -392,7 +392,7 @@ def _fingerprint(longrepr: str) -> str:
         last_nonempty = line.strip()
         m = _PYTEST_E_LINE.match(line)
         if m:
-            last_e = m.group(0).lstrip("E ").strip()
+            last_e = m.group(0)[1:].strip()
     fp = last_e or last_nonempty or "unknown"
     # Strip volatile bits (random bucket prefix, hex ids, timestamps) so similar
     # errors collapse into one cluster.
