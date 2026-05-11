@@ -74,10 +74,6 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "ConfirmOrg": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
     "CreateAccessKey": {
       "name": string
       "type": "sst.aws.Function"
