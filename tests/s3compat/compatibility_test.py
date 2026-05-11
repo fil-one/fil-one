@@ -183,7 +183,9 @@ def _run_pytest(conf_path: Path, marks: str, test_target: str, json_out: Path,
     ]
 
     # Always load the backend loader plugin; it no-ops if S3COMPAT_BACKEND
-    # is unset or names an on-ramp without a `lib/backend-<provider>/` package.
+    # is unset, set to `boto3`, or names a provider without a
+    # `lib/backend-<provider>/` package. We pass `boto3` explicitly below in
+    # that last case so the test runner's intent is unambiguous.
     cmd += ["-p", "lib.backend_loader"]
 
     if marks:
@@ -192,6 +194,9 @@ def _run_pytest(conf_path: Path, marks: str, test_target: str, json_out: Path,
         cmd += ["-k", filter_expr]
     cmd.append(test_target)
 
+    backend_pkg = _SCRIPTS_DIR / "lib" / f"backend-{provider}"
+    backend_name = provider if backend_pkg.is_dir() else "boto3"
+
     # Make tests/s3compat/ importable so `backend_loader` can find the
     # provider package, and so provider env vars already loaded by
     # client.resolve_provider() reach the pytest subprocess.
@@ -199,14 +204,14 @@ def _run_pytest(conf_path: Path, marks: str, test_target: str, json_out: Path,
     env = {
         **os.environ,
         "S3TEST_CONF": str(conf_path),
-        "S3COMPAT_BACKEND": provider,
+        "S3COMPAT_BACKEND": backend_name,
         "PYTHONPATH": testing_dir + os.pathsep + os.environ.get("PYTHONPATH", ""),
     }
 
     print(f"Command : {' '.join(str(c) for c in cmd)}")
     print(f"CWD     : {S3TESTS_DIR}")
     print(f"Marks   : {marks or '(none)'}")
-    print(f"Backend : {provider}")
+    print(f"Backend : {backend_name}")
     print()
 
     result = subprocess.run(cmd, cwd=S3TESTS_DIR, env=env)

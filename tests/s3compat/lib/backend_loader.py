@@ -1,8 +1,9 @@
 """Pytest plugin that activates the on-ramp backend named by S3COMPAT_BACKEND.
 
 Loaded unconditionally by `compatibility_test.py` via `pytest -p lib.backend_loader`.
-No-ops when `S3COMPAT_BACKEND` is unset or set to `boto3`, so it's safe to
-load for providers that don't ship per-method patches.
+No-ops when `S3COMPAT_BACKEND` is unset, set to `boto3`, or names a provider
+for which `lib/backend-<name>/` does not exist, so it's safe to load for
+providers that don't ship per-method patches.
 
 Each on-ramp's backend code lives under `lib/backend-<provider>/`, separate
 from the provider's runtime data:
@@ -25,6 +26,7 @@ Adding a new backend:
 import importlib
 import logging
 import os
+from pathlib import Path
 
 import pytest
 
@@ -37,6 +39,13 @@ _BACKEND_MODULE = None
 def _load_backend(name):
     """Import `lib.backend-<name>` and call its activate() entry point."""
     if not name or name == "boto3":
+        return None
+    backend_dir = Path(__file__).parent / f"backend-{name}"
+    if not backend_dir.is_dir():
+        log.info(
+            "backend_loader: no lib/backend-%s/ package; running plain boto3",
+            name,
+        )
         return None
     module_name = f"lib.backend-{name}"
     try:
