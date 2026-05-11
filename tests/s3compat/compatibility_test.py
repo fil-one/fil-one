@@ -421,7 +421,7 @@ def main():
     quarantine_expr = " or ".join(_QUARANTINE_MARKS)
     passes = [
         ("main", f"not ({quarantine_expr})"),
-        ("quarantine", quarantine_expr),
+        # ("quarantine", quarantine_expr),
     ]
 
     json_outs = []

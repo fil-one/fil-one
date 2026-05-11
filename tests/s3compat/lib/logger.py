@@ -85,7 +85,7 @@ class Logger:
             report_file=self.report_file,
             success_log=self.success_log,
             error_log=self.error_log,
-            extra_lines=extra_lines,
+            extra_lines=extra_lines or [],
         )
         print(f"\n{text}")
         print(f"Report written to: {self.report_file}")
