@@ -227,7 +227,7 @@ def _build_model(
         "failed": len(error_entries),
     }
 
-    log_paths = {}
+    log_paths: dict = {"success": None, "error": None}
     if report_file is not None:
         report_parent = report_file.parent
         if success_log:
@@ -355,7 +355,7 @@ def _render_markdown(m: _ReportModel) -> str:
                 "pct": (
                     r.pct
                     if r.pct is not None
-                    else ((100.0 * r.ok) / r.total if r.total else None)
+                    else (int(round((100.0 * r.ok) / r.total)) if r.total else None)
                 ),
             }
             for r in m.op_rows
@@ -443,9 +443,13 @@ def write_report(
         compatibility_test.py to inject Failure-clusters etc. without coupling
         report.py to pytest specifics.
       - op_decorations: dict[op_name -> {"pct": int}] — overlays per-op pass-rate
+<<<<<<< write-report-after-interrupted
         percentages onto the ops table (HTML gets a visual bar; MD shows percent).
       - interrupted: when True, renders a prominent "incomplete results" banner at
         the top of every output format, signalling that the run did not finish.
+=======
+        percentages onto the ops table.
+>>>>>>> fil-259-reporting
     """
     model = _build_model(
         title=title,

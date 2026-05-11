@@ -77,7 +77,7 @@ Numbers below reflect only the tests that finished before the interruption.
 
 {% for e in errors %}
 <details>
-<summary>{{ e.summary }}</summary>
+<summary>{{ e.summary | e }}</summary>
 
 {{ e.body }}
 
