@@ -178,6 +178,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "SubscriptionDriftChecker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "UpdateProfile": {
       "name": string
       "type": "sst.aws.Function"
