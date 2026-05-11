@@ -16,8 +16,6 @@
   --ok: #1a7f37;
   --err: #cf222e;
   --warn: #9a6700;
-  --bar-bg: #e6e8ec;
-  --bar-fill: #1a7f37;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -30,8 +28,6 @@
     --ok: #3fb950;
     --err: #f85149;
     --warn: #d29922;
-    --bar-bg: #21262d;
-    --bar-fill: #3fb950;
   }
 }
 * { box-sizing: border-box; }
@@ -64,8 +60,6 @@ details > summary::-webkit-details-marker { display: none; }
 details > summary::before { content: "▸ "; color: var(--muted); }
 details[open] > summary::before { content: "▾ "; }
 details[open] { background: var(--bg); }
-.bar { display: inline-block; width: 90px; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; vertical-align: middle; margin-right: 6px; }
-.bar::before { content: ""; display: block; width: var(--pct, 0%); height: 100%; background: var(--bar-fill); transition: width .25s ease; }
 hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
 a { color: var(--accent); }
 /* Pygments — light (default) */

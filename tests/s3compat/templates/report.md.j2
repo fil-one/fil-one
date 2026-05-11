@@ -17,7 +17,7 @@
 | {{ group_field }} | Pass rate | OK | Failed | Total | Avg | Stddev | Min | Max |
 |---|:---|---:|---:|---:|---:|---:|---:|---:|
 {% for r in op_rows -%}
-| `{{ r.op }}` | <div class="bar" style="--pct:{{ r.pct }}%"></div>**{{ r.pct }}%** ({{ r.ok }}/{{ r.total }}) | {{ r.ok }} | {{ r.err }} | {{ r.total }} | {{ r.avg }} | {{ r.stddev }} | {{ r.min }} | {{ r.max }} |
+| `{{ r.op }}` | **{{ r.pct }}%** ({{ r.ok }}/{{ r.total }}) | {{ r.ok }} | {{ r.err }} | {{ r.total }} | {{ r.avg }} | {{ r.stddev }} | {{ r.min }} | {{ r.max }} |
 {% endfor %}
 {% else %}
 | {{ group_field }} | OK | Failed | Total | Avg | Stddev | Min | Max |
