@@ -8,6 +8,7 @@ Callers build a list of entry dicts with at minimum:
 (e.g. the provider refused GetBucketCors with AccessDenied). Skipped entries
 are reported separately and do not count as failures.
 
+<<<<<<< HEAD
 Callers call write_report() to produce three artefacts side-by-side:
   - <ts>_<script>_report.txt  — plain text (legacy format, byte-stable)
   - <ts>_<script>_report.md   — Markdown (canonical, agent-friendly, GitHub-renderable)
@@ -16,10 +17,14 @@ Callers call write_report() to produce three artefacts side-by-side:
 Markdown is rendered from a Jinja2 template (templates/report.md.j2). HTML is
 the rendered Markdown wrapped in a small CSS shell. Inline HTML in the Markdown
 (e.g. <details>, the progress-bar div) survives both via md_in_html.
+=======
+Callers call write_report() to produce the unified output.
+>>>>>>> ec7518528dd66777707fc6366d4ecb8c6a158912
 """
 import json
 import os
 import statistics
+<<<<<<< HEAD
 from dataclasses import dataclass 
 from pathlib import Path
 from typing import Optional
@@ -29,10 +34,14 @@ import markdown as _markdown
 from bleach.css_sanitizer import CSSSanitizer
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pygments.formatters import HtmlFormatter
+=======
+from pathlib import Path
+>>>>>>> ec7518528dd66777707fc6366d4ecb8c6a158912
 
 
 NON_FAILURE_STATUSES = frozenset({"ok", "skipped"})
 
+<<<<<<< HEAD
 _HTML_ALLOWED_TAGS = frozenset({
     "h1", "h2", "h3", "h4", "h5", "h6",
     "p", "br", "hr", "strong", "em", "b", "i", "u", "s", "sub", "sup",
@@ -166,10 +175,23 @@ def _render_error(entry: dict) -> dict:
 
 
 def _build_model(
+=======
+
+def _timing_stats(times: list) -> str:
+    if not times:
+        return "(no timing)"
+    avg = statistics.mean(times)
+    std = statistics.pstdev(times)
+    return f"avg {avg:.3f}s  stddev {std:.3f}s  min {min(times):.3f}s  max {max(times):.3f}s"
+
+
+def write_report(
+>>>>>>> ec7518528dd66777707fc6366d4ecb8c6a158912
     title: str,
     script_name: str,
     ts: str,
     entries: list,
+<<<<<<< HEAD
     success_log: Optional[Path] = None,
     error_log: Optional[Path] = None,
     extra_lines: Optional[list] = None,
@@ -186,6 +208,23 @@ def _build_model(
 
     # Per-op aggregation. Skipped entries fold into the "ok" column so a skipped
     # op does not look like a failure; the SUMMARY/SKIPPED section show separately.
+=======
+    report_file: Path,
+    success_log: Path = None,
+    error_log: Path = None,
+    extra_lines: list = None,
+    group_label: str = "BY OPERATION",
+    show_successes: bool = True,
+) -> str:
+    """Format a unified report, write it to disk, and return the text."""
+    successes = [e for e in entries if e.get("status") == "ok"]
+    skipped = [e for e in entries if e.get("status") == "skipped"]
+    errors = [e for e in entries if e.get("status") not in NON_FAILURE_STATUSES]
+
+    # Per-op counts and timing. Skipped entries are folded into the "ok"
+    # column so a skipped op does not look like a failure; the SUMMARY and
+    # dedicated SKIPPED section show the skip count separately.
+>>>>>>> ec7518528dd66777707fc6366d4ecb8c6a158912
     ops: dict = {}
     for e in entries:
         op = e.get("op", "unknown")
@@ -197,6 +236,7 @@ def _build_model(
         if "elapsed_s" in e:
             rec["times"].append(e["elapsed_s"])
 
+<<<<<<< HEAD
     op_decorations = op_decorations or {}
     has_pass_rate = bool(op_decorations) and any(
         d.get("pct") is not None for d in op_decorations.values()
@@ -297,10 +337,39 @@ def _render_text(m: _ReportModel) -> str:
         *summary_lines,
         "",
         m.group_label,
+=======
+    op_lines = []
+    for op, rec in sorted(ops.items()):
+        total = rec["ok"] + rec["err"]
+        counts = f"{rec['ok']:>4} ok  {rec['err']:>4} failed  ({total:>4} total)"
+        timing = _timing_stats(rec["times"])
+        op_lines.append(f"  {op:<30}  {counts}  {timing}")
+
+    summary_lines = [
+        "SUMMARY",
+        f"  Total  : {len(entries)}",
+        f"  OK     : {len(successes)}",
+    ]
+    if skipped:
+        summary_lines.append(f"  Skipped: {len(skipped)}")
+    summary_lines.append(f"  Failed : {len(errors)}")
+
+    lines = [
+        "=" * 70,
+        f"  {title}",
+        f"  Script : {script_name}",
+        f"  Run    : {ts}",
+        "=" * 70,
+        "",
+        *summary_lines,
+        "",
+        group_label,
+>>>>>>> ec7518528dd66777707fc6366d4ecb8c6a158912
         *op_lines,
         "",
     ]
 
+<<<<<<< HEAD
     if m.extra_lines:
         lines += list(m.extra_lines) + [""]
 
@@ -474,5 +543,42 @@ def write_report(
         f.write(md)
     with open(html_path, "w") as f:
         f.write(html)
+=======
+    if extra_lines:
+        lines += extra_lines + [""]
+
+    if show_successes and successes:
+        lines.append("SUCCESSES")
+        for s in successes:
+            lines.append(f"  {json.dumps(s)}")
+        lines.append("")
+
+    if skipped:
+        lines.append("SKIPPED")
+        for s in skipped:
+            lines.append(f"  {json.dumps(s)}")
+        lines.append("")
+
+    if errors:
+        lines.append("ERRORS")
+        for e in errors:
+            lines.append(f"  {json.dumps(e)}")
+        lines.append("")
+
+    if success_log or error_log:
+        # Use paths relative to the report file's directory so reports are
+        # portable and don't leak local filesystem details.
+        report_parent = report_file.parent
+        lines.append("Log files:")
+        if success_log:
+            lines.append(f"  Success : {os.path.relpath(success_log, report_parent)}")
+        if error_log:
+            lines.append(f"  Errors  : {os.path.relpath(error_log, report_parent)}")
+        lines.append("")
+
+    text = "\n".join(lines)
+    with open(report_file, "w") as f:
+        f.write(text)
+>>>>>>> ec7518528dd66777707fc6366d4ecb8c6a158912
 
     return text
