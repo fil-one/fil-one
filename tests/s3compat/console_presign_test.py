@@ -38,6 +38,7 @@ Usage:
 Env (loaded from <provider>/.env via client.py):
   S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_ENDPOINT, S3_BUCKET
 """
+
 import argparse
 import json
 import os
@@ -55,7 +56,6 @@ from botocore.client import Config
 from client import resolve_provider
 from logger import Logger
 
-
 BROWSER_ORIGIN_DEFAULT = "https://app.fil.one"
 PRESIGN_EXPIRY_SECONDS = 300
 TEST_BODY = b"FilOne Console presigned-URL smoke test.\n"
@@ -69,7 +69,12 @@ PROVIDERS_WITH_PUT_BUCKET_CORS = {"akave"}
 
 # Response headers the Console needs to read after HeadObject.
 # Per PR #198 ADR: Aurora CORS must expose these via Access-Control-Expose-Headers.
-REQUIRED_EXPOSE_HEADERS_BASE = ("etag", "content-length", "content-type", "last-modified")
+REQUIRED_EXPOSE_HEADERS_BASE = (
+    "etag",
+    "content-length",
+    "content-type",
+    "last-modified",
+)
 # Only applicable to the fil-include-meta=1 variant.
 REQUIRED_EXPOSE_HEADERS_FIL_META = ("x-fil-cid",)
 # x-amz-meta-* is a prefix — we check any x-amz-meta-<something> header we sent
@@ -79,22 +84,24 @@ REQUIRED_EXPOSE_HEADERS_FIL_META = ("x-fil-cid",)
 # set (e.g. x-amz-server-side-encryption-aws-kms-key-id, x-amz-id-2,
 # x-amz-storage-class, rate-limit counters) are sensitive operational data
 # that should not be committed to the repo alongside the test reports.
-LOGGED_RESPONSE_HEADERS = frozenset({
-    "access-control-allow-credentials",
-    "access-control-allow-headers",
-    "access-control-allow-methods",
-    "access-control-allow-origin",
-    "access-control-expose-headers",
-    "access-control-max-age",
-    "content-disposition",
-    "content-encoding",
-    "content-length",
-    "content-type",
-    "date",
-    "etag",
-    "last-modified",
-    "vary",
-})
+LOGGED_RESPONSE_HEADERS = frozenset(
+    {
+        "access-control-allow-credentials",
+        "access-control-allow-headers",
+        "access-control-allow-methods",
+        "access-control-allow-origin",
+        "access-control-expose-headers",
+        "access-control-max-age",
+        "content-disposition",
+        "content-encoding",
+        "content-length",
+        "content-type",
+        "date",
+        "etag",
+        "last-modified",
+        "vary",
+    }
+)
 LOGGED_RESPONSE_HEADER_PREFIXES = ("x-amz-meta-", "x-fil-")
 
 
@@ -112,25 +119,35 @@ class ResponseCorsCheck:
 
 @dataclass
 class OpCase:
-    name: str                       # Short id used in log entry names.
-    s3_op: str                      # boto3 operation name (e.g. "head_object").
-    http_method: str                # HTTP method.
-    params: dict                    # Params passed to generate_presigned_url.
-    extra_query: dict = field(default_factory=dict)  # Signed query params (e.g. fil-include-meta).
+    name: str  # Short id used in log entry names.
+    s3_op: str  # boto3 operation name (e.g. "head_object").
+    http_method: str  # HTTP method.
+    params: dict  # Params passed to generate_presigned_url.
+    extra_query: dict = field(
+        default_factory=dict
+    )  # Signed query params (e.g. fil-include-meta).
     request_body: bytes | None = None
-    request_headers: dict = field(default_factory=dict)  # Headers sent with the execute request.
+    request_headers: dict = field(
+        default_factory=dict
+    )  # Headers sent with the execute request.
     preflight: PreflightCheck | None = None
     response_cors: ResponseCorsCheck | None = None
     ok_statuses: tuple[int, ...] = (200,)  # Statuses treated as execution success.
-    acceptable_error_statuses: tuple[int, ...] = ()  # S3 errors that still prove the pipeline works.
+    acceptable_error_statuses: tuple[
+        int, ...
+    ] = ()  # S3 errors that still prove the pipeline works.
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Verify presigned-URL support + CORS for FilOne Console ops",
     )
-    parser.add_argument("--provider", required=True, help="Provider name (e.g. aurora, akave)")
-    parser.add_argument("--bucket", default=None, help="Bucket (default: S3_BUCKET from .env)")
+    parser.add_argument(
+        "--provider", required=True, help="Provider name (e.g. aurora, akave)"
+    )
+    parser.add_argument(
+        "--bucket", default=None, help="Bucket (default: S3_BUCKET from .env)"
+    )
     parser.add_argument(
         "--browser-origin",
         default=BROWSER_ORIGIN_DEFAULT,
@@ -193,6 +210,7 @@ def main():
 
 # ── Test cases ─────────────────────────────────────────────────────────
 
+
 def _build_cases(bucket: str, key: str, metadata: dict[str, str]) -> list[OpCase]:
     """Build the ordered list of operations the Console uses."""
     # Headers the browser sends when uploading. Content-Type is always signed;
@@ -213,7 +231,9 @@ def _build_cases(bucket: str, key: str, metadata: dict[str, str]) -> list[OpCase
             },
             request_body=TEST_BODY,
             request_headers=put_headers,
-            preflight=PreflightCheck(method="PUT", request_headers=sorted(put_headers.keys())),
+            preflight=PreflightCheck(
+                method="PUT", request_headers=sorted(put_headers.keys())
+            ),
             response_cors=ResponseCorsCheck(),
             ok_statuses=(200,),
         ),
@@ -243,7 +263,8 @@ def _build_cases(bucket: str, key: str, metadata: dict[str, str]) -> list[OpCase
             params={"Bucket": bucket, "Key": key},
             extra_query={"fil-include-meta": "1"},
             response_cors=ResponseCorsCheck(
-                required_expose=REQUIRED_EXPOSE_HEADERS_BASE + REQUIRED_EXPOSE_HEADERS_FIL_META,
+                required_expose=REQUIRED_EXPOSE_HEADERS_BASE
+                + REQUIRED_EXPOSE_HEADERS_FIL_META,
                 required_meta_survives=[f"x-amz-meta-{k}" for k in metadata],
             ),
             ok_statuses=(200,),
@@ -253,7 +274,9 @@ def _build_cases(bucket: str, key: str, metadata: dict[str, str]) -> list[OpCase
             s3_op="get_object",
             http_method="GET",
             params={"Bucket": bucket, "Key": key},
-            response_cors=ResponseCorsCheck(required_expose=REQUIRED_EXPOSE_HEADERS_BASE),
+            response_cors=ResponseCorsCheck(
+                required_expose=REQUIRED_EXPOSE_HEADERS_BASE
+            ),
             ok_statuses=(200,),
         ),
         OpCase(
@@ -281,6 +304,7 @@ def _build_cases(bucket: str, key: str, metadata: dict[str, str]) -> list[OpCase
 
 # ── Per-case runner ────────────────────────────────────────────────────
 
+
 def _run_case(s3, log: Logger, case: OpCase, origin: str):
     print(f"\n=== {case.name} ===")
 
@@ -289,15 +313,22 @@ def _run_case(s3, log: Logger, case: OpCase, origin: str):
     try:
         url = _sign(s3, case)
     except Exception as e:
-        log.error(f"presign_{case.name}", e,
-                  elapsed_s=round(time.monotonic() - t0, 3),
-                  s3_op=case.s3_op, http_method=case.http_method)
+        log.error(
+            f"presign_{case.name}",
+            e,
+            elapsed_s=round(time.monotonic() - t0, 3),
+            s3_op=case.s3_op,
+            http_method=case.http_method,
+        )
         return
-    log.success(f"presign_{case.name}",
-                elapsed_s=round(time.monotonic() - t0, 3),
-                s3_op=case.s3_op, http_method=case.http_method,
-                url_host=urlparse(url).hostname,
-                signed_query_contains_fil_meta="fil-include-meta=1" in url)
+    log.success(
+        f"presign_{case.name}",
+        elapsed_s=round(time.monotonic() - t0, 3),
+        s3_op=case.s3_op,
+        http_method=case.http_method,
+        url_host=urlparse(url).hostname,
+        signed_query_contains_fil_meta="fil-include-meta=1" in url,
+    )
 
     # 2. Preflight
     if case.preflight:
@@ -305,8 +336,9 @@ def _run_case(s3, log: Logger, case: OpCase, origin: str):
         try:
             resp = _preflight(url, origin, case.preflight)
         except Exception as e:
-            log.error(f"preflight_{case.name}", e,
-                      elapsed_s=round(time.monotonic() - t0, 3))
+            log.error(
+                f"preflight_{case.name}", e, elapsed_s=round(time.monotonic() - t0, 3)
+            )
             # Continue — preflight failure doesn't prevent the execute check.
         else:
             ok, details = _check_preflight(resp, origin, case.preflight)
@@ -321,18 +353,19 @@ def _run_case(s3, log: Logger, case: OpCase, origin: str):
             if ok:
                 log.success(f"preflight_{case.name}", **entry)
             else:
-                log.error_raw(f"preflight_{case.name}",
-                              error_code="PreflightFailed",
-                              error_message="CORS preflight did not permit the request",
-                              **entry)
+                log.error_raw(
+                    f"preflight_{case.name}",
+                    error_code="PreflightFailed",
+                    error_message="CORS preflight did not permit the request",
+                    **entry,
+                )
 
     # 3. Execute
     t0 = time.monotonic()
     try:
         resp = _execute(url, case, origin)
     except Exception as e:
-        log.error(f"execute_{case.name}", e,
-                  elapsed_s=round(time.monotonic() - t0, 3))
+        log.error(f"execute_{case.name}", e, elapsed_s=round(time.monotonic() - t0, 3))
         return
 
     exec_entry = {
@@ -345,14 +378,18 @@ def _run_case(s3, log: Logger, case: OpCase, origin: str):
     elif resp.status_code in case.acceptable_error_statuses:
         # URL + CORS pipeline worked; S3 returned a documented error (e.g.,
         # retention not set on the object).
-        log.success(f"execute_{case.name}",
-                    note="acceptable S3 error (pipeline still validated)",
-                    **exec_entry)
+        log.success(
+            f"execute_{case.name}",
+            note="acceptable S3 error (pipeline still validated)",
+            **exec_entry,
+        )
     else:
-        log.error_raw(f"execute_{case.name}",
-                      error_code=f"HTTP {resp.status_code}",
-                      error_message=resp.reason or "Unexpected status",
-                      **exec_entry)
+        log.error_raw(
+            f"execute_{case.name}",
+            error_code=f"HTTP {resp.status_code}",
+            error_message=resp.reason or "Unexpected status",
+            **exec_entry,
+        )
 
     # 4. Response CORS
     if case.response_cors is not None:
@@ -361,13 +398,16 @@ def _run_case(s3, log: Logger, case: OpCase, origin: str):
         if ok:
             log.success(f"response_cors_{case.name}", **entry)
         else:
-            log.error_raw(f"response_cors_{case.name}",
-                          error_code="ResponseCorsMissing",
-                          error_message="Response lacks CORS headers the browser needs",
-                          **entry)
+            log.error_raw(
+                f"response_cors_{case.name}",
+                error_code="ResponseCorsMissing",
+                error_message="Response lacks CORS headers the browser needs",
+                **entry,
+            )
 
 
 # ── Signing ────────────────────────────────────────────────────────────
+
 
 def _sign(s3, case: OpCase) -> str:
     """Generate a presigned URL, with optional signed extra query params."""
@@ -397,11 +437,13 @@ def _sign(s3, case: OpCase) -> str:
 
 def _make_query_param_hook(name: str, value: str) -> Callable:
     """A before-sign hook that adds a query parameter before SigV4 signs the URL."""
+
     def hook(request, **kwargs):
         parsed = urlparse(request.url)
         q = dict(parse_qsl(parsed.query, keep_blank_values=True))
         q[name] = value
         request.url = urlunparse(parsed._replace(query=urlencode(q)))
+
     return hook
 
 
@@ -412,10 +454,11 @@ def _op_class_name(s3_op: str) -> str:
 
 # ── HTTP requests ──────────────────────────────────────────────────────
 
+
 def _preflight(url: str, origin: str, pf: PreflightCheck) -> requests.Response:
     headers = {
         "Origin": origin,
-        "Access-Control-Request-Method": pf.method,
+        # "Access-Control-Request-Method": pf.method,
     }
     if pf.request_headers:
         headers["Access-Control-Request-Headers"] = ", ".join(pf.request_headers)
@@ -436,16 +479,24 @@ def _execute(url: str, case: OpCase, origin: str) -> requests.Response:
 
 # ── Checks ─────────────────────────────────────────────────────────────
 
-def _check_preflight(resp: requests.Response, origin: str, pf: PreflightCheck) -> tuple[bool, dict]:
+
+def _check_preflight(
+    resp: requests.Response, origin: str, pf: PreflightCheck
+) -> tuple[bool, dict]:
     allow_origin = resp.headers.get("Access-Control-Allow-Origin", "")
     allow_methods = _split_header(resp.headers.get("Access-Control-Allow-Methods", ""))
-    allow_headers = _split_header(resp.headers.get("Access-Control-Allow-Headers", ""), lower=True)
+    allow_headers = _split_header(
+        resp.headers.get("Access-Control-Allow-Headers", ""), lower=True
+    )
 
     status_ok = resp.status_code in (200, 204)
     origin_ok = allow_origin == "*" or allow_origin.lower() == origin.lower()
-    method_ok = "*" in allow_methods or pf.method.upper() in {m.upper() for m in allow_methods}
+    method_ok = "*" in allow_methods or pf.method.upper() in {
+        m.upper() for m in allow_methods
+    }
     missing = [
-        h for h in pf.request_headers
+        h
+        for h in pf.request_headers
         if "*" not in allow_headers and h.lower() not in allow_headers
     ]
     headers_ok = not missing
@@ -462,16 +513,21 @@ def _check_preflight(resp: requests.Response, origin: str, pf: PreflightCheck) -
     }
 
 
-def _check_response_cors(resp: requests.Response, origin: str, case: OpCase) -> tuple[bool, dict]:
+def _check_response_cors(
+    resp: requests.Response, origin: str, case: OpCase
+) -> tuple[bool, dict]:
     rc = case.response_cors
     allow_origin = resp.headers.get("Access-Control-Allow-Origin", "")
     origin_ok = allow_origin == "*" or allow_origin.lower() == origin.lower()
 
-    exposed = _split_header(resp.headers.get("Access-Control-Expose-Headers", ""), lower=True)
+    exposed = _split_header(
+        resp.headers.get("Access-Control-Expose-Headers", ""), lower=True
+    )
     wildcard_expose = "*" in exposed
 
     missing_expose = [
-        h for h in rc.required_expose
+        h
+        for h in rc.required_expose
         if not wildcard_expose and h.lower() not in exposed
     ]
     expose_ok = not missing_expose
@@ -482,8 +538,7 @@ def _check_response_cors(resp: requests.Response, origin: str, case: OpCase) -> 
     # when 'x-amz-meta-*' or individual names are required.)
     response_headers_lower = {k.lower(): v for k, v in resp.headers.items()}
     missing_meta = [
-        h for h in rc.required_meta_survives
-        if h.lower() not in response_headers_lower
+        h for h in rc.required_meta_survives if h.lower() not in response_headers_lower
     ]
     meta_ok = not missing_meta
 
@@ -515,12 +570,15 @@ def _filter_response_headers(headers) -> dict:
     out = {}
     for k, v in headers.items():
         lk = k.lower()
-        if lk in LOGGED_RESPONSE_HEADERS or any(lk.startswith(p) for p in LOGGED_RESPONSE_HEADER_PREFIXES):
+        if lk in LOGGED_RESPONSE_HEADERS or any(
+            lk.startswith(p) for p in LOGGED_RESPONSE_HEADER_PREFIXES
+        ):
             out[lk] = v
     return out
 
 
 # ── Setup helpers ──────────────────────────────────────────────────────
+
 
 def _get_sigv4_s3_client():
     """S3 client forced to AWS Sig V4 (browser presigned URLs use X-Amz-* params).
@@ -543,7 +601,9 @@ def _get_sigv4_s3_client():
     )
 
 
-def _apply_bucket_cors(s3, bucket: str, origin: str, metadata_keys: list[str], log: Logger):
+def _apply_bucket_cors(
+    s3, bucket: str, origin: str, metadata_keys: list[str], log: Logger
+):
     """Overwrite the bucket's CORS config so the Console operations succeed from `origin`.
 
     The rule mirrors exactly what the test case list needs: every HTTP method
@@ -574,14 +634,18 @@ def _apply_bucket_cors(s3, bucket: str, origin: str, metadata_keys: list[str], l
     except Exception as e:
         log.error("bucket_cors_apply", e, bucket=bucket)
         raise
-    log.success("bucket_cors_apply",
-                bucket=bucket,
-                allowed_origins=[origin],
-                allowed_methods=cors["CORSRules"][0]["AllowedMethods"],
-                expose_headers=expose)
+    log.success(
+        "bucket_cors_apply",
+        bucket=bucket,
+        allowed_origins=[origin],
+        allowed_methods=cors["CORSRules"][0]["AllowedMethods"],
+        expose_headers=expose,
+    )
 
 
-def _snapshot_bucket_cors(s3, bucket: str, log: Logger, label: str) -> tuple[list | None, str]:
+def _snapshot_bucket_cors(
+    s3, bucket: str, log: Logger, label: str
+) -> tuple[list | None, str]:
     """Fetch the bucket's CORS config.
 
     Returns ``(rules, display)``:
@@ -601,14 +665,17 @@ def _snapshot_bucket_cors(s3, bucket: str, log: Logger, label: str) -> tuple[lis
         if code in {"NoSuchCORSConfiguration", "NoSuchBucket"}:
             return [], f"(provider returned {code})"
         if code in {"AccessDenied", "AllAccessDisabled"}:
-            log.success(f"bucket_cors_read_{label}",
-                        bucket=bucket,
-                        status="skipped",
-                        error_code=code,
-                        error_message=str(e))
+            log.success(
+                f"bucket_cors_read_{label}",
+                bucket=bucket,
+                status="skipped",
+                error_code=code,
+                error_message=str(e),
+            )
             return None, f"(cannot read: {code})"
-        log.error_raw(f"bucket_cors_read_{label}",
-                      error_code=code, error_message=str(e))
+        log.error_raw(
+            f"bucket_cors_read_{label}", error_code=code, error_message=str(e)
+        )
         return None, f"(error reading CORS: {code})"
     rules = resp.get("CORSRules", [])
     return rules, json.dumps(rules, indent=2, default=str)
@@ -622,18 +689,23 @@ def _restore_bucket_cors(s3, bucket: str, rules: list | None, log: Logger):
     place. The operator can reconcile manually.
     """
     if rules is None:
-        log.error_raw("bucket_cors_restore",
-                      error_code="NotRestorable",
-                      error_message="Pre-existing CORS config was not readable; "
-                                    "test-applied rules remain in place.",
-                      bucket=bucket)
+        log.error_raw(
+            "bucket_cors_restore",
+            error_code="NotRestorable",
+            error_message="Pre-existing CORS config was not readable; "
+            "test-applied rules remain in place.",
+            bucket=bucket,
+        )
         return
     try:
         if rules:
-            s3.put_bucket_cors(Bucket=bucket,
-                               CORSConfiguration={"CORSRules": rules})
-            log.success("bucket_cors_restore", bucket=bucket,
-                        action="put", rules_count=len(rules))
+            s3.put_bucket_cors(Bucket=bucket, CORSConfiguration={"CORSRules": rules})
+            log.success(
+                "bucket_cors_restore",
+                bucket=bucket,
+                action="put",
+                rules_count=len(rules),
+            )
         else:
             s3.delete_bucket_cors(Bucket=bucket)
             log.success("bucket_cors_restore", bucket=bucket, action="delete")

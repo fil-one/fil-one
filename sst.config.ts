@@ -381,10 +381,10 @@ export default $config({
     const auroraEnv = {
       AURORA_BACKOFFICE_URL: isProduction
         ? 'https://api-backoffice.aur.lu/api'
-        : 'https://api.backoffice.dev.aur.lu/api',
+        : 'https://api-backoffice.dev.aur.lu/api',
       AURORA_PORTAL_URL: isProduction
         ? 'https://api-portal.aur.lu/api'
-        : 'https://api.portal.dev.aur.lu/api',
+        : 'https://api-portal.dev.aur.lu/api',
       AURORA_PARTNER_ID: 'ff',
       AURORA_REGION_ID: 'ff',
     };
