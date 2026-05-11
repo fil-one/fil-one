@@ -102,7 +102,6 @@ function mockAuthIdentity() {
         pk: { S: `ORG#${MOCK_ORG_ID}` },
         sk: { S: 'PROFILE' },
         name: { S: 'Test Org' },
-        orgConfirmed: { BOOL: true },
         auroraTenantId: { S: AURORA_TENANT_ID },
         setupStatus: { S: FINAL_SETUP_STATUS },
       },
@@ -135,7 +134,6 @@ function mockAuthIdentityWithoutTenant() {
         pk: { S: `ORG#${MOCK_ORG_ID}` },
         sk: { S: 'PROFILE' },
         name: { S: 'Test Org' },
-        orgConfirmed: { BOOL: true },
       },
     });
 }
