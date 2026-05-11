@@ -599,9 +599,6 @@ export default $config({
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
 
-    // ── Org routes ──────────────────────────────────────────────────
-    addRoute({ method: 'POST', routePath: '/api/org/confirm', handler: 'confirm-org' });
-
     // ── Usage + Dashboard routes ─────────────────────────────────────
     addRoute({
       method: 'GET',

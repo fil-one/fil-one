@@ -105,7 +105,6 @@ describe('PATCH /api/me/profile handler', () => {
       })
       .resolves({
         Item: {
-          orgConfirmed: { BOOL: true },
           setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
         },
       });

@@ -102,9 +102,7 @@ describe('POST /api/me/resend-verification handler', () => {
         Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
       })
       .resolves({
-        Item: {
-          orgConfirmed: { BOOL: true },
-        },
+        Item: {},
       });
   });
 

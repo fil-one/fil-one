@@ -56,10 +56,6 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
   if (response.status === 403) {
     const body = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
-    if (body.code === ApiErrorCode.ORG_NOT_CONFIRMED) {
-      window.dispatchEvent(new CustomEvent('org:not-confirmed'));
-      throw Object.assign(new Error('Please create an organization to continue.'), { status: 403 });
-    }
     if (body.code === ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED) {
       throw Object.assign(
         new Error(
@@ -94,23 +90,11 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
 // ── Me / Org API ────────────────────────────────────────────────────────
 
-import type {
-  MeResponse,
-  ConfirmOrgResponse,
-  UpdateProfileRequest,
-  UpdateProfileResponse,
-} from '@filone/shared';
+import type { MeResponse, UpdateProfileRequest, UpdateProfileResponse } from '@filone/shared';
 
 export function getMe(options?: { forceRefresh?: boolean }): Promise<MeResponse> {
   const qs = options?.forceRefresh ? '?forceRefresh=1' : '';
   return apiRequest<MeResponse>(`/me${qs}`);
-}
-
-export function confirmOrg(orgName: string): Promise<ConfirmOrgResponse> {
-  return apiRequest<ConfirmOrgResponse>('/org/confirm', {
-    method: 'POST',
-    body: JSON.stringify({ orgName }),
-  });
 }
 
 export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfileResponse> {
