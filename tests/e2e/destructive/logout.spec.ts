@@ -15,7 +15,6 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await expect(page.getByText('Dashboard')).toBeVisible();
 
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByTestId('user-profile').click();
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('button', { name: 'Log out' }).click();
