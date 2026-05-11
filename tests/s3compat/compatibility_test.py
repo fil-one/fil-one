@@ -214,8 +214,20 @@ def _run_pytest(conf_path: Path, marks: str, test_target: str, json_out: Path,
     print(f"Backend : {backend_name}")
     print()
 
-    result = subprocess.run(cmd, cwd=S3TESTS_DIR, env=env)
-    return result.returncode
+    # Use Popen + wait so a Ctrl+C delivers SIGINT to both us and pytest (same
+    # process group) and pytest gets time to flush its JSON report from
+    # pytest_sessionfinish before exiting. subprocess.run would SIGKILL the
+    # child on KeyboardInterrupt and lose the partial report.
+    proc = subprocess.Popen(cmd, cwd=S3TESTS_DIR, env=env)
+    try:
+        return proc.wait()
+    except KeyboardInterrupt:
+        try:
+            proc.wait(timeout=20)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            proc.kill()
+            proc.wait()
+        raise
 
 
 def _test_category(test: dict) -> str:
@@ -431,31 +443,42 @@ def main():
 
     json_outs = []
     worst_exit = 0
+    interrupted = False
 
     with tempfile.TemporaryDirectory() as tmp:
         conf_path = _generate_conf(Path(tmp), args.provider)
 
-        for i, (pass_name, pass_filter) in enumerate(passes):
-            combined = _combine_filters(args.filter, pass_filter)
-            json_out = logs_dir / f"{ts}_compatibility_pytest_{pass_name}.json"
+        try:
+            for i, (pass_name, pass_filter) in enumerate(passes):
+                combined = _combine_filters(args.filter, pass_filter)
+                json_out = logs_dir / f"{ts}_compatibility_pytest_{pass_name}.json"
 
-            print(f"\n{'=' * 60}")
-            print(f"  Pass {i + 1}/{len(passes)}: {pass_name}")
-            print(f"  Filter: {combined}")
-            print(f"{'=' * 60}\n")
+                print(f"\n{'=' * 60}")
+                print(f"  Pass {i + 1}/{len(passes)}: {pass_name}")
+                print(f"  Filter: {combined}")
+                print(f"{'=' * 60}\n")
 
-            exit_code = _run_pytest(
-                conf_path, args.marks, args.test_file, json_out,
-                provider=args.provider, filter_expr=combined,
-            )
-            if json_out.exists():
-                json_outs.append(json_out)
-            worst_exit = max(worst_exit, exit_code)
+                exit_code = _run_pytest(
+                    conf_path, args.marks, args.test_file, json_out,
+                    provider=args.provider, filter_expr=combined,
+                )
+                if json_out.exists():
+                    json_outs.append(json_out)
+                worst_exit = max(worst_exit, exit_code)
 
-            # Best-effort cleanup between passes (not after the last one)
-            if i < len(passes) - 1:
-                print("\nCleaning up test buckets between passes...")
-                _cleanup_buckets(args.provider)
+                # Best-effort cleanup between passes (not after the last one)
+                if i < len(passes) - 1:
+                    print("\nCleaning up test buckets between passes...")
+                    _cleanup_buckets(args.provider)
+        except KeyboardInterrupt:
+            print("\n\nInterrupted — generating partial report from completed tests...")
+            interrupted = True
+            worst_exit = 130
+            # Pick up any JSON the interrupted pytest managed to flush.
+            for pass_name, _ in passes:
+                jp = logs_dir / f"{ts}_compatibility_pytest_{pass_name}.json"
+                if jp.exists() and jp not in json_outs:
+                    json_outs.append(jp)
 
     if not json_outs:
         print(
@@ -498,6 +521,7 @@ def main():
         group_label="BY CATEGORY",
         show_successes=False,  # Hundreds of passing tests — errors are what matter
         op_decorations=_category_progress(entries),
+        interrupted=interrupted,
     )
 
     print(f"\n{text}")

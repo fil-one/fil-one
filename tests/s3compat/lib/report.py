@@ -112,6 +112,7 @@ class _ReportModel:
     extra_lines: list
     log_paths: dict
     show_successes: bool
+    interrupted: bool
 
 
 def _timing_stats(times: list) -> tuple:
@@ -177,6 +178,7 @@ def _build_model(
     sections: Optional[list] = None,
     op_decorations: Optional[dict] = None,
     report_file: Optional[Path] = None,
+    interrupted: bool = False,
 ) -> _ReportModel:
     successes = [e for e in entries if e.get("status") == "ok"]
     skipped = [e for e in entries if e.get("status") == "skipped"]
@@ -255,6 +257,7 @@ def _build_model(
         extra_lines=extra_lines or [],
         log_paths=log_paths,
         show_successes=show_successes,
+        interrupted=interrupted,
     )
 
 
@@ -281,6 +284,16 @@ def _render_text(m: _ReportModel) -> str:
         f"  Run    : {m.ts}",
         "=" * 70,
         "",
+    ]
+    if m.interrupted:
+        lines += [
+            "!" * 70,
+            "  INCOMPLETE RESULTS — test run was interrupted (Ctrl+C).",
+            "  Numbers below reflect only the tests that finished running.",
+            "!" * 70,
+            "",
+        ]
+    lines += [
         *summary_lines,
         "",
         m.group_label,
@@ -309,11 +322,11 @@ def _render_text(m: _ReportModel) -> str:
             lines.append(f"  {json.dumps(e, default=str)}")
         lines.append("")
 
-    if m.log_paths["success"] or m.log_paths["error"]:
+    if m.log_paths.get("success") or m.log_paths.get("error"):
         lines.append("Log files:")
-        if m.log_paths["success"]:
+        if m.log_paths.get("success"):
             lines.append(f"  Success : {m.log_paths['success']}")
-        if m.log_paths["error"]:
+        if m.log_paths.get("error"):
             lines.append(f"  Errors  : {m.log_paths['error']}")
         lines.append("")
 
@@ -355,6 +368,7 @@ def _render_markdown(m: _ReportModel) -> str:
         extra_lines=m.extra_lines,
         log_paths=m.log_paths,
         show_successes=m.show_successes,
+        interrupted=m.interrupted,
     )
 
 def _render_html(title: str, md_text: str) -> str:
@@ -419,10 +433,11 @@ def write_report(
     show_successes: bool = True,
     sections: Optional[list] = None,
     op_decorations: Optional[dict] = None,
+    interrupted: bool = False,
 ) -> str:
     """Format a unified report, write .txt/.md/.html to disk, and return the text form.
 
-    New optional kwargs:
+    Optional kwargs:
       - sections: list of Section(title, markdown) — extra rich content rendered
         between the ops table and the Skipped/Success/Errors blocks. Used by
         compatibility_test.py to inject Failure-clusters etc. without coupling
@@ -443,6 +458,7 @@ def write_report(
         sections=sections,
         op_decorations=op_decorations,
         report_file=report_file,
+        interrupted=interrupted,
     )
 
     text = _render_text(model)
