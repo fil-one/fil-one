@@ -21,12 +21,19 @@ const UPLOAD_FILE = {
 const UPLOAD_FILE_SIZE_LABEL = '23 B';
 
 async function createBucketWithKey(page: Page, bucketName: string): Promise<void> {
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('link', { name: 'Buckets' }).click();
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('button', { name: 'Create bucket' }).first().click();
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('textbox', { name: 'Bucket name' }).fill(bucketName);
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('button', { name: 'Create new key' }).click();
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('textbox', { name: 'Key name' }).fill(`${bucketName}-key`);
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('button', { name: 'Create bucket and access key' }).click();
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('button', { name: 'Done' }).click();
   await expect(page).toHaveURL(new RegExp(`/buckets/${bucketName}$`));
 }
@@ -49,6 +56,7 @@ async function openFirstBucket(page: Page): Promise<string> {
 async function submitUpload(page: Page, bucketName: string): Promise<void> {
   // Header has an unconditional "Upload object" button; an empty bucket also
   // renders one in the empty-state card. `.first()` targets the header button.
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('button', { name: 'Upload object' }).first().click();
   await expect(page).toHaveURL(new RegExp(`/buckets/${bucketName}/upload$`));
 
@@ -59,6 +67,7 @@ async function submitUpload(page: Page, bucketName: string): Promise<void> {
 
   // Submit button on the upload page (different button than the header one
   // we clicked above — this is the form submit).
+  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('button', { name: 'Upload object' }).click();
 }
 
@@ -83,6 +92,7 @@ test.describe('paid user', () => {
 
     // The file row has role="button"; its accessible name concatenates the
     // file name and formatted size from the table cells.
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page
       .getByRole('button', { name: `${UPLOAD_FILE.name} ${UPLOAD_FILE_SIZE_LABEL}` })
       .click();
@@ -112,6 +122,7 @@ test.describe('trial user', () => {
 
     await expect(page).toHaveURL(new RegExp(`/buckets/${bucketName}$`));
 
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page
       .getByRole('button', { name: `${UPLOAD_FILE.name} ${UPLOAD_FILE_SIZE_LABEL}` })
       .click();
@@ -130,16 +141,22 @@ test.describe('unpaid user', () => {
     const bucketName = uniqueBucketName('unpaid');
 
     await page.goto('/dashboard');
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page.getByRole('link', { name: 'Buckets' }).click();
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page.getByRole('button', { name: 'Create bucket' }).first().click();
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page.getByRole('textbox', { name: 'Bucket name' }).fill(bucketName);
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page.getByRole('button', { name: 'Create bucket' }).click();
 
     // No navigation on failure — still on the create page.
     await expect(page).toHaveURL(/\/buckets\/create$/);
 
     // Returning to /buckets should not show a row for this bucket name.
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page.getByRole('link', { name: 'Buckets' }).click();
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await expect(page.getByRole('cell', { name: bucketName })).toHaveCount(0);
   });
 
@@ -152,6 +169,7 @@ test.describe('unpaid user', () => {
     // accounts; the upload hook catches the error, resets to the idle state,
     // and stays on the upload page. Wait for the dropzone to reappear, which
     // signals that the failure has been processed.
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await expect(page.getByRole('button', { name: /Drop files here or click to/i })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/buckets/${bucketName}/upload$`));
   });

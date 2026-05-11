@@ -272,7 +272,7 @@ export function DashboardPage() {
                 </Badge>
               )}
             </div>
-            <span className="text-xl font-semibold text-zinc-900">
+            <span className="text-xl font-medium text-zinc-900">
               {planDisplayName(billing.subscription.planId)}
             </span>
             {isTrialing && (
@@ -302,7 +302,7 @@ export function DashboardPage() {
               STORAGE
             </span>
             <div className="flex items-baseline gap-1.5">
-              <span className="text-[30px] font-semibold leading-9 tracking-tight text-zinc-900">
+              <span className="text-[30px] font-medium leading-9 tracking-tight text-zinc-900">
                 {formatBytes(usage.storage.usedBytes)}
               </span>
               {isTrialing && <span className="text-[13px] text-zinc-500">/ 1 TB</span>}
@@ -313,7 +313,7 @@ export function DashboardPage() {
           ) : (
             <div className="flex items-center justify-between border-t border-zinc-200 pt-3">
               <span className="text-[11px] text-zinc-500">Est. monthly cost</span>
-              <span className="text-[13px] font-semibold text-zinc-900">
+              <span className="text-[13px] font-medium text-zinc-900">
                 {estimateMonthlyCost(usage.storage.usedBytes, pricePerTbCents)}
               </span>
             </div>
@@ -327,7 +327,7 @@ export function DashboardPage() {
               EGRESS
             </span>
             <div className="flex items-baseline gap-1.5">
-              <span className="text-[30px] font-semibold leading-9 tracking-tight text-zinc-900">
+              <span className="text-[30px] font-medium leading-9 tracking-tight text-zinc-900">
                 {formatBytes(usage.egress.usedBytes)}
               </span>
               {isTrialing && <span className="text-[13px] text-zinc-500">/ 2 TB</span>}
@@ -355,7 +355,7 @@ export function DashboardPage() {
             </AppLink>
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-xl font-semibold text-zinc-900">{usage.buckets.count}</span>
+            <span className="text-xl font-medium text-zinc-900">{usage.buckets.count}</span>
             <span className="text-[11px] text-zinc-500">/ {usage.buckets.limit}</span>
           </div>
         </div>
@@ -364,7 +364,7 @@ export function DashboardPage() {
             OBJECTS
           </span>
           <div className="flex items-baseline gap-1">
-            <span className="text-xl font-semibold text-zinc-900">{usage.objects.count}</span>
+            <span className="text-xl font-medium text-zinc-900">{usage.objects.count}</span>
             <span className="text-[11px] text-zinc-500">total</span>
           </div>
         </div>
@@ -378,7 +378,7 @@ export function DashboardPage() {
             </AppLink>
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-xl font-semibold text-zinc-900">{usage.accessKeys.count}</span>
+            <span className="text-xl font-medium text-zinc-900">{usage.accessKeys.count}</span>
             <span className="text-[11px] text-zinc-500">/ {usage.accessKeys.limit}</span>
           </div>
         </div>
