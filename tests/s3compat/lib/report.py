@@ -20,8 +20,9 @@ the rendered Markdown wrapped in a small CSS shell. Inline HTML in the Markdown
 import json
 import os
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass 
 from pathlib import Path
+from typing import Optional
 
 import markdown as _markdown
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -136,14 +137,14 @@ def _build_model(
     script_name: str,
     ts: str,
     entries: list,
-    success_log: Path = None,
-    error_log: Path = None,
-    extra_lines: list = None,
+    success_log: Optional[Path] = None,
+    error_log: Optional[Path] = None,
+    extra_lines: Optional[list] = None,
     group_label: str = "BY OPERATION",
     show_successes: bool = True,
-    sections: list = None,
-    op_decorations: dict = None,
-    report_file: Path = None,
+    sections: Optional[list] = None,
+    op_decorations: Optional[dict] = None,
+    report_file: Optional[Path] = None,
 ) -> _ReportModel:
     successes = [e for e in entries if e.get("status") == "ok"]
     skipped = [e for e in entries if e.get("status") == "skipped"]
@@ -192,7 +193,7 @@ def _build_model(
         "failed": len(error_entries),
     }
 
-    log_paths = {"success": None, "error": None}
+    log_paths = {"success": 'success.jsonl', "error": 'errors.jsonl'}
     if report_file is not None:
         report_parent = report_file.parent
         if success_log:
@@ -315,74 +316,6 @@ def _render_markdown(m: _ReportModel) -> str:
         show_successes=m.show_successes,
     )
 
-
-_HTML_CSS = """
-:root {
-  color-scheme: light dark;
-  --fg: #1f2328;
-  --muted: #57606a;
-  --bg: #ffffff;
-  --bg-muted: #f6f8fa;
-  --border: #d0d7de;
-  --accent: #0969da;
-  --ok: #1a7f37;
-  --err: #cf222e;
-  --warn: #9a6700;
-  --bar-bg: #e6e8ec;
-  --bar-fill: #1a7f37;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --fg: #e6edf3;
-    --muted: #8b949e;
-    --bg: #0d1117;
-    --bg-muted: #161b22;
-    --border: #30363d;
-    --accent: #58a6ff;
-    --ok: #3fb950;
-    --err: #f85149;
-    --warn: #d29922;
-    --bar-bg: #21262d;
-    --bar-fill: #3fb950;
-  }
-}
-* { box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--fg);
-  background: var(--bg);
-  margin: 0;
-  padding: 24px;
-}
-.container { max-width: 1100px; margin: 0 auto; }
-h1, h2, h3 { line-height: 1.25; margin-top: 1.6em; }
-h1 { font-size: 1.9rem; border-bottom: 1px solid var(--border); padding-bottom: .3em; margin-top: 0; }
-h2 { font-size: 1.35rem; border-bottom: 1px solid var(--border); padding-bottom: .25em; }
-h3 { font-size: 1.1rem; }
-p, li { color: var(--fg); }
-code, pre { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
-code { background: var(--bg-muted); padding: 2px 5px; border-radius: 3px; font-size: 90%; }
-pre { background: var(--bg-muted); padding: 12px 14px; border-radius: 6px; overflow-x: auto; font-size: 12.5px; line-height: 1.45; }
-pre code { background: transparent; padding: 0; }
-table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 13.5px; }
-th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: middle; }
-th { background: var(--bg-muted); font-weight: 600; }
-tbody tr:nth-child(even) { background: var(--bg-muted); }
-details { margin: .5em 0; border: 1px solid var(--border); border-radius: 6px; padding: 0 12px; background: var(--bg-muted); }
-details > summary { cursor: pointer; padding: 8px 0; font-weight: 500; list-style: none; }
-details > summary::-webkit-details-marker { display: none; }
-details > summary::before { content: "▸ "; color: var(--muted); }
-details[open] > summary::before { content: "▾ "; }
-details[open] { background: var(--bg); }
-.bar { display: inline-block; width: 90px; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; vertical-align: middle; margin-right: 6px; }
-.bar::before { content: ""; display: block; width: var(--pct, 0%); height: 100%; background: var(--bar-fill); transition: width .25s ease; }
-hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
-a { color: var(--accent); }
-"""
-
-
 def _render_html(title: str, md_text: str) -> str:
     body = _markdown.markdown(
         md_text,
@@ -399,25 +332,15 @@ def _render_html(title: str, md_text: str) -> str:
             "codehilite": {"css_class": "highlight", "guess_lang": False},
             "toc": {"permalink": False},
         },
-        output_format="html5",
+        output_format="html",
     )
     # Escape only the document title (safe text inside <title>); md_text body
     # has been processed by Python-Markdown which sanitizes appropriately.
     safe_title = (
         title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     )
-    return (
-        "<!doctype html>\n"
-        '<html lang="en">\n<head>\n'
-        '<meta charset="utf-8">\n'
-        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        f"<title>{safe_title}</title>\n"
-        f"<style>{_HTML_CSS}</style>\n"
-        "</head>\n<body>\n"
-        '<div class="container">\n'
-        f"{body}\n"
-        "</div>\n</body>\n</html>\n"
-    )
+    template = _jinja_env.get_template("report.html.j2")
+    return template.render(safe_title=safe_title, body=body)
 
 
 def _sibling_path(report_file: Path, suffix: str) -> Path:
@@ -430,13 +353,13 @@ def write_report(
     ts: str,
     entries: list,
     report_file: Path,
-    success_log: Path = None,
-    error_log: Path = None,
-    extra_lines: list = None,
+    success_log: Optional[Path] = None,
+    error_log: Optional[Path] = None,
+    extra_lines: Optional[list] = None,
     group_label: str = "BY OPERATION",
     show_successes: bool = True,
-    sections: list = None,
-    op_decorations: dict = None,
+    sections: Optional[list] = None,
+    op_decorations: Optional[dict] = None,
 ) -> str:
     """Format a unified report, write .txt/.md/.html to disk, and return the text form.
 
