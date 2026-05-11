@@ -25,7 +25,7 @@ A single **partner key** authenticates every endpoint. It is a global, partner-s
 
 ### Tenant lifecycle
 
-- `POST /tenants` performs create & setup synchronously and returns only after the tenant is fully operational. The Service Orchestrator generates and returns a tenant `id`. FilOne passes its organisation ID as `externalId` (the idempotency key): re-calling with the same `externalId` returns the existing tenant. FilOne stores the SO-assigned `id` and uses it as the `{tenantId}` path parameter in all subsequent calls.
+- `POST /tenants` performs create & setup synchronously and returns only after the tenant is fully operational. The call is idempotent on a client-supplied `tenantId`: re-calling with the same identifier returns the existing tenant. The `tenantId` must be a UUID. UUID lets every Service Orchestrator persist the value efficiently and rules out cross-partner collisions by construction. FilOne's organisation IDs are already UUIDs, so FilOne uses its organisation ID verbatim as the `tenantId` without minting or persisting a separate identifier.
 - `GET /tenants/{tenantId}` returns operational state: status, resource counts, and resource limits.
 - `POST /tenants/{tenantId}/status` sets `active` / `write-locked` / `disabled`; setting the same status twice is a no-op.
 - `DELETE /tenants/{tenantId}` permanently deletes the tenant and all resources owned by it (buckets, objects, S3 access keys). The tenant must be in the `disabled` state — the call returns 409 otherwise. The two-phase pattern (disable, then delete) forces the caller to consciously cut off all access before committing to a destructive, irreversible operation. The endpoint is synchronous (matching `POST /tenants`) and idempotent: a call against an already-deleted tenant returns 204.
@@ -56,7 +56,7 @@ Service Orchestrators must support at least:
 
 Every operation is safely retryable end-to-end:
 
-- `POST /tenants` returns the existing tenant on duplicate `externalId`.
+- `POST /tenants` returns the existing tenant on duplicate `tenantId`.
 - `POST /tenants/{tenantId}/status` is a no-op when already in the requested status.
 - `DELETE /tenants/{tenantId}` returns 204 if the tenant is already gone.
 - `POST /tenants/{tenantId}/access-keys` returns 409 on duplicate name; the caller can recover via list + get.
@@ -101,9 +101,9 @@ Prefix all routes with a version segment so that a future breaking revision can 
 
 Match Aurora's existing convention. Rejected in favour of standard `Authorization: Bearer <token>`, which is more idiomatic, has first-class support in HTTP clients and OpenAPI tooling, and does not require Service Orchestrators to invent a custom header.
 
-### Partner-supplied `tenantId`
+### Server-assigned tenant IDs
 
-FilOne passes its organisation ID as the canonical `tenantId` in `POST /tenants`, and the Service Orchestrator uses it as its primary key. Rejected because it imposes FilOne's ID format and character-set constraints on the Service Orchestrator's database schema. It also risks silent collisions when two different Service Orchestrator partners (e.g. FilOne and another integrator) use organisation IDs that happen to match — per-partner scoping in the Service Orchestrator prevents this only if the Service Orchestrator is already aware of the problem. Allowing the Service Orchestrator to generate its own ID (with FilOne's org ID carried as `externalId`) keeps the primary key under the Service Orchestrator's control and makes the scoping explicit.
+Server returns a tenant `id`; the client carries its own identifier separately (e.g. Aurora's `name` slug, or an opaque `externalId` used as the idempotency key). Rejected because it forces FilOne to store and look up a Service Orchestrator-assigned identifier alongside its organisation ID, and to keep the two in sync on every call. The motivations that would otherwise favour SO-assignment — letting the Service Orchestrator control its primary-key format, and avoiding cross-partner ID collisions — are both addressed by requiring the client-supplied `tenantId` to be a UUID: UUID is a universally accepted identifier format that any Service Orchestrator can persist directly, and UUID randomness rules out cross-partner collisions by construction.
 
 ### Bare AWS action names without the `s3:` prefix
 
@@ -115,6 +115,5 @@ Aurora expresses permissions as bare AWS action names — `GetObject`, `PutObjec
 - Bucket and object operations move entirely to the standard S3 API. Existing Aurora Portal calls for bucket management (`create-bucket`, `list-buckets`, `get-bucket`, `get-bucket-analytics` ownership check) will be reworked to use S3.
 - The contract requires Service Orchestrators to support synchronous `POST /tenants` (potentially long-running) and to honour idempotency on every mutating endpoint. Service Orchestrators whose native setup flow is fully asynchronous must adapt internally.
 - The access-key permission enum gains bucket-management permissions (`s3:CreateBucket`, `s3:ListAllMyBuckets`, `s3:DeleteBucket`) that Aurora's permission strings did not surface as first-class options. Service Orchestrators map these to whatever native primitives they expose.
-- FilOne must persist the Service Orchestrator–assigned tenant `id` (returned by `POST /tenants`) alongside its own organisation ID and use it as the `{tenantId}` path parameter in all subsequent management API calls.
 - A single partner key authenticates every endpoint, including tenant-scoped operations. The Service Orchestrator must enforce per-partner tenant scoping so the partner key cannot reach tenants belonging to other partners.
 - Telemetry (TTFB, error rates, RPS) and S3 Gateway observability are explicitly out of scope for this contract; they are delivered through the partner's observability stack.
