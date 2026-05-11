@@ -5,7 +5,7 @@ DeleteBucket via access-key auth.  These operations are only available
 through the Aurora Dashboard (Portal) REST API using a Bearer token.
 
 This module provides thin wrappers that return responses shaped like
-their boto3/S3 equivalents so ``aurora.backend.patch`` can swap them in
+their boto3/S3 equivalents so ``lib.backend-aurora.patch`` can swap them in
 transparently.
 
 Env vars
@@ -17,7 +17,7 @@ AURORA_NO_VERIFY_SSL  - set to "true" to skip TLS cert verification
 Token
 -----
 Reuses the cached Bearer token at ~/.aurora_token written by
-``python aurora/tools/aurora_key_management.py login``.
+``python tools/aurora_key_management.py login``.
 """
 import json
 import logging
@@ -29,7 +29,7 @@ from pathlib import Path
 import requests
 import urllib3
 
-log = logging.getLogger("aurora.backend.portal_api")
+log = logging.getLogger("backend-aurora.portal_api")
 
 TOKEN_CACHE = Path.home() / ".aurora_token"
 API_BASE = "/api/v1"
@@ -67,13 +67,13 @@ def _load_token() -> str:
     if not TOKEN_CACHE.exists():
         raise RuntimeError(
             f"No Aurora token found at {TOKEN_CACHE}. "
-            "Run: python aurora/tools/aurora_key_management.py login"
+            "Run: python tools/aurora_key_management.py login"
         )
     data = json.loads(TOKEN_CACHE.read_text())
     if "expires_at" in data and time.time() > data["expires_at"]:
         raise RuntimeError(
             "Aurora Bearer token has expired. "
-            "Run: python aurora/tools/aurora_key_management.py login"
+            "Run: python tools/aurora_key_management.py login"
         )
     token = data.get("access_token", "")
     if not token:

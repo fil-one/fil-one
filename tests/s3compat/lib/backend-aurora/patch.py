@@ -31,7 +31,7 @@ from .portal_api import (
     validate_connection,
 )
 
-log = logging.getLogger("aurora.backend.patch")
+log = logging.getLogger("backend-aurora.patch")
 
 
 # ── S3 Client patching ──────────────────────────────────────────────────
@@ -232,7 +232,7 @@ def _install_patches():
     boto3.resource = _patched_boto3_resource
     boto3.session.Session.resource = _patched_session_resource
     _INSTALLED = True
-    log.info("aurora.backend.patch: boto3 patches installed")
+    log.info("backend-aurora.patch: boto3 patches installed")
 
 
 # ── Tests to auto-skip (consumed by backend_loader) ──────────────────────
@@ -255,5 +255,5 @@ SKIP_REASON = (
 def activate():
     """Entry point invoked by `backend_loader._load_backend('aurora')`."""
     validate_connection()
-    log.info("aurora.backend.patch: portal API connection validated")
+    log.info("backend-aurora.patch: portal API connection validated")
     _install_patches()

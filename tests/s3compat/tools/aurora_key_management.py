@@ -16,30 +16,30 @@ USAGE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   # Step 1 — fetch tenant API key from SSM and cache it
-  python aurora/tools/aurora_key_management.py login \\
+  python tools/aurora_key_management.py login \\
     --stage dev --region eu-west-1 --tenant-id <TENANT_ID>
 
   # Step 2 — discover env (Portal API)
-  python aurora/tools/aurora_key_management.py env \\
+  python tools/aurora_key_management.py env \\
     --portal-origin https://api.portal.dev.aur.lu --no-verify
 
   # Step 3 — list tenants (Back Office API; uses partner-level key)
-  python aurora/tools/aurora_key_management.py tenants \\
+  python tools/aurora_key_management.py tenants \\
     --backoffice-origin https://api.backoffice.dev.aur.lu \\
     --backoffice-api-key <PARTNER_API_KEY> --no-verify
 
   # Step 4 — list access keys for a tenant (Portal API)
-  python aurora/tools/aurora_key_management.py keys \\
+  python tools/aurora_key_management.py keys \\
     --portal-origin https://api.portal.dev.aur.lu \\
     --tenant <TENANT_ID> --no-verify
 
   # Step 5 — create a key
-  python aurora/tools/aurora_key_management.py create-key \\
+  python tools/aurora_key_management.py create-key \\
     --portal-origin https://api.portal.dev.aur.lu --tenant <TENANT_ID> \\
     --name "compat-test-full" --access '["s3:*"]' --no-verify
 
   # Step 6 — delete a key
-  python aurora/tools/aurora_key_management.py delete-key \\
+  python tools/aurora_key_management.py delete-key \\
     --portal-origin https://api.portal.dev.aur.lu --tenant <TENANT_ID> \\
     --key-id <KEY_ID> --no-verify
 

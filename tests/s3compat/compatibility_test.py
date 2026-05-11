@@ -183,7 +183,7 @@ def _run_pytest(conf_path: Path, marks: str, test_target: str, json_out: Path,
     ]
 
     # Always load the backend loader plugin; it no-ops if S3COMPAT_BACKEND
-    # is unset or names an on-ramp without a `<provider>/backend/` package.
+    # is unset or names an on-ramp without a `lib/backend-<provider>/` package.
     cmd += ["-p", "lib.backend_loader"]
 
     if marks:
