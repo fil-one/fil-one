@@ -1,0 +1,28 @@
+======================================================================
+  S3 Compatibility Test — aurora
+  Script : compatibility_test
+  Run    : 20260224_130820
+======================================================================
+
+SUMMARY
+  Total  : 1
+  OK     : 0
+  Failed : 1
+
+BY CATEGORY
+  s3_core                            0 ok     1 failed  (   1 total)  avg 5.709s  stddev 0.000s  min 5.709s  max 5.709s
+
+TEST RUN
+  Provider  : aurora
+  Collected : 1
+  Passed    : 0
+  Failed    : 0
+  Error     : 1
+  Skipped   : 0
+  Duration  : 5.9s
+  Marks     : not fails_on_aws
+  Target    : s3tests/functional/test_s3.py::test_bucket_list_empty
+  Raw JSON  : ../logs/20260224_130820_compatibility_pytest_raw.json
+
+ERRORS
+  {"op": "s3_core", "status": "err", "outcome": "error", "test": "s3tests/functional/test_s3.py::test_bucket_list_empty", "elapsed_s": 5.709, "longrepr": "s3tests/functional/__init__.py:344: in setup_teardown\n    teardown()\ns3tests/functional/__init__.py:314: in teardown\n    nuke_prefixed_buckets(prefix=prefix, client=alt_client)\ns3tests/functional/__init__.py:159: in nuke_prefixed_buckets\n    raise err\ns3tests/functional/__init__.py:150: in nuke_prefixed_buckets\n    nuke_bucket(client, bucket_name)\ns3tests/functional/__init__.py:103: in nuke_bucket\n    for objects in list_versions(client, bucket, batch_size):\ns3tests/functional/__init__.py:88: in list_versions\n    listing = client.list_object_versions(**kwargs)\n              ^^^^^^^^^^^^^^^^^^^"}

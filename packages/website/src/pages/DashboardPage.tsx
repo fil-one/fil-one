@@ -12,8 +12,9 @@ import { Link as AppLink } from '../components/Link';
 
 const UsageTrends = lazy(() => import('./UsageTrends'));
 
-import { Heading } from '../components/Heading';
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
+import { IconButton } from '../components/IconButton';
 import { Badge, type BadgeColor } from '../components/Badge';
 import { Card } from '../components/Card';
 import { IconBox } from '../components/IconBox';
@@ -172,10 +173,12 @@ export function DashboardPage() {
   const quickSetupTotal = quickSetupTasks.length;
 
   return (
-    <div className="p-8">
+    <div className="px-10 pt-10">
       {/* 1. Page header */}
       <div className="mb-5 flex items-center justify-between">
-        <Heading tag="h1">Dashboard</Heading>
+        <Heading tag="h1" size="xl">
+          Dashboard
+        </Heading>
         <Button variant="ghost" size="sm" icon={PlusIcon} href="/buckets">
           New bucket
         </Button>
@@ -199,17 +202,19 @@ export function DashboardPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="primary" size="sm" href="/billing">
-              Upgrade →
-            </Button>
-            <button
-              type="button"
+            <Link
+              to="/billing"
+              className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-br from-[#0080ff] to-[#256af4] px-3 py-1.5 text-xs font-medium text-white shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] hover:opacity-90"
+            >
+              Upgrade
+              <span aria-hidden="true">→</span>
+            </Link>
+            <IconButton
+              icon={XIcon}
               aria-label="Dismiss trial banner"
               onClick={() => setTrialBannerVisible(false)}
-              className="rounded-md p-1.5 text-zinc-400 hover:text-zinc-600"
-            >
-              <XIcon size={16} />
-            </button>
+              size="sm"
+            />
           </div>
         </div>
       )}

@@ -6,8 +6,7 @@ import { CopySimpleIcon, DatabaseIcon, PlusIcon } from '@phosphor-icons/react/di
 
 import { AccessKeysTable } from '../components/AccessKeysTable';
 import { Button } from '../components/Button';
-import { Link } from '../components/Link';
-import { Heading } from '../components/Heading';
+import { Heading } from '../components/Heading/Heading';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Spinner } from '../components/Spinner';
@@ -35,6 +34,12 @@ type AccessKeysTabProps = {
 function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
   return (
     <>
+      <div className="mt-4 mb-4">
+        <span className="text-sm text-zinc-600">
+          {keys.length === 1 ? '1 key' : `${keys.length} keys`}
+        </span>
+      </div>
+
       <AccessKeysTable
         keys={keys}
         showBuckets
@@ -183,10 +188,17 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
       {/* Quickstart CLI */}
       <div>
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-zinc-900">Quickstart (AWS CLI)</h3>
-          <Link variant="accent" href={DOCS_URL} className="text-xs">
-            View docs
-          </Link>
+          <Heading tag="h3" size="sm">
+            Quickstart (AWS CLI)
+          </Heading>
+          <a
+            href={DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs font-medium text-brand-600 hover:underline"
+          >
+            View docs ↗
+          </a>
         </div>
         <div className="flex flex-col gap-3">
           {[
@@ -223,7 +235,9 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 
       {/* SDK Examples */}
       <div>
-        <h3 className="mb-4 text-sm font-semibold text-zinc-900">SDK examples</h3>
+        <Heading tag="h3" size="sm" className="mb-4">
+          SDK examples
+        </Heading>
         <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
           {/* Tab bar */}
           <div className="flex border-b border-zinc-200 bg-zinc-50">
@@ -278,7 +292,9 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 
       {/* Migrating from AWS S3 */}
       <div>
-        <h3 className="mb-2 text-sm font-semibold text-zinc-900">Migrating from AWS S3</h3>
+        <Heading tag="h3" size="sm" className="mb-2">
+          Migrating from AWS S3
+        </Heading>
         <p className="mb-4 text-sm text-zinc-600">
           Fil One is fully S3-compatible. In most cases, you only need to change two settings in
           your existing code.
@@ -394,7 +410,7 @@ export function ApiKeysPage() {
 
   if (isError) {
     return (
-      <div className="p-6">
+      <div className="px-10 pt-10">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error?.message ?? 'Failed to load access keys'}
         </div>
@@ -403,9 +419,13 @@ export function ApiKeysPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="px-10 pt-10">
       <div className="mb-6 flex items-center justify-between">
-        <Heading tag="h1" description="Manage credentials and connect via S3-compatible API">
+        <Heading
+          tag="h1"
+          size="xl"
+          description="Manage credentials and connect via S3-compatible API"
+        >
           API Keys
         </Heading>
         <Button

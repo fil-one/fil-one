@@ -14,7 +14,7 @@ const paddingStyles: Record<CardPadding, string> = {
   md: 'p-5',
 };
 
-export function Card({ children, shadow, padding = 'md', className, ...rest }: CardProps) {
+export function Card({ children, shadow = true, padding = 'md', className, ...rest }: CardProps) {
   return (
     <div
       className={clsx(

@@ -14,8 +14,10 @@ import type { CreateBucketResponse, RetentionMode, RetentionDurationType } from 
 import { apiRequest, createAccessKey } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 
-import { Heading } from '../components/Heading';
+import { Heading } from '../components/Heading/Heading';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
+import { Button } from '../components/Button';
+import { IconButton } from '../components/IconButton';
 import { Input } from '../components/Input';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
@@ -45,7 +47,7 @@ export function CreateBucketPage() {
   const [retentionDurationType, setRetentionDurationType] = useState<RetentionDurationType>('d');
 
   // Key section visibility
-  const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [createKeyToggled, setCreateKeyToggled] = useState(false);
 
   // Validation
   const [nameError, setNameError] = useState<string | null>(null);
@@ -61,9 +63,9 @@ export function CreateBucketPage() {
 
   // When the key section opens, default to specific scope for this bucket
   useEffect(() => {
-    if (!permissionsOpen) return;
+    if (!createKeyToggled) return;
     form.setBucketScope('specific');
-  }, [permissionsOpen]); // form.setBucketScope is a stable useState setter
+  }, [createKeyToggled]); // form.setBucketScope is a stable useState setter
 
   // Track the previous bucket name so we can swap it in selectedBuckets when it changes
   const prevBucketNameRef = useRef('');
@@ -72,7 +74,7 @@ export function CreateBucketPage() {
   // When the name changes while open, swap the old name for the new one so that
   // any other buckets the user has selected are preserved.
   useEffect(() => {
-    if (!permissionsOpen) return;
+    if (!createKeyToggled) return;
     const prev = prevBucketNameRef.current;
     const next = name.trim();
     prevBucketNameRef.current = next;
@@ -80,7 +82,7 @@ export function CreateBucketPage() {
       const withoutPrev = prev ? buckets.filter((b) => b !== prev) : buckets;
       return next ? [...withoutPrev, next] : withoutPrev;
     });
-  }, [name, permissionsOpen]); // form.setSelectedBuckets is a stable useState setter
+  }, [name, createKeyToggled]); // form.setSelectedBuckets is a stable useState setter
 
   function validateName(value: string) {
     const result = CreateBucketSchema.shape.name.safeParse(value);
@@ -92,11 +94,9 @@ export function CreateBucketPage() {
     return true;
   }
 
-  const wantsApiKey = permissionsOpen && form.keyName.trim().length > 0;
-
   // eslint-disable-next-line complexity/complexity
   async function handleSubmit() {
-    if (wantsApiKey && form.permissions.length === 0) return;
+    if (createKeyToggled && form.permissions.length === 0) return;
 
     const bucketBody = {
       name: name.trim(),
@@ -146,7 +146,7 @@ export function CreateBucketPage() {
     }
 
     // Step 2: Optionally create API key scoped to this bucket
-    if (wantsApiKey) {
+    if (createKeyToggled) {
       const keyBody = {
         keyName: form.keyName.trim(),
         permissions: form.permissions,
@@ -186,12 +186,12 @@ export function CreateBucketPage() {
     void navigate({ to: '/buckets/$bucketName', params: { bucketName: name.trim() } });
   }
 
-  const accessKeyNameValid = wantsApiKey
+  const accessKeyNameValid = createKeyToggled
     ? CreateAccessKeySchema.shape.keyName.safeParse(form.keyName.trim()).success
     : true;
 
   const accessKeyFormValid =
-    !wantsApiKey ||
+    !createKeyToggled ||
     (accessKeyNameValid &&
       form.permissions.length > 0 &&
       (form.bucketScope !== 'specific' || form.selectedBuckets.length > 0));
@@ -202,17 +202,14 @@ export function CreateBucketPage() {
     <div className="mx-auto flex max-w-[860px] flex-col gap-6 py-12">
       {/* Back + header */}
       <div className="flex items-center gap-4">
-        <button
-          type="button"
+        <IconButton
+          icon={ArrowLeftIcon}
+          aria-label="Back to buckets"
           onClick={() => navigate({ to: '/buckets' })}
-          className="flex size-9 items-center justify-center rounded-full text-zinc-500 hover:text-zinc-900"
-        >
-          <ArrowLeftIcon size={16} aria-hidden="true" />
-        </button>
+        />
         <div>
-          <Heading tag="h1" description="S3-compatible storage on Filecoin">
-            Create bucket
-          </Heading>
+          <Heading tag="h1">Create bucket</Heading>
+          <p className="text-[13px] text-zinc-500">S3-compatible storage on Filecoin</p>
         </div>
       </div>
 
@@ -289,14 +286,14 @@ export function CreateBucketPage() {
               {/* Clickable toggle header */}
               <button
                 type="button"
-                onClick={() => setPermissionsOpen(!permissionsOpen)}
+                onClick={() => setCreateKeyToggled(!createKeyToggled)}
                 className="flex w-full items-center justify-between rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-left hover:bg-zinc-100"
               >
                 <div className="flex items-center gap-2">
                   <PlusIcon size={14} className="text-zinc-500" aria-hidden="true" />
                   <span className="text-[13px] text-zinc-900">Create new key</span>
                 </div>
-                {permissionsOpen ? (
+                {createKeyToggled ? (
                   <CaretUpIcon size={14} className="text-zinc-500" aria-hidden="true" />
                 ) : (
                   <CaretDownIcon size={14} className="text-zinc-500" aria-hidden="true" />
@@ -304,27 +301,27 @@ export function CreateBucketPage() {
               </button>
 
               {/* Expanded form */}
-              {permissionsOpen && (
+              {createKeyToggled && (
                 <div className="rounded-lg border border-zinc-200 p-4">
                   <AccessKeyFormFields form={form} pinnedBucket={name.trim() || undefined} />
                 </div>
               )}
             </div>
 
-            {/* Submit button — full width */}
-            <button
-              type="button"
+            {/* Submit button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={CheckIcon}
               disabled={!canSubmit}
               onClick={handleSubmit}
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-700 px-4 pb-2 pt-3 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <CheckIcon size={16} aria-hidden="true" />
               {creating
                 ? 'Creating...'
-                : wantsApiKey
+                : createKeyToggled
                   ? 'Create bucket and access key'
                   : 'Create bucket'}
-            </button>
+            </Button>
           </div>
         </div>
 

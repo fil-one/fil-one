@@ -70,8 +70,12 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   const bucketCount = tenantInfo?.bucketCount ?? 0;
   const bucketLimit = tenantInfo?.bucketQuantityLimit ?? 100;
-  const accessKeyCount = tenantInfo?.keyCount ?? 0;
-  const accessKeyLimit = tenantInfo?.accessKeyQuantityLimit ?? 300;
+  // Reserve one slot for the system `filone-console` key created during onboarding,
+  // so users see the count and limit relative to the keys they themselves can manage.
+  const rawKeyCount = tenantInfo?.keyCount ?? 0;
+  const rawKeyLimit = tenantInfo?.accessKeyQuantityLimit ?? 300;
+  const accessKeyCount = Math.max(0, rawKeyCount - 1);
+  const accessKeyLimit = Math.max(0, rawKeyLimit - 1);
 
   const response: UsageResponse = {
     storage: { usedBytes: storageUsedBytes },

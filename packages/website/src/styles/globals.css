@@ -30,6 +30,8 @@
   --spacing-readable: 60ch;
 
   --tracking-tight: -1%;
+
+  --shadow-xs: 0px 1px 2px 0px rgba(20, 24, 31, 0.03);
 }
 
 @theme inline {

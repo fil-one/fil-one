@@ -1,4 +1,4 @@
-# Fil.one
+# Fil One
 
 Full-stack prototype — pnpm workspaces monorepo deploying to AWS via [SST v3](https://sst.dev/).
 

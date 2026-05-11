@@ -9,6 +9,9 @@ const meta: Meta<typeof Card> = {
     shadow: { control: 'boolean' },
     padding: { control: 'select', options: ['none', 'md'] },
   },
+  parameters: {
+    layout: 'padded',
+  },
 };
 
 export default meta;
@@ -17,7 +20,7 @@ type Story = StoryObj<typeof Card>;
 export const Default: Story = {
   args: {
     children: 'Card content',
-    shadow: false,
+    shadow: true,
     padding: 'md',
   },
 };
@@ -48,17 +51,15 @@ export const AllVariants: Story = {
   render: () => (
     <div className="flex flex-col gap-4 p-6 bg-zinc-50 min-h-screen">
       <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-        Default (no shadow)
+        Default (with shadow)
       </p>
       <Card>
-        <p className="text-sm text-zinc-700">No shadow, default padding</p>
+        <p className="text-sm text-zinc-700">Shadow, default padding</p>
       </Card>
 
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-        With shadow
-      </p>
-      <Card shadow>
-        <p className="text-sm text-zinc-700">With shadow, default padding</p>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">No shadow</p>
+      <Card shadow={false}>
+        <p className="text-sm text-zinc-700">No shadow, default padding</p>
       </Card>
 
       <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">

@@ -43,15 +43,9 @@ export async function baseHandler(
       .build();
   }
 
-  const {
-    keyName,
-    permissions,
-    bucketScope,
-    buckets: bucketList,
-    expiresAt: expiresAtRaw,
-  } = parsed.data;
-  const buckets = bucketScope === 'specific' ? (bucketList ?? []) : undefined;
-  const expiresAt = expiresAtRaw ?? null;
+  const { keyName, permissions, granularPermissions, bucketScope } = parsed.data;
+  const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
+  const expiresAt = parsed.data.expiresAt ?? null;
 
   const { orgId } = getUserInfo(event);
 
@@ -66,7 +60,7 @@ export async function baseHandler(
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
   const setupStatus = orgProfile?.setupStatus?.S;
   if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    console.error('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
+    console.warn('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
     return new ResponseBuilder()
       .status(503)
       .body<ErrorResponse>({
@@ -81,6 +75,7 @@ export async function baseHandler(
       tenantId: auroraTenantId,
       keyName,
       permissions,
+      granularPermissions,
       buckets,
       expiresAt,
     });
@@ -112,6 +107,7 @@ export async function baseHandler(
         createdAt: auroraKey.createdAt,
         status: 'active',
         permissions,
+        ...(granularPermissions?.length ? { granularPermissions } : {}),
         bucketScope,
         ...(buckets ? { buckets } : {}),
         ...(expiresAt ? { expiresAt } : {}),

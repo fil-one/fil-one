@@ -1,7 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { useToast } from '../components/Toast/index.js';
-import { apiRequest } from './api.js';
-import type { PresignUploadResponse } from '@filone/shared';
+import { batchPresign } from './use-presign.js';
 
 export type UploadStep = 'idle' | 'uploading' | 'done';
 
@@ -57,19 +56,18 @@ export function useFileUpload({ bucketName, tags, onSuccess }: UseFileUploadOpti
       const contentType = selectedFile.type || 'application/octet-stream';
 
       const description = objectDescription.trim() || undefined;
-      const presignData = await apiRequest<PresignUploadResponse>(
-        `/buckets/${encodeURIComponent(bucketName)}/objects/presign`,
+      const { items } = await batchPresign([
         {
-          method: 'POST',
-          body: JSON.stringify({
-            key,
-            contentType,
-            fileName: selectedFile.name,
-            ...(description && { description }),
-            ...(tags && tags.length > 0 && { tags }),
-          }),
+          op: 'putObject',
+          bucket: bucketName,
+          key,
+          contentType,
+          fileName: selectedFile.name,
+          ...(description && { description }),
+          ...(tags && tags.length > 0 && { tags }),
         },
-      );
+      ]);
+      const { url: presignedUrl, method: presignedMethod } = items[0];
       setUploadProgress(1);
 
       await new Promise<void>((resolve, reject) => {
@@ -88,7 +86,7 @@ export function useFileUpload({ bucketName, tags, onSuccess }: UseFileUploadOpti
           }
         };
         xhr.onerror = () => reject(new Error('Upload failed'));
-        xhr.open('PUT', presignData.url);
+        xhr.open(presignedMethod, presignedUrl);
         xhr.setRequestHeader('Content-Type', contentType);
         xhr.send(selectedFile);
       });
@@ -96,7 +94,7 @@ export function useFileUpload({ bucketName, tags, onSuccess }: UseFileUploadOpti
       setUploadProgress(100);
       setUploadStep('done');
       toast.success(`${selectedFile.name} uploaded successfully`);
-      onSuccess?.(presignData.key, selectedFile);
+      onSuccess?.(key, selectedFile);
     } catch (err) {
       console.error('Upload failed:', err);
       reset();

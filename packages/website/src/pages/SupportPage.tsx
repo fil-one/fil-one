@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { Heading } from '../components/Heading';
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { TextArea } from '../components/TextArea';
@@ -72,8 +72,8 @@ export function SupportPage() {
   }
 
   return (
-    <div className="p-8">
-      <Heading tag="h1" description="We typically respond within 1 business day." className="mb-6">
+    <div className="px-10 pt-10">
+      <Heading tag="h1" size="xl" description="We typically respond within 1 business day.">
         Talk to an Expert
       </Heading>
 

@@ -1,0 +1,20 @@
+======================================================================
+  Create Bucket
+  Script : create_bucket
+  Run    : 20260219_143021
+======================================================================
+
+SUMMARY
+  Total  : 1
+  OK     : 1
+  Failed : 0
+
+BY OPERATION
+  create_bucket                      1 ok     0 failed  (   1 total)  avg 0.227s  stddev 0.000s  min 0.227s  max 0.227s
+
+SUCCESSES
+  {"ts": "2026-02-19T22:30:21.375782+00:00", "op": "create_bucket", "status": "ok", "bucket": "filecoin-foundation-bucket-nolock", "location": "", "object_lock_enabled": false, "elapsed_s": 0.227}
+
+Log files:
+  Success : ../logs/20260219_143021_create_bucket_success.jsonl
+  Errors  : ../logs/20260219_143021_create_bucket_errors.jsonl

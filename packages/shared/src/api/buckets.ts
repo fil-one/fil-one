@@ -65,6 +65,12 @@ export interface Bucket {
   region: string;
   createdAt: string;
   isPublic: boolean;
+  objectLockEnabled?: boolean;
+  versioning?: boolean;
+  encrypted?: boolean;
+  defaultRetention?: RetentionMode;
+  retentionDuration?: number;
+  retentionDurationType?: RetentionDurationType;
 }
 
 export interface ListBucketsResponse {
@@ -94,4 +100,9 @@ export interface GetBucketResponse {
 
 export interface DeleteBucketRequest {
   bucketName: string;
+}
+
+export interface BucketAnalyticsResponse {
+  objectCount: number;
+  bytesUsed: number;
 }

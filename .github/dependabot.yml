@@ -71,6 +71,29 @@ updates:
         patterns:
           - '*'
 
+  # ── Python (pip) dependencies ──
+  - package-ecosystem: pip
+    directory: /tests/s3compat
+    schedule:
+      interval: weekly
+      day: thursday
+      time: '09:00'
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+    labels:
+      - dependencies
+    groups:
+      pytest:
+        patterns:
+          - 'pytest'
+          - 'pytest-*'
+      boto:
+        patterns:
+          - 'boto3'
+          - 'botocore'
+
   # ── Git submodules ──
   - package-ecosystem: gitsubmodule
     directory: /

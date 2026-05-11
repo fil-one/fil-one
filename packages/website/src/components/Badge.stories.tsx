@@ -8,7 +8,7 @@ const meta: Meta<typeof Badge> = {
   argTypes: {
     color: { control: 'select', options: ['green', 'blue', 'red', 'amber', 'grey'] },
     size: { control: 'select', options: ['sm', 'md', 'lg'] },
-    weight: { control: 'select', options: ['regular', 'medium'] },
+    weight: { control: 'select', options: ['regular', 'medium', 'semibold'] },
     variant: { control: 'select', options: ['subtle', 'solid'] },
     dot: { control: 'boolean' },
   },
@@ -67,6 +67,25 @@ export const WithDot: Story = {
       </Badge>
     </div>
   ),
+};
+
+export const WithDescription: Story = {
+  args: {
+    children: 'Data protection',
+    color: 'blue',
+    size: 'sm',
+    description: (
+      <>
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+          Data protection
+        </p>
+        <ul className="flex flex-col gap-0.5">
+          <li className="text-xs text-zinc-700">Prevent deletion</li>
+          <li className="text-xs text-zinc-700">Prevent overwrite</li>
+        </ul>
+      </>
+    ),
+  },
 };
 
 export const AllVariants: Story = {

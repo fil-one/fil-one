@@ -1,0 +1,1 @@
+{"ts": "2026-02-18T23:07:33.517847+00:00", "op": "upload", "status": "err", "key": "baz", "elapsed_s": 0.05, "status_code": 503, "error_code": "SlowDown", "error_message": "Rate exceeded", "request_id": "abc", "host_id": null, "response_body": {"ResponseMetadata": {"HTTPStatusCode": 503, "RequestId": "abc"}, "Error": {"Code": "SlowDown", "Message": "Rate exceeded"}}}

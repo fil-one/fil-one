@@ -34,8 +34,15 @@ describe('Usage Reporting (meter events via test clock)', () => {
     // Attach valid card
     const pmId = await attachValidCard(cusId);
 
-    // Create active subscription with metered price
-    const anchorTime = frozenTime + 7 * 86400;
+    // Create active subscription with metered price.
+    // 1-hour anchor keeps the test-clock advance fast. Stripe's docs describe
+    // day/week/month/year as standard intervals (daily is the smallest documented
+    // interval), but `billing_cycle_anchor` accepts any second-precision timestamp
+    // and sub-day cycles are not forbidden. This test is safe at 1h because it
+    // calls `stripe.billing.meterEvents.create` directly with a hardcoded value,
+    // bypassing the production usage-reporting worker — so neither the worker's
+    // Aurora query window nor its 12h cron schedule apply here.
+    const anchorTime = frozenTime + 3600;
     const sub = await stripe.subscriptions.create({
       customer: cusId,
       items: [{ price: priceId }],
@@ -49,8 +56,15 @@ describe('Usage Reporting (meter events via test clock)', () => {
 
   afterAll(async () => {
     const stripe = getStripeClient();
-    await stripe.subscriptions.cancel(subId);
-    // deleting the clock will also delete associated customers
+    try {
+      await stripe.subscriptions.cancel(subId);
+    } catch (err) {
+      // Best-effort: testClocks.del below cascades and cancels subscriptions.
+      // This most commonly fails with "Test clock advancement underway" when
+      // the test body bailed mid-advance.
+      console.warn('[afterAll] subscriptions.cancel failed (continuing):', err);
+    }
+    // deleting the clock will also delete associated customers and subscriptions
     await stripe.testHelpers.testClocks.del(clockId);
     await deleteBillingRecord(userId);
   });
@@ -72,6 +86,18 @@ describe('Usage Reporting (meter events via test clock)', () => {
     const meter = await stripe.billing.meters.retrieve(meterId);
     const meterEventName = meter.event_name;
 
+    // Preflight: Stripe's billing.meterEvents.create rejects events against
+    // inactive meters with a cryptic "No active meter found for event name X"
+    // error. Fail early with actionable guidance instead.
+    if (meter.status !== 'active') {
+      throw new Error(
+        `Stripe Billing Meter "${meterEventName}" (${meterId}) linked to price ` +
+          `${priceId} has status "${meter.status}" — expected "active".\n` +
+          `Check the staging Stripe secrets in 1Password and ensure your stack's ` +
+          `StripePriceId SST secret has the same value.`,
+      );
+    }
+
     // Send meter event
     await stripe.billing.meterEvents.create({
       event_name: meterEventName,
@@ -92,7 +118,7 @@ describe('Usage Reporting (meter events via test clock)', () => {
     });
 
     // Poll until clock is ready
-    await pollTestClockReady({ clockId, timeoutSeconds: 120 });
+    await pollTestClockReady({ clockId });
 
     // Fetch invoices and check for metered line item
     const invoices = await stripe.invoices.list({

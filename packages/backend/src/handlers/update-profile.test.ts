@@ -105,7 +105,6 @@ describe('PATCH /api/me/profile handler', () => {
       })
       .resolves({
         Item: {
-          orgConfirmed: { BOOL: true },
           setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
         },
       });
@@ -240,6 +239,25 @@ describe('PATCH /api/me/profile handler', () => {
     const result = await handler(profileEvent({ orgName: 'A' }), buildContext());
 
     expect(result).toMatchObject({ statusCode: 400 });
+  });
+
+  it('returns 400 when orgName contains special characters', async () => {
+    const result = await handler(profileEvent({ orgName: 'Acme @Corp!' }), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 400,
+      body: expect.stringContaining('letters, numbers, spaces, hyphens, and periods'),
+    });
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('accepts orgName with dots and hyphens', async () => {
+    const result = await handler(profileEvent({ orgName: 'Acme-Corp Inc.' }), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({ orgName: 'Acme-Corp Inc.' }),
+    });
   });
 
   it('returns 400 for invalid JSON body', async () => {
