@@ -351,6 +351,37 @@ export async function getTenantInfo({
   return data;
 }
 
+export type TenantStatusResult =
+  | { kind: 'ok'; status: ModelsTenantStatus | undefined }
+  | { kind: 'not_found' }
+  | { kind: 'error'; cause: unknown };
+
+// Variant of getTenantInfo for drift-check style read-only probes: never throws,
+// distinguishes tenant-not-found (404) from transport/server errors so callers
+// can classify those cases separately instead of bucketing them together.
+export async function getTenantStatus({
+  tenantId,
+}: {
+  tenantId: string;
+}): Promise<TenantStatusResult> {
+  try {
+    const partnerId = process.env.AURORA_PARTNER_ID!;
+    const client = createBackofficeClient();
+
+    const { data, error, response } = await getTenant({
+      client,
+      path: { partnerId, tenantId },
+      throwOnError: false,
+    });
+
+    if (response?.status === 404) return { kind: 'not_found' };
+    if (error) return { kind: 'error', cause: error };
+    return { kind: 'ok', status: data?.status };
+  } catch (cause) {
+    return { kind: 'error', cause };
+  }
+}
+
 export async function updateTenantStatus({
   tenantId,
   status,
