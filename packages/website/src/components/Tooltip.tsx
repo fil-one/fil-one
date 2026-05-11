@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 
-type TooltipSide = 'right' | 'top' | 'bottom' | 'left';
+export type TooltipSide = 'right' | 'top' | 'bottom' | 'left';
 
 type TooltipProps = {
   children: React.ReactNode;

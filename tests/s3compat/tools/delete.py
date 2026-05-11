@@ -5,19 +5,22 @@ By default deletes all keys in manifest.json with status=done.
 Updates the manifest entry to status=deleted on success.
 
 Usage:
-  python delete.py --provider aurora                        # delete all manifest done entries
-  python delete.py --provider aurora --key gov-data/f.csv  # delete a specific key
-  python delete.py --provider aurora --key gov-data/f.csv --version-id <vid>
-  python delete.py --provider aurora --dry-run             # print what would be deleted
+  python tools/delete.py --provider aurora                        # delete all manifest done entries
+  python tools/delete.py --provider aurora --key gov-data/f.csv  # delete a specific key
+  python tools/delete.py --provider aurora --key gov-data/f.csv --version-id <vid>
+  python tools/delete.py --provider aurora --dry-run             # print what would be deleted
 """
 import argparse
 import os
 import sys
 import time
+from pathlib import Path
 
-import manifest as mf
-from client import resolve_provider, get_s3_client
-from logger import Logger
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from lib import manifest as mf  # noqa: E402
+from lib.client import resolve_provider, get_s3_client  # noqa: E402
+from lib.logger import Logger  # noqa: E402
 
 
 def delete_object(s3, bucket: str, key: str, version_id: str = None) -> dict:
