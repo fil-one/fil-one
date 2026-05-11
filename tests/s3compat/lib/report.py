@@ -232,6 +232,11 @@ def _build_model(
             log_paths["success"] = os.path.relpath(success_log, report_parent)
         if error_log:
             log_paths["error"] = os.path.relpath(error_log, report_parent)
+    else:
+        if success_log:
+            log_paths["success"] = success_log
+        if error_log:
+            log_paths["error"] = error_log
 
     return _ReportModel(
         title=title,
@@ -334,7 +339,11 @@ def _render_markdown(m: _ReportModel) -> str:
                 "stddev": r.stddev,
                 "min": r.min,
                 "max": r.max,
-                "pct": r.pct if r.pct is not None else 0,
+                "pct": (
+                    r.pct
+                    if r.pct is not None
+                    else (int(round((100.0 * r.ok) / r.total)) if r.total else None)
+                ),
             }
             for r in m.op_rows
         ],
