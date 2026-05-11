@@ -3,6 +3,8 @@ import type { ComponentType, SVGProps } from 'react';
 import { forwardRef } from 'react';
 
 import { cn } from '../lib/utils';
+import { Tooltip } from './Tooltip';
+import type { TooltipSide } from './Tooltip';
 
 type IconButtonSize = 'sm' | 'md' | 'lg';
 
@@ -10,6 +12,8 @@ type IconButtonProps = {
   icon: PhosphorIcon | ComponentType<SVGProps<SVGSVGElement>>;
   'aria-label': string;
   size?: IconButtonSize;
+  tooltip?: string;
+  tooltipSide?: TooltipSide;
 } & Omit<React.ComponentProps<'button'>, 'children'>;
 
 const sizeStyles: Record<IconButtonSize, { padding: string; iconSize: number }> = {
@@ -19,9 +23,9 @@ const sizeStyles: Record<IconButtonSize, { padding: string; iconSize: number }> 
 };
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
-  ({ icon: Icon, size = 'md', className, ...rest }, ref) => {
+  ({ icon: Icon, size = 'md', className, tooltip, tooltipSide, ...rest }, ref) => {
     const { padding, iconSize } = sizeStyles[size];
-    return (
+    const button = (
       <button
         ref={ref}
         type="button"
@@ -36,6 +40,15 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
         <Icon width={iconSize} height={iconSize} aria-hidden="true" />
       </button>
     );
+
+    if (tooltip) {
+      return (
+        <Tooltip content={tooltip} side={tooltipSide}>
+          {button}
+        </Tooltip>
+      );
+    }
+    return button;
   },
 );
 
