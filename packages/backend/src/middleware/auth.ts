@@ -205,7 +205,6 @@ interface ResolvedIdentity {
   email: string | null;
 }
 
-// eslint-disable-next-line max-lines-per-function
 async function resolveUserAndOrg(
   sub: string,
   email: string | null,
@@ -240,6 +239,46 @@ async function resolveUserAndOrg(
   const userId = crypto.randomUUID();
   const orgId = crypto.randomUUID();
   const orgName = deriveOrgName(name ?? undefined, email ?? undefined);
+
+  await createNewUserAndOrg({ sub, userId, orgId, orgName });
+
+  // Fire SQS enqueue + Stripe trial in parallel; both are safe to retry.
+  // triggerTenantSetup is deduped server-side by SQS via MessageDeduplicationId: orgId.
+  // createBillingTrial passes idempotencyKey to Stripe customer/subscription creation,
+  // so duplicate calls return the cached response without creating new resources.
+  const [tenantResult, billingResult] = await Promise.allSettled([
+    triggerTenantSetup({ orgId, orgName }),
+    createBillingTrial({ userId, orgId, email: email ?? undefined }),
+  ]);
+  if (tenantResult.status === 'rejected') {
+    console.error('[auth] Failed to trigger tenant setup for new org', {
+      error: tenantResult.reason,
+      orgId,
+    });
+  }
+  if (billingResult.status === 'rejected') {
+    console.error('[auth] Failed to create billing trial for new org', {
+      error: billingResult.reason,
+      orgId,
+      userId,
+    });
+  }
+
+  return { userId, orgId, email };
+}
+
+async function createNewUserAndOrg({
+  sub,
+  userId,
+  orgId,
+  orgName,
+}: {
+  sub: string;
+  userId: string;
+  orgId: string;
+  orgName: string;
+}) {
+  const tableName = Resource.UserInfoTable.name;
   const now = new Date().toISOString();
 
   await getDynamoClient().send(
@@ -297,30 +336,6 @@ async function resolveUserAndOrg(
       ],
     }),
   );
-
-  // Fire SQS enqueue + Stripe trial in parallel; both are safe to retry.
-  // triggerTenantSetup is deduped server-side by SQS via MessageDeduplicationId: orgId.
-  // createBillingTrial passes idempotencyKey to Stripe customer/subscription creation,
-  // so duplicate calls return the cached response without creating new resources.
-  const [tenantResult, billingResult] = await Promise.allSettled([
-    triggerTenantSetup({ orgId, orgName }),
-    createBillingTrial({ userId, orgId, email: email ?? undefined }),
-  ]);
-  if (tenantResult.status === 'rejected') {
-    console.error('[auth] Failed to trigger tenant setup for new org', {
-      error: tenantResult.reason,
-      orgId,
-    });
-  }
-  if (billingResult.status === 'rejected') {
-    console.error('[auth] Failed to create billing trial for new org', {
-      error: billingResult.reason,
-      orgId,
-      userId,
-    });
-  }
-
-  return { userId, orgId, email };
 }
 
 // ---------------------------------------------------------------------------
