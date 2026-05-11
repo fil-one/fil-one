@@ -78,13 +78,6 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     reportDate,
   } = event;
 
-  console.log('[usage-worker] Processing', {
-    orgId,
-    subscriptionId,
-    subscriptionStatus,
-    reportDate,
-  });
-
   const meterEventName = process.env.STRIPE_METER_EVENT_NAME;
   if (!meterEventName) {
     throw new Error('STRIPE_METER_EVENT_NAME env var is not set');
@@ -94,21 +87,37 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const isTrial = subscriptionStatus === 'trialing';
 
   // Fetch storage, egress, and (for trials) tenant info in parallel
-  const [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
-    getStorageSamples({
-      tenantId: auroraTenantId,
-      from: currentPeriodStart,
-      to: now,
-      window: '1h',
-    }),
-    getOperationsSamples({
-      tenantId: auroraTenantId,
-      from: currentPeriodStart,
-      to: now,
-      window: '24h',
-    }),
-    isTrial ? getTenantInfo({ tenantId: auroraTenantId }) : null,
-  ]);
+  let storageSamples: Awaited<ReturnType<typeof getStorageSamples>>;
+  let operationsSamples: Awaited<ReturnType<typeof getOperationsSamples>>;
+  let tenantInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
+  try {
+    [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
+      getStorageSamples({
+        tenantId: auroraTenantId,
+        from: currentPeriodStart,
+        to: now,
+        window: '1h',
+      }),
+      getOperationsSamples({
+        tenantId: auroraTenantId,
+        from: currentPeriodStart,
+        to: now,
+        window: '24h',
+      }),
+      isTrial ? getTenantInfo({ tenantId: auroraTenantId }) : null,
+    ]);
+  } catch (error) {
+    const e = error as Error & { cause?: unknown };
+    console.error('[usage-worker] Aurora fetch failed', {
+      orgId,
+      auroraTenantId,
+      subscriptionId,
+      message: e.message,
+      cause: e.cause,
+      stack: e.stack,
+    });
+    throw error;
+  }
 
   const usage = calculateAverageUsage(storageSamples);
   const averageStorageGbUsed = usage.averageStorageBytesUsed / GB_BYTES;
@@ -117,14 +126,6 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     (sum, sample) => sum + (sample.txBytes ?? 0),
     0,
   );
-
-  console.log('[usage-worker] Usage calculated', {
-    orgId,
-    sampleCount: usage.sampleCount,
-    averageStorageGbUsed,
-    currentStorageBytes,
-    totalEgressBytes,
-  });
 
   const { reported } = await reportStorageToStripe({
     orgId,
@@ -165,8 +166,6 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     reportedToStripe: reported,
     orgSyncAction,
   });
-
-  console.log('[usage-worker] Audit record written', { orgId, reportDate });
 }
 
 // Stripe SDK errors expose `code` on the error object; matches StripeInvalidRequestError 404s.
