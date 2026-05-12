@@ -8,6 +8,7 @@ jobs:
   teardown:
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     concurrency:
       group: preview-pr-${{ github.event.pull_request.number }}
       cancel-in-progress: false
@@ -16,6 +17,7 @@ jobs:
       contents: read
     env:
       AWS_REGION: us-east-2
+      SST_STAGE: pr-${{ github.event.pull_request.number }}
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -40,19 +42,19 @@ jobs:
       - name: Check if SST stage exists
         id: check-stage
         run: |
-          STAGE="pr-${{ github.event.pull_request.number }}"
-          if pnpm exec sst state list | grep -qw "$STAGE"; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Stage ${STAGE} not found, nothing to tear down"
+          output=$(pnpm exec sst state export --stage "$SST_STAGE" 2>&1) || true
+          if echo "$output" | grep -q "Could not pull state"; then
+            echo "Stage ${SST_STAGE} not found, nothing to tear down"
             echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Remove SST stage
         id: remove
         if: steps.check-stage.outputs.exists == 'true'
         continue-on-error: true
-        run: pnpm exec sst remove --stage "pr-${{ github.event.pull_request.number }}"
+        run: pnpm exec sst remove --stage "$SST_STAGE"
 
       - name: Notify Slack on teardown failure
         if: steps.remove.outcome == 'failure'
