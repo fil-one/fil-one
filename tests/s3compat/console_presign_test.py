@@ -52,8 +52,8 @@ import boto3
 import requests
 from botocore.client import Config
 
-from client import resolve_provider
-from logger import Logger
+from lib.client import resolve_provider
+from lib.logger import Logger
 
 
 BROWSER_ORIGIN_DEFAULT = "https://app.fil.one"

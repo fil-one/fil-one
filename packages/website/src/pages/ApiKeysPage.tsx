@@ -2,13 +2,13 @@ import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { CopySimpleIcon, PlusIcon } from '@phosphor-icons/react/dist/ssr';
+import { CopySimpleIcon, DatabaseIcon, PlusIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { AccessKeysTable } from '../components/AccessKeysTable';
 import { Button } from '../components/Button';
+import { Heading } from '../components/Heading/Heading';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { Heading } from '../components/Heading/Heading';
 import { Spinner } from '../components/Spinner';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
 import { useToast } from '../components/Toast';
@@ -47,6 +47,13 @@ function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
         onDelete={onDelete}
         onCreateOpen={onCreateOpen}
       />
+      {keys.length === 0 && (
+        <div className="mt-6 flex justify-center">
+          <Button variant="tertiary" icon={DatabaseIcon} href="/buckets">
+            Manage buckets
+          </Button>
+        </div>
+      )}
     </>
   );
 }

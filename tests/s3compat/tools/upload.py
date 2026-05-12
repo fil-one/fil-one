@@ -6,8 +6,8 @@ Uses multipart upload for files over MULTIPART_THRESHOLD.
 Tracks state in manifest.json — re-running skips already-done keys.
 
 Usage:
-  python upload.py --provider aurora [--count N] [--max-size-mb M] [--prefix PREFIX]
-  python upload.py --provider aurora --force   # ignore manifest, re-upload everything
+  python tools/upload.py --provider aurora [--count N] [--max-size-mb M] [--prefix PREFIX]
+  python tools/upload.py --provider aurora --force   # ignore manifest, re-upload everything
 
 Resume:
   Just re-run the same command. Done entries in manifest.json are skipped.
@@ -16,10 +16,13 @@ import argparse
 import os
 import sys
 import time
+from pathlib import Path
 
-import manifest as mf
-from client import resolve_provider, get_s3_client, get_source_client
-from logger import Logger
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from lib import manifest as mf  # noqa: E402
+from lib.client import resolve_provider, get_s3_client, get_source_client  # noqa: E402
+from lib.logger import Logger  # noqa: E402
 
 MULTIPART_THRESHOLD = 50 * 1024 * 1024  # 50 MB — use multipart above this
 PART_SIZE = 50 * 1024 * 1024            # 50 MB parts

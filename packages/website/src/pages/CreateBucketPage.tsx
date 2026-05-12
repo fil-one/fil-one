@@ -20,10 +20,10 @@ import type { CreateBucketResponse, RetentionMode, RetentionDurationType } from 
 import { apiRequest, createAccessKey } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 
+import { Heading } from '../components/Heading/Heading';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
-import { Heading } from '../components/Heading/Heading';
 import { Input } from '../components/Input';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
 import { RegionSelect } from '../components/RegionSelect';

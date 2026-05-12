@@ -74,10 +74,6 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "ConfirmOrg": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
     "CreateAccessKey": {
       "name": string
       "type": "sst.aws.Function"
@@ -175,6 +171,10 @@ declare module "sst" {
       "value": string
     }
     "StripeWebhook": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "SubscriptionDriftChecker": {
       "name": string
       "type": "sst.aws.Function"
     }
