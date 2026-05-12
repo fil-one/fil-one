@@ -4,7 +4,6 @@ import { ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { CreateAccessKeyResponse } from '@filone/shared';
 import { S3_REGION } from '@filone/shared';
-import { AccessKeyFormFields } from '../components/AccessKeyFormFields.js';
 import { Heading } from '../components/Heading/Heading';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields.js';
 import { Button } from '../components/Button.js';
