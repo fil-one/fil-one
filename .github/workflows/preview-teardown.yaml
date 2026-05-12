@@ -42,34 +42,9 @@ jobs:
       - name: Check if SST stage exists
         id: check-stage
         run: |
-          set +e
-          stderr_file=$(mktemp)
-          pnpm exec sst state export --stage "$SST_STAGE" >/dev/null 2>"$stderr_file"
-          exit_code=$?
-          stderr_output=$(cat "$stderr_file")
-          rm -f "$stderr_file"
-
-          if [ "$exit_code" -eq 0 ]; then
-            echo "Stage ${SST_STAGE} exists"
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if echo "$stderr_output" | grep -qiE "AccessDenied|UnauthorizedOperation|InvalidClientTokenId|ExpiredToken|credentials|Throttl|RequestTimeout|InternalError|ServiceUnavailable|SignatureDoesNotMatch"; then
-            echo "::error::sst state export failed with an AWS error (not a missing-stage condition):"
-            echo "$stderr_output" >&2
-            exit 1
-          fi
-
-          if echo "$stderr_output" | grep -q "Could not pull state"; then
-            echo "Stage ${SST_STAGE} not found, nothing to tear down"
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "::error::sst state export failed with an unrecognised error (treating as failure to avoid silently skipping teardown):"
-          echo "$stderr_output" >&2
-          exit 1
+          exists=$(bin/check-sst-stage-exists.sh "$SST_STAGE") || exit $?
+          echo "Stage ${SST_STAGE} exists=${exists}"
+          echo "exists=${exists}" >> "$GITHUB_OUTPUT"
 
       - name: Remove SST stage
         id: remove
