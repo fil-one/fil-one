@@ -10,8 +10,8 @@ import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 
-import type { ListBucketsResponse, S3Region } from '@filone/shared';
-import { REGION_LABELS, S3_REGION } from '@filone/shared';
+import type { ListBucketsResponse } from '@filone/shared';
+import { S3_REGION, getRegionLabel } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -138,9 +138,7 @@ export function BucketsPage() {
                   </td>
                   <td className="px-4 py-3 text-xs">
                     <span className="font-medium text-zinc-900">
-                      {REGION_LABELS[(bucket.region as S3Region) ?? S3_REGION] ??
-                        bucket.region ??
-                        S3_REGION}
+                      {getRegionLabel(bucket.region)}
                     </span>{' '}
                     <span className="text-zinc-500">{bucket.region ?? S3_REGION}</span>
                   </td>

@@ -5,7 +5,7 @@ import { DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon } from '@phosphor-icons/rea
 import { IconBox } from './IconBox';
 
 import type { AccessKey } from '@filone/shared';
-import { GRANULAR_PERMISSION_LABELS, REGION_LABELS, S3_REGION } from '@filone/shared';
+import { GRANULAR_PERMISSION_LABELS, S3_REGION, getRegionLabel } from '@filone/shared';
 
 import { Badge } from './Badge';
 import { Button } from './Button';
@@ -166,9 +166,7 @@ export function AccessKeysTable({
 
               {/* Region */}
               <td className={`${tdClass} hidden md:table-cell`}>
-                <p className="text-xs font-medium text-zinc-900">
-                  {REGION_LABELS[key.region ?? S3_REGION] ?? key.region ?? S3_REGION}
-                </p>
+                <p className="text-xs font-medium text-zinc-900">{getRegionLabel(key.region)}</p>
                 <div className="flex items-center gap-1">
                   <p className="text-xs text-zinc-500">{key.region ?? S3_REGION}</p>
                 </div>

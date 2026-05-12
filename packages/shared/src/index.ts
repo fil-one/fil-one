@@ -8,6 +8,7 @@ export {
   S3Region,
   REGION_LABELS,
   formatRegion,
+  getRegionLabel,
   getAvailableRegions,
   getS3Endpoint,
   getAuth0Domain,

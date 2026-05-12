@@ -14,7 +14,7 @@ import {
   CreateBucketSchema,
   CreateAccessKeySchema,
   DOCS_URL,
-  REGION_LABELS,
+  getRegionLabel,
 } from '@filone/shared';
 import type { CreateBucketResponse, RetentionMode, RetentionDurationType } from '@filone/shared';
 import { apiRequest, createAccessKey } from '../lib/api.js';
@@ -304,7 +304,7 @@ export function CreateBucketPage() {
                 <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4">
                   <p className="text-xs leading-relaxed text-zinc-600">
                     This key will only work with buckets in{' '}
-                    <span className="text-zinc-900">{REGION_LABELS[region]}</span>{' '}
+                    <span className="text-zinc-900">{getRegionLabel(region)}</span>{' '}
                     <span className="text-zinc-500">{region}</span>.{' '}
                     <a
                       href={DOCS_URL}

@@ -28,6 +28,17 @@ export function formatRegion(region: S3Region | string): string {
 }
 
 /**
+ * Resolve a region value to its human-readable label.
+ *
+ * Defaults to the label of {@link S3_REGION} when the input is null/undefined,
+ * and falls back to the raw region string when it isn't a known {@link S3Region}.
+ */
+export function getRegionLabel(region: S3Region | string | null | undefined): string {
+  const r = region ?? S3_REGION;
+  return REGION_LABELS[r as S3Region] ?? r;
+}
+
+/**
  * Regions selectable in the given stage. Production currently exposes only
  * `eu-west-1`; non-production stages also expose `us-midwest-1` for dogfooding.
  */

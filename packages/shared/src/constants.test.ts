@@ -10,7 +10,9 @@ import {
   getStageFromHostname,
   getAvailableRegions,
   formatRegion,
+  getRegionLabel,
   REGION_LABELS,
+  S3_REGION,
   S3Region,
   Stage,
 } from './constants.ts';
@@ -145,5 +147,24 @@ describe('formatRegion', () => {
 
   it('returns the raw region for unknown values', () => {
     expect(formatRegion('ap-south-1')).toBe('ap-south-1');
+  });
+});
+
+describe('getRegionLabel', () => {
+  it('returns the label for a known region', () => {
+    expect(getRegionLabel(S3Region.EuWest1)).toBe(REGION_LABELS[S3Region.EuWest1]);
+    expect(getRegionLabel(S3Region.UsMidwest1)).toBe(REGION_LABELS[S3Region.UsMidwest1]);
+  });
+
+  it('returns the default region label for undefined', () => {
+    expect(getRegionLabel(undefined)).toBe(REGION_LABELS[S3_REGION]);
+  });
+
+  it('returns the default region label for null', () => {
+    expect(getRegionLabel(null)).toBe(REGION_LABELS[S3_REGION]);
+  });
+
+  it('returns the raw region string for unknown values', () => {
+    expect(getRegionLabel('ap-south-1')).toBe('ap-south-1');
   });
 });
