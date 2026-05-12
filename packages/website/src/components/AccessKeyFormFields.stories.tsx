@@ -4,6 +4,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import type { ListBucketsResponse } from '@filone/shared';
+import { S3_REGION } from '@filone/shared';
 
 import { queryKeys } from '../lib/query-client';
 import { useAccessKeyForm } from '../lib/use-access-key-form';
@@ -34,12 +35,21 @@ export default meta;
 type Story = StoryObj<typeof AccessKeyFormFields>;
 
 function AccessKeyFormFieldsStoryContent({ pinnedBucket }: { pinnedBucket?: string }) {
+  const [region, setRegion] = useState(S3_REGION);
   const form = useAccessKeyForm({
     defaultBucket: pinnedBucket,
+    region,
     onSuccess: () => {},
   });
 
-  return <AccessKeyFormFields form={form} pinnedBucket={pinnedBucket} />;
+  return (
+    <AccessKeyFormFields
+      form={form}
+      pinnedBucket={pinnedBucket}
+      region={region}
+      onRegionChange={setRegion}
+    />
+  );
 }
 
 function AccessKeyFormFieldsWrapper({ pinnedBucket }: { pinnedBucket?: string }) {

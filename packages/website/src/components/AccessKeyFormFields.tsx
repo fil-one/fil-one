@@ -1,3 +1,4 @@
+import type { S3Region } from '@filone/shared';
 import { KEY_NAME_MAX_LENGTH } from '@filone/shared';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyBucketScopeFields } from './AccessKeyBucketScopeFields.js';
@@ -13,14 +14,16 @@ const INVALID_KEY_CHAR = /[^a-zA-Z0-9 _\-.]/g;
 type AccessKeyFormFieldsProps = {
   form: ReturnType<typeof useAccessKeyForm>;
   pinnedBucket?: string;
-  /** When true, the region field is hidden (caller controls region externally). */
-  hideRegionSelector?: boolean;
+  region: S3Region;
+  /** When provided, renders the region selector. Omit to hide it (caller owns the region). */
+  onRegionChange?: (region: S3Region) => void;
 };
 
 export function AccessKeyFormFields({
   form,
   pinnedBucket,
-  hideRegionSelector,
+  region,
+  onRegionChange,
 }: AccessKeyFormFieldsProps) {
   const {
     keyName,
@@ -33,8 +36,6 @@ export function AccessKeyFormFields({
     setBucketScope,
     selectedBuckets,
     setSelectedBuckets,
-    region,
-    setRegion,
     expiration,
     setExpiration,
     customDate,
@@ -68,14 +69,14 @@ export function AccessKeyFormFields({
         />
       </FormField>
 
-      {/* Region — hidden when caller controls it externally (e.g. bucket creation flow) */}
-      {!hideRegionSelector && (
+      {/* Region — only rendered when the caller supplies an onRegionChange handler */}
+      {onRegionChange && (
         <FormField
           htmlFor="key-region"
           label="Region"
           description="This key only works with buckets in this region."
         >
-          <RegionSelect id="key-region" value={region} onChange={setRegion} />
+          <RegionSelect id="key-region" value={region} onChange={onRegionChange} />
         </FormField>
       )}
 

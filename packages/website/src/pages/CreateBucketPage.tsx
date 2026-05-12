@@ -66,12 +66,7 @@ export function CreateBucketPage() {
     secretAccessKey: string;
   } | null>(null);
 
-  const form = useAccessKeyForm({ defaultRegion: region, onSuccess: () => {} });
-
-  // Keep the inline-key form's region in sync with the bucket's region
-  useEffect(() => {
-    form.setRegion(region);
-  }, [region]); // form.setRegion is a stable useState setter
+  const form = useAccessKeyForm({ region, onSuccess: () => {} });
 
   // When the key section opens, default to specific scope for this bucket
   useEffect(() => {
@@ -323,7 +318,7 @@ export function CreateBucketPage() {
                   <AccessKeyFormFields
                     form={form}
                     pinnedBucket={name.trim() || undefined}
-                    hideRegionSelector
+                    region={region}
                   />
                 </div>
               )}

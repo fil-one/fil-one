@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { CreateAccessKeyResponse } from '@filone/shared';
+import { S3_REGION } from '@filone/shared';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields.js';
 import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button.js';
@@ -20,8 +21,10 @@ export function CreateApiKeyPage() {
     accessKeyId: string;
     secretAccessKey: string;
   } | null>(null);
+  const [region, setRegion] = useState(S3_REGION);
 
   const form = useAccessKeyForm({
+    region,
     onSuccess: (response: CreateAccessKeyResponse) => {
       setCredentials({
         accessKeyId: response.accessKeyId,
@@ -57,7 +60,7 @@ export function CreateApiKeyPage() {
           {/* Left: form */}
           <form onSubmit={form.handleSubmit} className="flex flex-1 flex-col gap-6">
             <div className="rounded-lg border border-zinc-200 bg-white p-6">
-              <AccessKeyFormFields form={form} />
+              <AccessKeyFormFields form={form} region={region} onRegionChange={setRegion} />
             </div>
 
             <Button type="submit" variant="primary" disabled={!form.canSubmit}>

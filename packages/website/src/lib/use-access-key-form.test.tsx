@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
+import { S3_REGION } from '@filone/shared';
 import { ToastProvider } from '../components/Toast';
 import { useAccessKeyForm } from './use-access-key-form.js';
 
@@ -14,7 +15,9 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 function renderForm(opts?: { defaultBucket?: string }) {
-  return renderHook(() => useAccessKeyForm({ onSuccess: () => {}, ...opts }), { wrapper });
+  return renderHook(() => useAccessKeyForm({ region: S3_REGION, onSuccess: () => {}, ...opts }), {
+    wrapper,
+  });
 }
 
 describe('useAccessKeyForm — canSubmit', () => {

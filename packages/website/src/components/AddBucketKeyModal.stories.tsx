@@ -4,6 +4,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import type { ListBucketsResponse } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 
 import { queryKeys } from '../lib/query-client';
 import { Button } from './Button';
@@ -45,6 +46,7 @@ export const Default: Story = {
           open={open}
           onClose={() => setOpen(false)}
           bucketName="my-bucket"
+          bucketRegion={S3Region.UsEast1}
           onKeyAdded={() => {}}
         />
       </QueryClientProvider>
