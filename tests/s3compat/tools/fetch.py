@@ -5,18 +5,21 @@ By default operates on all keys in manifest.json with status=done.
 Pass --key to target a specific key, optionally with --version-id.
 
 Usage:
-  python fetch.py --provider aurora
-  python fetch.py --provider aurora --key gov-data/somefile.csv
-  python fetch.py --provider aurora --key gov-data/somefile.csv --version-id <vid>
+  python tools/fetch.py --provider aurora
+  python tools/fetch.py --provider aurora --key gov-data/somefile.csv
+  python tools/fetch.py --provider aurora --key gov-data/somefile.csv --version-id <vid>
 """
 import argparse
 import os
 import sys
 import time
+from pathlib import Path
 
-import manifest as mf
-from client import resolve_provider, get_s3_client
-from logger import Logger
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from lib import manifest as mf  # noqa: E402
+from lib.client import resolve_provider, get_s3_client  # noqa: E402
+from lib.logger import Logger  # noqa: E402
 
 PREVIEW_BYTES = 1024  # bytes to read for content preview
 

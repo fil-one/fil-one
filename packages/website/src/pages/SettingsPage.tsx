@@ -6,6 +6,7 @@ import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/
 
 import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
+import { Link } from '../components/Link';
 import { Input } from '../components/Input';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
@@ -240,14 +241,11 @@ export function SettingsPage() {
                     <Input value={name} onChange={() => {}} disabled />
                     <p className="text-[11px] text-zinc-500">
                       Managed by {provider?.label}.{' '}
-                      <a
-                        href={provider?.profileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-500 hover:underline"
-                      >
-                        Update at {provider?.label}
-                      </a>
+                      {provider?.profileUrl && (
+                        <Link variant="accent" href={provider.profileUrl}>
+                          Update at {provider?.label}
+                        </Link>
+                      )}
                     </p>
                   </>
                 ) : (
@@ -267,14 +265,11 @@ export function SettingsPage() {
                   <Input value={email} onChange={() => {}} disabled />
                   <p className="text-[11px] text-zinc-500">
                     Managed by {provider?.label}.{' '}
-                    <a
-                      href={provider?.profileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-500 hover:underline"
-                    >
-                      Update at {provider?.label}
-                    </a>
+                    {provider?.profileUrl && (
+                      <Link variant="accent" href={provider.profileUrl}>
+                        Update at {provider?.label}
+                      </Link>
+                    )}
                   </p>
                 </>
               ) : (
@@ -377,14 +372,9 @@ export function SettingsPage() {
             {social && provider && (
               <p className="text-xs text-zinc-500">
                 Security settings are managed by {provider.label}.{' '}
-                <a
-                  href={provider.profileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-500 hover:underline"
-                >
+                <Link variant="accent" href={provider.profileUrl}>
                   Visit {provider.label} settings
-                </a>
+                </Link>
               </p>
             )}
           </div>

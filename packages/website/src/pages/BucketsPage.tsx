@@ -8,6 +8,7 @@ import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
+import { EmptyStateCard } from '../components/EmptyStateCard';
 
 import type { ListBucketsResponse } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
@@ -83,12 +84,11 @@ export function BucketsPage() {
 
       {/* Content: empty state or table */}
       {buckets.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
-          <DatabaseIcon size={48} className="mb-4 text-zinc-300" aria-hidden="true" />
-          <p className="mb-1 text-base font-medium text-zinc-700">No buckets yet</p>
-          <p className="mb-6 text-sm text-zinc-500">
-            Create your first bucket to start storing objects
-          </p>
+        <EmptyStateCard
+          icon={DatabaseIcon}
+          title="No buckets yet"
+          description="Create your first bucket to start storing objects"
+        >
           <Button
             variant="primary"
             icon={PlusIcon}
@@ -96,7 +96,7 @@ export function BucketsPage() {
           >
             Create bucket
           </Button>
-        </div>
+        </EmptyStateCard>
       ) : (
         <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
           <table className="w-full text-sm">
