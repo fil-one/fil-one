@@ -19,6 +19,7 @@ import { formatBytes, formatBytesShort } from '@filone/shared';
 import { getActivity } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
 import { queryKeys } from '../lib/query-client.js';
+import { Card } from '../components/Card';
 
 // ---------------------------------------------------------------------------
 // Custom tooltip
@@ -105,7 +106,7 @@ export function UsageTrends() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {/* Storage chart — AreaChart */}
-          <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+          <Card>
             <div className="mb-3 flex items-center justify-between">
               <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
                 STORAGE
@@ -162,10 +163,10 @@ export function UsageTrends() {
                 />
               </AreaChart>
             </ResponsiveContainer>
-          </div>
+          </Card>
 
           {/* Objects chart — BarChart */}
-          <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+          <Card>
             <div className="mb-3 flex items-center justify-between">
               <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
                 OBJECTS
@@ -207,7 +208,7 @@ export function UsageTrends() {
                 <Bar dataKey="value" fill="#0080FF" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          </div>
+          </Card>
         </div>
       )}
     </div>

@@ -1,3 +1,4 @@
+@import '@fontsource-variable/inter';
 @import 'tailwindcss';
 @import './styles/globals.css';
 @source "./stories/**/*.tsx";

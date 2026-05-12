@@ -181,7 +181,7 @@ export default $config({
         securityHeadersConfig: {
           contentSecurityPolicy: {
             // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://plausible.io https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io/api ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://plausible.io https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io/api https://fil-one.instatus.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
@@ -381,10 +381,10 @@ export default $config({
     const auroraEnv = {
       AURORA_BACKOFFICE_URL: isProduction
         ? 'https://api-backoffice.aur.lu/api'
-        : 'https://api.backoffice.dev.aur.lu/api',
+        : 'https://api-backoffice.dev.aur.lu/api',
       AURORA_PORTAL_URL: isProduction
         ? 'https://api-portal.aur.lu/api'
-        : 'https://api.portal.dev.aur.lu/api',
+        : 'https://api-portal.dev.aur.lu/api',
       AURORA_PARTNER_ID: 'ff',
       AURORA_REGION_ID: 'ff',
     };
@@ -599,9 +599,6 @@ export default $config({
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
 
-    // ── Org routes ──────────────────────────────────────────────────
-    addRoute({ method: 'POST', routePath: '/api/org/confirm', handler: 'confirm-org' });
-
     // ── Usage + Dashboard routes ─────────────────────────────────────
     addRoute({
       method: 'GET',
@@ -739,6 +736,21 @@ export default $config({
       // run the Lambda every 12 hours, one hour after usage reporting (08:00 and 20:00 UTC).
       schedule: 'cron(0 8/12 * * ? *)',
       function: gracePeriodEnforcer.arn,
+    });
+
+    // ── Subscription drift checker (cron-based, observe-only) ───────
+    const subscriptionDriftChecker = createFn('SubscriptionDriftChecker', {
+      handler: 'packages/backend/src/jobs/subscription-drift-checker.handler',
+      link: [billingTable, userInfoTable, auroraBackofficeToken],
+      environment: auroraEnv,
+      timeout: '300 seconds',
+      memory: '256 MB',
+    });
+
+    new sst.aws.CronV2('SubscriptionDriftCheckerCron', {
+      // run the Lambda every 12 hours, staggered 2h after grace-period (10:00 and 22:00 UTC).
+      schedule: 'cron(0 10/12 * * ? *)',
+      function: subscriptionDriftChecker.arn,
     });
 
     return {

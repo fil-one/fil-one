@@ -36,6 +36,21 @@ All scripts must be run from the `tests/s3compat/` directory:
 cd tests/s3compat
 ```
 
+**Aurora-specific: Portal API token**
+
+The Aurora S3 gateway does not expose `ListBuckets` / `CreateBucket` / `DeleteBucket` via S3 access-key auth; those operations go through the Aurora Portal API and require a per-tenant API key. The compatibility test (which creates/deletes buckets per test) and `tools/create_bucket.py` rely on this token being cached at `~/.aurora_token`.
+
+The per-tenant key is provisioned by FilOne Console backend during tenant creation and stored in AWS SSM. Fetching it requires the [AWS CLI](https://aws.amazon.com/cli/) on `PATH` and credentials configured for the AWS account that owns the parameter. Then run:
+
+```bash
+python tools/aurora_key_management.py login \
+  --stage dev --region eu-west-1 --tenant-id <TENANT_ID>
+```
+
+This shells out to `aws ssm get-parameter --with-decryption` and writes the token to `~/.aurora_token` (chmod 600). Re-run when the cached token expires.
+
+The runtime patch also reads `AURORA_PORTAL_ORIGIN` and `AURORA_TENANT_ID` from the environment. The same CLI exposes Portal-API helpers (`keys`, `get-key`, `create-key`, `delete-key`) and a Back Office–API `tenants` command (which uses a partner-level key from `AURORA_BACKOFFICE_API_KEY` / `AURORA_BACKOFFICE_ORIGIN`). See `python tools/aurora_key_management.py --help`.
+
 ---
 
 ## Basic Operations
@@ -46,13 +61,13 @@ Streams files directly from source.coop → Aurora without local download. State
 
 ```bash
 # Upload 5 files up to 200 MB each (defaults)
-python upload.py --provider aurora
+python tools/upload.py --provider aurora
 
 # Upload 10 files, skip anything over 50 MB
-python upload.py --provider aurora --count 10 --max-size-mb 50
+python tools/upload.py --provider aurora --count 10 --max-size-mb 50
 
 # Different source prefix
-python upload.py --provider aurora --prefix gov-data/collections/
+python tools/upload.py --provider aurora --prefix gov-data/collections/
 ```
 
 **Resume after failure:** re-run the same command. Done entries in `manifest.json` are skipped.
@@ -60,8 +75,8 @@ python upload.py --provider aurora --prefix gov-data/collections/
 **Force re-upload** (ignore manifest, re-upload everything):
 
 ```bash
-python upload.py --provider aurora --force
-python upload.py --provider aurora --force --count 10
+python tools/upload.py --provider aurora --force
+python tools/upload.py --provider aurora --force --count 10
 ```
 
 State files: `aurora/manifest.json`
@@ -72,27 +87,27 @@ Runs `HeadObject`, `GetObject` (first 1 KB preview), and `ListObjectVersions` on
 
 ```bash
 # Fetch all keys from manifest.json
-python fetch.py --provider aurora
+python tools/fetch.py --provider aurora
 
 # Fetch a specific key
-python fetch.py --provider aurora --key gov-data/README.md
+python tools/fetch.py --provider aurora --key gov-data/README.md
 
 # Fetch a specific version
-python fetch.py --provider aurora --key gov-data/README.md --version-id <version-id>
+python tools/fetch.py --provider aurora --key gov-data/README.md --version-id <version-id>
 ```
 
 ### Delete
 
 ```bash
 # Preview what would be deleted (no changes made)
-python delete.py --provider aurora --dry-run
+python tools/delete.py --provider aurora --dry-run
 
 # Delete all done entries in manifest.json
-python delete.py --provider aurora
+python tools/delete.py --provider aurora
 
 # Delete a specific key or version
-python delete.py --provider aurora --key gov-data/README.md
-python delete.py --provider aurora --key gov-data/README.md --version-id <version-id>
+python tools/delete.py --provider aurora --key gov-data/README.md
+python tools/delete.py --provider aurora --key gov-data/README.md --version-id <version-id>
 ```
 
 ---
@@ -337,7 +352,7 @@ The suite requires an INI config file. You can either auto-generate it from your
 **Option A: Auto-generate from `.env`**
 
 ```bash
-uv run python generate_ceph_conf.py akave   # or aurora, fth, etc.
+uv run python tools/generate_ceph_conf.py akave   # or aurora, fth, etc.
 ```
 
 This creates `ceph-s3-tests/s3tests.conf` with all sections populated from your provider's `.env`.
@@ -540,17 +555,42 @@ ERRORS
 
 ## File Reference
 
-| File                      | Purpose                                                           |
-| ------------------------- | ----------------------------------------------------------------- |
-| `client.py`               | boto3 client factory for Aurora and source.coop                   |
-| `report.py`               | Shared report formatting used by all scripts                      |
-| `logger.py`               | Per-operation JSONL logging + report generation for phase scripts |
-| `manifest.py`             | Upload resume state (`manifest.json`)                             |
-| `upload.py`               | Upload files from source.coop to Aurora                           |
-| `fetch.py`                | Head, get preview, and list versions                              |
-| `delete.py`               | Delete objects by key or version                                  |
-| `load_test.py`            | Concurrent load test with SQLite-backed resume                    |
-| `compatibility_test.py`   | Full S3 compatibility test via ceph/s3-tests                      |
-| `console_presign_test.py` | Presigned URL + CORS test for the Console's operations            |
-| `manifest.json`           | Created at runtime — upload state                                 |
-| `load_test_state.db`      | Created at runtime — load test state                              |
+| File                               | Purpose                                                                                  |
+| ---------------------------------- | ---------------------------------------------------------------------------------------- |
+| `lib/client.py`                    | boto3 client factory; `resolve_provider()` loads `<provider>/.env`                       |
+| `lib/report.py`                    | Shared report formatting used by all scripts                                             |
+| `lib/logger.py`                    | Per-operation JSONL logging + report generation for phase scripts                        |
+| `lib/manifest.py`                  | Upload resume state (`manifest.json`)                                                    |
+| `lib/backend_loader.py`            | Pytest plugin; activates `<S3COMPAT_BACKEND>.backend` at startup                         |
+| `lib/backend-aurora/__init__.py`   | Aurora backend entry point — re-exports `activate`                                       |
+| `lib/backend-aurora/patch.py`      | Aurora boto3 monkey-patches (create/delete bucket)                                       |
+| `lib/backend-aurora/portal_api.py` | Aurora Portal HTTP wrappers                                                              |
+| `tools/upload.py`                  | Upload files from source.coop to the on-ramp                                             |
+| `tools/fetch.py`                   | Head, get preview, and list versions                                                     |
+| `tools/delete.py`                  | Delete objects by key or version                                                         |
+| `tools/create_bucket.py`           | Create a bucket with optional versioning, object lock, and encryption                    |
+| `tools/generate_ceph_conf.py`      | Generate `ceph-s3-tests/s3tests.conf` from a provider's `.env`                           |
+| `tools/aurora_key_management.py`   | Aurora CLI: SSM-based Portal token login, Back Office `tenants`, Portal access-key admin |
+| `load_test.py`                     | Concurrent load test with SQLite-backed resume                                           |
+| `compatibility_test.py`            | Full S3 compatibility test via ceph/s3-tests                                             |
+| `console_presign_test.py`          | Presigned URL + CORS test for the Console's operations                                   |
+| `manifest.json`                    | Created at runtime — upload state                                                        |
+| `load_test_state.db`               | Created at runtime — load test state                                                     |
+
+### Adding per-onramp patches
+
+Each on-ramp's backend code lives under `lib/backend-<provider>/`, separate
+from the provider's runtime data (`aurora/`, `akave/`, `fth/` — `.env`, logs,
+reports) and CLIs. To add e.g. an Akave-specific `put_bucket_cors` workaround:
+
+1. Create `lib/backend-akave/__init__.py` exposing `def activate(): ...` —
+   typically split into `patch.py` (boto3 monkey-patches) + `portal_api.py`
+   (HTTP wire layer), mirroring `lib/backend-aurora/`. Provider-specific CLIs
+   go under the top-level `tools/` directory, prefixed with the provider name
+   (e.g. `tools/akave_key_management.py`).
+2. Optionally export module-level `SKIP_TESTS = {...}` and `SKIP_REASON = "..."`
+   to auto-skip tests that don't apply to that on-ramp.
+3. Run `python compatibility_test.py --provider akave` — `backend_loader`
+   imports `lib.backend-akave` and calls `activate()` at pytest startup.
+
+No edits to `compatibility_test.py` or `backend_loader.py` are required.

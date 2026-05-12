@@ -23,8 +23,8 @@ export function AppShell({ children }: AppShellProps) {
         </Banner>
       )}
       {tenantStatus === 'DISABLED' && (
-        <Banner variant="error" action={{ label: 'Reactivate', href: '/billing' }}>
-          Account canceled. Reactivate to regain access.
+        <Banner variant="error" action={{ label: 'Manage account', href: '/billing' }}>
+          Account disabled. Visit billing to restore access.
         </Banner>
       )}
       <div className="flex flex-1 overflow-hidden">
