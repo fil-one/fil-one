@@ -8,6 +8,7 @@ jobs:
   teardown:
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     concurrency:
       group: preview-pr-${{ github.event.pull_request.number }}
       cancel-in-progress: false
@@ -16,6 +17,7 @@ jobs:
       contents: read
     env:
       AWS_REGION: us-east-2
+      SST_STAGE: pr-${{ github.event.pull_request.number }}
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -40,22 +42,38 @@ jobs:
       - name: Check if SST stage exists
         id: check-stage
         run: |
-          STAGE="pr-${{ github.event.pull_request.number }}"
-          if pnpm exec sst state list | grep -qw "$STAGE"; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Stage ${STAGE} not found, nothing to tear down"
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
+          exists=$(bin/check-sst-stage-exists.sh "$SST_STAGE") || exit $?
+          echo "Stage ${SST_STAGE} exists=${exists}"
+          echo "exists=${exists}" >> "$GITHUB_OUTPUT"
 
       - name: Remove SST stage
         id: remove
         if: steps.check-stage.outputs.exists == 'true'
         continue-on-error: true
-        run: pnpm exec sst remove --stage "pr-${{ github.event.pull_request.number }}"
+        run: pnpm exec sst remove --stage "$SST_STAGE"
+
+      - name: Determine failure phase
+        if: >-
+          always() && (
+            steps.check-stage.outcome == 'failure' ||
+            steps.remove.outcome == 'failure'
+          )
+        id: failure-phase
+        run: |
+          if [ "${{ steps.check-stage.outcome }}" = "failure" ]; then
+            echo "phase=stage-existence check" >> "$GITHUB_OUTPUT"
+            echo "detail=Could not determine whether the stage exists — AWS credentials, state backend, or transient error. Teardown was NOT attempted; resources for \`${SST_STAGE}\` may still be live." >> "$GITHUB_OUTPUT"
+          else
+            echo "phase=sst remove" >> "$GITHUB_OUTPUT"
+            echo "detail=Stage \`${SST_STAGE}\` may have orphaned resources that need manual cleanup." >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Notify Slack on teardown failure
-        if: steps.remove.outcome == 'failure'
+        if: >-
+          always() && (
+            steps.check-stage.outcome == 'failure' ||
+            steps.remove.outcome == 'failure'
+          )
         uses: slackapi/slack-github-action@45a88b9581bfab2566dc881e2cd66d334e621e2c # v3.0.3
         with:
           method: chat.postMessage
@@ -63,20 +81,20 @@ jobs:
           payload: |
             {
               "channel": "filone-alerts",
-              "text": ${{ toJSON(format('Preview teardown failed for PR #{0}. Details: {1}/{2}/actions/runs/{3}', github.event.pull_request.number, github.server_url, github.repository, github.run_id)) }},
+              "text": ${{ toJSON(format('Preview teardown failed ({4}) for PR #{0}. Details: {1}/{2}/actions/runs/{3}', github.event.pull_request.number, github.server_url, github.repository, github.run_id, steps.failure-phase.outputs.phase)) }},
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ${{ toJSON(format(':warning: *Preview teardown failed for PR <{1}/{2}/pull/{0}|#{0}>* · <{1}/{2}/actions/runs/{3}|Details>', github.event.pull_request.number, github.server_url, github.repository, github.run_id)) }}
+                    "text": ${{ toJSON(format(':warning: *Preview teardown failed ({4}) for PR <{1}/{2}/pull/{0}|#{0}>* · <{1}/{2}/actions/runs/{3}|Details>', github.event.pull_request.number, github.server_url, github.repository, github.run_id, steps.failure-phase.outputs.phase)) }}
                   }
                 },
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ${{ toJSON(format('Stage `pr-{0}` may have orphaned resources that need manual cleanup.', github.event.pull_request.number)) }}
+                    "text": ${{ toJSON(steps.failure-phase.outputs.detail) }}
                   }
                 }
               ]
