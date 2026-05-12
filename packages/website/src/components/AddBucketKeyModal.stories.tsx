@@ -12,8 +12,13 @@ import { AddBucketKeyModal } from './AddBucketKeyModal';
 
 const mockBuckets: ListBucketsResponse = {
   buckets: [
-    { name: 'my-bucket', region: 'us-east-1', createdAt: '2026-01-15T00:00:00Z', isPublic: false },
-    { name: 'backups', region: 'us-east-1', createdAt: '2026-02-20T00:00:00Z', isPublic: false },
+    {
+      name: 'my-bucket',
+      region: 'us-midwest-1',
+      createdAt: '2026-01-15T00:00:00Z',
+      isPublic: false,
+    },
+    { name: 'backups', region: 'us-midwest-1', createdAt: '2026-02-20T00:00:00Z', isPublic: false },
   ],
 };
 
@@ -46,7 +51,7 @@ export const Default: Story = {
           open={open}
           onClose={() => setOpen(false)}
           bucketName="my-bucket"
-          bucketRegion={S3Region.UsEast1}
+          bucketRegion={S3Region.UsMidwest1}
           onKeyAdded={() => {}}
         />
       </QueryClientProvider>

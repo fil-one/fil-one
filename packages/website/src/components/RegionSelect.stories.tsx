@@ -21,7 +21,7 @@ export const Default: Story = {
 
 export const UsEast1: Story = {
   args: {
-    value: S3Region.UsEast1,
+    value: S3Region.UsMidwest1,
   },
 };
 

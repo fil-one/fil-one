@@ -9,7 +9,7 @@ export const DOCS_URL = 'https://docs.fil.one';
 /** Available S3 regions. */
 export enum S3Region {
   EuWest1 = 'eu-west-1',
-  UsEast1 = 'us-east-1',
+  UsMidwest1 = 'us-midwest-1',
 }
 
 /** Default S3 region for Fil One. */
@@ -18,7 +18,7 @@ export const S3_REGION = S3Region.EuWest1 satisfies S3Region;
 /** Human-readable region labels. */
 export const REGION_LABELS: Record<S3Region, string> = {
   [S3Region.EuWest1]: 'Europe (France)',
-  [S3Region.UsEast1]: 'US East (N. Virginia)',
+  [S3Region.UsMidwest1]: 'US Midwest (Ohio)',
 };
 
 /** Format a region as `"Europe (France) eu-west-1"`. */
@@ -29,11 +29,11 @@ export function formatRegion(region: S3Region | string): string {
 
 /**
  * Regions selectable in the given stage. Production currently exposes only
- * `eu-west-1`; non-production stages also expose `us-east-1` for dogfooding.
+ * `eu-west-1`; non-production stages also expose `us-midwest-1` for dogfooding.
  */
 export function getAvailableRegions(stage: Stage | string): S3Region[] {
   if (stage === Stage.Production) return [S3Region.EuWest1];
-  return [S3Region.EuWest1, S3Region.UsEast1];
+  return [S3Region.EuWest1, S3Region.UsMidwest1];
 }
 
 /**
