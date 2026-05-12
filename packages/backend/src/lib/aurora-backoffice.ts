@@ -300,9 +300,10 @@ async function fetchStorageSamplesRange({
   });
 
   if (error) {
-    throw new Error(`Aurora storage API failed for tenant ${tenantId}`, {
-      cause: error,
-    });
+    throw new Error(
+      `Aurora storage API failed for tenant ${tenantId} (from=${from} to=${to} window=${window})`,
+      { cause: error },
+    );
   }
 
   return data?.samples ?? [];
@@ -393,9 +394,10 @@ async function fetchOperationsSamplesRange({
   });
 
   if (error) {
-    throw new Error(`Aurora operations API failed for tenant ${tenantId}`, {
-      cause: error,
-    });
+    throw new Error(
+      `Aurora operations API failed for tenant ${tenantId} (from=${from} to=${to} window=${window})`,
+      { cause: error },
+    );
   }
 
   return data?.series?.[0]?.samples ?? [];
