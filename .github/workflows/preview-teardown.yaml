@@ -42,13 +42,34 @@ jobs:
       - name: Check if SST stage exists
         id: check-stage
         run: |
-          output=$(pnpm exec sst state export --stage "$SST_STAGE" 2>&1 >/dev/null) || true
-          if echo "$output" | grep -q "Could not pull state"; then
+          set +e
+          stderr_file=$(mktemp)
+          pnpm exec sst state export --stage "$SST_STAGE" >/dev/null 2>"$stderr_file"
+          exit_code=$?
+          stderr_output=$(cat "$stderr_file")
+          rm -f "$stderr_file"
+
+          if [ "$exit_code" -eq 0 ]; then
+            echo "Stage ${SST_STAGE} exists"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if echo "$stderr_output" | grep -qiE "AccessDenied|UnauthorizedOperation|InvalidClientTokenId|ExpiredToken|credentials|Throttl|RequestTimeout|InternalError|ServiceUnavailable|SignatureDoesNotMatch"; then
+            echo "::error::sst state export failed with an AWS error (not a missing-stage condition):"
+            echo "$stderr_output" >&2
+            exit 1
+          fi
+
+          if echo "$stderr_output" | grep -q "Could not pull state"; then
             echo "Stage ${SST_STAGE} not found, nothing to tear down"
             echo "exists=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          echo "::error::sst state export failed with an unrecognised error (treating as failure to avoid silently skipping teardown):"
+          echo "$stderr_output" >&2
+          exit 1
 
       - name: Remove SST stage
         id: remove
@@ -56,8 +77,28 @@ jobs:
         continue-on-error: true
         run: pnpm exec sst remove --stage "$SST_STAGE"
 
+      - name: Determine failure phase
+        if: >-
+          always() && (
+            steps.check-stage.outcome == 'failure' ||
+            steps.remove.outcome == 'failure'
+          )
+        id: failure-phase
+        run: |
+          if [ "${{ steps.check-stage.outcome }}" = "failure" ]; then
+            echo "phase=stage-existence check" >> "$GITHUB_OUTPUT"
+            echo "detail=Could not determine whether the stage exists — AWS credentials, state backend, or transient error. Teardown was NOT attempted; resources for \`${SST_STAGE}\` may still be live." >> "$GITHUB_OUTPUT"
+          else
+            echo "phase=sst remove" >> "$GITHUB_OUTPUT"
+            echo "detail=Stage \`${SST_STAGE}\` may have orphaned resources that need manual cleanup." >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Notify Slack on teardown failure
-        if: steps.remove.outcome == 'failure'
+        if: >-
+          always() && (
+            steps.check-stage.outcome == 'failure' ||
+            steps.remove.outcome == 'failure'
+          )
         uses: slackapi/slack-github-action@45a88b9581bfab2566dc881e2cd66d334e621e2c # v3.0.3
         with:
           method: chat.postMessage
@@ -65,20 +106,20 @@ jobs:
           payload: |
             {
               "channel": "filone-alerts",
-              "text": ${{ toJSON(format('Preview teardown failed for PR #{0}. Details: {1}/{2}/actions/runs/{3}', github.event.pull_request.number, github.server_url, github.repository, github.run_id)) }},
+              "text": ${{ toJSON(format('Preview teardown failed ({4}) for PR #{0}. Details: {1}/{2}/actions/runs/{3}', github.event.pull_request.number, github.server_url, github.repository, github.run_id, steps.failure-phase.outputs.phase)) }},
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ${{ toJSON(format(':warning: *Preview teardown failed for PR <{1}/{2}/pull/{0}|#{0}>* · <{1}/{2}/actions/runs/{3}|Details>', github.event.pull_request.number, github.server_url, github.repository, github.run_id)) }}
+                    "text": ${{ toJSON(format(':warning: *Preview teardown failed ({4}) for PR <{1}/{2}/pull/{0}|#{0}>* · <{1}/{2}/actions/runs/{3}|Details>', github.event.pull_request.number, github.server_url, github.repository, github.run_id, steps.failure-phase.outputs.phase)) }}
                   }
                 },
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ${{ toJSON(format('Stage `pr-{0}` may have orphaned resources that need manual cleanup.', github.event.pull_request.number)) }}
+                    "text": ${{ toJSON(steps.failure-phase.outputs.detail) }}
                   }
                 }
               ]
