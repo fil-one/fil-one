@@ -16,12 +16,14 @@ type Story = StoryObj<typeof RegionSelect>;
 export const Default: Story = {
   args: {
     value: S3Region.EuWest1,
+    onChange: () => {},
   },
 };
 
-export const UsEast1: Story = {
+export const UsMidwest1: Story = {
   args: {
     value: S3Region.UsMidwest1,
+    onChange: () => {},
   },
 };
 
@@ -29,6 +31,7 @@ export const Disabled: Story = {
   args: {
     value: S3Region.EuWest1,
     disabled: true,
+    onChange: () => {},
   },
 };
 

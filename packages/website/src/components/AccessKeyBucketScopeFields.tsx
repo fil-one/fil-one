@@ -33,6 +33,8 @@ export function AccessKeyBucketScopeFields({
     queryFn: () => apiRequest<ListBucketsResponse>('/buckets'),
     enabled: bucketScope === 'specific',
   });
+  // TODO: forward `region` to the `/buckets` API endpoint so filtering happens
+  // on the backend, once the buckets API supports per-bucket region metadata.
   const buckets = (data?.buckets ?? [])
     .filter((b) => !region || b.region === region)
     .map((b) => b.name);
