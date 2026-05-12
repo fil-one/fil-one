@@ -22,7 +22,7 @@ import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
-// TODO: Refactor the handler, reducing it's complexity and removing the ignore eslint directive.
+// TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
 // eslint-disable-next-line max-lines-per-function, complexity/complexity
 export async function baseHandler(
