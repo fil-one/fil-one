@@ -42,7 +42,7 @@ jobs:
       - name: Check if SST stage exists
         id: check-stage
         run: |
-          output=$(pnpm exec sst state export --stage "$SST_STAGE" 2>&1) || true
+          output=$(pnpm exec sst state export --stage "$SST_STAGE" 2>&1 >/dev/null) || true
           if echo "$output" | grep -q "Could not pull state"; then
             echo "Stage ${SST_STAGE} not found, nothing to tear down"
             echo "exists=false" >> "$GITHUB_OUTPUT"
