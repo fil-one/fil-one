@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type {
   AccessKeyBucketScope,
@@ -46,6 +46,13 @@ export function useAccessKeyForm({
   const [expiration, setExpiration] = useState<ExpirationOption>('never');
   const [customDate, setCustomDate] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+
+  const prevRegionRef = useRef(region);
+  useEffect(() => {
+    if (prevRegionRef.current === region) return;
+    prevRegionRef.current = region;
+    setSelectedBuckets([]);
+  }, [region]);
 
   const candidatePayload = {
     keyName: keyName.trim(),
