@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   SquaresFourIcon,
   DatabaseIcon,
@@ -318,27 +318,34 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const egressPct =
     limits.egressLimitBytes > 0 ? Math.min(100, (egressUsed / limits.egressLimitBytes) * 100) : 0;
 
-  function handleClickOutside(e: React.MouseEvent) {
-    if (
-      userMenuRef.current &&
-      !userMenuRef.current.contains(e.target as Node) &&
-      userButtonRef.current &&
-      !userButtonRef.current.contains(e.target as Node)
-    ) {
-      setUserMenuOpen(false);
+  useEffect(() => {
+    if (!userMenuOpen && !helpMenuOpen) return;
+    function handleMouseDown(e: MouseEvent) {
+      if (
+        userMenuOpen &&
+        userMenuRef.current &&
+        !userMenuRef.current.contains(e.target as Node) &&
+        userButtonRef.current &&
+        !userButtonRef.current.contains(e.target as Node)
+      ) {
+        setUserMenuOpen(false);
+      }
+      if (
+        helpMenuOpen &&
+        helpMenuRef.current &&
+        !helpMenuRef.current.contains(e.target as Node) &&
+        helpButtonRef.current &&
+        !helpButtonRef.current.contains(e.target as Node)
+      ) {
+        setHelpMenuOpen(false);
+      }
     }
-    if (
-      helpMenuRef.current &&
-      !helpMenuRef.current.contains(e.target as Node) &&
-      helpButtonRef.current &&
-      !helpButtonRef.current.contains(e.target as Node)
-    ) {
-      setHelpMenuOpen(false);
-    }
-  }
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [userMenuOpen, helpMenuOpen]);
 
   return (
-    <div className="h-full" onClick={handleClickOutside}>
+    <div className="h-full">
       <nav className="relative flex h-full flex-col border-r border-zinc-200 bg-white">
         {/* Expand toggle (collapsed) — centered on the sidebar's right border */}
         {collapsed && (

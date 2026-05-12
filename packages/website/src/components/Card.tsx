@@ -1,13 +1,30 @@
 import { clsx } from 'clsx';
 
+export type CardPadding = 'none' | 'md';
+
 type CardProps = {
   children: React.ReactNode;
+  shadow?: boolean;
+  padding?: CardPadding;
   className?: string;
+} & React.HTMLAttributes<HTMLDivElement>;
+
+const paddingStyles: Record<CardPadding, string> = {
+  none: '',
+  md: 'p-5',
 };
 
-export function Card({ children, className }: CardProps) {
+export function Card({ children, shadow = true, padding = 'md', className, ...rest }: CardProps) {
   return (
-    <div className={clsx('rounded-lg border border-zinc-200 bg-white p-5 shadow-xs', className)}>
+    <div
+      className={clsx(
+        'rounded-xl border border-zinc-200 bg-white',
+        paddingStyles[padding],
+        shadow && 'shadow-xs',
+        className,
+      )}
+      {...rest}
+    >
       {children}
     </div>
   );

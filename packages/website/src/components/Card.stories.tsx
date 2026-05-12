@@ -5,6 +5,10 @@ import { Card } from './Card';
 const meta: Meta<typeof Card> = {
   title: 'Components/Card',
   component: Card,
+  argTypes: {
+    shadow: { control: 'boolean' },
+    padding: { control: 'select', options: ['none', 'md'] },
+  },
   parameters: {
     layout: 'padded',
   },
@@ -15,31 +19,58 @@ type Story = StoryObj<typeof Card>;
 
 export const Default: Story = {
   args: {
+    children: 'Card content',
+    shadow: true,
+    padding: 'md',
+  },
+};
+
+export const WithShadow: Story = {
+  args: {
+    children: 'Card content',
+    shadow: true,
+    padding: 'md',
+  },
+};
+
+export const NoPadding: Story = {
+  args: {
+    shadow: true,
+    padding: 'none',
     children: (
-      <p className="text-sm text-zinc-600">
-        This is a card. It provides a consistent container with border, background, and shadow.
-      </p>
+      <div className="divide-y divide-zinc-200">
+        <div className="px-5 py-3 text-sm text-zinc-700">Row one</div>
+        <div className="px-5 py-3 text-sm text-zinc-700">Row two</div>
+        <div className="px-5 py-3 text-sm text-zinc-700">Row three</div>
+      </div>
     ),
   },
 };
 
-export const WithHeading: Story = {
+export const AllVariants: Story = {
   render: () => (
-    <Card>
-      <h2 className="mb-3 text-sm font-medium text-zinc-900">Card title</h2>
-      <p className="text-sm text-zinc-500">Card body content goes here.</p>
-    </Card>
-  ),
-};
-
-export const Stacked: Story = {
-  render: () => (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 p-6 bg-zinc-50 min-h-screen">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+        Default (with shadow)
+      </p>
       <Card>
-        <p className="text-sm text-zinc-600">First card</p>
+        <p className="text-sm text-zinc-700">Shadow, default padding</p>
       </Card>
-      <Card>
-        <p className="text-sm text-zinc-600">Second card</p>
+
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">No shadow</p>
+      <Card shadow={false}>
+        <p className="text-sm text-zinc-700">No shadow, default padding</p>
+      </Card>
+
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+        No padding + shadow
+      </p>
+      <Card shadow padding="none">
+        <div className="divide-y divide-zinc-200">
+          <div className="px-5 py-3 text-sm text-zinc-700">Row one</div>
+          <div className="px-5 py-3 text-sm text-zinc-700">Row two</div>
+          <div className="px-5 py-3 text-sm text-zinc-700">Row three</div>
+        </div>
       </Card>
     </div>
   ),
