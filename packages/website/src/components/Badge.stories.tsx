@@ -109,34 +109,36 @@ export const WithTooltip: Story = {
 export const AllVariants: Story = {
   render: () => (
     <div className="flex flex-col gap-8">
-      {(['default', 'solid'] as BadgeVariant[]).map((variant) => (
-        <div key={variant} className="flex flex-col gap-4">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-            {variant}
+      {(
+        [
+          { label: 'Default', variant: 'default', strength: 'subtle' },
+          { label: 'Default / Strong', variant: 'default', strength: 'strong' },
+          { label: 'Solid', variant: 'solid', strength: 'subtle' },
+        ] as { label: string; variant: BadgeVariant; strength: BadgeStrength }[]
+      ).map(({ label, variant, strength }) => (
+        <div key={label} className="flex flex-col gap-4">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
+            {label}
           </p>
           {(['green', 'blue', 'red', 'amber', 'grey'] as BadgeColor[]).map((color) => (
             <div key={color} className="flex flex-col gap-2">
-              <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-300">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
                 {color}
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
-                  <Badge key={size} color={color} size={size} variant={variant}>
-                    {size}
-                  </Badge>
-                ))}
-                {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
-                  <Badge key={`dot-${size}`} color={color} size={size} variant={variant} dot>
+                  <Badge key={size} color={color} size={size} variant={variant} strength={strength}>
                     {size}
                   </Badge>
                 ))}
                 {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
                   <Badge
-                    key={`med-${size}`}
+                    key={`dot-${size}`}
                     color={color}
                     size={size}
                     variant={variant}
-                    weight="medium"
+                    strength={strength}
+                    dot
                   >
                     {size}
                   </Badge>

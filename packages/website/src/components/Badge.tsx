@@ -41,7 +41,7 @@ const solidColorStyles: Record<BadgeColor, string> = {
   green: 'bg-green-700 text-white',
   blue: 'bg-brand-600 text-white',
   red: 'bg-red-700 text-white',
-  amber: 'bg-amber-600 text-white',
+  amber: 'bg-amber-700 text-white',
   grey: 'bg-zinc-600 text-white',
 };
 
