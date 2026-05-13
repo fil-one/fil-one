@@ -103,14 +103,14 @@ export function BucketsPage() {
       ) : (
         <Table>
           <Table.Header>
-            <tr>
+            <Table.Row>
               <Table.Head>Name</Table.Head>
               <Table.Head>Region</Table.Head>
               <Table.Head>Created</Table.Head>
               <Table.Head>Visibility</Table.Head>
               <Table.Head>Features</Table.Head>
               <Table.Head aria-label="Actions" />
-            </tr>
+            </Table.Row>
           </Table.Header>
           <Table.Body>
             {buckets.map((bucket) => (

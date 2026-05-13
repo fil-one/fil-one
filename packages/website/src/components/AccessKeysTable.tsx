@@ -130,7 +130,7 @@ export function AccessKeysTable({
   return (
     <Table>
       <Table.Header>
-        <tr>
+        <Table.Row>
           <Table.Head>Name</Table.Head>
           {showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
           {showPermissions && <Table.Head className="hidden md:table-cell">Permissions</Table.Head>}
@@ -141,7 +141,7 @@ export function AccessKeysTable({
               <span className="sr-only">Actions</span>
             </Table.Head>
           )}
-        </tr>
+        </Table.Row>
       </Table.Header>
       <Table.Body>
         {keys.map((key) => (
