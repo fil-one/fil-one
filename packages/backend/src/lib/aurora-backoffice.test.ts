@@ -398,7 +398,8 @@ describe('getStorageSamples', () => {
         if (query.from === boundary && query.to === to) {
           return Promise.resolve({ data: { samples: range2Samples }, error: undefined });
         }
-        return Promise.resolve({ data: { samples: [] }, error: undefined });
+        const error = new Error(`Unexpected query range: from ${query.from} to ${query.to}`);
+        return Promise.resolve({ data: undefined, error });
       });
 
       const result = await getStorageSamples({ tenantId: 'tenant-1', from, to, window: '1h' });
@@ -522,7 +523,9 @@ describe('getOperationsSamples', () => {
           error: undefined,
         });
       }
-      return Promise.resolve({ data: { series: [{ samples: [] }] }, error: undefined });
+
+      const error = new Error(`Unexpected query range: from ${query.from} to ${query.to}`);
+      return Promise.resolve({ data: undefined, error });
     });
 
     const result = await getOperationsSamples({
