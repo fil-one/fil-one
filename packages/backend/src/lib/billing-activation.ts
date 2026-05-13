@@ -75,7 +75,11 @@ export async function unlockAuroraTenant(orgId: string): Promise<void> {
     await setOrgAuroraTenantStatus(orgId, 'ACTIVE');
     console.log('[billing-activation] Aurora tenant unlocked', { orgId, auroraTenantId });
   } catch (error) {
-    console.error('[billing-activation] Failed to unlock Aurora tenant', { orgId, error });
+    console.error('[billing-activation] Failed to unlock Aurora tenant', {
+      orgId,
+      error,
+      cause: error instanceof Error ? error.cause : undefined,
+    });
     throw error;
   }
 }
