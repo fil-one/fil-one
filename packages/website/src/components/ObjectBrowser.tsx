@@ -390,7 +390,7 @@ export function ObjectBrowser({
       ) : (
         <Table>
           <Table.Header>
-            <tr>
+            <Table.Row>
               <Table.Head>Name</Table.Head>
               {versioningEnabled && (
                 <>
@@ -401,7 +401,7 @@ export function ObjectBrowser({
               <Table.Head>Size</Table.Head>
               <Table.Head>Last Modified</Table.Head>
               <Table.Head aria-label="Actions" />
-            </tr>
+            </Table.Row>
           </Table.Header>
           <Table.Body>
             {entries.map((entry) => {
