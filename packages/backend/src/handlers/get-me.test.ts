@@ -113,7 +113,6 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
           setupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
@@ -125,7 +124,6 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
-        orgConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: true,
@@ -146,7 +144,6 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
           setupStatus: { S: 'FILONE_ORG_CREATED' },
         },
       });
@@ -158,7 +155,6 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
-        orgConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: false,
@@ -179,7 +175,6 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
         },
       });
 
@@ -190,7 +185,6 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
-        orgConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: false,
@@ -200,7 +194,7 @@ describe('GET /api/me handler', () => {
     });
   });
 
-  it('triggers tenant setup when org is confirmed but setup is incomplete', async () => {
+  it('triggers tenant setup when setup is incomplete', async () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
@@ -211,7 +205,6 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
           setupStatus: { S: 'FILONE_ORG_CREATED' },
         },
       });
@@ -235,7 +228,6 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
           setupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
@@ -258,7 +250,6 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: true },
           setupStatus: { S: 'FILONE_ORG_CREATED' },
         },
       });
@@ -270,7 +261,6 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
-        orgConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: false,
@@ -280,25 +270,31 @@ describe('GET /api/me handler', () => {
     });
   });
 
-  it('does not trigger tenant setup when org is not confirmed', async () => {
+  it('degrades gracefully when org profile row is missing (eventual consistency)', async () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
         Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
       })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          orgConfirmed: { BOOL: false },
-          setupStatus: { S: 'FILONE_ORG_CREATED' },
-        },
-      });
+      .resolves({});
 
-    await handler(authenticatedEvent(), buildContext());
+    const result = await handler(authenticatedEvent(), buildContext());
 
-    expect(mockTriggerTenantSetup).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({
+        orgId: MOCK_ORG_ID,
+        orgName: '',
+        emailVerified: true,
+        email: MOCK_EMAIL,
+        orgSetupComplete: false,
+        connectionType: 'auth0',
+      }),
+    });
+    expect(mockTriggerTenantSetup).toHaveBeenCalledWith({
+      orgId: MOCK_ORG_ID,
+      orgName: '',
+    });
   });
 
   it('does not call getMfaEnrollments when include=mfa is absent', async () => {

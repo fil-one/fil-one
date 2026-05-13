@@ -9,72 +9,72 @@ BASIC
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   # Create bucket using S3_BUCKET from .env
-  python create_bucket.py --provider fth
+  python tools/create_bucket.py --provider fth
 
   # Override bucket name
-  python create_bucket.py --provider fth --bucket my-other-bucket
+  python tools/create_bucket.py --provider fth --bucket my-other-bucket
 
   # Specify a region/location constraint
-  python create_bucket.py --provider fth --region us-west-2
+  python tools/create_bucket.py --provider fth --region us-west-2
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 VERSIONING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   # Enable versioning
-  python create_bucket.py --provider fth --versioning
+  python tools/create_bucket.py --provider fth --versioning
 
   # Versioning + encryption
-  python create_bucket.py --provider fth --versioning --encryption
+  python tools/create_bucket.py --provider fth --versioning --encryption
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ENCRYPTION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   # Enable AES256 server-side encryption (SSE-S3)
-  python create_bucket.py --provider fth --encryption
+  python tools/create_bucket.py --provider fth --encryption
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OBJECT LOCK (governance — privileged users can override)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   # Object lock only (no default retention policy)
-  python create_bucket.py --provider fth --object-lock
+  python tools/create_bucket.py --provider fth --object-lock
 
   # Object lock with 90-day governance retention
-  python create_bucket.py --provider fth --object-lock --retention-days 90
+  python tools/create_bucket.py --provider fth --object-lock --retention-days 90
 
   # Object lock with 365-day governance retention
-  python create_bucket.py --provider fth --object-lock --retention-days 365
+  python tools/create_bucket.py --provider fth --object-lock --retention-days 365
 
   # Object lock + encryption
-  python create_bucket.py --provider fth --object-lock --retention-days 365 --encryption
+  python tools/create_bucket.py --provider fth --object-lock --retention-days 365 --encryption
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OBJECT LOCK (compliance — no overrides, even for root)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   # Compliance mode with 90-day retention
-  python create_bucket.py --provider fth --object-lock --retention-mode COMPLIANCE --retention-days 90
+  python tools/create_bucket.py --provider fth --object-lock --retention-mode COMPLIANCE --retention-days 90
 
   # Compliance mode with 365-day retention
-  python create_bucket.py --provider fth --object-lock --retention-mode COMPLIANCE --retention-days 365
+  python tools/create_bucket.py --provider fth --object-lock --retention-mode COMPLIANCE --retention-days 365
 
   # Compliance + encryption
-  python create_bucket.py --provider fth --object-lock --retention-mode COMPLIANCE --retention-days 365 --encryption
+  python tools/create_bucket.py --provider fth --object-lock --retention-mode COMPLIANCE --retention-days 365 --encryption
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FULL SETUP
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   # Governance + encryption (versioning implied by object lock)
-  python create_bucket.py --provider fth --object-lock --retention-days 365 --encryption
+  python tools/create_bucket.py --provider fth --object-lock --retention-days 365 --encryption
 
   # Compliance + encryption (versioning implied by object lock)
-  python create_bucket.py --provider fth --object-lock --retention-mode COMPLIANCE --retention-days 365 --encryption
+  python tools/create_bucket.py --provider fth --object-lock --retention-mode COMPLIANCE --retention-days 365 --encryption
 
   # Versioning + encryption, no lock
-  python create_bucket.py --provider fth --versioning --encryption
+  python tools/create_bucket.py --provider fth --versioning --encryption
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 RETENTION MODES
@@ -104,9 +104,12 @@ import argparse
 import os
 import sys
 import time
+from pathlib import Path
 
-from client import resolve_provider, get_s3_client
-from logger import Logger
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from lib.client import resolve_provider, get_s3_client  # noqa: E402
+from lib.logger import Logger  # noqa: E402
 
 
 def _create_bucket(s3, log: Logger, bucket: str, region: str, object_lock: bool):

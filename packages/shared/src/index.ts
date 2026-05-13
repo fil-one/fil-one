@@ -25,8 +25,6 @@ export { formatBytes, formatBytesShort } from './formatBytes.js';
 export type {
   MeResponse,
   MfaEnrollment,
-  ConfirmOrgRequest,
-  ConfirmOrgResponse,
   UpdateProfileRequest,
   UpdateProfileResponse,
   RegenerateRecoveryCodeResponse,
@@ -39,7 +37,6 @@ export type { ConnectionProvider } from './connection-providers.js';
 export {
   OrgRole,
   OrgNameSchema,
-  ConfirmOrgSchema,
   ORG_NAME_MIN_LENGTH,
   ORG_NAME_MAX_LENGTH,
   ORG_NAME_PATTERN,
@@ -128,13 +125,19 @@ export type {
 
 export type { UsageResponse } from './api/usage.js';
 
-export { PlanId, SubscriptionStatus, mapStripeStatus } from './api/billing.js';
+export {
+  PlanId,
+  SubscriptionStatus,
+  mapStripeStatus,
+  ActivateSubscriptionRequestSchema,
+} from './api/billing.js';
 export type {
   Plan,
   Subscription,
   PaymentMethod,
   BillingInfo,
   CreateSetupIntentResponse,
+  ActivateSubscriptionRequest,
   ActivateSubscriptionResponse,
   CreatePortalSessionResponse,
   Invoice,

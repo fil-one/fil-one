@@ -4,9 +4,7 @@ import { OrgNameSchema } from './org.js';
 export interface MeResponse {
   orgId: string;
   orgName: string;
-  orgConfirmed: boolean;
   emailVerified: boolean;
-  suggestedOrgName?: string;
   email?: string;
   orgSetupComplete: boolean;
   name?: string;
@@ -45,15 +43,6 @@ export interface UpdateProfileResponse {
   name?: string;
   email?: string;
   orgName?: string;
-}
-
-export interface ConfirmOrgRequest {
-  orgName: string;
-}
-
-export interface ConfirmOrgResponse {
-  orgId: string;
-  orgName: string;
 }
 
 export interface RegenerateRecoveryCodeResponse {

@@ -18,10 +18,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   // again enrolls an additional factor.
   await flagMfaEnrollment(sub);
 
-  return new ResponseBuilder()
-    .status(200)
-    .body({ message: 'Redirecting to enroll MFA.' })
-    .build();
+  return new ResponseBuilder().status(200).body({ message: 'Redirecting to enroll MFA.' }).build();
 }
 
 export const handler = middy(baseHandler)

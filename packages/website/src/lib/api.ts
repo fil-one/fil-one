@@ -72,10 +72,6 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
   if (response.status === 403) {
     const body = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
-    if (body.code === ApiErrorCode.ORG_NOT_CONFIRMED) {
-      window.dispatchEvent(new CustomEvent('org:not-confirmed'));
-      throw Object.assign(new Error('Please create an organization to continue.'), { status: 403 });
-    }
     if (body.code === ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED) {
       throw Object.assign(
         new Error(
@@ -112,7 +108,6 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
 import type {
   MeResponse,
-  ConfirmOrgResponse,
   UpdateProfileRequest,
   UpdateProfileResponse,
   RegenerateRecoveryCodeResponse,
@@ -124,13 +119,6 @@ export function getMe(options?: { forceRefresh?: boolean; include?: 'mfa' }): Pr
   if (options?.include) params.set('include', options.include);
   const qs = params.toString();
   return apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
-}
-
-export function confirmOrg(orgName: string): Promise<ConfirmOrgResponse> {
-  return apiRequest<ConfirmOrgResponse>('/org/confirm', {
-    method: 'POST',
-    body: JSON.stringify({ orgName }),
-  });
 }
 
 export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfileResponse> {
@@ -214,6 +202,7 @@ export function getActivity(
 import type {
   BillingInfo,
   CreateSetupIntentResponse,
+  ActivateSubscriptionRequest,
   ActivateSubscriptionResponse,
   CreatePortalSessionResponse,
   ListInvoicesResponse,
@@ -227,8 +216,13 @@ export function createSetupIntent(): Promise<CreateSetupIntentResponse> {
   return apiRequest<CreateSetupIntentResponse>('/billing/setup-intent', { method: 'POST' });
 }
 
-export function activateSubscription(): Promise<ActivateSubscriptionResponse> {
-  return apiRequest<ActivateSubscriptionResponse>('/billing/activate', { method: 'POST' });
+export function activateSubscription(
+  opts: ActivateSubscriptionRequest = {},
+): Promise<ActivateSubscriptionResponse> {
+  return apiRequest<ActivateSubscriptionResponse>('/billing/activate', {
+    method: 'POST',
+    body: JSON.stringify(opts),
+  });
 }
 
 export function createPortalSession(): Promise<CreatePortalSessionResponse> {
