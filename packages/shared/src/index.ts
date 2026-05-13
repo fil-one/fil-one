@@ -6,6 +6,10 @@ export {
   DOCS_URL,
   S3_REGION,
   S3Region,
+  REGION_LABELS,
+  formatRegion,
+  getRegionLabel,
+  getAvailableRegions,
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
@@ -118,13 +122,19 @@ export type {
 
 export type { UsageResponse } from './api/usage.js';
 
-export { PlanId, SubscriptionStatus, mapStripeStatus } from './api/billing.js';
+export {
+  PlanId,
+  SubscriptionStatus,
+  mapStripeStatus,
+  ActivateSubscriptionRequestSchema,
+} from './api/billing.js';
 export type {
   Plan,
   Subscription,
   PaymentMethod,
   BillingInfo,
   CreateSetupIntentResponse,
+  ActivateSubscriptionRequest,
   ActivateSubscriptionResponse,
   CreatePortalSessionResponse,
   Invoice,

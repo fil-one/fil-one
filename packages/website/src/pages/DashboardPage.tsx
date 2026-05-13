@@ -44,7 +44,7 @@ function planDisplayName(planId: PlanId): string {
   }
 }
 
-function statusBadge(status: SubscriptionStatus): { label: string; color: BadgeColor } {
+function statusBadgeProps(status: SubscriptionStatus): { label: string; color: BadgeColor } {
   switch (status) {
     case SubscriptionStatus.Trialing:
       return { label: 'Trial', color: 'blue' };
@@ -129,7 +129,7 @@ export function DashboardPage() {
   const showQuickSetup =
     usage.buckets.count === 0 || usage.objects.count === 0 || usage.accessKeys.count === 0;
 
-  const badge = statusBadge(billing.subscription.status);
+  const badge = statusBadgeProps(billing.subscription.status);
   const pricePerTbCents = billing.subscription.planId === PlanId.PayAsYouGo ? 499 : 0;
 
   const limits = getUsageLimits(isActivePaid);
@@ -187,13 +187,11 @@ export function DashboardPage() {
 
       {/* 2. Trial banner */}
       {isTrialing && trialBannerVisible && (
-        <div className="mb-5 flex items-center justify-between rounded-xl bg-brand-50 px-5 py-3.5 ring-1 ring-brand-100">
+        <div className="mb-5 flex items-center justify-between rounded-xl bg-brand-50/60 px-5 py-3.5 shadow-[0px_0px_0px_1px_theme(colors.brand.100)]">
           <div className="flex items-center gap-4">
-            <span title={trialEndsLabel}>
-              <Badge color="blue" size="sm" weight="medium">
-                {trialDaysLeft !== null ? `${trialDaysLeft} days left` : 'TRIAL'}
-              </Badge>
-            </span>
+            <Badge color="blue" size="sm" strength="strong" description={trialEndsLabel}>
+              {trialDaysLeft !== null ? `${trialDaysLeft} days left` : 'TRIAL'}
+            </Badge>
             <p className="text-[13px]">
               <span className="font-medium text-zinc-900">Free trial</span>
               <span className="text-zinc-500">
@@ -203,13 +201,9 @@ export function DashboardPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              to="/billing"
-              className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-br from-[#0080ff] to-[#256af4] px-3 py-1.5 text-xs font-medium text-white shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] hover:opacity-90"
-            >
+            <Button variant="primary" size="sm" href="/billing">
               Upgrade
-              <span aria-hidden="true">→</span>
-            </Link>
+            </Button>
             <IconButton
               icon={XIcon}
               aria-label="Dismiss trial banner"
@@ -267,14 +261,12 @@ export function DashboardPage() {
                 PLAN
               </span>
               {isTrialing && trialDaysLeft !== null && (
-                <span title={trialEndsLabel}>
-                  <Badge color="blue" size="sm" weight="medium">
-                    {trialDaysLeft} days left
-                  </Badge>
-                </span>
+                <Badge color="blue" size="sm" description={trialEndsLabel}>
+                  {trialDaysLeft} days left
+                </Badge>
               )}
               {!isTrialing && (
-                <Badge color={badge.color} size="sm" weight="medium">
+                <Badge color={badge.color} size="sm">
                   {badge.label}
                 </Badge>
               )}
@@ -409,9 +401,11 @@ export function DashboardPage() {
         </div>
 
         {activities.length === 0 ? (
-          <div className="flex flex-col items-center py-8 text-center">
+          <div className="flex flex-col items-center px-6 py-16 text-center">
             <p className="mb-1 text-sm font-medium text-zinc-900">No activity yet</p>
-            <p className="mb-4 text-sm text-zinc-500">Create a bucket to start storing objects</p>
+            <p className="mb-4 max-w-xs text-sm text-zinc-500">
+              Create a bucket to start storing objects
+            </p>
             <Button variant="primary" icon={PlusIcon} href="/buckets">
               Create bucket
             </Button>
@@ -425,21 +419,15 @@ export function DashboardPage() {
                     <span className="truncate text-[13px] font-medium text-zinc-900">
                       {activity.resourceName}
                     </span>
-                    <span
-                      className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
-                        activity.resourceType === 'bucket'
-                          ? 'bg-zinc-100 text-zinc-500'
-                          : 'bg-purple-50 text-purple-600'
-                      }`}
-                    >
+                    <Badge color={activity.resourceType === 'bucket' ? 'grey' : 'blue'} size="sm">
                       {activity.resourceType}
-                    </span>
+                    </Badge>
                   </div>
                   <p className="mt-0.5 text-[11px] text-zinc-500">
                     {activity.action.replace('.', ' ')}
                   </p>
                 </div>
-                <span className="shrink-0 w-14 text-right text-[11px] text-zinc-500">
+                <span className="w-14 shrink-0 text-right text-[11px] text-zinc-500">
                   {timeAgo(activity.timestamp)}
                 </span>
               </div>
