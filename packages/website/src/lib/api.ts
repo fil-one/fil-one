@@ -135,6 +135,7 @@ export function getActivity(
 import type {
   BillingInfo,
   CreateSetupIntentResponse,
+  ActivateSubscriptionRequest,
   ActivateSubscriptionResponse,
   CreatePortalSessionResponse,
   ListInvoicesResponse,
@@ -148,8 +149,13 @@ export function createSetupIntent(): Promise<CreateSetupIntentResponse> {
   return apiRequest<CreateSetupIntentResponse>('/billing/setup-intent', { method: 'POST' });
 }
 
-export function activateSubscription(): Promise<ActivateSubscriptionResponse> {
-  return apiRequest<ActivateSubscriptionResponse>('/billing/activate', { method: 'POST' });
+export function activateSubscription(
+  opts: ActivateSubscriptionRequest = {},
+): Promise<ActivateSubscriptionResponse> {
+  return apiRequest<ActivateSubscriptionResponse>('/billing/activate', {
+    method: 'POST',
+    body: JSON.stringify(opts),
+  });
 }
 
 export function createPortalSession(): Promise<CreatePortalSessionResponse> {
