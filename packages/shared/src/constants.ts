@@ -9,10 +9,43 @@ export const DOCS_URL = 'https://docs.fil.one';
 /** Available S3 regions. */
 export enum S3Region {
   EuWest1 = 'eu-west-1',
+  UsMidwest1 = 'us-midwest-1',
 }
 
 /** Default S3 region for Fil One. */
-export const S3_REGION = S3Region.EuWest1;
+export const S3_REGION = S3Region.EuWest1 satisfies S3Region;
+
+/** Human-readable region labels. */
+export const REGION_LABELS: Record<S3Region, string> = {
+  [S3Region.EuWest1]: 'Europe (France)',
+  [S3Region.UsMidwest1]: 'US Midwest (Ohio)',
+};
+
+/** Format a region as `"Europe (France) eu-west-1"`. */
+export function formatRegion(region: S3Region | string): string {
+  const label = REGION_LABELS[region as S3Region];
+  return label ? `${label} ${region}` : region;
+}
+
+/**
+ * Resolve a region value to its human-readable label.
+ *
+ * Defaults to the label of {@link S3_REGION} when the input is null/undefined,
+ * and falls back to the raw region string when it isn't a known {@link S3Region}.
+ */
+export function getRegionLabel(region: S3Region | string | null | undefined): string {
+  const r = region ?? S3_REGION;
+  return REGION_LABELS[r as S3Region] ?? r;
+}
+
+/**
+ * Regions selectable in the given stage. Production currently exposes only
+ * `eu-west-1`; non-production stages also expose `us-midwest-1` for dogfooding.
+ */
+export function getAvailableRegions(stage: Stage | string): S3Region[] {
+  if (stage === Stage.Production) return [S3Region.EuWest1];
+  return [S3Region.EuWest1, S3Region.UsMidwest1];
+}
 
 /**
  * Build the S3-compatible endpoint URL for a given region and stage.
