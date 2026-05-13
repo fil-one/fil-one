@@ -27,6 +27,13 @@ export type {
   ModelsTenantWithMetricsManagementResponse,
 };
 
+export class DuplicateTokenNameError extends Error {
+  constructor() {
+    super('An Aurora tenant API token with this name already exists');
+    this.name = 'DuplicateTokenNameError';
+  }
+}
+
 function createBackofficeClient() {
   const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
   const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
@@ -196,7 +203,7 @@ export async function createAuroraTenantApiKey({
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  const { data, error } = await createTenantToken({
+  const { data, error, response } = await createTenantToken({
     client,
     path: { partnerId, tenantId },
     body: { name: `filone-${orgId}` },
@@ -204,6 +211,9 @@ export async function createAuroraTenantApiKey({
   });
 
   if (error) {
+    if (response?.status === 409) {
+      throw new DuplicateTokenNameError();
+    }
     console.error('Failed to create Aurora API key:', error);
     throw new Error(`Aurora API key creation failed for org ${orgId}`, {
       cause: error,
