@@ -148,7 +148,8 @@ export function BillingPage() {
     setContactSalesOpen(true);
   }
 
-  const canReactivateWithSavedCard = !!billing?.paymentMethod && (isGracePeriod || isCanceled);
+  const canReactivateWithSavedCard =
+    Boolean(billing?.paymentMethod?.id) && (isGracePeriod || isCanceled);
 
   async function startNewCardFlow() {
     try {
