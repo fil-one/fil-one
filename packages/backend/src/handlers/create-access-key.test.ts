@@ -6,7 +6,6 @@ import {
   PutItemCommand,
   QueryCommand,
 } from '@aws-sdk/client-dynamodb';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -30,6 +29,11 @@ vi.mock('../lib/aurora-portal.js', async (importOriginal) => {
   };
 });
 
+const mockEnsureTenantReady = vi.fn();
+vi.mock('../lib/aurora-tenant-setup.js', () => ({
+  ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './create-access-key.js';
@@ -50,22 +54,12 @@ function validBody() {
   });
 }
 
-function orgProfileWithTenant(tenantId: string) {
+function orgProfileItem(name: string) {
   return {
     Item: {
       pk: { S: `ORG#${USER_INFO.orgId}` },
       sk: { S: 'PROFILE' },
-      auroraTenantId: { S: tenantId },
-      setupStatus: { S: FINAL_SETUP_STATUS },
-    },
-  };
-}
-
-function orgProfileWithoutTenant() {
-  return {
-    Item: {
-      pk: { S: `ORG#${USER_INFO.orgId}` },
-      sk: { S: 'PROFILE' },
+      name: { S: name },
     },
   };
 }
@@ -90,10 +84,11 @@ describe('create-access-key baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
+    mockEnsureTenantReady.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
   });
 
   it('returns 201 with keyName, accessKeyId, and secretAccessKey on success', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
     ddbMock.on(PutItemCommand).resolves({});
     mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
 
@@ -112,7 +107,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('calls createAuroraAccessKey with correct params', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
     ddbMock.on(PutItemCommand).resolves({});
     mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
 
@@ -129,7 +124,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('stores access key in DynamoDB without the secret', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
     ddbMock.on(PutItemCommand).resolves({});
     mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
 
@@ -180,7 +175,7 @@ describe('create-access-key baseHandler', () => {
   }
 
   it('trims whitespace from keyName', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
     ddbMock.on(PutItemCommand).resolves({});
     mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
 
@@ -203,7 +198,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('passes YYYY-MM-DD expiresAt to Aurora as-is', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
     ddbMock.on(PutItemCommand).resolves({});
     mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
 
@@ -224,7 +219,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('stores the YYYY-MM-DD expiresAt in DynamoDB (not RFC3339)', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
     ddbMock.on(PutItemCommand).resolves({});
     mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
 
@@ -291,19 +286,35 @@ describe('create-access-key baseHandler', () => {
     expect(result.statusCode).toBe(400);
   });
 
-  it('returns 503 when auroraTenantId is missing', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithoutTenant());
-    ddbMock.on(PutItemCommand).resolves({});
+  it('returns 503 with a retry message when tenant setup fails', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
+    mockEnsureTenantReady.mockRejectedValue(new Error('Aurora setup timed out'));
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(503);
+    const body = JSON.parse(result.body!);
+    expect(body.message).toMatch(/setting up your account/i);
     expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('drives Aurora tenant setup via ensureTenantReady before creating the access key', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
+    ddbMock.on(PutItemCommand).resolves({});
+    mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+
+    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    await baseHandler(event);
+
+    expect(mockEnsureTenantReady).toHaveBeenCalledWith({ orgId: 'org-1', orgName: 'Example Corp' });
   });
 
   it('throws when Aurora Portal API fails', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
     mockCreateAuroraAccessKey.mockRejectedValue(new Error('Aurora API error'));
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
@@ -313,7 +324,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('returns 409 when Aurora rejects duplicate key name and key exists in DynamoDB', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
     mockCreateAuroraAccessKey.mockRejectedValue(new DuplicateKeyNameError());
     ddbMock.on(QueryCommand).resolves({
       Items: [
@@ -340,7 +351,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('returns 409 and recovers DynamoDB record on partial failure', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
     mockCreateAuroraAccessKey.mockRejectedValue(new DuplicateKeyNameError());
     // No matching key in DynamoDB — partial failure
     ddbMock.on(QueryCommand).resolves({ Items: [] });

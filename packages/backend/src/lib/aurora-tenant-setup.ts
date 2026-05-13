@@ -15,11 +15,13 @@ import {
 } from './aurora-backoffice.js';
 import { ACCESS_KEY_PERMISSIONS } from '@filone/shared';
 import { createAuroraAccessKey } from './aurora-portal.js';
+import { reportMetric } from './metrics.js';
 import { OrgSetupStatus } from './org-setup-status.js';
+import { scanAndEmitStuckTenantCount } from './stuck-tenant-metric.js';
 
 export { OrgSetupStatus };
 
-export interface AuroraTenantSetupMessage {
+export interface TenantSetupOptions {
   orgId: string;
   orgName: string;
 }
@@ -32,8 +34,43 @@ type OrgProfileKey = {
   sk: { S: 'PROFILE' };
 };
 
-export async function processTenantSetup(message: AuroraTenantSetupMessage): Promise<void> {
-  const { orgId, orgName } = message;
+// Public entry point for synchronous tenant setup from request handlers.
+// Returns the auroraTenantId once setup has reached AURORA_S3_ACCESS_KEY_CREATED.
+// On any failure inside processTenantSetup, increments the per-org failure
+// counter (best-effort) and re-throws so the handler can return a 503 to the
+// user. The state machine resumes from whatever step is next on the user's
+// retry.
+export async function ensureTenantReady(
+  options: TenantSetupOptions,
+): Promise<{ auroraTenantId: string }> {
+  try {
+    await processTenantSetup(options);
+  } catch (err) {
+    try {
+      await recordSetupFailure(options.orgId);
+    } catch (counterErr) {
+      console.error('[tenant-setup] failed to record setup failure', {
+        orgId: options.orgId,
+        error: counterErr,
+      });
+    }
+    throw err;
+  }
+
+  const { Item } = await dynamo.send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `ORG#${options.orgId}` }, sk: { S: 'PROFILE' } },
+      ConsistentRead: true,
+    }),
+  );
+  const auroraTenantId = Item?.auroraTenantId?.S;
+  assert(auroraTenantId, `auroraTenantId missing after successful setup for org ${options.orgId}`);
+  return { auroraTenantId };
+}
+
+export async function processTenantSetup(options: TenantSetupOptions): Promise<void> {
+  const { orgId, orgName } = options;
   const orgProfileKey = {
     pk: { S: `ORG#${orgId}` },
     sk: { S: 'PROFILE' },
@@ -79,7 +116,7 @@ export async function processTenantSetup(message: AuroraTenantSetupMessage): Pro
 
     case OrgSetupStatus.FILONE_ORG_CREATED: {
       const auroraTenantId = await createTenant(orgId, orgName, orgProfileKey);
-      await runSetup(orgId, auroraTenantId, orgProfileKey);
+      await runSetupAndMeasure(orgId, auroraTenantId, orgProfileKey);
       await createAndStoreApiKey(orgId, auroraTenantId, orgProfileKey);
       await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey);
       return;
@@ -113,7 +150,7 @@ async function createTenant(
     writeAuroraTenantId: auroraTenantId,
   });
 
-  if (result === 'already-advanced') {
+  if (result === 'lost-race') {
     // A concurrent invocation already wrote AURORA_TENANT_CREATED (or beyond)
     // and the winner's auroraTenantId is recorded on the org. Aurora's 409
     // handler in createAuroraTenant returns the same ID, but re-read here to
@@ -131,6 +168,42 @@ async function createTenant(
   }
 
   return auroraTenantId;
+}
+
+// Wraps runSetup to emit AuroraTenantSetupDuration. Called only from the
+// FILONE_ORG_CREATED branch — that's the invocation that just won the
+// createTenant transition and is the canonical "first attempt." Wall clock
+// excludes the createTenant API call itself per the metric definition. A
+// timeout still emits (the finally runs before the throw propagates), giving
+// the metric a budget-valued spike when Aurora setup is taking longer than
+// our poll budget.
+async function runSetupAndMeasure(
+  orgId: string,
+  auroraTenantId: string,
+  orgProfileKey: OrgProfileKey,
+): Promise<void> {
+  const start = performance.now();
+  try {
+    await runSetup(orgId, auroraTenantId, orgProfileKey);
+  } finally {
+    reportAuroraTenantSetupDuration(performance.now() - start);
+  }
+}
+
+function reportAuroraTenantSetupDuration(durationMs: number): void {
+  reportMetric({
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [[]],
+          Metrics: [{ Name: 'AuroraTenantSetupDuration', Unit: 'Milliseconds' }],
+        },
+      ],
+    },
+    AuroraTenantSetupDuration: durationMs,
+  });
 }
 
 // Aurora setup is reported as <1 s typical, <10 s p99. The schedule below
@@ -246,11 +319,14 @@ async function createAndStoreS3AccessKey(
         throw err;
       }
 
-      await advanceStatus({
+      const result = await advanceStatus({
         orgProfileKey,
         expected: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED,
         next: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED,
       });
+      if (result === 'wrote') {
+        await resetSetupFailureCount(orgProfileKey);
+      }
       return;
     }
     throw err;
@@ -265,11 +341,14 @@ async function createAndStoreS3AccessKey(
     }),
   );
 
-  await advanceStatus({
+  const result = await advanceStatus({
     orgProfileKey,
     expected: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED,
     next: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED,
   });
+  if (result === 'wrote') {
+    await resetSetupFailureCount(orgProfileKey);
+  }
 }
 
 type OrgSetupStatusValue = (typeof OrgSetupStatus)[keyof typeof OrgSetupStatus];
@@ -311,7 +390,51 @@ async function ssmHasParameter(name: string): Promise<boolean> {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-async function advanceStatus(opts: AdvanceStatusOptions): Promise<'advanced' | 'already-advanced'> {
+// Increments the per-org failure counter atomically. When the count first
+// crosses the stuck threshold (newCount === 3), kicks off a one-shot scan
+// + EMF emission of StuckAuroraTenantSetupCount. Concurrent failing
+// invocations are serialized by DynamoDB's atomic ADD: only one of them
+// observes newCount === 3, so only one runs the scan.
+export async function recordSetupFailure(orgId: string): Promise<void> {
+  const out = await dynamo.send(
+    new UpdateItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+      UpdateExpression: 'ADD setupFailureCount :one SET updatedAt = :now',
+      ExpressionAttributeValues: {
+        ':one': { N: '1' },
+        ':now': { S: new Date().toISOString() },
+      },
+      ReturnValues: 'UPDATED_NEW',
+    }),
+  );
+  const newCount = Number(out.Attributes?.setupFailureCount?.N ?? '0');
+  if (newCount === 3) {
+    await scanAndEmitStuckTenantCount();
+  }
+}
+
+// Resets setupFailureCount to 0 after a setup reaches the terminal status.
+// Reads the prior value via ReturnValues=ALL_OLD; if the org was previously
+// stuck (prior >= 3), re-emits StuckAuroraTenantSetupCount so the alert
+// clears immediately.
+async function resetSetupFailureCount(orgProfileKey: OrgProfileKey): Promise<void> {
+  const result = await dynamo.send(
+    new UpdateItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: orgProfileKey,
+      UpdateExpression: 'SET setupFailureCount = :zero',
+      ExpressionAttributeValues: { ':zero': { N: '0' } },
+      ReturnValues: 'ALL_OLD',
+    }),
+  );
+  const prior = Number(result.Attributes?.setupFailureCount?.N ?? '0');
+  if (prior >= 3) {
+    await scanAndEmitStuckTenantCount();
+  }
+}
+
+async function advanceStatus(opts: AdvanceStatusOptions): Promise<'wrote' | 'lost-race'> {
   const setExpr =
     opts.writeAuroraTenantId !== undefined
       ? 'SET auroraTenantId = :auroraTenantId, setupStatus = :status, updatedAt = :now'
@@ -335,14 +458,14 @@ async function advanceStatus(opts: AdvanceStatusOptions): Promise<'advanced' | '
         ExpressionAttributeValues: exprValues,
       }),
     );
-    return 'advanced';
+    return 'wrote';
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {
       // A concurrent invocation already advanced past `expected`. Treat as
       // success at this step; the caller decides whether anything else needs
       // to happen (e.g. createTenant re-reads to fetch the winner's
       // auroraTenantId).
-      return 'already-advanced';
+      return 'lost-race';
     }
     throw err;
   }

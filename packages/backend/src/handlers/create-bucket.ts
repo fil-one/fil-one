@@ -7,7 +7,7 @@ import { CreateBucketSchema, S3_REGION } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { createAuroraBucket, BucketAlreadyExistsError } from '../lib/aurora-portal.js';
-import { isOrgSetupComplete } from '../lib/org-setup-status.js';
+import { ensureTenantReady } from '../lib/aurora-tenant-setup.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -51,22 +51,29 @@ export async function baseHandler(
 
   const { orgId } = getUserInfo(event);
 
-  // Look up org profile to get auroraTenantId
+  // Read orgName from the profile — needed by ensureTenantReady when this is
+  // the first bucket creation for a fresh org and the tenant must be created.
   const { Item: orgProfile } = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
     }),
   );
+  const orgName = orgProfile?.name?.S ?? '';
 
-  const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    console.warn('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
+  let auroraTenantId: string;
+  try {
+    ({ auroraTenantId } = await ensureTenantReady({ orgId, orgName }));
+  } catch (err) {
+    console.error('[tenant-setup] setup failed during create-bucket', {
+      orgId,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     return new ResponseBuilder()
       .status(503)
       .body<ErrorResponse>({
-        message: 'Aurora tenant setup is not complete, please try again later',
+        message: "We're still setting up your account. Please try again in a moment.",
       })
       .build();
   }

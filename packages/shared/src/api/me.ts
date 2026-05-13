@@ -6,7 +6,6 @@ export interface MeResponse {
   orgName: string;
   emailVerified: boolean;
   email?: string;
-  orgSetupComplete: boolean;
   name?: string;
   picture?: string;
   connectionType?: string;

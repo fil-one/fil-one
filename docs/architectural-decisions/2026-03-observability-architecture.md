@@ -162,6 +162,16 @@ Cloud Prometheus.
   `sum(rate(AuroraApiRequestCount{statusGroup!="2xx"}[5m])) / sum(rate(AuroraApiRequestCount[5m]))`
 - p99 duration: use `AuroraApiDuration` with appropriate histogram/summary queries.
 
+**Convention: no `stage` dimension on custom metrics.** Production and staging
+run in separate AWS accounts, so their CloudWatch Metric Streams are
+segregated at the source. Adding `stage` to EMF dimensions is redundant and
+inflates time-series count. When defining a new metric, prefer
+`Dimensions: [[]]` (see `subscription-drift-checker.ts` and `InvoicePaid` in
+`stripe-webhook.ts`) unless the metric needs to be sliced by a signal-bearing
+facet (`apiName`, `statusGroup`, etc.). Note that the `stage` field on
+`DunningEscalation` refers to a dunning lifecycle stage — not a deployment
+stage — and is signal-bearing.
+
 ### Lambda configuration
 
 JSON log formatting is configured per Lambda via our `createFunction` helper in

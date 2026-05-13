@@ -56,11 +56,6 @@ vi.mock('../lib/auth-secrets.js', () => ({
   }),
 }));
 
-const mockTriggerTenantSetup = vi.fn().mockResolvedValue(undefined);
-vi.mock('../lib/trigger-tenant-setup.js', () => ({
-  triggerTenantSetup: (args: unknown) => mockTriggerTenantSetup(args),
-}));
-
 const mockCreateBillingTrial = vi.fn().mockResolvedValue(undefined);
 vi.mock('../lib/create-billing-trial.js', () => ({
   createBillingTrial: (args: unknown) => mockCreateBillingTrial(args),
@@ -492,10 +487,6 @@ describe('authMiddleware', () => {
         },
       ]);
 
-      expect(mockTriggerTenantSetup).toHaveBeenCalledWith({
-        orgId: MOCK_ORG_ID,
-        orgName: 'Alice Org',
-      });
       expect(mockCreateBillingTrial).toHaveBeenCalledWith({
         userId: MOCK_USER_ID,
         orgId: MOCK_ORG_ID,
@@ -524,10 +515,6 @@ describe('authMiddleware', () => {
       const orgItem = transactCalls[0].args[0].input.TransactItems?.[2].Put?.Item;
       expect(orgItem?.name).toEqual({ S: 'Example' });
       expect(orgItem?.orgConfirmed).toBeUndefined();
-      expect(mockTriggerTenantSetup).toHaveBeenCalledWith({
-        orgId: MOCK_ORG_ID,
-        orgName: 'Example',
-      });
     });
 
     it('refreshes tokens when access token is expired but refresh token is valid', async () => {
