@@ -74,7 +74,7 @@ export async function baseHandler(
     return new ResponseBuilder()
       .status(503)
       .body<ErrorResponse>({
-        message: 'Aurora tenant setup is not complete, please try again later',
+        message: 'We are still setting up your account. Please try again in a moment.',
       })
       .build();
   }
