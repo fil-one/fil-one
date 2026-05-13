@@ -52,7 +52,7 @@ if (PROTECTED_STAGES.includes(stage)) {
 // Aurora backoffice config — non-prod only. The stage guard above blocks
 // production; we deliberately do not encode the production URL here.
 // `sst shell` does not export Lambda-scoped env vars, so we set them locally.
-const AURORA_BACKOFFICE_URL = 'https://api.backoffice.dev.aur.lu/api';
+const AURORA_BACKOFFICE_URL = 'https://api-backoffice.dev.aur.lu/api';
 const AURORA_PARTNER_ID = 'ff';
 
 const dynamo = new DynamoDBClient({});
@@ -156,14 +156,20 @@ await dynamo.send(
 );
 
 // 6. Unlock Aurora tenant via backoffice API
-const { error: auroraError } = await setTenantStatus({
+const { error: auroraError, response: auroraResponse } = await setTenantStatus({
   client: auroraClient,
   path: { partnerId: AURORA_PARTNER_ID, tenantId: auroraTenantId },
   body: { status: 'ACTIVE' },
   throwOnError: false,
 });
 if (auroraError) {
-  console.error('Failed to unlock Aurora tenant:', JSON.stringify(auroraError, null, 2));
+  console.error('Failed to unlock Aurora tenant.');
+  if (auroraResponse) {
+    console.error(`  HTTP ${auroraResponse.status} ${auroraResponse.statusText}`);
+  } else {
+    console.error('  No HTTP response — fetch failed (DNS / connection / TLS).');
+  }
+  console.error('  error:', auroraError);
   process.exit(1);
 }
 

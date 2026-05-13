@@ -4,7 +4,7 @@ import { LightbulbIcon } from '@phosphor-icons/react/dist/ssr';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyFormFields } from './AccessKeyFormFields.js';
 
-import type { CreateAccessKeyResponse } from '@filone/shared';
+import type { CreateAccessKeyResponse, S3Region } from '@filone/shared';
 
 import { Button } from './Button.js';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal/index.js';
@@ -18,6 +18,7 @@ export type AddBucketKeyModalProps = {
   open: boolean;
   onClose: () => void;
   bucketName: string;
+  bucketRegion: S3Region;
   onKeyAdded: () => void;
 };
 
@@ -29,6 +30,7 @@ export function AddBucketKeyModal({
   open,
   onClose,
   bucketName,
+  bucketRegion,
   onKeyAdded,
 }: AddBucketKeyModalProps) {
   const [credentials, setCredentials] = useState<{
@@ -37,6 +39,7 @@ export function AddBucketKeyModal({
   } | null>(null);
   const form = useAccessKeyForm({
     defaultBucket: bucketName,
+    region: bucketRegion,
     onSuccess: (response: CreateAccessKeyResponse) => {
       setCredentials({
         accessKeyId: response.accessKeyId,
@@ -63,7 +66,7 @@ export function AddBucketKeyModal({
         <div className="flex gap-6">
           {/* Left: form fields */}
           <div className="flex-1">
-            <AccessKeyFormFields form={form} />
+            <AccessKeyFormFields form={form} region={bucketRegion} />
           </div>
 
           {/* Right: info panel */}

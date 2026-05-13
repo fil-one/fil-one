@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type {
   AccessKeyBucketScope,
   AccessKeyPermission,
   CreateAccessKeyResponse,
   GranularPermission,
+  S3Region,
 } from '@filone/shared';
 import { CreateAccessKeySchema, GRANULAR_PERMISSION_MAP } from '@filone/shared';
 import { createAccessKey } from './api.js';
@@ -17,6 +18,7 @@ import { queryClient, queryKeys } from './query-client.js';
 export type UseAccessKeyFormOptions = {
   defaultBucket?: string;
   defaultPermissions?: AccessKeyPermission[];
+  region: S3Region;
   onSuccess: (response: CreateAccessKeyResponse) => void;
 };
 
@@ -25,6 +27,7 @@ const FALLBACK_PERMISSIONS: AccessKeyPermission[] = ['read', 'write', 'list'];
 export function useAccessKeyForm({
   defaultBucket,
   defaultPermissions,
+  region,
   onSuccess,
 }: UseAccessKeyFormOptions) {
   const { toast } = useToast();
@@ -44,12 +47,20 @@ export function useAccessKeyForm({
   const [customDate, setCustomDate] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
+  const prevRegionRef = useRef(region);
+  useEffect(() => {
+    if (prevRegionRef.current === region) return;
+    prevRegionRef.current = region;
+    setSelectedBuckets([]);
+  }, [region]);
+
   const candidatePayload = {
     keyName: keyName.trim(),
     permissions,
     granularPermissions: granularPermissions.length > 0 ? granularPermissions : undefined,
     bucketScope,
     buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
+    region,
     expiresAt: expiresAtFromForm(expiration, customDate),
   };
   const canSubmit = !creating && CreateAccessKeySchema.safeParse(candidatePayload).success;
@@ -79,6 +90,7 @@ export function useAccessKeyForm({
       granularPermissions?: GranularPermission[];
       bucketScope: AccessKeyBucketScope;
       buckets?: string[];
+      region?: S3Region;
       expiresAt?: string | null;
     }) => {
       const parsed = CreateAccessKeySchema.safeParse(body);
