@@ -23,7 +23,7 @@ import { formatBytes } from '@filone/shared';
 import { SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
 import type { CreateSetupIntentResponse } from '@filone/shared';
 
-import { apiRequest, getUsage, getBilling, getInvoices } from '../lib/api.js';
+import { apiRequest, getUsage, getBilling, getInvoices, activateSubscription } from '../lib/api.js';
 import { daysUntil, formatDate } from '../lib/time.js';
 import { ChoosePlanDialog } from '../components/billing/ChoosePlanDialog.js';
 import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
@@ -148,8 +148,9 @@ export function BillingPage() {
     setContactSalesOpen(true);
   }
 
-  async function handleSelectPayAsYouGo() {
-    setPlanOpen(false);
+  const canReactivateWithSavedCard = !!billing?.paymentMethod && (isGracePeriod || isCanceled);
+
+  async function startNewCardFlow() {
     try {
       const { clientSecret: cs, stripePublishableKey: pk } =
         await apiRequest<CreateSetupIntentResponse>('/billing/setup-intent', { method: 'POST' });
@@ -159,6 +160,30 @@ export function BillingPage() {
     } catch (err) {
       toast.error((err as Error).message || 'Failed to set up payment. Please try again.');
     }
+  }
+
+  async function handleSelectPayAsYouGo() {
+    setPlanOpen(false);
+
+    if (canReactivateWithSavedCard) {
+      try {
+        await activateSubscription({ useSavedPaymentMethod: true });
+        toast.success('Subscription reactivated!');
+        void queryClient.invalidateQueries({ queryKey: queryKeys.billing });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
+        window.dispatchEvent(new CustomEvent('billing:updated'));
+      } catch (err) {
+        toast.error((err as Error).message || 'Failed to reactivate. Please try again.');
+      }
+      return;
+    }
+
+    await startNewCardFlow();
+  }
+
+  async function handleUseDifferentCard() {
+    setPlanOpen(false);
+    await startNewCardFlow();
   }
 
   function handlePaymentBack() {
@@ -638,6 +663,8 @@ export function BillingPage() {
         onClose={() => setPlanOpen(false)}
         onSelectPayAsYouGo={handleSelectPayAsYouGo}
         onContactSales={handleContactSales}
+        savedCardLast4={canReactivateWithSavedCard ? billing?.paymentMethod?.last4 : undefined}
+        onUseDifferentCard={canReactivateWithSavedCard ? handleUseDifferentCard : undefined}
       />
 
       <AddPaymentDialog

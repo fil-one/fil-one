@@ -7,6 +7,8 @@ type ChoosePlanDialogProps = {
   onClose: () => void;
   onSelectPayAsYouGo: () => void;
   onContactSales: () => void;
+  savedCardLast4?: string;
+  onUseDifferentCard?: () => void;
 };
 
 const PAY_AS_YOU_GO_FEATURES = [
@@ -41,6 +43,8 @@ export function ChoosePlanDialog({
   onClose,
   onSelectPayAsYouGo,
   onContactSales,
+  savedCardLast4,
+  onUseDifferentCard,
 }: ChoosePlanDialogProps) {
   return (
     <Modal open={open} onClose={onClose} size="lg">
@@ -78,8 +82,25 @@ export function ChoosePlanDialog({
                 onClick={onSelectPayAsYouGo}
                 className="w-full justify-center"
               >
-                Upgrade now
+                {savedCardLast4 ? 'Reactivate' : 'Upgrade now'}
               </Button>
+              {savedCardLast4 && (
+                <p className="mt-2 text-center text-[11px] leading-[16px] text-zinc-500">
+                  Will use card ending in &bull;&bull;{savedCardLast4}
+                  {onUseDifferentCard && (
+                    <>
+                      {' · '}
+                      <button
+                        type="button"
+                        onClick={onUseDifferentCard}
+                        className="font-medium text-brand-600 hover:underline"
+                      >
+                        Use a different card
+                      </button>
+                    </>
+                  )}
+                </p>
+              )}
             </div>
           </div>
 

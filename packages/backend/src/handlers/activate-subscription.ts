@@ -1,16 +1,19 @@
-import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import { PlanId, SubscriptionStatus, mapStripeStatus } from '@filone/shared';
+import {
+  ActivateSubscriptionRequestSchema,
+  PlanId,
+  SubscriptionStatus,
+  mapStripeStatus,
+} from '@filone/shared';
 import type { ActivateSubscriptionResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
-import { updateTenantStatus } from '../lib/aurora-backoffice.js';
-import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
-import { isOrgSetupComplete } from '../lib/org-setup-status.js';
+import { saveBillingRecord, unlockAuroraTenant } from '../lib/billing-activation.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -20,12 +23,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 const dynamo = getDynamoClient();
 
-function resolvePaymentMethodId(
-  paymentMethod: string | { id: string } | null | undefined,
-): string | undefined {
-  if (typeof paymentMethod === 'string') return paymentMethod;
-  return paymentMethod?.id;
-}
+type PaymentMethodResolution = string | APIGatewayProxyResultV2;
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId, orgId } = getUserInfo(event);
@@ -33,7 +31,25 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const stripe = getStripeClient();
   const secrets = getBillingSecrets();
 
-  // 1. Get customer record from billing table
+  // 1. Parse + validate request body
+  let parsedJson: unknown = {};
+  if (event.body) {
+    try {
+      parsedJson = JSON.parse(event.body);
+    } catch {
+      return new ResponseBuilder().status(400).body({ message: 'Invalid JSON body.' }).build();
+    }
+  }
+  const parsed = ActivateSubscriptionRequestSchema.safeParse(parsedJson);
+  if (!parsed.success) {
+    return new ResponseBuilder()
+      .status(400)
+      .body({ message: 'Invalid request body.', issues: parsed.error.issues })
+      .build();
+  }
+  const { useSavedPaymentMethod } = parsed.data;
+
+  // 2. Get customer record from billing table
   const result = await dynamo.send(
     new GetItemCommand({
       TableName: tableName,
@@ -61,29 +77,14 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  // 2. Retrieve the latest succeeded SetupIntent to get payment_method
-  const setupIntents = await stripe.setupIntents.list({
-    customer: stripeCustomerId,
-    limit: 1,
-  });
+  // 3. Resolve payment method: saved (DDB) or freshly confirmed (SetupIntent)
+  const paymentMethodId = useSavedPaymentMethod
+    ? resolveSavedPaymentMethod(record)
+    : await resolveSetupIntentPaymentMethod(stripe, stripeCustomerId);
 
-  const latestSetupIntent = setupIntents.data[0];
-  if (!latestSetupIntent || latestSetupIntent.status !== 'succeeded') {
-    return new ResponseBuilder()
-      .status(400)
-      .body({
-        message: 'No confirmed payment method found. Please complete the payment setup first.',
-      })
-      .build();
-  }
-
-  const paymentMethodId = resolvePaymentMethodId(latestSetupIntent.payment_method);
-
-  if (!paymentMethodId) {
-    return new ResponseBuilder()
-      .status(400)
-      .body({ message: 'Payment method not found on setup intent.' })
-      .build();
+  if (typeof paymentMethodId !== 'string') {
+    // Helper returned a ResponseBuilder result on validation failure.
+    return paymentMethodId;
   }
 
   // 3. Create or update subscription
@@ -137,7 +138,13 @@ async function createOrUpdateSubscription(
   secrets: ReturnType<typeof getBillingSecrets>,
   userId: string,
 ) {
-  if (record.subscriptionId) {
+  // Canceled subscriptions are terminal in Stripe and cannot be updated; reactivation
+  // must create a fresh subscription even though the stale subscriptionId still sits in DDB.
+  const isCanceled =
+    record.subscriptionStatus === SubscriptionStatus.GracePeriod ||
+    record.subscriptionStatus === SubscriptionStatus.Canceled;
+
+  if (record.subscriptionId && !isCanceled) {
     // Step 1: Attach payment method first
     await stripe.subscriptions.update(record.subscriptionId as string, {
       default_payment_method: paymentMethodId,
@@ -148,9 +155,11 @@ async function createOrUpdateSubscription(
       expand: ['latest_invoice.payment_intent', 'default_payment_method'],
     });
   }
-  console.warn('[activate-subscription] No existing subscription found for user, creating new', {
-    userId,
-  });
+  if (!record.subscriptionId) {
+    console.warn('[activate-subscription] No existing subscription found for user, creating new', {
+      userId,
+    });
+  }
   return stripe.subscriptions.create({
     customer: record.stripeCustomerId as string,
     items: [{ price: secrets.STRIPE_PRICE_ID }],
@@ -159,75 +168,64 @@ async function createOrUpdateSubscription(
   });
 }
 
-async function saveBillingRecord(
-  tableName: string,
-  userId: string,
-  subscription: Awaited<ReturnType<typeof createOrUpdateSubscription>>,
-  paymentMethodId: string,
-  mappedStatus: SubscriptionStatus,
-) {
-  const pm = subscription.default_payment_method;
-  let paymentMethodLast4 = '';
-  let paymentMethodBrand = '';
-  let paymentMethodExpMonth = 0;
-  let paymentMethodExpYear = 0;
+function resolveSavedPaymentMethod(record: Record<string, unknown>): PaymentMethodResolution {
+  const subscriptionStatus = record.subscriptionStatus as SubscriptionStatus | undefined;
+  const paymentMethodId = record.paymentMethodId as string | undefined;
 
-  if (pm && typeof pm === 'object' && pm.card) {
-    paymentMethodLast4 = pm.card.last4;
-    paymentMethodBrand = pm.card.brand;
-    paymentMethodExpMonth = pm.card.exp_month;
-    paymentMethodExpYear = pm.card.exp_year;
+  const isReactivatable =
+    subscriptionStatus === SubscriptionStatus.GracePeriod ||
+    subscriptionStatus === SubscriptionStatus.Canceled;
+
+  if (!isReactivatable) {
+    return new ResponseBuilder()
+      .status(400)
+      .body({
+        message:
+          'Subscription is not eligible for reactivation. Only canceled or grace-period subscriptions can be reactivated this way.',
+      })
+      .build();
   }
 
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-      UpdateExpression:
-        'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
-      ExpressionAttributeValues: {
-        ':subId': { S: subscription.id },
-        ':status': { S: mappedStatus },
-        ':periodEnd': {
-          S: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
-        },
-        ':pmId': { S: paymentMethodId },
-        ':last4': { S: paymentMethodLast4 },
-        ':brand': { S: paymentMethodBrand },
-        ':expMonth': { N: String(paymentMethodExpMonth) },
-        ':expYear': { N: String(paymentMethodExpYear) },
-        ':now': { S: new Date().toISOString() },
-      },
-    }),
-  );
+  if (!paymentMethodId) {
+    return new ResponseBuilder()
+      .status(400)
+      .body({ message: 'No saved payment method. Please add a card.' })
+      .build();
+  }
+
+  return paymentMethodId;
 }
 
-async function unlockAuroraTenant(orgId: string) {
-  const { Item: orgProfile } = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: {
-        pk: { S: `ORG#${orgId}` },
-        sk: { S: 'PROFILE' },
-      },
-    }),
-  );
-  const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    throw new Error(`Aurora tenant setup is not complete for org ${orgId}`);
+async function resolveSetupIntentPaymentMethod(
+  stripe: ReturnType<typeof getStripeClient>,
+  stripeCustomerId: string,
+): Promise<PaymentMethodResolution> {
+  const setupIntents = await stripe.setupIntents.list({
+    customer: stripeCustomerId,
+    limit: 1,
+  });
+
+  const latestSetupIntent = setupIntents.data[0];
+  if (!latestSetupIntent || latestSetupIntent.status !== 'succeeded') {
+    return new ResponseBuilder()
+      .status(400)
+      .body({
+        message: 'No confirmed payment method found. Please complete the payment setup first.',
+      })
+      .build();
   }
-  try {
-    await updateTenantStatus({ tenantId: auroraTenantId, status: 'ACTIVE' });
-    await setOrgAuroraTenantStatus(orgId, 'ACTIVE');
-    console.log('[activate-subscription] Aurora tenant unlocked', { orgId, auroraTenantId });
-  } catch (error) {
-    console.error('[activate-subscription] Failed to unlock Aurora tenant', { orgId, error });
-    throw error;
+
+  const pm = latestSetupIntent.payment_method;
+  const paymentMethodId = typeof pm === 'string' ? pm : pm?.id;
+
+  if (!paymentMethodId) {
+    return new ResponseBuilder()
+      .status(400)
+      .body({ message: 'Payment method not found on setup intent.' })
+      .build();
   }
+
+  return paymentMethodId;
 }
 
 export const handler = middy(baseHandler)
