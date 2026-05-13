@@ -228,6 +228,49 @@ export async function createAuroraTenantApiKey({
   return { token: apiToken, tokenId };
 }
 
+// Aurora's metrics endpoints reject queries whose (to − from) span exceeds
+// ~40 days. For longer spans (e.g. grace-period subscriptions whose
+// currentPeriodStart can be ~60 days old) we split the request into ≤40-day
+// sub-ranges, fetch them in parallel, and merge the samples — dedupe by
+// timestamp absorbs any overlap at range boundaries.
+const MAX_AURORA_QUERY_RANGE_DAYS = 40;
+const MAX_AURORA_QUERY_RANGE_MS = MAX_AURORA_QUERY_RANGE_DAYS * 24 * 60 * 60 * 1000;
+
+function splitTimeRange(fromIso: string, toIso: string): Array<{ from: string; to: string }> {
+  const fromMs = Date.parse(fromIso);
+  const toMs = Date.parse(toIso);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
+    return [{ from: fromIso, to: toIso }];
+  }
+  if (toMs - fromMs <= MAX_AURORA_QUERY_RANGE_MS) {
+    return [{ from: fromIso, to: toIso }];
+  }
+  const ranges: Array<{ from: string; to: string }> = [];
+  let cursor = fromMs;
+  while (cursor < toMs) {
+    const next = Math.min(cursor + MAX_AURORA_QUERY_RANGE_MS, toMs);
+    ranges.push({ from: new Date(cursor).toISOString(), to: new Date(next).toISOString() });
+    cursor = next;
+  }
+  return ranges;
+}
+
+function dedupeByTimestamp<T extends { timestamp?: string }>(samples: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const sample of samples) {
+    const key = sample.timestamp;
+    if (key === undefined) {
+      out.push(sample);
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(sample);
+  }
+  return out;
+}
+
 export interface GetStorageSamplesOptions {
   tenantId: string;
   from: string;
@@ -235,12 +278,17 @@ export interface GetStorageSamplesOptions {
   window?: string;
 }
 
-export async function getStorageSamples({
+async function fetchStorageSamplesRange({
   tenantId,
   from,
   to,
-  window = '1h',
-}: GetStorageSamplesOptions): Promise<ModelStorageMetricsSample[]> {
+  window,
+}: {
+  tenantId: string;
+  from: string;
+  to: string;
+  window: string;
+}): Promise<ModelStorageMetricsSample[]> {
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
@@ -252,12 +300,37 @@ export async function getStorageSamples({
   });
 
   if (error) {
-    throw new Error(`Aurora storage API failed for tenant ${tenantId}`, {
-      cause: error,
-    });
+    throw new Error(
+      `Aurora storage API failed for tenant ${tenantId} (from=${from} to=${to} window=${window})`,
+      { cause: error },
+    );
   }
 
   return data?.samples ?? [];
+}
+
+export async function getStorageSamples({
+  tenantId,
+  from,
+  to,
+  window = '1h',
+}: GetStorageSamplesOptions): Promise<ModelStorageMetricsSample[]> {
+  const ranges = splitTimeRange(from, to);
+  if (ranges.length === 1) {
+    return fetchStorageSamplesRange({ tenantId, from, to, window });
+  }
+
+  console.log('[aurora-client] Splitting storage query into ranges', {
+    tenantId,
+    ranges: ranges.length,
+    from,
+    to,
+    window,
+  });
+  const results = await Promise.all(
+    ranges.map((r) => fetchStorageSamplesRange({ tenantId, from: r.from, to: r.to, window })),
+  );
+  return dedupeByTimestamp(results.flat());
 }
 
 export interface GetBucketStorageSamplesOptions {
@@ -299,12 +372,17 @@ export interface GetOperationsSamplesOptions {
   window?: string;
 }
 
-export async function getOperationsSamples({
+async function fetchOperationsSamplesRange({
   tenantId,
   from,
   to,
-  window = '24h',
-}: GetOperationsSamplesOptions): Promise<ModelOperationMetricsSample[]> {
+  window,
+}: {
+  tenantId: string;
+  from: string;
+  to: string;
+  window: string;
+}): Promise<ModelOperationMetricsSample[]> {
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
@@ -316,12 +394,37 @@ export async function getOperationsSamples({
   });
 
   if (error) {
-    throw new Error(`Aurora operations API failed for tenant ${tenantId}`, {
-      cause: error,
-    });
+    throw new Error(
+      `Aurora operations API failed for tenant ${tenantId} (from=${from} to=${to} window=${window})`,
+      { cause: error },
+    );
   }
 
   return data?.series?.[0]?.samples ?? [];
+}
+
+export async function getOperationsSamples({
+  tenantId,
+  from,
+  to,
+  window = '24h',
+}: GetOperationsSamplesOptions): Promise<ModelOperationMetricsSample[]> {
+  const ranges = splitTimeRange(from, to);
+  if (ranges.length === 1) {
+    return fetchOperationsSamplesRange({ tenantId, from, to, window });
+  }
+
+  console.log('[aurora-client] Splitting operations query into ranges', {
+    tenantId,
+    ranges: ranges.length,
+    from,
+    to,
+    window,
+  });
+  const results = await Promise.all(
+    ranges.map((r) => fetchOperationsSamplesRange({ tenantId, from: r.from, to: r.to, window })),
+  );
+  return dedupeByTimestamp(results.flat());
 }
 
 export async function getTenantInfo({
