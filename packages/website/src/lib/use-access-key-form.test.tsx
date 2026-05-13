@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
-import { S3_REGION } from '@filone/shared';
+import { S3_REGION, S3Region } from '@filone/shared';
 import { ToastProvider } from '../components/Toast';
 import { useAccessKeyForm } from './use-access-key-form.js';
 
@@ -110,5 +110,49 @@ describe('useAccessKeyForm — canSubmit', () => {
     act(() => result.current.reset());
     expect(result.current.canSubmit).toBe(false);
     expect(result.current.keyName).toBe('');
+  });
+});
+
+describe('useAccessKeyForm — region change', () => {
+  function renderWithRegion(initialRegion: S3Region, opts?: { defaultBucket?: string }) {
+    return renderHook(
+      ({ region }: { region: S3Region }) =>
+        useAccessKeyForm({ region, onSuccess: () => {}, ...opts }),
+      { initialProps: { region: initialRegion }, wrapper },
+    );
+  }
+
+  it('clears selectedBuckets when the region changes', () => {
+    const { result, rerender } = renderWithRegion(S3Region.EuWest1);
+    act(() => result.current.setSelectedBuckets(['a', 'b']));
+    expect(result.current.selectedBuckets).toEqual(['a', 'b']);
+
+    rerender({ region: S3Region.UsMidwest1 });
+    expect(result.current.selectedBuckets).toEqual([]);
+  });
+
+  it('leaves bucketScope unchanged when the region changes', () => {
+    const { result, rerender } = renderWithRegion(S3Region.EuWest1);
+    act(() => {
+      result.current.setBucketScope('specific');
+      result.current.setSelectedBuckets(['a']);
+    });
+
+    rerender({ region: S3Region.UsMidwest1 });
+    expect(result.current.bucketScope).toBe('specific');
+    expect(result.current.selectedBuckets).toEqual([]);
+  });
+
+  it('does not clear selectedBuckets on initial render when defaultBucket is provided', () => {
+    const { result } = renderWithRegion(S3Region.EuWest1, { defaultBucket: 'b1' });
+    expect(result.current.selectedBuckets).toEqual(['b1']);
+  });
+
+  it('does not clear selectedBuckets when re-rendered with the same region', () => {
+    const { result, rerender } = renderWithRegion(S3Region.EuWest1);
+    act(() => result.current.setSelectedBuckets(['a', 'b']));
+
+    rerender({ region: S3Region.EuWest1 });
+    expect(result.current.selectedBuckets).toEqual(['a', 'b']);
   });
 });
