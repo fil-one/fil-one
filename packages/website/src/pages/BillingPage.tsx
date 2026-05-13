@@ -287,26 +287,18 @@ export function BillingPage() {
         </div>
       )}
 
-      {/* Canceled banner */}
-      {isCanceled && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-          <WarningIcon size={20} className="text-red-600 flex-shrink-0" weight="fill" />
-          <span className="text-sm text-red-800">
-            Your account has been canceled.{' '}
-            <button type="button" onClick={handleUpgradeClick} className="font-semibold underline">
-              Reactivate
-            </button>{' '}
-            to regain access.
-          </span>
-        </div>
-      )}
-
       <div className="flex gap-6">
         {/* ── Left column ──────────────────────────────────────── */}
         <div className="flex-1 min-w-0 flex flex-col gap-6">
           {/* Plan card */}
           <div
-            className={`rounded-lg border bg-white flex flex-col gap-4 py-4 px-5 shadow-sm ${isActive || isPastDue ? 'border-green-200' : 'border-zinc-200'}`}
+            className={`rounded-lg border bg-white flex flex-col gap-4 py-4 px-5 shadow-sm ${
+              isActive || isPastDue
+                ? 'border-green-200'
+                : isCanceled
+                  ? 'border-red-200'
+                  : 'border-brand-200'
+            }`}
           >
             <div className="flex items-center justify-between">
               <div>
@@ -384,7 +376,9 @@ export function BillingPage() {
                     : 'bg-amber-50 border border-amber-200'
                 }`}
               >
-                <p className="text-[13px] font-medium text-zinc-900">
+                <p
+                  className={`text-[13px] font-medium ${isCanceled ? 'text-red-800' : 'text-zinc-900'}`}
+                >
                   {isCanceled
                     ? 'Reactivate your subscription to regain full access'
                     : isTrialExpiredGrace
@@ -392,7 +386,7 @@ export function BillingPage() {
                       : 'Reactivate your subscription to restore full access'}
                 </p>
                 <Button
-                  variant="primary"
+                  variant={isCanceled ? 'destructive' : 'primary'}
                   size="sm"
                   icon={ArrowRightIcon}
                   iconPosition="right"
