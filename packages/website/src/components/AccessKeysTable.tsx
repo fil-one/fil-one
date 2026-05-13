@@ -5,7 +5,7 @@ import { DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon } from '@phosphor-icons/rea
 import { IconBox } from './IconBox';
 
 import type { AccessKey } from '@filone/shared';
-import { GRANULAR_PERMISSION_LABELS } from '@filone/shared';
+import { GRANULAR_PERMISSION_LABELS, S3_REGION, getRegionLabel } from '@filone/shared';
 
 import { Badge } from './Badge';
 import { Button } from './Button';
@@ -132,6 +132,7 @@ export function AccessKeysTable({
       <Table.Header>
         <tr>
           <Table.Head>Name</Table.Head>
+          <Table.Head className="hidden md:table-cell">Region</Table.Head>
           {showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
           {showPermissions && <Table.Head className="hidden md:table-cell">Permissions</Table.Head>}
           <Table.Head className="hidden sm:table-cell">Status</Table.Head>
@@ -157,6 +158,12 @@ export function AccessKeysTable({
               <div className="mt-1 sm:hidden">
                 <StatusBadge status={key.status} />
               </div>
+            </Table.Cell>
+
+            {/* Region */}
+            <Table.Cell className="hidden md:table-cell">
+              <p className="text-xs font-medium text-zinc-900">{getRegionLabel(key.region)}</p>
+              <p className="text-xs text-zinc-500">{key.region ?? S3_REGION}</p>
             </Table.Cell>
 
             {/* Buckets */}

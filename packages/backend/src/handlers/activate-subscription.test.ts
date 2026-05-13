@@ -65,14 +65,18 @@ import { handler } from './activate-subscription.js';
 // ---------------------------------------------------------------------------
 
 function buildBillingRecord(overrides?: Record<string, unknown>) {
-  return marshall({
+  const base: Record<string, unknown> = {
     pk: 'CUSTOMER#user-1',
     sk: 'SUBSCRIPTION',
     stripeCustomerId: 'cus_test_123',
     orgId: 'org-1',
     subscriptionStatus: SubscriptionStatus.Trialing,
     ...overrides,
-  });
+  };
+  for (const key of Object.keys(base)) {
+    if (base[key] === undefined) delete base[key];
+  }
+  return marshall(base);
 }
 
 function orgProfileWithTenant(tenantId: string) {
@@ -121,7 +125,12 @@ describe('activate-subscription handler', () => {
     // Record has subscriptionId from billing-trial-setup
     ddbMock
       .on(GetItemCommand)
-      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
+      .resolvesOnce({
+        Item: buildBillingRecord({
+          subscriptionId: 'sub_trial_123',
+          subscriptionStatus: SubscriptionStatus.Trialing,
+        }),
+      })
       .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
@@ -148,7 +157,12 @@ describe('activate-subscription handler', () => {
     // to fire before the payment method was fully attached, canceling the subscription.
     ddbMock
       .on(GetItemCommand)
-      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
+      .resolvesOnce({
+        Item: buildBillingRecord({
+          subscriptionId: 'sub_trial_123',
+          subscriptionStatus: SubscriptionStatus.Trialing,
+        }),
+      })
       .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
     ddbMock.on(UpdateItemCommand).resolves({});
 
@@ -192,6 +206,76 @@ describe('activate-subscription handler', () => {
     const body = JSON.parse((result as { body: string }).body);
 
     // Should call create, NOT update
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
+      customer: 'cus_test_123',
+      items: [{ price: 'price_test_fake' }],
+      default_payment_method: 'pm_test_789',
+      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+    });
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+
+    expect(body.subscription.status).toBe(SubscriptionStatus.Active);
+  });
+
+  it('creates a new subscription when reactivating a canceled subscription (GracePeriod)', async () => {
+    // Record retains the stale subscriptionId from the canceled Stripe subscription;
+    // the webhook clears it later via customer.subscription.created.
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({
+        Item: buildBillingRecord({
+          subscriptionId: 'sub_canceled_old',
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+        }),
+      })
+      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    const result = await handler(event, {} as never);
+    const body = JSON.parse((result as { body: string }).body);
+
+    expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
+      customer: 'cus_test_123',
+      items: [{ price: 'price_test_fake' }],
+      default_payment_method: 'pm_test_789',
+      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+    });
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+
+    expect(body.subscription.status).toBe(SubscriptionStatus.Active);
+  });
+
+  it('creates a new subscription when reactivating a fully canceled subscription (Canceled)', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({
+        Item: buildBillingRecord({
+          subscriptionId: 'sub_canceled_old',
+          subscriptionStatus: SubscriptionStatus.Canceled,
+        }),
+      })
+      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    const result = await handler(event, {} as never);
+    const body = JSON.parse((result as { body: string }).body);
+
+    expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
     expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
       customer: 'cus_test_123',
       items: [{ price: 'price_test_fake' }],
@@ -370,5 +454,160 @@ describe('activate-subscription handler', () => {
     });
     const result = await handler(event, {} as never);
     expect((result as { statusCode: number }).statusCode).toBe(500);
+  });
+
+  // ── useSavedPaymentMethod path ────────────────────────────────────
+
+  it('reactivates a canceled subscription using the saved payment method (GracePeriod)', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({
+        Item: buildBillingRecord({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          subscriptionId: 'sub_canceled_old',
+          paymentMethodId: 'pm_saved_1',
+        }),
+      })
+      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    mockSubscriptionsCreate.mockResolvedValue(
+      mockSubscriptionResponse({ id: 'sub_new_999', status: 'active' }),
+    );
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+      body: JSON.stringify({ useSavedPaymentMethod: true }),
+    });
+    const result = await handler(event, {} as never);
+    const body = JSON.parse((result as { body: string }).body);
+
+    expect(mockSetupIntentsList).not.toHaveBeenCalled();
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
+      customer: 'cus_test_123',
+      items: [{ price: 'price_test_fake' }],
+      default_payment_method: 'pm_saved_1',
+      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+    });
+    expect(body.subscription.status).toBe(SubscriptionStatus.Active);
+  });
+
+  it('reactivates a canceled subscription using the saved payment method (Canceled)', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({
+        Item: buildBillingRecord({
+          subscriptionStatus: SubscriptionStatus.Canceled,
+          subscriptionId: 'sub_canceled_old',
+          paymentMethodId: 'pm_saved_1',
+        }),
+      })
+      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+      body: JSON.stringify({ useSavedPaymentMethod: true }),
+    });
+    const result = await handler(event, {} as never);
+    const body = JSON.parse((result as { body: string }).body);
+
+    expect(mockSetupIntentsList).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
+    expect(body.subscription.status).toBe(SubscriptionStatus.Active);
+  });
+
+  it('rejects useSavedPaymentMethod when subscription is active', async () => {
+    ddbMock.on(GetItemCommand).resolvesOnce({
+      Item: buildBillingRecord({
+        subscriptionStatus: SubscriptionStatus.Active,
+        paymentMethodId: 'pm_saved_1',
+      }),
+    });
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+      body: JSON.stringify({ useSavedPaymentMethod: true }),
+    });
+    const result = await handler(event, {} as never);
+
+    expect((result as { statusCode: number }).statusCode).toBe(400);
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects useSavedPaymentMethod when subscription is trialing', async () => {
+    ddbMock.on(GetItemCommand).resolvesOnce({
+      Item: buildBillingRecord({
+        subscriptionStatus: SubscriptionStatus.Trialing,
+        paymentMethodId: 'pm_saved_1',
+      }),
+    });
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+      body: JSON.stringify({ useSavedPaymentMethod: true }),
+    });
+    const result = await handler(event, {} as never);
+
+    expect((result as { statusCode: number }).statusCode).toBe(400);
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+  });
+
+  it('rejects useSavedPaymentMethod when no saved payment method exists', async () => {
+    ddbMock.on(GetItemCommand).resolvesOnce({
+      Item: buildBillingRecord({
+        subscriptionStatus: SubscriptionStatus.Canceled,
+        // paymentMethodId intentionally omitted
+      }),
+    });
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+      body: JSON.stringify({ useSavedPaymentMethod: true }),
+    });
+    const result = await handler(event, {} as never);
+    const body = JSON.parse((result as { body: string }).body);
+
+    expect((result as { statusCode: number }).statusCode).toBe(400);
+    expect(body.message).toContain('No saved payment method');
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+  });
+
+  it('returns 402 for useSavedPaymentMethod when subscription is incomplete', async () => {
+    ddbMock.on(GetItemCommand).resolvesOnce({
+      Item: buildBillingRecord({
+        subscriptionStatus: SubscriptionStatus.Canceled,
+        paymentMethodId: 'pm_saved_1',
+      }),
+    });
+
+    mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'incomplete' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+      body: JSON.stringify({ useSavedPaymentMethod: true }),
+    });
+    const result = await handler(event, {} as never);
+
+    expect((result as { statusCode: number }).statusCode).toBe(402);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
   });
 });

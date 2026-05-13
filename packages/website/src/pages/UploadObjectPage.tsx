@@ -2,7 +2,6 @@ import { useState, useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ArrowLeftIcon,
-  ArrowUpIcon,
   CloudArrowUpIcon,
   FileIcon,
   XIcon,
@@ -16,6 +15,8 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { Input } from '../components/Input';
+import { Textarea } from '../components/TextArea';
+import { FormField } from '../components/FormField';
 import { ProgressBar } from '../components/ProgressBar';
 import { Spinner } from '../components/Spinner';
 import { useFileUpload } from '../lib/use-file-upload.js';
@@ -87,7 +88,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
       />
 
       {/* Back + header */}
-      <div className="mt-2 mb-6 flex items-center gap-4">
+      <div className="mt-6 mb-6 flex items-center gap-4">
         <IconButton
           icon={ArrowLeftIcon}
           aria-label="Back to bucket"
@@ -104,9 +105,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
         <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-5">
             {/* File dropzone */}
-            <div className="flex flex-col gap-2.5">
-              <label className="text-xs font-medium text-zinc-900">File</label>
-
+            <FormField label="File">
               {!upload.selectedFile ? (
                 <div
                   className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-zinc-300 p-8 text-center hover:border-brand-400"
@@ -151,13 +150,14 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
                 className="hidden"
                 onChange={upload.handleFileSelect}
               />
-            </div>
+            </FormField>
 
             {/* Object name */}
-            <div className="flex flex-col gap-2.5">
-              <label htmlFor="object-name" className="text-xs font-medium text-zinc-900">
-                Object name
-              </label>
+            <FormField
+              label="Object name"
+              htmlFor="object-name"
+              description="Can include slashes to create a folder-like path, e.g. images/photo.png"
+            >
               <Input
                 id="object-name"
                 value={upload.objectName}
@@ -165,74 +165,60 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
                 placeholder="path/to/my-file.txt"
                 autoComplete="off"
               />
-              <p className="text-[11px] leading-relaxed text-zinc-500">
-                Can include slashes to create a folder-like path, e.g. <code>images/photo.png</code>
-              </p>
-            </div>
+            </FormField>
 
             {/* Description */}
-            <div className="flex flex-col gap-2.5">
-              <label htmlFor="object-description" className="text-xs font-medium text-zinc-900">
-                Description <span className="font-normal text-zinc-400">(optional)</span>
-              </label>
-              <textarea
+            <FormField label="Description" optional htmlFor="object-description">
+              <Textarea
                 id="object-description"
                 value={upload.objectDescription}
-                onChange={(e) => upload.setObjectDescription(e.target.value)}
+                onChange={upload.setObjectDescription}
                 placeholder="A short description of this object"
                 rows={2}
-                className="block w-full rounded-lg border border-zinc-200 p-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-2 focus:outline-brand-600"
               />
-            </div>
+            </FormField>
 
             {/* Tags */}
-            <div className="flex flex-col gap-2.5">
-              <label htmlFor="object-tags" className="text-xs font-medium text-zinc-900">
-                Tags <span className="font-normal text-zinc-400">(optional)</span>
-              </label>
-
-              {/* Tag chips */}
-              {tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700"
-                    >
-                      {tag}
-                      <button
-                        type="button"
-                        aria-label={`Remove tag ${tag}`}
-                        onClick={() => removeTag(tag)}
-                        className="text-zinc-400 hover:text-zinc-700"
+            <FormField
+              label="Tags"
+              optional
+              htmlFor="object-tags"
+              description="Press Enter or comma to add a tag."
+            >
+              <div className="flex flex-col gap-2">
+                {tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700"
                       >
-                        <XIcon size={10} aria-hidden="true" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <Input
-                id="object-tags"
-                value={tagInput}
-                onChange={setTagInput}
-                onKeyDown={handleTagKeyDown}
-                placeholder="Type a tag and press Enter"
-                autoComplete="off"
-              />
-              <p className="text-[11px] leading-relaxed text-zinc-500">
-                Press Enter or comma to add a tag.
-              </p>
-            </div>
+                        {tag}
+                        <button
+                          type="button"
+                          aria-label={`Remove tag ${tag}`}
+                          onClick={() => removeTag(tag)}
+                          className="text-zinc-400 hover:text-zinc-700"
+                        >
+                          <XIcon size={10} aria-hidden="true" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <Input
+                  id="object-tags"
+                  value={tagInput}
+                  onChange={setTagInput}
+                  onKeyDown={handleTagKeyDown}
+                  placeholder="Type a tag and press Enter"
+                  autoComplete="off"
+                />
+              </div>
+            </FormField>
 
             {/* Submit */}
-            <Button
-              variant="primary"
-              icon={ArrowUpIcon}
-              disabled={!canUpload}
-              onClick={upload.handleUpload}
-            >
+            <Button variant="primary" disabled={!canUpload} onClick={upload.handleUpload}>
               Upload object
             </Button>
           </div>

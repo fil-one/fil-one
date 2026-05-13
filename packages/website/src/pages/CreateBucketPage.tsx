@@ -9,17 +9,24 @@ import {
   CheckIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
-import { S3_REGION, CreateBucketSchema, CreateAccessKeySchema } from '@filone/shared';
+import {
+  S3_REGION,
+  CreateBucketSchema,
+  CreateAccessKeySchema,
+  DOCS_URL,
+  getRegionLabel,
+} from '@filone/shared';
 import type { CreateBucketResponse, RetentionMode, RetentionDurationType } from '@filone/shared';
 import { apiRequest, createAccessKey } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 
+import { Heading } from '../components/Heading/Heading';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
-import { Heading } from '../components/Heading/Heading';
 import { Input } from '../components/Input';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
+import { RegionSelect } from '../components/RegionSelect';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
 import { useToast } from '../components/Toast';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
@@ -59,7 +66,7 @@ export function CreateBucketPage() {
     secretAccessKey: string;
   } | null>(null);
 
-  const form = useAccessKeyForm({ onSuccess: () => {} });
+  const form = useAccessKeyForm({ region, onSuccess: () => {} });
 
   // When the key section opens, default to specific scope for this bucket
   useEffect(() => {
@@ -82,7 +89,7 @@ export function CreateBucketPage() {
       const withoutPrev = prev ? buckets.filter((b) => b !== prev) : buckets;
       return next ? [...withoutPrev, next] : withoutPrev;
     });
-  }, [name, createKeyToggled]); // form.setSelectedBuckets is a stable useState setter
+  }, [name, createKeyToggled, region]); // form.setSelectedBuckets is a stable useState setter
 
   function validateName(value: string) {
     const result = CreateBucketSchema.shape.name.safeParse(value);
@@ -152,6 +159,7 @@ export function CreateBucketPage() {
         permissions: form.permissions,
         bucketScope: form.bucketScope,
         buckets: form.bucketScope === 'specific' ? form.selectedBuckets : undefined,
+        region,
         expiresAt: form.expiresAt,
       };
       const parsed = CreateAccessKeySchema.safeParse(keyBody);
@@ -251,16 +259,7 @@ export function CreateBucketPage() {
               <label htmlFor="bucket-region" className="text-xs font-medium text-zinc-900">
                 Region
               </label>
-              <select
-                id="bucket-region"
-                value={region}
-                onChange={(e) => setRegion(e.target.value as typeof S3_REGION)}
-                disabled
-                className="block w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-[13px] text-zinc-900 opacity-50 focus:outline-2 focus:outline-brand-600"
-              >
-                <option value={S3_REGION}>Europe (eu-west-1)</option>
-              </select>
-              <p className="text-[11px] text-zinc-500">More regions coming soon.</p>
+              <RegionSelect id="bucket-region" value={region} onChange={setRegion} />
             </div>
 
             {/* Object settings */}
@@ -302,8 +301,25 @@ export function CreateBucketPage() {
 
               {/* Expanded form */}
               {createKeyToggled && (
-                <div className="rounded-lg border border-zinc-200 p-4">
-                  <AccessKeyFormFields form={form} pinnedBucket={name.trim() || undefined} />
+                <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4">
+                  <p className="text-xs leading-relaxed text-zinc-600">
+                    This key will only work with buckets in{' '}
+                    <span className="text-zinc-900">{getRegionLabel(region)}</span>{' '}
+                    <span className="text-zinc-500">{region}</span>.{' '}
+                    <a
+                      href={DOCS_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-brand-600 hover:underline"
+                    >
+                      Learn more
+                    </a>
+                  </p>
+                  <AccessKeyFormFields
+                    form={form}
+                    pinnedBucket={name.trim() || undefined}
+                    region={region}
+                  />
                 </div>
               )}
             </div>

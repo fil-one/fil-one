@@ -48,7 +48,7 @@ vi.mock('jose', () => ({
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 process.env.FILONE_STAGE = 'test';
-process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu';
+process.env.AURORA_PORTAL_URL = 'https://api-portal.dev.aur.lu/api';
 
 const ddbMock = mockClient(DynamoDBClient);
 
