@@ -172,16 +172,15 @@ function resolveSavedPaymentMethod(record: Record<string, unknown>): PaymentMeth
   const subscriptionStatus = record.subscriptionStatus as SubscriptionStatus | undefined;
   const paymentMethodId = record.paymentMethodId as string | undefined;
 
-  const isReactivatable =
+  const isCanceled =
     subscriptionStatus === SubscriptionStatus.GracePeriod ||
     subscriptionStatus === SubscriptionStatus.Canceled;
 
-  if (!isReactivatable) {
+  if (!isCanceled) {
     return new ResponseBuilder()
       .status(400)
       .body({
-        message:
-          'Subscription is not eligible for reactivation. Only canceled or grace-period subscriptions can be reactivated this way.',
+        message: 'Only canceled or grace-period subscriptions can use a saved payment method.',
       })
       .build();
   }
