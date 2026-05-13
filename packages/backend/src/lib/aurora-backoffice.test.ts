@@ -384,8 +384,11 @@ describe('getStorageSamples', () => {
       const range1Samples = [
         { timestamp: '2024-01-15T00:00:00.000Z', bytesUsed: 100 },
         { timestamp: '2024-02-01T00:00:00.000Z', bytesUsed: 200 },
+        { timestamp: '2024-02-09T00:00:00.000Z', bytesUsed: 250 },
+        { timestamp: '2024-02-10T00:00:00.000Z', bytesUsed: 260 },
       ];
       const range2Samples = [
+        { timestamp: '2024-02-11T00:00:00.000Z', bytesUsed: 275 },
         { timestamp: '2024-02-20T00:00:00.000Z', bytesUsed: 300 },
         { timestamp: '2024-03-01T00:00:00.000Z', bytesUsed: 400 },
       ];
