@@ -74,7 +74,7 @@ export function SplitButton({
         >
           <Icon component={CaretDownIcon} size={iconSize} />
         </MenuButton>
-        <MenuItems className="split-button__menu">
+        <MenuItems anchor="top end" className="split-button__menu">
           {items.map((item) => (
             <MenuItem key={item.label}>
               <button type="button" onClick={item.onClick} className="split-button__item">

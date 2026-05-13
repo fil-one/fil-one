@@ -48,9 +48,9 @@ Two time-series endpoints, both parameterised by `from` / `to` / `window`, each 
 
 Service Orchestrators must support at least:
 
-- A query range (`to` − `from`) of 32 days (covers a 31-day billing period with a one-day buffer).
+- A query range (`to` − `from`) of 62 days (covers a 31-day billing period plus a 30-day grace period, with a one-day buffer).
 - Window values of `1h`, `24h`, and `720h`.
-- 768 data points per response (32 days at 1 h granularity — the highest-resolution, longest-range query FilOne issues).
+- 1488 data points per response (62 days at 1 h granularity — the highest-resolution, longest-range query FilOne issues).
 
 ### Idempotency
 
@@ -117,3 +117,4 @@ Aurora expresses permissions as bare AWS action names — `GetObject`, `PutObjec
 - The access-key permission enum gains bucket-management permissions (`s3:CreateBucket`, `s3:ListAllMyBuckets`, `s3:DeleteBucket`) that Aurora's permission strings did not surface as first-class options. Service Orchestrators map these to whatever native primitives they expose.
 - A single partner key authenticates every endpoint, including tenant-scoped operations. The Service Orchestrator must enforce per-partner tenant scoping so the partner key cannot reach tenants belonging to other partners.
 - Telemetry (TTFB, error rates, RPS) and S3 Gateway observability are explicitly out of scope for this contract; they are delivered through the partner's observability stack.
+- Aurora's current metrics endpoints cap a single request at a ~40-day `to` − `from` span, which is below the 62-day contract minimum. To remain unblocked while Aurora catches up, the FilOne backend's Aurora client splits longer requests into ≤ 40-day sub-ranges, issues them in parallel, and dedupes samples by timestamp at the boundary. Service Orchestrators that meet the 62-day requirement on a single request need no workaround.

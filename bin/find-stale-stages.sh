@@ -2,8 +2,10 @@
 #
 # Find SST stages whose corresponding PRs are no longer open.
 #
-# Scans both the Resource Groups Tagging API (regional resources) and
-# IAM roles directly (global resources not returned by the tagging API).
+# Scans three sources:
+#   - Resource Groups Tagging API (regional resources)
+#   - IAM roles directly (global, not returned by the tagging API)
+#   - CloudFront Response Headers Policy names (also global)
 #
 # Usage:
 #   bin/find-stale-stages.sh
@@ -45,8 +47,18 @@ done < <(aws iam list-roles \
   --query 'Roles[?contains(RoleName, `filone-`) || contains(RoleName, `hyperspace-`) || contains(RoleName, `pr-`) || contains(RoleName, `srdj-`) || contains(RoleName, `bajt-`)].RoleName' \
   --output text | tr '\t' '\n')
 
+# Get stages from CloudFront Response Headers Policies (global — not returned
+# by the tagging API, and the cheapest stable signal for CloudFront-only stages).
+echo "Scanning CloudFront Response Headers Policies for sst:stage names..."
+cf_stages=$(aws cloudfront list-response-headers-policies --type custom \
+  --query 'ResponseHeadersPolicyList.Items[].ResponseHeadersPolicy.ResponseHeadersPolicyConfig.Name' \
+  --output text 2>/dev/null \
+  | tr '\t' '\n' \
+  | sed -n 's/^filone-\(.*\)-security-headers$/\1/p' \
+  | sort -u)
+
 # Merge and deduplicate
-stages=$(printf '%s\n%s' "$tagging_stages" "$iam_stages" | grep -v '^$' | sort -u)
+stages=$(printf '%s\n%s\n%s' "$tagging_stages" "$iam_stages" "$cf_stages" | grep -v '^$' | sort -u)
 
 echo ""
 echo "Checking stages..."

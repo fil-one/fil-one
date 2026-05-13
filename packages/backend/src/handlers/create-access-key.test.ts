@@ -47,6 +47,7 @@ function validBody() {
     keyName: 'My Key',
     permissions: ['read', 'write', 'list', 'delete'],
     bucketScope: 'all',
+    region: 'eu-west-1',
   });
 }
 
@@ -370,6 +371,61 @@ describe('create-access-key baseHandler', () => {
       accessKeyId: { S: 'AKIA1234567890' },
       createdAt: { S: '2026-03-10T00:00:00Z' },
       status: { S: 'active' },
+    });
+  });
+
+  describe('region', () => {
+    beforeEach(() => {
+      ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+      ddbMock.on(PutItemCommand).resolves({});
+      mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+    });
+
+    it('succeeds when region is missing (back-compat with legacy callers)', async () => {
+      const event = buildEvent({
+        body: JSON.stringify({
+          keyName: 'My Key',
+          permissions: ['read', 'write', 'list', 'delete'],
+          bucketScope: 'all',
+        }),
+        userInfo: USER_INFO,
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('accepts eu-west-1', async () => {
+      const event = buildEvent({
+        body: JSON.stringify({
+          keyName: 'My Key',
+          permissions: ['read'],
+          bucketScope: 'all',
+          region: 'eu-west-1',
+        }),
+        userInfo: USER_INFO,
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('rejects us-midwest-1', async () => {
+      const event = buildEvent({
+        body: JSON.stringify({
+          keyName: 'My Key',
+          permissions: ['read'],
+          bucketScope: 'all',
+          region: 'us-midwest-1',
+        }),
+        userInfo: USER_INFO,
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(400);
+      const body = JSON.parse(result.body!);
+      expect(body.message).toContain('Unsupported region');
+      expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
     });
   });
 });
