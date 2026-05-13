@@ -6,6 +6,7 @@ import { ResponseBuilder } from '../lib/response-builder.js';
 import {
   deleteAuthenticationMethod,
   deleteGuardianEnrollment,
+  deleteRecoveryCode,
   getMfaEnrollments,
   updateAuth0User,
 } from '../lib/auth0-management.js';
@@ -45,9 +46,12 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     await deleteAuthenticationMethod(sub, enrollmentId);
   }
 
-  // If this was the last MFA enrollment, clear the enrolling flag
+  // If this was the last MFA enrollment, also tear down the recovery code —
+  // an orphaned recovery code remains valid and would let the holder sign in
+  // with no second factor present — and clear the enrolling flag.
   const remaining = enrollments.filter((e) => e.id !== enrollmentId);
   if (remaining.length === 0) {
+    await deleteRecoveryCode(sub);
     await updateAuth0User(sub, {
       app_metadata: { mfa_enrolling: false },
     });

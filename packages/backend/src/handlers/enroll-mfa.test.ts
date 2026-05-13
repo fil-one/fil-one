@@ -120,7 +120,7 @@ describe('POST /api/mfa/enroll handler', () => {
     expect(result).toMatchObject({
       statusCode: 200,
       body: JSON.stringify({
-        message: 'Redirecting to enroll your authenticator.',
+        message: 'Redirecting to enroll MFA.',
       }),
     });
     expect(mockFlagMfaEnrollment).toHaveBeenCalledWith(MOCK_SUB);
@@ -135,7 +135,7 @@ describe('POST /api/mfa/enroll handler', () => {
     expect(result).toMatchObject({
       statusCode: 200,
       body: JSON.stringify({
-        message: 'Redirecting to enroll your authenticator.',
+        message: 'Redirecting to enroll MFA.',
       }),
     });
     expect(mockFlagMfaEnrollment).toHaveBeenCalledWith(MOCK_SOCIAL_SUB);
@@ -150,7 +150,7 @@ describe('POST /api/mfa/enroll handler', () => {
     expect(result).toMatchObject({
       statusCode: 200,
       body: JSON.stringify({
-        message: 'Redirecting to enroll your authenticator.',
+        message: 'Redirecting to enroll MFA.',
       }),
     });
     expect(mockFlagMfaEnrollment).toHaveBeenCalledWith(MOCK_SUB);

@@ -288,6 +288,7 @@ describe('GET /api/me handler', () => {
         emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: false,
+        mfaEnrollments: [],
         connectionType: 'auth0',
       }),
     });
@@ -356,7 +357,6 @@ describe('GET /api/me handler', () => {
       body: JSON.stringify({
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
-        orgConfirmed: true,
         emailVerified: true,
         email: MOCK_EMAIL,
         orgSetupComplete: true,

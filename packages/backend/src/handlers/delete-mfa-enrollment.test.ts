@@ -9,12 +9,14 @@ import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 const mockGetMfaEnrollments = vi.fn();
 const mockDeleteGuardianEnrollment = vi.fn();
 const mockDeleteAuthenticationMethod = vi.fn();
+const mockDeleteRecoveryCode = vi.fn();
 const mockUpdateAuth0User = vi.fn();
 vi.mock('../lib/auth0-management.js', () => ({
   getConnectionType: (sub: string) => sub.split('|')[0] ?? 'unknown',
   getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
   deleteGuardianEnrollment: (...args: unknown[]) => mockDeleteGuardianEnrollment(...args),
   deleteAuthenticationMethod: (...args: unknown[]) => mockDeleteAuthenticationMethod(...args),
+  deleteRecoveryCode: (...args: unknown[]) => mockDeleteRecoveryCode(...args),
   updateAuth0User: (...args: unknown[]) => mockUpdateAuth0User(...args),
 }));
 
@@ -144,6 +146,7 @@ describe('DELETE /api/mfa/enrollments/{enrollmentId} handler', () => {
     });
     expect(mockDeleteAuthenticationMethod).toHaveBeenCalledWith(MOCK_SUB, MOCK_ENROLLMENT_ID);
     expect(mockDeleteGuardianEnrollment).not.toHaveBeenCalled();
+    expect(mockDeleteRecoveryCode).not.toHaveBeenCalled();
     expect(mockUpdateAuth0User).not.toHaveBeenCalled();
   });
 
@@ -159,6 +162,7 @@ describe('DELETE /api/mfa/enrollments/{enrollmentId} handler', () => {
       },
     ]);
     mockDeleteAuthenticationMethod.mockResolvedValue(undefined);
+    mockDeleteRecoveryCode.mockResolvedValue(undefined);
     mockUpdateAuth0User.mockResolvedValue(undefined);
 
     const result = await handler(deleteEnrollmentEvent(totpEnrollmentId), buildContext());
@@ -169,6 +173,7 @@ describe('DELETE /api/mfa/enrollments/{enrollmentId} handler', () => {
     });
     expect(mockDeleteAuthenticationMethod).toHaveBeenCalledWith(MOCK_SUB, totpEnrollmentId);
     expect(mockDeleteGuardianEnrollment).not.toHaveBeenCalled();
+    expect(mockDeleteRecoveryCode).toHaveBeenCalledWith(MOCK_SUB);
     expect(mockUpdateAuth0User).toHaveBeenCalledWith(MOCK_SUB, {
       app_metadata: { mfa_enrolling: false },
     });
@@ -186,6 +191,7 @@ describe('DELETE /api/mfa/enrollments/{enrollmentId} handler', () => {
       },
     ]);
     mockDeleteGuardianEnrollment.mockResolvedValue(undefined);
+    mockDeleteRecoveryCode.mockResolvedValue(undefined);
     mockUpdateAuth0User.mockResolvedValue(undefined);
 
     const result = await handler(deleteEnrollmentEvent(otpEnrollmentId), buildContext());
@@ -196,6 +202,7 @@ describe('DELETE /api/mfa/enrollments/{enrollmentId} handler', () => {
     });
     expect(mockDeleteGuardianEnrollment).toHaveBeenCalledWith(otpEnrollmentId);
     expect(mockDeleteAuthenticationMethod).not.toHaveBeenCalled();
+    expect(mockDeleteRecoveryCode).toHaveBeenCalledWith(MOCK_SUB);
     expect(mockUpdateAuth0User).toHaveBeenCalledWith(MOCK_SUB, {
       app_metadata: { mfa_enrolling: false },
     });

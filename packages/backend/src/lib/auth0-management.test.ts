@@ -23,6 +23,7 @@ import {
   deleteGuardianEnrollment,
   deleteAuthenticationMethod,
   deleteAllAuthenticators,
+  deleteRecoveryCode,
   getConnectionType,
   MFA_GUARDIAN_TYPES,
 } from './auth0-management.js';
@@ -350,6 +351,82 @@ describe('deleteAuthenticationMethod', () => {
 });
 
 // ---------------------------------------------------------------------------
+// deleteRecoveryCode
+// ---------------------------------------------------------------------------
+
+describe('deleteRecoveryCode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('DELETEs the recovery-code authentication-method when present', async () => {
+    const deletedUrls: string[] = [];
+
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const urlStr = String(url);
+      if (urlStr.includes('/oauth/token')) return mockTokenResponse();
+      if (urlStr.endsWith('/authentication-methods') && (!init?.method || init.method === 'GET')) {
+        return new Response(
+          JSON.stringify([
+            { id: 'totp|am-1', type: 'totp', confirmed: true },
+            { id: 'recovery-code|am-2', type: 'recovery-code', confirmed: true },
+          ]),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes('/authentication-methods/') && init?.method === 'DELETE') {
+        deletedUrls.push(urlStr);
+        return new Response(null, { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    await deleteRecoveryCode('auth0|abc123');
+
+    expect(deletedUrls).toHaveLength(1);
+    expect(deletedUrls[0]).toContain(encodeURIComponent('recovery-code|am-2'));
+  });
+
+  it('is a no-op when no recovery code is on file', async () => {
+    const deletedUrls: string[] = [];
+
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const urlStr = String(url);
+      if (urlStr.includes('/oauth/token')) return mockTokenResponse();
+      if (urlStr.endsWith('/authentication-methods') && (!init?.method || init.method === 'GET')) {
+        return new Response(JSON.stringify([{ id: 'totp|am-1', type: 'totp', confirmed: true }]), {
+          status: 200,
+        });
+      }
+      if (urlStr.includes('/authentication-methods/') && init?.method === 'DELETE') {
+        deletedUrls.push(urlStr);
+        return new Response(null, { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    await deleteRecoveryCode('auth0|abc123');
+
+    expect(deletedUrls).toEqual([]);
+  });
+
+  it('throws when the list call fails', async () => {
+    mockFetch.mockImplementation(async (url: string) => {
+      const urlStr = String(url);
+      if (urlStr.includes('/oauth/token')) return mockTokenResponse();
+      if (urlStr.endsWith('/authentication-methods')) {
+        return new Response('boom', { status: 500 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    await expect(deleteRecoveryCode('auth0|abc123')).rejects.toThrow(
+      'Auth0 list authentication methods (recovery) failed (500): boom',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // deleteAllAuthenticators
 // ---------------------------------------------------------------------------
 
@@ -406,6 +483,50 @@ describe('deleteAllAuthenticators', () => {
     });
   });
 
+  it('also deletes the recovery-code row alongside strong factors', async () => {
+    const authMethodDeletedUrls: string[] = [];
+    let patchBody: Record<string, unknown> | undefined;
+
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const urlStr = String(url);
+      if (urlStr.includes('/oauth/token')) return mockTokenResponse();
+      if (urlStr.endsWith('/authentication-methods') && (!init?.method || init.method === 'GET')) {
+        return new Response(
+          JSON.stringify([
+            { id: 'totp|am-1', type: 'totp', confirmed: true },
+            { id: 'recovery-code|am-2', type: 'recovery-code', confirmed: true },
+          ]),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes('/enrollments') && (!init?.method || init.method === 'GET')) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      if (urlStr.includes('/authentication-methods/') && init?.method === 'DELETE') {
+        authMethodDeletedUrls.push(urlStr);
+        return new Response(null, { status: 200 });
+      }
+      if (urlStr.includes('/api/v2/users/') && init?.method === 'PATCH') {
+        patchBody = JSON.parse(init.body as string);
+        return new Response('{}', { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    await deleteAllAuthenticators('auth0|abc123');
+
+    expect(authMethodDeletedUrls).toHaveLength(2);
+    expect(authMethodDeletedUrls.some((u) => u.includes(encodeURIComponent('totp|am-1')))).toBe(
+      true,
+    );
+    expect(
+      authMethodDeletedUrls.some((u) => u.includes(encodeURIComponent('recovery-code|am-2'))),
+    ).toBe(true);
+    expect(patchBody).toEqual({
+      app_metadata: { mfa_enrolling: false },
+    });
+  });
+
   it('does not clear mfa_enrolling when a delete fails (partial failure)', async () => {
     let patchBody: Record<string, unknown> | undefined;
 
@@ -444,7 +565,7 @@ describe('deleteAllAuthenticators', () => {
     });
 
     await expect(deleteAllAuthenticators('auth0|abc123')).rejects.toThrow(
-      /Failed to delete 1 of 2 MFA factor/,
+      /Failed to delete 1 of 3 MFA factor/,
     );
     // Critical: leaving the flag set means the Post-Login Action keeps
     // protecting the user with whatever factors remain.

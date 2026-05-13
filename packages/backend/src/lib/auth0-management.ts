@@ -280,8 +280,36 @@ export async function deleteAuthenticationMethod(sub: string, methodId: string):
 }
 
 /**
- * Delete all MFA enrollments for a user (both Guardian and authentication-methods),
- * then clear the mfa_enrolling flag. The Post-Login Action will no longer challenge.
+ * Delete the user's recovery code, if one is on file.
+ *
+ * Auth0 stores the recovery code as a row in /authentication-methods with
+ * `type: 'recovery-code'`. `getMfaEnrollments` filters that row out (it's not
+ * a user-visible factor), so callers tearing down MFA must clean it up
+ * explicitly — otherwise a dangling recovery code remains valid and can be
+ * redeemed even after every strong factor is gone.
+ *
+ * No-op when no recovery code is present.
+ */
+export async function deleteRecoveryCode(sub: string): Promise<void> {
+  const domain = getDomain();
+  const token = await getManagementToken();
+  const resp = await fetch(
+    `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/authentication-methods`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  await throwIfNotOk(resp, 'Auth0 list authentication methods (recovery) failed');
+
+  const methods = (await resp.json()) as Auth0AuthenticationMethod[];
+  const recoveryIds = methods.filter((m) => m.type === 'recovery-code').map((m) => m.id);
+  if (recoveryIds.length === 0) return;
+
+  await Promise.all(recoveryIds.map((id) => deleteAuthenticationMethod(sub, id)));
+}
+
+/**
+ * Delete all MFA enrollments for a user (both Guardian and authentication-methods)
+ * plus any recovery code on file, then clear the mfa_enrolling flag. The
+ * Post-Login Action will no longer challenge.
  *
  * Deletes are attempted in parallel via Promise.allSettled so a single failure
  * does not strand the user with a half-deleted set of factors. The
@@ -295,11 +323,14 @@ export async function deleteAllAuthenticators(
 ): Promise<void> {
   const enrollments = prefetchedEnrollments ?? (await getMfaEnrollments(sub));
 
-  const operations: Array<Promise<void>> = enrollments.map((enrollment) =>
-    enrollment.source === 'guardian'
-      ? deleteGuardianEnrollment(enrollment.id)
-      : deleteAuthenticationMethod(sub, enrollment.id),
-  );
+  const operations: Array<Promise<void>> = [
+    ...enrollments.map((enrollment) =>
+      enrollment.source === 'guardian'
+        ? deleteGuardianEnrollment(enrollment.id)
+        : deleteAuthenticationMethod(sub, enrollment.id),
+    ),
+    deleteRecoveryCode(sub),
+  ];
 
   const results = await Promise.allSettled(operations);
 
