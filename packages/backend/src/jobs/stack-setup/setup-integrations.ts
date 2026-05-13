@@ -1,5 +1,6 @@
 import { Resource } from 'sst';
 import Stripe from 'stripe';
+import pRetry from 'p-retry';
 import {
   SSMClient,
   GetParameterCommand,
@@ -392,23 +393,21 @@ async function setupAuth0MfaAction(domain: string): Promise<void> {
   }
 
   // Wait briefly for the action to be built before deploying.
-  // Auth0 compiles actions asynchronously after create/update.
-  // Keep the polling budget comfortably below the SetupIntegrations Lambda timeout.
-  const buildWaitMs = [500, 1000, 2000];
-  for (let attempt = 0; attempt <= buildWaitMs.length; attempt++) {
-    const statusResp = await fetch(`https://${domain}/api/v2/actions/actions/${actionId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    await throwIfNotOk(statusResp, 'Auth0 get action status failed');
-    const action = (await statusResp.json()) as Auth0Action & { status: string };
-    if (action.status === 'built') break;
-    if (attempt === buildWaitMs.length) {
-      throw new Error(
-        `Auth0 action did not reach 'built' state after ${buildWaitMs.length + 1} attempts (status: ${action.status})`,
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, buildWaitMs[attempt]));
-  }
+  // Auth0 compiles actions asynchronously after create/update. Delays:
+  // 500ms, 1000ms, 2000ms. Stays well below the SetupIntegrations Lambda timeout.
+  await pRetry(
+    async () => {
+      const statusResp = await fetch(`https://${domain}/api/v2/actions/actions/${actionId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      await throwIfNotOk(statusResp, 'Auth0 get action status failed');
+      const action = (await statusResp.json()) as Auth0Action & { status: string };
+      if (action.status !== 'built') {
+        throw new Error(`Auth0 action not yet built (status: ${action.status})`);
+      }
+    },
+    { retries: 3, minTimeout: 500, factor: 2 },
+  );
 
   // Deploy the action
   const deployResp = await fetch(`https://${domain}/api/v2/actions/actions/${actionId}/deploy`, {

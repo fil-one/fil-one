@@ -11,8 +11,14 @@
 
 // ── Auth0 Action runtime types ──────────────────────────────────────────
 
+// MFA factor types this Action recognizes. The `(string & {})` keeps the
+// field assignable from any string (Auth0 may emit 'email', 'sms', etc. on
+// incoming events) while preserving autocomplete for the known set when
+// constructing factor arrays.
+export type MfaFactorType = 'otp' | 'webauthn-roaming' | 'webauthn-platform' | 'recovery-code';
+
 export interface MfaFactor {
-  type: string;
+  type: MfaFactorType | (string & {});
 }
 
 export interface AuthenticationMethod {
@@ -43,7 +49,12 @@ export interface PostLoginApi {
 // ── Action handler ──────────────────────────────────────────────────────
 
 export async function onExecutePostLogin(event: PostLoginEvent, api: PostLoginApi): Promise<void> {
-  const mfaTypes = new Set(['otp', 'webauthn-roaming', 'webauthn-platform', 'recovery-code']);
+  const mfaTypes = new Set<string>([
+    'otp',
+    'webauthn-roaming',
+    'webauthn-platform',
+    'recovery-code',
+  ] satisfies MfaFactorType[]);
   const enrolledFactors = (event.user.enrolledFactors || []).filter((f) => mfaTypes.has(f.type));
   const hasMfa = enrolledFactors.length > 0;
   const authMethods = event.authentication?.methods || [];
