@@ -1,6 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
-import { Badge, type BadgeColor, type BadgeSize } from './Badge';
+import {
+  Badge,
+  type BadgeColor,
+  type BadgeSize,
+  type BadgeStrength,
+  type BadgeVariant,
+} from './Badge';
 
 const meta: Meta<typeof Badge> = {
   title: 'Components/Badge',
@@ -9,7 +15,8 @@ const meta: Meta<typeof Badge> = {
     color: { control: 'select', options: ['green', 'blue', 'red', 'amber', 'grey'] },
     size: { control: 'select', options: ['sm', 'md', 'lg'] },
     weight: { control: 'select', options: ['regular', 'medium', 'semibold'] },
-    variant: { control: 'select', options: ['subtle', 'solid'] },
+    strength: { control: 'select', options: ['subtle', 'strong'] },
+    variant: { control: 'select', options: ['default', 'solid'] },
     dot: { control: 'boolean' },
   },
 };
@@ -26,21 +33,32 @@ export const Sizes: Story = {
     <div className="flex flex-col gap-3">
       {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
         <div key={size} className="flex items-center gap-2">
-          <Badge color="green" size={size}>
-            size {size}
-          </Badge>
-          <Badge color="blue" size={size}>
-            size {size}
-          </Badge>
-          <Badge color="red" size={size}>
-            size {size}
-          </Badge>
-          <Badge color="amber" size={size}>
-            size {size}
-          </Badge>
-          <Badge color="grey" size={size}>
-            size {size}
-          </Badge>
+          {(['green', 'blue', 'red', 'grey', 'amber'] as BadgeColor[]).map((color) => (
+            <Badge key={color} color={color} size={size}>
+              size {size}
+            </Badge>
+          ))}
+        </div>
+      ))}
+    </div>
+  ),
+};
+
+export const Strength: Story = {
+  render: () => (
+    <div className="flex flex-col gap-4">
+      {(['subtle', 'strong'] as BadgeStrength[]).map((strength) => (
+        <div key={strength} className="flex flex-col gap-2">
+          <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+            {strength}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {(['green', 'blue', 'red', 'grey', 'amber'] as BadgeColor[]).map((color) => (
+              <Badge key={color} color={color} strength={strength}>
+                {color}
+              </Badge>
+            ))}
+          </div>
         </div>
       ))}
     </div>
@@ -69,7 +87,7 @@ export const WithDot: Story = {
   ),
 };
 
-export const WithDescription: Story = {
+export const WithTooltip: Story = {
   args: {
     children: 'Data protection',
     color: 'blue',
@@ -91,34 +109,36 @@ export const WithDescription: Story = {
 export const AllVariants: Story = {
   render: () => (
     <div className="flex flex-col gap-8">
-      {(['subtle', 'solid'] as const).map((variant) => (
-        <div key={variant} className="flex flex-col gap-4">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-            {variant}
+      {(
+        [
+          { label: 'Default', variant: 'default', strength: 'subtle' },
+          { label: 'Default / Strong', variant: 'default', strength: 'strong' },
+          { label: 'Solid', variant: 'solid', strength: 'subtle' },
+        ] as { label: string; variant: BadgeVariant; strength: BadgeStrength }[]
+      ).map(({ label, variant, strength }) => (
+        <div key={label} className="flex flex-col gap-4">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
+            {label}
           </p>
           {(['green', 'blue', 'red', 'amber', 'grey'] as BadgeColor[]).map((color) => (
             <div key={color} className="flex flex-col gap-2">
-              <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-300">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
                 {color}
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
-                  <Badge key={size} color={color} size={size} variant={variant}>
-                    {size}
-                  </Badge>
-                ))}
-                {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
-                  <Badge key={`dot-${size}`} color={color} size={size} variant={variant} dot>
+                  <Badge key={size} color={color} size={size} variant={variant} strength={strength}>
                     {size}
                   </Badge>
                 ))}
                 {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
                   <Badge
-                    key={`med-${size}`}
+                    key={`dot-${size}`}
                     color={color}
                     size={size}
                     variant={variant}
-                    weight="medium"
+                    strength={strength}
+                    dot
                   >
                     {size}
                   </Badge>

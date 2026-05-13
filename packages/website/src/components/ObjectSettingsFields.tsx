@@ -3,6 +3,7 @@ import { RETENTION_MAX_DAYS, RETENTION_MAX_YEARS } from '@filone/shared';
 
 import { Switch } from './Switch';
 import { RadioOption } from './RadioOption';
+import { Select } from './Select';
 
 type ObjectSettingsFieldsProps = {
   versioning: boolean;
@@ -197,17 +198,15 @@ export function ObjectSettingsFields({
                     <label htmlFor="lock-period-unit" className="sr-only">
                       Duration unit
                     </label>
-                    <select
+                    <Select
                       id="lock-period-unit"
                       value={retentionDurationType}
-                      onChange={(e) =>
-                        onRetentionDurationTypeChange(e.target.value as RetentionDurationType)
-                      }
-                      className="w-24 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-[13px] text-zinc-900 focus:outline-2 focus:outline-brand-600"
+                      onChange={(v) => onRetentionDurationTypeChange(v as RetentionDurationType)}
+                      className="w-24 py-1.5 text-[13px]"
                     >
                       <option value="d">Days</option>
                       <option value="y">Years</option>
-                    </select>
+                    </Select>
                   </div>
                   <span id="lock-period-hint" className="text-[11px] text-zinc-500">
                     Objects cannot be deleted until this period expires.

@@ -15,7 +15,7 @@ export function Select({ onChange, invalid, className, children, ...rest }: Sele
     <div className="relative">
       <HeadlessSelect
         {...rest}
-        invalid={invalid}
+        aria-invalid={invalid}
         onChange={(event) => onChange(event.target.value)}
         className={clsx(
           'flex w-full appearance-none rounded-md border bg-white px-3 py-2.5 text-sm text-(--color-text-base)',

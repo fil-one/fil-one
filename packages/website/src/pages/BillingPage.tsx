@@ -6,7 +6,6 @@ import {
   CheckIcon,
   CreditCardIcon,
   ArrowRightIcon,
-  ArrowUpRightIcon,
   WarningIcon,
   DownloadSimpleIcon,
   LightningIcon,
@@ -23,7 +22,7 @@ import { formatBytes } from '@filone/shared';
 import { SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
 import type { CreateSetupIntentResponse } from '@filone/shared';
 
-import { apiRequest, getUsage, getBilling, getInvoices } from '../lib/api.js';
+import { apiRequest, getUsage, getBilling, getInvoices, activateSubscription } from '../lib/api.js';
 import { daysUntil, formatDate } from '../lib/time.js';
 import { ChoosePlanDialog } from '../components/billing/ChoosePlanDialog.js';
 import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
@@ -149,8 +148,10 @@ export function BillingPage() {
     setContactSalesOpen(true);
   }
 
-  async function handleSelectPayAsYouGo() {
-    setPlanOpen(false);
+  const canReactivateWithSavedCard =
+    Boolean(billing?.paymentMethod?.id) && (isGracePeriod || isCanceled);
+
+  async function startNewCardFlow() {
     try {
       const { clientSecret: cs, stripePublishableKey: pk } =
         await apiRequest<CreateSetupIntentResponse>('/billing/setup-intent', { method: 'POST' });
@@ -160,6 +161,30 @@ export function BillingPage() {
     } catch (err) {
       toast.error((err as Error).message || 'Failed to set up payment. Please try again.');
     }
+  }
+
+  async function handleSelectPayAsYouGo() {
+    setPlanOpen(false);
+
+    if (canReactivateWithSavedCard) {
+      try {
+        await activateSubscription({ useSavedPaymentMethod: true });
+        toast.success('Subscription reactivated!');
+        void queryClient.invalidateQueries({ queryKey: queryKeys.billing });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
+        window.dispatchEvent(new CustomEvent('billing:updated'));
+      } catch (err) {
+        toast.error((err as Error).message || 'Failed to reactivate. Please try again.');
+      }
+      return;
+    }
+
+    await startNewCardFlow();
+  }
+
+  async function handleUseDifferentCard() {
+    setPlanOpen(false);
+    await startNewCardFlow();
   }
 
   function handlePaymentBack() {
@@ -282,7 +307,7 @@ export function BillingPage() {
         <div className="flex-1 min-w-0 flex flex-col gap-6">
           {/* Plan card */}
           <div
-            className={`rounded-lg border bg-white flex flex-col gap-4 py-4 px-5 shadow-sm ${isActive || isPastDue ? 'border-green-200' : 'border-brand-200'}`}
+            className={`rounded-lg border bg-white flex flex-col gap-4 py-4 px-5 shadow-sm ${isActive || isPastDue ? 'border-green-200' : 'border-zinc-200'}`}
           >
             <div className="flex items-center justify-between">
               <div>
@@ -335,15 +360,9 @@ export function BillingPage() {
                 <p className="text-[13px] font-medium text-zinc-900">
                   Ready to unlock unlimited storage?
                 </p>
-                <button
-                  type="button"
-                  onClick={handleUpgradeClick}
-                  className="flex items-center gap-1.5 rounded-[6px] h-8 px-4 py-2 text-[12px] font-medium leading-[18px] text-white shadow-sm transition-opacity hover:opacity-90"
-                  style={{ backgroundImage: 'linear-gradient(135deg, #0080FF 0%, #256AF4 100%)' }}
-                >
+                <Button variant="ghost" size="sm" onClick={handleUpgradeClick}>
                   Upgrade
-                  <ArrowUpRightIcon size={16} weight="bold" />
-                </button>
+                </Button>
               </div>
             )}
 
@@ -373,15 +392,15 @@ export function BillingPage() {
                       ? 'Upgrade to keep your data and unlock unlimited storage'
                       : 'Reactivate your subscription to restore full access'}
                 </p>
-                <button
-                  type="button"
+                <Button
+                  variant="primary"
+                  size="sm"
+                  icon={ArrowRightIcon}
+                  iconPosition="right"
                   onClick={handleUpgradeClick}
-                  className="flex items-center gap-1.5 rounded-[6px] h-8 px-4 py-2 text-[12px] font-medium leading-[18px] text-white shadow-sm transition-opacity hover:opacity-90"
-                  style={{ backgroundImage: 'linear-gradient(135deg, #0080FF 0%, #256AF4 100%)' }}
                 >
                   {isTrialExpiredGrace ? 'Upgrade' : 'Reactivate'}
-                  <ArrowRightIcon size={16} weight="bold" />
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -598,15 +617,14 @@ export function BillingPage() {
 
               {/* CTA for trial / grace / canceled users */}
               {(isTrialing || isGracePeriod || isCanceled) && (
-                <button
-                  type="button"
+                <Button
+                  variant="primary"
+                  icon={LightningIcon}
                   onClick={handleUpgradeClick}
-                  className="flex w-full items-center justify-center gap-2 rounded-[6px] h-[36px] px-4 py-2 text-[13px] font-medium text-white shadow-sm transition-opacity hover:opacity-90"
-                  style={{ backgroundImage: 'linear-gradient(135deg, #0080FF 0%, #256AF4 100%)' }}
+                  className="w-full justify-center"
                 >
-                  <LightningIcon size={16} weight="fill" />
                   {isTrialing ? 'Upgrade now' : 'Reactivate'}
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -635,6 +653,8 @@ export function BillingPage() {
         onClose={() => setPlanOpen(false)}
         onSelectPayAsYouGo={handleSelectPayAsYouGo}
         onContactSales={handleContactSales}
+        savedCardLast4={canReactivateWithSavedCard ? billing?.paymentMethod?.last4 : undefined}
+        onUseDifferentCard={canReactivateWithSavedCard ? handleUseDifferentCard : undefined}
       />
 
       <AddPaymentDialog
