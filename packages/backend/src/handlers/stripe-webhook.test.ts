@@ -1342,4 +1342,61 @@ describe('stripe-webhook handler', () => {
       expect(dunningEmissions()).toHaveLength(0);
     });
   });
+
+  // -----------------------------------------------------------------------
+  // 11. InvoicePaid metric (EMF via reportMetric)
+  // -----------------------------------------------------------------------
+  describe('InvoicePaid metric', () => {
+    function invoicePaidEmissions(): MetricEvent[] {
+      return reportMetricMock.mock.calls
+        .map(([event]) => event)
+        .filter((e) => (e as { InvoicePaid?: unknown }).InvoicePaid === 1);
+    }
+
+    it('emits one InvoicePaid event on invoice.payment_succeeded', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      const emissions = invoicePaidEmissions();
+      expect(emissions).toHaveLength(1);
+      expect(emissions[0]).toMatchObject({ InvoicePaid: 1 });
+      expect(emissions[0]._aws).toMatchObject({
+        CloudWatchMetrics: [
+          {
+            Namespace: 'FilOne',
+            Dimensions: [[]],
+            Metrics: [{ Name: 'InvoicePaid', Unit: 'Count' }],
+          },
+        ],
+      });
+    });
+
+    it('does not emit even when invoice.customer is null', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ customer: null }));
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(invoicePaidEmissions()).toHaveLength(0);
+    });
+
+    it('does NOT emit on invoice.payment_failed', async () => {
+      setupStripeEvent('invoice.payment_failed', mockInvoice({ attempt_count: 1 }));
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(invoicePaidEmissions()).toHaveLength(0);
+    });
+
+    it('does NOT emit on unrelated events (customer.subscription.created)', async () => {
+      setupStripeEvent('customer.subscription.created', mockSubscription());
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(invoicePaidEmissions()).toHaveLength(0);
+    });
+  });
 });

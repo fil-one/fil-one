@@ -13,6 +13,7 @@ import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { ObjectBrowser } from '../components/ObjectBrowser';
 import { BucketAccessTab } from '../components/BucketAccessTab';
+import type { S3Region } from '@filone/shared';
 import { getS3Endpoint, S3_REGION, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 
@@ -140,7 +141,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
     );
   }
 
-  const bucketRegion = bucket?.region ?? S3_REGION;
+  const bucketRegion = (bucket?.region as S3Region | undefined) ?? S3_REGION;
 
   return (
     <div className="px-10 pt-10">
@@ -220,6 +221,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
         open={addKeyOpen}
         onClose={() => setAddKeyOpen(false)}
         bucketName={bucketName}
+        bucketRegion={bucketRegion}
         onKeyAdded={invalidateAccessKeysCache}
       />
     </div>

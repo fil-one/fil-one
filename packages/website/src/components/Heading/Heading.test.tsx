@@ -73,4 +73,14 @@ describe('Heading', () => {
     expect(container.querySelector('h1')).toBeInTheDocument();
     expect(container.querySelector('p')).toHaveTextContent('Sub text');
   });
+
+  it('applies className to wrapper div (not h*) when description is present', () => {
+    const { container } = render(
+      <Heading tag="h1" description="Sub text" className="mb-6">
+        Title
+      </Heading>,
+    );
+    expect(container.firstChild).toHaveClass('mb-6');
+    expect(container.querySelector('h1')).not.toHaveClass('mb-6');
+  });
 });

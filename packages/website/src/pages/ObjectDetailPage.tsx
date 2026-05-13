@@ -10,6 +10,9 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 
+import { Alert } from '../components/Alert';
+import { Badge } from '../components/Badge';
+import { Card } from '../components/Card';
 import { Heading } from '../components/Heading/Heading';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { CodeBlock } from '../components/CodeBlock';
@@ -179,9 +182,7 @@ export function ObjectDetailPage({ bucketName, objectKey, versionId }: ObjectDet
             { label: objectKey },
           ]}
         />
-        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error?.message ?? 'Failed to load object metadata'}
-        </div>
+        <Alert variant="red" description={error?.message ?? 'Failed to load object metadata'} />
       </div>
     );
   }
@@ -222,105 +223,104 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
       />
 
       {/* Page header */}
-      <div className="mt-2 mb-6 flex items-center gap-3">
+      <div className="mt-6 mb-6 flex items-center gap-3">
         <IconButton
           icon={ArrowLeftIcon}
           aria-label="Back to bucket"
           onClick={() => void navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
         />
-        <div className="flex-1">
-          <Heading tag="h1">{objectKey}</Heading>
-          <p className="text-[13px] text-zinc-500">{bucketName}</p>
+        <div className="min-w-0 flex-1">
+          <Heading tag="h1" className="truncate">
+            {objectKey}
+          </Heading>
+          <p className="text-sm text-(--color-paragraph-text-subtle)">{bucketName}</p>
         </div>
 
         <div className="flex items-center gap-1">
           <IconButton
             icon={DownloadSimpleIcon}
             aria-label="Download object"
+            tooltip="Download"
+            tooltipSide="bottom"
             onClick={() => void objectActions.downloadObject(objectKey, versionId)}
           />
           <IconButton
             icon={LinkIcon}
             aria-label="Share object"
+            tooltip="Share object"
+            tooltipSide="bottom"
             onClick={() => setShareOpen(true)}
           />
           <IconButton
             icon={TrashIcon}
             aria-label="Delete object"
+            tooltip="Delete"
+            tooltipSide="bottom"
             onClick={() => setConfirmDeleteOpen(true)}
           />
         </div>
       </div>
 
       {/* Object details card */}
-      <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+      <Card>
         <Heading tag="h2" size="sm" className="mb-3">
           Object details
         </Heading>
-        <div className="flex flex-col gap-2">
-          <DetailRow label="Name" value={objectKey} mono />
-          {metadata && <DetailRow label="Size" value={formatBytes(metadata.sizeBytes)} mono />}
-          <DetailRow label="Bucket" value={bucketName} mono />
+        <div className="flex flex-col gap-1">
+          <DetailRow label="Name" value={objectKey} />
+          {metadata && <DetailRow label="Size" value={formatBytes(metadata.sizeBytes)} />}
+          <DetailRow label="Bucket" value={bucketName} />
           <CopyableDetailRow label="S3 Path" value={s3Path} />
           {versionId && <CopyableDetailRow label="Version ID" value={versionId} />}
           {etag && <CopyableDetailRow label="ETag" value={etag} />}
-          <div className="flex items-center justify-between py-1">
-            <span className="text-[13px] text-zinc-500">Retention</span>
+          <div className="flex min-h-9 items-center justify-between">
+            <span className="text-sm text-(--color-paragraph-text-subtle)">Retention</span>
             {metadata?.retention ? (
-              <span className="flex items-center gap-1.5 font-mono text-xs text-zinc-900">
+              <span className="flex items-center gap-1.5 font-mono text-xs text-(--color-text-base)">
                 <LockIcon size={12} />
                 {metadata.retention.mode === 'COMPLIANCE' ? 'Compliance' : 'Governance'}
                 {' \u00b7 Expires '}
                 {retentionDateFormat.format(new Date(metadata.retention.retainUntilDate))}
               </span>
             ) : (
-              <span className="flex items-center gap-1.5 font-mono text-xs text-zinc-400">
-                <LockIcon size={12} />
-                None
-              </span>
+              <span className="text-sm text-(--color-paragraph-text-subtle)">None</span>
             )}
           </div>
           {metadata?.metadata.description && (
-            <div className="flex items-start justify-between pt-2">
-              <span className="pt-0.5 text-[13px] text-zinc-500">Description</span>
-              <span className="text-right text-[13px] text-zinc-900">
+            <div className="flex min-h-9 items-start justify-between gap-4 py-2">
+              <span className="shrink-0 text-sm text-(--color-paragraph-text-subtle)">
+                Description
+              </span>
+              <span className="text-right text-sm text-(--color-text-base)">
                 {metadata.metadata.description}
               </span>
             </div>
           )}
-          <div className="flex items-start justify-between pt-2">
-            <span className="pt-0.5 text-[13px] text-zinc-500">Tags</span>
+          <div className="flex min-h-9 items-start justify-between py-2">
+            <span className="shrink-0 text-sm text-(--color-paragraph-text-subtle)">Tags</span>
             {tags.length > 0 ? (
               <div className="flex flex-wrap justify-end gap-1.5">
                 {tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600"
-                  >
-                    <TagIcon size={12} />
+                  <Badge key={tag} color="blue" size="sm">
+                    <TagIcon size={10} />
                     {tag}
-                  </span>
+                  </Badge>
                 ))}
               </div>
             ) : (
-              <span className="text-[13px] text-zinc-400">None</span>
+              <span className="text-sm text-(--color-paragraph-text-subtle)">None</span>
             )}
           </div>
         </div>
-      </div>
+      </Card>
 
       {metadata?.retention && metadata.retention.mode === 'COMPLIANCE' && (
-        <div className="mt-6 rounded-lg border border-red-300/50 p-4">
-          <div className="flex items-start gap-3">
-            <LockIcon size={16} className="mt-0.5 shrink-0 text-red-600" aria-hidden="true" />
-            <p className="text-[13px] text-red-600">
-              This object is protected by a compliance retention lock until{' '}
-              <span className="font-bold">
-                {retentionDateFormat.format(new Date(metadata.retention.retainUntilDate))}
-              </span>
-              . It cannot be deleted before this date.
-            </p>
-          </div>
+        <div className="mt-6">
+          <Alert
+            variant="red"
+            title="Compliance retention lock"
+            description={`This object is locked until ${retentionDateFormat.format(new Date(metadata.retention.retainUntilDate))}. It cannot be deleted before this date.`}
+          />
         </div>
       )}
 
@@ -332,12 +332,12 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
       />
 
       {/* API access example card */}
-      <div className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+      <Card className="mt-6">
         <Heading tag="h2" size="sm" className="mb-3">
           API access example
         </Heading>
         <CodeBlock code={apiExample} language="bash" />
-      </div>
+      </Card>
 
       {/* Share dialog */}
       <ShareObjectModal
@@ -367,17 +367,17 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
 
 function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="flex items-center justify-between py-1">
-      <span className="text-[13px] text-zinc-500">{label}</span>
-      <span className={`text-xs text-zinc-900 ${mono ? 'font-mono' : ''}`}>{value}</span>
+    <div className="flex min-h-9 items-center justify-between">
+      <span className="text-sm text-(--color-paragraph-text-subtle)">{label}</span>
+      <span className={`text-sm text-(--color-text-base) ${mono ? 'font-mono' : ''}`}>{value}</span>
     </div>
   );
 }
 
 function CopyableDetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between py-1">
-      <span className="text-[13px] text-zinc-500">{label}</span>
+    <div className="flex min-h-9 items-center justify-between gap-4">
+      <span className="text-sm text-(--color-paragraph-text-subtle)">{label}</span>
       <CopyableField label="" value={value} />
     </div>
   );

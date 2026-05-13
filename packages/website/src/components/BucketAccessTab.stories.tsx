@@ -34,7 +34,7 @@ const meta: Meta<typeof BucketAccessTab> = {
   args: {
     bucketName: 'my-bucket',
     s3Endpoint: 'https://s3.filone.org',
-    region: 'us-east-1',
+    region: 'us-midwest-1',
     onCreateOpen: () => {},
   },
 };

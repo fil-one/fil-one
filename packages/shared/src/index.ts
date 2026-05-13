@@ -6,6 +6,10 @@ export {
   DOCS_URL,
   S3_REGION,
   S3Region,
+  REGION_LABELS,
+  formatRegion,
+  getRegionLabel,
+  getAvailableRegions,
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
@@ -22,13 +26,7 @@ export {
 } from './constants.js';
 export type { UsageLimits } from './constants.js';
 export { formatBytes, formatBytesShort } from './formatBytes.js';
-export type {
-  MeResponse,
-  ConfirmOrgRequest,
-  ConfirmOrgResponse,
-  UpdateProfileRequest,
-  UpdateProfileResponse,
-} from './api/me.js';
+export type { MeResponse, UpdateProfileRequest, UpdateProfileResponse } from './api/me.js';
 export { UpdateProfileSchema } from './api/me.js';
 
 export { getProvider, isSocialConnection } from './connection-providers.js';
@@ -36,7 +34,6 @@ export type { ConnectionProvider } from './connection-providers.js';
 export {
   OrgRole,
   OrgNameSchema,
-  ConfirmOrgSchema,
   ORG_NAME_MIN_LENGTH,
   ORG_NAME_MAX_LENGTH,
   ORG_NAME_PATTERN,
@@ -125,13 +122,19 @@ export type {
 
 export type { UsageResponse } from './api/usage.js';
 
-export { PlanId, SubscriptionStatus, mapStripeStatus } from './api/billing.js';
+export {
+  PlanId,
+  SubscriptionStatus,
+  mapStripeStatus,
+  ActivateSubscriptionRequestSchema,
+} from './api/billing.js';
 export type {
   Plan,
   Subscription,
   PaymentMethod,
   BillingInfo,
   CreateSetupIntentResponse,
+  ActivateSubscriptionRequest,
   ActivateSubscriptionResponse,
   CreatePortalSessionResponse,
   Invoice,
