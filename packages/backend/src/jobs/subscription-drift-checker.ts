@@ -82,7 +82,7 @@ async function scanActiveSubscriptions(billingTableName: string): Promise<Active
     for (const item of result.Items ?? []) {
       const record = unmarshall(item);
       if (typeof record.pk !== 'string' || !record.orgId) {
-        console.error('[subscription-drift-checker] missing orgId', { pk: record.pk });
+        console.warn('[subscription-drift-checker] missing orgId', { pk: record.pk });
         continue;
       }
       out.push({

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 def resolve_provider(name: str) -> Path:
     """Validate a provider name and load its .env. Returns the provider directory."""
-    provider_dir = Path(__file__).parent / name
+    provider_dir = Path(__file__).resolve().parent.parent / name
     if not provider_dir.is_dir():
         print(f"ERROR: Provider directory not found: {provider_dir}", file=sys.stderr)
         sys.exit(1)

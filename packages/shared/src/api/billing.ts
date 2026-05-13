@@ -1,3 +1,13 @@
+import { z } from 'zod';
+
+export const ActivateSubscriptionRequestSchema = z
+  .object({
+    useSavedPaymentMethod: z.boolean().default(false),
+  })
+  .strict();
+
+export type ActivateSubscriptionRequest = z.input<typeof ActivateSubscriptionRequestSchema>;
+
 export enum PlanId {
   FreeTrial = 'free_trial',
   PayAsYouGo = 'pay_as_you_go',
