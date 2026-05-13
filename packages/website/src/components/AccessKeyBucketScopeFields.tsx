@@ -16,8 +16,8 @@ type AccessKeyBucketScopeFieldsProps = {
   onSelectedBucketsChange: (buckets: string[]) => void;
   /** Always show this bucket in the list even when unchecked (e.g. the bucket being created). */
   pinnedBucket?: string;
-  /** When provided, filter the picker list to buckets in this region. */
-  region?: S3Region;
+  /** Filter the picker list to buckets in this region. */
+  region: S3Region;
 };
 
 export function AccessKeyBucketScopeFields({
@@ -35,6 +35,7 @@ export function AccessKeyBucketScopeFields({
   });
   // TODO: forward `region` to the `/buckets` API endpoint so filtering happens
   // on the backend, once the buckets API supports per-bucket region metadata.
+  // https://linear.app/filecoin-foundation/issue/FIL-324/move-filtering-bucket-regions-to-backend
   const buckets = (data?.buckets ?? [])
     .filter((b) => !region || b.region === region)
     .map((b) => b.name);

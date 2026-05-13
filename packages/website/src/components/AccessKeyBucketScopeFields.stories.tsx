@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-import type { AccessKeyBucketScope, ListBucketsResponse } from '@filone/shared';
+import { S3Region, type AccessKeyBucketScope, type ListBucketsResponse } from '@filone/shared';
 
 import { queryKeys } from '../lib/query-client';
 import { AccessKeyBucketScopeFields } from './AccessKeyBucketScopeFields';
@@ -52,6 +52,7 @@ export const Interactive: Story = {
     return (
       <QueryClientProvider client={queryClient}>
         <AccessKeyBucketScopeFields
+          region={S3Region.UsMidwest1}
           bucketScope={bucketScope}
           onBucketScopeChange={setBucketScope}
           selectedBuckets={selectedBuckets}

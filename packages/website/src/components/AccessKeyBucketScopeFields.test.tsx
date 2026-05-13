@@ -14,7 +14,7 @@ const defaultBuckets: Bucket[] = [
 ];
 
 function renderWith(props: {
-  region?: S3Region;
+  region: S3Region;
   selectedBuckets?: string[];
   pinnedBucket?: string;
   buckets?: Bucket[];
@@ -37,13 +37,6 @@ function renderWith(props: {
 }
 
 describe('AccessKeyBucketScopeFields region filtering', () => {
-  it('shows all buckets when no region is provided', () => {
-    renderWith({});
-    expect(screen.getByRole('checkbox', { name: 'midwest-a' })).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: 'midwest-b' })).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: 'eu-a' })).toBeInTheDocument();
-  });
-
   it('shows only us-midwest-1 buckets when region is us-midwest-1', () => {
     renderWith({ region: S3Region.UsMidwest1 });
     expect(screen.getByRole('checkbox', { name: 'midwest-a' })).toBeInTheDocument();
