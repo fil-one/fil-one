@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { LightbulbIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { CreateAccessKeyResponse } from '@filone/shared';
+import { S3_REGION } from '@filone/shared';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyFormFields } from './AccessKeyFormFields.js';
 import { Button } from './Button.js';
@@ -25,9 +26,11 @@ export type CreateAccessKeyModalProps = {
 
 export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyModalProps) {
   const [result, setResult] = useState<CreateAccessKeyResponse | null>(null);
+  const [region, setRegion] = useState(S3_REGION);
 
   const form = useAccessKeyForm({
     defaultPermissions: ['read', 'write', 'list', 'delete'],
+    region,
     onSuccess: setResult,
   });
 
@@ -60,7 +63,7 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
         <div className="flex gap-6">
           {/* Left: form fields */}
           <div className="flex-1">
-            <AccessKeyFormFields form={form} />
+            <AccessKeyFormFields form={form} region={region} onRegionChange={setRegion} />
           </div>
 
           {/* Right: info panel */}

@@ -8,8 +8,10 @@ import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
+import { EmptyStateCard } from '../components/EmptyStateCard';
 
 import type { ListBucketsResponse } from '@filone/shared';
+import { S3_REGION, getRegionLabel } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -83,12 +85,11 @@ export function BucketsPage() {
 
       {/* Content: empty state or table */}
       {buckets.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
-          <DatabaseIcon size={48} className="mb-4 text-zinc-300" aria-hidden="true" />
-          <p className="mb-1 text-base font-medium text-zinc-700">No buckets yet</p>
-          <p className="mb-6 text-sm text-zinc-500">
-            Create your first bucket to start storing objects
-          </p>
+        <EmptyStateCard
+          icon={DatabaseIcon}
+          title="No buckets yet"
+          description="Create your first bucket to start storing objects"
+        >
           <Button
             variant="primary"
             icon={PlusIcon}
@@ -96,7 +97,7 @@ export function BucketsPage() {
           >
             Create bucket
           </Button>
-        </div>
+        </EmptyStateCard>
       ) : (
         <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
           <table className="w-full text-sm">
@@ -135,7 +136,12 @@ export function BucketsPage() {
                       {bucket.name}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-zinc-600">{bucket.region}</td>
+                  <td className="px-4 py-3 text-xs">
+                    <span className="font-medium text-zinc-900">
+                      {getRegionLabel(bucket.region)}
+                    </span>{' '}
+                    <span className="text-zinc-500">{bucket.region ?? S3_REGION}</span>
+                  </td>
                   <td className="px-4 py-3 text-zinc-600">{formatDate(bucket.createdAt)}</td>
                   <td className="px-4 py-3">
                     {bucket.isPublic ? (

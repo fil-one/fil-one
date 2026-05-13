@@ -10,6 +10,7 @@ build/
 
 # SST
 .sst/
+tests/s3compat/sst.pyi
 
 # We don't need access to infra `Resource.{key}` at runtime,
 # so there is no need to keep the auto-generated sst-env.d.ts
