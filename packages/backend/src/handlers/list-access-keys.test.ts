@@ -89,6 +89,7 @@ describe('list-access-keys baseHandler', () => {
           status: 'active',
           permissions: ['read', 'list'],
           bucketScope: 'all',
+          region: 'eu-west-1',
           expiresAt: null,
         },
       ],
@@ -284,6 +285,7 @@ describe('list-access-keys baseHandler', () => {
           status: 'active',
           permissions: ['read', 'write'],
           bucketScope: 'all',
+          region: 'eu-west-1',
           expiresAt: null,
         },
         {
@@ -295,6 +297,7 @@ describe('list-access-keys baseHandler', () => {
           permissions: ['read'],
           bucketScope: 'specific',
           buckets: ['target-bucket'],
+          region: 'eu-west-1',
           expiresAt: null,
         },
       ],
