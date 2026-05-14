@@ -48,7 +48,7 @@ A single `AuroraTenantSetupDuration` EMF metric (Milliseconds) is emitted once p
 
 ### Negative
 
-- **Slower first POST.** The first bucket/access-key request blocks on Aurora setup (sub-second typical, up to the poll budget on the tail). Provisioned concurrency is already in place for these handlers, mitigating Lambda cold start on top of this.
+- **Slower first POST.** The first bucket/access-key request blocks on Aurora setup (around one second typical, up to the poll budget on the tail). Provisioned concurrency is already in place for these handlers, mitigating Lambda cold start on top of this.
 - **No automatic retry.** A flapping Aurora dependency now surfaces as a 503 the user must retry, instead of being absorbed silently by SQS retries.
 - **Manual-fix gap on the stuck-tenant gauge.** If an operator fixes the underlying issue without the user retrying, the gauge doesn't auto-clear. Tracked as a follow-up ticket (operator-facing endpoint to re-emit).
 
