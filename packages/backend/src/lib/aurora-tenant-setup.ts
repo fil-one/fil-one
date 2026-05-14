@@ -206,11 +206,10 @@ function reportAuroraTenantSetupDuration(durationMs: number): void {
   });
 }
 
-// Aurora setup is reported as <1 s typical, <10 s p99. The schedule below
-// gives 7 attempts over ~7.8 s of waits — short enough that the everyday case
-// finishes inline well within a single Lambda invocation, and SQS retries
-// pick up the rare tail. Calling setupAuroraTenant repeatedly is safe — it
-// returns the current per-component state, not a new setup attempt.
+// Aurora tenant setup usually takes around 1s. The schedule below gives 7 attempts over ~7.8 s of
+// waits — short enough that the everyday case finishes inline well within a single Lambda
+// invocation, and SQS retries pick up the rare tail. Calling setupAuroraTenant repeatedly is safe —
+// it returns the current per-component state, not a new setup attempt.
 const RUN_SETUP_POLL_BACKOFFS_MS = [100, 200, 500, 1000, 2000, 4000];
 
 async function runSetup(
