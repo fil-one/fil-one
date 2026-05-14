@@ -6,7 +6,7 @@ If you discover a security vulnerability in Fil One, please report it responsibl
 
 ### For vulnerabilities in Fil One
 
-Use GitHub's private vulnerability reporting feature, available in the **Security** tab of this repository. This reaches the Fil-One engineering and security teams directly.
+Use GitHub's private vulnerability reporting feature, available at https://github.com/fil-one/fil-one/security. 
 
 Alternatively, email **security@fil.org**.
 
