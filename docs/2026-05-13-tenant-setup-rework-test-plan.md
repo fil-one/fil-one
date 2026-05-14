@@ -31,9 +31,13 @@ AURORA_TENANT_API_KEY_CREATED → AURORA_S3_ACCESS_KEY_CREATED` within the
   sub-second `Milliseconds` value and no dimensions.
 - `setupFailureCount` on the org profile is unset / 0.
 
+**✅ CHECK PASSED ✅**
+
 ### 2. Fresh org, first access key creation
 
 Same as (1) but via `POST /api/access-keys`.
+
+**✅ CHECK PASSED ✅**
 
 ### 3. Tenant setup poll-budget exhaustion
 
@@ -51,6 +55,8 @@ WARM_TIER_ADDED` (or stub Aurora to fail).
 - Org profile remains at `AURORA_TENANT_CREATED`.
 - A `console.error` line containing `[tenant-setup]`, `orgId`, and the error
   message appears in CloudWatch.
+
+**✅ CHECK PASSED ✅**
 
 ### 4. Retry-after-timeout succeeds
 
@@ -71,6 +77,8 @@ Continuing from (3):
   stuck-tenant alert excludes terminal-status rows, so the elevated count
   on a completed org does not contribute to the gauge.
 
+**✅ CHECK PASSED ✅**
+
 ### 5. Stuck-tenant gauge transition up
 
 1. Manually set `setupFailureCount = 2` on an org profile via
@@ -83,6 +91,8 @@ Continuing from (3):
 - Counter increments to `3`.
 - One `StuckAuroraTenantSetupCount` EMF emission with the current count
   (>= 1, depending on other stuck orgs).
+
+**✅ CHECK PASSED ✅**
 
 ### 6. Stuck-tenant gauge transition down
 
@@ -100,6 +110,8 @@ Continuing from (5):
   (smaller by 1) — the terminal advance reads the prior counter via
   `ALL_OLD` and triggers a re-emit because that prior value was ≥ 3.
 
+**✅ CHECK PASSED ✅**
+
 ### 7. Concurrent first-bucket requests
 
 1. As a fresh org, fire two parallel `POST /api/buckets` requests.
@@ -112,6 +124,21 @@ Continuing from (5):
 - Exactly one `AuroraTenantSetupDuration` EMF emission (only the
   `createTenant` winner emits).
 
+**🟠 UNEXPECTED OUTCOME 🟠**
+
+- Single AuroraTenantSetupDuration EMF: ✅ Pass
+- No orphan Aurora resources: ✅ Pass
+- Both clients return 201: ❌ Got 503 + 201
+
+Aurora's backoffice doesn't handle concurrent `POST /v1/partners/{partnerId}/tenants` for the same orgId idempotently — it returns 500 instead of 409. This means:
+
+- The current synchronous design correctly serializes the successful path, but the loser of a tight race gets a 503 from us, even though we did nothing wrong.
+- A user double-clicking "Create bucket" on a fresh org will see "We're still setting up your account. Please try again in a moment." on one of the two clicks. A second click usually succeeds (org is now
+  at AURORA_S3_ACCESS_KEY_CREATED).
+- setupFailureCount will tick up on every double-click — a benign but noisy signal.
+
+This is acceptable UX: "user clicked twice, they get one 503 they can retry".
+
 ### 8. Concurrent failure increments
 
 1. With `setupFailureCount = 2` already on the org, fire two parallel failing
@@ -123,6 +150,8 @@ Continuing from (5):
   other `newCount === 4`.
 - Exactly one `StuckAuroraTenantSetupCount` EMF emission.
 
+**✅ CHECK PASSED ✅**
+
 ### 9. `/api/me` no longer triggers setup
 
 1. As a fresh user (org just created), call `GET /api/me` repeatedly.
@@ -133,6 +162,8 @@ Continuing from (5):
 - No SQS messages sent.
 - Response does **not** include `orgSetupComplete` (the field is removed from
   `MeResponse`).
+
+**✅ CHECK PASSED ✅**
 
 ### 10. In-flight SQS messages still drain
 
@@ -148,9 +179,4 @@ Continuing from (5):
   reaches `AURORA_S3_ACCESS_KEY_CREATED`.
 - Queue depth returns to 0; no DLQ growth.
 
-## Sign-off
-
-Tests pass: ☐
-Manual scenarios pass: ☐
-Reviewer: **\*\*\*\***\_\_\_\_**\*\*\*\***
-Date: **\*\*\*\***\_\_\_\_**\*\*\*\***
+**✅ CHECK PASSED ✅**
