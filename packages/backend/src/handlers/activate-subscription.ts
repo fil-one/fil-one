@@ -53,10 +53,17 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const record = await getCustomerBillingRecord(userId);
   const stripeCustomerId = record?.stripeCustomerId as string | undefined;
 
-  if (!record || !stripeCustomerId) {
+  if (!record) {
     return new ResponseBuilder()
       .status(400)
       .body({ message: 'No billing record found. Please set up a payment method first.' })
+      .build();
+  }
+
+  if (!stripeCustomerId) {
+    return new ResponseBuilder()
+      .status(400)
+      .body({ message: 'Billing record is missing Stripe customer information. Please set up a payment method first.' })
       .build();
   }
 
