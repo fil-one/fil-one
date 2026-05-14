@@ -920,6 +920,7 @@ describe('recordSetupFailure', () => {
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
       UpdateExpression: 'ADD setupFailureCount :one SET updatedAt = :now',
+      ConditionExpression: 'attribute_exists(setupStatus)',
       ReturnValues: 'UPDATED_NEW',
     });
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({

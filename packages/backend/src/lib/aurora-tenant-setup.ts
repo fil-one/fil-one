@@ -395,6 +395,14 @@ export async function recordSetupFailure(orgId: string): Promise<void> {
       TableName: Resource.UserInfoTable.name,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
       UpdateExpression: 'ADD setupFailureCount :one SET updatedAt = :now',
+      // Without this guard, UpdateItem's default upsert would create an
+      // orphan row containing only pk/sk/setupFailureCount/updatedAt when
+      // the org profile is missing (e.g. operational deletion or restore
+      // from an inconsistent backup). The orphan has no setupStatus, so
+      // every future processTenantSetup call hits the default branch and
+      // wedges the org permanently. setupStatus is the canonical marker
+      // of a profile created by the onboarding transaction.
+      ConditionExpression: 'attribute_exists(setupStatus)',
       ExpressionAttributeValues: {
         ':one': { N: '1' },
         ':now': { S: new Date().toISOString() },
