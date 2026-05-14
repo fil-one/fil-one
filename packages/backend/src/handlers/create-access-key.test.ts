@@ -387,7 +387,7 @@ describe('create-access-key baseHandler', () => {
 
   describe('region', () => {
     beforeEach(() => {
-      ddbMock.on(GetItemCommand).resolves(orgProfileItem('aurora-t-1'));
+      ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
       ddbMock.on(PutItemCommand).resolves({});
       mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
     });
