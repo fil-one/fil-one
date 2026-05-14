@@ -141,11 +141,11 @@ describe('processTenantSetup', () => {
     });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    // One status advance + one setupFailureCount reset on full success
-    expect(updateCalls).toHaveLength(2);
+    expect(updateCalls).toHaveLength(1);
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues![':status']).toStrictEqual({
       S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED,
     });
+    expect(updateCalls[0].args[0].input.ReturnValues).toBe('ALL_OLD');
 
     const ssmCalls = ssmMock.commandCalls(PutParameterCommand);
     expect(ssmCalls).toHaveLength(1);
@@ -186,8 +186,7 @@ describe('processTenantSetup', () => {
     });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    // Four advanceStatus updates + one setupFailureCount reset on full success
-    expect(updateCalls).toHaveLength(5);
+    expect(updateCalls).toHaveLength(4);
 
     // First update: set auroraTenantId + AURORA_TENANT_CREATED
     expect(updateCalls[0].args[0].input).toStrictEqual({
@@ -230,7 +229,8 @@ describe('processTenantSetup', () => {
       },
     });
 
-    // Fourth update: set AURORA_S3_ACCESS_KEY_CREATED
+    // Fourth update: set AURORA_S3_ACCESS_KEY_CREATED, with ALL_OLD so the
+    // post-write check can read the prior setupFailureCount.
     expect(updateCalls[3].args[0].input).toStrictEqual({
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
@@ -241,6 +241,7 @@ describe('processTenantSetup', () => {
         ':expected': { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         ':now': { S: expect.any(String) },
       },
+      ReturnValues: 'ALL_OLD',
     });
 
     // SSM: stores both API key and S3 access key
@@ -288,8 +289,7 @@ describe('processTenantSetup', () => {
     });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    // Three status advances + one setupFailureCount reset on full success
-    expect(updateCalls).toHaveLength(4);
+    expect(updateCalls).toHaveLength(3);
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues![':status']).toStrictEqual({
       S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE,
     });
@@ -328,8 +328,7 @@ describe('processTenantSetup', () => {
     });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    // Two status advances + one setupFailureCount reset on full success
-    expect(updateCalls).toHaveLength(3);
+    expect(updateCalls).toHaveLength(2);
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues![':status']).toStrictEqual({
       S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED,
     });
@@ -382,9 +381,9 @@ describe('processTenantSetup', () => {
       '/filone/test/aurora-portal/tenant-api-key/aurora-t-5',
     );
 
-    // Status advances through API_KEY_CREATED → S3_ACCESS_KEY_CREATED, plus the reset
+    // Status advances through API_KEY_CREATED → S3_ACCESS_KEY_CREATED.
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(3);
+    expect(updateCalls).toHaveLength(2);
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues![':status']).toStrictEqual({
       S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED,
     });
@@ -452,8 +451,7 @@ describe('processTenantSetup', () => {
 
       expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(6);
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      // API key advance + S3 key advance + setupFailureCount reset
-      expect(updateCalls).toHaveLength(3);
+      expect(updateCalls).toHaveLength(2);
       expect(updateCalls[0].args[0].input.ExpressionAttributeValues![':status']).toStrictEqual({
         S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED,
       });
@@ -478,8 +476,7 @@ describe('processTenantSetup', () => {
     await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    // S3 key advance + setupFailureCount reset
-    expect(updateCalls).toHaveLength(2);
+    expect(updateCalls).toHaveLength(1);
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues![':status']).toStrictEqual({
       S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED,
     });
@@ -543,8 +540,7 @@ describe('processTenantSetup', () => {
 
       expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(6);
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      // S3 key advance + setupFailureCount reset
-      expect(updateCalls).toHaveLength(2);
+      expect(updateCalls).toHaveLength(1);
       expect(updateCalls[0].args[0].input.ExpressionAttributeValues![':status']).toStrictEqual({
         S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED,
       });
@@ -842,44 +838,11 @@ describe('processTenantSetup', () => {
   });
 });
 
-describe('setupFailureCount reset on full success', () => {
+describe('stuck-tenant gauge refresh on terminal advance', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
     ssmMock.reset();
-  });
-
-  it('resets setupFailureCount to 0 when setup reaches AURORA_S3_ACCESS_KEY_CREATED', async () => {
-    ddbMock.on(GetItemCommand).resolves(
-      orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
-        auroraTenantId: { S: 'aurora-t-1' },
-      }),
-    );
-    // The four advanceStatus updates resolve normally. The reset update is
-    // matched on its UpdateExpression so we can give it a separate response.
-    ddbMock.on(UpdateItemCommand).resolves({});
-    ddbMock
-      .on(UpdateItemCommand, {
-        UpdateExpression: 'SET setupFailureCount = :zero',
-      })
-      .resolves({ Attributes: { setupFailureCount: { N: '0' } } });
-    ssmMock.on(PutParameterCommand).resolves({});
-    setupDefaultS3AccessKeyMock();
-
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
-
-    const resetCalls = ddbMock
-      .commandCalls(UpdateItemCommand)
-      .filter((c) => c.args[0].input.UpdateExpression === 'SET setupFailureCount = :zero');
-    expect(resetCalls).toHaveLength(1);
-    expect(resetCalls[0].args[0].input).toMatchObject({
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-      UpdateExpression: 'SET setupFailureCount = :zero',
-      ExpressionAttributeValues: { ':zero': { N: '0' } },
-      ReturnValues: 'ALL_OLD',
-    });
   });
 
   it('re-emits StuckAuroraTenantSetupCount when prior failureCount was >= 3 (alert clears)', async () => {
@@ -889,10 +852,10 @@ describe('setupFailureCount reset on full success', () => {
         auroraTenantId: { S: 'aurora-t-1' },
       }),
     );
-    ddbMock.on(UpdateItemCommand).resolves({});
-    ddbMock
-      .on(UpdateItemCommand, { UpdateExpression: 'SET setupFailureCount = :zero' })
-      .resolves({ Attributes: { setupFailureCount: { N: '5' } } });
+    // The path from AURORA_TENANT_API_KEY_CREATED issues exactly one
+    // UpdateItem — the terminal advance. Its ALL_OLD response carries the
+    // prior setupFailureCount used by the post-write check.
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { setupFailureCount: { N: '5' } } });
     ssmMock.on(PutParameterCommand).resolves({});
     setupDefaultS3AccessKeyMock();
 
@@ -908,15 +871,34 @@ describe('setupFailureCount reset on full success', () => {
         auroraTenantId: { S: 'aurora-t-1' },
       }),
     );
-    ddbMock.on(UpdateItemCommand).resolves({});
-    ddbMock
-      .on(UpdateItemCommand, { UpdateExpression: 'SET setupFailureCount = :zero' })
-      .resolves({ Attributes: { setupFailureCount: { N: '2' } } });
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { setupFailureCount: { N: '2' } } });
     ssmMock.on(PutParameterCommand).resolves({});
     setupDefaultS3AccessKeyMock();
 
     await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
 
+    expect(mockScanAndEmitStuckTenantCount).not.toHaveBeenCalled();
+  });
+
+  it('does not re-emit StuckAuroraTenantSetupCount when the terminal advance loses the race', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      orgProfileItem({
+        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+        auroraTenantId: { S: 'aurora-t-1' },
+      }),
+    );
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        $metadata: {},
+        message: 'The conditional request failed',
+      }),
+    );
+    ssmMock.on(PutParameterCommand).resolves({});
+    setupDefaultS3AccessKeyMock();
+
+    await expect(
+      processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' }),
+    ).resolves.toBeUndefined();
     expect(mockScanAndEmitStuckTenantCount).not.toHaveBeenCalled();
   });
 });

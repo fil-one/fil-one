@@ -65,7 +65,11 @@ Continuing from (3):
 - **No** new `AuroraTenantSetupDuration` emission — only the original
   `createTenant`-winning invocation emits.
 - Org profile reaches `AURORA_S3_ACCESS_KEY_CREATED`.
-- `setupFailureCount` is reset to `0`.
+- `setupFailureCount` retains the value it accumulated during the failed
+  attempts (e.g. `1`). It is not reset on success — the counter is a
+  monotonic record of failed attempts before setup completed. The
+  stuck-tenant alert excludes terminal-status rows, so the elevated count
+  on a completed org does not contribute to the gauge.
 
 ### 5. Stuck-tenant gauge transition up
 
@@ -90,9 +94,11 @@ Continuing from (5):
 **Expect:**
 
 - Setup completes (`AURORA_S3_ACCESS_KEY_CREATED`).
-- `setupFailureCount` reset to `0`.
+- `setupFailureCount` stays at its prior value (≥ 3). The alert filter
+  excludes the row because `setupStatus` is terminal.
 - One `StuckAuroraTenantSetupCount` EMF emission with the new count
-  (smaller by 1).
+  (smaller by 1) — the terminal advance reads the prior counter via
+  `ALL_OLD` and triggers a re-emit because that prior value was ≥ 3.
 
 ### 7. Concurrent first-bucket requests
 

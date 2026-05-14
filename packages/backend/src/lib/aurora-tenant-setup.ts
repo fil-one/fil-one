@@ -16,7 +16,7 @@ import {
 import { ACCESS_KEY_PERMISSIONS } from '@filone/shared';
 import { createAuroraAccessKey } from './aurora-portal.js';
 import { reportMetric } from './metrics.js';
-import { OrgSetupStatus } from './org-setup-status.js';
+import { OrgSetupStatus, isOrgSetupComplete } from './org-setup-status.js';
 import { scanAndEmitStuckTenantCount } from './stuck-tenant-metric.js';
 
 export { OrgSetupStatus };
@@ -319,14 +319,11 @@ async function createAndStoreS3AccessKey(
         throw err;
       }
 
-      const result = await advanceStatus({
+      await advanceStatus({
         orgProfileKey,
         expected: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED,
         next: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED,
       });
-      if (result === 'wrote') {
-        await resetSetupFailureCount(orgProfileKey);
-      }
       return;
     }
     throw err;
@@ -341,14 +338,11 @@ async function createAndStoreS3AccessKey(
     }),
   );
 
-  const result = await advanceStatus({
+  await advanceStatus({
     orgProfileKey,
     expected: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED,
     next: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED,
   });
-  if (result === 'wrote') {
-    await resetSetupFailureCount(orgProfileKey);
-  }
 }
 
 type OrgSetupStatusValue = (typeof OrgSetupStatus)[keyof typeof OrgSetupStatus];
@@ -414,27 +408,9 @@ export async function recordSetupFailure(orgId: string): Promise<void> {
   }
 }
 
-// Resets setupFailureCount to 0 after a setup reaches the terminal status.
-// Reads the prior value via ReturnValues=ALL_OLD; if the org was previously
-// stuck (prior >= 3), re-emits StuckAuroraTenantSetupCount so the alert
-// clears immediately.
-async function resetSetupFailureCount(orgProfileKey: OrgProfileKey): Promise<void> {
-  const result = await dynamo.send(
-    new UpdateItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: orgProfileKey,
-      UpdateExpression: 'SET setupFailureCount = :zero',
-      ExpressionAttributeValues: { ':zero': { N: '0' } },
-      ReturnValues: 'ALL_OLD',
-    }),
-  );
-  const prior = Number(result.Attributes?.setupFailureCount?.N ?? '0');
-  if (prior >= 3) {
-    await scanAndEmitStuckTenantCount();
-  }
-}
-
 async function advanceStatus(opts: AdvanceStatusOptions): Promise<'wrote' | 'lost-race'> {
+  const isTerminal = isOrgSetupComplete(opts.next);
+
   const setExpr =
     opts.writeAuroraTenantId !== undefined
       ? 'SET auroraTenantId = :auroraTenantId, setupStatus = :status, updatedAt = :now'
@@ -449,15 +425,29 @@ async function advanceStatus(opts: AdvanceStatusOptions): Promise<'wrote' | 'los
   };
 
   try {
-    await dynamo.send(
+    const out = await dynamo.send(
       new UpdateItemCommand({
         TableName: Resource.UserInfoTable.name,
         Key: opts.orgProfileKey,
         UpdateExpression: setExpr,
         ConditionExpression: 'setupStatus = :expected',
         ExpressionAttributeValues: exprValues,
+        // On the terminal advance, read the prior setupFailureCount so we can
+        // refresh the stuck-tenant gauge when this org was previously stuck.
+        // The counter itself is left in place — it is a historical record of
+        // attempts-to-success and is excluded from the gauge by the
+        // setupStatus filter once terminal.
+        ...(isTerminal ? { ReturnValues: 'ALL_OLD' as const } : {}),
       }),
     );
+
+    if (isTerminal) {
+      const priorFailureCount = Number(out.Attributes?.setupFailureCount?.N ?? '0');
+      if (priorFailureCount >= 3) {
+        await scanAndEmitStuckTenantCount();
+      }
+    }
+
     return 'wrote';
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {

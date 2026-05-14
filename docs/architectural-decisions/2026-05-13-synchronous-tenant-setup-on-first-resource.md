@@ -26,7 +26,9 @@ The sign-in path (`middleware/auth.ts`) and `GET /api/me` no longer trigger setu
 
 ### Stuck-tenant alert
 
-Each thrown failure increments a per-org `setupFailureCount` (atomic DynamoDB `ADD`). When the count first crosses 3, the failing invocation does a one-time `Scan` of `UserInfoTable` for org profiles where `setupFailureCount >= 3 AND setupStatus != AURORA_S3_ACCESS_KEY_CREATED` and emits a `StuckAuroraTenantSetupCount` EMF gauge. When a setup eventually succeeds for an org that was stuck (prior count ≥ 3), the counter resets to 0 and the gauge re-emits. The Grafana alert fires on `> 0` and auto-clears when the gauge drops back to zero.
+Each thrown failure increments a per-org `setupFailureCount` (atomic DynamoDB `ADD`). When the count first crosses 3, the failing invocation does a one-time `Scan` of `UserInfoTable` for org profiles where `setupFailureCount >= 3 AND setupStatus != AURORA_S3_ACCESS_KEY_CREATED` and emits a `StuckAuroraTenantSetupCount` EMF gauge. When a setup eventually succeeds, the conditional `UpdateItem` that writes the terminal `setupStatus` uses `ReturnValues: 'ALL_OLD'` to read the prior `setupFailureCount`; if that prior value was `≥ 3`, the invocation re-emits the gauge so the alert clears immediately. The counter itself is **not** reset — it stays on the row as a monotonic record of failed attempts before setup completed. The gauge's `setupStatus <> :complete` filter excludes terminal-status rows, so the carried-over counter does not contribute to the gauge. The Grafana alert fires on `> 0` and auto-clears when the gauge drops back to zero.
+
+The convention "an org is currently failing iff `setupFailureCount >= N AND setupStatus <> AURORA_S3_ACCESS_KEY_CREATED`" is the contract for any future predicate that wants to detect ongoing failure — the `setupStatus` qualifier is required because `setupFailureCount` alone is ambiguous after success.
 
 Operators triage by Loki log search on `orgId` — failure details are in `console.error` lines from `ensureTenantReady` and the underlying Aurora API libraries. No error column in DynamoDB.
 

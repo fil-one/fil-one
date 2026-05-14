@@ -45,8 +45,10 @@ platform-wide Aurora incident rather than per-org.
 errors, or Lambda timeout traces.
 
 **Action:** Check Aurora status (their status page or backoffice ping). If
-Aurora is broken, wait for them. The stuck-tenant counter resets the moment
-the next user retry succeeds — no intervention required.
+Aurora is broken, wait for them. The stuck-tenant gauge refreshes the
+moment the next user retry succeeds — the terminal-status advance reads
+the prior `setupFailureCount` and re-emits the gauge when it was previously
+`≥ 3`, so the alert clears immediately. No intervention required.
 
 ### 2. Lost SSM secret (orphan in Aurora)
 
@@ -98,15 +100,20 @@ retry-friendly state. Escalate to engineering.
 After fixing the underlying cause, the alert clears via one of two paths:
 
 - **User retries.** Best path: the user's next `POST /api/buckets` or
-  `POST /api/access-keys` succeeds, which resets `setupFailureCount` to 0
-  and re-emits `StuckAuroraTenantSetupCount` (which drops by 1).
-- **Operator triggers a retry.** If the user has gone away, we currently have
-  no UI for this. See Linear ticket "Build an operator-facing endpoint to
-  restart Aurora tenant setup for a stuck org" for the planned tool. As an
-  interim measure, you can manually clear `setupFailureCount` in DynamoDB
-  and email the user asking them to retry. **Important:** clearing the
-  counter alone does not re-emit the gauge — only a real `recordSetupFailure`
-  or `resetSetupFailureCount` call does.
+  `POST /api/access-keys` succeeds. The terminal-status advance reads
+  the prior `setupFailureCount` (≥ 3) via `ReturnValues: 'ALL_OLD'` and
+  re-emits `StuckAuroraTenantSetupCount`, dropping the gauge by 1. The
+  counter itself is left in place — it stays on the row as a historical
+  record of attempts-to-success, and the gauge filter
+  (`setupStatus <> :complete`) excludes the row from then on.
+- **Operator triggers a retry.** If the user has gone away, we currently
+  have no UI for this. See Linear ticket "Build an operator-facing endpoint
+  to restart Aurora tenant setup for a stuck org" for the planned tool. As
+  an interim measure, email the user asking them to retry. **Note:**
+  manually clearing `setupFailureCount` in DynamoDB does not re-emit the
+  gauge — only a real `recordSetupFailure` call or a successful terminal
+  advance does. Clearing the counter without driving a state transition
+  leaves the gauge stale until the next transition event.
 
 ## Verification
 
@@ -117,4 +124,7 @@ After resolving:
 2. The alert auto-clears once the gauge has been zero for the configured
    evaluation window.
 3. Spot-check the resolved org's profile:
-   `setupStatus == AURORA_S3_ACCESS_KEY_CREATED`, `setupFailureCount == 0`.
+   `setupStatus == AURORA_S3_ACCESS_KEY_CREATED`. `setupFailureCount` will
+   carry whatever value it accumulated during the failed attempts (i.e.
+   `≥ 3` for a previously-stuck org); that is expected — it is now a
+   historical record, not active state.
