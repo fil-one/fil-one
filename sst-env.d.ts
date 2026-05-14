@@ -98,6 +98,18 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "DeleteMfaEnrollment": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "DisableMfa": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "EnrollMfa": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "GetActivity": {
       "name": string
       "type": "sst.aws.Function"
@@ -147,6 +159,10 @@ declare module "sst" {
       "type": "sst.aws.Bucket"
     }
     "Presign": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "RegenerateRecoveryCode": {
       "name": string
       "type": "sst.aws.Function"
     }
