@@ -77,7 +77,8 @@ function PaymentForm({
 
     // Validate the promo code against the same zod schema the server uses, so format
     // typos are caught before we bother creating a Stripe payment method.
-    const body = promotionCode ? { promotionCode: promotionCode.trim() } : {};
+    const trimmedPromotionCode = promotionCode.trim();
+    const body = trimmedPromotionCode ? { promotionCode: trimmedPromotionCode } : {};
     const parsed = ActivateSubscriptionRequestSchema.safeParse(body);
     if (!parsed.success) {
       const issue = parsed.error.issues.find((i) => i.path[0] === 'promotionCode');
