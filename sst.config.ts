@@ -429,6 +429,7 @@ export default $config({
       extraLink?: (typeof allResources)[number][];
       provisionedConcurrency?: number;
       memory?: sst.aws.FunctionArgs['memory'];
+      timeout?: sst.aws.FunctionArgs['timeout'];
     }
 
     function addRoute({
@@ -440,6 +441,7 @@ export default $config({
       extraLink,
       provisionedConcurrency,
       memory,
+      timeout,
     }: AddRouteProps) {
       // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
       const fnName = handler
@@ -455,7 +457,7 @@ export default $config({
           ...extraEnv,
         },
         permissions,
-        timeout: '10 seconds',
+        timeout: timeout ?? '10 seconds',
         ...(memory ? { memory } : {}),
         ...(provisionedConcurrency && provisionedConcurrency > 0
           ? {
@@ -498,9 +500,15 @@ export default $config({
       method: 'POST',
       routePath: '/api/buckets',
       handler: 'create-bucket',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: auroraEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+        },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      timeout: '30 seconds',
     });
     addRoute({
       method: 'GET',
@@ -527,8 +535,14 @@ export default $config({
       method: 'POST',
       routePath: '/api/access-keys',
       handler: 'create-access-key',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: auroraEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+        },
+      ],
+      timeout: '30 seconds',
     });
     addRoute({
       method: 'DELETE',
