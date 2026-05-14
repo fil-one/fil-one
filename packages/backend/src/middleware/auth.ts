@@ -382,45 +382,6 @@ async function createNewUserAndOrg({
 // Middleware factory
 // ---------------------------------------------------------------------------
 
-async function tryValidateAccessToken({
-  request,
-  accessToken,
-  idToken,
-  jwks,
-  audience,
-  issuer,
-  clientId,
-  failureLabel,
-}: {
-  request: AuthMiddlewareRequest;
-  accessToken: string;
-  idToken: string | undefined;
-  jwks: ReturnType<typeof createRemoteJWKSet>;
-  audience: string;
-  issuer: string;
-  clientId: string;
-  failureLabel: string;
-}): Promise<boolean> {
-  try {
-    const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
-    const sub = payload.sub!;
-    const idClaims = await extractIdTokenClaims({ idToken, jwks, clientId, issuer });
-    request.internal.idTokenClaims = idClaims;
-    await attachIdentity({
-      event: request.event,
-      sub,
-      email: idClaims.email,
-      emailVerified: idClaims.emailVerified,
-      name: idClaims.name,
-      picture: idClaims.picture,
-    });
-    return true;
-  } catch (err) {
-    console.warn(failureLabel, { error: err });
-    return false;
-  }
-}
-
 // eslint-disable-next-line max-lines-per-function
 export function authMiddleware() {
   const before = async (
@@ -544,4 +505,43 @@ export function authMiddleware() {
   };
 
   return { before, after } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;
+}
+
+async function tryValidateAccessToken({
+  request,
+  accessToken,
+  idToken,
+  jwks,
+  audience,
+  issuer,
+  clientId,
+  failureLabel,
+}: {
+  request: AuthMiddlewareRequest;
+  accessToken: string;
+  idToken: string | undefined;
+  jwks: ReturnType<typeof createRemoteJWKSet>;
+  audience: string;
+  issuer: string;
+  clientId: string;
+  failureLabel: string;
+}): Promise<boolean> {
+  try {
+    const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
+    const sub = payload.sub!;
+    const idClaims = await extractIdTokenClaims({ idToken, jwks, clientId, issuer });
+    request.internal.idTokenClaims = idClaims;
+    await attachIdentity({
+      event: request.event,
+      sub,
+      email: idClaims.email,
+      emailVerified: idClaims.emailVerified,
+      name: idClaims.name,
+      picture: idClaims.picture,
+    });
+    return true;
+  } catch (err) {
+    console.warn(failureLabel, { error: err });
+    return false;
+  }
 }
