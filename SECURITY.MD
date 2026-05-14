@@ -11,8 +11,7 @@ Use GitHub's private vulnerability reporting feature, available in the **Securit
 Alternatively, email **security@fil.org**.
 
 This covers:
-- Fil One API (`s3.fil.one`)
-- Fil One Console (`app.fil.one`)
+- Fil One Staging environment. (https://staging.fil.one)
 - Authentication, authorization, and session management
 - Billing and subscription management
 - API key issuance and access controls
