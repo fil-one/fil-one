@@ -3,6 +3,14 @@ import { z } from 'zod';
 export const ActivateSubscriptionRequestSchema = z
   .object({
     useSavedPaymentMethod: z.boolean().default(false),
+    promotionCode: z
+      .string()
+      .trim()
+      .regex(
+        /^[A-Za-z0-9_-]{3,40}$/,
+        'Promo code must be 3–40 letters, digits, hyphens, or underscores.',
+      )
+      .optional(),
   })
   .strict();
 
