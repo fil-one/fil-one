@@ -99,7 +99,6 @@ type StatusBannersProps = {
   graceDays: number | null;
   graceEndsLabel: string | undefined;
   isPastDue: boolean;
-  isCanceled: boolean;
 };
 
 function StatusBanners({
@@ -116,7 +115,6 @@ function StatusBanners({
   graceDays,
   graceEndsLabel,
   isPastDue,
-  isCanceled,
 }: StatusBannersProps) {
   return (
     <>
@@ -185,18 +183,6 @@ function StatusBanners({
           <div className="mt-3">
             <Button variant="primary" href="/billing" className="w-full justify-center text-xs">
               Update payment
-            </Button>
-          </div>
-        </div>
-      )}
-      {!collapsed && isCanceled && (
-        <div className="border-t border-red-200 bg-red-50 px-3 py-4">
-          <p className="text-xs font-medium text-red-800">
-            Account canceled. Reactivate to regain access.
-          </p>
-          <div className="mt-3">
-            <Button variant="primary" href="/billing" className="w-full justify-center text-xs">
-              Reactivate
             </Button>
           </div>
         </div>
@@ -291,7 +277,6 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
   const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod;
   const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
-  const isCanceled = billing?.subscription.status === SubscriptionStatus.Canceled;
   const trialDays =
     isTrialing && billing?.subscription.trialEndsAt
       ? daysUntil(billing.subscription.trialEndsAt)
@@ -448,7 +433,6 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           graceDays={graceDays}
           graceEndsLabel={graceEndsLabel}
           isPastDue={isPastDue}
-          isCanceled={isCanceled}
         />
 
         {/* Footer: Help + System status */}
