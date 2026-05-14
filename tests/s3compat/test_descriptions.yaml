@@ -1,0 +1,853 @@
+# Per-test descriptions for ceph/s3-tests surfaced in compatibility reports.
+#
+# Keys: bare test function name (preferred) or full pytest nodeid for disambiguation.
+# Value: a string description, or a mapping with a `description` field plus
+# optional forward-compat fields like `notes`, `spec_url`.
+#
+# Missing entries are silently skipped; orphan keys are ignored. Adding a
+# description does not change pass/fail behavior — it only enriches the
+# Errors/Skipped/Successes sections of the generated reports.
+#
+# Scope: covers tests in `s3tests/functional/test_s3.py`, the only file
+# compatibility_test.py runs by default. Other modules in the submodule
+# (test_iam.py, test_sts.py, test_headers.py, test_s3select.py, test_sns.py)
+# are not in scope.
+
+# ── bucket basics: create, delete, head, naming, default ACL ──
+
+test_bucket_delete_notexist: DeleteBucket on a never-created name; expects 404 NoSuchBucket.
+test_bucket_delete_nonempty: DeleteBucket against a bucket containing objects; expects 409 BucketNotEmpty.
+test_bucket_create_delete: Creates a bucket, deletes it, then deletes again; second delete must return 404 NoSuchBucket.
+test_bucket_concurrent_set_canned_acl: Hammers PutBucketAcl from 50 threads with the public-read canned ACL; all calls must succeed.
+test_bucket_head: HeadBucket on an existing bucket; expects HTTP 200.
+test_bucket_head_notexist: HeadBucket on a never-created bucket; expects HTTP 404.
+test_bucket_head_extended: HeadBucket with the RGW `read-stats=true` extension; validates x-rgw-object-count and x-rgw-bytes-used headers before and after uploading 3 keys.
+test_bucket_create_naming_bad_starts_nonalpha: CreateBucket with a name starting with an underscore; expects InvalidBucketName.
+test_bucket_create_naming_bad_short_one: CreateBucket with a 1-character name; expects InvalidBucketName (minimum length is 3).
+test_bucket_create_naming_bad_short_two: CreateBucket with a 2-character name; expects InvalidBucketName.
+test_bucket_create_naming_good_long_60: CreateBucket with a 60-character name; must succeed (within the 63-char max).
+test_bucket_create_naming_good_long_61: CreateBucket with a 61-character name; must succeed.
+test_bucket_create_naming_good_long_62: CreateBucket with a 62-character name; must succeed.
+test_bucket_create_naming_good_long_63: CreateBucket with a 63-character name (maximum allowed); must succeed.
+test_bucket_create_naming_bad_ip: CreateBucket with an IPv4-formatted name; expects rejection (S3 forbids IP-shaped names).
+test_bucket_create_naming_dns_underscore: CreateBucket with an underscore in the name; expects 400 InvalidBucketName.
+test_bucket_create_naming_dns_long: CreateBucket at exactly 63 characters total length (prefix + suffix); must succeed.
+test_bucket_create_naming_dns_dash_at_end: CreateBucket with a trailing dash; expects 400 InvalidBucketName.
+test_bucket_create_naming_dns_dot_dot: CreateBucket with consecutive dots; expects 400 InvalidBucketName.
+test_bucket_create_naming_dns_dot_dash: CreateBucket with a dot followed by dash; expects 400 InvalidBucketName.
+test_bucket_create_naming_dns_dash_dot: CreateBucket with a dash followed by dot; expects 400 InvalidBucketName.
+test_bucket_create_exists: Same user calls CreateBucket twice with the same name; second call expects 409 BucketAlreadyOwnedByYou.
+test_bucket_create_exists_nonowner: Two different users try to CreateBucket with the same name; second user expects 409 BucketAlreadyExists.
+test_bucket_recreate_overwrite_acl: After creating a bucket with public-read ACL, recreating it expects 409 BucketAlreadyExists.
+test_bucket_recreate_new_acl: After creating a bucket, recreating it with a different ACL expects 409 BucketAlreadyExists.
+test_bucket_acl_default: GetBucketAcl on a freshly created bucket; expects a single FULL_CONTROL grant to the bucket owner.
+test_bucket_header_acl_grants: CreateBucket while injecting x-amz-grant-* headers; verifies all five grant types (READ, WRITE, READ_ACP, WRITE_ACP, FULL_CONTROL) land on the alt user.
+test_bucket_create_naming_good_starts_alpha: CreateBucket with a name beginning with a letter; must succeed.
+test_bucket_create_naming_good_starts_digit: CreateBucket with a name beginning with a digit; must succeed.
+test_bucket_create_naming_good_contains_period: CreateBucket with a period in the name (`aaa.111`); must succeed.
+test_bucket_create_naming_good_contains_hyphen: CreateBucket with a hyphen in the name (`aaa-111`); must succeed.
+test_bucket_recreate_not_overriding: After populating a bucket with keys, recreating the bucket must not wipe its object list.
+test_bucket_create_special_key_names: Upload, list, GET, and PutObjectAcl across keys containing special characters (space, quote, `$`, `%`, `&`, `'`, `<`, `>`, `_`).
+test_bucket_create_delete_bucket_ownership: Roundtrips BucketOwnerEnforced ownership controls via Put/Get/Delete; expects 404 OwnershipControlsNotFoundError after delete.
+
+# ── bucket_policy ──
+
+test_bucket_policy: PutBucketPolicy granting `s3:ListBucket` to `*`; alt user can then ListObjects (v1) and see the single uploaded key.
+test_bucketv2_policy: PutBucketPolicy granting `s3:ListBucket` to `*`; alt user can then ListObjectsV2 and see the uploaded key. Same as test_bucket_policy but exercises the v2 listing API.
+test_bucket_policy_deny_self_denied_policy: With a Deny policy on Put/Get/DeleteBucketPolicy for `*`, the IAM root account can still bypass it but non-root IAM users get AccessDenied.
+test_bucket_policy_deny_self_denied_policy_confirm_header: Same Deny policy applied with ConfirmRemoveSelfBucketAccess=True; even the IAM root account gets AccessDenied on subsequent policy operations.
+test_bucket_policy_acl: A Deny ListBucket policy combined with an authenticated-read bucket ACL must result in 403 AccessDenied for the alt user (policy overrides ACL allow).
+test_bucketv2_policy_acl: Same as test_bucket_policy_acl but exercises ListObjectsV2 on the alt user; expects 403 AccessDenied.
+test_bucket_policy_different_tenant: Allow-ListBucket policy on a global-tenant bucket; a tenanted client must be able to list it using the `:bucket` cross-tenant syntax.
+test_bucket_policy_multipart: Policy granting s3:PutObject on the bucket ARN only is insufficient for CreateMultipartUpload; an object-ARN grant is required.
+test_bucket_policy_tenanted_bucket: Allow-ListBucket policy on a tenanted bucket; the global-tenant client must be able to list it via `tenant:bucket` syntax.
+test_bucket_policy_another_bucket: GetBucketPolicy round-trips a wildcard `arn:aws:s3:::*` policy onto a second bucket; alt user can list both.
+test_bucketv2_policy_another_bucket: Same as test_bucket_policy_another_bucket using ListObjectsV2 on both buckets.
+test_bucket_policy_set_condition_operator_end_with_IfExists: Policy with a `StringLikeIfExists` aws:Referer condition; matching referers receive HTTP 200, non-matching get 403.
+test_set_get_del_bucket_policy: Round-trip Put/Get/DeleteBucketPolicy; GetBucketPolicy after delete must return NoSuchBucketPolicy.
+test_get_tags_acl_public: Policy granting s3:GetObjectTagging to `*` lets the alt user read tags the owner set.
+test_put_tags_acl_public: Policy granting s3:PutObjectTagging to `*` lets the alt user write tags that the owner can then read.
+test_delete_tags_obj_public: Policy granting s3:DeleteObjectTagging to `*` lets the alt user delete tags; the owner's subsequent GetObjectTagging returns an empty set.
+test_bucket_policy_get_obj_existing_tag: Policy with `s3:ExistingObjectTag/security=public` condition; alt user can GET the matching-tag object only, others return 403.
+test_bucket_policy_get_obj_tagging_existing_tag: Same ExistingObjectTag condition scoped to GetObjectTagging; alt user can read tags only on the matching object, other tagging reads return 403.
+test_bucket_policy_put_obj_tagging_existing_tag: PutObjectTagging gated on ExistingObjectTag/security=public; alt user can re-tag the matching object only while preserving the condition tag.
+test_bucket_policy_upload_part_copy: Policy granting GetObject on `public/*` only; alt user can UploadPartCopy from public/* keys but is denied for private/* sources.
+test_bucket_policy_put_obj_copy_source: Two-bucket policy where the destination requires `s3:x-amz-copy-source` to start with `bucket/public/`; alt user can CopyObject from public sources, private is denied.
+test_bucket_policy_put_obj_copy_source_meta: Policy requires `s3:x-amz-metadata-directive=COPY` on the destination; alt user succeeds with the header and is denied without it.
+test_bucket_policy_put_obj_acl: Two-statement policy that Allows PutObject but Denies if x-amz-acl matches `public*`; private uploads succeed, public-read ACL upload returns 403.
+test_bucket_policy_put_obj_grant: Policy requiring `s3:x-amz-grant-full-control` matching the bucket owner; verifies object ownership transfer to bucket owner when header is present vs retained by alt uploader when absent.
+test_bucket_policy_put_obj_s3_noenc: Deny PutObject when x-amz-server-side-encryption header is absent; unencrypted PutObject is denied, AES256 PutObject succeeds.
+test_bucket_policy_put_obj_s3_incorrect_algo_sse_s3: Deny PutObject unless server-side-encryption header equals AES256; AES192 is denied, AES256 succeeds.
+test_bucket_policy_put_obj_s3_kms: Policy denies PutObject when SSE is not AES256 or is absent; verifies even a KMS PutObject is denied because policy requires AES256.
+test_bucket_policy_put_obj_kms_noenc: Policy requires `aws:kms` SSE and forbids unencrypted; KMS PutObject succeeds, unencrypted is denied. Skipped when [s3 main] has no kms_keyid configured.
+test_bucket_policy_put_obj_kms_s3: Policy requires `aws:kms` SSE; an AES256 PutObject must be denied because it doesn't match the kms condition.
+test_bucket_policy_put_obj_request_obj_tag: 'Policy allows PutObject only when `s3:RequestObjectTag/security=public`; alt user is denied without the tag header and succeeds with `x-amz-tagging: security=public`.'
+test_bucket_policy_get_obj_acl_existing_tag: Policy with ExistingObjectTag condition scoped to GetObjectAcl; alt user can read ACL of matching-tag object only, other operations return 403.
+
+# ── versioning ──
+
+test_versioning_concurrent_multi_object_delete: Concurrent multi-object DeleteObjects from 5 threads over 15 versions; every response must report all 15 deleted with no Errors.
+test_versioning_bucket_create_suspend: Toggles bucket versioning Suspended → Enabled → Enabled → Suspended and verifies each PutBucketVersioning sticks via GetBucketVersioning.
+test_versioning_obj_create_read_remove: Creates and removes 5 object versions in a versioning-enabled bucket across several deletion orderings (oldest-first, newest-first, mixed).
+test_versioning_obj_create_read_remove_head: After creating versions and deleting the head version, GetObject must return the previous version; a subsequent unversioned DeleteObject creates a DeleteMarker visible in ListObjectVersions.
+test_versioning_stack_delete_merkers: Issuing three unversioned DeleteObject calls against the same key in a versioned bucket must produce three stacked DeleteMarkers atop the single existing version.
+test_versioning_obj_plain_null_version_removal: Object PUT before versioning was enabled has VersionId 'null'; deleting with VersionId='null' must remove it and the subsequent GET returns 404 NoSuchKey.
+test_versioning_obj_plain_null_version_overwrite: After enabling versioning, overwriting the null-version object creates a new VersionId; deleting that returns access to the null version, then deleting 'null' removes the key entirely.
+test_versioning_obj_plain_null_version_overwrite_suspended: Same as the overwrite test but versioning is then Suspended; the overwrite collapses into a single 'null' version which can still be deleted by VersionId='null'.
+test_versioning_obj_suspend_versions: Mixes versioned writes, suspended overwrites, suspended deletes, and re-enabled versioning, then removes every version one-by-one; final state must be empty.
+test_versioning_obj_suspended_copy: With versioning suspended, CopyObject reads the latest version and writes it to a new key — both within the source bucket and to a non-versioned destination bucket.
+test_versioning_obj_create_versions_remove_all: Creates 10 versions and removes them one at a time; final version list must be empty.
+test_versioning_obj_create_versions_remove_special_names: Same create/remove-all flow but against keys with special characters (`_testobj`, `_`, `:`, ` `).
+test_versioning_obj_create_overwrite_multipart: Three sequential multipart uploads to the same key under versioning produce three distinct VersionIds; verifies each version's contents and supports per-version delete.
+test_versioning_obj_list_marker: Lists versions across two keys (5 versions each); ListObjectVersions must return them grouped per key in reverse-creation order.
+test_versioning_copy_obj_version: CopyObject with a specific VersionId copies that exact version (not the latest), both within the bucket and across buckets; copying without VersionId picks the head.
+test_versioning_multi_object_delete: DeleteObjects on both VersionIds of a key removes all versions; a second identical call must succeed (idempotency).
+test_versioning_multi_object_delete_with_marker: DeleteObjects across versions plus a delete-marker VersionId removes everything; a repeat call must be idempotent and leave the bucket empty.
+test_versioning_multi_object_delete_with_marker_create: DeleteObjects on a key with no existing version creates a DeleteMarker; response['Deleted'][0]['DeleteMarker'] is True and ListObjectVersions reports it.
+test_versioned_object_acl: GetObjectAcl with a specific VersionId returns default owner FULL_CONTROL; PutObjectAcl ACL='public-read' with VersionId scopes the grant to that version; new put_object creates a fresh version with default ACL.
+test_versioned_object_acl_no_version_specified: PutObjectAcl without VersionId targets the current head version; verifies that ACL change is observable via GetObjectAcl with the head VersionId.
+test_versioned_concurrent_object_create_concurrent_remove: Five rounds of concurrently creating 5 versions then concurrently clearing the bucket; each round must end with no versions remaining.
+test_versioned_concurrent_object_create_and_remove: Interleaves concurrent create/clear loops; after a final clear the bucket must report no versions.
+test_versioning_bucket_atomic_upload_return_version_id: PutObject returns a VersionId on versioning-enabled buckets and omits it on default/suspended buckets.
+test_versioning_bucket_multipart_upload_return_version_id: CompleteMultipartUpload returns a VersionId on versioning-enabled buckets and omits it on default/suspended buckets (uses a 30 MB upload).
+
+# ── lifecycle (configuration + expiration + transition) ──
+
+test_lifecycle_set: PutBucketLifecycleConfiguration with two prefix rules (Enabled + Disabled); expects HTTP 200.
+test_lifecycle_get: Put then GetBucketLifecycleConfiguration; the returned rules must equal the rules submitted.
+test_lifecycle_delete: GetBucketLifecycleConfiguration on a fresh bucket returns 404 NoSuchLifecycleConfiguration; DeleteBucketLifecycle returns 204 even when no config exists.
+test_lifecycle_get_no_id: Puts rules without explicit IDs; GetBucketLifecycleConfiguration must auto-assign IDs while preserving prefix/days/status.
+test_lifecycle_expiration: Two prefix-scoped rules (Days=1 and Days=5); waits debug intervals and verifies the expiring-prefix keys disappear at the expected rounds while keep/ keys remain.
+test_lifecyclev2_expiration: Same flow as test_lifecycle_expiration but uses ListObjectsV2 to observe expirations.
+test_lifecycle_expiration_versioning_enabled: With versioning enabled and a delete-marker created, a Days=1 expiration rule keeps the single noncurrent version plus its delete marker after the wait window.
+test_lifecycle_expiration_tags1: Rule filtering by both Prefix and a single Tag; an object lacking the tag must not expire.
+test_lifecycle_expiration_tags2: Tag-filtered rule via helper setup; after expiration only the one matching-tag object remains.
+test_lifecycle_expiration_versioned_tags2: Same as tags2 but with versioning enabled; the tag-filtered rule still yields one remaining object.
+test_lifecycle_expiration_noncur_tags1: NoncurrentVersionExpiration with a tag filter; verifies 10→10 then 10→1 across two wait windows (only the current version survives).
+test_lifecycle_expiration_newer_noncurrent: NewerNoncurrentVersions=5 keeps the 5 latest noncurrent versions plus the current; after one wait window 6 objects remain out of 10.
+test_lifecycle_expiration_size_gt: Filter with ObjectSizeGreaterThan=2000; the 3000-byte object expires, the 1000-byte object survives.
+test_lifecycle_expiration_size_lt: Filter with ObjectSizeLessThan=2000; the 1000-byte object expires, the 3000-byte object survives.
+test_lifecycle_id_too_long: Rule with ID of 256 chars; PutBucketLifecycleConfiguration must reject with 400 InvalidArgument.
+test_lifecycle_same_id: Two rules sharing the same ID; PutBucketLifecycleConfiguration must reject with 400 InvalidArgument.
+test_lifecycle_invalid_status: Rules with Status values 'enabled'/'disabled'/'invalid' (only 'Enabled'/'Disabled' are valid); each must return 400 MalformedXML.
+test_lifecycle_set_date: Rule with Expiration.Date in ISO date form; expects HTTP 200.
+test_lifecycle_set_invalid_date: Rule with Expiration.Date in non-ISO form ('20200101'); expects 400.
+test_lifecycle_expiration_date: Rules with past and future Date values; only the past-date prefix expires.
+test_lifecycle_expiration_days0: Days=0 is illegal for expiration rules (legal only for transitions); expects InvalidArgument.
+test_lifecycle_expiration_header_put: PutBucketLifecycleConfiguration response carries an x-amz-expiration header matching the rule; helper checks ID and Days.
+test_lifecycle_expiration_header_head: HeadObject on a key matching an expiration rule includes the x-amz-expiration header.
+test_lifecycle_expiration_header_tags_head: With a tag-filtered rule, HeadObject returns the x-amz-expiration header only when the object matches the tag filter.
+test_lifecycle_expiration_header_and_tags_head: Filter with AND-of-tags; HeadObject must NOT return x-amz-expiration when the object matches only one of the required tags.
+test_lifecycle_set_noncurrent: PutBucketLifecycleConfiguration with NoncurrentVersionExpiration rules; expects HTTP 200.
+test_lifecycle_noncur_expiration: With versioning enabled and NoncurrentVersionExpiration on one prefix, after waiting the noncurrent versions on that prefix vanish while other-prefix versions remain.
+test_lifecycle_set_deletemarker: Rule with Expiration.ExpiredObjectDeleteMarker=True; expects HTTP 200.
+test_lifecycle_set_filter: Rule with explicit Filter.Prefix (vs top-level Prefix); expects HTTP 200.
+test_lifecycle_set_empty_filter: Rule with an empty Filter object; expects HTTP 200.
+test_lifecycle_deletemarker_expiration: Mixed NoncurrentVersionExpiration + ExpiredObjectDeleteMarker rule; after the wait window the noncurrent versions and the orphan delete marker are both removed.
+test_lifecycle_deletemarker_expiration_with_days_tag: ExpiredObjectDeleteMarker is ignored when Days is also specified; after the first window only versions expire, then after the second window the delete marker also clears.
+test_lifecycle_set_multipart: Rule with AbortIncompleteMultipartUpload.DaysAfterInitiation; expects HTTP 200.
+test_lifecycle_multipart_expiration: With AbortIncompleteMultipartUpload set on a prefix, an in-flight upload under that prefix is aborted while uploads on other prefixes persist.
+test_lifecycle_transition_set_invalid_date: Transition rule with non-ISO Date format; expects 400.
+test_lifecycle_transition: Two prefix rules transitioning to different non-STANDARD storage classes; verifies counts per storage class across the wait windows. Skipped when fewer than 3 storage classes are configured.
+test_lifecycle_transition_single_rule_multi_trans: Single rule with two transitions (Days=1 then Days=7); objects step from STANDARD → sc[1] → sc[2] across wait windows. Skipped when fewer than 3 storage classes configured.
+test_lifecycle_set_noncurrent_transition: PutBucketLifecycleConfiguration with NoncurrentVersionTransitions plus NoncurrentVersionExpiration; expects HTTP 200. Skipped when fewer than 3 storage classes configured.
+test_lifecycle_noncur_transition: Noncurrent-version transitions to two storage classes plus expiration; verifies counts per storage class across waits. Skipped when fewer than 3 storage classes configured.
+test_lifecycle_plain_null_version_current_transition: A null-version (pre-versioning) object becomes a current version after enabling versioning and must transition under a Days=1 rule like other current versions.
+test_lifecycle_cloud_transition: Transition to a cloud storage class; verifies objects move to STANDARD on source side, retain-head behavior, and that GET/COPY return InvalidObjectState while DELETE succeeds. Skipped when [s3 cloud] not configured.
+test_lifecycle_cloud_multiple_transition: Three rules (regional → cloud → expiration); verifies counts move through STANDARD → sc1 → cloud_sc → expired across waits. Skipped when [s3 cloud] not configured.
+test_lifecycle_noncur_cloud_transition: NoncurrentVersionTransitions to a regional then a cloud storage class; verifies versioned-object transition reaches the cloud target with per-version naming. Skipped when [s3 cloud] not configured.
+test_lifecycle_cloud_transition_large_obj: Same cloud-transition flow but with 9 MB objects (exercises multipart on the cloud side). Skipped when [s3 cloud] not configured.
+test_lifecycle_cloud_transition_target_by_bucket: With target_by_bucket=true, objects land in a per-bucket target with no bucket prefix on keys; restore_object must succeed and reuse the cloud-backed content. Skipped when target_by_bucket not enabled.
+test_lifecycle_cloud_transition_target_by_bucket_multiple_buckets: target_by_bucket isolates objects between two source buckets — each target sees only its own bucket's keys; restore on one bucket also verified. Skipped when target_by_bucket not enabled.
+test_delete_marker_expiration: ExpiredObjectDeleteMarker plus NoncurrentVersionExpiration on a delete-markered key; after waits the delete marker is itself removed.
+test_lifecycle_transition_encrypted: Parametrized transition matrix across (source_mode_key, source_storage_class, dest_storage_class); verifies transition preserves encryption mode. Skipped when fewer than 2 storage classes configured.
+
+# ── copy ──
+
+test_object_copy_zero_size: CopyObject from a zero-byte source; destination must report ContentLength=0.
+test_object_copy_16m: CopyObject of a 16 MB object via single-part CopyObject (not multipart); destination ContentLength must equal source.
+test_object_copy_same_bucket: CopyObject from one key to another within the same bucket; verifies body roundtrips intact.
+test_object_copy_verify_contenttype: CopyObject must preserve the source object's Content-Type header on the destination.
+test_object_copy_to_itself: CopyObject with same source and destination key (no metadata change); expects 400 InvalidRequest.
+test_object_copy_to_itself_with_metadata: CopyObject to the same key with Metadata + MetadataDirective=REPLACE; verifies the metadata is replaced in place.
+test_object_copy_diff_bucket: CopyObject from one bucket to a different bucket; body must transfer intact.
+test_object_copy_not_owned_bucket: Alt user attempts CopyObject from a bucket they don't own to their own bucket; expects 403.
+test_object_copy_not_owned_object_bucket: After main user grants FULL_CONTROL via object and bucket ACLs, the alt user can CopyObject the granted source.
+test_object_copy_canned_acl: CopyObject with ACL=public-read makes the destination readable by an unrelated user; tested both with retained and replaced metadata.
+test_object_copy_retaining_metadata: CopyObject without MetadataDirective preserves the source's Content-Type, user metadata, and length; tested at 3 B and 1 MB.
+test_object_copy_replacing_metadata: CopyObject with MetadataDirective=REPLACE swaps in new Content-Type and user metadata while preserving length; tested at 3 B and 1 MB.
+test_object_copy_bucket_not_found: CopyObject whose CopySource references a non-existent bucket; expects 404.
+test_object_copy_key_not_found: CopyObject whose CopySource references an existing bucket but missing key; expects 404.
+test_object_copy_versioned_bucket: CopyObject with explicit VersionId across same-bucket, versioned destination bucket, non-versioned destination bucket, and back; verifies body/length per copy.
+test_object_copy_versioned_url_encoding: CopyObject of a key whose name contains `?` to a destination whose name contains `&`; both keys must roundtrip cleanly via the client's URL-encoding.
+test_object_copy_versioning_multipart_upload: CopyObject of a 30 MB multipart-uploaded source preserves body, length, metadata, and Content-Type across same-bucket and cross-bucket copies.
+test_multipart_copy_small: Multipart UploadPartCopy with a single 1-byte part; CompleteMultipartUpload assembles the destination object.
+test_multipart_copy_invalid_range: UploadPartCopy with CopySourceRange beyond the source size (0-21 over 5 bytes); expects 400 or 416 InvalidRange.
+test_multipart_copy_improper_range: UploadPartCopy with malformed CopySourceRange values (missing bytes= prefix, non-numeric, multi-range, etc.); each must return 400 InvalidArgument.
+test_multipart_copy_without_range: UploadPartCopy without CopySourceRange copies the entire source as one part; destination ContentLength matches source.
+test_multipart_copy_special_names: UploadPartCopy from sources whose keys contain space, `_`, `__`, and `?versionId`; each completes intact.
+test_multipart_copy_versioned: Three versions of a 15 MB source; UploadPartCopy with each explicit VersionId produces a destination matching that version's contents.
+test_multipart_copy_multiple_sizes: UploadPartCopy at six sizes around the 5 MB part boundary (5 MB, 5 MB+100K, 5 MB+600K, 10 MB+100K, 10 MB+600K, 10 MB) — all must roundtrip identical bytes.
+test_copy_object_ifmatch_good: CopyObject with CopySourceIfMatch=<source-etag> succeeds and copies the body.
+test_copy_object_ifmatch_failed: CopyObject with CopySourceIfMatch=<wrong-etag> expects 412 PreconditionFailed.
+test_copy_object_ifnonematch_good: CopyObject with CopySourceIfNoneMatch=<source-etag> expects 412 PreconditionFailed (source matches — copy refused).
+test_copy_object_ifnonematch_failed: CopyObject with CopySourceIfNoneMatch=<wrong-etag> succeeds because the source does not match.
+
+# ── encryption (SSE-C, SSE-KMS, SSE-S3, bucket-default) ──
+
+test_multipart_sse_c_get_part: SSE-C multipart upload (4 parts, 16 MB total); HeadObject and GetObject with PartNumber must return per-part length and ETag; out-of-range PartNumber returns InvalidPart; before complete a part GET returns NoSuchKey.
+test_non_multipart_sse_c_get_part: Single-part SSE-C upload; GetObject with PartNumber=1 returns the whole body with matching ETag, PartNumber=2 returns InvalidPart.
+test_encrypted_transfer_1b: SSE-C round-trip at 1 byte; helper writes with customer-provided key and reads it back.
+test_encrypted_transfer_1kb: SSE-C round-trip at 1 KB.
+test_encrypted_transfer_1MB: SSE-C round-trip at 1 MB.
+test_encrypted_transfer_13b: SSE-C round-trip at 13 bytes (edge-of-block-alignment case).
+test_encryption_sse_c_method_head: After SSE-C PutObject, HeadObject without SSE-C headers expects 400; HeadObject with the matching SSE-C headers returns 200.
+test_encryption_sse_c_present: After SSE-C PutObject, GetObject without SSE-C headers must return 400.
+test_encryption_sse_c_other_key: PUT with key A, GET with key B; expects 400 (decryption refused).
+test_encryption_sse_c_invalid_md5: PutObject with SSE-C key plus a mismatched key-MD5 header; expects 400.
+test_encryption_sse_c_no_md5: PutObject with SSE-C algorithm/key but no key-MD5 header; expects rejection.
+test_encryption_sse_c_no_key: PutObject with SSE-C algorithm header but no key; expects rejection.
+test_encryption_key_no_sse_c: PutObject with SSE-C key/MD5 but no algorithm header; expects 400.
+test_encryption_sse_c_multipart_upload: Aligned (5 MB) SSE-C multipart upload of 30 MB; verifies length, metadata, Content-Type, body, and range reads across part boundaries.
+test_encryption_sse_c_unaligned_multipart_upload: Same as above but with part size 5 MB+1 (not 4 KB-aligned); verifies length, metadata, body, and range reads still work.
+test_encryption_sse_c_multipart_invalid_chunks_1: SSE-C multipart with different SSE-C keys per part; expects 400 during the part upload.
+test_encryption_sse_c_multipart_invalid_chunks_2: SSE-C multipart with matching key but mismatched key-MD5 between init and parts; expects 400.
+test_encryption_sse_c_multipart_bad_download: SSE-C multipart uploaded with key A; GetObject with key B expects 400.
+test_encryption_sse_c_post_object_authenticated_request: POST presigned upload with SSE-C headers in the policy; subsequent GET with the same SSE-C headers returns the body.
+test_encryption_sse_c_enforced_with_bucket_policy: Bucket policy denies PutObject when SSE-C algorithm header is absent; unencrypted PUT is denied, SSE-C PUT succeeds.
+test_encryption_sse_c_deny_algo_with_bucket_policy: Bucket policy denies PutObject when SSE-C algorithm is not AES256; AES192 PUT is denied, AES256 PUT succeeds.
+test_sse_kms_method_head: After SSE-KMS PutObject, HeadObject returns x-amz-server-side-encryption=aws:kms and the key id; HeadObject sent with SSE-KMS request headers expects 400.
+test_sse_kms_present: SSE-KMS PutObject and GetObject without re-sending KMS headers; body must come back intact.
+test_sse_kms_no_key: PutObject with x-amz-server-side-encryption=aws:kms but no key id; expects rejection.
+test_sse_kms_not_declared: PutObject with KMS key-id header but no x-amz-server-side-encryption header; expects 400.
+test_sse_kms_multipart_upload: SSE-KMS multipart upload of 30 MB; verifies length, metadata, Content-Type, body, and range reads.
+test_sse_kms_multipart_invalid_chunks_1: SSE-KMS multipart with different KMS key ids between init and parts (no assertion — just verifies the upload helper attempts the call).
+test_sse_kms_multipart_invalid_chunks_2: SSE-KMS multipart where parts use a non-existent KMS key id (no assertion — just verifies the upload helper attempts the call).
+test_sse_kms_post_object_authenticated_request: POST presigned upload with SSE-KMS conditions; subsequent GET returns the body.
+test_sse_kms_transfer_1b: SSE-KMS round-trip at 1 byte. Skipped when [s3 main] has no kms_keyid.
+test_sse_kms_transfer_1kb: SSE-KMS round-trip at 1 KB. Skipped when [s3 main] has no kms_keyid.
+test_sse_kms_transfer_1MB: SSE-KMS round-trip at 1 MB. Skipped when [s3 main] has no kms_keyid.
+test_sse_kms_transfer_13b: SSE-KMS round-trip at 13 bytes. Skipped when [s3 main] has no kms_keyid.
+test_sse_kms_read_declare: Plain PutObject, then GetObject with KMS request headers attached; expects 400 (KMS headers on a non-KMS object are invalid).
+test_put_obj_enc_conflict_c_s3: PutObject combining SSE-S3 header with SSE-C headers; expects 400 InvalidArgument (conflicting modes).
+test_put_obj_enc_conflict_c_kms: PutObject combining SSE-KMS headers with SSE-C headers; expects 400 InvalidArgument.
+test_put_obj_enc_conflict_s3_kms: PutObject with x-amz-server-side-encryption=AES256 plus a KMS key id; expects 400 InvalidArgument.
+test_put_obj_enc_conflict_bad_enc_kms: PutObject with malformed `aes:kms` value (typo for `aws:kms`); expects 400 InvalidArgument.
+test_put_bucket_encryption_s3: PutBucketEncryption with SSE-S3 default rule; expects success.
+test_put_bucket_encryption_kms: PutBucketEncryption with SSE-KMS default rule; expects success.
+test_get_bucket_encryption_s3: GetBucketEncryption on a fresh bucket returns ServerSideEncryptionConfigurationNotFoundError; after Put it returns the SSE-S3 rule.
+test_get_bucket_encryption_kms: GetBucketEncryption on a fresh bucket returns ServerSideEncryptionConfigurationNotFoundError; after Put it returns the SSE-KMS rule with KMSMasterKeyID.
+test_delete_bucket_encryption_s3: DeleteBucketEncryption is idempotent and returns 204 even when no config exists; after a Put + Delete, GetBucketEncryption returns NotFound.
+test_delete_bucket_encryption_kms: Same idempotency check for the KMS configuration variant.
+test_sse_s3_default_upload_1b: With SSE-S3 bucket default, plain PutObject at 1 byte; the stored object must come back with x-amz-server-side-encryption=AES256.
+test_sse_s3_default_upload_1kb: SSE-S3 bucket-default upload at 1 KB.
+test_sse_s3_default_upload_1mb: SSE-S3 bucket-default upload at 1 MB.
+test_sse_s3_default_upload_8mb: SSE-S3 bucket-default upload at 8 MB.
+test_sse_kms_default_upload_1b: With SSE-KMS bucket default, plain PutObject at 1 byte; the stored object must come back with aws:kms encryption and the configured key id.
+test_sse_kms_default_upload_1kb: SSE-KMS bucket-default upload at 1 KB.
+test_sse_kms_default_upload_1mb: SSE-KMS bucket-default upload at 1 MB.
+test_sse_kms_default_upload_8mb: SSE-KMS bucket-default upload at 8 MB.
+test_sse_s3_default_method_head: With SSE-S3 default, HeadObject returns x-amz-server-side-encryption=AES256; sending an SSE-S3 header on HeadObject expects 400 (only SSE-C uses request-side headers).
+test_sse_s3_default_multipart_upload: With SSE-S3 default, 30 MB multipart upload completes and GetObject reports AES256; range reads succeed.
+test_sse_s3_default_post_object_authenticated_request: POST presigned upload to a bucket with SSE-S3 default; the resulting object reports AES256.
+test_sse_kms_default_post_object_authenticated_request: POST presigned upload to a bucket with SSE-KMS default; the resulting object reports aws:kms and the key id. Skipped when [s3 main] has no kms_keyid.
+test_sse_s3_encrypted_upload_1b: Explicit SSE-S3 PutObject at 1 byte (header sent on the request).
+test_sse_s3_encrypted_upload_1kb: Explicit SSE-S3 PutObject at 1 KB.
+test_sse_s3_encrypted_upload_1mb: Explicit SSE-S3 PutObject at 1 MB.
+test_sse_s3_encrypted_upload_8mb: Explicit SSE-S3 PutObject at 8 MB.
+test_get_sse_c_encrypted_object_attributes: 'GetObjectAttributes on an SSE-C object: without SSE-C headers expects 400; with SSE-C headers returns ObjectSize/ETag/StorageClass while omitting DeleteMarker/VersionId/ObjectParts.'
+test_copy_part_enc: Parametrized UploadPartCopy matrix across (source_mode_key, dest_mode_key, source_storage_class, dest_storage_class, obj_size); verifies that encryption-mode transitions during copy preserve bytes.
+test_copy_enc: Parametrized CopyObject matrix across encryption modes and storage classes; verifies same behavior at the single-part copy level.
+
+# ── tagging ──
+
+test_set_bucket_tagging: PutBucketTagging round-trip; GetBucketTagging before Put returns 404 NoSuchTagSet, DeleteBucketTagging returns 204 and subsequent Get returns 404 again.
+test_set_multipart_tagging: CreateMultipartUpload with `Tagging` returns tags via GetObjectTagging after CompleteMultipartUpload; DeleteObjectTagging clears them.
+test_get_obj_tagging: PutObjectTagging with 2 tags; GetObjectTagging must return the same TagSet.
+test_get_obj_head_tagging: HeadObject returns x-amz-tagging-count matching the number of tags set on the object.
+test_put_max_tags: PutObjectTagging with 10 tags (the documented S3 maximum); succeeds and round-trips.
+test_put_excess_tags: PutObjectTagging with 11 tags exceeds the 10-tag maximum; expects 400 InvalidTag and the object has no tags afterward.
+test_put_max_kvsize_tags: PutObjectTagging with 128-byte keys and 256-byte values (the documented maxima); succeeds.
+test_put_excess_key_tags: PutObjectTagging with 129-byte keys exceeds the 128-byte key maximum; expects 400 InvalidTag.
+test_put_excess_val_tags: PutObjectTagging with 257-byte values exceeds the 256-byte value maximum; expects 400 InvalidTag.
+test_put_modify_tags: Second PutObjectTagging fully replaces the prior TagSet (not a merge); only the new tags remain.
+test_put_delete_tags: PutObjectTagging then DeleteObjectTagging; GetObjectTagging returns an empty TagSet.
+test_post_object_tags_anonymous_request: Anonymous POST upload to a public bucket with an XML Tagging field; GetObjectTagging returns the parsed TagSet.
+test_post_object_tags_authenticated_request: Authenticated POST presigned upload with an XML Tagging field in the policy; the resulting object roundtrips intact.
+test_put_obj_with_tags: PutObject with x-amz-tagging header `foo=bar&bar` (the second key has an empty value); GetObjectTagging returns both tags.
+
+# ── checksum + conditional_write ──
+
+test_object_checksum_sha256: PutObject with ChecksumAlgorithm=SHA256 and matching ChecksumSHA256 succeeds; HeadObject hides the checksum unless ChecksumMode=ENABLED; a bad checksum returns 400 BadDigest.
+test_object_checksum_crc64nvme: Same as the SHA256 checksum test but using CRC64NVME; bad CRC returns 400 BadDigest.
+test_multipart_checksum_sha256: Multipart upload with per-part SHA256 checksums; CompleteMultipartUpload with a bad composite checksum returns 400 BadDigest, missing per-part checksum also returns 400, and a valid composite checksum completes and roundtrips via HeadObject(ChecksumMode=ENABLED).
+test_multipart_reupload_checksum_and_etag: Three-part upload with per-part SHA256 checksums and a composite ETag/checksum; a second identical CompleteMultipartUpload is idempotent and returns the same ETag and ChecksumSHA256.
+test_multipart_use_cksum_helper_sha256: COMPOSITE multipart SHA256 helper across 3 × 5 MB parts; verifies the helper produces the expected composite checksum.
+test_multipart_use_cksum_helper_crc64nvme: FULL_OBJECT multipart CRC64NVME helper across 3 × 5 MB parts.
+test_multipart_use_cksum_helper_crc32: FULL_OBJECT multipart CRC32 helper across 3 × 5 MB parts.
+test_multipart_use_cksum_helper_crc32c: FULL_OBJECT multipart CRC32C helper across 3 × 5 MB parts.
+test_multipart_use_cksum_helper_sha1: COMPOSITE multipart SHA1 helper across 3 × 5 MB parts.
+test_post_object_upload_checksum: POST presigned upload with x-amz-checksum-sha256; a correct checksum returns 204 and an incorrect one returns 400.
+test_get_multipart_checksum_object_attributes: 64 MB multipart upload; GetObjectAttributes returns ObjectSize, the composite Checksum.ChecksumSHA256, and per-part sizes/checksums for every part.
+test_put_object_if_match: PutObject with conditional IfNoneMatch=`*` and IfMatch=<etag>; verifies 412 PreconditionFailed for stale-etag IfNoneMatch, 404 NoSuchKey for IfMatch on missing key, and success for valid combinations.
+test_multipart_put_object_if_match: Same conditional PUT matrix as test_put_object_if_match but exercised through multipart upload (CompleteMultipartUpload carries IfMatch/IfNoneMatch).
+test_put_current_object_if_none_match: On a versioned bucket, IfNoneMatch only checks the current version; after creating two versions, IfNoneMatch=`*` and IfNoneMatch=<etag-of-current> both return 412.
+test_multipart_put_current_object_if_none_match: Same as the previous test but using multipart upload for each PUT.
+test_put_current_object_if_match: On a versioned bucket, IfMatch validates against the current version; etag mismatch returns 412, IfMatch=`*` on missing key returns 404.
+test_multipart_put_current_object_if_match: Multipart variant of test_put_current_object_if_match.
+test_put_object_current_if_match: After PutObject with IfNoneMatch=`*`, repeated PUTs with the same IfNoneMatch return 412; DeleteObject then makes IfMatch=`*` return 404.
+test_delete_object_if_match: DeleteObject with IfMatch=<wrong-etag> returns 412; with the correct etag succeeds; on a missing key with IfMatch=`*` or bad etag the delete is silently 204 (S3 quirk).
+test_delete_object_current_if_match: On a versioned bucket, DeleteObject with IfMatch checks the current version; after creating a delete-marker the same IfMatch returns 412 (still treats as current).
+test_delete_object_version_if_match: DeleteObject with VersionId + IfMatch checks that specific version's etag; correct etag deletes that version (no delete-marker), wrong etag returns 412.
+test_delete_object_if_match_last_modified_time: DeleteObject with IfMatchLastModifiedTime; mismatched mtime returns 412, matching mtime succeeds, missing key with bad mtime returns 204.
+test_delete_object_current_if_match_last_modified_time: Versioned-bucket variant; after a successful conditional delete creates a delete-marker, retrying with the same bad mtime still returns 412.
+test_delete_object_version_if_match_last_modified_time: VersionId + IfMatchLastModifiedTime; deletes the specific version (no delete-marker); subsequent attempts on missing version return 204.
+test_delete_object_if_match_size: DeleteObject with IfMatchSize; mismatched size returns 412, correct size succeeds, missing key with bad size returns 204.
+test_delete_object_current_if_match_size: Versioned-bucket variant; delete-marker is created on success and subsequent bad-size retries return 412.
+test_delete_object_version_if_match_size: VersionId + IfMatchSize; mismatched size returns 412, correct size deletes the version, missing version returns 204.
+test_delete_objects_if_match: DeleteObjects with per-key ETag; wrong etag returns PreconditionFailed in the Errors list, right etag deletes; -ENOENT on a bad etag returns 200 (silent).
+test_delete_objects_current_if_match: Versioned-bucket variant; success creates a delete-marker and subsequent bad-etag retries still return PreconditionFailed.
+test_delete_objects_version_if_match: DeleteObjects with VersionId + ETag; mismatched etag goes in Errors, correct etag deletes the version with no delete-marker.
+test_delete_objects_if_match_last_modified_time: DeleteObjects with per-key LastModifiedTime; same precondition semantics as the ETag variant.
+test_delete_objects_current_if_match_last_modified_time: Versioned-bucket LastModifiedTime variant; success creates a delete-marker.
+test_delete_objects_version_if_match_last_modified_time: VersionId + LastModifiedTime variant; targets a specific version.
+test_delete_objects_if_match_size: DeleteObjects with per-key Size; same precondition semantics.
+test_delete_objects_current_if_match_size: Versioned-bucket Size variant; success creates a delete-marker, bad-size retries return PreconditionFailed.
+test_delete_objects_version_if_match_size: VersionId + Size variant; targets a specific version.
+
+# ── object_lock (quarantine pass — runs last) ──
+
+test_object_lock_put_obj_lock: PutObjectLockConfiguration with GOVERNANCE/Days and then COMPLIANCE/Years on a lock-enabled bucket; both succeed and versioning is implicitly enabled.
+test_object_lock_put_obj_lock_invalid_bucket: PutObjectLockConfiguration on a bucket created without ObjectLockEnabledForBucket; expects 409 InvalidBucketState.
+test_object_lock_put_obj_lock_enable_after_create: PutObjectLockConfiguration on an unversioned and then suspended bucket both return InvalidBucketState; after enabling versioning it succeeds.
+test_object_lock_put_obj_lock_with_days_and_years: PutObjectLockConfiguration with both Days and Years in DefaultRetention; expects 400 MalformedXML.
+test_object_lock_put_obj_lock_invalid_days: DefaultRetention.Days=0; expects 400 InvalidRetentionPeriod.
+test_object_lock_put_obj_lock_invalid_years: DefaultRetention.Years=-1; expects 400 InvalidRetentionPeriod.
+test_object_lock_put_obj_lock_invalid_mode: DefaultRetention.Mode='abc' or lowercase 'governance'; expects 400 MalformedXML for each.
+test_object_lock_put_obj_lock_invalid_status: ObjectLockEnabled='Disabled' is not a valid status; expects 400 MalformedXML.
+test_object_lock_suspend_versioning: Attempt to suspend versioning on a lock-enabled bucket; expects 409 InvalidBucketState.
+test_object_lock_get_obj_lock: PutObjectLockConfiguration then GetObjectLockConfiguration returns the exact config submitted.
+test_object_lock_get_obj_lock_invalid_bucket: GetObjectLockConfiguration on a non-lock-enabled bucket; expects 404 ObjectLockConfigurationNotFoundError.
+test_object_lock_put_obj_retention: PutObjectRetention with GOVERNANCE/RetainUntilDate=2140; GetObjectRetention returns it. Cleanup uses BypassGovernanceRetention=True.
+test_object_lock_put_obj_retention_invalid_bucket: PutObjectRetention against a non-lock-enabled bucket; expects 400 InvalidRequest.
+test_object_lock_put_obj_retention_invalid_mode: Retention.Mode='governance' or 'abc' both expect 400 MalformedXML.
+test_object_lock_get_obj_retention: Put then GetObjectRetention; the returned Retention must equal the Retention submitted.
+test_object_lock_get_obj_retention_iso8601: Retention set with a Python datetime; HeadObject's x-amz-object-lock-retain-until-date header must be ISO-8601 parseable.
+test_object_lock_get_obj_retention_invalid_bucket: GetObjectRetention against a non-lock-enabled bucket; expects 400 InvalidRequest.
+test_object_lock_put_obj_retention_versionid: PutObjectRetention with explicit VersionId scopes the retention to that version; GetObjectRetention with the same VersionId returns it.
+test_object_lock_put_obj_retention_override_default_retention: Default GOVERNANCE/Days=1 bucket retention can be overridden per-object by a longer PutObjectRetention.
+test_object_lock_put_obj_retention_increase_period: Increasing the RetainUntilDate from 2030-01-01 to 2030-01-03 succeeds; GetObjectRetention reflects the new date.
+test_object_lock_put_obj_retention_shorten_period: Shortening the RetainUntilDate under GOVERNANCE without BypassGovernanceRetention expects 403 AccessDenied.
+test_object_lock_put_obj_retention_shorten_period_bypass: Shortening RetainUntilDate with BypassGovernanceRetention=True succeeds.
+test_object_lock_delete_object_with_retention: DeleteObject of a retained version expects 403 AccessDenied; with BypassGovernanceRetention=True it returns 204.
+test_object_lock_delete_multipart_object_with_retention: CreateMultipartUpload carrying ObjectLockMode/RetainUntilDate produces a retained object; DeleteObject without bypass returns 403, with bypass returns 204.
+test_object_lock_delete_object_with_retention_and_marker: Even after adding a delete-marker on top of a retained version, the underlying version still requires BypassGovernanceRetention to delete.
+test_object_lock_multi_delete_object_with_retention: DeleteObjects with two keys (one retained, one not) returns one Deleted and one AccessDenied entry; a bypass call then succeeds for the retained version.
+test_object_lock_put_legal_hold: PutObjectLegalHold ON then OFF; both calls return 200.
+test_object_lock_put_legal_hold_invalid_bucket: PutObjectLegalHold against a non-lock-enabled bucket; expects 400 InvalidRequest.
+test_object_lock_put_legal_hold_invalid_status: PutObjectLegalHold with Status='abc'; expects 400 MalformedXML.
+test_object_lock_get_legal_hold: GetObjectLegalHold returns the most recently set ON or OFF status.
+test_object_lock_get_legal_hold_invalid_bucket: GetObjectLegalHold against a non-lock-enabled bucket; expects 400 InvalidRequest.
+test_object_lock_delete_object_with_legal_hold_on: DeleteObject of a version with legal hold ON expects 403 AccessDenied (legal hold cannot be bypassed by governance flag).
+test_object_lock_delete_multipart_object_with_legal_hold_on: CreateMultipartUpload with ObjectLockLegalHoldStatus=ON yields an object that resists DeleteObject; expects 403 AccessDenied.
+test_object_lock_delete_object_with_legal_hold_off: After explicit PutObjectLegalHold OFF, DeleteObject succeeds with 204.
+test_object_lock_get_obj_metadata: HeadObject on a retained + legal-hold object returns ObjectLockMode, ObjectLockRetainUntilDate, and ObjectLockLegalHoldStatus headers.
+test_object_lock_uploading_obj: PutObject with inline ObjectLockMode/RetainUntilDate/LegalHoldStatus headers; HeadObject reflects all three.
+test_object_lock_changing_mode_from_governance_with_bypass: GOVERNANCE → COMPLIANCE upgrade is allowed when BypassGovernanceRetention=True is supplied.
+test_object_lock_changing_mode_from_governance_without_bypass: GOVERNANCE → COMPLIANCE upgrade without bypass expects 403 AccessDenied.
+test_object_lock_changing_mode_from_compliance: COMPLIANCE → GOVERNANCE downgrade is forbidden even with bypass; expects 403 AccessDenied.
+
+# ── storage_class (cloud restore) ──
+
+test_restore_object_temporary: After lifecycle transition to a cloud SC, RestoreObject with Days=20 makes the object readable; re-issuing with Days=2 keeps it restored; after the shorter window expires, HeadObject reports ContentLength=0. Skipped when [s3 cloud] not configured.
+test_restore_object_permanent: After lifecycle transition to a cloud SC, RestoreObject with an empty RestoreRequest permanently restores the object to STANDARD; ContentLength matches and storage class becomes STANDARD. Skipped when [s3 cloud] not configured.
+test_read_through: With allow_readthrough=true, a GetObject on a transitioned cloud-tier object triggers an implicit restore (first GET may 400; after wait, HeadObject returns the body); when readthrough is disabled, GetObject expects 403 InvalidObjectState. Skipped when [s3 cloud] not configured.
+test_restore_noncur_obj: NoncurrentVersionTransitions to a cloud SC, then RestoreObject with VersionId restores a specific noncurrent version temporarily; after the restore window expires, HeadObject reports ContentLength=0. Skipped when [s3 cloud] not configured.
+
+# ── delete_marker (non-versioned + versioned + suspended) ──
+
+test_delete_marker_nonversioned: DeleteObject on a non-versioned bucket; response['DeleteMarker'] must be absent (no delete marker is created).
+test_delete_marker_versioned: DeleteObject on a versioning-enabled bucket; response['DeleteMarker']=True (a delete marker is created).
+test_delete_marker_suspended: After enabling and then suspending versioning, DeleteObject still creates a delete marker (because the bucket previously had versioning).
+
+# ── list_objects_v2 ──
+
+test_bucket_list_distinct: Two separate buckets are isolated; objects in bucket1 do not appear in bucket2 listings.
+test_bucket_listv2_many: ListObjectsV2 with MaxKeys=2 returns the first 2 keys and IsTruncated=True; StartAfter=baz returns the remaining single key.
+test_basic_key_count: ListObjectsV2 returns KeyCount equal to the number of objects in the bucket (5).
+test_bucket_listv2_delimiter_basic: ListObjectsV2 with Delimiter='/' returns top-level keys in Contents and grouped prefixes in CommonPrefixes; KeyCount equals their sum.
+test_bucket_listv2_encoding_basic: ListObjectsV2 with EncodingType=url URL-encodes special characters (`+` → `%2B`, ` ` → `%20`) in both keys and CommonPrefixes.
+test_bucket_listv2_delimiter_prefix: Pagination test combining Prefix and Delimiter with MaxKeys=1 and MaxKeys=2; verifies continuation-token-based traversal across keys and CommonPrefixes.
+test_bucket_listv2_delimiter_prefix_ends_with_delimiter: Prefix that itself ends with the delimiter (`asdf/`); the exact-match object appears in Contents (not CommonPrefixes).
+test_bucket_listv2_delimiter_alt: Single-char delimiter `a`; keys without `a` (foo) come as Contents; the rest collapse into CommonPrefixes (`ba`, `ca`).
+test_bucket_listv2_delimiter_prefix_underscore: Same delimiter+prefix pagination test using underscore-prefixed keys (`_obj1_`, `_under1/`, `_under2/`).
+test_bucket_listv2_delimiter_percentage: Delimiter `%`; keys with `%` collapse, others (foo) stay in Contents.
+test_bucket_listv2_delimiter_whitespace: Delimiter ` ` (space); keys with spaces collapse into CommonPrefixes.
+test_bucket_listv2_delimiter_dot: Delimiter `.`; keys with `.` collapse into CommonPrefixes.
+test_bucket_listv2_delimiter_unreadable: Delimiter `\x0a` (LF); since no key contains LF, all keys remain in Contents.
+test_bucket_listv2_delimiter_empty: Delimiter='' is dropped from the response; all keys appear flat in Contents.
+test_bucket_listv2_delimiter_none: No Delimiter parameter; response carries no Delimiter and all keys flat in Contents.
+test_bucket_listv2_fetchowner_notempty: ListObjectsV2 with FetchOwner=True returns Owner inside each Contents entry.
+test_bucket_listv2_fetchowner_defaultempty: ListObjectsV2 without FetchOwner omits Owner from Contents entries (the default).
+test_bucket_listv2_fetchowner_empty: ListObjectsV2 with FetchOwner=False explicitly omits Owner.
+test_bucket_listv2_delimiter_not_exist: Delimiter `/` that no key contains; all keys come out flat in Contents with empty CommonPrefixes.
+test_bucket_listv2_prefix_basic: Prefix `foo/`; Contents includes only keys starting with `foo/`.
+test_bucket_listv2_prefix_alt: Prefix `ba`; Contents includes only keys starting with `ba` (no Delimiter, so no CommonPrefixes).
+test_bucket_listv2_prefix_empty: Prefix='' returns all keys with Prefix='' echoed in the response.
+test_bucket_listv2_prefix_none: ListObjectsV2 without a Prefix returns all keys (Prefix defaults to empty).
+test_bucket_listv2_prefix_not_exist: Prefix `d` matches no keys; Contents is empty and CommonPrefixes is empty.
+test_bucket_listv2_prefix_unreadable: Prefix `\x0a` matches no keys; Contents is empty.
+test_bucket_listv2_prefix_delimiter_basic: Prefix `foo/` with Delimiter `/`; returns top-level `foo/bar` as Contents and `foo/baz/` as a CommonPrefix.
+test_bucket_listv2_prefix_delimiter_alt: Prefix `ba` with Delimiter `a`; returns `bar` as Contents and `baza` as a CommonPrefix.
+test_bucket_listv2_prefix_delimiter_prefix_not_exist: Prefix `/` with Delimiter `d`; no keys match the prefix so both arrays are empty.
+test_bucket_listv2_prefix_delimiter_delimiter_not_exist: Prefix `b` with Delimiter `z` (never appears); all matching keys come back in Contents flat.
+test_bucket_listv2_prefix_delimiter_prefix_delimiter_not_exist: Both Prefix and Delimiter mismatch; both arrays empty.
+test_bucket_listv2_maxkeys_one: MaxKeys=1 returns 1 key and IsTruncated=True; subsequent StartAfter=<that-key> returns the remainder.
+test_bucket_listv2_maxkeys_zero: MaxKeys=0 returns no keys and IsTruncated=False.
+test_bucket_listv2_maxkeys_none: ListObjectsV2 with no MaxKeys defaults to MaxKeys=1000 and returns all 4 keys.
+test_bucket_listv2_unordered: With `allow-unordered=true` query param, ListObjectsV2 returns keys in arbitrary order; pagination via StartAfter still has no overlap; combining unordered with Delimiter expects 400 InvalidArgument.
+test_bucket_listv2_continuationtoken_empty: ListObjectsV2 with ContinuationToken='' is treated as no token and returns all keys.
+test_bucket_listv2_continuationtoken: MaxKeys=1 then ListObjectsV2 with NextContinuationToken returns the remaining 3 keys and echoes the token.
+test_bucket_listv2_both_continuationtoken_startafter: ListObjectsV2 with both StartAfter and ContinuationToken; the response echoes both and pagination skips the StartAfter boundary correctly.
+test_bucket_listv2_startafter_unreadable: StartAfter=`\x0a` (LF, before any ASCII key) returns all keys.
+test_bucket_listv2_startafter_not_in_list: StartAfter=`blah` (not a key) returns keys strictly greater than `blah` (`foo`, `quxx`).
+test_bucket_listv2_startafter_after_list: StartAfter=`zzz` (after all keys) returns an empty Contents and IsTruncated=False.
+test_bucket_listv2_objects_anonymous: After PutBucketAcl ACL=public-read, an unauthenticated client can ListObjectsV2.
+test_bucket_listv2_objects_anonymous_fail: ListObjectsV2 from an unauthenticated client against a private bucket expects 403 AccessDenied.
+test_bucketv2_notexist: ListObjectsV2 on a non-existent bucket expects 404 NoSuchBucket.
+test_expected_bucket_owner: ListObjects/PutObject with ExpectedBucketOwner set to a wrong id expects 403 AccessDenied.
+test_multi_objectv2_delete: DeleteObjects of 3 keys; response has 3 Deleted entries and no Errors; subsequent ListObjectsV2 reports no Contents; a repeat DeleteObjects is idempotent.
+test_access_bucket_private_objectv2_private: Both bucket and object ACLs private; alt user fails GET on either object, ListObjectsV2 on the bucket, and PUT to any key.
+test_access_bucket_private_objectv2_publicread: Bucket private, object public-read; alt user can GET that one object but cannot PUT, GET other objects, or ListObjectsV2.
+test_access_bucket_private_objectv2_publicreadwrite: Bucket private, object public-read-write; alt user can still only GET that one object (private bucket prevents the write); cannot ListObjectsV2.
+
+# ── bucket_logging (RGW extension — access logs to a target bucket) ──
+# Suffix conventions: `_s` = Standard text logs; `_j` = JSON logs; `_single` = single-object roll mode.
+
+test_put_bucket_logging: PutBucketLogging round-trips minimal config, SimplePrefix/PartitionedPrefix key formats, and TargetGrants (which RGW silently drops); also asserts the ObjectRollTime and LoggingType extension fields when present.
+test_bucket_logging_mtime: Re-applying the same logging config preserves Last-Modified; changing the config or disable+re-enable advances Last-Modified.
+test_bucket_logging_simple_key: Validates SimplePrefix target object naming for prefixes `log/` and empty (delegated to helper).
+test_bucket_logging_partitioned_key: Validates PartitionedPrefix target object naming for prefixes `log/` and empty.
+test_bucket_logging_bucket_auth_type: After PutBucketLogging, exercises GET via auth-header, unauthenticated, and presigned SigV4/SigV2 URLs; each log record must capture the right AuthType and SigVersion.
+test_bucket_logging_request_id: Captures x-amz-request-id from a PutObject response; the standard log record's RequestID field must equal it.
+test_bucket_logging_bucket_acl_required: Alt-user ListObjectsV2 against a public-read bucket is logged with the alt user's auth context.
+test_bucket_logging_object_acl_required: Alt-user GetObject against a public-read object is logged with the alt user's auth context.
+test_bucket_logging_key_filter_s: Standard logging with a key filter on the source bucket; only matching keys produce log records.
+test_bucket_logging_key_filter_j: JSON logging variant of the key-filter test.
+test_bucket_logging_flush_empty: Calling the RGW flush extension with no buffered logs is a no-op that succeeds.
+test_bucket_logging_flush_j: JSON logging — flush after operations produces log objects in the target bucket.
+test_bucket_logging_flush_s: Standard logging — same flush semantics as the JSON variant.
+test_bucket_logging_flush_j_single: JSON logging with single-object roll mode — flush writes records to a single log object.
+test_bucket_logging_flush_s_single: Standard logging single-object roll mode — flush writes records to a single log object.
+test_bucket_logging_concurrent_flush_j: Concurrent flush calls under JSON logging produce no duplicate records.
+test_bucket_logging_concurrent_flush_s: Concurrent flush calls under Standard logging produce no duplicate records.
+test_bucket_logging_concurrent_flush_j_single: Concurrent flush under JSON + single-object roll mode.
+test_bucket_logging_concurrent_flush_s_single: Concurrent flush under Standard + single-object roll mode.
+test_bucket_logging_put_and_flush: Interleaved PUTs and flushes; every operation must appear in exactly one log record.
+test_put_bucket_logging_errors: Negative tests for PutBucketLogging — invalid target bucket, missing policy, malformed TargetObjectKeyFormat, etc.
+test_bucket_logging_owner: Log records carry the bucket owner's display name and ID in the Owner field.
+test_put_bucket_logging_permissions: PutBucketLogging on a bucket without the required policy on the log bucket expects 403.
+test_put_bucket_logging_policy_wildcard: PutBucketLogging succeeds when the log bucket policy uses a `*` wildcard for the source ARN.
+test_put_bucket_logging_policy_wildcard_objects: Wildcard policy on `arn:aws:s3:::*/*` is sufficient to write log objects.
+test_bucket_logging_permission_change_s: Standard — changing the source ACL between operations is reflected in subsequent log records.
+test_bucket_logging_permission_change_j: JSON — same permission-change behavior.
+test_put_bucket_logging_tenant_s: Standard logging when source and log buckets live in different tenants.
+test_put_bucket_logging_tenant_j: JSON logging variant of the tenant test.
+test_put_bucket_logging_account_s: Standard logging when source and log buckets live in different IAM accounts.
+test_put_bucket_logging_account_j: JSON logging variant of the account-isolation test.
+test_rm_bucket_logging: PutBucketLogging with an empty BucketLoggingStatus disables logging; GetBucketLogging then returns no LoggingEnabled element.
+test_put_bucket_logging_extensions: Validates RGW-only fields ObjectRollTime, LoggingType (Standard/JSON), and RecordsBatchSize round-trip through Put/Get.
+test_bucket_logging_put_objects: PutObject operations under logging produce REST.PUT.OBJECT records.
+test_bucket_logging_put_objects_versioned: Versioning-enabled variant; log records include the resulting VersionId.
+test_bucket_logging_put_concurrency: Concurrent PutObject calls produce one log record per call, in any order.
+test_bucket_logging_delete_objects: DeleteObject operations produce REST.DELETE.OBJECT records.
+test_bucket_logging_delete_objects_versioned: Versioned bucket — delete creates a marker; the log records reflect that.
+test_bucket_logging_get_objects: GetObject operations produce REST.GET.OBJECT records.
+test_bucket_logging_get_objects_versioned: Versioned bucket — GET with VersionId logs that VersionId.
+test_bucket_logging_copy_objects: CopyObject within the same bucket logs both the source GET and destination PUT.
+test_bucket_logging_copy_objects_versioned: Same as test_bucket_logging_copy_objects with versioning enabled.
+test_bucket_logging_copy_objects_bucket: CopyObject across buckets logs both sides; only the destination bucket's log bucket sees the PUT record.
+test_bucket_logging_copy_objects_bucket_versioned: Cross-bucket copy variant with versioning enabled.
+test_bucket_logging_head_objects: HeadObject operations produce REST.HEAD.OBJECT records.
+test_bucket_logging_head_objects_versioned: Versioned HeadObject variant.
+test_bucket_logging_mpu_s: Standard log records for multipart upload — Initiate/UploadPart/Complete each appear.
+test_bucket_logging_mpu_versioned_s: Versioned multipart upload — Standard log records include the resulting VersionId.
+test_bucket_logging_mpu_j: JSON logging variant of the multipart-upload test.
+test_bucket_logging_mpu_versioned_j: Versioned JSON logging variant.
+test_bucket_logging_mpu_copy: UploadPartCopy operations are logged on the destination side.
+test_bucket_logging_mpu_copy_versioned: UploadPartCopy + versioning variant.
+test_bucket_logging_multi_delete: DeleteObjects produces one log record per deleted key.
+test_bucket_logging_multi_delete_versioned: Versioned variant — log records include each VersionId or DeleteMarker.
+test_bucket_logging_event_type_j: JSON logs differentiate event types (REST.PUT.OBJECT, REST.GET.OBJECT, etc.).
+test_bucket_logging_event_type_s: Standard log variant of the event-type test.
+test_bucket_logging_roll_time: After ObjectRollTime elapses, log records are rolled into a new target object automatically.
+test_bucket_logging_multiple_prefixes: Multiple source buckets writing to the same log bucket use distinct prefixes; records do not cross-pollinate.
+test_bucket_logging_single_prefix: Multiple source buckets sharing one prefix in the log bucket; records remain attributable per source via the bucket field.
+test_bucket_logging_object_meta: Log records include the object size, etag, and storage class fields.
+test_bucket_logging_cleanup_bucket_deletion_j: JSON — deleting the source bucket cleans up pending log buffers (no orphan records after subsequent flush).
+test_bucket_logging_cleanup_bucket_deletion_j_single: Single-object roll-mode variant of bucket-deletion cleanup (JSON).
+test_bucket_logging_cleanup_disabling_j: Disabling logging mid-flow flushes any buffered records.
+test_bucket_logging_cleanup_disabling_j_single: Single-object variant of disabling-cleanup (JSON).
+test_bucket_logging_cleanup_updating_j: Updating the logging config mid-flow flushes buffered records under the old config before applying the new one.
+test_bucket_logging_cleanup_updating_j_single: Single-object variant of update-cleanup (JSON).
+test_bucket_logging_notupdating_j: A PutBucketLogging that doesn't actually change config must not trigger a buffer flush.
+test_bucket_logging_notupdating_j_single: Single-object variant.
+test_bucket_logging_cleanup_bucket_deletion_s: Standard — bucket-deletion cleans up pending log buffers.
+test_bucket_logging_cleanup_bucket_deletion_s_single: Single-object variant (Standard).
+test_bucket_logging_cleanup_disabling_s: Standard — disabling logging flushes buffered records.
+test_bucket_logging_cleanup_disabling_s_single: Single-object variant.
+test_bucket_logging_cleanup_updating_s: Standard — updating logging config flushes buffered records.
+test_bucket_logging_cleanup_updating_s_single: Single-object variant.
+test_bucket_logging_notupdating_s: Standard — no-op PutBucketLogging does not flush.
+test_bucket_logging_notupdating_s_single: Single-object variant.
+test_bucket_logging_target_cleanup_j: JSON — deleting the target log bucket while logging is enabled is handled gracefully (subsequent ops do not error).
+test_bucket_logging_target_cleanup_j_single: Single-object variant.
+test_bucket_logging_target_cleanup_s: Standard variant.
+test_bucket_logging_target_cleanup_s_single: Single-object Standard variant.
+test_bucket_logging_cleanup_bucket_concurrent_deletion_j: JSON — concurrent source-bucket deletion and ongoing PUT operations; no orphan log records remain.
+test_bucket_logging_cleanup_bucket_concurrent_deletion_j_single: Single-object variant.
+test_bucket_logging_cleanup_concurrent_disabling_j: JSON — concurrent PutBucketLogging (disable) and source-bucket operations.
+test_bucket_logging_cleanup_concurrent_disabling_j_single: Single-object variant.
+test_bucket_logging_cleanup_concurrent_updating_j: JSON — concurrent PutBucketLogging (config change) and source-bucket operations.
+test_bucket_logging_cleanup_concurrent_updating_j_single: Single-object variant.
+test_bucket_logging_cleanup_bucket_concurrent_deletion_s: Standard — concurrent source-bucket deletion + ongoing ops.
+test_bucket_logging_cleanup_bucket_concurrent_deletion_s_single: Single-object Standard variant.
+test_bucket_logging_cleanup_concurrent_disabling_s: Standard — concurrent disable + ops.
+test_bucket_logging_cleanup_concurrent_disabling_s_single: Single-object Standard variant.
+test_bucket_logging_cleanup_concurrent_updating_s: Standard — concurrent config-update + ops.
+test_bucket_logging_cleanup_concurrent_updating_s_single: Single-object Standard variant.
+test_bucket_logging_part_cleanup_concurrent_updating_s: Standard — partial-record cleanup under concurrent config update.
+test_bucket_logging_part_cleanup_concurrent_disabling_s: Standard — partial-record cleanup under concurrent disable.
+test_bucket_logging_part_cleanup_concurrent_deletion_s: Standard — partial-record cleanup under concurrent bucket deletion.
+test_bucket_logging_part_cleanup_concurrent_updating_j: JSON variant — partial-record cleanup under concurrent update.
+test_bucket_logging_part_cleanup_concurrent_disabling_j: JSON variant — partial-record cleanup under concurrent disable.
+test_bucket_logging_part_cleanup_concurrent_deletion_j: JSON variant — partial-record cleanup under concurrent deletion.
+test_bucket_logging_part_cleanup_updating_s: Standard — partial-record cleanup under serial config update.
+test_bucket_logging_part_cleanup_disabling_s: Standard — partial-record cleanup under serial disable.
+test_bucket_logging_part_cleanup_deletion_s: Standard — partial-record cleanup under serial deletion.
+test_bucket_logging_part_cleanup_updating_j: JSON variant of serial update cleanup.
+test_bucket_logging_part_cleanup_disabling_j: JSON variant of serial disable cleanup.
+test_bucket_logging_part_cleanup_deletion_j: JSON variant of serial deletion cleanup.
+test_bucket_logging_conf_updating_roll_s: Standard — updating only ObjectRollTime takes effect on subsequent operations.
+test_bucket_logging_conf_updating_roll_j: JSON variant.
+test_bucket_logging_conf_updating_pfx_s: Standard — updating only TargetPrefix routes new records to the new prefix.
+test_bucket_logging_conf_updating_pfx_j: JSON variant.
+test_bucket_logging_conf_concurrent_updating_roll_s: Standard — concurrent ObjectRollTime updates remain consistent.
+test_bucket_logging_conf_concurrent_updating_roll_j: JSON variant.
+test_bucket_logging_conf_concurrent_updating_pfx_s: Standard — concurrent TargetPrefix updates remain consistent.
+test_bucket_logging_conf_concurrent_updating_pfx_j: JSON variant.
+
+# ── bucket listing (v1, ListObjects) ──
+
+test_bucket_list_empty: Lists an empty bucket; Contents must be absent or empty.
+test_bucket_list_many: ListObjects with MaxKeys=2 returns first 2 keys and IsTruncated=True; subsequent Marker=baz returns the remainder.
+test_bucket_list_delimiter_basic: ListObjects with Delimiter='/' returns top-level keys in Contents and grouped CommonPrefixes.
+test_bucket_list_encoding_basic: ListObjects with EncodingType=url URL-encodes special characters in keys and CommonPrefixes.
+test_bucket_list_delimiter_prefix: Pagination test combining Prefix and Delimiter with various MaxKeys; verifies marker-based traversal.
+test_bucket_list_delimiter_prefix_ends_with_delimiter: Prefix ending in the delimiter; the exact-match object appears in Contents.
+test_bucket_list_delimiter_alt: Delimiter `a`; keys without `a` stay in Contents, others collapse into CommonPrefixes.
+test_bucket_list_delimiter_prefix_underscore: Same delimiter+prefix pagination with underscore-prefixed keys.
+test_bucket_list_delimiter_percentage: Delimiter `%`; keys with `%` collapse into CommonPrefixes.
+test_bucket_list_delimiter_whitespace: Delimiter ` ` (space); keys with spaces collapse.
+test_bucket_list_delimiter_dot: Delimiter `.`; keys with `.` collapse.
+test_bucket_list_delimiter_unreadable: Delimiter `\x0a` (LF) matches no keys; everything stays in Contents.
+test_bucket_list_delimiter_empty: Delimiter='' is dropped from the response; keys flat in Contents.
+test_bucket_list_delimiter_none: No Delimiter parameter; response carries no Delimiter and all keys flat.
+test_bucket_list_delimiter_not_exist: Delimiter `/` that no key contains; all keys flat with empty CommonPrefixes.
+test_bucket_list_delimiter_not_skip_special: Special character handling in delimiter that should not skip valid keys.
+test_bucket_list_prefix_basic: Prefix `foo/`; Contents includes only keys starting with `foo/`.
+test_bucket_list_prefix_alt: Prefix `ba` returns `bar`/`baz`.
+test_bucket_list_prefix_empty: Prefix='' returns all keys with Prefix='' echoed.
+test_bucket_list_prefix_none: No Prefix; returns all keys.
+test_bucket_list_prefix_not_exist: Prefix `d` matches no keys; both arrays empty.
+test_bucket_list_prefix_unreadable: Prefix `\x0a` matches no keys.
+test_bucket_list_prefix_delimiter_basic: Prefix `foo/` with Delimiter `/` returns top-level `foo/bar` and `foo/baz/` as CommonPrefix.
+test_bucket_list_prefix_delimiter_alt: Prefix `ba` + Delimiter `a` returns `bar` and `baza` CommonPrefix.
+test_bucket_list_prefix_delimiter_prefix_not_exist: Prefix-mismatch returns both arrays empty.
+test_bucket_list_prefix_delimiter_delimiter_not_exist: Delimiter-mismatch returns all matching keys flat.
+test_bucket_list_prefix_delimiter_prefix_delimiter_not_exist: Both mismatch; both arrays empty.
+test_bucket_list_maxkeys_one: MaxKeys=1; IsTruncated=True and Marker=<that-key> returns the rest.
+test_bucket_list_maxkeys_zero: MaxKeys=0 returns no keys and IsTruncated=False.
+test_bucket_list_maxkeys_none: No MaxKeys; defaults to 1000 and returns all keys.
+test_account_usage: GetBucketAccountUsage extension returns object/byte counts for the account.
+test_head_bucket_usage: HeadBucket with the read-stats=true extension returns x-rgw-object-count and x-rgw-bytes-used.
+test_bucket_list_unordered: With `allow-unordered=true`, ListObjects returns keys in arbitrary order; combining with Delimiter expects 400 InvalidArgument.
+test_bucket_list_maxkeys_invalid: ListObjects with MaxKeys=-1 (or other invalid value) expects 400.
+test_bucket_list_marker_none: ListObjects without Marker returns all keys with Marker empty.
+test_bucket_list_marker_empty: ListObjects with Marker='' returns all keys.
+test_bucket_list_marker_unreadable: ListObjects with Marker=`\x0a` returns all keys (LF sorts before ASCII).
+test_bucket_list_marker_not_in_list: ListObjects with Marker=`blah` returns keys strictly greater.
+test_bucket_list_marker_after_list: ListObjects with Marker=`zzz` returns no keys and IsTruncated=False.
+test_bucket_list_return_data: ListObjects returns ETag, Size, LastModified, and Owner for each entry; values must match the uploaded objects.
+test_bucket_list_return_data_versioning: Versioning-enabled bucket; ListObjects (not v2) returns only current versions with VersionId omitted.
+test_bucket_list_objects_anonymous: After ACL=public-read, an unauthenticated ListObjects succeeds.
+test_bucket_list_objects_anonymous_fail: Unauthenticated ListObjects against a private bucket expects 403 AccessDenied.
+test_bucket_notexist: ListObjects on a non-existent bucket expects 404 NoSuchBucket.
+
+# ── object CRUD, metadata, ranges, conditionals ──
+
+test_object_write_to_nonexist_bucket: PutObject against a non-existent bucket expects 404 NoSuchBucket.
+test_object_write_with_chunked_transfer_encoding: PutObject with Transfer-Encoding chunked succeeds and the body roundtrips.
+test_object_read_not_exist: GetObject on a missing key expects 404 NoSuchKey.
+test_object_requestid_matches_header_on_error: On a GetObject error, the x-amz-request-id header is present and matches the SOAP error response RequestID.
+test_multi_object_delete: DeleteObjects of 3 keys; response has 3 Deleted entries and no Errors; repeat is idempotent.
+test_multi_object_delete_key_limit: DeleteObjects with more than the documented per-request limit (1000); expects 400 or rejection.
+test_multi_objectv2_delete_key_limit: ListObjectsV2 + DeleteObjects key-limit variant.
+test_object_head_zero_bytes: HeadObject on a 0-byte object returns ContentLength=0.
+test_object_write_check_etag: PutObject returns an ETag that matches the MD5 of the body.
+test_object_write_cache_control: PutObject with Cache-Control header; GetObject returns the same Cache-Control.
+test_object_write_expires: PutObject with Expires header; GetObject returns the same Expires.
+test_object_write_read_update_read_delete: Full lifecycle on one key — PUT, GET, overwrite PUT, re-GET, DELETE; each step returns expected status and body.
+test_object_set_get_metadata_none_to_good: PutObject sets user metadata; GetObject's Metadata map returns it.
+test_object_set_get_metadata_none_to_empty: PutObject sets an empty user-metadata value; GetObject returns the empty string.
+test_object_set_get_metadata_overwrite_to_empty: PutObject overwriting an object replaces metadata; new empty value sticks.
+test_object_set_get_unicode_metadata: PutObject with non-ASCII metadata values; roundtrips intact.
+test_object_metadata_replaced_on_put: A second PutObject without metadata replaces existing metadata with nothing (not merge).
+test_object_write_file: PutObject from a file handle; body matches the file's contents.
+
+# ── POST presigned uploads ──
+
+test_post_object_anonymous_request: Anonymous POST upload to a public-read-write bucket; the object lands with the specified ACL.
+test_post_object_authenticated_request: Authenticated POST presigned upload; the resulting object roundtrips intact.
+test_post_object_authenticated_no_content_type: Authenticated POST with no Content-Type in the policy; expects success.
+test_post_object_authenticated_request_bad_access_key: POST with a wrong AWSAccessKeyId expects 403.
+test_post_object_set_success_code: POST with success_action_status=201; response status is 201.
+test_post_object_set_invalid_success_code: POST with an invalid success_action_status (e.g. 999); ignored and returns the default 204.
+test_post_object_upload_larger_than_chunk: POST upload larger than the server's chunk threshold; succeeds and content matches.
+test_post_object_set_key_from_filename: POST policy with key prefix and ${filename}; resulting key is `<prefix><filename>`.
+test_post_object_ignored_header: Headers not in the policy conditions are ignored; the upload still succeeds.
+test_post_object_case_insensitive_condition_fields: Policy condition field names are case-insensitive.
+test_post_object_escaped_field_values: Escaped characters in policy condition values are accepted.
+test_post_object_success_redirect_action: POST with success_action_redirect; response is a 303 redirect.
+test_post_object_invalid_signature: POST with a wrong signature expects 403.
+test_post_object_invalid_access_key: POST with a malformed access key expects 403.
+test_post_object_invalid_date_format: POST policy with an unparseable expiration date expects 400.
+test_post_object_no_key_specified: POST without a key field expects 400.
+test_post_object_missing_signature: POST without a signature field expects 400.
+test_post_object_missing_policy_condition: POST policy missing a required condition expects 400.
+test_post_object_user_specified_header: Custom headers passed via the policy are honored on the resulting object.
+test_post_object_request_missing_policy_specified_field: A field listed in policy conditions but missing from the form expects 400.
+test_post_object_condition_is_case_sensitive: Condition values are case-sensitive (only field names are not).
+test_post_object_expires_is_case_sensitive: The expiration field name is case-sensitive.
+test_post_object_expired_policy: POST after the policy expiration timestamp expects 403.
+test_post_object_wrong_bucket: POST whose policy specifies a different bucket than the URL expects 403.
+test_post_object_invalid_request_field_value: Field value violating a starts-with condition expects 403.
+test_post_object_missing_expires_condition: Policy without an expiration field expects 400.
+test_post_object_missing_conditions_list: Policy without a conditions array expects 400.
+test_post_object_upload_size_limit_exceeded: Body larger than content-length-range max expects 400.
+test_post_object_missing_content_length_argument: Policy without content-length-range expects 400.
+test_post_object_invalid_content_length_argument: Policy with malformed content-length-range expects 400.
+test_post_object_upload_size_below_minimum: Body smaller than content-length-range min expects 400.
+test_post_object_upload_size_rgw_chunk_size_bug: Regression test for RGW chunk-size handling around the content-length-range boundary.
+test_post_object_empty_conditions: Policy with an empty conditions array — the upload still succeeds when no constraints apply.
+
+# ── conditional GET/PUT ──
+
+test_get_object_ifmatch_good: GetObject with If-Match=<correct-etag> succeeds.
+test_get_object_ifmatch_failed: GetObject with If-Match=<wrong-etag> expects 412 PreconditionFailed.
+test_get_object_ifnonematch_good: GetObject with If-None-Match=<wrong-etag> succeeds.
+test_get_object_ifnonematch_failed: GetObject with If-None-Match=<correct-etag> expects 304 NotModified.
+test_get_object_ifmodifiedsince_good: GetObject with If-Modified-Since before mtime succeeds.
+test_get_object_ifmodifiedsince_failed: GetObject with If-Modified-Since after mtime expects 304 NotModified.
+test_get_object_ifunmodifiedsince_good: GetObject with If-Unmodified-Since after mtime succeeds.
+test_get_object_ifunmodifiedsince_failed: GetObject with If-Unmodified-Since before mtime expects 412.
+test_put_object_ifmatch_good: PutObject with If-Match=<correct-etag> overwrites successfully.
+test_put_object_ifmatch_failed: PutObject with If-Match=<wrong-etag> expects 412.
+test_put_object_ifmatch_overwrite_existed_good: If-Match validates against the current object before overwriting.
+test_put_object_ifmatch_nonexisted_failed: PutObject with If-Match=`*` on a missing key expects 412 (or 404 — implementation varies).
+test_put_object_ifnonmatch_good: PutObject with If-None-Match=`*` on a missing key succeeds (creates).
+test_put_object_ifnonmatch_failed: PutObject with If-None-Match=`*` on an existing key expects 412.
+test_put_object_ifnonmatch_nonexisted_good: PutObject with If-None-Match=<any-etag> on a missing key succeeds.
+test_put_object_ifnonmatch_overwrite_existed_failed: PutObject with If-None-Match=<existing-etag> on the same key expects 412.
+
+# ── object raw GET/PUT (presigned/unsigned URL behavior) ──
+
+test_object_raw_get: Unauthenticated GET via raw HTTP on a public-read object succeeds.
+test_object_raw_get_bucket_gone: Raw GET after the bucket was deleted expects 404 NoSuchBucket.
+test_object_delete_key_bucket_gone: DeleteObject after the bucket was deleted expects 404 NoSuchBucket.
+test_object_raw_get_object_gone: Raw GET on a deleted object expects 404 NoSuchKey.
+test_object_raw_get_bucket_acl: Raw GET on a private bucket (no policy) expects 403.
+test_object_raw_get_object_acl: Raw GET on a private object expects 403.
+test_object_put_acl_mtime: PutObjectAcl bumps the object's Last-Modified timestamp.
+test_object_raw_authenticated: Signed (authenticated) raw GET succeeds even on a private object.
+test_object_raw_response_headers: GetObject query-string response-header overrides (response-content-type, etc.) override the response headers.
+test_object_raw_authenticated_bucket_acl: Authenticated GET on a private bucket succeeds for the owner.
+test_object_raw_authenticated_object_acl: Authenticated GET on a private object succeeds for the owner.
+test_object_raw_authenticated_bucket_gone: Authenticated GET after the bucket was deleted expects 404.
+test_object_raw_authenticated_object_gone: Authenticated GET on a deleted object expects 404.
+test_object_raw_get_x_amz_expires_not_expired: Presigned URL with X-Amz-Expires in the future succeeds.
+test_object_raw_get_x_amz_expires_not_expired_tenant: Tenant-scoped presigned URL with valid expiration succeeds.
+test_object_raw_get_x_amz_expires_out_range_zero: Presigned URL with X-Amz-Expires=0 expects 400 (out of valid range).
+test_object_raw_get_x_amz_expires_out_max_range: Presigned URL with X-Amz-Expires beyond the 7-day max expects 400.
+test_object_raw_get_x_amz_expires_out_positive_range: Same boundary check at a still-out-of-range positive value.
+test_object_content_encoding_aws_chunked: PutObject with Content-Encoding=aws-chunked; body parses correctly and roundtrips.
+test_object_anon_put: Anonymous PutObject on a private bucket expects 403.
+test_object_anon_put_write_access: Anonymous PutObject after PutBucketAcl=public-read-write succeeds.
+test_object_put_authenticated: Authenticated PutObject succeeds for the owner.
+test_object_presigned_put_object_with_acl: Presigned PUT carrying x-amz-acl creates the object with the specified ACL.
+test_object_presigned_put_object_with_acl_tenant: Same as above scoped to a tenant.
+test_object_raw_put_authenticated_expired: Presigned PUT after expiry expects 403.
+
+# ── ListBuckets + bucket location ──
+
+test_bucket_list_long_name: ListObjects against a bucket with a 63-char name succeeds.
+test_bucket_get_location: GetBucketLocation returns the bucket's LocationConstraint.
+test_buckets_create_then_list: After creating buckets, ListBuckets includes them all.
+test_buckets_list_ctime: ListBuckets returns CreationDate for each bucket; values are monotonically increasing for sequential creates.
+test_list_buckets_anonymous: Unauthenticated ListBuckets expects 403 (no anonymous account context).
+test_list_buckets_invalid_auth: ListBuckets with a malformed signature expects 403.
+test_list_buckets_bad_auth: ListBuckets with a wrong secret key expects 403.
+test_list_buckets_paginated: ListBuckets with MaxBuckets and ContinuationToken paginates correctly across more than the default.
+test_bucket_list_special_prefix: ListObjects under buckets whose names start with special characters; treats them as ordinary buckets.
+
+# ── ACL — bucket + object ──
+
+test_bucket_acl_canned_during_create: CreateBucket with ACL=public-read sets that canned ACL on creation.
+test_bucket_acl_canned: PutBucketAcl with canned ACL public-read; GetBucketAcl reflects the public-read grant.
+test_bucket_acl_canned_publicreadwrite: PutBucketAcl public-read-write applies READ + WRITE grants to AllUsers.
+test_bucket_acl_canned_authenticatedread: PutBucketAcl authenticated-read applies READ to AuthenticatedUsers group.
+test_put_bucket_acl_grant_group_read: PutBucketAcl with a Group grantee for READ permission; GetBucketAcl reflects it.
+test_object_acl_default: New objects have a single FULL_CONTROL grant to the bucket owner.
+test_object_acl_canned_during_create: PutObject with ACL=public-read sets that canned ACL on creation.
+test_object_acl_canned: PutObjectAcl with canned public-read; GetObjectAcl reflects the new grant.
+test_object_acl_canned_publicreadwrite: PutObjectAcl public-read-write; GetObjectAcl shows READ + WRITE grants to AllUsers.
+test_object_acl_canned_authenticatedread: PutObjectAcl authenticated-read; GetObjectAcl shows READ to AuthenticatedUsers.
+test_object_acl_canned_bucketownerread: PutObjectAcl bucket-owner-read; bucket owner gets READ on objects owned by another user.
+test_object_acl_canned_bucketownerfullcontrol: PutObjectAcl bucket-owner-full-control transfers ownership-equivalent grants to the bucket owner.
+test_object_acl_full_control_verify_owner: After bucket-owner-full-control, the original uploader still owns the object; only grants change.
+test_object_acl_full_control_verify_attributes: Object attributes (size, etag) are preserved across ACL changes.
+test_bucket_acl_canned_private_to_private: PutBucketAcl private on an already-private bucket is a no-op success.
+test_object_acl: Round-trip of arbitrary AccessControlPolicy on objects via Put/GetObjectAcl.
+test_object_acl_write: PutObjectAcl grant WRITE to alt user; alt user can PutObject but not Get.
+test_object_acl_writeacp: PutObjectAcl grant WRITE_ACP to alt user; alt user can change the ACL but not the content.
+test_object_acl_read: PutObjectAcl grant READ to alt user; alt user can GET but not Put.
+test_object_acl_readacp: PutObjectAcl grant READ_ACP to alt user; alt user can GetObjectAcl but not the content.
+test_bucket_acl_grant_userid_fullcontrol: PutBucketAcl FULL_CONTROL to alt user's ID; alt user has full bucket access.
+test_bucket_acl_grant_userid_read: PutBucketAcl READ to alt user's ID; alt user can ListObjects.
+test_bucket_acl_grant_userid_readacp: PutBucketAcl READ_ACP to alt user's ID; alt user can GetBucketAcl.
+test_bucket_acl_grant_userid_write: PutBucketAcl WRITE to alt user's ID; alt user can PutObject into the bucket.
+test_bucket_acl_grant_userid_writeacp: PutBucketAcl WRITE_ACP to alt user's ID; alt user can change the bucket ACL.
+test_bucket_acl_grant_nonexist_user: PutBucketAcl referencing a non-existent CanonicalUser ID expects an error.
+test_object_header_acl_grants: PutObject while injecting x-amz-grant-* headers; GetObjectAcl returns the five matching grants.
+test_bucket_acl_grant_email: PutBucketAcl with email-address grantee resolves to the user's canonical ID.
+test_bucket_acl_grant_email_not_exist: PutBucketAcl with an unknown email expects an error.
+test_bucket_acl_revoke_all: PutBucketAcl with no grants is rejected (the owner FULL_CONTROL grant cannot be revoked).
+
+# ── access combinations (v1 listing) ──
+
+test_access_bucket_private_object_private: Both private; alt user cannot GET either object, ListObjects, or PUT.
+test_access_bucket_private_object_publicread: Bucket private, object public-read; alt user can GET that one object only.
+test_access_bucket_private_object_publicreadwrite: Bucket private, object public-read-write; alt user can still only GET that object.
+test_access_bucket_publicread_object_private: Bucket public-read, object private; alt user can ListObjects but cannot GET the private object.
+test_access_bucket_publicread_object_publicread: Both public-read; alt user can ListObjects and GET; cannot PUT.
+test_access_bucket_publicread_object_publicreadwrite: Bucket public-read, object public-read-write; alt user can GET; cannot ListObjects-Write.
+test_access_bucket_publicreadwrite_object_private: Bucket public-read-write, object private; alt user can ListObjects and PUT; GET on the private object fails.
+test_access_bucket_publicreadwrite_object_publicread: Bucket public-read-write, object public-read; alt user has full operational access.
+test_access_bucket_publicreadwrite_object_publicreadwrite: Both public-read-write; alt user has full operational access.
+
+# ── multipart upload ──
+
+test_multipart_upload_empty: Multipart upload with zero parts; CompleteMultipartUpload expects 400.
+test_multipart_upload_complete_without_create: CompleteMultipartUpload with an invented UploadId expects 404 NoSuchUpload.
+test_multipart_upload_small: Single-part multipart upload at the minimum sub-5MB size on the last part; completes successfully.
+test_multipart_upload: Standard multipart upload with multiple 5MB parts; verifies CompleteMultipartUpload returns the composite ETag and GetObject returns the assembled body.
+test_multipart_upload_resend_part: Re-uploading a part with the same PartNumber replaces it; CompleteMultipartUpload uses the latest part.
+test_multipart_upload_multiple_sizes: Multipart upload at various sizes around the 5 MB part boundary; each completes intact.
+test_multipart_upload_size_too_small: CompleteMultipartUpload where a non-last part is below 5 MB expects EntityTooSmall.
+test_multipart_upload_contents: Multipart upload verifies the assembled bytes match the input.
+test_multipart_upload_overwrite_existing_object: Multipart upload to a key that already exists replaces it.
+test_abort_multipart_upload: AbortMultipartUpload releases the upload; subsequent CompleteMultipartUpload expects 404.
+test_abort_multipart_upload_not_found: AbortMultipartUpload with an invented UploadId expects 404 NoSuchUpload.
+test_list_multipart_upload: ListMultipartUploads returns ongoing uploads with key, UploadId, and Initiator.
+test_list_multipart_upload_owner: ListMultipartUploads returns the Owner who initiated each upload.
+test_multipart_upload_missing_part: CompleteMultipartUpload with a missing part in the parts list expects InvalidPart.
+test_multipart_upload_incorrect_etag: CompleteMultipartUpload with a wrong ETag for a part expects InvalidPart.
+test_multipart_get_part: GetObject with PartNumber on a multipart object returns just that part's bytes and PartsCount.
+test_multipart_single_get_part: Same as test_multipart_get_part for a single-part multipart object.
+test_non_multipart_get_part: GetObject with PartNumber=1 on a single-part (non-multipart) object returns the whole body.
+test_100_continue: PutObject sends Expect:100-continue; server returns 100 before body is sent.
+test_100_continue_error_retry: 100-continue with a server-side rejection (e.g. preauth failure) and the client must not send the body.
+
+# ── CORS ──
+
+test_set_cors: PutBucketCors round-trips a CORS rule via Put/Get/DeleteBucketCors.
+test_cors_origin_response: OPTIONS preflight with an allowed Origin returns the configured Access-Control-Allow-Origin.
+test_cors_origin_wildcard: OPTIONS preflight with a wildcard `*` origin rule returns the wildcard.
+test_cors_header_option: CORS rule with AllowedHeaders; preflight returns Access-Control-Allow-Headers.
+test_cors_presigned_get_object: CORS preflight then presigned GET succeeds for the allowed origin.
+test_cors_presigned_get_object_tenant: Tenant-scoped variant.
+test_cors_presigned_get_object_v2: SigV2 variant.
+test_cors_presigned_get_object_tenant_v2: Tenant + SigV2 variant.
+test_cors_presigned_put_object: CORS preflight then presigned PUT succeeds.
+test_cors_presigned_put_object_with_acl: Same with x-amz-acl in the presigned URL.
+test_cors_presigned_put_object_v2: SigV2 variant.
+test_cors_presigned_put_object_tenant_v2: Tenant + SigV2 variant.
+test_cors_presigned_put_object_tenant: Tenant variant.
+test_cors_presigned_put_object_tenant_with_acl: Tenant + ACL variant.
+
+# ── atomic read/write (concurrent PUT/GET) ──
+
+test_atomic_read_1mb: GET during an in-flight overwrite returns either the old or new full body — never a mix. Tested at 1 MB.
+test_atomic_read_4mb: Same atomicity check at 4 MB.
+test_atomic_read_8mb: Same at 8 MB.
+test_atomic_write_1mb: Concurrent overlapping PUTs of the same key resolve to one consistent final body (no torn writes). At 1 MB.
+test_atomic_write_4mb: Same at 4 MB.
+test_atomic_write_8mb: Same at 8 MB.
+test_atomic_dual_write_1mb: Two-writer atomicity check at 1 MB.
+test_atomic_dual_write_4mb: At 4 MB.
+test_atomic_dual_write_8mb: At 8 MB.
+test_atomic_conditional_write_1mb: Conditional PUT (IfNoneMatch) atomicity check at 1 MB; only one writer wins.
+test_atomic_dual_conditional_write_1mb: Two conditional PUTs at 1 MB; at most one succeeds.
+test_atomic_write_bucket_gone: PUT during concurrent DeleteBucket; PUT either succeeds or returns 404 — no intermediate state.
+test_atomic_multipart_upload_write: Concurrent multipart upload + single-PUT to the same key resolve consistently.
+test_multipart_resend_first_finishes_last: Resending PartNumber=1 after later parts completed must replace the first part; final body uses the resent bytes.
+
+# ── ranged GET ──
+
+test_ranged_request_response_code: GET with Range header returns 206 Partial Content.
+test_ranged_big_request_response_code: Range on a large object returns 206 with correct Content-Range and Content-Length.
+test_ranged_request_skip_leading_bytes_response_code: Range=bytes=N- returns the suffix.
+test_ranged_request_return_trailing_bytes_response_code: Range=bytes=-N returns the trailing N bytes.
+test_ranged_request_invalid_range: Range beyond object size expects 416 InvalidRange.
+test_ranged_request_empty_object: Range on a 0-byte object expects 416 or appropriate empty handling.
+test_object_read_unreadable: GetObject of a key whose name contains unreadable bytes; client must round-trip the URL-encoded name.
+
+# ── bucket policy status + public access block ──
+
+test_get_bucket_policy_status: GetBucketPolicyStatus on a bucket with no policy returns IsPublic=False.
+test_get_public_acl_bucket_policy_status: GetBucketPolicyStatus reflects a public ACL as IsPublic=True.
+test_get_authpublic_acl_bucket_policy_status: GetBucketPolicyStatus with authenticated-read ACL returns IsPublic=True (AuthenticatedUsers is considered public).
+test_get_publicpolicy_acl_bucket_policy_status: GetBucketPolicyStatus with a wildcard-principal Allow policy returns IsPublic=True.
+test_get_nonpublicpolicy_acl_bucket_policy_status: Policy whose principals are scoped to specific ARNs returns IsPublic=False.
+test_get_nonpublicpolicy_principal_bucket_policy_status: NotPrincipal patterns are correctly classified non-public.
+test_bucket_policy_allow_notprincipal: Bucket policy with NotPrincipal works as documented (allow all except those listed).
+test_get_undefined_public_block: GetPublicAccessBlock on a bucket without configuration expects NoSuchPublicAccessBlockConfiguration.
+test_get_public_block_deny_bucket_policy: PutPublicAccessBlock with RestrictPublicBuckets blocks subsequent public bucket policies.
+test_put_public_block: PutPublicAccessBlock round-trips all four flags via Put/Get.
+test_block_public_put_bucket_acls: With BlockPublicAcls=true, PutBucketAcl public-read is rejected.
+test_block_public_object_canned_acls: With BlockPublicAcls=true, PutObject ACL=public-read is rejected.
+test_block_public_policy: With BlockPublicPolicy=true, PutBucketPolicy with a wildcard principal is rejected.
+test_block_public_policy_with_principal: BlockPublicPolicy does not block policies that specify a non-wildcard principal.
+test_block_public_restrict_public_buckets: With RestrictPublicBuckets=true, anonymous list/get on a public bucket is denied even if its ACL is public.
+test_ignore_public_acls: With IgnorePublicAcls=true, existing public-read ACLs are ignored at access-check time.
+test_put_get_delete_public_block: PutPublicAccessBlock + GetPublicAccessBlock + DeletePublicAccessBlock round-trip.
+test_multipart_upload_on_a_bucket_with_policy: Multipart upload to a bucket with a Deny policy on PutObject succeeds when the policy permits the upload's principal.
+
+# ── misc — torrent, object attributes, percent-encoded keys, ownership controls, 404 ──
+
+test_get_object_torrent: GetObjectTorrent on an object; expects either a torrent file or NotImplemented depending on provider.
+test_get_multipart_object_attributes: GetObjectAttributes on a multipart object returns ObjectParts and per-part sizes.
+test_get_paginated_multipart_object_attributes: GetObjectAttributes with MaxParts paginates through ObjectParts.
+test_get_single_multipart_object_attributes: GetObjectAttributes on a one-part multipart object returns one ObjectPart.
+test_get_checksum_object_attributes: GetObjectAttributes returns the Checksum field for objects uploaded with a checksum algorithm.
+test_get_versioned_object_attributes: GetObjectAttributes with VersionId returns that version's ObjectSize and ETag.
+test_get_object_attributes: GetObjectAttributes basic round-trip returns ETag, ObjectSize, and StorageClass.
+test_upload_part_copy_percent_encoded_key: UploadPartCopy where the source key contains characters that must be percent-encoded; copy succeeds.
+test_create_bucket_no_ownership_controls: CreateBucket without ObjectOwnership leaves the bucket with the default (ObjectWriter on AWS, varies per provider).
+test_create_bucket_bucket_owner_enforced: CreateBucket with ObjectOwnership=BucketOwnerEnforced disables ACLs entirely.
+test_create_bucket_bucket_owner_preferred: CreateBucket with BucketOwnerPreferred causes new objects to be owned by the bucket owner when uploaded with bucket-owner-full-control.
+test_create_bucket_object_writer: CreateBucket with ObjectOwnership=ObjectWriter; uploader retains ownership.
+test_put_bucket_ownership_bucket_owner_enforced: PutBucketOwnershipControls flipping a bucket to BucketOwnerEnforced disables ACLs.
+test_put_bucket_ownership_bucket_owner_preferred: PutBucketOwnershipControls to BucketOwnerPreferred.
+test_put_bucket_ownership_object_writer: PutBucketOwnershipControls to ObjectWriter.
+test_head_object_404_with_policy_prefix: HeadObject on a missing key under a policy-restricted prefix; expects 404 (not 403 — the policy doesn't leak existence).

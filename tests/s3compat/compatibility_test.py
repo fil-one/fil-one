@@ -34,11 +34,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+from lib import descriptions as _descriptions
 from lib import report as _report
 from lib.client import get_s3_client, resolve_provider
 
 _SCRIPTS_DIR = Path(__file__).parent
 S3TESTS_DIR = _SCRIPTS_DIR / "ceph-s3-tests"
+_DEFAULT_DESCRIPTIONS = _SCRIPTS_DIR / "test_descriptions.yaml"
 
 # Marks defined in s3-tests pytest.ini that represent test categories.
 # Checked in priority order — first match wins for grouping.
@@ -420,6 +422,15 @@ def main():
         default="",
         help="Pytest -k expression to select tests by name (e.g. 'test_bucket_policy or test_versioning')",
     )
+    parser.add_argument(
+        "--descriptions",
+        default=None,
+        help=(
+            "Path to YAML file mapping test IDs to descriptions for inclusion "
+            f"in reports. Defaults to {_DEFAULT_DESCRIPTIONS.name} next to this "
+            "script if it exists."
+        ),
+    )
     args = parser.parse_args()
 
     _check_prereqs()
@@ -488,6 +499,9 @@ def main():
         sys.exit(1)
 
     entries, meta = _merge_results(json_outs)
+
+    desc_path = Path(args.descriptions) if args.descriptions else _DEFAULT_DESCRIPTIONS
+    _descriptions.describe(entries, _descriptions.load(desc_path))
 
     pass_desc = ", ".join(
         f"{name} ({filt})" for name, filt in passes
