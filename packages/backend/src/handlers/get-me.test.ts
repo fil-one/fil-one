@@ -23,6 +23,15 @@ vi.mock('../lib/auth-secrets.js', () => ({
   }),
 }));
 
+const mockGetMfaEnrollments = vi.fn();
+vi.mock('../lib/auth0-management.js', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
+  };
+});
+
 const mockJwtVerify = vi.fn();
 vi.mock('jose', () => ({
   jwtVerify: (token: unknown, jwks: unknown, opts: unknown) => mockJwtVerify(token, jwks, opts),
@@ -47,10 +56,11 @@ const MOCK_ORG_ID = 'org-1';
 const MOCK_USER_ID = 'user-1';
 const MOCK_EMAIL = 'user@example.com';
 
-function authenticatedEvent() {
+function authenticatedEvent(queryStringParameters?: Record<string, string>) {
   return buildEvent({
     cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
     userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, email: MOCK_EMAIL },
+    queryStringParameters,
   });
 }
 
@@ -66,6 +76,8 @@ describe('GET /api/me handler', () => {
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
     });
+
+    mockGetMfaEnrollments.mockResolvedValue([]);
 
     // Auth middleware: resolve existing user
     ddbMock
@@ -108,6 +120,7 @@ describe('GET /api/me handler', () => {
         orgName: 'Example Corp',
         emailVerified: true,
         email: MOCK_EMAIL,
+        mfaEnrollments: [],
         connectionType: 'auth0',
       }),
     });
@@ -137,6 +150,7 @@ describe('GET /api/me handler', () => {
         orgName: 'Example Corp',
         emailVerified: true,
         email: MOCK_EMAIL,
+        mfaEnrollments: [],
         connectionType: 'auth0',
       }),
     });
@@ -159,6 +173,81 @@ describe('GET /api/me handler', () => {
         orgName: '',
         emailVerified: true,
         email: MOCK_EMAIL,
+        mfaEnrollments: [],
+        connectionType: 'auth0',
+      }),
+    });
+  });
+
+  it('does not call getMfaEnrollments when include=mfa is absent', async () => {
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          orgConfirmed: { BOOL: true },
+          setupStatus: { S: FINAL_SETUP_STATUS },
+        },
+      });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(mockGetMfaEnrollments).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: expect.stringContaining('"mfaEnrollments":[]'),
+    });
+  });
+
+  it('returns enrollments when include=mfa is set', async () => {
+    mockGetMfaEnrollments.mockResolvedValue([
+      {
+        id: 'webauthn-roaming|dev_abc',
+        type: 'webauthn-roaming',
+        status: 'confirmed',
+        name: 'My key',
+        enrolled_at: '2026-03-24T00:20:17.000Z',
+      },
+    ]);
+
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          orgConfirmed: { BOOL: true },
+          setupStatus: { S: FINAL_SETUP_STATUS },
+        },
+      });
+
+    const result = await handler(authenticatedEvent({ include: 'mfa' }), buildContext());
+
+    expect(mockGetMfaEnrollments).toHaveBeenCalledWith(MOCK_SUB);
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({
+        orgId: MOCK_ORG_ID,
+        orgName: 'Example Corp',
+        emailVerified: true,
+        email: MOCK_EMAIL,
+        mfaEnrollments: [
+          {
+            id: 'webauthn-roaming|dev_abc',
+            type: 'webauthn-roaming',
+            name: 'My key',
+            createdAt: '2026-03-24T00:20:17.000Z',
+          },
+        ],
         connectionType: 'auth0',
       }),
     });
