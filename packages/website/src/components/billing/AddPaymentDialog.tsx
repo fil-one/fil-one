@@ -15,6 +15,7 @@ import { ActivateSubscriptionRequestSchema } from '@filone/shared';
 import { Modal, ModalBody, ModalHeader } from '../Modal/index.js';
 
 import { getStripe } from '../../lib/stripe.js';
+import { activateSubscription } from '../../lib/api.js';
 
 type AddPaymentDialogProps = {
   open: boolean;
@@ -99,11 +100,7 @@ function PaymentForm({
 
     // Card setup confirmed — activate subscription via API
     try {
-      const { apiRequest } = await import('../../lib/api.js');
-      await apiRequest('/billing/activate', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
+      await activateSubscription({ promotionCode: trimmedPromotionCode });
       onSuccess();
     } catch (err) {
       setError((err as Error).message || 'Failed to activate subscription.');

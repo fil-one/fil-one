@@ -80,7 +80,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     return paymentMethodId;
   }
 
-  // Resolve promo code against Stripe before we mutate any subscription state.
+  // 4. Resolve promo code against Stripe before we mutate any subscription state.
   let promotionCodeId: string | undefined;
   if (promotionCode) {
     const matches = await stripe.promotionCodes.list({
@@ -100,7 +100,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     }
   }
 
-  // 3. Create or update subscription
+  // 5. Create or update subscription
   const subscription = await createOrUpdateSubscription(
     stripe,
     record,
@@ -128,7 +128,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  // 4. Persist billing record and unlock Aurora tenant
+  // 6. Persist billing record and unlock Aurora tenant
   await saveBillingRecord(userId, subscription, paymentMethodId, mappedStatus);
   await unlockAuroraTenant(orgId);
 
