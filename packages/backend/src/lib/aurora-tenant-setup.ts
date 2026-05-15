@@ -29,6 +29,8 @@ export interface TenantSetupOptions {
   orgName: string;
 }
 
+const SETUP_FAILURE_ALERT_THRESHOLD = 3;
+
 const dynamo = getDynamoClient();
 const ssm = new SSMClient({});
 
@@ -403,11 +405,11 @@ async function ssmHasParameter(name: string): Promise<boolean> {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-// Increments the per-org failure counter atomically. When the count first
-// crosses the stuck threshold (newCount === 3), kicks off a one-shot scan
-// + EMF emission of StuckAuroraTenantSetupCount. Concurrent failing
-// invocations are serialized by DynamoDB's atomic ADD: only one of them
-// observes newCount === 3, so only one runs the scan.
+// Increments the per-org failure counter atomically. When the count first crosses the stuck
+// threshold (newCount === SETUP_FAILURE_ALERT_THRESHOLD), kicks off a one-shot scan + EMF emission
+// of StuckAuroraTenantSetupCount. Concurrent failing invocations are serialized by DynamoDB's
+// atomic ADD: only one of them observes newCount === SETUP_FAILURE_ALERT_THRESHOLD, so only one
+// runs the scan.
 export async function recordSetupFailure(orgId: string): Promise<void> {
   const out = await dynamo.send(
     new UpdateItemCommand({
@@ -430,7 +432,7 @@ export async function recordSetupFailure(orgId: string): Promise<void> {
     }),
   );
   const newCount = Number(out.Attributes?.setupFailureCount?.N ?? '0');
-  if (newCount === 3) {
+  if (newCount === SETUP_FAILURE_ALERT_THRESHOLD) {
     await scanAndEmitStuckTenantCount();
   }
 }
@@ -470,7 +472,7 @@ async function advanceStatus(opts: AdvanceStatusOptions): Promise<'wrote' | 'los
 
     if (isTerminal) {
       const priorFailureCount = Number(out.Attributes?.setupFailureCount?.N ?? '0');
-      if (priorFailureCount >= 3) {
+      if (priorFailureCount >= SETUP_FAILURE_ALERT_THRESHOLD) {
         await scanAndEmitStuckTenantCount();
       }
     }
