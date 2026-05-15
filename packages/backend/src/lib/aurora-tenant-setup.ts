@@ -50,17 +50,14 @@ type EnsureTenantReadyResult =
 // machine resumes from whatever step is next on the user's retry.
 export async function ensureTenantReady(orgId: string): Promise<EnsureTenantReadyResult> {
   try {
-    const { Item: orgProfile } = await getDynamoClient().send(
-      new GetItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      }),
-    );
-    const orgName = orgProfile?.name?.S ?? '';
-
-    const { auroraTenantId } = await processTenantSetup({ orgId, orgName });
+    const { auroraTenantId } = await processTenantSetup(orgId);
     return { ok: true, auroraTenantId };
   } catch (err) {
+    console.error(`[tenant-setup] setup failed`, {
+      orgId,
+      error: format(err),
+    });
+
     try {
       await recordSetupFailure(orgId);
     } catch (counterErr) {
@@ -70,10 +67,6 @@ export async function ensureTenantReady(orgId: string): Promise<EnsureTenantRead
       });
     }
 
-    console.error(`[tenant-setup] setup failed`, {
-      orgId,
-      error: format(err),
-    });
     return {
       ok: false,
       errorResponse: new ResponseBuilder()
@@ -86,16 +79,13 @@ export async function ensureTenantReady(orgId: string): Promise<EnsureTenantRead
   }
 }
 
-export async function processTenantSetup(
-  options: TenantSetupOptions,
-): Promise<{ auroraTenantId: string }> {
-  const { orgId, orgName } = options;
+export async function processTenantSetup(orgId: string): Promise<{ auroraTenantId: string }> {
   const orgProfileKey = {
     pk: { S: `ORG#${orgId}` },
     sk: { S: 'PROFILE' },
   } satisfies OrgProfileKey;
 
-  const { Item } = await dynamo.send(
+  const { Item: orgProfile } = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: orgProfileKey,
@@ -108,28 +98,29 @@ export async function processTenantSetup(
     }),
   );
 
-  if (!Item) {
+  if (!orgProfile) {
     throw new Error(`Org profile not found for org ${orgId}`);
   }
 
-  const setupStatus = Item.setupStatus?.S;
+  const orgName = orgProfile.name?.S ?? '';
+  const setupStatus = orgProfile.setupStatus?.S;
 
   switch (setupStatus) {
     case OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED: {
-      const auroraTenantId = Item.auroraTenantId?.S;
+      const auroraTenantId = orgProfile.auroraTenantId?.S;
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
       return { auroraTenantId };
     }
 
     case OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED: {
-      const auroraTenantId = Item.auroraTenantId?.S;
+      const auroraTenantId = orgProfile.auroraTenantId?.S;
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
       await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey);
       return { auroraTenantId };
     }
 
     case OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE: {
-      const auroraTenantId = Item.auroraTenantId?.S;
+      const auroraTenantId = orgProfile.auroraTenantId?.S;
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
       await createAndStoreApiKey(orgId, auroraTenantId, orgProfileKey);
       await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey);
@@ -145,7 +136,7 @@ export async function processTenantSetup(
     }
 
     case OrgSetupStatus.AURORA_TENANT_CREATED: {
-      const auroraTenantId = Item.auroraTenantId?.S;
+      const auroraTenantId = orgProfile.auroraTenantId?.S;
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
       await runSetup(orgId, auroraTenantId, orgProfileKey);
       await createAndStoreApiKey(orgId, auroraTenantId, orgProfileKey);

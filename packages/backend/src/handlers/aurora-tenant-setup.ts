@@ -9,6 +9,6 @@ export async function handler(event: SQSEvent, _context: Context): Promise<void>
     1,
     `Expected exactly 1 SQS record, got ${event.Records.length}`,
   );
-  const options: TenantSetupOptions = JSON.parse(event.Records[0].body);
-  await processTenantSetup(options);
+  const { orgId }: TenantSetupOptions = JSON.parse(event.Records[0].body);
+  await processTenantSetup(orgId);
 }

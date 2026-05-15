@@ -110,7 +110,7 @@ describe('processTenantSetup', () => {
       }),
     );
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     expect(mockCreateAuroraTenant).not.toHaveBeenCalled();
     expect(mockSetupAuroraTenant).not.toHaveBeenCalled();
@@ -130,7 +130,7 @@ describe('processTenantSetup', () => {
     ssmMock.on(PutParameterCommand).resolves({});
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     expect(mockCreateAuroraTenant).not.toHaveBeenCalled();
     expect(mockSetupAuroraTenant).not.toHaveBeenCalled();
@@ -161,7 +161,12 @@ describe('processTenantSetup', () => {
   it('creates full pipeline when status is FILONE_ORG_CREATED', async () => {
     ddbMock
       .on(GetItemCommand)
-      .resolves(orgProfileItem({ setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }));
+      .resolves(
+        orgProfileItem({
+          setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+          name: { S: 'Test Org' },
+        }),
+      );
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
@@ -169,7 +174,7 @@ describe('processTenantSetup', () => {
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_secret', tokenId: 'tok-1' });
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     expect(mockCreateAuroraTenant).toHaveBeenCalledWith({
       orgId: 'org-1',
@@ -275,7 +280,7 @@ describe('processTenantSetup', () => {
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_key', tokenId: 'tok-2' });
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     expect(mockCreateAuroraTenant).not.toHaveBeenCalled();
     expect(mockSetupAuroraTenant).toHaveBeenCalledWith({ tenantId: 'aurora-t-2' });
@@ -314,7 +319,7 @@ describe('processTenantSetup', () => {
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_key3', tokenId: 'tok-3' });
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     expect(mockCreateAuroraTenant).not.toHaveBeenCalled();
     expect(mockSetupAuroraTenant).not.toHaveBeenCalled();
@@ -366,7 +371,7 @@ describe('processTenantSetup', () => {
     mockCreateAuroraTenantApiKey.mockRejectedValue(new FakeDuplicateTokenNameError());
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     // PutParameter only fires once — for the S3 key, not the api token
     const putParameterCalls = ssmMock.commandCalls(PutParameterCommand);
@@ -407,7 +412,7 @@ describe('processTenantSetup', () => {
       paramNotFound.name = 'ParameterNotFound';
       ssmMock.on(GetParameterCommand).rejects(paramNotFound);
 
-      const promise = processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+      const promise = processTenantSetup('org-1');
       promise.catch(() => {}); // suppress unhandled-rejection while timers advance
       await vi.runAllTimersAsync();
       await expect(promise).rejects.toThrow(
@@ -446,7 +451,7 @@ describe('processTenantSetup', () => {
         .resolves({ Parameter: { Value: 'atp_existing' } });
       setupDefaultS3AccessKeyMock();
 
-      const promise = processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+      const promise = processTenantSetup('org-1');
       await vi.runAllTimersAsync();
       await promise;
 
@@ -474,7 +479,7 @@ describe('processTenantSetup', () => {
     mockCreateAuroraAccessKey.mockRejectedValue(duplicateError);
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: '{}' } });
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(1);
@@ -499,7 +504,7 @@ describe('processTenantSetup', () => {
       paramNotFound.name = 'ParameterNotFound';
       ssmMock.on(GetParameterCommand).rejects(paramNotFound);
 
-      const promise = processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+      const promise = processTenantSetup('org-1');
       promise.catch(() => {}); // suppress unhandled-rejection while timers advance
       await vi.runAllTimersAsync();
       await expect(promise).rejects.toThrow('An access key with this name already exists');
@@ -535,7 +540,7 @@ describe('processTenantSetup', () => {
         .rejectsOnce(paramNotFound)
         .resolves({ Parameter: { Value: '{}' } });
 
-      const promise = processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+      const promise = processTenantSetup('org-1');
       await vi.runAllTimersAsync();
       await promise;
 
@@ -568,7 +573,7 @@ describe('processTenantSetup', () => {
       mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp', tokenId: 'tok' });
       setupDefaultS3AccessKeyMock();
 
-      const promise = processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+      const promise = processTenantSetup('org-1');
       await vi.runAllTimersAsync();
       await promise;
 
@@ -592,7 +597,7 @@ describe('processTenantSetup', () => {
         lastSetupStep: 'WARM_TIER_ADDED',
       });
 
-      const promise = processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+      const promise = processTenantSetup('org-1');
       promise.catch(() => {});
       await vi.runAllTimersAsync();
       await expect(promise).rejects.toThrow(
@@ -617,7 +622,7 @@ describe('processTenantSetup', () => {
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp', tokenId: 'tok' });
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     const durationCalls = mockReportMetric.mock.calls.filter((call) =>
       call[0]?._aws?.CloudWatchMetrics?.[0]?.Metrics?.some(
@@ -653,7 +658,7 @@ describe('processTenantSetup', () => {
         lastSetupStep: 'WARM_TIER_ADDED',
       });
 
-      const promise = processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+      const promise = processTenantSetup('org-1');
       promise.catch(() => {});
       await vi.runAllTimersAsync();
       await expect(promise).rejects.toThrow(/Aurora tenant setup not finished/);
@@ -682,7 +687,7 @@ describe('processTenantSetup', () => {
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp', tokenId: 'tok' });
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     const durationCalls = mockReportMetric.mock.calls.filter((call) =>
       call[0]?._aws?.CloudWatchMetrics?.[0]?.Metrics?.some(
@@ -695,7 +700,12 @@ describe('processTenantSetup', () => {
   it('creates full pipeline when setupStatus is FILONE_ORG_CREATED', async () => {
     ddbMock
       .on(GetItemCommand)
-      .resolves(orgProfileItem({ setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }));
+      .resolves(
+        orgProfileItem({
+          setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+          name: { S: 'Test Org' },
+        }),
+      );
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-new' });
@@ -703,7 +713,7 @@ describe('processTenantSetup', () => {
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_new', tokenId: 'tok-new' });
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     expect(mockCreateAuroraTenant).toHaveBeenCalledWith({
       orgId: 'org-1',
@@ -724,15 +734,15 @@ describe('processTenantSetup', () => {
   it('throws when org profile is not found', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
 
-    await expect(
-      processTenantSetup({ orgId: 'org-missing', orgName: 'Missing Org' }),
-    ).rejects.toThrow('Org profile not found for org org-missing');
+    await expect(processTenantSetup('org-missing')).rejects.toThrow(
+      'Org profile not found for org org-missing',
+    );
   });
 
   it('throws when setupStatus attribute is missing on the org profile', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileItem({}));
 
-    await expect(processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' })).rejects.toThrow(
+    await expect(processTenantSetup('org-1')).rejects.toThrow(
       'Unexpected setupStatus "undefined" for org org-1',
     );
   });
@@ -765,7 +775,7 @@ describe('processTenantSetup', () => {
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_race', tokenId: 'tok-race' });
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     expect(mockSetupAuroraTenant).toHaveBeenCalledWith({ tenantId: 'aurora-t-race' });
     expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(2);
@@ -785,7 +795,7 @@ describe('processTenantSetup', () => {
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp', tokenId: 'tok' });
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     expect(mockCreateAuroraTenantApiKey).toHaveBeenCalled();
     expect(mockCreateAuroraAccessKey).toHaveBeenCalled();
@@ -803,7 +813,7 @@ describe('processTenantSetup', () => {
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp', tokenId: 'tok' });
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     expect(mockCreateAuroraAccessKey).toHaveBeenCalled();
   });
@@ -819,9 +829,9 @@ describe('processTenantSetup', () => {
     ssmMock.on(PutParameterCommand).resolves({});
     setupDefaultS3AccessKeyMock();
 
-    await expect(
-      processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' }),
-    ).resolves.toStrictEqual({ auroraTenantId: 'aurora-t-1' });
+    await expect(processTenantSetup('org-1')).resolves.toStrictEqual({
+      auroraTenantId: 'aurora-t-1',
+    });
   });
 
   it('reads the org profile with strong consistency', async () => {
@@ -832,7 +842,7 @@ describe('processTenantSetup', () => {
       }),
     );
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     const getCalls = ddbMock.commandCalls(GetItemCommand);
     expect(getCalls).toHaveLength(1);
@@ -861,7 +871,7 @@ describe('stuck-tenant gauge refresh on terminal advance', () => {
     ssmMock.on(PutParameterCommand).resolves({});
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     expect(mockScanAndEmitStuckTenantCount).toHaveBeenCalledTimes(1);
   });
@@ -877,7 +887,7 @@ describe('stuck-tenant gauge refresh on terminal advance', () => {
     ssmMock.on(PutParameterCommand).resolves({});
     setupDefaultS3AccessKeyMock();
 
-    await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
+    await processTenantSetup('org-1');
 
     expect(mockScanAndEmitStuckTenantCount).not.toHaveBeenCalled();
   });
@@ -898,9 +908,9 @@ describe('stuck-tenant gauge refresh on terminal advance', () => {
     ssmMock.on(PutParameterCommand).resolves({});
     setupDefaultS3AccessKeyMock();
 
-    await expect(
-      processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' }),
-    ).resolves.toStrictEqual({ auroraTenantId: 'aurora-t-1' });
+    await expect(processTenantSetup('org-1')).resolves.toStrictEqual({
+      auroraTenantId: 'aurora-t-1',
+    });
     expect(mockScanAndEmitStuckTenantCount).not.toHaveBeenCalled();
   });
 });
