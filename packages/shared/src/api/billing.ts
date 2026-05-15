@@ -6,10 +6,7 @@ export const ActivateSubscriptionRequestSchema = z
     promotionCode: z
       .string()
       .trim()
-      .regex(
-        /^[A-Za-z0-9_-]{3,40}$/,
-        'Promo code must be 3–40 letters, digits, hyphens, or underscores.',
-      )
+      .regex(/^[A-Za-z0-9-]{3,40}$/, 'Promo code must be 3–40 letters, digits, or hyphens.')
       .optional(),
   })
   .strict();
