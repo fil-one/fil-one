@@ -342,14 +342,14 @@ jobs:
         continue-on-error: true # Advisory — informational baseline
 
       - name: Upload Scorecard results
-        if: always()
+        if: always() && hashFiles('scorecard-results.sarif') != ''
         uses: actions/upload-artifact@v4
         with:
           name: scorecard-results
           path: scorecard-results.sarif
 
       - name: Upload SARIF to GitHub Security tab
-        if: always() && vars.ENABLE_GHAS == 'true'
+        if: always() && vars.ENABLE_GHAS == 'true' && hashFiles('scorecard-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: scorecard-results.sarif
