@@ -169,7 +169,7 @@ Look up `pk=SUB#${sub}, sk=IDENTITY`:
 - **Miss (first login):** atomic `TransactWriteItems` writes four records:
   - `SUB#${sub} / IDENTITY` (with `attribute_not_exists(pk)` to guard concurrent first logins)
   - `USER#${userId} / PROFILE`
-  - `ORG#${orgId} / PROFILE` with `orgConfirmed: false`, `setupStatus: FILONE_ORG_CREATED`, suggested `name`
+  - `ORG#${orgId} / PROFILE` with `setupStatus: FILONE_ORG_CREATED`, suggested `name`
   - `ORG#${orgId} / MEMBER#${userId}` with `role: OrgRole.Admin`
 
 The new user is now authenticated but `orgConfirmed=false`. Aurora tenant creation is _not_ triggered here — see Tenancy below.
