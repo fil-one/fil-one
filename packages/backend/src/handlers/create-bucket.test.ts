@@ -1,6 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -27,22 +25,10 @@ vi.mock('../lib/aurora-tenant-setup.js', () => ({
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
 }));
 
-const ddbMock = mockClient(DynamoDBClient);
-
 import { baseHandler } from './create-bucket.js';
 import { BucketAlreadyExistsError } from '../lib/aurora-portal.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 import { S3_REGION } from '@filone/shared';
-
-function orgProfileItem(name: string) {
-  return {
-    Item: {
-      pk: { S: `ORG#${USER_INFO.orgId}` },
-      sk: { S: 'PROFILE' },
-      name: { S: name },
-    },
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,9 +47,7 @@ function validBody() {
 describe('create-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    ddbMock.reset();
-    mockEnsureTenantReady.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
-    ddbMock.on(GetItemCommand).resolves(orgProfileItem('Example Corp'));
+    mockEnsureTenantReady.mockResolvedValue({ ok: true, auroraTenantId: 'aurora-t-1' });
   });
 
   it('returns 201 and calls createAuroraBucket on success', async () => {
@@ -88,12 +72,17 @@ describe('create-bucket baseHandler', () => {
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(mockEnsureTenantReady).toHaveBeenCalledWith({ orgId: 'org-1', orgName: 'Example Corp' });
+    expect(mockEnsureTenantReady).toHaveBeenCalledWith('org-1');
   });
 
   it('returns 503 with a retry message when tenant setup fails', async () => {
-    mockEnsureTenantReady.mockRejectedValue(new Error('Aurora setup timed out'));
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errorResponse = {
+      statusCode: 503,
+      body: JSON.stringify({
+        message: 'We are still setting up your account. Please try again in a moment.',
+      }),
+    };
+    mockEnsureTenantReady.mockResolvedValue({ ok: false, errorResponse });
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -102,8 +91,6 @@ describe('create-bucket baseHandler', () => {
     const body = JSON.parse(result.body as string);
     expect(body.message).toMatch(/setting up your account/i);
     expect(mockCreateAuroraBucket).not.toHaveBeenCalled();
-    expect(consoleErrorSpy).toHaveBeenCalled();
-    consoleErrorSpy.mockRestore();
   });
 
   it('throws when Aurora Portal API fails', async () => {

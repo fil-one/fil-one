@@ -974,12 +974,12 @@ describe('ensureTenantReady', () => {
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp', tokenId: 'tok' });
     setupDefaultS3AccessKeyMock();
 
-    const result = await ensureTenantReady({ orgId: 'org-1', orgName: 'Test Org' });
+    const result = await ensureTenantReady('org-1');
 
-    expect(result).toStrictEqual({ auroraTenantId: 'aurora-t-1' });
+    expect(result).toStrictEqual({ ok: true, auroraTenantId: 'aurora-t-1' });
   });
 
-  it('records a failure and re-throws when processTenantSetup throws', async () => {
+  it('records a failure and returns 503 error response when processTenantSetup throws', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
         setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
@@ -996,9 +996,9 @@ describe('ensureTenantReady', () => {
       .resolves({ Attributes: { setupFailureCount: { N: '1' } } });
     mockSetupAuroraTenant.mockRejectedValue(new Error('Aurora is down'));
 
-    await expect(ensureTenantReady({ orgId: 'org-1', orgName: 'Test Org' })).rejects.toThrow(
-      'Aurora is down',
-    );
+    const result = await ensureTenantReady('org-1');
+
+    expect(result.ok).toBe(false);
 
     const addCalls = ddbMock
       .commandCalls(UpdateItemCommand)

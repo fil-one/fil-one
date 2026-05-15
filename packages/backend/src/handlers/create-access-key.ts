@@ -1,4 +1,4 @@
-import { GetItemCommand, PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import { PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
@@ -59,8 +59,8 @@ export async function baseHandler(
 
   const { orgId } = getUserInfo(event);
 
-  const ready = await prepareTenant(orgId, 'create-access-key');
-  if (!ready.ok) return ready.response;
+  const ready = await ensureTenantReady(orgId);
+  if (!ready.ok) return ready.errorResponse;
   const { auroraTenantId } = ready;
 
   let auroraKey;
@@ -119,40 +119,6 @@ export async function baseHandler(
       createdAt: auroraKey.createdAt,
     })
     .build();
-}
-
-type PrepareTenantResult =
-  | { ok: true; auroraTenantId: string }
-  | { ok: false; response: APIGatewayProxyStructuredResultV2 };
-
-async function prepareTenant(orgId: string, handlerName: string): Promise<PrepareTenantResult> {
-  const { Item: orgProfile } = await getDynamoClient().send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-    }),
-  );
-  const orgName = orgProfile?.name?.S ?? '';
-
-  try {
-    const { auroraTenantId } = await ensureTenantReady({ orgId, orgName });
-    return { ok: true, auroraTenantId };
-  } catch (err) {
-    console.error(`[tenant-setup] setup failed during ${handlerName}`, {
-      orgId,
-      error: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack : undefined,
-    });
-    return {
-      ok: false,
-      response: new ResponseBuilder()
-        .status(503)
-        .body<ErrorResponse>({
-          message: 'We are still setting up your account. Please try again in a moment.',
-        })
-        .build(),
-    };
-  }
 }
 
 async function recoverDuplicateKey(

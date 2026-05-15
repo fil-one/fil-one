@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import { format } from 'node:util';
 import {
   ConditionalCheckFailedException,
   GetItemCommand,
@@ -13,11 +14,13 @@ import {
   DuplicateTokenNameError,
   setupAuroraTenant,
 } from './aurora-backoffice.js';
-import { ACCESS_KEY_PERMISSIONS } from '@filone/shared';
+import { ACCESS_KEY_PERMISSIONS, ErrorResponse } from '@filone/shared';
 import { createAuroraAccessKey } from './aurora-portal.js';
 import { reportMetric } from './metrics.js';
 import { OrgSetupStatus, isOrgSetupComplete } from './org-setup-status.js';
 import { scanAndEmitStuckTenantCount } from './stuck-tenant-metric.js';
+import { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import { ResponseBuilder } from './response-builder.js';
 
 export { OrgSetupStatus };
 
@@ -34,26 +37,50 @@ type OrgProfileKey = {
   sk: { S: 'PROFILE' };
 };
 
+type EnsureTenantReadyResult =
+  | { ok: true; auroraTenantId: string }
+  | { ok: false; errorResponse: APIGatewayProxyStructuredResultV2 };
+
 // Public entry point for synchronous tenant setup from request handlers.
 // Returns the auroraTenantId on success. On any failure inside
 // processTenantSetup, increments the per-org failure counter (best-effort)
 // and re-throws so the handler can return a 503 to the user. The state
 // machine resumes from whatever step is next on the user's retry.
-export async function ensureTenantReady(
-  options: TenantSetupOptions,
-): Promise<{ auroraTenantId: string }> {
+export async function ensureTenantReady(orgId: string): Promise<EnsureTenantReadyResult> {
   try {
-    return await processTenantSetup(options);
+    const { Item: orgProfile } = await getDynamoClient().send(
+      new GetItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+      }),
+    );
+    const orgName = orgProfile?.name?.S ?? '';
+
+    const { auroraTenantId } = await processTenantSetup({ orgId, orgName });
+    return { ok: true, auroraTenantId };
   } catch (err) {
     try {
-      await recordSetupFailure(options.orgId);
+      await recordSetupFailure(orgId);
     } catch (counterErr) {
       console.error('[tenant-setup] failed to record setup failure', {
-        orgId: options.orgId,
-        error: counterErr,
+        orgId: orgId,
+        error: format(counterErr),
       });
     }
-    throw err;
+
+    console.error(`[tenant-setup] setup failed`, {
+      orgId,
+      error: format(err),
+    });
+    return {
+      ok: false,
+      errorResponse: new ResponseBuilder()
+        .status(503)
+        .body<ErrorResponse>({
+          message: 'We are still setting up your account. Please try again in a moment.',
+        })
+        .build(),
+    };
   }
 }
 
