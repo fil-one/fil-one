@@ -6,6 +6,8 @@ export enum ApiErrorCode {
   SUBSCRIPTION_CANCELED = 'SUBSCRIPTION_CANCELED',
   /** Subscription is in an inactive or incomplete state — all access is blocked. */
   SUBSCRIPTION_INACTIVE = 'SUBSCRIPTION_INACTIVE',
+  /** Promo code is invalid, expired, or inactive. */
+  INVALID_PROMOTION_CODE = 'INVALID_PROMOTION_CODE',
 }
 
 export interface ErrorResponse {
