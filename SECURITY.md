@@ -27,7 +27,7 @@ The program is administered by Filecoin Foundation and offers bounties for quali
 
 ### For vulnerabilities in third-party services & dependencies
 
-- **Aurora storage backend** (`https://aurorainfra.ai/`). Out of Scope.
+- **Aurora storage backend** (`https://aurorainfra.ai/`). Is Out of Scope from this program, and should be reported directly. 
 - **Auth0** — [Auth0 Responsible Disclosure](https://auth0.com/responsible-disclosure-policy)
 - **Stripe** — [Stripe Security](https://stripe.com/docs/security/reporting)
 
