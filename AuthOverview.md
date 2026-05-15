@@ -7,7 +7,7 @@ This document describes how authentication and authorization work in the Hypersp
 - **Identity provider:** Auth0 owns user pools, password storage, social/SSO connections, MFA challenges, and access/ID/refresh token issuance.
 - **BFF:** The console API (Lambda + API Gateway) is the Backend-for-Frontend. It handles the OAuth2 authorization-code exchange and writes HTTP-only cookies. The SPA never touches tokens.(AI loves this BFF term: I never seen it before but makes enough sense to me)
 - **Internal identity:** Each Auth0 `sub` is mapped 1:1 to an internal `userId` (UUID) and `orgId` (UUID) in DynamoDB on first login. The mapping is resolved in middleware on every request.
-- **Tenancy:** Users map 1:1 with orgs today (one user creates one org as Admin; multi-member orgs are not yet enabled). Each confirmed org gets one Aurora tenant.
+- **Tenancy:** Users map 1:1 with orgs today (one user creates one org as Admin; multi-member orgs are not yet enabled). Each confirmed org gets up to one Aurora tenant.
 - **Authorization:** A subscription guard middleware reads the user's Stripe subscription state from DynamoDB and gates routes by `AccessLevel.Read` or `AccessLevel.Write`.
 - **MFA:** Optional per user. OTP, WebAuthn, and biometric (fingerprint / Face ID) enrollment is driven by an Auth0 Post-Login Action and `app_metadata.mfa_enrolling`. Email is intentionally not offered as an MFA factor and we limit email's role to the sign-up verification gate (see Tenancy below).
 
@@ -34,8 +34,7 @@ Browser                    Console API Lambda                    Auth0 / DynamoD
    |----------------------------->| middy stack:                          |
    |                              |   1. authMiddleware (verify JWT,      |
    |                              |      refresh if needed,               |
-   |                              |      resolve sub→userId/orgId,        |
-   |                              |      enforce orgConfirmed)            |
+   |                              |      resolve sub→userId/orgId)        |
    |                              |   2. csrfMiddleware (mutations only)  |
    |                              |   3. subscriptionGuardMiddleware      |
    |                              |      (Read/Write × Stripe state)      |
@@ -63,7 +62,6 @@ Background reading: [`docs/architectural-decisions/2026-03-mfa-enrollment.md`](h
 | Login handler (state cookie + Auth0 redirect)               | [`packages/backend/src/handlers/auth-login.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/auth-login.ts)                                                                                                                                                                             |
 | Callback handler (code → tokens → cookies)                  | [`packages/backend/src/handlers/auth-callback.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/auth-callback.ts)                                                                                                                                                                       |
 | Logout handler                                              | [`packages/backend/src/handlers/auth-logout.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/auth-logout.ts)                                                                                                                                                                           |
-| Org confirmation (gates the rest of the API)                | [`packages/backend/src/handlers/confirm-org.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/confirm-org.ts)                                                                                                                                                                           |
 | MFA: enrollment flag handler                                | [`packages/backend/src/handlers/enroll-mfa.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/enroll-mfa.ts)                                                                                                                                                                             |
 | MFA: disable / delete enrollment                            | [`packages/backend/src/handlers/disable-mfa.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/disable-mfa.ts), [`packages/backend/src/handlers/delete-mfa-enrollment.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/delete-mfa-enrollment.ts) |
 | MFA: Auth0 Post-Login Action source                         | [`packages/backend/src/jobs/stack-setup/mfa-action.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/jobs/stack-setup/mfa-action.ts)                                                                                                                                                             |
@@ -81,7 +79,7 @@ Background reading: [`docs/architectural-decisions/2026-03-mfa-enrollment.md`](h
 | Area                                                 | File                                                                                                                                                  |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | SPA API wrapper (cookies, CSRF header, 401 handling) | [`packages/website/src/lib/api.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/api.ts)                            |
-| SPA route guard (logged-in + org-confirmed checks)   | [`packages/website/src/routes/_app.tsx`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/routes/_app.tsx)                  |
+| SPA route guard (logged-in + email-verified checks)  | [`packages/website/src/routes/_app.tsx`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/routes/_app.tsx)                  |
 | SPA sign-in entry                                    | [`packages/website/src/routes/_auth/sign-in.tsx`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/routes/_auth/sign-in.tsx) |
 
 ## Auth0 integration
@@ -145,7 +143,7 @@ export const handler = middy(baseHandler)
   .use(errorHandlerMiddleware());
 ```
 
-Examples: [`list-buckets.ts:81-86`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/list-buckets.ts#L81-L86), [`create-bucket.ts:111`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/create-bucket.ts#L111), [`confirm-org.ts:88-89`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/confirm-org.ts#L88-L89), [`get-me.ts:76`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/get-me.ts#L76) (note: `/api/me` skips the subscription guard).
+Examples: [`list-buckets.ts:81-86`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/list-buckets.ts#L81-L86), [`create-bucket.ts:111`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/create-bucket.ts#L111), [`get-me.ts:76`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/get-me.ts#L76) (note: `/api/me` skips the subscription guard).
 
 ### authMiddleware ([`auth.ts:345-493`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/auth.ts#L345-L493))
 
@@ -165,24 +163,14 @@ Implemented in `resolveUserAndOrg` ([`auth.ts:234-339`](https://github.com/filec
 
 Look up `pk=SUB#${sub}, sk=IDENTITY`:
 
-- **Hit:** read `userId`, `orgId`, then read `pk=ORG#${orgId}, sk=PROFILE` for `orgConfirmed`. Return.
+- **Hit:** read `userId`, `orgId`. Return.
 - **Miss (first login):** atomic `TransactWriteItems` writes four records:
   - `SUB#${sub} / IDENTITY` (with `attribute_not_exists(pk)` to guard concurrent first logins)
   - `USER#${userId} / PROFILE`
   - `ORG#${orgId} / PROFILE` with `setupStatus: FILONE_ORG_CREATED`, suggested `name`
   - `ORG#${orgId} / MEMBER#${userId}` with `role: OrgRole.Admin`
 
-The new user is now authenticated but `orgConfirmed=false`. Aurora tenant creation is _not_ triggered here — see Tenancy below.
-
-### Org-confirmed gate
-
-If `orgConfirmed=false`, every route except this allow-list returns 403 with code `ORG_NOT_CONFIRMED` ([`auth.ts:141-145`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/auth.ts#L141-L145)):
-
-- `/api/me`
-- `/api/org/confirm`
-- `/api/me/resend-verification`
-
-The SPA's `_app` route guard catches this status and redirects to `/finish-sign-up` ([`_app.tsx`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/routes/_app.tsx)). This is being removed, actively: https://linear.app/filecoin-foundation/issue/FIL-222/remove-organization-name-step-from-onboarding-process 
+The new user is now authenticated. Aurora tenant creation is _not_ triggered here — see Tenancy below.
 
 ### CSRF middleware ([`csrf.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/csrf.ts))
 
@@ -198,17 +186,6 @@ Today, "1:1" describes the practical state, not a schema constraint:
 
 So this is entirely expandable to multiple users in one org and we can attach different rights/access scopes to them, if desired. I suggest to think through the product requirements on multiple user support, what kind of authorization model to use, and how we want to link accounts or invite users before modifying this. Auth0 has ability to invite users and we can use their organization construct.
 
-### Org confirmation and Aurora tenant setup
-
-`POST /api/org/confirm` ([`confirm-org.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/confirm-org.ts)) is the gate that turns the new account on:
-
-1. Validate org name.
-2. Update `ORG#${orgId} / PROFILE` with `name` and `orgConfirmed=true`.
-3. If tenant setup hasn't been kicked off, send an SQS message to the Aurora tenant setup queue ([`trigger-tenant-setup.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/lib/trigger-tenant-setup.ts)). The consumer Lambda ([`aurora-tenant-setup.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/aurora-tenant-setup.ts)) provisions the Aurora-side tenant and writes back `auroraTenantId` and `setupStatus`.
-4. Create a Stripe customer + trial subscription ([`create-billing-trial.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/lib/create-billing-trial.ts)).
-
-For background, see [`docs/architectural-decisions/2026-03-aurora-tenant-setup-workflow.md`](https://github.com/filecoin-project/fil-one/blob/main/docs/architectural-decisions/2026-03-aurora-tenant-setup-workflow.md). If expanding to support organizations in our console with multiple users, suggestion is to expand this to create the Auth0 organization tied to our UUID for the tenant. 
-
 ### Roles
 
 `OrgRole.Admin` is the only role assigned today (creator-as-admin). Auth0 RBAC is wired in the auth middleware design but not enforced in production — see the "RBAC (Planned)" section of the auth ADR. We do not need to use RBAC and can instead use resource based authZ which is also supported by Auth0 as an alternative and we have some notion of already between CSRF token enforcement and the stripe middleware guard. 
@@ -217,7 +194,7 @@ For user management in the console, using Roles over resource based Auth0 claims
 
 ## Authorization: subscription-state gating
 
-Authorization beyond "are you logged in and confirmed" is driven by Stripe state. Implemented in [`subscription-guard.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/subscription-guard.ts).
+Authorization beyond "are you logged in" is driven by Stripe state. Implemented in [`subscription-guard.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/subscription-guard.ts).
 
 ### AccessLevel
 
@@ -257,7 +234,7 @@ Search: `grep -rn "subscriptionGuardMiddleware" packages/backend/src/handlers`. 
 - **Read-gated:** `list-buckets`, `get-bucket`, `get-bucket-analytics`, `list-access-keys`, `presign`
 - **Write-gated:** `create-bucket`, `delete-bucket`, `create-access-key`, `delete-access-key`
 
-Notably _not_ gated: `/api/me`, `/api/org/confirm`, `/api/me/resend-verification`, anything under `/api/auth/*`, `/api/mfa/*`, `/api/billing/*`, `stripe-webhook` (signature-verified, no auth middleware at all).
+Notably _not_ gated: `/api/me`, `/api/me/resend-verification`, anything under `/api/auth/*`, `/api/mfa/*`, `/api/billing/*`, `stripe-webhook` (signature-verified, no auth middleware at all).
 
 ### Stripe webhook
 
@@ -278,8 +255,7 @@ The SPA (React + TanStack Router, `packages/website`) is the only client. It doe
 1. If the JS-readable `hs_logged_in` cookie is missing → redirect to `/login` (no round-trip).
 2. Otherwise prefetch `/api/me` (cached via TanStack Query in [`query-client.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/query-client.ts)).
 3. If `emailVerified=false` → `/verify-email`.
-4. If `orgConfirmed=false` → `/finish-sign-up`.
-5. Render the app.
+4. Render the app.
 
 ### API calls
 
@@ -287,13 +263,13 @@ The fetch wrapper at [`api.ts:34-93`](https://github.com/filecoin-project/fil-on
 
 - `credentials: 'include'` so cookies are sent.
 - For mutations, reads `hs_csrf_token` from `document.cookie` and attaches `X-CSRF-Token`.
-- On 401, calls `redirectToLogin()`. On 403 with `ORG_NOT_CONFIRMED`, dispatches a `org:not-confirmed` window event so the route guard can react.
+- On 401, calls `redirectToLogin()`.
 
 ## MFA
 
 Designed in [`docs/architectural-decisions/2026-03-mfa-enrollment.md`](https://github.com/filecoin-project/fil-one/blob/main/docs/architectural-decisions/2026-03-mfa-enrollment.md).
 
-Email is intentionally **not** offered as an MFA factor — it is weaker than OTP / WebAuthn / biometrics (an attacker who has compromised an email account would also bypass MFA). Email's only role in auth is the sign-up verification gate (see Tenancy and the `/verify-email` flow above).
+Email is intentionally **not** offered as an MFA factor — it is weaker than OTP / WebAuthn / biometrics (an attacker who has compromised an email account would also bypass MFA). Email's only role in auth is the sign-up verification gate (the `/verify-email` flow above).
 
 ### Enrollment — TOTP / WebAuthn / biometrics (in Universal Login)
 
@@ -318,7 +294,7 @@ Today: App surfaces a Step-up Auth protected endpoint to generate recovery code.
 A recovery code is a portable, take-anywhere bypass — a stolen session must not be enough to mint one. The `mfaRecoveryCodes` branch introduces a step-up auth pattern that will protect that endpoint and is meant to be reused across other sensitive MFA/account endpoints. Shape:
 
 - **Backend:** new `requireFreshMfa({ maxAgeSeconds: 300 })` middy middleware (`packages/backend/src/middleware/require-fresh-mfa.ts`). Slots between `authMiddleware` and `csrfMiddleware`. Reads `auth_time` from the access token claims already verified by `authMiddleware` and returns `401 { error: 'step_up_required', maxAge: 300 }` if missing or stale.
-- **Token claim:** `auth_time` is injected into the access token by the existing Post-Login Action via `api.accessToken.setCustomClaim('auth_time', ...)` ([`mfa-action.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/jobs/stack-setup/mfa-action.ts)) — sourced from the most recent `event.authentication.methods[].timestamp`. Updating the Action requires bumping the stack-setup function version so it actually redeploys to Auth0.
+- **Token claim:** `auth_time` is injected into the access token by the existing Post-Login Action via `api.accessToken.setCustomClaim('auth_time', ...)` ([`mfa-action.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/jobs/stack-setup/mfa-action.ts)) — sourced from the most recent `event.authentication.methods[].timestamp`. Updating the Action requires bumping the stack-setup function version (a plain string defined in SST — not tied to a version format) so it actually redeploys to Auth0. The same setup function configures more than the Action, so any change it deploys (Action source, callbacks, email provider, etc.) needs a bump.
 - **Frontend:** the `apiRequest` wrapper ([`packages/website/src/lib/api.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/api.ts)) catches the `step_up_required` 401 and redirects to Auth0 `/authorize` with `prompt=login&max_age=300` and a `returnTo` carrying enough state (`?action=...`) for the page to resume the mutation after the round trip.
 - **Freshness window:** 300s (matches Stripe / AWS console). Configurable per endpoint.
 - **First consumer:** `POST /api/mfa/recovery-code/regenerate`. Planned follow-ups (mechanical, separate PRs): `/api/mfa/disable`, `DELETE /api/mfa/enrollments/{id}`, account deletion, password change.
@@ -353,7 +329,7 @@ Handlers read it via `getUserInfo(event)`. If a handler mutates Auth0 user data 
 - **Adding a sensitive MFA / account route:** add `requireFreshMfa({ maxAgeSeconds: 300 })` ([`packages/backend/src/middleware/require-fresh-mfa.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/require-fresh-mfa.ts)) between `authMiddleware` and `csrfMiddleware`. Don't roll your own freshness check. See MFA § Step-up authorizer.
 - **Adding a new social/SSO connection:** Auth0 dashboard only — no code change. The authorize URL builder ([`packages/shared/src/auth.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/shared/src/auth.ts)) already accepts a `connection` hint.
 - **Adding a Management API call:** add the function in [`auth0-management.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/lib/auth0-management.ts) and grant the scope on the runtime M2M app in the Auth0 dashboard. Document the new scope in the auth ADR's runtime M2M scope table.
-- **Tightening authorization:** today the only access discriminator beyond `orgConfirmed` is the Stripe state. Adding role/permission checks means activating Auth0 RBAC and threading `requiredPermissions` through `authMiddleware()` (see ADR §"RBAC (Planned)").
+- **Tightening authorization:** today the only access discriminator beyond "logged in" is the Stripe state. Adding role/permission checks means activating Auth0 RBAC and threading `requiredPermissions` through `authMiddleware()` (see ADR §"RBAC (Planned)").
 - **Multi-org / org membership:** the DDB layout (`ORG#${orgId} / MEMBER#${userId}`) already supports it, but the `SUB#${sub} / IDENTITY` record currently holds one `orgId`. Adding multi-org would require an org-switcher and an `orgId` claim on each request (cookie or header).
 
 Claude code does a great job in doing this given how consistent we apply the pattern, but make sure to double check the endpoints are correctly configured during review!
