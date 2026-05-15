@@ -17,6 +17,8 @@ This covers:
 - API key issuance and access controls
 - Infrastructure and CI/CD as defined in this repository
 
+**Testing must be limited to the staging environment.** Do not test against production (`app.fil.one`) or access other users' data. Reports involving unauthorized production testing may be disqualified.
+
 ### For vulnerabilities in the Filecoin protocol
 
 Bugs affecting the core Filecoin protocol (Lotus, builtin-actors, FVM, F3, and other [in-scope repositories](https://immunefi.com/bug-bounty/filecoin/)) should be reported through the **Filecoin Bug Bounty Program** on Immunefi:
