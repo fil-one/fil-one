@@ -5,6 +5,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import {
   ActivateSubscriptionRequestSchema,
+  ApiErrorCode,
   PlanId,
   SubscriptionStatus,
   mapStripeStatus,
@@ -27,7 +28,6 @@ type PaymentMethodResolution = string | APIGatewayProxyResultV2;
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId, orgId } = getUserInfo(event);
-  const tableName = Resource.BillingTable.name;
   const stripe = getStripeClient();
   const secrets = getBillingSecrets();
 
@@ -47,33 +47,25 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .body({ message: 'Invalid request body.', issues: parsed.error.issues })
       .build();
   }
-  const { useSavedPaymentMethod } = parsed.data;
+  const { useSavedPaymentMethod, promotionCode } = parsed.data;
 
   // 2. Get customer record from billing table
-  const result = await dynamo.send(
-    new GetItemCommand({
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-    }),
-  );
+  const record = await getCustomerBillingRecord(userId);
+  const stripeCustomerId = record?.stripeCustomerId as string | undefined;
 
-  if (!result.Item) {
+  if (!record) {
     return new ResponseBuilder()
       .status(400)
       .body({ message: 'No billing record found. Please set up a payment method first.' })
       .build();
   }
 
-  const record = unmarshall(result.Item);
-  const stripeCustomerId = record.stripeCustomerId as string;
-
   if (!stripeCustomerId) {
     return new ResponseBuilder()
       .status(400)
-      .body({ message: 'No Stripe customer found. Please set up a payment method first.' })
+      .body({
+        message: 'No Stripe customer found. Please set up a payment method first.',
+      })
       .build();
   }
 
@@ -87,13 +79,34 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     return paymentMethodId;
   }
 
-  // 3. Create or update subscription
+  // 4. Resolve promo code against Stripe before we mutate any subscription state.
+  let promotionCodeId: string | undefined;
+  if (promotionCode) {
+    const matches = await stripe.promotionCodes.list({
+      code: promotionCode,
+      active: true,
+      limit: 1,
+    });
+    promotionCodeId = matches.data[0]?.id;
+    if (!promotionCodeId) {
+      return new ResponseBuilder()
+        .status(400)
+        .body({
+          message: 'Invalid or expired promo code.',
+          code: ApiErrorCode.INVALID_PROMOTION_CODE,
+        })
+        .build();
+    }
+  }
+
+  // 5. Create or update subscription
   const subscription = await createOrUpdateSubscription(
     stripe,
     record,
     paymentMethodId,
     secrets,
     userId,
+    promotionCodeId,
   );
 
   // Guard: reject if subscription is not in a usable state after activation.
@@ -114,8 +127,8 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  // 4. Persist billing record and unlock Aurora tenant
-  await saveBillingRecord(tableName, userId, subscription, paymentMethodId, mappedStatus);
+  // 6. Persist billing record and unlock Aurora tenant
+  await saveBillingRecord(userId, subscription, paymentMethodId, mappedStatus);
   await unlockAuroraTenant(orgId);
 
   const response: ActivateSubscriptionResponse = {
@@ -131,12 +144,29 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   return new ResponseBuilder().status(200).body(response).build();
 }
 
+async function getCustomerBillingRecord(
+  userId: string,
+): Promise<Record<string, unknown> | undefined> {
+  const result = await dynamo.send(
+    new GetItemCommand({
+      TableName: Resource.BillingTable.name,
+      Key: {
+        pk: { S: `CUSTOMER#${userId}` },
+        sk: { S: 'SUBSCRIPTION' },
+      },
+    }),
+  );
+
+  return result.Item ? unmarshall(result.Item) : undefined;
+}
+
 async function createOrUpdateSubscription(
   stripe: ReturnType<typeof getStripeClient>,
   record: Record<string, unknown>,
   paymentMethodId: string,
   secrets: ReturnType<typeof getBillingSecrets>,
   userId: string,
+  promotionCodeId?: string,
 ) {
   // Canceled subscriptions are terminal in Stripe and cannot be updated; reactivation
   // must create a fresh subscription even though the stale subscriptionId still sits in DDB.
@@ -144,13 +174,24 @@ async function createOrUpdateSubscription(
     record.subscriptionStatus === SubscriptionStatus.GracePeriod ||
     record.subscriptionStatus === SubscriptionStatus.Canceled;
 
+  const discounts = promotionCodeId ? [{ promotion_code: promotionCodeId }] : undefined;
+
   if (record.subscriptionId && !isCanceled) {
-    // Step 1: Attach payment method first
-    await stripe.subscriptions.update(record.subscriptionId as string, {
+    const subscriptionId = record.subscriptionId as string;
+    // Step 1: Attach payment method
+    await stripe.subscriptions.update(subscriptionId, {
       default_payment_method: paymentMethodId,
     });
-    // Step 2: End trial — payment method already attached, so cancel behavior won't fire
-    return stripe.subscriptions.update(record.subscriptionId as string, {
+    // Step 2: Persist the discount on its own update so it's in place before the
+    // trial-end update generates the first paid invoice. Bundling discounts and
+    // trial_end into the same call leaves invoice ordering ambiguous.
+    if (promotionCodeId) {
+      await stripe.subscriptions.update(subscriptionId, {
+        discounts: [{ promotion_code: promotionCodeId }],
+      });
+    }
+    // Step 3: End trial — invoice is generated from the now-discounted subscription.
+    return stripe.subscriptions.update(subscriptionId, {
       trial_end: 'now',
       expand: ['latest_invoice.payment_intent', 'default_payment_method'],
     });
@@ -164,6 +205,7 @@ async function createOrUpdateSubscription(
     customer: record.stripeCustomerId as string,
     items: [{ price: secrets.STRIPE_PRICE_ID }],
     default_payment_method: paymentMethodId,
+    ...(discounts ? { discounts } : {}),
     expand: ['latest_invoice.payment_intent', 'default_payment_method'],
   });
 }
