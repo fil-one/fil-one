@@ -103,11 +103,12 @@ describe('processTenantSetup', () => {
   });
 
   it('is a no-op when setupStatus is AURORA_S3_ACCESS_KEY_CREATED', async () => {
-    ddbMock
-      .on(GetItemCommand)
-      .resolves(
-        orgProfileItem({ setupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED } }),
-      );
+    ddbMock.on(GetItemCommand).resolves(
+      orgProfileItem({
+        setupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
+        auroraTenantId: { S: 'aurora-t-1' },
+      }),
+    );
 
     await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
 
@@ -820,15 +821,16 @@ describe('processTenantSetup', () => {
 
     await expect(
       processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' }),
-    ).resolves.toBeUndefined();
+    ).resolves.toStrictEqual({ auroraTenantId: 'aurora-t-1' });
   });
 
   it('reads the org profile with strong consistency', async () => {
-    ddbMock
-      .on(GetItemCommand)
-      .resolves(
-        orgProfileItem({ setupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED } }),
-      );
+    ddbMock.on(GetItemCommand).resolves(
+      orgProfileItem({
+        setupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
+        auroraTenantId: { S: 'aurora-t-1' },
+      }),
+    );
 
     await processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' });
 
@@ -898,7 +900,7 @@ describe('stuck-tenant gauge refresh on terminal advance', () => {
 
     await expect(
       processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' }),
-    ).resolves.toBeUndefined();
+    ).resolves.toStrictEqual({ auroraTenantId: 'aurora-t-1' });
     expect(mockScanAndEmitStuckTenantCount).not.toHaveBeenCalled();
   });
 });
@@ -962,16 +964,9 @@ describe('ensureTenantReady', () => {
   });
 
   it('returns the auroraTenantId when setup completes successfully', async () => {
-    // After full setup, the final read should see auroraTenantId set.
     ddbMock
       .on(GetItemCommand)
-      .resolvesOnce(orgProfileItem({ setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }))
-      .resolves(
-        orgProfileItem({
-          setupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
-          auroraTenantId: { S: 'aurora-t-1' },
-        }),
-      );
+      .resolves(orgProfileItem({ setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }));
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });

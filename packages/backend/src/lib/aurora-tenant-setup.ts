@@ -35,16 +35,15 @@ type OrgProfileKey = {
 };
 
 // Public entry point for synchronous tenant setup from request handlers.
-// Returns the auroraTenantId once setup has reached AURORA_S3_ACCESS_KEY_CREATED.
-// On any failure inside processTenantSetup, increments the per-org failure
-// counter (best-effort) and re-throws so the handler can return a 503 to the
-// user. The state machine resumes from whatever step is next on the user's
-// retry.
+// Returns the auroraTenantId on success. On any failure inside
+// processTenantSetup, increments the per-org failure counter (best-effort)
+// and re-throws so the handler can return a 503 to the user. The state
+// machine resumes from whatever step is next on the user's retry.
 export async function ensureTenantReady(
   options: TenantSetupOptions,
 ): Promise<{ auroraTenantId: string }> {
   try {
-    await processTenantSetup(options);
+    return await processTenantSetup(options);
   } catch (err) {
     try {
       await recordSetupFailure(options.orgId);
@@ -56,20 +55,11 @@ export async function ensureTenantReady(
     }
     throw err;
   }
-
-  const { Item } = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: { pk: { S: `ORG#${options.orgId}` }, sk: { S: 'PROFILE' } },
-      ConsistentRead: true,
-    }),
-  );
-  const auroraTenantId = Item?.auroraTenantId?.S;
-  assert(auroraTenantId, `auroraTenantId missing after successful setup for org ${options.orgId}`);
-  return { auroraTenantId };
 }
 
-export async function processTenantSetup(options: TenantSetupOptions): Promise<void> {
+export async function processTenantSetup(
+  options: TenantSetupOptions,
+): Promise<{ auroraTenantId: string }> {
   const { orgId, orgName } = options;
   const orgProfileKey = {
     pk: { S: `ORG#${orgId}` },
@@ -96,14 +86,17 @@ export async function processTenantSetup(options: TenantSetupOptions): Promise<v
   const setupStatus = Item.setupStatus?.S;
 
   switch (setupStatus) {
-    case OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED:
-      return;
+    case OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED: {
+      const auroraTenantId = Item.auroraTenantId?.S;
+      assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
+      return { auroraTenantId };
+    }
 
     case OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED: {
       const auroraTenantId = Item.auroraTenantId?.S;
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
       await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey);
-      return;
+      return { auroraTenantId };
     }
 
     case OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE: {
@@ -111,7 +104,7 @@ export async function processTenantSetup(options: TenantSetupOptions): Promise<v
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
       await createAndStoreApiKey(orgId, auroraTenantId, orgProfileKey);
       await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey);
-      return;
+      return { auroraTenantId };
     }
 
     case OrgSetupStatus.FILONE_ORG_CREATED: {
@@ -119,7 +112,7 @@ export async function processTenantSetup(options: TenantSetupOptions): Promise<v
       await runSetupAndMeasure(orgId, auroraTenantId, orgProfileKey);
       await createAndStoreApiKey(orgId, auroraTenantId, orgProfileKey);
       await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey);
-      return;
+      return { auroraTenantId };
     }
 
     case OrgSetupStatus.AURORA_TENANT_CREATED: {
@@ -128,7 +121,7 @@ export async function processTenantSetup(options: TenantSetupOptions): Promise<v
       await runSetup(orgId, auroraTenantId, orgProfileKey);
       await createAndStoreApiKey(orgId, auroraTenantId, orgProfileKey);
       await createAndStoreS3AccessKey(orgId, auroraTenantId, orgProfileKey);
-      return;
+      return { auroraTenantId };
     }
 
     default:
