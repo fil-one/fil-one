@@ -20,7 +20,6 @@ import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import {
-  bucketAttempt,
   emitDunningEscalation,
   emitInvoiceFinalizationFailed,
   emitInvoiceFinalized,
@@ -357,7 +356,7 @@ async function handleSubscriptionDeleted(
   emitDunningEscalation({
     stage: 'canceled',
     reason: subscription.cancellation_details?.reason ?? 'unknown',
-    attemptBucket: bucketAttempt(attemptCount),
+    attemptCount: attemptCount ?? 0,
   });
 
   // Best-effort: set Aurora tenant to WRITE_LOCKED during grace period.
@@ -414,7 +413,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
     emitDunningEscalation({
       stage: 'recovered',
       reason: priorStatus,
-      attemptBucket: bucketAttempt(invoice.attempt_count),
+      attemptCount: invoice.attempt_count ?? 0,
     });
   }
 
@@ -473,6 +472,6 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
   emitDunningEscalation({
     stage: attemptCount <= 1 ? 'entered' : 'retry',
     reason: invoice.last_finalization_error?.code ?? 'unknown',
-    attemptBucket: bucketAttempt(attemptCount),
+    attemptCount: attemptCount,
   });
 }
