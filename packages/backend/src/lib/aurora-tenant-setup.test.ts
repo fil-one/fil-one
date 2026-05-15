@@ -132,7 +132,7 @@ describe('processTenantSetup', () => {
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
-    mockSetupAuroraTenant.mockResolvedValue({ id: 'aurora-t-1', lastSetupStep: 'FINISHED' });
+    mockSetupAuroraTenant.mockResolvedValue({ lastSetupStep: 'FINISHED' });
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_secret', tokenId: 'tok-1' });
     setupDefaultS3AccessKeyMock();
 
@@ -235,7 +235,7 @@ describe('processTenantSetup', () => {
     );
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
-    mockSetupAuroraTenant.mockResolvedValue({ id: 'aurora-t-2', lastSetupStep: 'FINISHED' });
+    mockSetupAuroraTenant.mockResolvedValue({ lastSetupStep: 'FINISHED' });
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_key', tokenId: 'tok-2' });
     setupDefaultS3AccessKeyMock();
 
@@ -367,7 +367,7 @@ describe('processTenantSetup', () => {
         auroraTenantId: { S: 'aurora-t-3' },
       }),
     );
-    mockSetupAuroraTenant.mockResolvedValue({ id: 'aurora-t-3', lastSetupStep: 'WARM_TIER_ADDED' });
+    mockSetupAuroraTenant.mockResolvedValue({ lastSetupStep: 'WARM_TIER_ADDED' });
 
     await expect(processTenantSetup({ orgId: 'org-1', orgName: 'Test Org' })).rejects.toThrow(
       'Aurora tenant setup not finished for org org-1: lastSetupStep=WARM_TIER_ADDED',
@@ -379,7 +379,7 @@ describe('processTenantSetup', () => {
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-new' });
-    mockSetupAuroraTenant.mockResolvedValue({ id: 'aurora-t-new', lastSetupStep: 'FINISHED' });
+    mockSetupAuroraTenant.mockResolvedValue({ lastSetupStep: 'FINISHED' });
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_new', tokenId: 'tok-new' });
     setupDefaultS3AccessKeyMock();
 
