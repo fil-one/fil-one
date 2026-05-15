@@ -5,6 +5,9 @@ export type SlowOperationIndicatorState = {
   showMessage: boolean;
 };
 
+// 400 ms: above flicker territory and the eye's reliable "I noticed a wait" threshold (~100 ms),
+// below the cross-region baseline that would make the spinner the default state.
+// 1200 ms: just past Nielsen's 1 s "flow of thought" boundary (when users start actively waiting)
 const SPINNER_DELAY_MS = 400;
 const MESSAGE_DELAY_MS = 1200;
 
