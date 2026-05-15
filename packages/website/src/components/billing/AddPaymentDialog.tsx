@@ -82,8 +82,7 @@ function PaymentForm({
     const body = trimmedPromotionCode ? { promotionCode: trimmedPromotionCode } : {};
     const parsed = ActivateSubscriptionRequestSchema.safeParse(body);
     if (!parsed.success) {
-      const issue = parsed.error.issues.find((i) => i.path[0] === 'promotionCode');
-      setError(issue?.message ?? 'Invalid promo code.');
+      setError(parsed.error.issues[0]?.message ?? 'Form validation error.');
       setLoading(false);
       return;
     }
