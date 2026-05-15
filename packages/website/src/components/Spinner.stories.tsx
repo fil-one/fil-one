@@ -29,12 +29,14 @@ export const Small: Story = {
   },
 };
 
-export const AllVariants: Story = {
+export const AllSizes: Story = {
   render: () => (
     <div className="flex items-end gap-12">
+      <Spinner size={16} ariaLabel="Extra small" />
       <Spinner size={24} ariaLabel="Small" />
-      <Spinner ariaLabel="Default" />
-      <Spinner message="Loading buckets..." />
+      <Spinner size={36} ariaLabel="Medium" />
+      <Spinner ariaLabel="Default (52)" />
+      <Spinner size={72} ariaLabel="Large" />
     </div>
   ),
 };

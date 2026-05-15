@@ -9,7 +9,12 @@ import {
   getS3AccessKey,
   listS3AccessKeys,
 } from '@filone/aurora-portal-client';
-import type { AccessKeyPermission, RetentionDurationType, RetentionMode } from '@filone/shared';
+import type {
+  AccessKeyPermission,
+  GranularPermission,
+  RetentionDurationType,
+  RetentionMode,
+} from '@filone/shared';
 import { instrumentClient } from './aurora-api-metrics.js';
 
 const ssm = new SSMClient({});
@@ -116,23 +121,28 @@ const AURORA_ACCESS_ALWAYS: string[] = [
   'GetBucketObjectLockConfiguration',
 ];
 
-// Maps our permission model to Aurora access type strings.
-const AURORA_ACCESS_MAP: Record<AccessKeyPermission, string[]> = {
-  read: ['Read', 'GetObjectVersion', 'GetObjectRetention', 'GetObjectLegalHold'],
-  write: ['Write', 'PutObjectRetention', 'PutObjectLegalHold'],
-  list: ['List', 'ListBucketVersions'],
-  delete: ['Delete', 'DeleteObjectVersion'],
+// Maps basic permissions to their base Aurora access type.
+const AURORA_BASE_ACTION: Record<AccessKeyPermission, string> = {
+  read: 'Read',
+  write: 'Write',
+  list: 'List',
+  delete: 'Delete',
 };
 
-export function buildAuroraAccessArray(permissions: AccessKeyPermission[]): string[] {
-  const extra = permissions.flatMap((p) => AURORA_ACCESS_MAP[p]);
-  return [...AURORA_ACCESS_ALWAYS, ...extra];
+export function buildAuroraAccessArray(
+  permissions: AccessKeyPermission[],
+  granularPermissions?: GranularPermission[],
+): string[] {
+  const base = permissions.map((p) => AURORA_BASE_ACTION[p]);
+  const granular = granularPermissions ?? [];
+  return [...AURORA_ACCESS_ALWAYS, ...base, ...granular];
 }
 
 export interface CreateAuroraAccessKeyOptions {
   tenantId: string;
   keyName: string;
   permissions: AccessKeyPermission[];
+  granularPermissions?: GranularPermission[];
   buckets?: string[];
   expiresAt?: string | null;
 }
@@ -147,6 +157,7 @@ export async function createAuroraAccessKey({
   tenantId,
   keyName,
   permissions,
+  granularPermissions,
   buckets,
   expiresAt,
 }: CreateAuroraAccessKeyOptions): Promise<CreateAuroraAccessKeyResult> {
@@ -157,7 +168,7 @@ export async function createAuroraAccessKey({
     path: { tenantId },
     body: {
       name: keyName,
-      access: buildAuroraAccessArray(permissions),
+      access: buildAuroraAccessArray(permissions, granularPermissions),
       ...(buckets && buckets.length > 0 ? { buckets } : {}),
       ...(expiresAt ? { expiration: expiresAt } : {}),
     },
@@ -192,21 +203,18 @@ export async function createAuroraAccessKey({
     `Aurora API returned invalid access key for tenant ${tenantId}: expected an object but got ${typeof accessKey}`,
   );
   const { id, accessKeyId, accessKeySecret, createdAt } = accessKey;
-  assert(
-    !!id,
-    `Aurora Portal API returned empty access key "id" for tenant ${tenantId}. Full response: ${JSON.stringify(data)}`,
-  );
+  assert(!!id, `Aurora Portal API returned empty access key "id" for tenant ${tenantId}`);
   assert(
     !!accessKeyId,
-    `Aurora Portal API returned empty access key "accessKeyId" for tenant ${tenantId}. Full response: ${JSON.stringify(data)}`,
+    `Aurora Portal API returned empty access key "accessKeyId" for tenant ${tenantId}. Response fields: ${Object.keys(data).join(', ')}`,
   );
   assert(
     !!accessKeySecret,
-    `Aurora Portal API returned empty access key "accessKeySecret" for tenant ${tenantId}. Full response: ${JSON.stringify(data)}`,
+    `Aurora Portal API returned empty access key "accessKeySecret" for tenant ${tenantId}. Response fields: ${Object.keys(data).join(', ')}`,
   );
   assert(
     !!createdAt,
-    `Aurora Portal API returned empty access key "createdAt" for tenant ${tenantId}. Full response: ${JSON.stringify(data)}`,
+    `Aurora Portal API returned empty access key "createdAt" for tenant ${tenantId}. Response fields: ${Object.keys(data).join(', ')}`,
   );
 
   console.log(

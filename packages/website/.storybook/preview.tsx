@@ -33,6 +33,12 @@ const preview: Preview = {
       // 'error' - fail CI on a11y violations
       // 'off' - skip a11y checks entirely
       test: 'todo',
+      // Headless UI renders focus-guard <button> sentinels with aria-hidden="true"
+      // as part of its focus-trap implementation. Axe flags these as
+      // aria-hidden-focus, but they're intentional — exclude them from checks.
+      context: {
+        exclude: [['[data-headlessui-focus-guard]']],
+      },
     },
   },
 };

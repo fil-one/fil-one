@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { CopySimpleIcon, PlusIcon } from '@phosphor-icons/react/dist/ssr';
+import { CopySimpleIcon, DatabaseIcon, PlusIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { AccessKeysTable } from '../components/AccessKeysTable';
 import { Button } from '../components/Button';
+import { Heading } from '../components/Heading/Heading';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Spinner } from '../components/Spinner';
@@ -33,13 +34,10 @@ type AccessKeysTabProps = {
 function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
   return (
     <>
-      <div className="mt-4 mb-4 flex items-center justify-between">
+      <div className="mt-4 mb-4">
         <span className="text-sm text-zinc-600">
           {keys.length === 1 ? '1 key' : `${keys.length} keys`}
         </span>
-        <Button variant="filled" icon={PlusIcon} onClick={onCreateOpen}>
-          Create new key
-        </Button>
       </div>
 
       <AccessKeysTable
@@ -49,6 +47,13 @@ function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
         onDelete={onDelete}
         onCreateOpen={onCreateOpen}
       />
+      {keys.length === 0 && (
+        <div className="mt-6 flex justify-center">
+          <Button variant="tertiary" icon={DatabaseIcon} href="/buckets">
+            Manage buckets
+          </Button>
+        </div>
+      )}
     </>
   );
 }
@@ -183,7 +188,9 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
       {/* Quickstart CLI */}
       <div>
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-zinc-900">Quickstart (AWS CLI)</h3>
+          <Heading tag="h3" size="sm">
+            Quickstart (AWS CLI)
+          </Heading>
           <a
             href={DOCS_URL}
             target="_blank"
@@ -228,7 +235,9 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 
       {/* SDK Examples */}
       <div>
-        <h3 className="mb-4 text-sm font-semibold text-zinc-900">SDK examples</h3>
+        <Heading tag="h3" size="sm" className="mb-4">
+          SDK examples
+        </Heading>
         <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
           {/* Tab bar */}
           <div className="flex border-b border-zinc-200 bg-zinc-50">
@@ -283,7 +292,9 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 
       {/* Migrating from AWS S3 */}
       <div>
-        <h3 className="mb-2 text-sm font-semibold text-zinc-900">Migrating from AWS S3</h3>
+        <Heading tag="h3" size="sm" className="mb-2">
+          Migrating from AWS S3
+        </Heading>
         <p className="mb-4 text-sm text-zinc-600">
           Fil One is fully S3-compatible. In most cases, you only need to change two settings in
           your existing code.
@@ -399,7 +410,7 @@ export function ApiKeysPage() {
 
   if (isError) {
     return (
-      <div className="p-6">
+      <div className="px-10 pt-10">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error?.message ?? 'Failed to load access keys'}
         </div>
@@ -408,11 +419,24 @@ export function ApiKeysPage() {
   }
 
   return (
-    <div className="p-8">
-      <h1 className="mb-1 text-2xl font-semibold text-zinc-900">API Keys</h1>
-      <p className="mb-6 text-sm text-zinc-500">
-        Manage credentials and connect via S3-compatible API
-      </p>
+    <div className="px-10 pt-10">
+      <div className="mb-6 flex items-center justify-between">
+        <Heading
+          tag="h1"
+          size="xl"
+          description="Manage credentials and connect via S3-compatible API"
+        >
+          API Keys
+        </Heading>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={PlusIcon}
+          onClick={() => void navigate({ to: '/api-keys/create' })}
+        >
+          Create new key
+        </Button>
+      </div>
 
       <Tabs>
         <TabList>

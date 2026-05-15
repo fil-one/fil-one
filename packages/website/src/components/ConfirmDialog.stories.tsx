@@ -18,9 +18,11 @@ export const Default: Story = {
     const [open, setOpen] = useState(true);
     return (
       <>
-        <Button variant="primary" onClick={() => setOpen(true)}>
-          Open confirm dialog
-        </Button>
+        {!open && (
+          <Button variant="primary" onClick={() => setOpen(true)}>
+            Open confirm dialog
+          </Button>
+        )}
         <ConfirmDialog
           open={open}
           onClose={() => setOpen(false)}
@@ -38,9 +40,11 @@ export const CustomLabels: Story = {
     const [open, setOpen] = useState(true);
     return (
       <>
-        <Button variant="primary" onClick={() => setOpen(true)}>
-          Open confirm dialog
-        </Button>
+        {!open && (
+          <Button variant="primary" onClick={() => setOpen(true)}>
+            Open confirm dialog
+          </Button>
+        )}
         <ConfirmDialog
           open={open}
           onClose={() => setOpen(false)}

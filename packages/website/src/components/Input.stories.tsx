@@ -21,6 +21,15 @@ export const Default: Story = {
 export const WithValue: Story = {
   args: {
     value: 'my-bucket-name',
+    placeholder: 'e.g., my-bucket-name',
+  },
+};
+
+export const Invalid: Story = {
+  args: {
+    value: 'Production@Key#1',
+    placeholder: 'e.g., Production API Key',
+    invalid: true,
   },
 };
 

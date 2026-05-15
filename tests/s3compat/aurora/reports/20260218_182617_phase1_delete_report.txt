@@ -1,0 +1,20 @@
+======================================================================
+  Phase 1: Delete
+  Script : phase1_delete
+  Run    : 20260218_182617
+======================================================================
+
+SUMMARY
+  Total  : 1
+  OK     : 0
+  Failed : 1
+
+BY OPERATION
+  delete_object                      0 ok     1 failed  (   1 total)  avg 0.724s  stddev 0.000s  min 0.724s  max 0.724s
+
+ERRORS
+  {"ts": "2026-02-19T02:26:17.877218+00:00", "op": "delete_object", "status": "err", "key": "gov-data/README.md", "version_id": "ff36f5d1-7c66-40b4-99a3-b2de7950f7e7", "bucket": "joe-test-all", "elapsed_s": 0.724, "status_code": 400, "error_code": "InvalidRequest", "error_message": "Object is WORM protected and cannot be overwritten", "request_id": "189584BD70208DA6", "host_id": "925d39e0f2f1f47dd23fbae89d86279d4d849fa2f53a2f83a92e768a244a5188", "response_body": {"Error": {"Code": "InvalidRequest", "Message": "Object is WORM protected and cannot be overwritten", "Key": "gov-data/README.md", "BucketName": "joe-test-all", "Resource": "/joe-test-all/gov-data/README.md"}, "ResponseMetadata": {"RequestId": "189584BD70208DA6", "HostId": "925d39e0f2f1f47dd23fbae89d86279d4d849fa2f53a2f83a92e768a244a5188", "HTTPStatusCode": 400, "HTTPHeaders": {"server": "nginx/1.24.0 (Ubuntu)", "date": "Thu, 19 Feb 2026 02:26:17 GMT", "content-type": "application/xml", "content-length": "389", "connection": "keep-alive", "accept-ranges": "bytes", "strict-transport-security": "max-age=31536000; includeSubDomains", "vary": "Origin, Accept-Encoding", "x-amz-id-2": "925d39e0f2f1f47dd23fbae89d86279d4d849fa2f53a2f83a92e768a244a5188", "x-amz-request-id": "189584BD70208DA6", "x-content-type-options": "nosniff", "x-ratelimit-limit": "4760", "x-ratelimit-remaining": "4760", "x-xss-protection": "1; mode=block"}, "RetryAttempts": 0}}}
+
+Log files:
+  Success : ../logs/20260218_182617_phase1_delete_success.jsonl
+  Errors  : ../logs/20260218_182617_phase1_delete_errors.jsonl

@@ -3,8 +3,11 @@ import { useNavigate } from '@tanstack/react-router';
 import { ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { CreateAccessKeyResponse } from '@filone/shared';
+import { S3_REGION } from '@filone/shared';
+import { Heading } from '../components/Heading/Heading';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields.js';
 import { Button } from '../components/Button.js';
+import { IconButton } from '../components/IconButton.js';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal.js';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 
@@ -18,8 +21,10 @@ export function CreateApiKeyPage() {
     accessKeyId: string;
     secretAccessKey: string;
   } | null>(null);
+  const [region, setRegion] = useState(S3_REGION);
 
   const form = useAccessKeyForm({
+    region,
     onSuccess: (response: CreateAccessKeyResponse) => {
       setCredentials({
         accessKeyId: response.accessKeyId,
@@ -34,19 +39,16 @@ export function CreateApiKeyPage() {
 
   return (
     <>
-      <div className="mx-auto max-w-4xl p-8">
+      <div className="mx-auto max-w-4xl px-10 pt-10">
         {/* Header */}
         <div className="mb-8 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => void navigate({ to: '/api-keys' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+          <IconButton
+            icon={ArrowLeftIcon}
             aria-label="Back to API keys"
-          >
-            <ArrowLeftIcon size={16} />
-          </button>
+            onClick={() => void navigate({ to: '/api-keys' })}
+          />
           <div>
-            <h1 className="text-xl font-semibold text-zinc-900">Create API key</h1>
+            <Heading tag="h1">Create API key</Heading>
             <p className="text-sm text-zinc-500">
               Generate credentials for S3-compatible API access
             </p>
@@ -58,10 +60,10 @@ export function CreateApiKeyPage() {
           {/* Left: form */}
           <form onSubmit={form.handleSubmit} className="flex flex-1 flex-col gap-6">
             <div className="rounded-lg border border-zinc-200 bg-white p-6">
-              <AccessKeyFormFields form={form} />
+              <AccessKeyFormFields form={form} region={region} onRegionChange={setRegion} />
             </div>
 
-            <Button type="submit" variant="filled" disabled={!form.canSubmit}>
+            <Button type="submit" variant="primary" disabled={!form.canSubmit}>
               {form.creating ? 'Creating...' : 'Create API key'}
             </Button>
           </form>
@@ -102,7 +104,6 @@ export function CreateApiKeyPage() {
       {credentials && (
         <SaveCredentialsModal
           open={true}
-          onClose={handleCredentialsDone}
           onDone={handleCredentialsDone}
           credentials={credentials}
         />

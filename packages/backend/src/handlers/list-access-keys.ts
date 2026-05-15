@@ -3,7 +3,8 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
+import type { AccessKey, GranularPermission, ListAccessKeysResponse } from '@filone/shared';
+import { S3_REGION } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -50,8 +51,11 @@ export async function baseHandler(
       createdAt: record.createdAt as string,
       status: record.status as AccessKey['status'],
       permissions: record.permissions as AccessKey['permissions'],
+      granularPermissions:
+        (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
       bucketScope: record.bucketScope as AccessKey['bucketScope'],
       buckets: record.buckets as string[] | undefined,
+      region: S3_REGION,
       expiresAt: (record.expiresAt as string | undefined) ?? null,
     };
   });

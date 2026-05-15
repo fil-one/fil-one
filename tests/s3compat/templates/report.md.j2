@@ -1,0 +1,96 @@
+# {{ title }}
+
+{% if interrupted %}
+<div class="report-banner" markdown="1">
+
+**Incomplete results — test run was interrupted (Ctrl+C).**
+Numbers below reflect only the tests that finished before the interruption.
+
+</div>
+
+{% endif %}
+| Field | Value |
+|---|---|
+| Script | `{{ script_name }}` |
+| Run | `{{ ts }}` |
+
+## Summary
+
+| Total | OK | {% if summary.skipped %}Skipped | {% endif %}Failed | Status |
+|---:|---:|{% if summary.skipped %}---:|{% endif %}---:|:---|
+| {{ summary.total }} | {{ summary.ok }} | {% if summary.skipped %}{{ summary.skipped }} | {% endif %}{{ summary.failed }} | {% if summary.failed == 0 %}**PASS**{% else %}**FAIL**{% endif %} |
+
+## {{ group_label }}
+
+{% if has_pass_rate %}
+| {{ group_field }} | Pass rate | OK | Failed | Total | Avg | Stddev | Min | Max |
+|---|:---|---:|---:|---:|---:|---:|---:|---:|
+{% for r in op_rows -%}
+| `{{ r.op }}` | **{{ r.pct }}%** ({{ r.ok }}/{{ r.total }}) | {{ r.ok }} | {{ r.err }} | {{ r.total }} | {{ r.avg }} | {{ r.stddev }} | {{ r.min }} | {{ r.max }} |
+{% endfor %}
+{% else %}
+| {{ group_field }} | OK | Failed | Total | Avg | Stddev | Min | Max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+{% for r in op_rows -%}
+| `{{ r.op }}` | {{ r.ok }} | {{ r.err }} | {{ r.total }} | {{ r.avg }} | {{ r.stddev }} | {{ r.min }} | {{ r.max }} |
+{% endfor %}
+{% endif %}
+{% for section in sections %}
+
+## {{ section.title }}
+
+{{ section.markdown }}
+{% endfor %}
+{% if extra_lines %}
+
+## Run details
+
+```
+{% for line in extra_lines -%}
+{{ line }}
+{% endfor -%}
+```
+{% endif %}
+{% if skipped %}
+
+## Skipped
+
+{% for s in skipped %}
+- ```json
+  {{ s }}
+  ```
+{% endfor %}
+{% endif %}
+{% if show_successes and successes %}
+
+## Successes
+
+```json
+{% for s in successes -%}
+{{ s }}
+{% endfor -%}
+```
+{% endif %}
+{% if errors %}
+
+## Errors
+
+{% for e in errors %}
+<details markdown="1">
+<summary>{{ e.summary | e }}</summary>
+
+{{ e.body }}
+
+</details>
+
+{% endfor %}
+{% endif %}
+{% if log_paths.success or log_paths.error %}
+
+## Log files
+
+{% if log_paths.success %}- Success: `{{ log_paths.success }}`
+{% endif %}
+{% if log_paths.error %}- Errors: `{{ log_paths.error }}`
+{% endif %}
+{% endif %}

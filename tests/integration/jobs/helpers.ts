@@ -25,6 +25,7 @@ export const AURORA_TEST_TENANT_ID = '1ab311c9-b6ad-4d4d-b707-c07d8404eaa2';
 export async function invokeWorker(payload: {
   orgId: string;
   auroraTenantId: string;
+  orgName?: string;
   subscriptionId: string;
   stripeCustomerId: string;
   currentPeriodStart: string;
@@ -203,6 +204,30 @@ export async function invokeEnforcer(): Promise<{
   return {
     payload: result.Payload ? new TextDecoder().decode(result.Payload) : undefined,
     functionError: result.FunctionError,
+  };
+}
+
+export async function invokeDriftChecker(): Promise<{
+  payload: string | undefined;
+  functionError: string | undefined;
+  logTail: string | undefined;
+}> {
+  const result = await lambda.send(
+    new InvokeCommand({
+      FunctionName: (Resource as unknown as Record<string, { name: string }>)
+        .SubscriptionDriftChecker.name,
+      InvocationType: 'RequestResponse',
+      LogType: 'Tail',
+      Payload: Buffer.from(JSON.stringify({})),
+    }),
+  );
+
+  return {
+    payload: result.Payload ? new TextDecoder().decode(result.Payload) : undefined,
+    functionError: result.FunctionError,
+    logTail: result.LogResult
+      ? Buffer.from(result.LogResult, 'base64').toString('utf8')
+      : undefined,
   };
 }
 

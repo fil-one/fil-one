@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 import { defineConfig, devices } from '@playwright/test';
 
 const isCI = !!process.env.CI;
@@ -22,17 +24,35 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
+    // setup for disruptive tests
     {
-      name: 'chromium',
+      name: 'setup',
+      testMatch: /auth\.setup\.ts/,
+    },
+    // `full-*` projects run both smoke and staging-only suites across all browsers.
+    {
+      name: 'full-chromium',
+      testDir: './tests/e2e',
       use: { ...devices['Desktop Chrome'] },
+      dependencies: ['setup'],
     },
     {
-      name: 'firefox',
+      name: 'full-firefox',
+      testDir: './tests/e2e',
       use: { ...devices['Desktop Firefox'] },
+      dependencies: ['setup'],
     },
     {
-      name: 'webkit',
+      name: 'full-webkit',
+      testDir: './tests/e2e',
       use: { ...devices['Desktop Safari'] },
+      dependencies: ['setup'],
+    },
+    // smoke tests executed in production
+    {
+      name: 'smoke',
+      testDir: './tests/e2e/smoke',
+      use: { ...devices['Desktop Chrome'] },
     },
   ],
 });

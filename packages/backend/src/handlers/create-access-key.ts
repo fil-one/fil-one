@@ -3,7 +3,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CreateAccessKeySchema } from '@filone/shared';
+import { CreateAccessKeySchema, S3_REGION } from '@filone/shared';
 import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import {
@@ -22,6 +22,9 @@ import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
+// TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
+// https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
+// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -43,15 +46,16 @@ export async function baseHandler(
       .build();
   }
 
-  const {
-    keyName,
-    permissions,
-    bucketScope,
-    buckets: bucketList,
-    expiresAt: expiresAtRaw,
-  } = parsed.data;
-  const buckets = bucketScope === 'specific' ? (bucketList ?? []) : undefined;
-  const expiresAt = expiresAtRaw ?? null;
+  const { keyName, permissions, granularPermissions, bucketScope, region } = parsed.data;
+  const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
+  const expiresAt = parsed.data.expiresAt ?? null;
+
+  if (region !== undefined && region !== S3_REGION) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: `Unsupported region. Supported: ${S3_REGION}` })
+      .build();
+  }
 
   const { orgId } = getUserInfo(event);
 
@@ -66,11 +70,11 @@ export async function baseHandler(
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
   const setupStatus = orgProfile?.setupStatus?.S;
   if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    console.error('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
+    console.warn('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
     return new ResponseBuilder()
       .status(503)
       .body<ErrorResponse>({
-        message: 'Aurora tenant setup is not complete, please try again later',
+        message: 'We are still setting up your account. Please try again in a moment.',
       })
       .build();
   }
@@ -81,6 +85,7 @@ export async function baseHandler(
       tenantId: auroraTenantId,
       keyName,
       permissions,
+      granularPermissions,
       buckets,
       expiresAt,
     });
@@ -112,6 +117,7 @@ export async function baseHandler(
         createdAt: auroraKey.createdAt,
         status: 'active',
         permissions,
+        ...(granularPermissions?.length ? { granularPermissions } : {}),
         bucketScope,
         ...(buckets ? { buckets } : {}),
         ...(expiresAt ? { expiresAt } : {}),

@@ -1,9 +1,12 @@
+import type { S3Region } from '@filone/shared';
 import { KEY_NAME_MAX_LENGTH } from '@filone/shared';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyBucketScopeFields } from './AccessKeyBucketScopeFields.js';
 import { AccessKeyExpirationFields } from './AccessKeyExpirationFields.js';
 import { AccessKeyPermissionsFields } from './AccessKeyPermissionsFields.js';
+import { FormField } from './FormField.js';
 import { Input } from './Input.js';
+import { RegionSelect } from './RegionSelect.js';
 
 // Inverse of KEY_NAME_PATTERN's character class — finds disallowed chars
 const INVALID_KEY_CHAR = /[^a-zA-Z0-9 _\-.]/g;
@@ -11,14 +14,24 @@ const INVALID_KEY_CHAR = /[^a-zA-Z0-9 _\-.]/g;
 type AccessKeyFormFieldsProps = {
   form: ReturnType<typeof useAccessKeyForm>;
   pinnedBucket?: string;
+  region: S3Region;
+  /** When provided, renders the region selector. Omit to hide it (caller owns the region). */
+  onRegionChange?: (region: S3Region) => void;
 };
 
-export function AccessKeyFormFields({ form, pinnedBucket }: AccessKeyFormFieldsProps) {
+export function AccessKeyFormFields({
+  form,
+  pinnedBucket,
+  region,
+  onRegionChange,
+}: AccessKeyFormFieldsProps) {
   const {
     keyName,
     setKeyName,
     permissions,
     setPermissions,
+    granularPermissions,
+    setGranularPermissions,
     bucketScope,
     setBucketScope,
     selectedBuckets,
@@ -35,66 +48,78 @@ export function AccessKeyFormFields({ form, pinnedBucket }: AccessKeyFormFieldsP
   return (
     <div className="flex flex-col gap-6">
       {/* Key name */}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="key-name" className="text-sm font-medium text-zinc-700">
-          Key name
-        </label>
+      <FormField
+        htmlFor="key-name"
+        label="Key name"
+        description="A descriptive name helps identify this key in your list."
+        error={
+          invalidChars.length > 0
+            ? `Not allowed: ${invalidChars.map((c) => `"${c}"`).join(', ')}`
+            : overLimit
+              ? `${keyName.length}/${KEY_NAME_MAX_LENGTH} characters — too long`
+              : undefined
+        }
+      >
         <Input
           id="key-name"
           value={keyName}
+          invalid={invalidChars.length > 0 || overLimit}
           onChange={setKeyName}
           placeholder="e.g., Production API Key"
         />
-        {invalidChars.length > 0 ? (
-          <p className="text-xs text-red-600">
-            Not allowed: {invalidChars.map((c) => `"${c}"`).join(', ')}
-          </p>
-        ) : overLimit ? (
-          <p className="text-xs text-red-600">
-            {keyName.length}/{KEY_NAME_MAX_LENGTH} characters — too long
-          </p>
-        ) : (
-          <p className="text-xs text-zinc-500">
-            A descriptive name helps identify this key in your list.
-          </p>
-        )}
-      </div>
+      </FormField>
+
+      {/* Region — only rendered when the caller supplies an onRegionChange handler */}
+      {onRegionChange && (
+        <FormField
+          htmlFor="key-region"
+          label="Region"
+          description="This key only works with buckets in this region."
+        >
+          <RegionSelect id="key-region" value={region} onChange={onRegionChange} />
+        </FormField>
+      )}
 
       {/* Permissions */}
-      <div className="flex flex-col gap-2">
-        <label className="text-sm font-medium text-zinc-700">What can this key do?</label>
-        <AccessKeyPermissionsFields value={permissions} onChange={setPermissions} />
-        {permissions.length === 0 && (
-          <p className="text-xs text-red-600">Select at least one permission.</p>
-        )}
-      </div>
+      <FormField
+        label="What can this key do?"
+        error={permissions.length === 0 ? 'Select at least one permission.' : undefined}
+      >
+        <AccessKeyPermissionsFields
+          value={permissions}
+          onChange={setPermissions}
+          granularPermissions={granularPermissions}
+          onGranularPermissionsChange={setGranularPermissions}
+        />
+      </FormField>
 
       {/* Bucket scope */}
-      <div className="flex flex-col gap-2">
-        <label className="text-sm font-medium text-zinc-700">
-          Which buckets can this key access?
-        </label>
-        <p className="text-xs text-zinc-500">Restrict access to specific buckets or allow all</p>
+      <FormField
+        label="Which buckets can this key access?"
+        description="Restrict access to specific buckets or allow all"
+      >
         <AccessKeyBucketScopeFields
           bucketScope={bucketScope}
           onBucketScopeChange={setBucketScope}
           selectedBuckets={selectedBuckets}
           onSelectedBucketsChange={setSelectedBuckets}
           pinnedBucket={pinnedBucket}
+          region={region}
         />
-      </div>
+      </FormField>
 
       {/* Expiration */}
-      <div className="flex flex-col gap-2">
-        <label className="text-sm font-medium text-zinc-700">When should it expire?</label>
-        <p className="text-xs text-zinc-500">Set an expiration date for added security</p>
+      <FormField
+        label="When should it expire?"
+        description="Set an expiration date for added security"
+      >
         <AccessKeyExpirationFields
           value={expiration}
           customDate={customDate}
           onChange={setExpiration}
           onDateChange={setCustomDate}
         />
-      </div>
+      </FormField>
     </div>
   );
 }

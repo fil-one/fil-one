@@ -4,14 +4,20 @@ import { OrgNameSchema } from './org.js';
 export interface MeResponse {
   orgId: string;
   orgName: string;
-  orgConfirmed: boolean;
   emailVerified: boolean;
-  suggestedOrgName?: string;
   email?: string;
   orgSetupComplete: boolean;
   name?: string;
-  picture?: string;
   connectionType?: string;
+  mfaEnrollments: MfaEnrollment[];
+  picture?: string;
+}
+
+export interface MfaEnrollment {
+  id: string;
+  type: 'authenticator' | 'webauthn-roaming' | 'webauthn-platform';
+  name?: string;
+  createdAt?: string;
 }
 
 export const PROFILE_NAME_MAX_LENGTH = 200;
@@ -39,11 +45,11 @@ export interface UpdateProfileResponse {
   orgName?: string;
 }
 
-export interface ConfirmOrgRequest {
-  orgName: string;
+export interface RegenerateRecoveryCodeResponse {
+  recoveryCode: string;
+  message: string;
 }
 
-export interface ConfirmOrgResponse {
-  orgId: string;
-  orgName: string;
+export interface StepUpRequiredResponse {
+  error: 'step_up_required';
 }

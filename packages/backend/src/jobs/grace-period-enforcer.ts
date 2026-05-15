@@ -24,17 +24,93 @@ interface Candidate {
   action: Action;
 }
 
-// eslint-disable-next-line max-lines-per-function, complexity/complexity
+interface TenantRecord {
+  auroraTenantId: string | undefined;
+  setupStatus: string | undefined;
+  currentAuroraStatus: string | undefined;
+}
+
+type CandidateOutcome = 'canceled' | 'write_locked' | 'skipped';
+
 export async function handler(): Promise<void> {
   const billingTableName = Resource.BillingTable.name;
   const now = new Date();
-  const nowMs = now.getTime();
 
   console.log('[grace-period-enforcer] Starting enforcement run', {
     timestamp: now.toISOString(),
   });
 
-  // Scan for grace_period records
+  const candidates = await scanGracePeriodCandidates(billingTableName, now.getTime());
+
+  console.log('[grace-period-enforcer] Found candidates', { count: candidates.length });
+
+  if (candidates.length === 0) return;
+
+  let canceled = 0;
+  let writeLocked = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const candidate of candidates) {
+    try {
+      const outcome = await processCandidate(candidate, billingTableName, now);
+      if (outcome === 'canceled') canceled++;
+      else if (outcome === 'write_locked') writeLocked++;
+      else skipped++;
+    } catch (error) {
+      failed++;
+      console.error('[grace-period-enforcer] Failed to process record', {
+        userId: candidate.userId,
+        orgId: candidate.orgId,
+        action: candidate.action,
+        error,
+      });
+    }
+  }
+
+  console.log('[grace-period-enforcer] Complete', {
+    candidates: candidates.length,
+    canceled,
+    writeLocked,
+    skipped,
+    failed,
+  });
+}
+
+async function processCandidate(
+  candidate: Candidate,
+  billingTableName: string,
+  now: Date,
+): Promise<CandidateOutcome> {
+  // Resolve Aurora tenant for all actions
+  const tenant = await resolveTenantForEnforcement(candidate.orgId);
+  const tenantReady = tenant.auroraTenantId && isOrgSetupComplete(tenant.setupStatus);
+
+  if (!tenantReady) {
+    console.warn('[grace-period-enforcer] Tenant not ready, skipping', {
+      userId: candidate.userId,
+      orgId: candidate.orgId,
+      auroraTenantId: tenant.auroraTenantId,
+      setupStatus: tenant.setupStatus,
+    });
+    return 'skipped';
+  }
+
+  const auroraTenantId = tenant.auroraTenantId!;
+
+  if (candidate.action === 'cancel') {
+    await cancelSubscriptionAndDisableTenant(candidate, auroraTenantId, billingTableName, now);
+    return 'canceled';
+  }
+
+  return ensureTenantWriteLocked(candidate, auroraTenantId, tenant.currentAuroraStatus);
+}
+
+// Scan for grace_period records
+async function scanGracePeriodCandidates(
+  billingTableName: string,
+  nowMs: number,
+): Promise<Candidate[]> {
   const candidates: Candidate[] = [];
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
 
@@ -80,98 +156,71 @@ export async function handler(): Promise<void> {
     lastEvaluatedKey = result.LastEvaluatedKey;
   } while (lastEvaluatedKey);
 
-  console.log('[grace-period-enforcer] Found candidates', { count: candidates.length });
+  return candidates;
+}
 
-  if (candidates.length === 0) return;
+async function resolveTenantForEnforcement(orgId: string): Promise<TenantRecord> {
+  const orgResult = await dynamo.send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: {
+        pk: { S: `ORG#${orgId}` },
+        sk: { S: 'PROFILE' },
+      },
+      ProjectionExpression: 'auroraTenantId, setupStatus, auroraTenantStatus',
+    }),
+  );
 
-  let canceled = 0;
-  let writeLocked = 0;
-  let skipped = 0;
-  let failed = 0;
+  return {
+    auroraTenantId: orgResult.Item?.auroraTenantId?.S,
+    setupStatus: orgResult.Item?.setupStatus?.S,
+    currentAuroraStatus: orgResult.Item?.auroraTenantStatus?.S,
+  };
+}
 
-  for (const candidate of candidates) {
-    try {
-      // Resolve Aurora tenant for all actions
-      const orgResult = await dynamo.send(
-        new GetItemCommand({
-          TableName: Resource.UserInfoTable.name,
-          Key: {
-            pk: { S: `ORG#${candidate.orgId}` },
-            sk: { S: 'PROFILE' },
-          },
-          ProjectionExpression: 'auroraTenantId, setupStatus, auroraTenantStatus',
-        }),
-      );
+async function cancelSubscriptionAndDisableTenant(
+  candidate: Candidate,
+  auroraTenantId: string,
+  billingTableName: string,
+  now: Date,
+): Promise<void> {
+  await updateTenantStatus({ tenantId: auroraTenantId, status: 'DISABLED' });
+  await setOrgAuroraTenantStatus(candidate.orgId, 'DISABLED');
+  // Transition DynamoDB status to canceled
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: billingTableName,
+      Key: { pk: { S: candidate.pk }, sk: { S: 'SUBSCRIPTION' } },
+      UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
+      ExpressionAttributeValues: {
+        ':status': { S: SubscriptionStatus.Canceled },
+        ':now': { S: now.toISOString() },
+      },
+    }),
+  );
 
-      const auroraTenantId = orgResult.Item?.auroraTenantId?.S;
-      const setupStatus = orgResult.Item?.setupStatus?.S;
-      const currentAuroraStatus = orgResult.Item?.auroraTenantStatus?.S;
-      const tenantReady = auroraTenantId && isOrgSetupComplete(setupStatus);
+  console.log('[grace-period-enforcer] Canceled + disabled', {
+    userId: candidate.userId,
+    orgId: candidate.orgId,
+    previousStatus: candidate.subscriptionStatus,
+  });
+}
 
-      if (!tenantReady) {
-        skipped++;
-        console.warn('[grace-period-enforcer] Tenant not ready, skipping', {
-          userId: candidate.userId,
-          orgId: candidate.orgId,
-          auroraTenantId,
-          setupStatus,
-        });
-        continue;
-      }
-
-      if (candidate.action === 'cancel') {
-        await updateTenantStatus({ tenantId: auroraTenantId, status: 'DISABLED' });
-        await setOrgAuroraTenantStatus(candidate.orgId, 'DISABLED');
-        // Transition DynamoDB status to canceled
-        await dynamo.send(
-          new UpdateItemCommand({
-            TableName: billingTableName,
-            Key: { pk: { S: candidate.pk }, sk: { S: 'SUBSCRIPTION' } },
-            UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
-            ExpressionAttributeValues: {
-              ':status': { S: SubscriptionStatus.Canceled },
-              ':now': { S: now.toISOString() },
-            },
-          }),
-        );
-        canceled++;
-
-        console.log('[grace-period-enforcer] Canceled + disabled', {
-          userId: candidate.userId,
-          orgId: candidate.orgId,
-          previousStatus: candidate.subscriptionStatus,
-        });
-      } else if (candidate.action === 'write_lock') {
-        // Non-expired grace period — ensure Aurora is WRITE_LOCKED
-        if (currentAuroraStatus === 'WRITE_LOCKED' || currentAuroraStatus === 'DISABLED') {
-          skipped++;
-          continue;
-        }
-
-        await updateTenantStatus({ tenantId: auroraTenantId, status: 'WRITE_LOCKED' });
-        await setOrgAuroraTenantStatus(candidate.orgId, 'WRITE_LOCKED');
-        writeLocked++;
-        console.log('[grace-period-enforcer] WRITE_LOCKED (retry)', {
-          userId: candidate.userId,
-          orgId: candidate.orgId,
-        });
-      }
-    } catch (error) {
-      failed++;
-      console.error('[grace-period-enforcer] Failed to process record', {
-        userId: candidate.userId,
-        orgId: candidate.orgId,
-        action: candidate.action,
-        error: (error as Error).message,
-      });
-    }
+// Non-expired grace period — ensure Aurora is WRITE_LOCKED
+async function ensureTenantWriteLocked(
+  candidate: Candidate,
+  auroraTenantId: string,
+  currentAuroraStatus: string | undefined,
+): Promise<CandidateOutcome> {
+  if (currentAuroraStatus === 'WRITE_LOCKED' || currentAuroraStatus === 'DISABLED') {
+    return 'skipped';
   }
 
-  console.log('[grace-period-enforcer] Complete', {
-    candidates: candidates.length,
-    canceled,
-    writeLocked,
-    skipped,
-    failed,
+  await updateTenantStatus({ tenantId: auroraTenantId, status: 'WRITE_LOCKED' });
+  await setOrgAuroraTenantStatus(candidate.orgId, 'WRITE_LOCKED');
+  console.log('[grace-period-enforcer] WRITE_LOCKED (retry)', {
+    userId: candidate.userId,
+    orgId: candidate.orgId,
   });
+  return 'write_locked';
 }

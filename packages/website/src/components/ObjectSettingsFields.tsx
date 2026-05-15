@@ -2,6 +2,7 @@ import type { RetentionDurationType, RetentionMode } from '@filone/shared';
 import { RETENTION_MAX_DAYS, RETENTION_MAX_YEARS } from '@filone/shared';
 
 import { Switch } from './Switch';
+import { Select } from './Select';
 
 type ObjectSettingsFieldsProps = {
   versioning: boolean;
@@ -65,8 +66,8 @@ export function ObjectSettingsFields({
   }
 
   return (
-    <fieldset className="flex flex-col gap-3.5">
-      <legend className="text-xs font-medium text-zinc-900">Object settings</legend>
+    <fieldset className="flex flex-col">
+      <legend className="mb-3 text-xs font-medium text-zinc-900">Object settings</legend>
 
       <div className="overflow-hidden rounded-lg border border-zinc-200">
         {/* Versioning */}
@@ -83,7 +84,7 @@ export function ObjectSettingsFields({
           <Switch
             checked={versioning}
             onChange={handleVersioningChange}
-            aria-labelledby="versioning-label"
+            aria-label="Versioning"
             aria-describedby="versioning-desc"
           />
         </div>
@@ -91,6 +92,7 @@ export function ObjectSettingsFields({
         {/* Object Lock */}
         <div className="border-t border-zinc-200/60">
           <div
+            aria-disabled={!versioning}
             className={`flex items-center justify-between px-3.5 py-3 ${!versioning ? 'opacity-40' : ''}`}
           >
             <div className="flex flex-col gap-0.5">
@@ -106,7 +108,7 @@ export function ObjectSettingsFields({
               checked={lock}
               onChange={handleLockChange}
               disabled={!versioning}
-              aria-labelledby="lock-label"
+              aria-label="Object Lock"
               aria-describedby="lock-desc"
             />
           </div>
@@ -115,7 +117,10 @@ export function ObjectSettingsFields({
         {/* Retention */}
         <div className="border-t border-zinc-200/60">
           <div className="flex flex-col px-3.5 py-3">
-            <div className={`flex items-center justify-between ${!lock ? 'opacity-40' : ''}`}>
+            <div
+              aria-disabled={!lock}
+              className={`flex items-center justify-between ${!lock ? 'opacity-40' : ''}`}
+            >
               <div className="flex flex-col gap-0.5">
                 <span id="retention-label" className="text-[13px] font-medium text-zinc-900">
                   Retention
@@ -129,7 +134,7 @@ export function ObjectSettingsFields({
                 checked={retentionEnabled}
                 onChange={onRetentionEnabledChange}
                 disabled={!lock}
-                aria-labelledby="retention-label"
+                aria-label="Retention"
                 aria-describedby="retention-desc"
               />
             </div>
@@ -142,8 +147,8 @@ export function ObjectSettingsFields({
                 aria-label="Retention configuration"
               >
                 {/* Retention mode */}
-                <fieldset className="flex flex-col gap-1.5">
-                  <legend className="text-xs font-medium text-zinc-900">
+                <fieldset className="flex flex-col">
+                  <legend className="mb-1.5 text-xs font-medium text-zinc-900">
                     Default Retention Policy
                   </legend>
                   <div
@@ -170,7 +175,7 @@ export function ObjectSettingsFields({
                           className="accent-brand-600"
                         />
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-[13px] font-medium leading-none text-zinc-900">
+                          <span className="text-[13px] font-medium leading-snug text-zinc-900">
                             {option.label}
                           </span>
                           <span
@@ -211,17 +216,15 @@ export function ObjectSettingsFields({
                     <label htmlFor="lock-period-unit" className="sr-only">
                       Duration unit
                     </label>
-                    <select
+                    <Select
                       id="lock-period-unit"
                       value={retentionDurationType}
-                      onChange={(e) =>
-                        onRetentionDurationTypeChange(e.target.value as RetentionDurationType)
-                      }
-                      className="w-24 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-[13px] text-zinc-900 focus:outline-2 focus:outline-brand-600"
+                      onChange={(v) => onRetentionDurationTypeChange(v as RetentionDurationType)}
+                      className="w-24 py-1.5 text-[13px]"
                     >
                       <option value="d">Days</option>
                       <option value="y">Years</option>
-                    </select>
+                    </Select>
                   </div>
                   <span id="lock-period-hint" className="text-[11px] text-zinc-500">
                     Objects cannot be deleted until this period expires.

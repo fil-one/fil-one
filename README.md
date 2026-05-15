@@ -1,4 +1,4 @@
-# Fil.one
+# Fil One
 
 Full-stack prototype — pnpm workspaces monorepo deploying to AWS via [SST v3](https://sst.dev/).
 
@@ -134,7 +134,7 @@ cd packages/website && pnpm run dev
 
 ### E2E Tests
 
-The repo includes a Playwright end-to-end test suite under `tests/e2e/`. The `@playwright/test` package is already a devDependency, so `pnpm install` covers it.
+Playwright end-to-end test suite under `tests/e2e/` that runs against a deployed environment (typically staging). The `@playwright/test` package is already a devDependency, so `pnpm install` covers it.
 
 **Install browser binaries** (one-time):
 
@@ -142,13 +142,31 @@ The repo includes a Playwright end-to-end test suite under `tests/e2e/`. The `@p
 pnpm exec playwright install --with-deps
 ```
 
-**Run tests** against a deployed stage:
+#### Required env vars
+
+| Variable                                                          | Purpose                                               |
+| ----------------------------------------------------------------- | ----------------------------------------------------- |
+| `BASE_URL`                                                        | The deployed app URL (e.g. `https://staging.fil.one`) |
+| `E2E_PAID_EMAIL` / `E2E_PAID_PASSWORD` / `E2E_PAID_USER_ID`       | Paid test user (Auth0 sub goes in `_USER_ID`)         |
+| `E2E_UNPAID_EMAIL` / `E2E_UNPAID_PASSWORD` / `E2E_UNPAID_USER_ID` | Unpaid test user                                      |
+| `E2E_TRIAL_EMAIL` / `E2E_TRIAL_PASSWORD` / `E2E_TRIAL_USER_ID`    | Trial test user                                       |
+
+In CI, all nine credential vars come from GitHub repository secrets (see [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)). Both workflows also configure AWS via OIDC (using `vars.AWS_ROLE_ARN`) so the billing-state reset can write to the staging `BillingTable`.
+
+#### Running locally
+
+The `test:e2e` script wraps Playwright in `sst shell` so SST Resource bindings (e.g. `BillingTable` name) resolve to the current SST stage. Deploy a stage first, then:
 
 ```bash
-BASE_URL=<your-cloudfront-url> pnpm test:e2e
+SST_STAGE=staging \
+BASE_URL=https://staging.fil.one \
+E2E_PAID_EMAIL=...   E2E_PAID_PASSWORD=...   E2E_PAID_USER_ID=auth0|... \
+E2E_UNPAID_EMAIL=... E2E_UNPAID_PASSWORD=... E2E_UNPAID_USER_ID=auth0|... \
+E2E_TRIAL_EMAIL=...  E2E_TRIAL_PASSWORD=...  E2E_TRIAL_USER_ID=auth0|... \
+pnpm test:e2e --project=chromium
 ```
 
-`BASE_URL` is required and should point to a deployed SST stage (personal dev stack, staging, etc.).
+Your local AWS credentials (e.g. via `aws sso login`) must have write access to the staging stage's `BillingTable`.
 
 After a run, an HTML report is generated at `playwright-report/`. To view it:
 
@@ -157,6 +175,32 @@ pnpm exec playwright show-report
 ```
 
 > CI runs these tests automatically against preview deployments on PRs.
+
+#### Subscription state reset
+
+[tests/e2e/auth.setup.ts](tests/e2e/auth.setup.ts) re-seeds the `BillingTable` row for each role before logging that role in. This is necessary because trial periods can elapse and `past_due` subscriptions can advance to `canceled` between scheduled runs, so prior runs' state is not safe to reuse.
+
+The seed values come from [tests/e2e/billing-reset.ts](tests/e2e/billing-reset.ts):
+
+- **paid** → `active`, `currentPeriodEnd` = now + 30d
+- **unpaid** → `past_due`, `lastPaymentFailedAt` = yesterday
+- **trial** → `trialing`, `trialEndsAt` = now + 14d
+
+The reset writes directly to DynamoDB (mirrors the integration-test pattern in [tests/integration/helpers.ts](tests/integration/helpers.ts)). It does **not** sync with Stripe — the local DB is the source of truth for `subscriptionStatus`, and Stripe state is allowed to drift for these test users.
+
+#### How auth works
+
+Each role logs in once via [tests/e2e/auth.setup.ts](tests/e2e/auth.setup.ts) and the session cookies are persisted to `.auth/<role>.json`. Authenticated specs reuse that storage state instead of going through the Auth0 login UI on every test.
+
+The `.auth/` directory is gitignored — the JSON files are regenerated on every run and **must not be committed**.
+
+#### Adding a new role
+
+1. Add an entry to [tests/e2e/roles.ts](tests/e2e/roles.ts) `STORAGE_STATE`.
+2. Add the role's desired subscription state to `DESIRED_STATE` in [tests/e2e/billing-reset.ts](tests/e2e/billing-reset.ts).
+3. Add the role to the `roles` array in [tests/e2e/auth.setup.ts](tests/e2e/auth.setup.ts) (with `email`, `password`, `userId`).
+4. Add `E2E_<ROLE>_EMAIL`, `E2E_<ROLE>_PASSWORD`, `E2E_<ROLE>_USER_ID` to `REQUIRED_CREDENTIAL_VARS` in [playwright.config.ts](playwright.config.ts).
+5. Add the same three vars to the `env:` block in both [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml), and provision the corresponding GitHub secrets.
 
 ### Integration Tests
 
@@ -215,6 +259,36 @@ pnpx sst dev
 
 Runs Lambda functions locally with live reload. Changes to handler code take effect immediately without redeploying.
 
+### Troubleshooting: CloudFormation Stack Stuck in Rollback
+
+The deploy-time setup Lambda (`setup-integrations`) runs as a CloudFormation custom resource. If it fails (e.g., missing Auth0 scopes, API errors), the CloudFormation stack enters `UPDATE_ROLLBACK_FAILED` state and blocks all future deploys.
+
+**To unblock:**
+
+1. Force the rollback to complete, skipping the failed resource:
+
+```bash
+aws cloudformation continue-update-rollback \
+  --stack-name <stack-name> \
+  --region us-east-2 \
+  --resources-to-skip Setup
+```
+
+The stack name is in the error output (e.g., `SetupStack-efd549a`).
+
+2. Wait for the stack to reach `UPDATE_ROLLBACK_COMPLETE`:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name <stack-name> \
+  --region us-east-2 \
+  --query 'Stacks[0].StackStatus'
+```
+
+3. Fix the underlying issue (grant missing scopes, etc.), then redeploy.
+
+For MFA-specific troubleshooting, see [`docs/architectural-decisions/2026-03-mfa-enrollment.md`](docs/architectural-decisions/2026-03-mfa-enrollment.md#troubleshooting).
+
 ## ACM Certificate Provisioning & DNS Setup
 
 Custom domains require an ACM certificate in **us-east-1** (CloudFront requirement):
@@ -225,11 +299,12 @@ Example PR To add `staging.fil.one`: https://github.com/FilecoinFoundationWeb/Fi
 
 ## Auth0
 
-|                 |                                                                                                                   |
-| --------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Dev environment | **FilOneDev**                                                                                                     |
-| Tenant domain   | `dev-oar2nhqh58xf5pwf.us.auth0.com`                                                                               |
-| Dashboard       | https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ/settings |
+Two Auth0 tenants are used:
+
+| Environment | Tenant        | Domain                              | Dashboard                                                                                                                      |
+| ----------- | ------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Staging/dev | **FilOneDev** | `dev-oar2nhqh58xf5pwf.us.auth0.com` | [Dashboard](https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ/settings) |
+| Production  | **fil-one**   | `fil-one.us.auth0.com`              | [Dashboard](https://manage.auth0.com/dashboard/us/fil-one)                                                                     |
 
 Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecret`). See the "Set SST secrets" step above.
 
@@ -244,7 +319,9 @@ Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecre
 - **Identifier (audience)**: `app.fil.one` (prod) — this must match `AUTH0_AUDIENCE` in `sst.config.ts`. It's what makes Auth0 issue a JWT access token (instead of an opaque one) and is the `aud` claim the middleware validates.
 - Under the API's **Machine to Machine Applications** tab, authorize your application so it can exchange tokens.
 
-### Auth0 Machine-to-Machine (M2M) Application
+### Auth0 MFA Setup
+
+MFA is opt-in per user (database and social connections). Auth0 handles enrollment and challenge via Universal Login. See `docs/architectural-decisions/2026-03-mfa-enrollment.md` for the full architectural decision record.
 
 Two separate M2M applications are used to limit the scope of credentials exposed to Lambda functions.
 
@@ -252,14 +329,35 @@ Two separate M2M applications are used to limit the scope of credentials exposed
 
 Used only by the deploy-time setup Lambda to configure Auth0 on each deploy. Not available to runtime Lambda functions.
 
-**One-time setup in Auth0 Dashboard:**
+**1. Enable MFA factors** (Security > Multi-factor Auth) — manual, one-time per tenant:
 
-1. Go to **Applications > Create Application**
-2. Choose **Machine to Machine Applications**
-3. Name it something like `Fil.one Deploy Automation`
-4. Authorize it for the **Auth0 Management API** (`https://<tenant>.us.auth0.com/api/v2/`)
-5. Grant these scopes: `read:clients`, `update:clients`, `read:email_provider`, `create:email_provider`, `update:email_provider`
-6. Copy the **Client ID** and **Client Secret**
+- Enable **One-time Password** (authenticator apps)
+- Enable **WebAuthn with FIDO Security Keys** (passkeys/security keys)
+- Enable **WebAuthn with FIDO Device Biometrics** (fingerprint, Face ID)
+- Do **not** enable **Email** or **SMS** — turning Email on tenant-wide causes Auth0 to auto-enroll every verified-email user into email MFA, defeating the strong-factor-only design
+- Set policy to **"Never"** (MFA is controlled entirely by the Post-Login Action)
+- Under additional settings, enable **"Customize MFA Factors using Actions"**
+
+**2. Post-Login Action** — automated on deploy:
+
+The deploy-time setup Lambda (`setup-integrations`) automatically creates, deploys, and binds an `MFA Enrollment Trigger` Action to the Login flow (staging/production only). This Action checks `app_metadata.mfa_enrolling` on each login — when `true`, it triggers MFA enrollment via Universal Login and clears the flag after success. No manual Action setup is needed.
+
+### Auth0 Machine-to-Machine (M2M) Applications
+
+Two separate M2M applications per tenant limit the blast radius of credentials. The deploy-time app is only available to the setup Lambda; the runtime app is available to request-time handlers.
+
+#### Deploy automation (`Auth0MgmtClientId` / `Auth0MgmtClientSecret`)
+
+Used only by the deploy-time setup Lambda to configure Auth0 on each deploy.
+
+| Environment | App name          | Dashboard                                                                                                                     |
+| ----------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Staging     | `SSTSetupM2MApp`  | [Settings](https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/WaVEvlq7iAirQa15CPPZJX0leTKWPJgw/settings) |
+| Production  | Deploy Automation | [Settings](https://manage.auth0.com/dashboard/us/fil-one/applications/8t5J60CfojuktFBqppOseY8IzYQYYrcv/settings)              |
+
+**Required scopes** (Applications > M2M app > APIs > Auth0 Management API):
+
+`read:clients`, `update:clients`, `read:email_provider`, `create:email_provider`, `update:email_provider`, `create:actions`, `read:actions`, `update:actions`, `read:triggers`, `update:triggers`
 
 ```bash
 pnpx sst secret set Auth0MgmtClientId <M2M-client-id> [--stage <stage>]
@@ -268,16 +366,16 @@ pnpx sst secret set Auth0MgmtClientSecret <M2M-client-secret> [--stage <stage>]
 
 #### Runtime user management (`Auth0MgmtRuntimeClientId` / `Auth0MgmtRuntimeClientSecret`)
 
-Used by request-time Lambda handlers (`update-profile`, `resend-verification`) to manage user records and trigger verification emails.
+Used by request-time Lambda handlers (`update-profile`, `resend-verification`, `enroll-mfa`, `disable-mfa`, `delete-mfa-enrollment`, `get-me`) to manage user records, trigger verification emails, and manage MFA enrollments.
 
-**One-time setup in Auth0 Dashboard:**
+| Environment | App name    | Dashboard                                                                                                                     |
+| ----------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Staging     | Runtime M2M | [Settings](https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/CCONYSKqPecSTV8fxpfQJ7TLu6JseYSz/settings) |
+| Production  | Runtime M2M | [Settings](https://manage.auth0.com/dashboard/us/fil-one/applications/1VydX3EOVZDHmVF3IdKa7n7pzRuczj7O/settings)              |
 
-1. Go to **Applications > Create Application**
-2. Choose **Machine to Machine Applications**
-3. Name it something like `Fil.one Runtime`
-4. Authorize it for the **Auth0 Management API** (`https://<tenant>.us.auth0.com/api/v2/`)
-5. Grant these scopes: `update:users`, `create:user_tickets`
-6. Copy the **Client ID** and **Client Secret**
+**Required scopes** (Applications > M2M app > APIs > Auth0 Management API):
+
+`read:users`, `update:users`, `update:users_app_metadata`, `create:user_tickets`, `delete:users`, `delete:guardian_enrollments`, `read:authentication_methods`, `create:authentication_methods`, `delete:authentication_methods`
 
 ```bash
 pnpx sst secret set Auth0MgmtRuntimeClientId <M2M-client-id> [--stage <stage>]

@@ -1,0 +1,24 @@
+======================================================================
+  Upload
+  Script : upload
+  Run    : 20260219_143221
+======================================================================
+
+SUMMARY
+  Total  : 5
+  OK     : 5
+  Failed : 0
+
+BY OPERATION
+  upload                             5 ok     0 failed  (   5 total)  avg 2.088s  stddev 0.718s  min 1.084s  max 3.221s
+
+SUCCESSES
+  {"ts": "2026-02-19T22:32:23.690737+00:00", "op": "upload", "status": "ok", "key": "gov-data/README.md", "size": 5555, "elapsed_s": 1.084, "target_bucket": "filecoin-foundation-bucket-nolock", "etag": "1256826d336c6689c73c3e1a52e34b19", "version_id": null}
+  {"ts": "2026-02-19T22:32:25.306604+00:00", "op": "upload", "status": "ok", "key": "gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip", "size": 740853, "elapsed_s": 1.615, "target_bucket": "filecoin-foundation-bucket-nolock", "etag": "e23c5682f81e05aa47b7885ef44fc7b1", "version_id": null}
+  {"ts": "2026-02-19T22:32:28.528383+00:00", "op": "upload", "status": "ok", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-0397e/v1.zip", "size": 21037826, "elapsed_s": 3.221, "target_bucket": "filecoin-foundation-bucket-nolock", "etag": "ec2a64294ac71af5f8c6e97b13233f1d", "version_id": null}
+  {"ts": "2026-02-19T22:32:30.787794+00:00", "op": "upload", "status": "ok", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-54c47/v1.zip", "size": 21082117, "elapsed_s": 2.258, "target_bucket": "filecoin-foundation-bucket-nolock", "etag": "52da975ed1ba99f6186d846a531d28b3", "version_id": null}
+  {"ts": "2026-02-19T22:32:33.053410+00:00", "op": "upload", "status": "ok", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-aa506/v1.zip", "size": 21079670, "elapsed_s": 2.264, "target_bucket": "filecoin-foundation-bucket-nolock", "etag": "e39c176d19a7297918243f6242406417", "version_id": null}
+
+Log files:
+  Success : ../logs/20260219_143221_upload_success.jsonl
+  Errors  : ../logs/20260219_143221_upload_errors.jsonl

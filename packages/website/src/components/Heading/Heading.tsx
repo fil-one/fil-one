@@ -5,7 +5,7 @@ import { cn } from '../../lib/utils.js';
 
 type HeadingTag = Extract<ElementType, 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'>;
 
-export const headingVariants = cva('text-zinc-900', {
+export const headingVariants = cva('text-(--color-text-base)', {
   variants: {
     size: {
       /** Subsection labels — text-sm font-medium */
@@ -42,7 +42,11 @@ export type HeadingProps<T extends HeadingTag = HeadingTag> = {
 export const Heading = forwardRef<HTMLHeadingElement, HeadingProps>(
   ({ tag: Tag, size, balance, description, className, children, ...rest }, ref) => {
     const heading = (
-      <Tag ref={ref} {...rest} className={cn(headingVariants({ size, balance }), className)}>
+      <Tag
+        ref={ref}
+        {...rest}
+        className={cn(headingVariants({ size, balance }), !description && className)}
+      >
         {children}
       </Tag>
     );
@@ -50,9 +54,9 @@ export const Heading = forwardRef<HTMLHeadingElement, HeadingProps>(
     if (!description) return heading;
 
     return (
-      <div className="flex flex-col gap-1">
+      <div className={cn('flex flex-col gap-1', className)}>
         {heading}
-        <p className="text-sm text-zinc-500">{description}</p>
+        <p className="text-sm text-(--color-paragraph-text-subtle)">{description}</p>
       </div>
     );
   },
