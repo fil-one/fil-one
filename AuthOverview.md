@@ -7,7 +7,7 @@ This document describes how authentication and authorization work in the Hypersp
 - **Identity provider:** Auth0 owns user pools, password storage, social/SSO connections, MFA challenges, and access/ID/refresh token issuance.
 - **BFF:** The console API (Lambda + API Gateway) is the Backend-for-Frontend. It handles the OAuth2 authorization-code exchange and writes HTTP-only cookies. The SPA never touches tokens.(AI loves this BFF term: I never seen it before but makes enough sense to me)
 - **Internal identity:** Each Auth0 `sub` is mapped 1:1 to an internal `userId` (UUID) and `orgId` (UUID) in DynamoDB on first login. The mapping is resolved in middleware on every request.
-- **Tenancy:** Users map 1:1 with orgs today (one user creates one org as Admin; multi-member orgs are not yet enabled). Each confirmed org gets one Aurora tenant created via SQS.
+- **Tenancy:** Users map 1:1 with orgs today (one user creates one org as Admin; multi-member orgs are not yet enabled). Each confirmed org gets one Aurora tenant.
 - **Authorization:** A subscription guard middleware reads the user's Stripe subscription state from DynamoDB and gates routes by `AccessLevel.Read` or `AccessLevel.Write`.
 - **MFA:** Optional per user. OTP, WebAuthn, and biometric (fingerprint / Face ID) enrollment is driven by an Auth0 Post-Login Action and `app_metadata.mfa_enrolling`. Email is intentionally not offered as an MFA factor and we limit email's role to the sign-up verification gate (see Tenancy below).
 
