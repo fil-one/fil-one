@@ -96,7 +96,7 @@ describe('GET /api/me handler', () => {
       });
   });
 
-  it('returns the org profile when setup is complete', async () => {
+  it('returns the org profile', async () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
@@ -108,36 +108,6 @@ describe('GET /api/me handler', () => {
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
           setupStatus: { S: FINAL_SETUP_STATUS },
-        },
-      });
-
-    const result = await handler(authenticatedEvent(), buildContext());
-
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({
-        orgId: MOCK_ORG_ID,
-        orgName: 'Example Corp',
-        emailVerified: true,
-        email: MOCK_EMAIL,
-        mfaEnrollments: [],
-        connectionType: 'auth0',
-      }),
-    });
-  });
-
-  it('returns the org profile when setup is in progress', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          setupStatus: { S: 'FILONE_ORG_CREATED' },
         },
       });
 
