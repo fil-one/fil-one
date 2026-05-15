@@ -1,3 +1,4 @@
+import './zod-config.js';
 import './sentry.js';
 import './plausible.js';
 import './styles.css';
