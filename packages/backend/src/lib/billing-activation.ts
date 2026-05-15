@@ -10,7 +10,6 @@ import { isOrgSetupComplete } from './org-setup-status.js';
 const dynamo = getDynamoClient();
 
 export async function saveBillingRecord(
-  tableName: string,
   userId: string,
   subscription: Stripe.Subscription,
   paymentMethodId: string,
@@ -31,7 +30,7 @@ export async function saveBillingRecord(
 
   await dynamo.send(
     new UpdateItemCommand({
-      TableName: tableName,
+      TableName: Resource.BillingTable.name,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },

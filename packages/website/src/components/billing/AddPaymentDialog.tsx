@@ -10,10 +10,12 @@ import {
   useElements,
 } from '@stripe/react-stripe-js';
 import type { Stripe, StripeCardNumberElementChangeEvent } from '@stripe/stripe-js';
+import { ActivateSubscriptionRequestSchema } from '@filone/shared';
 
 import { Modal, ModalBody, ModalHeader } from '../Modal/index.js';
 
 import { getStripe } from '../../lib/stripe.js';
+import { activateSubscription } from '../../lib/api.js';
 
 type AddPaymentDialogProps = {
   open: boolean;
@@ -49,6 +51,7 @@ function PaymentForm({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [_cardBrand, setCardBrand] = useState<string>('unknown');
+  const [promotionCode, setPromotionCode] = useState('');
 
   function handleCardChange(e: StripeCardNumberElementChangeEvent) {
     setCardBrand(e.brand ?? 'unknown');
@@ -73,6 +76,17 @@ function PaymentForm({
       return;
     }
 
+    // Validate the promo code against the same zod schema the server uses, so format
+    // typos are caught before we bother creating a Stripe payment method.
+    const trimmedPromotionCode = promotionCode.trim();
+    const body = trimmedPromotionCode ? { promotionCode: trimmedPromotionCode } : {};
+    const parsed = ActivateSubscriptionRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Form validation error.');
+      setLoading(false);
+      return;
+    }
+
     const result = await stripe.confirmCardSetup(clientSecret, {
       payment_method: { card: cardNumberElement },
     });
@@ -85,8 +99,7 @@ function PaymentForm({
 
     // Card setup confirmed — activate subscription via API
     try {
-      const { apiRequest } = await import('../../lib/api.js');
-      await apiRequest('/billing/activate', { method: 'POST' });
+      await activateSubscription({ promotionCode: trimmedPromotionCode });
       onSuccess();
     } catch (err) {
       setError((err as Error).message || 'Failed to activate subscription.');
@@ -135,6 +148,25 @@ function PaymentForm({
                 <CardCvcElement options={ELEMENT_OPTIONS} />
               </div>
             </div>
+          </div>
+
+          {/* Promo code (optional) */}
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="promotion-code" className="text-[13px] font-medium text-[#14181f]">
+              Promo code <span className="font-normal text-[#99a0ae]">(optional)</span>
+            </label>
+            <input
+              id="promotion-code"
+              type="text"
+              value={promotionCode}
+              onChange={(e) => setPromotionCode(e.target.value)}
+              placeholder="e.g. WELCOME20"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              maxLength={40}
+              className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5 text-[13px] text-[#14181f] placeholder:text-[#99a0ae] focus:outline-none focus:ring-1 focus:ring-[#0080ff]"
+            />
           </div>
 
           {/* Error */}
