@@ -2,7 +2,7 @@ name: Security
 
 on:
   push:
-    branches: [main]
+    branches: [main, security-pipeline]
   pull_request:
   schedule:
     # Weekly scan: Sunday 2am UTC
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   # ──────────────────────────────────────────────────
-  # Job 1: Semgrep SAST (custom rules + community)
+  # Job 1: Semgrep SAST (custom rules blocking + community advisory)
   # ──────────────────────────────────────────────────
   semgrep:
     name: Semgrep SAST
@@ -33,28 +33,50 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Run Semgrep
+      - name: Run Semgrep (custom rules — blocking)
         run: |
           semgrep scan \
             --config .semgrep.yml \
-            --sarif --output semgrep-results.sarif \
+            --sarif --output semgrep-custom.sarif \
             --error \
             --verbose
-        continue-on-error: true # Advisory mode — flip to false to block PRs
 
-      - name: Upload Semgrep results
+      - name: Run Semgrep (community rules — advisory)
+        run: |
+          semgrep scan \
+            --config p/ci \
+            --sarif --output semgrep-community.sarif \
+            --error \
+            --verbose
+        continue-on-error: true # Advisory — community rules may be noisy
+
+      - name: Upload custom-rule results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: semgrep-results
-          path: semgrep-results.sarif
+          name: semgrep-custom-results
+          path: semgrep-custom.sarif
 
-      - name: Upload SARIF to GitHub Security tab
+      - name: Upload community-rule results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-community-results
+          path: semgrep-community.sarif
+
+      - name: Upload custom SARIF to GitHub Security tab
         if: always() && vars.ENABLE_GHAS == 'true'
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: semgrep-results.sarif
-          category: semgrep
+          sarif_file: semgrep-custom.sarif
+          category: semgrep-custom
+
+      - name: Upload community SARIF to GitHub Security tab
+        if: always() && vars.ENABLE_GHAS == 'true'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep-community.sarif
+          category: semgrep-community
 
   # ──────────────────────────────────────────────────
   # Job 2: CodeQL (conditional — requires GHAS)
@@ -170,7 +192,7 @@ jobs:
           GITLEAKS_CONFIG: .gitleaks.toml
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'true'
           GITLEAKS_ENABLE_SUMMARY: 'true'
-        continue-on-error: true # Advisory mode — flip to false to block on secrets
+        # Blocking — custom rules in .gitleaks.toml are high-confidence
 
   # ──────────────────────────────────────────────────
   # Job 5: IaC Scanning (Trivy config mode)
@@ -244,3 +266,89 @@ jobs:
           severity: CRITICAL,HIGH
           skip-dirs: packages/aurora-backoffice-client,packages/aurora-portal-client,contracts/lib,.sst,node_modules
         continue-on-error: true # Advisory — review output before blocking
+
+  # ──────────────────────────────────────────────────
+  # Job 7: PR Dependency Review
+  # ──────────────────────────────────────────────────
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          deny-licenses: GPL-3.0, AGPL-3.0
+          comment-summary-in-pr: always
+
+  # ──────────────────────────────────────────────────
+  # Job 8: SBOM Generation (CycloneDX)
+  # ──────────────────────────────────────────────────
+  sbom:
+    name: SBOM Generation
+    if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@9b5745cdf0a2e8c2620f0746130f809adb911c19
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          format: cyclonedx-json
+          output-file: sbom-cyclonedx.json
+          artifact-name: sbom-cyclonedx.json
+
+  # ──────────────────────────────────────────────────
+  # Job 9: OpenSSF Scorecard
+  # ──────────────────────────────────────────────────
+  scorecard:
+    name: OpenSSF Scorecard
+    if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Run OpenSSF Scorecard
+        uses: ossf/scorecard-action@v2
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          publish_results: true
+        continue-on-error: true # Advisory — informational baseline
+
+      - name: Upload Scorecard results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-results
+          path: scorecard-results.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always() && vars.ENABLE_GHAS == 'true'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: scorecard-results.sarif
+          category: openssf-scorecard
