@@ -4,6 +4,8 @@ import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
 import { getUsage } from '../lib/api';
 import { queryKeys } from '../lib/query-client.js';
+import { AddOnStateProvider } from '../contexts/addOnState.js';
+import { IntegrationStateProvider } from '../contexts/integrationState.js';
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -16,6 +18,8 @@ export function AppShell({ children }: AppShellProps) {
   const tenantStatus = usage?.tenantStatus;
 
   return (
+    <AddOnStateProvider>
+    <IntegrationStateProvider>
     <div className="flex h-screen flex-col overflow-hidden">
       {tenantStatus === 'WRITE_LOCKED' && (
         <Banner variant="warning" action={{ label: 'Upgrade', href: '/billing' }}>
@@ -37,5 +41,7 @@ export function AppShell({ children }: AppShellProps) {
         </main>
       </div>
     </div>
+    </IntegrationStateProvider>
+    </AddOnStateProvider>
   );
 }
