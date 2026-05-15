@@ -35,7 +35,7 @@ The program is administered by Filecoin Foundation and offers bounties for quali
 
 ### Bug bounty eligibility
 
-The Immunefi bounty program covers the core Filecoin protocol repositories listed on the [program page](https://immunefi.com/bug-bounty/filecoin/). Fil One is **not currently in the Immunefi scope**, but we take all reports seriously and will coordinate with Filecoin Foundation where a vulnerability has protocol-level implications.
+Fil One currently doesn't operate a bug bounty program. Refer above for Filecoin related bug bounty. 
 
 ## What to include in a report
 
