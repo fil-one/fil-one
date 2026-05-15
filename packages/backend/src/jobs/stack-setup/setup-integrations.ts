@@ -53,6 +53,8 @@ const WEBHOOK_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
   'customer.subscription.trial_will_end',
   'invoice.payment_succeeded',
   'invoice.payment_failed',
+  'invoice.finalized',
+  'invoice.finalization_failed',
 ];
 
 const PROTECTED_STAGES = new Set(['production', 'staging']);
