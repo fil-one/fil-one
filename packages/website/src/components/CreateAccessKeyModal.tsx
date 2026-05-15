@@ -8,6 +8,7 @@ import { AccessKeyFormFields } from './AccessKeyFormFields.js';
 import { Button } from './Button.js';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal/index.js';
 import { SaveCredentialsModal } from './SaveCredentialsModal.js';
+import { SlowOperationIndicator } from './SlowOperationIndicator.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -102,13 +103,16 @@ export function CreateAccessKeyModal({ open, onClose, onDone }: CreateAccessKeyM
         </div>
       </ModalBody>
       <ModalFooter>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={handleClose}>
-            Cancel
-          </Button>
-          <Button variant="primary" disabled={!form.canSubmit} onClick={form.handleSubmit}>
-            {form.creating ? 'Creating...' : 'Create key'}
-          </Button>
+        <div className="flex flex-col gap-3">
+          <SlowOperationIndicator isLoading={form.creating} operation="Creating access key" />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={handleClose}>
+              Cancel
+            </Button>
+            <Button variant="primary" disabled={!form.canSubmit} onClick={form.handleSubmit}>
+              {form.creating ? 'Creating...' : 'Create key'}
+            </Button>
+          </div>
         </div>
       </ModalFooter>
     </Modal>
