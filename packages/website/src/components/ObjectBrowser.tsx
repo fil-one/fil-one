@@ -16,6 +16,7 @@ import type { S3ObjectVersion } from '@filone/shared';
 
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
+import { EmptyStateCard } from './EmptyStateCard';
 import { Spinner } from './Spinner';
 import { VersionRowBadge, truncateVersionId } from './VersionHistoryCard';
 import { formatDate } from '../lib/time.js';
@@ -290,6 +291,7 @@ export type ObjectBrowserProps = {
   onDelete: (key: string, versionId?: string) => Promise<void>;
 };
 
+// eslint-disable-next-line max-lines-per-function
 export function ObjectBrowser({
   bucketName,
   versions,
@@ -322,19 +324,22 @@ export function ObjectBrowser({
 
   if (versions.length === 0) {
     return (
-      <div className="mt-4 flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
-        <CloudArrowUpIcon size={48} className="mb-4 text-zinc-300" aria-hidden="true" />
-        <p className="mb-1 text-base font-medium text-zinc-700">No objects yet</p>
-        <p className="mb-6 text-sm text-zinc-500">Upload your first object to this bucket</p>
-        <Button
-          variant="primary"
-          icon={ArrowUpIcon}
-          onClick={() =>
-            void navigate({ to: '/buckets/$bucketName/upload', params: { bucketName } })
-          }
+      <div className="mt-4">
+        <EmptyStateCard
+          icon={CloudArrowUpIcon}
+          title="No objects yet"
+          description="Upload your first object to this bucket"
         >
-          Upload object
-        </Button>
+          <Button
+            variant="primary"
+            icon={ArrowUpIcon}
+            onClick={() =>
+              void navigate({ to: '/buckets/$bucketName/upload', params: { bucketName } })
+            }
+          >
+            Upload object
+          </Button>
+        </EmptyStateCard>
       </div>
     );
   }
