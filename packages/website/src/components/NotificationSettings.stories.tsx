@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import type { PreferencesResponse, UpdatePreferencesRequest } from '@filone/shared';
 
-import { NotificationSettings } from './NotificationsSettings';
+import { NotificationSettings } from './NotificationSettings';
 import { ToastProvider } from './Toast';
 
 type SeedMode = 'optedOut' | 'optedIn' | 'loading';

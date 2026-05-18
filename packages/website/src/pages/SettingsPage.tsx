@@ -15,7 +15,7 @@ import { getMe, updateProfile, changePassword } from '../lib/api.js';
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
 import type { ConnectionProvider, MeResponse } from '@filone/shared';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
-import { NotificationSettings } from '../components/NotificationsSettings';
+import { NotificationSettings } from '../components/NotificationSettings';
 
 // ---------------------------------------------------------------------------
 // Managed-by-provider field (read-only with provider link)

@@ -6,7 +6,7 @@ import type { PreferencesResponse } from '@filone/shared';
 
 import { queryKeys } from '../lib/query-client.js';
 import { ToastProvider } from './Toast/index.js';
-import { NotificationSettings } from './NotificationsSettings.js';
+import { NotificationSettings } from './NotificationSettings.js';
 import * as api from '../lib/api.js';
 
 vi.mock('../lib/api.js', () => ({
