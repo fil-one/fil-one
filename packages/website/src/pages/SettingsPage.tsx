@@ -139,66 +139,6 @@ function ProviderManagedField({
     </>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Notifications section
-// ---------------------------------------------------------------------------
-
-function NotificationsSection() {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const { data: prefs, isError } = useQuery({
-    queryKey: queryKeys.preferences,
-    queryFn: getPreferences,
-  });
-
-  const mutation = useMutation({
-    mutationFn: updatePreferences,
-    onSuccess: (result) => {
-      queryClient.setQueryData<PreferencesResponse>(queryKeys.preferences, result);
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to update preferences');
-    },
-  });
-
-  const marketingEnabled = prefs?.marketingEmailsOptedIn ?? false;
-
-  return (
-    <SectionCard
-      icon={BellIcon}
-      title="Notifications"
-      description="Manage your notification preferences"
-    >
-      <div className="flex flex-col gap-3">
-        <div className="opacity-50">
-          <ToggleRow
-            label="Email notifications"
-            description="Get notified about your uploads and when approaching storage limits"
-            enabled={false}
-            disabled
-          />
-          <p className="text-xs text-zinc-400 italic">Coming soon</p>
-        </div>
-        <div className="h-px bg-[#e1e4ea]" />
-        <ToggleRow
-          label="Marketing emails"
-          description="Receive updates about new features"
-          enabled={marketingEnabled}
-          disabled={!prefs}
-          saving={mutation.isPending}
-          onChange={() => mutation.mutate({ marketingEmailsOptedIn: !marketingEnabled })}
-        />
-        {isError && (
-          <p className="text-xs text-red-500">
-            Couldn&apos;t load preferences. Refresh to try again.
-          </p>
-        )}
-      </div>
-    </SectionCard>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Profile section
 // ---------------------------------------------------------------------------
@@ -353,6 +293,65 @@ function ProfileSaveBar({ form }: { form: ReturnType<typeof useProfileForm> }) {
       </Button>
       {form.hasChanges && <p className="text-[11px] text-zinc-500">Saving: {changedLabels}</p>}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Notifications section
+// ---------------------------------------------------------------------------
+
+function NotificationsSection() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data: prefs, isError } = useQuery({
+    queryKey: queryKeys.preferences,
+    queryFn: getPreferences,
+  });
+
+  const mutation = useMutation({
+    mutationFn: updatePreferences,
+    onSuccess: (result) => {
+      queryClient.setQueryData<PreferencesResponse>(queryKeys.preferences, result);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to update preferences');
+    },
+  });
+
+  const marketingEnabled = prefs?.marketingEmailsOptedIn ?? false;
+
+  return (
+    <SectionCard
+      icon={BellIcon}
+      title="Notifications"
+      description="Manage your notification preferences"
+    >
+      <div className="flex flex-col gap-3">
+        <div className="opacity-50">
+          <ToggleRow
+            label="Email notifications"
+            description="Get notified about your uploads and when approaching storage limits"
+            enabled={false}
+            disabled
+          />
+          <p className="text-xs text-zinc-400 italic">Coming soon</p>
+        </div>
+        <div className="h-px bg-[#e1e4ea]" />
+        <ToggleRow
+          label="Marketing emails"
+          description="Receive updates about new features"
+          enabled={marketingEnabled}
+          disabled={!prefs}
+          saving={mutation.isPending}
+          onChange={() => mutation.mutate({ marketingEmailsOptedIn: !marketingEnabled })}
+        />
+        {isError && (
+          <p className="text-xs text-red-500">
+            Couldn&apos;t load preferences. Refresh to try again.
+          </p>
+        )}
+      </div>
+    </SectionCard>
   );
 }
 
