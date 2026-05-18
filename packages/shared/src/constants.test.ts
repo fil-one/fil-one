@@ -123,13 +123,13 @@ describe('getAvailableRegions', () => {
   });
 
   it('returns both regions in staging', () => {
-    expect(getAvailableRegions(Stage.Staging)).toEqual([S3Region.EuWest1, S3Region.UsMidwest1]);
+    expect(getAvailableRegions(Stage.Staging)).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
   });
 
   const nonProductionStages = ['dev', 'pr-42', ''];
   for (const stage of nonProductionStages) {
     it(`returns both regions for non-production stage "${stage}"`, () => {
-      expect(getAvailableRegions(stage)).toEqual([S3Region.EuWest1, S3Region.UsMidwest1]);
+      expect(getAvailableRegions(stage)).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
     });
   }
 });
@@ -139,9 +139,9 @@ describe('formatRegion', () => {
     expect(formatRegion(S3Region.EuWest1)).toBe(`${REGION_LABELS[S3Region.EuWest1]} eu-west-1`);
   });
 
-  it('formats us-midwest-1 as "<label> <code>"', () => {
-    expect(formatRegion(S3Region.UsMidwest1)).toBe(
-      `${REGION_LABELS[S3Region.UsMidwest1]} us-midwest-1`,
+  it('formats us-east-1 as "<label> <code>"', () => {
+    expect(formatRegion(S3Region.UsEast1)).toBe(
+      `${REGION_LABELS[S3Region.UsEast1]} us-east-1`,
     );
   });
 
@@ -153,7 +153,7 @@ describe('formatRegion', () => {
 describe('getRegionLabel', () => {
   it('returns the label for a known region', () => {
     expect(getRegionLabel(S3Region.EuWest1)).toBe(REGION_LABELS[S3Region.EuWest1]);
-    expect(getRegionLabel(S3Region.UsMidwest1)).toBe(REGION_LABELS[S3Region.UsMidwest1]);
+    expect(getRegionLabel(S3Region.UsEast1)).toBe(REGION_LABELS[S3Region.UsEast1]);
   });
 
   it('returns the default region label for undefined', () => {
