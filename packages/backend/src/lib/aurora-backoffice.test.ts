@@ -5,6 +5,7 @@ import {
   getStorageSamples,
   getOperationsSamples,
   createAuroraTenantApiKey,
+  DuplicateTokenNameError,
   updateTenantStatus,
   getBucketStorageSamples,
 } from './aurora-backoffice.js';
@@ -253,6 +254,19 @@ describe('createAuroraTenantApiKey', () => {
     await expect(
       createAuroraTenantApiKey({ tenantId: 'tenant-1', orgId: 'org-1' }),
     ).rejects.toThrow('Aurora API key creation failed for org org-1');
+  });
+
+  it('throws DuplicateTokenNameError on 409 Conflict', async () => {
+    mockPostTokens.mockResolvedValue({
+      data: undefined,
+      error: { message: 'token name already exists' },
+      response: { status: 409 },
+    });
+
+    expect(DuplicateTokenNameError).toBeDefined();
+    await expect(
+      createAuroraTenantApiKey({ tenantId: 'tenant-1', orgId: 'org-1' }),
+    ).rejects.toBeInstanceOf(DuplicateTokenNameError);
   });
 
   it('throws when response has no token field', async () => {
