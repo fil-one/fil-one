@@ -159,14 +159,12 @@ describe('processTenantSetup', () => {
   });
 
   it('creates full pipeline when status is FILONE_ORG_CREATED', async () => {
-    ddbMock
-      .on(GetItemCommand)
-      .resolves(
-        orgProfileItem({
-          setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
-          name: { S: 'Test Org' },
-        }),
-      );
+    ddbMock.on(GetItemCommand).resolves(
+      orgProfileItem({
+        setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+        name: { S: 'Test Org' },
+      }),
+    );
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
@@ -698,14 +696,12 @@ describe('processTenantSetup', () => {
   });
 
   it('creates full pipeline when setupStatus is FILONE_ORG_CREATED', async () => {
-    ddbMock
-      .on(GetItemCommand)
-      .resolves(
-        orgProfileItem({
-          setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
-          name: { S: 'Test Org' },
-        }),
-      );
+    ddbMock.on(GetItemCommand).resolves(
+      orgProfileItem({
+        setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+        name: { S: 'Test Org' },
+      }),
+    );
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-new' });
