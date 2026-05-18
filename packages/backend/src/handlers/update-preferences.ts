@@ -15,7 +15,7 @@ import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { email } = getUserInfo(event);
+  const { email, emailVerified } = getUserInfo(event);
 
   let body: unknown;
   try {
@@ -35,10 +35,10 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  if (!email) {
+  if (!email || !emailVerified) {
     return new ResponseBuilder()
       .status(400)
-      .body<ErrorResponse>({ message: 'Email is required to update marketing preferences' })
+      .body<ErrorResponse>({ message: 'Email missing or not verified' })
       .build();
   }
 

@@ -16,7 +16,7 @@ export function ToggleRow({
   saving?: boolean;
 }) {
   const labelId = useId();
-  const interactive = !disabled && onChange && !saving;
+  const interactive = !disabled && !!onChange && !saving;
   return (
     <div className="flex items-center justify-between py-1">
       <div>
@@ -30,9 +30,9 @@ export function ToggleRow({
         role="switch"
         aria-checked={enabled}
         aria-labelledby={labelId}
-        disabled={disabled || saving}
+        disabled={!interactive}
         onClick={interactive ? onChange : undefined}
-        className={`flex h-6 w-11 items-center rounded-full border-2 border-transparent p-0.5 transition-colors ${enabled ? 'bg-blue-500' : 'bg-zinc-300'} ${disabled || saving ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+        className={`flex h-6 w-11 items-center rounded-full border-2 border-transparent p-0.5 transition-colors ${enabled ? 'bg-blue-500' : 'bg-zinc-300'} ${interactive ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
       >
         <div
           className={`size-5 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0'}`}
