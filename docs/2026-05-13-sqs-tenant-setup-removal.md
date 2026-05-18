@@ -49,13 +49,9 @@ queue had a visible backlog at deploy time):
    - `tenantSetupQueue.subscribe(...)` call (line ~692)
 4. Remove the now-orphan import paths in `packages/backend/src/handlers/get-me.ts`
    (already done in FIL-323) and `middleware/auth.ts` (already done in FIL-323).
-5. Update the concurrency-analysis doc
-   `docs/2026-05-12-tenant-setup-analysis.md` — add a header note that it is
-   historical context now that the synchronous move has shipped (or move it
-   under `docs/historical/`).
-6. Run `pnpm --filter @filone/backend test` and `pnpm typecheck` — both must
+5. Run `pnpm --filter @filone/backend test` and `pnpm typecheck` — both must
    pass.
-7. Deploy to staging, confirm the SQS resources are gone in the AWS console,
+6. Deploy to staging, confirm the SQS resources are gone in the AWS console,
    then promote to production.
 
 ## Rollback
