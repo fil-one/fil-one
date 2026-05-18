@@ -28,6 +28,7 @@ import { ChoosePlanDialog } from '../components/billing/ChoosePlanDialog.js';
 import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
 import { ContactSalesDialog } from '../components/billing/ContactSalesDialog.js';
 import { queryKeys } from '../lib/query-client.js';
+import { Overline } from '../components/Overline';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -582,9 +583,7 @@ export function BillingPage() {
           <div className="rounded-lg border border-zinc-200 bg-white shadow-sm overflow-hidden p-px">
             {/* Header */}
             <div className="flex flex-col gap-[6px] px-4 pt-4 pb-[13px] border-b border-zinc-200/50 bg-zinc-50">
-              <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-zinc-500">
-                Pay-as-you-go
-              </p>
+              <Overline>Pay-as-you-go</Overline>
               <div className="flex items-baseline gap-1">
                 <span className="text-3xl font-bold leading-9 text-zinc-900">$4.99</span>
                 <span className="text-[12px] leading-[18px] text-zinc-500">/ TB / month</span>
@@ -626,9 +625,7 @@ export function BillingPage() {
 
           {/* Need more? section */}
           <div className="flex flex-col gap-1 mt-5 px-1">
-            <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-zinc-500">
-              Need more?
-            </p>
+            <Overline>Need more?</Overline>
             <p className="text-[12px] leading-[19.5px] text-zinc-500">
               The <strong className="font-medium text-zinc-900">Business plan</strong> offers volume
               discounts, SLA guarantees, and dedicated support.

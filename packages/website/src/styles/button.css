@@ -14,7 +14,7 @@
     }
 
     &.button--lg {
-      @apply px-5 py-2.5 text-base;
+      @apply px-5 py-2.5 text-sm;
     }
 
     /* Balanced padding when icon is present */
