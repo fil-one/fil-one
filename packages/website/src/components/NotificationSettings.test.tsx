@@ -49,7 +49,7 @@ function getEmailNotificationsSwitch(): HTMLElement {
   return switchForRow('Email notifications');
 }
 
-describe('NotificationsSettings', () => {
+describe('NotificationSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getPreferencesMock.mockResolvedValue({ marketingEmailsOptedIn: false });
