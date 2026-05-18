@@ -1,4 +1,3 @@
-import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type {
   AccessKeyPermission,
   GranularPermission,
@@ -8,9 +7,11 @@ import type {
   S3Region,
 } from '@filone/shared';
 
+export type TenantNotReadyReason = 'setup-incomplete';
+
 export type EnsureTenantReadyResult =
   | { ok: true; tenantId: string }
-  | { ok: false; errorResponse: APIGatewayProxyStructuredResultV2 };
+  | { ok: false; reason: TenantNotReadyReason };
 
 export interface PresignerContext {
   endpointUrl: string;

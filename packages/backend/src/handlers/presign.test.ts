@@ -181,20 +181,14 @@ describe('presign baseHandler', () => {
   // ── Tenant readiness ────────────────────────────────────────────────
 
   it('returns 503 when the orchestrator says tenant is not ready', async () => {
-    mockEnsureTenantReady.mockResolvedValue({
-      ok: false,
-      errorResponse: {
-        statusCode: 503,
-        body: JSON.stringify({ message: 'Aurora tenant setup is not complete' }),
-      },
-    });
+    mockEnsureTenantReady.mockResolvedValue({ ok: false, reason: 'setup-incomplete' });
 
     const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }]);
     const result = await baseHandler(event);
 
     expect(result).toMatchObject({
       statusCode: 503,
-      body: expect.stringContaining('Aurora tenant setup is not complete'),
+      body: expect.stringContaining('setting up your account'),
     });
   });
 

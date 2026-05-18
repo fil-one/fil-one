@@ -75,13 +75,7 @@ function setTenant(tenantId?: string) {
   if (tenantId) {
     mockEnsureTenantReady.mockResolvedValue({ ok: true, tenantId });
   } else {
-    mockEnsureTenantReady.mockResolvedValue({
-      ok: false,
-      errorResponse: {
-        statusCode: 503,
-        body: JSON.stringify({ message: 'still setting up' }),
-      },
-    });
+    mockEnsureTenantReady.mockResolvedValue({ ok: false, reason: 'setup-incomplete' });
   }
 }
 

@@ -173,14 +173,8 @@ describe('get-bucket baseHandler', () => {
     expect(body).toStrictEqual({ message: 'Bucket name is required' });
   });
 
-  it('returns the orchestrator errorResponse when tenant is not ready', async () => {
-    mockEnsureTenantReady.mockResolvedValue({
-      ok: false,
-      errorResponse: {
-        statusCode: 503,
-        body: JSON.stringify({ message: 'still setting up' }),
-      },
-    });
+  it('returns 503 when tenant is not ready', async () => {
+    mockEnsureTenantReady.mockResolvedValue({ ok: false, reason: 'setup-incomplete' });
 
     const event = buildEvent({ userInfo: USER_INFO });
     event.pathParameters = { name: 'my-bucket' };

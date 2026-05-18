@@ -136,13 +136,7 @@ describe('list-buckets baseHandler', () => {
   });
 
   it('returns 200 with empty array when tenant is not ready', async () => {
-    mockEnsureTenantReady.mockResolvedValue({
-      ok: false,
-      errorResponse: {
-        statusCode: 503,
-        body: JSON.stringify({ message: 'not ready' }),
-      },
-    });
+    mockEnsureTenantReady.mockResolvedValue({ ok: false, reason: 'setup-incomplete' });
 
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);

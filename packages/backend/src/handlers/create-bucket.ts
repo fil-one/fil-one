@@ -5,6 +5,7 @@ import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
 import { CreateBucketSchema, S3_REGION } from '@filone/shared';
 import { orchestratorForRegion } from '../lib/service-orchestrator/registry.js';
 import { BucketAlreadyExistsError } from '../lib/service-orchestrator/service-orchestrator.js';
+import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -51,7 +52,7 @@ export async function baseHandler(
 
   const orchestrator = orchestratorForRegion(S3_REGION);
   const ready = await orchestrator.ensureTenantReady(orgId);
-  if (!ready.ok) return ready.errorResponse;
+  if (!ready.ok) return tenantNotReadyResponse(ready.reason);
   const { tenantId } = ready;
 
   try {

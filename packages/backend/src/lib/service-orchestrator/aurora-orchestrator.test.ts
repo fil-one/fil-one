@@ -85,13 +85,15 @@ describe('auroraOrchestrator', () => {
       expect(mockEnsureAuroraTenantReady).toHaveBeenCalledWith('org-1');
     });
 
-    it('passes the errorResponse through unchanged on failure', async () => {
-      const errorResponse = { statusCode: 503, body: JSON.stringify({ message: 'busy' }) };
-      mockEnsureAuroraTenantReady.mockResolvedValue({ ok: false, errorResponse });
+    it("collapses any aurora-tenant-setup failure into reason 'setup-incomplete'", async () => {
+      mockEnsureAuroraTenantReady.mockResolvedValue({
+        ok: false,
+        errorResponse: { statusCode: 503, body: JSON.stringify({ message: 'busy' }) },
+      });
 
       const result = await auroraOrchestrator.ensureTenantReady('org-1');
 
-      expect(result).toEqual({ ok: false, errorResponse });
+      expect(result).toEqual({ ok: false, reason: 'setup-incomplete' });
     });
   });
 

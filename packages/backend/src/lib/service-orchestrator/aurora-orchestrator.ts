@@ -66,7 +66,11 @@ export const auroraOrchestrator: ServiceOrchestrator = {
   async ensureTenantReady(orgId): Promise<EnsureTenantReadyResult> {
     const result = await ensureAuroraTenantReady(orgId);
     if (result.ok) return { ok: true, tenantId: result.auroraTenantId };
-    return { ok: false, errorResponse: result.errorResponse };
+    // aurora-tenant-setup currently builds a 503 APIGateway response for any
+    // setup failure (still-running, transient API error, etc.). At the
+    // abstraction boundary we collapse all of those into the single
+    // 'setup-incomplete' reason; handlers translate that into HTTP.
+    return { ok: false, reason: 'setup-incomplete' };
   },
 
   async createBucket(args: CreateBucketArgs): Promise<void> {
