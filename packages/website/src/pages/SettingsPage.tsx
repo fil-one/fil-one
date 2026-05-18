@@ -1,115 +1,21 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
-import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
+import { UserIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { MfaSettings } from '../components/MfaSettings';
+import { SectionCard } from '../components/SectionCard';
 import { SettingRow } from '../components/SettingRow';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import {
-  getMe,
-  updateProfile,
-  changePassword,
-  getPreferences,
-  updatePreferences,
-} from '../lib/api.js';
+import { getMe, updateProfile, changePassword } from '../lib/api.js';
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
-import type { ConnectionProvider, MeResponse, PreferencesResponse } from '@filone/shared';
+import type { ConnectionProvider, MeResponse } from '@filone/shared';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
-
-// ---------------------------------------------------------------------------
-// Section card wrapper
-// ---------------------------------------------------------------------------
-
-function SectionCard({
-  icon: IconComp,
-  title,
-  description,
-  danger,
-  children,
-}: {
-  icon: PhosphorIcon;
-  title: string;
-  description: string;
-  danger?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      className={`rounded-lg border bg-white shadow-sm ${
-        danger ? 'border-red-200' : 'border-[#e1e4ea]'
-      }`}
-    >
-      <div className="flex items-center gap-2.5 p-5 pb-0">
-        <div
-          className={`flex size-8 items-center justify-center rounded-lg ${
-            danger ? 'bg-red-50' : 'bg-zinc-100'
-          }`}
-        >
-          <IconComp size={16} className={danger ? 'text-red-600' : 'text-zinc-500'} />
-        </div>
-        <div>
-          <Heading tag="h2" size="sm" className={danger ? 'text-red-600' : undefined}>
-            {title}
-          </Heading>
-          <p className="text-[13px] text-zinc-500">{description}</p>
-        </div>
-      </div>
-      <div className="p-5">{children}</div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Toggle row (for notifications)
-// ---------------------------------------------------------------------------
-
-function ToggleRow({
-  label,
-  description,
-  enabled,
-  disabled,
-  onChange,
-  saving,
-}: {
-  label: string;
-  description: string;
-  enabled: boolean;
-  disabled?: boolean;
-  onChange?: () => void;
-  saving?: boolean;
-}) {
-  const interactive = !disabled && onChange && !saving;
-  return (
-    <div className="flex items-center justify-between py-1">
-      <div>
-        <p className="text-[13px] font-medium text-zinc-900">{label}</p>
-        <p className="text-xs text-zinc-500">{description}</p>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        disabled={disabled || saving}
-        onClick={interactive ? onChange : undefined}
-        className={`flex h-6 w-11 items-center rounded-full border-2 border-transparent p-0.5 transition-colors ${
-          enabled ? 'bg-blue-500' : 'bg-zinc-300'
-        } ${disabled || saving ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-      >
-        <div
-          className={`size-5 rounded-full bg-white shadow transition-transform ${
-            enabled ? 'translate-x-5' : 'translate-x-0'
-          }`}
-        />
-      </button>
-    </div>
-  );
-}
+import { NotificationSettings } from '../components/NotificationsSettings';
 
 // ---------------------------------------------------------------------------
 // Managed-by-provider field (read-only with provider link)
@@ -298,60 +204,6 @@ function ProfileSaveBar({ form }: { form: ReturnType<typeof useProfileForm> }) {
 }
 
 // ---------------------------------------------------------------------------
-// Notifications section
-// ---------------------------------------------------------------------------
-
-export function NotificationsSection() {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const { data: prefs, isPending } = useQuery({
-    queryKey: queryKeys.preferences,
-    queryFn: getPreferences,
-  });
-
-  const mutation = useMutation({
-    mutationFn: updatePreferences,
-    onSuccess: (result) => {
-      queryClient.setQueryData<PreferencesResponse>(queryKeys.preferences, result);
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to update preferences');
-    },
-  });
-
-  const marketingEnabled = prefs?.marketingEmailsOptedIn ?? false;
-
-  return (
-    <SectionCard
-      icon={BellIcon}
-      title="Notifications"
-      description="Manage your notification preferences"
-    >
-      <div className="flex flex-col gap-3">
-        <div className="opacity-50">
-          <ToggleRow
-            label="Email notifications"
-            description="Get notified about your uploads and when approaching storage limits"
-            enabled={false}
-            disabled
-          />
-          <p className="text-xs text-zinc-400 italic">Coming soon</p>
-        </div>
-        <div className="h-px bg-[#e1e4ea]" />
-        <ToggleRow
-          label="Marketing emails"
-          description="Receive updates about new features"
-          enabled={marketingEnabled}
-          disabled={isPending && !prefs}
-          saving={mutation.isPending}
-          onChange={() => mutation.mutate({ marketingEmailsOptedIn: !marketingEnabled })}
-        />
-      </div>
-    </SectionCard>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Security section
 // ---------------------------------------------------------------------------
 
@@ -457,7 +309,7 @@ export function SettingsPage() {
 
       <div className="mt-6 flex max-w-[672px] flex-col gap-6">
         <ProfileSection me={me} />
-        <NotificationsSection />
+        <NotificationSettings />
         <SecuritySection me={me} />
         <DangerSection />
       </div>
