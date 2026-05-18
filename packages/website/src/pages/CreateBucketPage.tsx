@@ -29,6 +29,7 @@ import { Input } from '../components/Input';
 import { Select } from '../components/Select';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
+import { SlowOperationIndicator } from '../components/SlowOperationIndicator';
 import { useToast } from '../components/Toast';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 
@@ -335,6 +336,7 @@ export function CreateBucketPage() {
                   ? 'Create bucket and API key'
                   : 'Create bucket'}
             </Button>
+            <SlowOperationIndicator isLoading={creating} operation="Creating bucket" />
           </div>
         </div>
 

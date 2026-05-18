@@ -22,7 +22,6 @@ import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
-import { triggerTenantSetup } from '../lib/trigger-tenant-setup.js';
 import { createBillingTrial } from '../lib/create-billing-trial.js';
 
 // ---------------------------------------------------------------------------
@@ -39,6 +38,13 @@ export interface AuthInternal extends Record<string, unknown> {
   newTokens?: NewTokens;
   /** Stashed by the before hook so the after hook can force-refresh if needed. */
   refreshToken?: string;
+  /**
+   * Verified ID token claims, set by the before hook after `jwtVerify`.
+   * Defaulted (with `amr: []`) when the id_token cookie is missing or
+   * verification fails — downstream gates on `amr` see an empty list and
+   * fail closed. Read via `getVerifiedIdTokenClaims`.
+   */
+  idTokenClaims?: IdTokenClaims;
 }
 
 type AuthMiddlewareRequest = Request<
@@ -48,6 +54,20 @@ type AuthMiddlewareRequest = Request<
   Context,
   AuthInternal
 >;
+
+/**
+ * Read verified ID token claims stashed by `authMiddleware`. Returns the
+ * empty-claims default (with `amr: []`) when the auth middleware ran but
+ * no valid id_token cookie was present, so callers can read fields without
+ * null checks.
+ *
+ * Must only be called from middleware/handlers downstream of `authMiddleware`.
+ */
+export function getVerifiedIdTokenClaims(
+  request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
+): IdTokenClaims {
+  return (request.internal as AuthInternal).idTokenClaims ?? EMPTY_ID_CLAIMS;
+}
 
 // ---------------------------------------------------------------------------
 // Module-level JWKS cache — reused across Lambda warm starts
@@ -126,16 +146,28 @@ function setCookiesFromTokens(
   ];
 }
 
-interface IdTokenClaims {
+export interface IdTokenClaims {
   email: string | null;
   emailVerified: boolean;
   name: string | null;
   picture: string | null;
+  /** OIDC Authentication Methods References — empty when not asserted/verified. */
+  amr: string[];
 }
 
+const EMPTY_ID_CLAIMS: IdTokenClaims = {
+  email: null,
+  emailVerified: false,
+  name: null,
+  picture: null,
+  amr: [],
+};
+
 /**
- * Verify the ID token and extract email + email_verified claims.
- * Returns defaults if the token is missing or invalid (non-fatal).
+ * Verify the ID token and extract claims. Returns defaults (including
+ * `amr: []`) if the token is missing or invalid — callers gating on `amr`
+ * see an empty array, which fails their check just like a verified token
+ * without `amr` would.
  */
 async function extractIdTokenClaims({
   idToken,
@@ -148,18 +180,25 @@ async function extractIdTokenClaims({
   clientId: string;
   issuer: string;
 }): Promise<IdTokenClaims> {
-  if (!idToken) return { email: null, emailVerified: false, name: null, picture: null };
+  if (!idToken) return EMPTY_ID_CLAIMS;
   try {
     const { payload } = await jwtVerify(idToken, jwks, { audience: clientId, issuer });
+    const rawAmr = payload.amr;
     return {
       email: (payload.email as string) ?? null,
       emailVerified: (payload.email_verified as boolean) ?? false,
       name: (payload.name as string) ?? null,
       picture: (payload.picture as string) ?? null,
+      amr: Array.isArray(rawAmr) ? rawAmr.filter((v): v is string => typeof v === 'string') : [],
     };
   } catch (err) {
-    console.warn('[auth] ID token verification failed, continuing without email', { error: err });
-    return { email: null, emailVerified: false, name: null, picture: null };
+    console.warn(
+      '[auth] ID token verification failed, continuing without verified ID token claims',
+      {
+        error: err,
+      },
+    );
+    return EMPTY_ID_CLAIMS;
   }
 }
 
@@ -242,23 +281,15 @@ async function resolveUserAndOrg(
 
   await createNewUserAndOrg({ sub, userId, orgId, orgName });
 
-  // Fire SQS enqueue + Stripe trial in parallel; both are safe to retry.
-  // triggerTenantSetup is deduped server-side by SQS via MessageDeduplicationId: orgId.
-  // createBillingTrial passes idempotencyKey to Stripe customer/subscription creation,
-  // so duplicate calls return the cached response without creating new resources.
-  const [tenantResult, billingResult] = await Promise.allSettled([
-    triggerTenantSetup({ orgId, orgName }),
-    createBillingTrial({ userId, orgId, email: email ?? undefined }),
-  ]);
-  if (tenantResult.status === 'rejected') {
-    console.error('[auth] Failed to trigger tenant setup for new org', {
-      error: tenantResult.reason,
-      orgId,
-    });
-  }
-  if (billingResult.status === 'rejected') {
+  // Aurora tenant setup is deferred until the user creates their first bucket
+  // or access key — see docs/architectural-decisions/2026-05-13-synchronous-tenant-setup-on-first-resource.md.
+  // Stripe trial is created here because billing must be ready before any
+  // metered operation; createBillingTrial is idempotent via idempotencyKey.
+  try {
+    await createBillingTrial({ userId, orgId, email: email ?? undefined });
+  } catch (error) {
     console.error('[auth] Failed to create billing trial for new org', {
-      error: billingResult.reason,
+      error,
       orgId,
       userId,
     });
@@ -341,6 +372,46 @@ async function createNewUserAndOrg({
 // ---------------------------------------------------------------------------
 // Middleware factory
 // ---------------------------------------------------------------------------
+
+async function tryValidateAccessToken({
+  request,
+  accessToken,
+  idToken,
+  jwks,
+  audience,
+  issuer,
+  clientId,
+  failureLabel,
+}: {
+  request: AuthMiddlewareRequest;
+  accessToken: string;
+  idToken: string | undefined;
+  jwks: ReturnType<typeof createRemoteJWKSet>;
+  audience: string;
+  issuer: string;
+  clientId: string;
+  failureLabel: string;
+}): Promise<boolean> {
+  try {
+    const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
+    const sub = payload.sub!;
+    const idClaims = await extractIdTokenClaims({ idToken, jwks, clientId, issuer });
+    request.internal.idTokenClaims = idClaims;
+    await attachIdentity({
+      event: request.event,
+      sub,
+      email: idClaims.email,
+      emailVerified: idClaims.emailVerified,
+      name: idClaims.name,
+      picture: idClaims.picture,
+    });
+    return true;
+  } catch (err) {
+    console.warn(failureLabel, { error: err });
+    return false;
+  }
+}
+
 // eslint-disable-next-line max-lines-per-function
 export function authMiddleware() {
   const before = async (
@@ -365,31 +436,23 @@ export function authMiddleware() {
     }
 
     const forceRefresh = event.queryStringParameters?.forceRefresh === '1';
+    const validateArgs = {
+      request,
+      idToken,
+      jwks,
+      audience,
+      issuer,
+      clientId: secrets.AUTH0_CLIENT_ID,
+    };
 
     // Step 1: Validate existing access token (skip if forceRefresh — we need fresh claims)
     if (accessToken && !forceRefresh) {
-      try {
-        const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
-        const sub = payload.sub!;
-        const idClaims = await extractIdTokenClaims({
-          idToken,
-          jwks,
-          clientId: secrets.AUTH0_CLIENT_ID,
-          issuer,
-        });
-        await attachIdentity({
-          event,
-          sub,
-          email: idClaims.email,
-          emailVerified: idClaims.emailVerified,
-          name: idClaims.name,
-          picture: idClaims.picture,
-        });
-        return; // Valid — continue to handler
-      } catch (err) {
-        // Expired or invalid — fall through to refresh
-        console.warn('[auth] Access token verification failed', { error: err });
-      }
+      const ok = await tryValidateAccessToken({
+        ...validateArgs,
+        accessToken,
+        failureLabel: '[auth] Access token verification failed',
+      });
+      if (ok) return;
     }
 
     // Step 2: Attempt token refresh (always runs when forceRefresh=1)
@@ -406,6 +469,7 @@ export function authMiddleware() {
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
         });
+        request.internal.idTokenClaims = refreshedClaims;
         await attachIdentity({
           event,
           sub: refreshedSub,
@@ -431,27 +495,12 @@ export function authMiddleware() {
     // access token rather than returning 401 — this prevents social-provider misconfigurations
     // or transient refresh failures from locking out users in prod.
     if (forceRefresh && accessToken) {
-      try {
-        const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
-        const sub = payload.sub!;
-        const idClaims = await extractIdTokenClaims({
-          idToken,
-          jwks,
-          clientId: secrets.AUTH0_CLIENT_ID,
-          issuer,
-        });
-        await attachIdentity({
-          event,
-          sub,
-          email: idClaims.email,
-          emailVerified: idClaims.emailVerified,
-          name: idClaims.name,
-          picture: idClaims.picture,
-        });
-        return;
-      } catch (err) {
-        console.warn('[auth] Fallback access token validation failed', { error: err });
-      }
+      const ok = await tryValidateAccessToken({
+        ...validateArgs,
+        accessToken,
+        failureLabel: '[auth] Fallback access token validation failed',
+      });
+      if (ok) return;
     }
 
     console.warn('[auth] Returning 401 — no valid tokens');

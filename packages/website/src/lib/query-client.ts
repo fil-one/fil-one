@@ -22,6 +22,7 @@ export const queryClient = new QueryClient({
 
 export const queryKeys = {
   me: ['me'] as const,
+  meWithMfa: ['me', 'mfa'] as const,
   usage: ['usage'] as const,
   billing: ['billing'] as const,
   invoices: ['invoices'] as const,

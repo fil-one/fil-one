@@ -95,18 +95,6 @@ export default $config({
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
     });
 
-    // ── SQS Queues ─────────────────────────────────────────────────
-    const tenantSetupDlq = new sst.aws.Queue('AuroraTenantSetupDlq', {
-      fifo: true,
-    });
-
-    const tenantSetupQueue = new sst.aws.Queue('AuroraTenantSetupQueue', {
-      fifo: true,
-      dlq: tenantSetupDlq.arn,
-      // Make visibility timeout longer than the Lambda timeout to avoid multiple retries
-      visibilityTimeout: '90 seconds',
-    });
-
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
@@ -323,7 +311,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              Version: '2.2',
+              Version: '2.9',
             },
           },
         },
@@ -357,7 +345,6 @@ export default $config({
       billingTable,
       userInfoTable,
       userFilesBucket,
-      tenantSetupQueue,
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
@@ -429,6 +416,7 @@ export default $config({
       extraLink?: (typeof allResources)[number][];
       provisionedConcurrency?: number;
       memory?: sst.aws.FunctionArgs['memory'];
+      timeout?: sst.aws.FunctionArgs['timeout'];
     }
 
     function addRoute({
@@ -440,6 +428,7 @@ export default $config({
       extraLink,
       provisionedConcurrency,
       memory,
+      timeout,
     }: AddRouteProps) {
       // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
       const fnName = handler
@@ -455,7 +444,7 @@ export default $config({
           ...extraEnv,
         },
         permissions,
-        timeout: '10 seconds',
+        timeout: timeout ?? '10 seconds',
         ...(memory ? { memory } : {}),
         ...(provisionedConcurrency && provisionedConcurrency > 0
           ? {
@@ -498,9 +487,15 @@ export default $config({
       method: 'POST',
       routePath: '/api/buckets',
       handler: 'create-bucket',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: auroraEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+        },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      timeout: '30 seconds',
     });
     addRoute({
       method: 'GET',
@@ -527,8 +522,14 @@ export default $config({
       method: 'POST',
       routePath: '/api/access-keys',
       handler: 'create-access-key',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: auroraEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+        },
+      ],
+      timeout: '30 seconds',
     });
     addRoute({
       method: 'DELETE',
@@ -581,6 +582,8 @@ export default $config({
       method: 'GET',
       routePath: '/api/me',
       handler: 'get-me',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
@@ -595,6 +598,36 @@ export default $config({
       method: 'POST',
       routePath: '/api/me/resend-verification',
       handler: 'resend-verification',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+
+    // ── MFA routes ──────────────────────────────────────────────────
+    addRoute({
+      method: 'POST',
+      routePath: '/api/mfa/enroll',
+      handler: 'enroll-mfa',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/mfa/disable',
+      handler: 'disable-mfa',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/mfa/enrollments/{enrollmentId}',
+      handler: 'delete-mfa-enrollment',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/mfa/recovery-code/regenerate',
+      handler: 'regenerate-recovery-code',
       extraLink: mgmtRuntimeResources,
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
@@ -659,37 +692,6 @@ export default $config({
         },
       ],
     });
-
-    // ── Tenant setup consumer ──────────────────────────────────────
-    const tenantSetupFn = createFn('AuroraTenantSetup', {
-      handler: 'packages/backend/src/handlers/aurora-tenant-setup.handler',
-      link: [userInfoTable, auroraBackofficeToken],
-      environment: {
-        ...auroraEnv,
-        ...sharedEnv,
-      },
-      permissions: [
-        {
-          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
-        },
-        // queue.subscribe(fn.arn) passes an ARN, so SST skips attaching
-        // SQS permissions automatically — we must add them here.
-        {
-          actions: [
-            'sqs:ChangeMessageVisibility',
-            'sqs:DeleteMessage',
-            'sqs:GetQueueAttributes',
-            'sqs:GetQueueUrl',
-            'sqs:ReceiveMessage',
-          ],
-          resources: [tenantSetupQueue.arn],
-        },
-      ],
-      timeout: '60 seconds',
-    });
-
-    tenantSetupQueue.subscribe(tenantSetupFn.arn, { batch: { size: 1 } });
 
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {

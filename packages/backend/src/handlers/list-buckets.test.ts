@@ -182,7 +182,7 @@ describe('list-buckets baseHandler', () => {
     );
   });
 
-  it('returns 503 when auroraTenantId is missing', async () => {
+  it('returns 200 with empty array when auroraTenantId is missing', async () => {
     ddbMock.on(GetItemCommand).resolves({
       Item: {
         pk: { S: `ORG#${USER_INFO.orgId}` },
@@ -193,11 +193,13 @@ describe('list-buckets baseHandler', () => {
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);
 
-    expect(result.statusCode).toBe(503);
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body as string);
+    expect(body).toStrictEqual({ buckets: [] });
     expect(mockListBuckets).not.toHaveBeenCalled();
   });
 
-  it('returns 503 when org setup is not complete', async () => {
+  it('returns 200 with empty array when org setup is not complete', async () => {
     ddbMock.on(GetItemCommand).resolves({
       Item: {
         pk: { S: `ORG#${USER_INFO.orgId}` },
@@ -210,7 +212,9 @@ describe('list-buckets baseHandler', () => {
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);
 
-    expect(result.statusCode).toBe(503);
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body as string);
+    expect(body).toStrictEqual({ buckets: [] });
     expect(mockListBuckets).not.toHaveBeenCalled();
   });
 
