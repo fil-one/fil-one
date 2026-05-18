@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
-import { BellIcon, ShieldCheckIcon, TrashIcon, UserIcon } from '@phosphor-icons/react/dist/ssr';
+import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
@@ -20,10 +20,10 @@ import {
 } from '../lib/api.js';
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
 import type { ConnectionProvider, MeResponse, PreferencesResponse } from '@filone/shared';
-import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
+import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
-// SectionCard
+// Section card wrapper
 // ---------------------------------------------------------------------------
 
 function SectionCard({
@@ -66,7 +66,7 @@ function SectionCard({
 }
 
 // ---------------------------------------------------------------------------
-// ToggleRow
+// ToggleRow (for notifications)
 // ---------------------------------------------------------------------------
 
 function ToggleRow({
@@ -115,7 +115,7 @@ function ToggleRow({
 // Notifications section
 // ---------------------------------------------------------------------------
 
-function NotificationSettings() {
+function NotificationsSection() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: prefs, isError } = useQuery({
@@ -462,7 +462,7 @@ export function SettingsPage() {
 
       <div className="mt-6 flex max-w-[672px] flex-col gap-6">
         <ProfileSection me={me} />
-        <NotificationSettings />
+        <NotificationsSection />
         <SecuritySection me={me} />
         <DangerSection />
       </div>
