@@ -7,6 +7,7 @@ import type { PreferencesResponse } from '@filone/shared';
 
 import { queryKeys } from '../lib/query-client';
 import { NotificationSettings } from './NotificationsSettings';
+import { ToastProvider } from './Toast';
 
 type SeedMode = 'optedOut' | 'optedIn' | 'loading';
 
@@ -37,9 +38,11 @@ const meta: Meta<Args> = {
     const [queryClient] = useState(() => createSeededQueryClient(initialState));
     return (
       <QueryClientProvider client={queryClient}>
-        <div style={{ maxWidth: 672 }}>
-          <NotificationSettings />
-        </div>
+        <ToastProvider>
+          <div style={{ maxWidth: 672 }}>
+            <NotificationSettings />
+          </div>
+        </ToastProvider>
       </QueryClientProvider>
     );
   },

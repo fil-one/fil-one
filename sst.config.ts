@@ -608,7 +608,12 @@ export default $config({
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
     addRoute({ method: 'POST', routePath: '/api/me/change-password', handler: 'change-password' });
-    addRoute({ method: 'GET', routePath: '/api/me/preferences', handler: 'get-preferences' });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/me/preferences',
+      handler: 'get-preferences',
+      extraLink: [hubSpotServiceKey],
+    });
     addRoute({
       method: 'PATCH',
       routePath: '/api/me/preferences',

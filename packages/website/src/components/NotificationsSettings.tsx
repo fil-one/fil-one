@@ -12,7 +12,7 @@ import { ToggleRow } from './ToggleRow';
 export function NotificationSettings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { data: prefs, isPending } = useQuery({
+  const { data: prefs, isError } = useQuery({
     queryKey: queryKeys.preferences,
     queryFn: getPreferences,
   });
@@ -50,10 +50,15 @@ export function NotificationSettings() {
           label="Marketing emails"
           description="Receive updates about new features"
           enabled={marketingEnabled}
-          disabled={isPending && !prefs}
+          disabled={!prefs}
           saving={mutation.isPending}
           onChange={() => mutation.mutate({ marketingEmailsOptedIn: !marketingEnabled })}
         />
+        {isError && (
+          <p className="text-xs text-red-500">
+            Couldn&apos;t load preferences. Refresh to try again.
+          </p>
+        )}
       </div>
     </SectionCard>
   );

@@ -1,40 +1,14 @@
 import { Resource } from 'sst';
 
-const HUBSPOT_BASE_URL = 'https://api.hubapi.com';
+// HubSpot subscription type ID for marketing emails. Shared across all environments
+// (single HubSpot portal). Look up via:
+// GET https://api.hubapi.com/communication-preferences/2026-03/definitions
+export const HUBSPOT_MARKETING_SUBSCRIPTION_TYPE_ID = 2233676376;
 
-// Look up via: GET https://api.hubapi.com/communication-preferences/2026-03/definitions
-const MARKETING_SUBSCRIPTION_TYPE_ID = 2233676376;
+const HUBSPOT_BASE_URL = 'https://api.hubapi.com';
 
 function getAccessToken(): string {
   return Resource.HubSpotServiceKey.value;
-}
-
-/**
- * Create or update a HubSpot contact by email.
- * Uses the Contacts v3 API with idProperty=email for upsert behavior.
- */
-async function upsertContact(email: string): Promise<void> {
-  const token = getAccessToken();
-
-  // Try to create the contact first
-  const createResp = await fetch(`${HUBSPOT_BASE_URL}/crm/v3/objects/contacts`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      properties: { email },
-    }),
-  });
-
-  if (createResp.ok) return;
-
-  // 409 means the contact already exists — that's fine
-  if (createResp.status === 409) return;
-
-  const body = await createResp.text();
-  throw new Error(`HubSpot upsert contact failed (${createResp.status}): ${body}`);
 }
 
 /**
@@ -43,7 +17,7 @@ async function upsertContact(email: string): Promise<void> {
  *
  * Requires the `subscriptions-status-write` OAuth scope on the HubSpot private app.
  */
-async function updateSubscriptionStatus(
+export async function updateSubscriptionStatus(
   email: string,
   subscriptionId: number,
   optedIn: boolean,
@@ -52,7 +26,7 @@ async function updateSubscriptionStatus(
   const subscriberId = encodeURIComponent(email);
 
   const resp = await fetch(
-    `${HUBSPOT_BASE_URL}/communication-preferences/2026-03/statuses/${subscriberId}`,
+    `${HUBSPOT_BASE_URL}/communication-preferences/2026-03/statuses/${subscriberId}?channel=EMAIL`,
     {
       method: 'POST',
       headers: {
@@ -63,7 +37,7 @@ async function updateSubscriptionStatus(
         subscriptionId,
         statusState: optedIn ? 'SUBSCRIBED' : 'UNSUBSCRIBED',
         channel: 'EMAIL',
-        legalBasis: 'LEGITIMATE_INTEREST_CLIENT',
+        legalBasis: 'CONSENT_WITH_NOTICE',
         legalBasisExplanation: 'User toggled marketing email preference in account settings',
       }),
     },
@@ -77,16 +51,37 @@ async function updateSubscriptionStatus(
 }
 
 /**
- * Sync the marketing email preference to HubSpot.
- * Upserts the contact (in case they don't exist in HubSpot yet) then
- * updates the subscription status.
+ * Read the current marketing-email subscription status for an email.
+ * Returns false when HubSpot has no subscription record for this contact
+ * (treated as opted-out — the user has never explicitly subscribed).
  */
-export async function syncMarketingPreference(email: string, optedIn: boolean): Promise<void> {
-  if (!MARKETING_SUBSCRIPTION_TYPE_ID) {
-    console.warn('[hubspot] MARKETING_SUBSCRIPTION_TYPE_ID is not configured, skipping sync');
-    return;
+export async function getMarketingPreference(email: string): Promise<boolean> {
+  const token = getAccessToken();
+  const subscriberId = encodeURIComponent(email);
+
+  const resp = await fetch(
+    `${HUBSPOT_BASE_URL}/communication-preferences/2026-03/statuses/${subscriberId}?channel=EMAIL`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (resp.status === 404) return false;
+
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`HubSpot get preferences failed (${resp.status}): ${body}`);
   }
 
-  await upsertContact(email);
-  await updateSubscriptionStatus(email, MARKETING_SUBSCRIPTION_TYPE_ID, optedIn);
+  const data = (await resp.json()) as {
+    subscriptionStatuses?: Array<{ id: string | number; status?: string; subscribed?: boolean }>;
+  };
+
+  const status = data.subscriptionStatuses?.find(
+    (s) => String(s.id) === String(HUBSPOT_MARKETING_SUBSCRIPTION_TYPE_ID),
+  );
+  if (!status) return false;
+
+  // 2026-03 returns a `status` string ("SUBSCRIBED"/"UNSUBSCRIBED"/"NOT_OPTED");
+  // older payloads use a boolean `subscribed`. Support both defensively.
+  if (typeof status.subscribed === 'boolean') return status.subscribed;
+  return status.status === 'SUBSCRIBED';
 }

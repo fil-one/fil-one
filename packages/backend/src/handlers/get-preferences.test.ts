@@ -6,12 +6,18 @@ import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 // Mocks
 // ---------------------------------------------------------------------------
 
+const mockGetMarketingPreference = vi.fn<(email: string) => Promise<boolean>>();
+vi.mock('../lib/hubspot-client.js', () => ({
+  getMarketingPreference: (email: string) => mockGetMarketingPreference(email),
+}));
+
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
     Auth0ClientId: { value: 'test-client-id' },
     Auth0ClientSecret: { value: 'test-client-secret' },
     AuroraBackofficeToken: { value: 'test-aurora-token' },
+    HubSpotServiceKey: { value: 'test-hubspot-key' },
   },
 }));
 
@@ -46,10 +52,14 @@ const MOCK_ORG_ID = 'org-1';
 const MOCK_USER_ID = 'user-1';
 const MOCK_EMAIL = 'user@example.com';
 
-function authenticatedEvent() {
+function authenticatedEvent(email: string | undefined = MOCK_EMAIL) {
   return buildEvent({
     cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
-    userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, email: MOCK_EMAIL },
+    userInfo: {
+      userId: MOCK_USER_ID,
+      orgId: MOCK_ORG_ID,
+      ...(email !== undefined ? { email } : {}),
+    },
   });
 }
 
@@ -95,19 +105,8 @@ describe('GET /api/me/preferences handler', () => {
       });
   });
 
-  it('returns marketingEmailsOptedIn: true when field is true', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `USER#${MOCK_USER_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `USER#${MOCK_USER_ID}` },
-          sk: { S: 'PROFILE' },
-          marketingEmailsOptedIn: { BOOL: true },
-        },
-      });
+  it('returns marketingEmailsOptedIn: true when HubSpot reports SUBSCRIBED', async () => {
+    mockGetMarketingPreference.mockResolvedValue(true);
 
     const result = await handler(authenticatedEvent(), buildContext());
 
@@ -115,21 +114,11 @@ describe('GET /api/me/preferences handler', () => {
       statusCode: 200,
       body: JSON.stringify({ marketingEmailsOptedIn: true }),
     });
+    expect(mockGetMarketingPreference).toHaveBeenCalledWith(MOCK_EMAIL);
   });
 
-  it('returns marketingEmailsOptedIn: false when field is false', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `USER#${MOCK_USER_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `USER#${MOCK_USER_ID}` },
-          sk: { S: 'PROFILE' },
-          marketingEmailsOptedIn: { BOOL: false },
-        },
-      });
+  it('returns marketingEmailsOptedIn: false when HubSpot reports unsubscribed', async () => {
+    mockGetMarketingPreference.mockResolvedValue(false);
 
     const result = await handler(authenticatedEvent(), buildContext());
 
@@ -139,40 +128,26 @@ describe('GET /api/me/preferences handler', () => {
     });
   });
 
-  it('defaults to true when field is absent (legacy users)', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `USER#${MOCK_USER_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `USER#${MOCK_USER_ID}` },
-          sk: { S: 'PROFILE' },
-        },
-      });
+  it('returns false when the authenticated user has no email (skips HubSpot)', async () => {
+    // Auth middleware derives email from the JWT; omit it from the payload here.
+    mockJwtVerify.mockResolvedValue({
+      payload: { sub: MOCK_SUB, email_verified: true },
+    });
 
-    const result = await handler(authenticatedEvent(), buildContext());
+    const result = await handler(authenticatedEvent(undefined), buildContext());
 
     expect(result).toMatchObject({
       statusCode: 200,
-      body: JSON.stringify({ marketingEmailsOptedIn: true }),
+      body: JSON.stringify({ marketingEmailsOptedIn: false }),
     });
+    expect(mockGetMarketingPreference).not.toHaveBeenCalled();
   });
 
-  it('defaults to true when user profile item is missing', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `USER#${MOCK_USER_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({});
+  it('returns 5xx when the HubSpot read throws', async () => {
+    mockGetMarketingPreference.mockRejectedValue(new Error('HubSpot down'));
 
     const result = await handler(authenticatedEvent(), buildContext());
 
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({ marketingEmailsOptedIn: true }),
-    });
+    expect(result).toMatchObject({ statusCode: 500 });
   });
 });

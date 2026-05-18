@@ -336,7 +336,6 @@ async function createNewUserAndOrg({
               sk: { S: 'PROFILE' },
               sub: { S: sub },
               orgId: { S: orgId },
-              marketingEmailsOptedIn: { BOOL: true },
               createdAt: { S: now },
             },
           },

@@ -1,15 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockSyncMarketingPreference = vi.fn();
+const mockUpdateSubscriptionStatus = vi.fn();
 vi.mock('../lib/hubspot-client.js', () => ({
-  syncMarketingPreference: (...args: unknown[]) => mockSyncMarketingPreference(...args),
+  HUBSPOT_MARKETING_SUBSCRIPTION_TYPE_ID: 2233676376,
+  updateSubscriptionStatus: (...args: unknown[]) => mockUpdateSubscriptionStatus(...args),
 }));
+
+const MARKETING_SUBSCRIPTION_ID = 2233676376;
 
 vi.mock('sst', () => ({
   Resource: {
@@ -77,7 +80,7 @@ describe('PATCH /api/me/preferences handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    mockSyncMarketingPreference.mockResolvedValue(undefined);
+    mockUpdateSubscriptionStatus.mockResolvedValue(undefined);
 
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
@@ -110,11 +113,9 @@ describe('PATCH /api/me/preferences handler', () => {
           setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
         },
       });
-
-    ddbMock.on(UpdateItemCommand).resolves({});
   });
 
-  it('updates preference to false and syncs to HubSpot', async () => {
+  it('syncs opt-out to HubSpot and returns the new preference', async () => {
     const result = await handler(
       preferencesEvent({ marketingEmailsOptedIn: false }),
       buildContext(),
@@ -125,18 +126,14 @@ describe('PATCH /api/me/preferences handler', () => {
       body: JSON.stringify({ marketingEmailsOptedIn: false }),
     });
 
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1);
-    expect(updateCalls[0].args[0].input).toMatchObject({
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `USER#${MOCK_USER_ID}` }, sk: { S: 'PROFILE' } },
-      ExpressionAttributeValues: { ':val': { BOOL: false } },
-    });
-
-    expect(mockSyncMarketingPreference).toHaveBeenCalledWith(MOCK_EMAIL, false);
+    expect(mockUpdateSubscriptionStatus).toHaveBeenCalledWith(
+      MOCK_EMAIL,
+      MARKETING_SUBSCRIPTION_ID,
+      false,
+    );
   });
 
-  it('updates preference to true and syncs to HubSpot', async () => {
+  it('syncs opt-in to HubSpot and returns the new preference', async () => {
     const result = await handler(
       preferencesEvent({ marketingEmailsOptedIn: true }),
       buildContext(),
@@ -147,11 +144,15 @@ describe('PATCH /api/me/preferences handler', () => {
       body: JSON.stringify({ marketingEmailsOptedIn: true }),
     });
 
-    expect(mockSyncMarketingPreference).toHaveBeenCalledWith(MOCK_EMAIL, true);
+    expect(mockUpdateSubscriptionStatus).toHaveBeenCalledWith(
+      MOCK_EMAIL,
+      MARKETING_SUBSCRIPTION_ID,
+      true,
+    );
   });
 
-  it('fails the request and skips the DDB write when HubSpot sync fails', async () => {
-    mockSyncMarketingPreference.mockRejectedValue(new Error('HubSpot API down'));
+  it('returns 5xx when HubSpot sync fails', async () => {
+    mockUpdateSubscriptionStatus.mockRejectedValue(new Error('HubSpot API down'));
 
     const result = await handler(
       preferencesEvent({ marketingEmailsOptedIn: false }),
@@ -159,9 +160,31 @@ describe('PATCH /api/me/preferences handler', () => {
     );
 
     expect(result).toMatchObject({ statusCode: 500 });
+  });
 
-    // DynamoDB was NOT updated — HubSpot is the gating step
-    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  it('returns 400 when the authenticated user has no email', async () => {
+    // Auth middleware derives email from the JWT; omit it from the payload here.
+    mockJwtVerify.mockResolvedValue({
+      payload: { sub: MOCK_SUB, email_verified: true },
+    });
+
+    const event = buildEvent({
+      cookies: [
+        `hs_access_token=valid-token`,
+        `hs_id_token=id-token`,
+        `hs_csrf_token=${MOCK_CSRF_TOKEN}`,
+      ],
+      userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
+      body: JSON.stringify({ marketingEmailsOptedIn: true }),
+      method: 'PATCH',
+      rawPath: '/api/me/preferences',
+    });
+    event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
+
+    const result = await handler(event, buildContext());
+
+    expect(result).toMatchObject({ statusCode: 400 });
+    expect(mockUpdateSubscriptionStatus).not.toHaveBeenCalled();
   });
 
   it('returns 400 for invalid JSON body', async () => {

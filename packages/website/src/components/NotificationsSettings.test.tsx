@@ -18,7 +18,9 @@ const getPreferencesMock = vi.mocked(api.getPreferences);
 const updatePreferencesMock = vi.mocked(api.updatePreferences);
 
 function renderSection(initial: PreferencesResponse) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } },
+  });
   client.setQueryData<PreferencesResponse>(queryKeys.preferences, initial);
   return {
     client,
