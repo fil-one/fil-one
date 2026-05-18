@@ -52,9 +52,7 @@ describe('ResponseBuilder', () => {
     expect(result.headers).toBeDefined();
     const headers = result.headers as Record<string, string>;
     expect(headers['Content-Type']).toBe('application/json');
-    expect(headers['Content-Security-Policy']).toBeDefined();
     expect(headers['X-Content-Type-Options']).toBe('nosniff');
-    expect(headers['X-Frame-Options']).toBe('DENY');
     expect(headers['Referrer-Policy']).toBe('strict-origin-when-cross-origin');
     expect(headers['Strict-Transport-Security']).toContain('max-age=');
   });

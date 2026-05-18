@@ -1,0 +1,78 @@
+title = "Gitleaks config for fil-one"
+
+# Extend the default ruleset (covers AWS keys, GitHub tokens, Stripe keys, etc.)
+[extend]
+useDefault = true
+
+# ── Custom rules for project-specific secrets ──
+
+[[rules]]
+id = "aurora-api-key"
+description = "Aurora API key"
+regex = '''(?i)aurora[_-]?api[_-]?key\s*[:=]\s*['"]?([a-zA-Z0-9_\-]{32,})['"]?'''
+tags = ["aurora", "api-key"]
+
+[[rules]]
+id = "auth0-client-secret"
+description = "Auth0 client secret"
+regex = '''(?i)auth0[_-]?client[_-]?secret\s*[:=]\s*['"]?([a-zA-Z0-9_\-]{32,})['"]?'''
+tags = ["auth0", "secret"]
+
+[[rules]]
+id = "stripe-webhook-secret"
+description = "Stripe webhook signing secret"
+regex = '''whsec_[a-zA-Z0-9]{32,}'''
+tags = ["stripe", "webhook"]
+
+[[rules]]
+id = "sst-secret-value"
+description = "SST secret set inline"
+regex = '''sst\s+secret\s+set\s+\S+\s+['"]?([^'"\s]{16,})['"]?'''
+tags = ["sst", "secret"]
+
+[[rules]]
+id = "stripe-secret-key"
+description = "Stripe secret key"
+regex = '''(?i)stripe[_-]?secret[_-]?key\s*[:=]\s*['"]?([a-zA-Z0-9_\-]{16,})['"]?'''
+tags = ["stripe", "secret"]
+
+[[rules]]
+id = "auth0-mgmt-client-secret"
+description = "Auth0 management client secret"
+regex = '''(?i)auth0[_-]?mgmt[_-]?client[_-]?secret\s*[:=]\s*['"]?([a-zA-Z0-9_\-]{16,})['"]?'''
+tags = ["auth0", "secret"]
+
+[[rules]]
+id = "sendgrid-api-key"
+description = "SendGrid API key"
+regex = '''(?i)sendgrid[_-]?api[_-]?key\s*[:=]\s*['"]?([a-zA-Z0-9_\.\-]{16,})['"]?'''
+tags = ["sendgrid", "api-key"]
+
+# ── Allowlists ──
+
+[allowlist]
+description = "Global allowlist"
+
+paths = [
+  # Auto-generated API clients — not under our control
+  '''packages/aurora-backoffice-client/src/generated''',
+  '''packages/aurora-portal-client/src/generated''',
+  # External dependencies — not under our control
+  '''contracts/lib/''',
+  '''node_modules/''',
+  '''.sst/''',
+
+  # Lock files produce false positives on integrity hashes
+  '''pnpm-lock\.yaml''',
+  '''package-lock\.json''',
+
+  # Test fixtures may contain dummy secrets
+  '''\.test\.ts$''',
+  '''\.test\.js$''',
+  '''\.spec\.ts$''',
+]
+
+# Known false positives — add specific commit + fingerprint pairs here
+# [[rules.allowlist]]
+# commits = ["abc1234"]
+# regexes = ['''AKIAIOSFODNN7EXAMPLE''']

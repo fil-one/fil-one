@@ -53,7 +53,6 @@ vi.mock('../lib/aurora-s3-client.js', () => ({
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 process.env.FILONE_STAGE = 'test';
-process.env.AURORA_S3_GATEWAY_URL = 'https://s3.dev.aur.lu';
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -103,7 +102,6 @@ function mockAuthIdentity() {
         pk: { S: `ORG#${MOCK_ORG_ID}` },
         sk: { S: 'PROFILE' },
         name: { S: 'Test Org' },
-        orgConfirmed: { BOOL: true },
         auroraTenantId: { S: AURORA_TENANT_ID },
         setupStatus: { S: FINAL_SETUP_STATUS },
       },
@@ -136,7 +134,6 @@ function mockAuthIdentityWithoutTenant() {
         pk: { S: `ORG#${MOCK_ORG_ID}` },
         sk: { S: 'PROFILE' },
         name: { S: 'Test Org' },
-        orgConfirmed: { BOOL: true },
       },
     });
 }
@@ -164,7 +161,7 @@ describe('GET /api/usage handler', () => {
       { timestamp: '2026-01-01T00:00:00Z', bytesUsed: 4000, objectCount: 3 },
     ]);
     mockGetOperationsSamples.mockResolvedValue([
-      { timestamp: '2026-01-01T00:00:00Z', rxBytes: 1500 },
+      { timestamp: '2026-01-01T00:00:00Z', txBytes: 1500 },
     ]);
     mockGetTenantInfo.mockResolvedValue({
       bucketCount: 2,
@@ -182,9 +179,24 @@ describe('GET /api/usage handler', () => {
         egress: { usedBytes: 1500 },
         buckets: { count: 2, limit: 50 },
         objects: { count: 3 },
-        accessKeys: { count: 3, limit: 200 },
+        accessKeys: { count: 2, limit: 199 },
       }),
     });
+  });
+
+  it('hides the system filone-console key from access key counts', async () => {
+    mockAuthIdentity();
+    mockGetTenantInfo.mockResolvedValue({
+      bucketCount: 0,
+      bucketQuantityLimit: 100,
+      keyCount: 1,
+      accessKeyQuantityLimit: 300,
+    });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+    const body = JSON.parse(String((result as { body: string }).body));
+
+    expect(body.accessKeys).toEqual({ count: 0, limit: 299 });
   });
 
   it('returns zeros when auroraTenantId is missing', async () => {
@@ -199,7 +211,7 @@ describe('GET /api/usage handler', () => {
         egress: { usedBytes: 0 },
         buckets: { count: 0, limit: 100 },
         objects: { count: 0 },
-        accessKeys: { count: 0, limit: 300 },
+        accessKeys: { count: 0, limit: 299 },
       }),
     });
     expect(mockGetStorageSamples).not.toHaveBeenCalled();
@@ -219,7 +231,7 @@ describe('GET /api/usage handler', () => {
         egress: { usedBytes: 0 },
         buckets: { count: 0, limit: 100 },
         objects: { count: 0 },
-        accessKeys: { count: 0, limit: 300 },
+        accessKeys: { count: 0, limit: 299 },
       }),
     });
   });

@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
-import { Link } from '@tanstack/react-router';
-import { AppHeader } from './AppHeader';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { SidebarNav } from './SidebarNav';
+import { Banner } from './Banner';
 import { getUsage } from '../lib/api';
-import type { UsageResponse } from '@filone/shared';
+import { queryKeys } from '../lib/query-client.js';
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -11,50 +11,29 @@ type AppShellProps = {
 
 export function AppShell({ children }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [tenantStatus, setTenantStatus] = useState<UsageResponse['tenantStatus']>();
 
-  useEffect(() => {
-    getUsage()
-      .then((data) => setTenantStatus(data.tenantStatus))
-      .catch(() => {});
-  }, []);
+  const { data: usage } = useQuery({ queryKey: queryKeys.usage, queryFn: getUsage });
+  const tenantStatus = usage?.tenantStatus;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      {/* Top header — full width */}
-      <AppHeader />
-
-      {/* Body row: sidebar + main */}
+      {tenantStatus === 'WRITE_LOCKED' && (
+        <Banner variant="warning" action={{ label: 'Upgrade', href: '/billing' }}>
+          Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.
+        </Banner>
+      )}
+      {tenantStatus === 'DISABLED' && (
+        <Banner variant="error" action={{ label: 'Manage account', href: '/billing' }}>
+          Account disabled. Visit billing to restore access.
+        </Banner>
+      )}
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
         <div className={`flex-shrink-0 transition-all duration-200 ${collapsed ? 'w-20' : 'w-60'}`}>
           <SidebarNav collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
         </div>
-
-        {/* Main content */}
-        <main className="min-h-full flex-1 overflow-auto bg-zinc-50 p-6">
-          {tenantStatus === 'WRITE_LOCKED' && (
-            <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
-              <p className="text-sm font-medium text-amber-800">
-                Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.{' '}
-                <Link to="/billing" className="font-semibold underline">
-                  Upgrade &rarr;
-                </Link>
-              </p>
-            </div>
-          )}
-          {tenantStatus === 'DISABLED' && (
-            <div className="mb-4 rounded-md border border-red-300 bg-red-50 px-4 py-3">
-              <p className="text-sm font-medium text-red-800">
-                Egress limit exceeded. Your account has been temporarily disabled. Upgrade to
-                restore access.{' '}
-                <Link to="/billing" className="font-semibold underline">
-                  Upgrade &rarr;
-                </Link>
-              </p>
-            </div>
-          )}
+        <main className="flex-1 overflow-auto bg-zinc-50">
           {children}
+          <div className="h-10 shrink-0" aria-hidden="true" />
         </main>
       </div>
     </div>

@@ -30,7 +30,6 @@ vi.mock('../lib/aurora-s3-client.js', () => ({
 }));
 
 process.env.FILONE_STAGE = 'test';
-process.env.AURORA_S3_GATEWAY_URL = 'https://s3.dev.aur.lu';
 
 const ddbMock = mockClient(DynamoDBClient);
 

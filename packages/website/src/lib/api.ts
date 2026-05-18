@@ -1,8 +1,18 @@
 import { API_URL } from '../env.js';
 import { ApiErrorCode, CSRF_COOKIE_NAME } from '@filone/shared';
+import type { StepUpRequiredResponse } from '@filone/shared';
+import { redirectToStepUp } from './step-up.js';
+import type { PreferencesResponse, UpdatePreferencesRequest } from '@filone/shared';
 
 // Prevents multiple simultaneous 401 responses from each triggering a redirect.
 let isRedirecting = false;
+
+/** Sentinel error subclass thrown when the backend returns step_up_required. */
+export class StepUpRequiredError extends Error {
+  constructor() {
+    super('Step-up authentication required');
+  }
+}
 
 function getCsrfToken(): string | undefined {
   return document.cookie
@@ -30,6 +40,7 @@ export function logout(): void {
  * - Always sends HttpOnly auth cookies via credentials: 'include'
  * - Redirects to Auth0 login on 401
  */
+// eslint-disable-next-line complexity/complexity
 export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const method = options.method?.toUpperCase() ?? 'GET';
   const headers = new Headers(options.headers);
@@ -48,31 +59,43 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   });
 
   if (response.status === 401) {
+    const body = (await response
+      .clone()
+      .json()
+      .catch(() => ({}))) as Partial<StepUpRequiredResponse>;
+    if (body.error === 'step_up_required') {
+      throw new StepUpRequiredError();
+    }
     redirectToLogin();
     // Throw so the caller's promise chain stops — the page is navigating away
-    throw new Error('Session expired. Redirecting to login...');
+    throw Object.assign(new Error('Session expired. Redirecting to login...'), { status: 401 });
   }
 
   if (response.status === 403) {
     const body = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
-    if (body.code === ApiErrorCode.ORG_NOT_CONFIRMED) {
-      window.dispatchEvent(new CustomEvent('org:not-confirmed'));
-      throw new Error('Please create an organization to continue.');
-    }
     if (body.code === ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED) {
-      throw new Error(
-        'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
+      throw Object.assign(
+        new Error(
+          'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
+        ),
+        { status: 403 },
       );
     }
     if (body.code === ApiErrorCode.SUBSCRIPTION_CANCELED) {
-      throw new Error('Your subscription has been canceled. Please reactivate to regain access.');
+      throw Object.assign(
+        new Error('Your subscription has been canceled. Please reactivate to regain access.'),
+        { status: 403 },
+      );
     }
-    throw new Error(body.message ?? 'Access denied');
+    throw Object.assign(new Error(body.message ?? 'Access denied'), { status: 403 });
   }
 
   if (!response.ok) {
     const error = (await response.json().catch(() => ({}))) as { message?: string };
-    throw new Error(error.message ?? `Request failed with status ${response.status}`);
+    throw Object.assign(
+      new Error(error.message ?? `Request failed with status ${response.status}`),
+      { status: response.status },
+    );
   }
 
   if (response.status === 204 || response.headers.get('content-length') === '0') {
@@ -86,21 +109,17 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
 import type {
   MeResponse,
-  ConfirmOrgResponse,
   UpdateProfileRequest,
   UpdateProfileResponse,
+  RegenerateRecoveryCodeResponse,
 } from '@filone/shared';
 
-export function getMe(options?: { forceRefresh?: boolean }): Promise<MeResponse> {
-  const qs = options?.forceRefresh ? '?forceRefresh=1' : '';
-  return apiRequest<MeResponse>(`/me${qs}`);
-}
-
-export function confirmOrg(orgName: string): Promise<ConfirmOrgResponse> {
-  return apiRequest<ConfirmOrgResponse>('/org/confirm', {
-    method: 'POST',
-    body: JSON.stringify({ orgName }),
-  });
+export function getMe(options?: { forceRefresh?: boolean; include?: 'mfa' }): Promise<MeResponse> {
+  const params = new URLSearchParams();
+  if (options?.forceRefresh) params.set('forceRefresh', '1');
+  if (options?.include) params.set('include', options.include);
+  const qs = params.toString();
+  return apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
 }
 
 export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfileResponse> {
@@ -120,8 +139,6 @@ export function resendVerificationEmail(): Promise<{ message: string }> {
 
 // ── Preferences API ─────────────────────────────────────────────────────
 
-import type { PreferencesResponse, UpdatePreferencesRequest } from '@filone/shared';
-
 export function getPreferences(): Promise<PreferencesResponse> {
   return apiRequest<PreferencesResponse>('/me/preferences');
 }
@@ -131,6 +148,49 @@ export function updatePreferences(data: UpdatePreferencesRequest): Promise<Prefe
     method: 'PATCH',
     body: JSON.stringify(data),
   });
+}
+
+// ── MFA API ──────────────────────────────────────────────────────────────
+
+export async function enrollMfa(): Promise<void> {
+  await apiRequest<{ message: string }>('/mfa/enroll', { method: 'POST' });
+  // Force a fresh login. The backend has set app_metadata.mfa_enrolling = true,
+  // so the Post-Login Action will trigger MFA enrollment via Universal Login.
+  redirectToLogin();
+}
+
+export function disableMfa(): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>('/mfa/disable', { method: 'POST' });
+}
+
+export function deleteMfaEnrollment(enrollmentId: string): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>(`/mfa/enrollments/${encodeURIComponent(enrollmentId)}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Regenerate the user's MFA recovery code. The backend gates this on the
+ * `amr: ["mfa"]` claim in the ID token. When missing, this catches the
+ * StepUpRequiredError and redirects through Auth0 with `acr_values=...
+ * :multi-factor` so the next attempt passes the gate. The redirect navigates
+ * the page away — the returned promise never resolves on the step-up path.
+ */
+export async function regenerateRecoveryCode(
+  options: { stepUpAction?: string } = {},
+): Promise<RegenerateRecoveryCodeResponse> {
+  try {
+    return await apiRequest<RegenerateRecoveryCodeResponse>('/mfa/recovery-code/regenerate', {
+      method: 'POST',
+    });
+  } catch (err) {
+    if (err instanceof StepUpRequiredError) {
+      redirectToStepUp(options.stepUpAction ?? 'regenerate-recovery-code');
+      // Hold the promise — the page is navigating away.
+      return new Promise<RegenerateRecoveryCodeResponse>(() => {});
+    }
+    throw err;
+  }
 }
 
 // ── Usage API ────────────────────────────────────────────────────────────
@@ -156,6 +216,7 @@ export function getActivity(
 import type {
   BillingInfo,
   CreateSetupIntentResponse,
+  ActivateSubscriptionRequest,
   ActivateSubscriptionResponse,
   CreatePortalSessionResponse,
   ListInvoicesResponse,
@@ -169,8 +230,13 @@ export function createSetupIntent(): Promise<CreateSetupIntentResponse> {
   return apiRequest<CreateSetupIntentResponse>('/billing/setup-intent', { method: 'POST' });
 }
 
-export function activateSubscription(): Promise<ActivateSubscriptionResponse> {
-  return apiRequest<ActivateSubscriptionResponse>('/billing/activate', { method: 'POST' });
+export function activateSubscription(
+  opts: ActivateSubscriptionRequest = {},
+): Promise<ActivateSubscriptionResponse> {
+  return apiRequest<ActivateSubscriptionResponse>('/billing/activate', {
+    method: 'POST',
+    body: JSON.stringify(opts),
+  });
 }
 
 export function createPortalSession(): Promise<CreatePortalSessionResponse> {
@@ -179,4 +245,15 @@ export function createPortalSession(): Promise<CreatePortalSessionResponse> {
 
 export function getInvoices(): Promise<ListInvoicesResponse> {
   return apiRequest<ListInvoicesResponse>('/billing/invoices');
+}
+
+// ── Access Keys API ──────────────────────────────────────────────────────────
+
+import type { CreateAccessKeyRequest, CreateAccessKeyResponse } from '@filone/shared';
+
+export function createAccessKey(body: CreateAccessKeyRequest): Promise<CreateAccessKeyResponse> {
+  return apiRequest<CreateAccessKeyResponse>('/access-keys', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }

@@ -1,21 +1,20 @@
 import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
+import { MfaSettings } from '../components/MfaSettings';
+import { SettingRow } from '../components/SettingRow';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import {
-  getMe,
-  updateProfile,
-  changePassword,
-  getPreferences,
-  updatePreferences,
-} from '../lib/api.js';
+import { getMe, updateProfile, changePassword } from '../lib/api.js';
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
-import type { MeResponse } from '@filone/shared';
+import type { ConnectionProvider, MeResponse } from '@filone/shared';
+import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Section card wrapper
@@ -49,13 +48,9 @@ function SectionCard({
           <IconComp size={16} className={danger ? 'text-red-600' : 'text-zinc-500'} />
         </div>
         <div>
-          <h2
-            className={`text-sm font-medium tracking-tight ${
-              danger ? 'text-red-600' : 'text-zinc-900'
-            }`}
-          >
+          <Heading tag="h2" size="sm" className={danger ? 'text-red-600' : undefined}>
             {title}
-          </h2>
+          </Heading>
           <p className="text-[13px] text-zinc-500">{description}</p>
         </div>
       </div>
@@ -111,113 +106,101 @@ function ToggleRow({
 }
 
 // ---------------------------------------------------------------------------
-// Setting row (for security section)
+// Managed-by-provider field (read-only with provider link)
 // ---------------------------------------------------------------------------
 
-function SettingRow({
-  label,
-  description,
-  action,
+function ProviderManagedField({
+  value,
+  provider,
 }: {
-  label: string;
-  description: string;
-  action: React.ReactNode;
+  value: string;
+  provider?: ConnectionProvider;
 }) {
   return (
-    <div className="flex items-center justify-between py-1">
-      <div>
-        <p className="text-[13px] font-medium text-zinc-900">{label}</p>
-        <p className="text-xs text-zinc-500">{description}</p>
-      </div>
-      {action}
-    </div>
+    <>
+      <Input value={value} onChange={() => {}} disabled />
+      <p className="text-[11px] text-zinc-500">
+        Managed by {provider?.label}.{' '}
+        <a
+          href={provider?.profileUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-500 hover:underline"
+        >
+          Update at {provider?.label}
+        </a>
+      </p>
+    </>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Page
+// Profile section
 // ---------------------------------------------------------------------------
 
-export function SettingsPage() {
-  const { toast } = useToast();
+function applyProfileUpdate(result: {
+  name?: string;
+  email?: string;
+  orgName?: string;
+}): (old: MeResponse | undefined) => MeResponse | undefined {
+  return (old) => {
+    if (!old) return old;
+    return {
+      ...old,
+      ...(result.name !== undefined ? { name: result.name } : {}),
+      ...(result.email !== undefined ? { email: result.email } : {}),
+      ...(result.orgName !== undefined ? { orgName: result.orgName } : {}),
+    };
+  };
+}
 
-  const [me, setMe] = useState<MeResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+function useProfileForm(me: MeResponse) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const social = isSocialConnection(me.connectionType);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [orgName, setOrgName] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [changingPassword, setChangingPassword] = useState(false);
-  const [marketingOptedIn, setMarketingOptedIn] = useState(true);
-  const [prefsSaving, setPrefsSaving] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    async function fetch() {
-      try {
-        const data = await getMe();
-        if (!cancelled) {
-          setMe(data);
-          setName(data.name ?? '');
-          setEmail(data.email ?? '');
-          setOrgName(data.orgName ?? '');
-        }
-      } catch (err) {
-        if (!cancelled) {
-          toast.error(err instanceof Error ? err.message : 'Failed to load settings');
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+    if (!initialized) {
+      setName(me.name ?? '');
+      setEmail(me.email ?? '');
+      setOrgName(me.orgName ?? '');
+      setInitialized(true);
     }
-    void fetch();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [me, initialized]);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchPrefs() {
-      try {
-        const prefs = await getPreferences();
-        if (!cancelled) setMarketingOptedIn(prefs.marketingEmailsOptedIn);
-      } catch {
-        // Non-critical — default stays true
-      }
-    }
-    void fetchPrefs();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function handleMarketingToggle() {
-    const newValue = !marketingOptedIn;
-    setPrefsSaving(true);
-    try {
-      const result = await updatePreferences({ marketingEmailsOptedIn: newValue });
-      setMarketingOptedIn(result.marketingEmailsOptedIn);
-      toast.success(
-        result.marketingEmailsOptedIn ? 'Marketing emails enabled' : 'Marketing emails disabled',
-      );
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update preference');
-    } finally {
-      setPrefsSaving(false);
-    }
-  }
-
-  const social = isSocialConnection(me?.connectionType);
-  const provider = getProvider(me?.connectionType);
-
-  const nameChanged = !social && name !== (me?.name ?? '');
-  const emailChanged = !social && email !== (me?.email ?? '');
-  const orgNameChanged = orgName !== (me?.orgName ?? '');
+  const nameChanged = !social && name !== (me.name ?? '');
+  const emailChanged = !social && email !== (me.email ?? '');
+  const orgNameChanged = orgName !== (me.orgName ?? '');
   const hasChanges = nameChanged || emailChanged || orgNameChanged;
 
-  async function handleSaveProfile() {
+  const mutation = useMutation({
+    mutationFn: updateProfile,
+    onSuccess: (result) => {
+      if (result.name !== undefined) setName(result.name);
+      if (result.email !== undefined) setEmail(result.email);
+      if (result.orgName !== undefined) setOrgName(result.orgName);
+
+      const update = applyProfileUpdate(result);
+      queryClient.setQueryData<MeResponse>(queryKeys.me, update);
+      queryClient.setQueryData<MeResponse>(queryKeys.meWithMfa, update);
+
+      toast.success(
+        result.email
+          ? 'Profile updated. Check your inbox to verify your new email.'
+          : 'Profile updated',
+      );
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to update profile');
+    },
+  });
+
+  function save() {
     const payload: Record<string, string> = {};
     if (nameChanged) payload.name = name;
     if (emailChanged) payload.email = email;
@@ -229,49 +212,205 @@ export function SettingsPage() {
       return;
     }
 
-    setSaving(true);
-    try {
-      const result = await updateProfile(validated.data);
-      const updated = { ...me } as MeResponse;
-      if (result.name !== undefined) {
-        setName(result.name);
-        updated.name = result.name;
-      }
-      if (result.email !== undefined) {
-        setEmail(result.email);
-        updated.email = result.email;
-      }
-      if (result.orgName !== undefined) {
-        setOrgName(result.orgName);
-        updated.orgName = result.orgName;
-      }
-      setMe(updated);
-
-      if (result.email && result.email !== me?.email) {
-        toast.success('Profile updated. Check your inbox to verify your new email.');
-      } else {
-        toast.success('Profile updated');
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update profile');
-    } finally {
-      setSaving(false);
-    }
+    mutation.mutate(validated.data);
   }
 
-  async function handleChangePassword() {
-    setChangingPassword(true);
-    try {
-      await changePassword();
-      toast.success('Password reset email sent');
-    } catch (err) {
+  return {
+    name,
+    setName,
+    email,
+    setEmail,
+    orgName,
+    setOrgName,
+    nameChanged,
+    emailChanged,
+    orgNameChanged,
+    hasChanges,
+    isSaving: mutation.isPending,
+    save,
+  };
+}
+
+function ProfileSection({ me }: { me: MeResponse }) {
+  const social = isSocialConnection(me.connectionType);
+  const provider = getProvider(me.connectionType);
+  const form = useProfileForm(me);
+
+  return (
+    <SectionCard icon={UserIcon} title="Profile" description="Your personal information">
+      <div className="flex flex-col gap-4">
+        <div className="flex gap-3">
+          <div className="flex flex-1 flex-col gap-1.5">
+            <label className="text-[13px] font-medium text-zinc-900">Full name</label>
+            {social ? (
+              <ProviderManagedField value={form.name} provider={provider} />
+            ) : (
+              <Input value={form.name} onChange={form.setName} placeholder="Your full name" />
+            )}
+          </div>
+          <div className="flex flex-1 flex-col gap-1.5">
+            <label className="text-[13px] font-medium text-zinc-900">Company name</label>
+            <Input value={form.orgName} onChange={form.setOrgName} placeholder="Your company" />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[13px] font-medium text-zinc-900">Email</label>
+          {social ? (
+            <ProviderManagedField value={form.email} provider={provider} />
+          ) : (
+            <>
+              <Input value={form.email} onChange={form.setEmail} placeholder="you@example.com" />
+              <p className="text-[11px] text-zinc-500">You will need to verify any email change.</p>
+            </>
+          )}
+        </div>
+
+        <ProfileSaveBar form={form} />
+      </div>
+    </SectionCard>
+  );
+}
+
+function ProfileSaveBar({ form }: { form: ReturnType<typeof useProfileForm> }) {
+  const changedLabels = [
+    form.nameChanged && 'name',
+    form.emailChanged && 'email',
+    form.orgNameChanged && 'company name',
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  return (
+    <div className="flex items-center gap-3">
+      <Button variant="primary" onClick={form.save} disabled={form.isSaving || !form.hasChanges}>
+        {form.isSaving ? 'Saving...' : 'Save changes'}
+      </Button>
+      {form.hasChanges && <p className="text-[11px] text-zinc-500">Saving: {changedLabels}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Notifications section
+// ---------------------------------------------------------------------------
+
+function NotificationsSection() {
+  return (
+    <SectionCard
+      icon={BellIcon}
+      title="Notifications"
+      description="Manage your notification preferences"
+    >
+      <div className="flex flex-col gap-3 opacity-50">
+        <ToggleRow
+          label="Email notifications"
+          description="Get notified about your uploads and when approaching storage limits"
+          enabled={false}
+          disabled
+        />
+        <div className="h-px bg-[#e1e4ea]" />
+        <ToggleRow
+          label="Marketing emails"
+          description="Receive updates about new features"
+          enabled={false}
+          disabled
+        />
+        <p className="text-xs text-zinc-400 italic">Coming soon</p>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Security section
+// ---------------------------------------------------------------------------
+
+function SecuritySection({ me }: { me: MeResponse }) {
+  const { toast } = useToast();
+  const social = isSocialConnection(me.connectionType);
+  const provider = getProvider(me.connectionType);
+
+  const changePasswordMutation = useMutation({
+    mutationFn: () => changePassword(),
+    onSuccess: () => toast.success('Password reset email sent'),
+    onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to send password reset email');
-    } finally {
-      setChangingPassword(false);
-    }
-  }
+    },
+  });
 
-  if (loading) {
+  return (
+    <SectionCard icon={ShieldCheckIcon} title="Security" description="Manage your account security">
+      <div className="flex flex-col gap-3">
+        <MfaSettings me={me} />
+        <div className="h-px bg-[#e1e4ea]" />
+        {!social && (
+          <SettingRow
+            label="Password"
+            description="Change your account password"
+            action={
+              <Button
+                variant="ghost"
+                onClick={() => changePasswordMutation.mutate()}
+                disabled={changePasswordMutation.isPending}
+              >
+                {changePasswordMutation.isPending ? 'Sending...' : 'Change'}
+              </Button>
+            }
+          />
+        )}
+        {social && provider && (
+          <p className="text-xs text-zinc-500">
+            Password is managed by {provider.label}.{' '}
+            <a
+              href={provider.profileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-500 hover:underline"
+            >
+              Visit {provider.label} settings
+            </a>
+          </p>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Danger zone
+// ---------------------------------------------------------------------------
+
+function DangerSection() {
+  return (
+    <SectionCard icon={TrashIcon} title="Danger zone" description="Irreversible actions" danger>
+      <div className="rounded-lg border border-red-200 bg-red-50/50 p-3.5">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[13px] font-medium text-zinc-900">Delete account</p>
+            <p className="text-xs text-zinc-500">Permanently delete your account and all data</p>
+          </div>
+          <Button variant="ghost" className="cursor-not-allowed opacity-40" disabled>
+            Delete account
+          </Button>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+export function SettingsPage() {
+  const { data: me, isPending } = useQuery({
+    queryKey: queryKeys.meWithMfa,
+    queryFn: () => getMe({ include: 'mfa' }),
+    staleTime: ME_STALE_TIME,
+  });
+
+  if (isPending || !me) {
     return (
       <div className="flex items-center justify-center p-16">
         <Spinner ariaLabel="Loading settings" />
@@ -280,190 +419,18 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="px-10 pt-10">
       <div className="mb-1">
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-900">Settings</h1>
-        <p className="text-[13px] text-zinc-500">Manage your profile and preferences</p>
+        <Heading tag="h1" size="xl" description="Manage your profile and preferences">
+          Settings
+        </Heading>
       </div>
 
       <div className="mt-6 flex max-w-[672px] flex-col gap-6">
-        {/* Profile */}
-        <SectionCard icon={UserIcon} title="Profile" description="Your personal information">
-          <div className="flex flex-col gap-4">
-            <div className="flex gap-3">
-              <div className="flex flex-1 flex-col gap-1.5">
-                <label className="text-[13px] font-medium text-zinc-900">Full name</label>
-                {social ? (
-                  <>
-                    <Input value={name} onChange={() => {}} disabled />
-                    <p className="text-[11px] text-zinc-500">
-                      Managed by {provider?.label}.{' '}
-                      <a
-                        href={provider?.profileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-500 hover:underline"
-                      >
-                        Update at {provider?.label}
-                      </a>
-                    </p>
-                  </>
-                ) : (
-                  <Input value={name} onChange={setName} placeholder="Your full name" />
-                )}
-              </div>
-              <div className="flex flex-1 flex-col gap-1.5">
-                <label className="text-[13px] font-medium text-zinc-900">Company name</label>
-                <Input value={orgName} onChange={setOrgName} placeholder="Your company" />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[13px] font-medium text-zinc-900">Email</label>
-              {social ? (
-                <>
-                  <Input value={email} onChange={() => {}} disabled />
-                  <p className="text-[11px] text-zinc-500">
-                    Managed by {provider?.label}.{' '}
-                    <a
-                      href={provider?.profileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-500 hover:underline"
-                    >
-                      Update at {provider?.label}
-                    </a>
-                  </p>
-                </>
-              ) : (
-                <>
-                  <Input value={email} onChange={setEmail} placeholder="you@example.com" />
-                  <p className="text-[11px] text-zinc-500">
-                    You will need to verify any email change.
-                  </p>
-                </>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Button variant="filled" onClick={handleSaveProfile} disabled={saving || !hasChanges}>
-                {saving ? 'Saving...' : 'Save changes'}
-              </Button>
-              {hasChanges && (
-                <p className="text-[11px] text-zinc-500">
-                  Saving:{' '}
-                  {[
-                    nameChanged && 'name',
-                    emailChanged && 'email',
-                    orgNameChanged && 'company name',
-                  ]
-                    .filter(Boolean)
-                    .join(', ')}
-                </p>
-              )}
-            </div>
-          </div>
-        </SectionCard>
-
-        {/* Notifications */}
-        <SectionCard
-          icon={BellIcon}
-          title="Notifications"
-          description="Manage your notification preferences"
-        >
-          <div className="flex flex-col gap-3">
-            <div className="opacity-50">
-              <ToggleRow
-                label="Email notifications"
-                description="Get notified about your uploads and when approaching storage limits"
-                enabled={false}
-                disabled
-              />
-              <p className="mt-1 text-xs text-zinc-400 italic">Coming soon</p>
-            </div>
-            <div className="h-px bg-[#e1e4ea]" />
-            <ToggleRow
-              label="Marketing emails"
-              description="Receive updates about new features"
-              enabled={marketingOptedIn}
-              onChange={handleMarketingToggle}
-              saving={prefsSaving}
-            />
-          </div>
-        </SectionCard>
-
-        {/* Security */}
-        <SectionCard
-          icon={ShieldCheckIcon}
-          title="Security"
-          description="Manage your account security"
-        >
-          <div className="flex flex-col gap-3">
-            {!social && (
-              <>
-                <SettingRow
-                  label="Two-factor authentication"
-                  description="Add an extra layer of security to your account"
-                  action={
-                    <Button variant="ghost" size="compact" disabled>
-                      Enable
-                    </Button>
-                  }
-                />
-                <p className="text-[11px] text-zinc-400 -mt-1">
-                  Requires Auth0 MFA configuration. Coming soon.
-                </p>
-                <div className="h-px bg-[#e1e4ea]" />
-              </>
-            )}
-            {!social && (
-              <SettingRow
-                label="Password"
-                description="Change your account password"
-                action={
-                  <Button
-                    variant="ghost"
-                    size="compact"
-                    onClick={handleChangePassword}
-                    disabled={changingPassword}
-                  >
-                    {changingPassword ? 'Sending...' : 'Change'}
-                  </Button>
-                }
-              />
-            )}
-            {social && provider && (
-              <p className="text-xs text-zinc-500">
-                Security settings are managed by {provider.label}.{' '}
-                <a
-                  href={provider.profileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-500 hover:underline"
-                >
-                  Visit {provider.label} settings
-                </a>
-              </p>
-            )}
-          </div>
-        </SectionCard>
-
-        {/* Danger Zone */}
-        <SectionCard icon={TrashIcon} title="Danger zone" description="Irreversible actions" danger>
-          <div className="rounded-lg border border-red-200 bg-red-50/50 p-3.5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[13px] font-medium text-zinc-900">Delete account</p>
-                <p className="text-xs text-zinc-500">
-                  Permanently delete your account and all data
-                </p>
-              </div>
-              <Button variant="ghost" className="cursor-not-allowed opacity-40" disabled>
-                Delete account
-              </Button>
-            </div>
-          </div>
-        </SectionCard>
+        <ProfileSection me={me} />
+        <NotificationsSection />
+        <SecuritySection me={me} />
+        <DangerSection />
       </div>
     </div>
   );

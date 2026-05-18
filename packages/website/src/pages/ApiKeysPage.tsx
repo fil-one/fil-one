@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { CopySimpleIcon, PlusIcon } from '@phosphor-icons/react/dist/ssr';
+import { CopySimpleIcon, DatabaseIcon, PlusIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { AccessKeysTable } from '../components/AccessKeysTable';
 import { Button } from '../components/Button';
+import { Heading } from '../components/Heading/Heading';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Spinner } from '../components/Spinner';
@@ -13,9 +15,11 @@ import { useToast } from '../components/Toast';
 
 import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
 
-import { DOCS_URL, S3_ENDPOINT, S3_REGION } from '@filone/shared';
+import { getS3Endpoint, S3_REGION, DOCS_URL } from '@filone/shared';
+import { FILONE_STAGE } from '../env';
 import { apiRequest } from '../lib/api.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
+import { queryKeys } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Tab 1: Access Keys
@@ -30,13 +34,10 @@ type AccessKeysTabProps = {
 function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
   return (
     <>
-      <div className="mt-4 mb-4 flex items-center justify-between">
+      <div className="mt-4 mb-4">
         <span className="text-sm text-zinc-600">
           {keys.length === 1 ? '1 key' : `${keys.length} keys`}
         </span>
-        <Button variant="filled" icon={PlusIcon} onClick={onCreateOpen}>
-          Create new key
-        </Button>
       </div>
 
       <AccessKeysTable
@@ -46,6 +47,13 @@ function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
         onDelete={onDelete}
         onCreateOpen={onCreateOpen}
       />
+      {keys.length === 0 && (
+        <div className="mt-6 flex justify-center">
+          <Button variant="tertiary" icon={DatabaseIcon} href="/buckets">
+            Manage buckets
+          </Button>
+        </div>
+      )}
     </>
   );
 }
@@ -70,7 +78,9 @@ function CopyButton({ value }: { value: string }) {
   );
 }
 
+// eslint-disable-next-line max-lines-per-function
 function ConnectionDetailsTab() {
+  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
   const [sdkTab, setSdkTab] = useState<'python' | 'nodejs' | 'go'>('python');
 
   const pythonInstall = `pip install boto3`;
@@ -78,7 +88,7 @@ function ConnectionDetailsTab() {
 
 s3 = boto3.client(
     "s3",
-    endpoint_url="${S3_ENDPOINT}",
+    endpoint_url="${s3Endpoint}",
     aws_access_key_id="YOUR_ACCESS_KEY",
     aws_secret_access_key="YOUR_SECRET_KEY",
     region_name="${S3_REGION}",
@@ -99,7 +109,7 @@ for obj in s3.list_objects_v2(Bucket="my-bucket").get("Contents", []):
 import { createReadStream } from "fs";
 
 const s3 = new S3Client({
-  endpoint: "${S3_ENDPOINT}",
+  endpoint: "${s3Endpoint}",
   region: "${S3_REGION}",
   credentials: {
     accessKeyId: "YOUR_ACCESS_KEY",
@@ -129,7 +139,7 @@ cfg, _ := config.LoadDefaultConfig(context.TODO(),
 )
 
 client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-    o.BaseEndpoint = aws.String("${S3_ENDPOINT}")
+    o.BaseEndpoint = aws.String("${s3Endpoint}")
     o.UsePathStyle = true
 })`;
 
@@ -165,8 +175,8 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
         <div className="flex items-center border-b border-zinc-100 px-4 py-3">
           <span className="w-28 shrink-0 text-sm text-zinc-500">S3 Endpoint</span>
-          <span className="flex-1 font-mono text-sm text-zinc-900">{S3_ENDPOINT}</span>
-          <CopyButton value={S3_ENDPOINT} />
+          <span className="flex-1 font-mono text-sm text-zinc-900">{s3Endpoint}</span>
+          <CopyButton value={s3Endpoint} />
         </div>
         <div className="flex items-center px-4 py-3">
           <span className="w-28 shrink-0 text-sm text-zinc-500">Region</span>
@@ -178,7 +188,9 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
       {/* Quickstart CLI */}
       <div>
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-zinc-900">Quickstart (AWS CLI)</h3>
+          <Heading tag="h3" size="sm">
+            Quickstart (AWS CLI)
+          </Heading>
           <a
             href={DOCS_URL}
             target="_blank"
@@ -198,12 +210,12 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
             {
               n: 2,
               title: 'Create a bucket',
-              code: `aws s3 mb s3://my-bucket --endpoint-url ${S3_ENDPOINT}`,
+              code: `aws s3 mb s3://my-bucket --endpoint-url ${s3Endpoint}`,
             },
             {
               n: 3,
               title: 'Upload a file',
-              code: `aws s3 cp ./my-file.parquet s3://my-bucket/ --endpoint-url ${S3_ENDPOINT}`,
+              code: `aws s3 cp ./my-file.parquet s3://my-bucket/ --endpoint-url ${s3Endpoint}`,
             },
           ].map(({ n, title, code }) => (
             <div key={n} className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -223,7 +235,9 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 
       {/* SDK Examples */}
       <div>
-        <h3 className="mb-4 text-sm font-semibold text-zinc-900">SDK examples</h3>
+        <Heading tag="h3" size="sm" className="mb-4">
+          SDK examples
+        </Heading>
         <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
           {/* Tab bar */}
           <div className="flex border-b border-zinc-200 bg-zinc-50">
@@ -278,7 +292,9 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 
       {/* Migrating from AWS S3 */}
       <div>
-        <h3 className="mb-2 text-sm font-semibold text-zinc-900">Migrating from AWS S3</h3>
+        <Heading tag="h3" size="sm" className="mb-2">
+          Migrating from AWS S3
+        </Heading>
         <p className="mb-4 text-sm text-zinc-600">
           Fil One is fully S3-compatible. In most cases, you only need to change two settings in
           your existing code.
@@ -290,7 +306,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
                 {
                   label: 'Endpoint URL',
                   aws: 'https://s3.amazonaws.com',
-                  fil: S3_ENDPOINT,
+                  fil: s3Endpoint,
                   highlight: true,
                 },
                 {
@@ -331,9 +347,9 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 
       {/* Manage buckets */}
       <div className="flex justify-center border-t border-zinc-100 pt-4">
-        <Link to="/buckets" className="text-sm font-medium text-zinc-500 hover:text-zinc-800">
+        <a href="/buckets" className="text-sm font-medium text-zinc-500 hover:text-zinc-800">
           Manage buckets →
-        </Link>
+        </a>
       </div>
     </div>
   );
@@ -346,34 +362,30 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 export function ApiKeysPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
-  const [keys, setKeys] = useState<AccessKey[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchKeys() {
-      try {
-        const data = await apiRequest<ListAccessKeysResponse>('/access-keys');
-        if (!cancelled) {
-          setKeys(data.keys);
-          setLoading(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load access keys');
-          setLoading(false);
-        }
-      }
-    }
-    void fetchKeys();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data, isPending, isError, error } = useQuery({
+    queryKey: queryKeys.accessKeys,
+    queryFn: () => apiRequest<ListAccessKeysResponse>('/access-keys'),
+  });
+  const keys = data?.keys ?? [];
 
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+
+  const deleteKeyMutation = useMutation({
+    mutationFn: (id: string) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }),
+    onSuccess: (_, id) => {
+      queryClient.setQueryData<ListAccessKeysResponse>(queryKeys.accessKeys, (old) =>
+        old ? { keys: old.keys.filter((k) => k.id !== id) } : old,
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
+      toast.success('Access key deleted');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete key');
+    },
+  });
 
   async function handleDelete(id: string) {
     setConfirmDeleteKey(id);
@@ -381,17 +393,14 @@ export function ApiKeysPage() {
 
   async function confirmDeleteKeyAction() {
     if (!confirmDeleteKey) return;
-    const id = confirmDeleteKey;
     try {
-      await apiRequest(`/access-keys/${id}`, { method: 'DELETE' });
-      setKeys((prev) => prev.filter((k) => k.id !== id));
-      toast.success('Access key deleted');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete key');
+      await deleteKeyMutation.mutateAsync(confirmDeleteKey);
+    } catch {
+      // error handled by mutation.onError
     }
   }
 
-  if (loading) {
+  if (isPending) {
     return (
       <div className="flex items-center justify-center p-16">
         <Spinner ariaLabel="Loading access keys" size={32} />
@@ -399,22 +408,35 @@ export function ApiKeysPage() {
     );
   }
 
-  if (error) {
+  if (isError) {
     return (
-      <div className="p-6">
+      <div className="px-10 pt-10">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
+          {error?.message ?? 'Failed to load access keys'}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-8">
-      <h1 className="mb-1 text-2xl font-semibold text-zinc-900">API Keys</h1>
-      <p className="mb-6 text-sm text-zinc-500">
-        Manage credentials and connect via S3-compatible API
-      </p>
+    <div className="px-10 pt-10">
+      <div className="mb-6 flex items-center justify-between">
+        <Heading
+          tag="h1"
+          size="xl"
+          description="Manage credentials and connect via S3-compatible API"
+        >
+          API Keys
+        </Heading>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={PlusIcon}
+          onClick={() => void navigate({ to: '/api-keys/create' })}
+        >
+          Create new key
+        </Button>
+      </div>
 
       <Tabs>
         <TabList>

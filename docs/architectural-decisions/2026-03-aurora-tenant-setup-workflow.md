@@ -1,6 +1,6 @@
 # ADR: Aurora Tenant Setup Workflow
 
-**Status:** Accepted
+**Status:** Superseded by [2026-05-13-synchronous-tenant-setup-on-first-resource.md](2026-05-13-synchronous-tenant-setup-on-first-resource.md) on 2026-05-13.
 **Created:** 2026-03-06
 **Last updated:** 2026-03-18
 
@@ -35,7 +35,7 @@ The frontend reads the `orgSetupComplete` boolean from the `/api/me` response (d
 ## Consequences
 
 - Race conditions are handled by FIFO deduplication — only one message per org is processed in any 5-minute window.
-- Retries are handled by SQS automatically; failed messages land in the DLQ according to the queue's redrive policy and trigger a CloudWatch alarm.
+- Retries are handled by SQS automatically; failed messages land in the DLQ according to the queue's redrive policy. A Grafana alert on the Prometheus metric `aws_sqs_approximate_number_of_messages_visible_maximum` (forwarded from CloudWatch via the account-wide Metric Stream) notifies on stuck tenants.
 - Resume-from-failure is handled by the DynamoDB status field — the consumer always checks where it left off.
 - No additional orchestration services are introduced; SQS and DynamoDB are already in our stack.
 - Self-healing: `GET /api/me` re-enqueues a setup message when an org is confirmed but setup is incomplete. This means adding new setup steps does not require a manual migration for existing orgs — they automatically catch up on the next page load.

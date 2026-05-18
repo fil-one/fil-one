@@ -6,42 +6,38 @@
  * https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard
  */
 import { HardDrivesIcon } from '@phosphor-icons/react/dist/ssr';
-import { Link } from '@tanstack/react-router';
 import { DOCS_URL } from '@filone/shared';
+
+import { Badge } from './Badge.js';
+import { Button } from './Button.js';
+import { IconBox } from './IconBox.js';
 
 export function SealingStatus() {
   return (
-    <div className="mb-6 rounded-xl border border-[#e1e4ea] bg-white p-5 shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)]">
+    <div className="mb-6 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h2 className="text-[11px] font-medium uppercase tracking-wider text-[#677183]">
-            FILECOIN SEALING STATUS
+          <h2 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+            Filecoin Sealing Status
           </h2>
-          <span className="rounded-full bg-[rgba(0,128,255,0.1)] px-2 py-0.5 text-[10px] font-semibold text-[#0080ff]">
+          <Badge color="blue" size="sm" weight="medium">
             On-chain verification
-          </span>
+          </Badge>
         </div>
-        <a
-          href={DOCS_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[11px] text-[#677183] hover:text-zinc-900"
-        >
-          Learn more ↗
-        </a>
+        <Button variant="tertiary" size="sm" href={DOCS_URL}>
+          Learn more
+        </Button>
       </div>
       <div className="flex flex-col items-center gap-2 py-6 text-center">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100">
-          <HardDrivesIcon size={20} className="text-[#677183]" />
-        </div>
-        <p className="text-[13px] font-medium text-zinc-900">No objects sealing yet</p>
-        <p className="max-w-xs text-[11px] text-[#677183]">
+        <IconBox icon={HardDrivesIcon} color="grey" size="md" />
+        <p className="text-sm font-medium text-zinc-900">No objects sealing yet</p>
+        <p className="max-w-xs text-xs text-zinc-500">
           Upload your first object to see real-time Filecoin sealing status and on-chain
           verification
         </p>
-        <Link to="/buckets" className="mt-1 text-[12px] font-medium text-[#0080ff] hover:underline">
-          Go to buckets <span aria-hidden="true">→</span>
-        </Link>
+        <Button variant="tertiary" size="sm" href="/buckets">
+          Go to buckets →
+        </Button>
       </div>
     </div>
   );

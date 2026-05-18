@@ -9,7 +9,7 @@ import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynam
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { OrgRole } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import {
   COOKIE_NAMES,
@@ -21,7 +21,8 @@ import {
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { suggestOrgName } from '../lib/suggest-org-name.js';
+import { deriveOrgName } from '../lib/suggest-org-name.js';
+import { createBillingTrial } from '../lib/create-billing-trial.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,6 +38,13 @@ export interface AuthInternal extends Record<string, unknown> {
   newTokens?: NewTokens;
   /** Stashed by the before hook so the after hook can force-refresh if needed. */
   refreshToken?: string;
+  /**
+   * Verified ID token claims, set by the before hook after `jwtVerify`.
+   * Defaulted (with `amr: []`) when the id_token cookie is missing or
+   * verification fails — downstream gates on `amr` see an empty list and
+   * fail closed. Read via `getVerifiedIdTokenClaims`.
+   */
+  idTokenClaims?: IdTokenClaims;
 }
 
 type AuthMiddlewareRequest = Request<
@@ -46,6 +54,20 @@ type AuthMiddlewareRequest = Request<
   Context,
   AuthInternal
 >;
+
+/**
+ * Read verified ID token claims stashed by `authMiddleware`. Returns the
+ * empty-claims default (with `amr: []`) when the auth middleware ran but
+ * no valid id_token cookie was present, so callers can read fields without
+ * null checks.
+ *
+ * Must only be called from middleware/handlers downstream of `authMiddleware`.
+ */
+export function getVerifiedIdTokenClaims(
+  request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
+): IdTokenClaims {
+  return (request.internal as AuthInternal).idTokenClaims ?? EMPTY_ID_CLAIMS;
+}
 
 // ---------------------------------------------------------------------------
 // Module-level JWKS cache — reused across Lambda warm starts
@@ -68,16 +90,6 @@ import { CSRF_COOKIE_NAME } from '@filone/shared';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
-}
-
-function orgNotConfirmedResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({
-      message: 'Please create an organization to continue.',
-      code: ApiErrorCode.ORG_NOT_CONFIRMED,
-    })
-    .build();
 }
 
 /**
@@ -114,7 +126,7 @@ async function exchangeRefreshToken(refreshToken: string): Promise<NewTokens | n
     const body = await res.text().catch(() => '');
     console.warn('[auth] Token refresh failed', { status: res.status, body });
   } catch (err) {
-    console.warn('[auth] Token refresh threw', { error: (err as Error).message });
+    console.warn('[auth] Token refresh threw', { error: err });
   }
   return null;
 }
@@ -134,26 +146,28 @@ function setCookiesFromTokens(
   ];
 }
 
-/**
- * Routes that are allowed through even when the user's org is not yet confirmed.
- * All other authenticated routes will return 403 ORG_NOT_CONFIRMED.
- */
-const ORG_CONFIRM_BYPASS_ROUTES = new Set([
-  '/api/me',
-  '/api/org/confirm',
-  '/api/me/resend-verification',
-]);
-
-interface IdTokenClaims {
+export interface IdTokenClaims {
   email: string | null;
   emailVerified: boolean;
   name: string | null;
   picture: string | null;
+  /** OIDC Authentication Methods References — empty when not asserted/verified. */
+  amr: string[];
 }
 
+const EMPTY_ID_CLAIMS: IdTokenClaims = {
+  email: null,
+  emailVerified: false,
+  name: null,
+  picture: null,
+  amr: [],
+};
+
 /**
- * Verify the ID token and extract email + email_verified claims.
- * Returns defaults if the token is missing or invalid (non-fatal).
+ * Verify the ID token and extract claims. Returns defaults (including
+ * `amr: []`) if the token is missing or invalid — callers gating on `amr`
+ * see an empty array, which fails their check just like a verified token
+ * without `amr` would.
  */
 async function extractIdTokenClaims({
   idToken,
@@ -166,28 +180,30 @@ async function extractIdTokenClaims({
   clientId: string;
   issuer: string;
 }): Promise<IdTokenClaims> {
-  if (!idToken) return { email: null, emailVerified: false, name: null, picture: null };
+  if (!idToken) return EMPTY_ID_CLAIMS;
   try {
     const { payload } = await jwtVerify(idToken, jwks, { audience: clientId, issuer });
+    const rawAmr = payload.amr;
     return {
       email: (payload.email as string) ?? null,
       emailVerified: (payload.email_verified as boolean) ?? false,
       name: (payload.name as string) ?? null,
       picture: (payload.picture as string) ?? null,
+      amr: Array.isArray(rawAmr) ? rawAmr.filter((v): v is string => typeof v === 'string') : [],
     };
   } catch (err) {
-    console.warn('[auth] ID token verification failed, continuing without email', {
-      error: (err as Error).message,
-    });
-    return { email: null, emailVerified: false, name: null, picture: null };
+    console.warn(
+      '[auth] ID token verification failed, continuing without verified ID token claims',
+      {
+        error: err,
+      },
+    );
+    return EMPTY_ID_CLAIMS;
   }
 }
 
 /**
- * Resolve user identity from sub+email, attach userInfo to the request context,
- * and enforce the org-confirmed gate.
- * Returns a 403 response if the org is not confirmed and the route is gated,
- * or undefined to let the request continue.
+ * Resolve user identity from sub+email and attach userInfo to the request context.
  */
 async function attachIdentity({
   event,
@@ -203,8 +219,8 @@ async function attachIdentity({
   emailVerified: boolean;
   name: string | null;
   picture: string | null;
-}): Promise<APIGatewayProxyStructuredResultV2 | null> {
-  const resolved = await resolveUserAndOrg(sub, email);
+}): Promise<void> {
+  const resolved = await resolveUserAndOrg(sub, email, name);
   (
     event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
   ).userInfo = {
@@ -216,10 +232,6 @@ async function attachIdentity({
     name: name ?? undefined,
     picture: picture ?? undefined,
   };
-  if (!resolved.orgConfirmed && !ORG_CONFIRM_BYPASS_ROUTES.has(event.rawPath)) {
-    return orgNotConfirmedResponse();
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,11 +241,14 @@ async function attachIdentity({
 interface ResolvedIdentity {
   userId: string;
   orgId: string;
-  orgConfirmed: boolean;
   email: string | null;
 }
 
-async function resolveUserAndOrg(sub: string, email: string | null): Promise<ResolvedIdentity> {
+async function resolveUserAndOrg(
+  sub: string,
+  email: string | null,
+  name: string | null,
+): Promise<ResolvedIdentity> {
   const tableName = Resource.UserInfoTable.name;
 
   // Look up existing mapping
@@ -247,34 +262,54 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
     }),
   );
 
-  const orgName = (email && suggestOrgName(email)) ?? 'My Organization';
-
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
     const userId = result.Item.userId.S;
     const orgId = result.Item.orgId.S;
-    const resolvedEmail = email;
-    if (!resolvedEmail) {
+    if (!email) {
       console.error(
         '[auth] Existing user authenticated without email claim — ID token verification may have failed',
         { userId },
       );
     }
-
-    const { Item: orgItem } = await getDynamoClient().send(
-      new GetItemCommand({
-        TableName: tableName,
-        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      }),
-    );
-
-    const orgConfirmed = orgItem?.orgConfirmed?.BOOL === true;
-
-    return { userId, orgId, orgConfirmed, email: resolvedEmail };
+    return { userId, orgId, email };
   }
 
   // New user — create user, org, and membership records atomically
   const userId = crypto.randomUUID();
   const orgId = crypto.randomUUID();
+  const orgName = deriveOrgName(name ?? undefined, email ?? undefined);
+
+  await createNewUserAndOrg({ sub, userId, orgId, orgName });
+
+  // Aurora tenant setup is deferred until the user creates their first bucket
+  // or access key — see docs/architectural-decisions/2026-05-13-synchronous-tenant-setup-on-first-resource.md.
+  // Stripe trial is created here because billing must be ready before any
+  // metered operation; createBillingTrial is idempotent via idempotencyKey.
+  try {
+    await createBillingTrial({ userId, orgId, email: email ?? undefined });
+  } catch (error) {
+    console.error('[auth] Failed to create billing trial for new org', {
+      error,
+      orgId,
+      userId,
+    });
+  }
+
+  return { userId, orgId, email };
+}
+
+async function createNewUserAndOrg({
+  sub,
+  userId,
+  orgId,
+  orgName,
+}: {
+  sub: string;
+  userId: string;
+  orgId: string;
+  orgName: string;
+}) {
+  const tableName = Resource.UserInfoTable.name;
   const now = new Date().toISOString();
 
   await getDynamoClient().send(
@@ -313,7 +348,6 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
               pk: { S: `ORG#${orgId}` },
               sk: { S: 'PROFILE' },
               name: { S: orgName },
-              orgConfirmed: { BOOL: false },
               setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: userId },
               createdAt: { S: now },
@@ -334,16 +368,52 @@ async function resolveUserAndOrg(sub: string, email: string | null): Promise<Res
       ],
     }),
   );
-
-  // Do NOT enqueue tenant setup here — org is not yet confirmed.
-  // Tenant setup will be triggered when the user confirms their org via POST /api/org/confirm.
-
-  return { userId, orgId, orgConfirmed: false, email };
 }
 
 // ---------------------------------------------------------------------------
 // Middleware factory
 // ---------------------------------------------------------------------------
+
+async function tryValidateAccessToken({
+  request,
+  accessToken,
+  idToken,
+  jwks,
+  audience,
+  issuer,
+  clientId,
+  failureLabel,
+}: {
+  request: AuthMiddlewareRequest;
+  accessToken: string;
+  idToken: string | undefined;
+  jwks: ReturnType<typeof createRemoteJWKSet>;
+  audience: string;
+  issuer: string;
+  clientId: string;
+  failureLabel: string;
+}): Promise<boolean> {
+  try {
+    const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
+    const sub = payload.sub!;
+    const idClaims = await extractIdTokenClaims({ idToken, jwks, clientId, issuer });
+    request.internal.idTokenClaims = idClaims;
+    await attachIdentity({
+      event: request.event,
+      sub,
+      email: idClaims.email,
+      emailVerified: idClaims.emailVerified,
+      name: idClaims.name,
+      picture: idClaims.picture,
+    });
+    return true;
+  } catch (err) {
+    console.warn(failureLabel, { error: err });
+    return false;
+  }
+}
+
+// eslint-disable-next-line max-lines-per-function
 export function authMiddleware() {
   const before = async (
     request: AuthMiddlewareRequest,
@@ -367,32 +437,23 @@ export function authMiddleware() {
     }
 
     const forceRefresh = event.queryStringParameters?.forceRefresh === '1';
+    const validateArgs = {
+      request,
+      idToken,
+      jwks,
+      audience,
+      issuer,
+      clientId: secrets.AUTH0_CLIENT_ID,
+    };
 
     // Step 1: Validate existing access token (skip if forceRefresh — we need fresh claims)
     if (accessToken && !forceRefresh) {
-      try {
-        const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
-        const sub = payload.sub!;
-        const idClaims = await extractIdTokenClaims({
-          idToken,
-          jwks,
-          clientId: secrets.AUTH0_CLIENT_ID,
-          issuer,
-        });
-        const blocked = await attachIdentity({
-          event,
-          sub,
-          email: idClaims.email,
-          emailVerified: idClaims.emailVerified,
-          name: idClaims.name,
-          picture: idClaims.picture,
-        });
-        if (blocked) return blocked;
-        return; // Valid — continue to handler
-      } catch (err) {
-        // Expired or invalid — fall through to refresh
-        console.warn('[auth] Access token verification failed', { error: (err as Error).message });
-      }
+      const ok = await tryValidateAccessToken({
+        ...validateArgs,
+        accessToken,
+        failureLabel: '[auth] Access token verification failed',
+      });
+      if (ok) return;
     }
 
     // Step 2: Attempt token refresh (always runs when forceRefresh=1)
@@ -409,7 +470,8 @@ export function authMiddleware() {
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
         });
-        const blocked = await attachIdentity({
+        request.internal.idTokenClaims = refreshedClaims;
+        await attachIdentity({
           event,
           sub: refreshedSub,
           email: refreshedClaims.email,
@@ -417,7 +479,6 @@ export function authMiddleware() {
           name: refreshedClaims.name,
           picture: refreshedClaims.picture,
         });
-        if (blocked) return blocked;
         return; // Continue to handler
       }
       if (forceRefresh) {
@@ -435,30 +496,12 @@ export function authMiddleware() {
     // access token rather than returning 401 — this prevents social-provider misconfigurations
     // or transient refresh failures from locking out users in prod.
     if (forceRefresh && accessToken) {
-      try {
-        const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
-        const sub = payload.sub!;
-        const idClaims = await extractIdTokenClaims({
-          idToken,
-          jwks,
-          clientId: secrets.AUTH0_CLIENT_ID,
-          issuer,
-        });
-        const blocked = await attachIdentity({
-          event,
-          sub,
-          email: idClaims.email,
-          emailVerified: idClaims.emailVerified,
-          name: idClaims.name,
-          picture: idClaims.picture,
-        });
-        if (blocked) return blocked;
-        return;
-      } catch (err) {
-        console.warn('[auth] Fallback access token validation failed', {
-          error: (err as Error).message,
-        });
-      }
+      const ok = await tryValidateAccessToken({
+        ...validateArgs,
+        accessToken,
+        failureLabel: '[auth] Fallback access token validation failed',
+      });
+      if (ok) return;
     }
 
     console.warn('[auth] Returning 401 — no valid tokens');

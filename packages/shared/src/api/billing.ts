@@ -1,3 +1,18 @@
+import { z } from 'zod';
+
+export const ActivateSubscriptionRequestSchema = z
+  .object({
+    useSavedPaymentMethod: z.boolean().default(false),
+    promotionCode: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z0-9-]{3,40}$/, 'Promo code must be 3–40 letters, digits, or hyphens.')
+      .optional(),
+  })
+  .strict();
+
+export type ActivateSubscriptionRequest = z.input<typeof ActivateSubscriptionRequestSchema>;
+
 export enum PlanId {
   FreeTrial = 'free_trial',
   PayAsYouGo = 'pay_as_you_go',
@@ -65,4 +80,31 @@ export interface Invoice {
 
 export interface ListInvoicesResponse {
   invoices: Invoice[];
+}
+
+/**
+ * Maps a raw Stripe subscription status to our internal SubscriptionStatus enum.
+ * Returns the mapped status, or null if the Stripe status represents a
+ * non-functional state that should not be persisted (e.g. incomplete).
+ */
+
+export function mapStripeStatus(stripeStatus: string): SubscriptionStatus | null {
+  switch (stripeStatus) {
+    case 'active':
+      return SubscriptionStatus.Active;
+    case 'trialing':
+      return SubscriptionStatus.Trialing;
+    case 'past_due':
+      return SubscriptionStatus.PastDue;
+    case 'canceled':
+      return SubscriptionStatus.Canceled;
+    case 'unpaid':
+    case 'paused':
+      return SubscriptionStatus.PastDue;
+    case 'incomplete_expired':
+      return SubscriptionStatus.Canceled;
+    case 'incomplete':
+    default:
+      return null;
+  }
 }

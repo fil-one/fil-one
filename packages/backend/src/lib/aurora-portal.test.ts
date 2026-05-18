@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import type { BucketsBucketCreateRequest } from '@filone/aurora-portal-client';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -23,17 +24,23 @@ vi.mock('@filone/aurora-portal-client', () => ({
   deleteS3AccessKey: (options: Record<string, unknown>) => mockDeleteAccessKey(options),
 }));
 
+vi.mock('./aurora-api-metrics.js', () => ({
+  instrumentClient: vi.fn(),
+}));
+
 process.env.AURORA_PORTAL_URL = 'https://api.portal.test.example.com/api';
 process.env.FILONE_STAGE = 'test';
 
 const ssmMock = mockClient(SSMClient);
 
 import {
+  buildAuroraAccessArray,
   createAuroraAccessKey,
   createAuroraBucket,
   DuplicateKeyNameError,
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
+  _resetSsmCacheForTesting,
 } from './aurora-portal.js';
 
 // ---------------------------------------------------------------------------
@@ -54,6 +61,7 @@ describe('createAuroraBucket', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ssmMock.reset();
+    _resetSsmCacheForTesting();
   });
 
   it('calls SSM with correct parameter name and WithDecryption', async () => {
@@ -91,7 +99,10 @@ describe('createAuroraBucket', () => {
     expect(mockPostBucket).toHaveBeenCalledWith({
       client: 'mock-portal-client',
       path: { tenantId: 'tenant-1' },
-      body: { name: 'my-bucket' },
+      body: {
+        name: 'my-bucket',
+        encrypted: true,
+      } satisfies BucketsBucketCreateRequest,
       throwOnError: false,
     });
   });
@@ -128,11 +139,96 @@ describe('createAuroraBucket', () => {
       createAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' }),
     ).rejects.toThrow('Failed to create Aurora bucket "my-bucket" for tenant tenant-1');
   });
+
+  it('passes versioning: true when option is set', async () => {
+    setupSsmMock();
+    mockPostBucket.mockResolvedValue({ error: undefined });
+
+    await createAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket', versioning: true });
+
+    expect(mockPostBucket).toHaveBeenCalledWith({
+      client: 'mock-portal-client',
+      path: { tenantId: 'tenant-1' },
+      body: {
+        name: 'my-bucket',
+        encrypted: true,
+        versioning: true,
+      } satisfies BucketsBucketCreateRequest,
+      throwOnError: false,
+    });
+  });
+
+  it('passes lock: true when option is set', async () => {
+    setupSsmMock();
+    mockPostBucket.mockResolvedValue({ error: undefined });
+
+    await createAuroraBucket({
+      tenantId: 'tenant-1',
+      bucketName: 'my-bucket',
+      versioning: true,
+      lock: true,
+    });
+
+    expect(mockPostBucket).toHaveBeenCalledWith({
+      client: 'mock-portal-client',
+      path: { tenantId: 'tenant-1' },
+      body: {
+        name: 'my-bucket',
+        encrypted: true,
+        versioning: true,
+        lock: true,
+      } satisfies BucketsBucketCreateRequest,
+      throwOnError: false,
+    });
+  });
+
+  it('passes defaultRetention when retention option is provided', async () => {
+    setupSsmMock();
+    mockPostBucket.mockResolvedValue({ error: undefined });
+
+    await createAuroraBucket({
+      tenantId: 'tenant-1',
+      bucketName: 'my-bucket',
+      versioning: true,
+      lock: true,
+      retention: { enabled: true, mode: 'governance', duration: 30, durationType: 'd' },
+    });
+
+    expect(mockPostBucket).toHaveBeenCalledWith({
+      client: 'mock-portal-client',
+      path: { tenantId: 'tenant-1' },
+      body: {
+        name: 'my-bucket',
+        encrypted: true,
+        versioning: true,
+        lock: true,
+        defaultRetention: {
+          enabled: true,
+          mode: 'governance',
+          duration: { duration: 30, type: 'd' },
+        },
+      } satisfies BucketsBucketCreateRequest,
+      throwOnError: false,
+    });
+  });
+
+  it('omits versioning, lock, retention from body when not provided', async () => {
+    setupSsmMock();
+    mockPostBucket.mockResolvedValue({ error: undefined });
+
+    await createAuroraBucket({ tenantId: 'tenant-1', bucketName: 'my-bucket' });
+
+    const body = (mockPostBucket.mock.calls[0][0] as { body: Record<string, unknown> }).body;
+    expect(body).not.toHaveProperty('versioning');
+    expect(body).not.toHaveProperty('lock');
+    expect(body).not.toHaveProperty('defaultRetention');
+  });
 });
 
 describe('getAuroraPortalApiKey', () => {
   beforeEach(() => {
     ssmMock.reset();
+    _resetSsmCacheForTesting();
   });
 
   it('calls SSM with correct parameter name and WithDecryption', async () => {
@@ -173,29 +269,108 @@ describe('getAuroraPortalApiKey', () => {
       'Aurora API key not found in SSM for tenant tenant-1',
     );
   });
+
+  it('returns cached value on second call without hitting SSM', async () => {
+    setupSsmMock('cached-key');
+
+    await getAuroraPortalApiKey('test', 'tenant-1');
+    ssmMock.reset();
+    const result = await getAuroraPortalApiKey('test', 'tenant-1');
+
+    expect(result).toBe('cached-key');
+    expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(0);
+  });
+
+  it('caches per stage+tenantId independently', async () => {
+    ssmMock
+      .on(GetParameterCommand, { Name: '/filone/test/aurora-portal/tenant-api-key/tenant-1' })
+      .resolves({ Parameter: { Value: 'key-for-tenant-1' } });
+    ssmMock
+      .on(GetParameterCommand, { Name: '/filone/test/aurora-portal/tenant-api-key/tenant-2' })
+      .resolves({ Parameter: { Value: 'key-for-tenant-2' } });
+
+    const [result1, result2] = await Promise.all([
+      getAuroraPortalApiKey('test', 'tenant-1'),
+      getAuroraPortalApiKey('test', 'tenant-2'),
+    ]);
+
+    expect(result1).toBe('key-for-tenant-1');
+    expect(result2).toBe('key-for-tenant-2');
+    expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(2);
+  });
 });
 
 // ---------------------------------------------------------------------------
 // createAuroraAccessKey
 // ---------------------------------------------------------------------------
 
-// Full-access array produced by buildAuroraAccessArray(['read','write','list','delete'])
-const EXPECTED_ACCESS = [
+// Base-only access array produced by buildAuroraAccessArray(['read','write','list','delete'])
+// (no granular permissions — new default behavior)
+const EXPECTED_BASE_ACCESS = [
   'Default',
   'GetBucketVersioning',
   'GetBucketObjectLockConfiguration',
   'Read',
-  'GetObjectVersion',
-  'GetObjectRetention',
-  'GetObjectLegalHold',
   'Write',
-  'PutObjectRetention',
-  'PutObjectLegalHold',
   'List',
-  'ListBucketVersions',
   'Delete',
-  'DeleteObjectVersion',
 ];
+
+// ---------------------------------------------------------------------------
+// buildAuroraAccessArray
+// ---------------------------------------------------------------------------
+
+describe('buildAuroraAccessArray', () => {
+  it('returns always-included + base actions without granular permissions', () => {
+    expect(buildAuroraAccessArray(['read', 'write', 'list', 'delete'])).toStrictEqual(
+      EXPECTED_BASE_ACCESS,
+    );
+  });
+
+  it('returns only always-included + single base action for one permission', () => {
+    expect(buildAuroraAccessArray(['read'])).toStrictEqual([
+      'Default',
+      'GetBucketVersioning',
+      'GetBucketObjectLockConfiguration',
+      'Read',
+    ]);
+  });
+
+  it('includes granular permissions when provided', () => {
+    expect(
+      buildAuroraAccessArray(['read'], ['GetObjectVersion', 'GetObjectRetention']),
+    ).toStrictEqual([
+      'Default',
+      'GetBucketVersioning',
+      'GetBucketObjectLockConfiguration',
+      'Read',
+      'GetObjectVersion',
+      'GetObjectRetention',
+    ]);
+  });
+
+  it('includes all granular permissions for full access', () => {
+    const allGranular = [
+      'GetObjectVersion',
+      'GetObjectRetention',
+      'GetObjectLegalHold',
+      'PutObjectRetention',
+      'PutObjectLegalHold',
+      'ListBucketVersions',
+      'DeleteObjectVersion',
+    ] as const;
+
+    expect(
+      buildAuroraAccessArray(['read', 'write', 'list', 'delete'], [...allGranular]),
+    ).toStrictEqual([...EXPECTED_BASE_ACCESS, ...allGranular]);
+  });
+
+  it('treats undefined granularPermissions the same as empty', () => {
+    expect(buildAuroraAccessArray(['read'], undefined)).toStrictEqual(
+      buildAuroraAccessArray(['read']),
+    );
+  });
+});
 
 const VALID_ACCESS_KEY_RESPONSE = {
   data: {
@@ -216,6 +391,7 @@ describe('createAuroraAccessKey', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ssmMock.reset();
+    _resetSsmCacheForTesting();
   });
 
   it('calls SSM with correct parameter path using FILONE_STAGE', async () => {
@@ -249,7 +425,36 @@ describe('createAuroraAccessKey', () => {
     expect(mockPostAccessKeys).toHaveBeenCalledWith({
       client: 'mock-portal-client',
       path: { tenantId: 'tenant-1' },
-      body: { name: 'my-key', access: EXPECTED_ACCESS },
+      body: { name: 'my-key', access: EXPECTED_BASE_ACCESS },
+      throwOnError: false,
+    });
+  });
+
+  it('includes granular permissions in Aurora access array when provided', async () => {
+    setupSsmMock();
+    mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
+
+    await createAuroraAccessKey({
+      tenantId: 'tenant-1',
+      keyName: 'my-key',
+      permissions: ['read'],
+      granularPermissions: ['GetObjectVersion', 'GetObjectRetention'],
+    });
+
+    expect(mockPostAccessKeys).toHaveBeenCalledWith({
+      client: 'mock-portal-client',
+      path: { tenantId: 'tenant-1' },
+      body: {
+        name: 'my-key',
+        access: [
+          'Default',
+          'GetBucketVersioning',
+          'GetBucketObjectLockConfiguration',
+          'Read',
+          'GetObjectVersion',
+          'GetObjectRetention',
+        ],
+      },
       throwOnError: false,
     });
   });
@@ -396,6 +601,7 @@ describe('findAuroraAccessKeyByName', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ssmMock.reset();
+    _resetSsmCacheForTesting();
   });
 
   it('returns key details when key is found by name', async () => {

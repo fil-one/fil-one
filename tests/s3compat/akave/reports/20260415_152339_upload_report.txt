@@ -1,0 +1,24 @@
+======================================================================
+  Upload
+  Script : upload
+  Run    : 20260415_152339
+======================================================================
+
+SUMMARY
+  Total  : 5
+  OK     : 5
+  Failed : 0
+
+BY OPERATION
+  upload                             5 ok     0 failed  (   5 total)  avg 6.924s  stddev 5.940s  min 1.604s  max 17.769s
+
+SUCCESSES
+  {"ts": "2026-04-15T13:23:43.572698+00:00", "op": "upload", "status": "ok", "key": "gov-data/README.md", "size": 5555, "elapsed_s": 1.608, "target_bucket": "mbx-2024-04-15-1", "etag": "ElaCbTNsZonHPD4aUuNLGQ==", "version_id": "V1"}
+  {"ts": "2026-04-15T13:23:45.178758+00:00", "op": "upload", "status": "ok", "key": "gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip", "size": 740853, "elapsed_s": 1.604, "target_bucket": "mbx-2024-04-15-1", "etag": "4jxWgvgeBapHt4he9E/HsQ==", "version_id": "V1"}
+  {"ts": "2026-04-15T13:24:02.948801+00:00", "op": "upload", "status": "ok", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-0397e/v1.zip", "size": 21037826, "elapsed_s": 17.769, "target_bucket": "mbx-2024-04-15-1", "etag": "7CpkKUrHGvX4xul7EyM/HQ==", "version_id": "V1"}
+  {"ts": "2026-04-15T13:24:08.715360+00:00", "op": "upload", "status": "ok", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-54c47/v1.zip", "size": 21082117, "elapsed_s": 5.765, "target_bucket": "mbx-2024-04-15-1", "etag": "UtqXXtG6mfYYbYRqUx0osw==", "version_id": "V1"}
+  {"ts": "2026-04-15T13:24:16.590785+00:00", "op": "upload", "status": "ok", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-aa506/v1.zip", "size": 21079670, "elapsed_s": 7.874, "target_bucket": "mbx-2024-04-15-1", "etag": "45wXbRmnKXkYJD9iQkBkFw==", "version_id": "V1"}
+
+Log files:
+  Success : ../logs/20260415_152339_upload_success.jsonl
+  Errors  : ../logs/20260415_152339_upload_errors.jsonl

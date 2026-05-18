@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { logout, getMe, resendVerificationEmail } from '../lib/api.js';
 import type { MeResponse } from '@filone/shared';
+import { queryKeys } from '../lib/query-client.js';
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
@@ -11,6 +14,7 @@ type VerifyEmailPageProps = {
 };
 
 export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
+  const queryClient = useQueryClient();
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
   const [resending, setResending] = useState(false);
@@ -29,6 +33,8 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
       // Force a token refresh so we pick up the latest email_verified claim from Auth0
       const updated = await getMe({ forceRefresh: true });
       if (updated.emailVerified) {
+        // Force a hard reset so the cached me reflects the newly verified token
+        void queryClient.resetQueries({ queryKey: queryKeys.me });
         onVerified();
       } else {
         setError(
@@ -78,7 +84,9 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
           )}
 
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold text-zinc-950">Verify your email</h1>
+            <Heading tag="h1" size="xl">
+              Verify your email
+            </Heading>
             <p className="text-sm text-zinc-500">
               We sent a verification email to{' '}
               <span className="font-medium text-zinc-700">{me.email}</span>. Please click the link
@@ -89,7 +97,7 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
           {error && <p className="text-xs text-red-600">{error}</p>}
 
           <Button
-            variant="filled"
+            variant="primary"
             type="button"
             className="w-full justify-center"
             disabled={checking}
@@ -137,9 +145,9 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
           One more step
         </div>
 
-        <h2 className="mb-4 max-w-sm text-center text-3xl font-semibold text-zinc-950">
+        <Heading tag="h2" size="3xl" balance className="mb-4 max-w-sm text-center">
           Verify your email
-        </h2>
+        </Heading>
 
         <p className="mb-10 max-w-sm text-center text-base text-zinc-600">
           Email verification helps us keep your account secure and ensures you receive important

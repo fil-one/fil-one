@@ -5,9 +5,17 @@ build/
 .env.local
 *.js.map
 *.d.ts.map
+.security-review/
+.semgrep/
 
 # SST
 .sst/
+tests/s3compat/sst.pyi
+
+# We don't need access to infra `Resource.{key}` at runtime,
+# so there is no need to keep the auto-generated sst-env.d.ts
+# file around.
+infra/sst-env.d.ts
 
 # TypeScript build output
 packages/*/dist/
@@ -38,3 +46,7 @@ contracts/out/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# Sentry Config File
+.env.sentry-build-plugin
+.auth

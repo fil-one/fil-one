@@ -65,7 +65,7 @@ export default $config({
             Action: 'sts:AssumeRoleWithWebIdentity',
             Condition: {
               StringLike: {
-                'token.actions.githubusercontent.com:sub': 'repo:filecoin-project/fil-one:*',
+                'token.actions.githubusercontent.com:sub': 'repo:fil-one/fil-one:*',
               },
               StringEquals: {
                 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
@@ -217,6 +217,7 @@ function setupMetricStreamPipeline(grafanaPrometheusAuth: sst.Secret) {
       { namespace: 'AWS/ApiGateway', metricNames: [] },
       { namespace: 'AWS/SQS', metricNames: [] },
       { namespace: 'AWS/DynamoDB', metricNames: [] },
+      { namespace: 'FilOne', metricNames: [] },
     ],
   });
 }

@@ -2,11 +2,11 @@ import { describe, it, beforeAll, afterAll, expect } from 'vitest';
 import {
   createTestCustomer,
   seedBillingRecord,
-  sleep,
-  getBillingRecord,
   deleteBillingRecord,
   getStripePriceId,
   getStripeClient,
+  pollForBillingStatusChange,
+  getBillingRecord,
 } from './helpers.js';
 
 describe('Trial Canceled (customer.subscription.deleted)', () => {
@@ -41,7 +41,11 @@ describe('Trial Canceled (customer.subscription.deleted)', () => {
 
     await stripe.subscriptions.cancel(subId);
 
-    await sleep(15 * 1000);
+    await pollForBillingStatusChange({
+      userId,
+      expectedStatus: 'grace_period',
+      fromStatus: 'trialing',
+    });
 
     const record = await getBillingRecord(userId);
     expect(record).toMatchObject({

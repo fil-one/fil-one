@@ -1,0 +1,7 @@
+# Trivy false-positive suppressions
+#
+# Add CVE IDs or rule IDs here (one per line) to suppress known false positives.
+# Always include a comment explaining WHY the finding is suppressed.
+#
+# Example:
+# CVE-2024-12345  # Not exploitable: only affects server-side XML parsing, we don't use XML

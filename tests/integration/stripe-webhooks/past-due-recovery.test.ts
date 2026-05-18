@@ -4,10 +4,11 @@ import {
   attachValidCard,
   seedBillingRecord,
   createAndPayInvoice,
-  sleep,
-  getBillingRecord,
   deleteBillingRecord,
   getStripeClient,
+  pollForBillingStatusChange,
+  pollForPaymentMethod,
+  getBillingRecord,
 } from './helpers.js';
 
 describe('Past Due Recovery (invoice.payment_succeeded with canceledAt)', () => {
@@ -17,13 +18,15 @@ describe('Past Due Recovery (invoice.payment_succeeded with canceledAt)', () => 
   beforeAll(async () => {
     userId = `test-pdr-${crypto.randomUUID()}`;
     cusId = await createTestCustomer(userId);
-    await attachValidCard(cusId);
 
     const canceledAt = new Date().toISOString();
     await seedBillingRecord(userId, cusId, 'past_due', {
       lastPaymentFailedAt: { S: '2024-01-01T00:00:00Z' },
       canceledAt: { S: canceledAt },
     });
+
+    const paymentMethodId = await attachValidCard(cusId);
+    await pollForPaymentMethod({ userId, paymentMethodId });
   });
 
   afterAll(async () => {
@@ -33,7 +36,11 @@ describe('Past Due Recovery (invoice.payment_succeeded with canceledAt)', () => 
 
   it('should restore status to active and clear all failure/cancel fields', async () => {
     await createAndPayInvoice(cusId);
-    await sleep(15 * 1000);
+    await pollForBillingStatusChange({
+      userId,
+      expectedStatus: 'active',
+      fromStatus: 'past_due',
+    });
     const record = await getBillingRecord(userId);
     expect(record).toStrictEqual({
       pk: { S: `CUSTOMER#${userId}` },

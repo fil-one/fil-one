@@ -41,64 +41,81 @@ export async function baseHandler(
 
   // 2. If no billing record → trial state
   if (!billingRecord || !billingRecord.stripeCustomerId) {
-    const trialEndsAt =
-      billingRecord?.trialEndsAt ??
-      new Date(Date.now() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    return buildTrialResponse(billingRecord, userId, billingTableName);
+  }
 
-    // Lazy eval: if trialing and trial has expired → transition to grace_period
-    if (
-      billingRecord?.subscriptionStatus === SubscriptionStatus.Trialing &&
-      billingRecord.trialEndsAt &&
-      new Date(billingRecord.trialEndsAt).getTime() < Date.now()
-    ) {
-      const gracePeriodEndsAt = new Date(
-        new Date(billingRecord.trialEndsAt).getTime() + 7 * 24 * 60 * 60 * 1000,
-      ).toISOString();
+  // 3. Has Stripe customer — fetch subscription + payment method
+  const paymentMethod = await resolvePaymentMethod(billingRecord);
+  const currentStatus = await evaluateStatusTransitions(billingRecord, userId, billingTableName);
 
-      await dynamo.send(
-        new UpdateItemCommand({
-          TableName: billingTableName,
-          Key: {
-            pk: { S: `CUSTOMER#${userId}` },
-            sk: { S: 'SUBSCRIPTION' },
-          },
-          UpdateExpression:
-            'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
-          ExpressionAttributeValues: {
-            ':status': { S: SubscriptionStatus.GracePeriod },
-            ':grace': { S: gracePeriodEndsAt },
-            ':now': { S: new Date().toISOString() },
-          },
-        }),
-      );
+  const response = buildBillingResponse(billingRecord, currentStatus, paymentMethod);
+  return new ResponseBuilder().status(200).body(response).build();
+}
 
-      const response: BillingInfo = {
-        subscription: {
-          planId: PlanId.FreeTrial,
-          status: SubscriptionStatus.GracePeriod,
-          trialEndsAt: billingRecord.trialEndsAt,
-          gracePeriodEndsAt,
+async function buildTrialResponse(
+  billingRecord: SubscriptionRecord | null,
+  userId: string,
+  billingTableName: string,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const trialEndsAt =
+    billingRecord?.trialEndsAt ??
+    new Date(Date.now() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  // Lazy eval: if trialing and trial has expired → transition to grace_period
+  if (
+    billingRecord?.subscriptionStatus === SubscriptionStatus.Trialing &&
+    billingRecord.trialEndsAt &&
+    new Date(billingRecord.trialEndsAt).getTime() < Date.now()
+  ) {
+    const gracePeriodEndsAt = new Date(
+      new Date(billingRecord.trialEndsAt).getTime() + 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: billingTableName,
+        Key: {
+          pk: { S: `CUSTOMER#${userId}` },
+          sk: { S: 'SUBSCRIPTION' },
         },
-      };
-      return new ResponseBuilder().status(200).body(response).build();
-    }
+        UpdateExpression:
+          'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+        ExpressionAttributeValues: {
+          ':status': { S: SubscriptionStatus.GracePeriod },
+          ':grace': { S: gracePeriodEndsAt },
+          ':now': { S: new Date().toISOString() },
+        },
+      }),
+    );
 
     const response: BillingInfo = {
       subscription: {
         planId: PlanId.FreeTrial,
-        status: SubscriptionStatus.Trialing,
-        trialEndsAt,
+        status: SubscriptionStatus.GracePeriod,
+        trialEndsAt: billingRecord.trialEndsAt,
+        gracePeriodEndsAt,
       },
     };
-
     return new ResponseBuilder().status(200).body(response).build();
   }
 
-  // 3. Has Stripe customer — fetch subscription + payment method
-  const stripe = getStripeClient();
+  const response: BillingInfo = {
+    subscription: {
+      planId: PlanId.FreeTrial,
+      status: SubscriptionStatus.Trialing,
+      trialEndsAt,
+    },
+  };
+  return new ResponseBuilder().status(200).body(response).build();
+}
+
+async function resolvePaymentMethod(
+  billingRecord: SubscriptionRecord,
+): Promise<BillingInfo['paymentMethod']> {
   let paymentMethod: BillingInfo['paymentMethod'];
 
   if (billingRecord.subscriptionId) {
+    const stripe = getStripeClient();
     try {
       const subscription = await stripe.subscriptions.retrieve(billingRecord.subscriptionId, {
         expand: ['default_payment_method'],
@@ -132,6 +149,14 @@ export async function baseHandler(
     };
   }
 
+  return paymentMethod;
+}
+
+async function evaluateStatusTransitions(
+  billingRecord: SubscriptionRecord,
+  userId: string,
+  billingTableName: string,
+): Promise<SubscriptionStatus> {
   let currentStatus = billingRecord.subscriptionStatus ?? SubscriptionStatus.Trialing;
 
   // Lazy eval: trial expired → grace_period
@@ -188,12 +213,20 @@ export async function baseHandler(
     currentStatus = SubscriptionStatus.Canceled;
   }
 
+  return currentStatus;
+}
+
+function buildBillingResponse(
+  billingRecord: SubscriptionRecord,
+  currentStatus: SubscriptionStatus,
+  paymentMethod: BillingInfo['paymentMethod'],
+): BillingInfo {
   const isActivePlan =
     currentStatus === SubscriptionStatus.Active ||
     currentStatus === SubscriptionStatus.PastDue ||
     currentStatus === SubscriptionStatus.GracePeriod;
 
-  const response: BillingInfo = {
+  return {
     subscription: {
       planId: isActivePlan
         ? PlanId.PayAsYouGo
@@ -215,8 +248,6 @@ export async function baseHandler(
     },
     paymentMethod,
   };
-
-  return new ResponseBuilder().status(200).body(response).build();
 }
 
 export const handler = middy(baseHandler)

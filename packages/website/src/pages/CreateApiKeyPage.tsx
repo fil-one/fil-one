@@ -2,22 +2,15 @@ import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr';
 
-import type {
-  AccessKeyBucketScope,
-  AccessKeyPermission,
-  CreateAccessKeyResponse,
-} from '@filone/shared';
-import { CreateAccessKeySchema } from '@filone/shared';
-import { apiRequest } from '../lib/api.js';
-import { expiresAtFromForm } from '../lib/time.js';
-import { AccessKeyExpirationFields } from '../components/AccessKeyExpirationFields.js';
-import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';
-import { AccessKeyBucketScopeFields } from '../components/AccessKeyBucketScopeFields.js';
-import { AccessKeyPermissionsFields } from '../components/AccessKeyPermissionsFields.js';
+import type { CreateAccessKeyResponse } from '@filone/shared';
+import { S3_REGION } from '@filone/shared';
+import { Heading } from '../components/Heading/Heading';
+import { AccessKeyFormFields } from '../components/AccessKeyFormFields.js';
 import { Button } from '../components/Button.js';
-import { Input } from '../components/Input.js';
+import { IconButton } from '../components/IconButton.js';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal.js';
-import { useToast } from '../components/Toast/index.js';
+import { SlowOperationIndicator } from '../components/SlowOperationIndicator.js';
+import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 
 // ---------------------------------------------------------------------------
 // Page
@@ -25,74 +18,38 @@ import { useToast } from '../components/Toast/index.js';
 
 export function CreateApiKeyPage() {
   const navigate = useNavigate();
-  const { toast } = useToast();
-
-  const [keyName, setKeyName] = useState('');
-  const [permissions, setPermissions] = useState<AccessKeyPermission[]>(['read', 'write', 'list']);
-  const [bucketScope, setBucketScope] = useState<AccessKeyBucketScope>('all');
-  const [selectedBuckets, setSelectedBuckets] = useState<string[]>([]);
-  const [expiration, setExpiration] = useState<ExpirationOption>('never');
-  const [customDate, setCustomDate] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
   const [credentials, setCredentials] = useState<{
     accessKeyId: string;
     secretAccessKey: string;
   } | null>(null);
+  const [region, setRegion] = useState(S3_REGION);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const body = {
-      keyName: keyName.trim(),
-      permissions,
-      bucketScope,
-      buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
-      expiresAt: expiresAtFromForm(expiration, customDate),
-    };
-    const parsed = CreateAccessKeySchema.safeParse(body);
-    if (!parsed.success) {
-      toast.error(parsed.error.issues[0].message);
-      return;
-    }
-    setCreating(true);
-    try {
-      const response = await apiRequest<CreateAccessKeyResponse>('/access-keys', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
+  const form = useAccessKeyForm({
+    region,
+    onSuccess: (response: CreateAccessKeyResponse) => {
       setCredentials({
         accessKeyId: response.accessKeyId,
         secretAccessKey: response.secretAccessKey,
       });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create access key');
-    } finally {
-      setCreating(false);
-    }
-  }
+    },
+  });
 
   function handleCredentialsDone() {
     void navigate({ to: '/api-keys' });
   }
 
-  const bucketsValid = bucketScope === 'all' || selectedBuckets.length > 0;
-  const canSubmit =
-    keyName.trim().length > 0 && permissions.length > 0 && bucketsValid && !creating;
-
   return (
     <>
-      <div className="mx-auto max-w-4xl p-8">
+      <div className="mx-auto max-w-4xl px-10 pt-10">
         {/* Header */}
         <div className="mb-8 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => void navigate({ to: '/api-keys' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+          <IconButton
+            icon={ArrowLeftIcon}
             aria-label="Back to API keys"
-          >
-            <ArrowLeftIcon size={16} />
-          </button>
+            onClick={() => void navigate({ to: '/api-keys' })}
+          />
           <div>
-            <h1 className="text-xl font-semibold text-zinc-900">Create API key</h1>
+            <Heading tag="h1">Create API key</Heading>
             <p className="text-sm text-zinc-500">
               Generate credentials for S3-compatible API access
             </p>
@@ -102,69 +59,15 @@ export function CreateApiKeyPage() {
         {/* Two-column layout */}
         <div className="flex gap-8">
           {/* Left: form */}
-          <form onSubmit={handleSubmit} className="flex flex-1 flex-col gap-6">
+          <form onSubmit={form.handleSubmit} className="flex flex-1 flex-col gap-6">
             <div className="rounded-lg border border-zinc-200 bg-white p-6">
-              <div className="flex flex-col gap-6">
-                {/* Key name */}
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="key-name" className="text-sm font-medium text-zinc-700">
-                    Key name
-                  </label>
-                  <Input
-                    id="key-name"
-                    value={keyName}
-                    onChange={setKeyName}
-                    placeholder="e.g., Production API Key"
-                  />
-                  <p className="text-xs text-zinc-500">
-                    A descriptive name helps identify this key in your list.
-                  </p>
-                </div>
-
-                {/* Permissions */}
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-zinc-700">What can this key do?</label>
-                  <AccessKeyPermissionsFields value={permissions} onChange={setPermissions} />
-                  {permissions.length === 0 && (
-                    <p className="text-xs text-red-600">Select at least one permission.</p>
-                  )}
-                </div>
-
-                {/* Bucket scope */}
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-zinc-700">
-                    Which buckets can this key access?
-                  </label>
-                  <p className="text-xs text-zinc-500">
-                    Restrict access to specific buckets or allow all
-                  </p>
-                  <AccessKeyBucketScopeFields
-                    bucketScope={bucketScope}
-                    onBucketScopeChange={setBucketScope}
-                    selectedBuckets={selectedBuckets}
-                    onSelectedBucketsChange={setSelectedBuckets}
-                  />
-                </div>
-
-                {/* Expiration */}
-                <div className="flex flex-col gap-2">
-                  <label className="text-sm font-medium text-zinc-700">
-                    When should it expire?
-                  </label>
-                  <p className="text-xs text-zinc-500">Set an expiration date for added security</p>
-                  <AccessKeyExpirationFields
-                    value={expiration}
-                    customDate={customDate}
-                    onChange={setExpiration}
-                    onDateChange={setCustomDate}
-                  />
-                </div>
-              </div>
+              <AccessKeyFormFields form={form} region={region} onRegionChange={setRegion} />
             </div>
 
-            <Button type="submit" variant="filled" disabled={!canSubmit}>
-              {creating ? 'Creating...' : 'Create API key'}
+            <Button type="submit" variant="primary" disabled={!form.canSubmit}>
+              {form.creating ? 'Creating...' : 'Create API key'}
             </Button>
+            <SlowOperationIndicator isLoading={form.creating} operation="Creating access key" />
           </form>
 
           {/* Right: info panel */}
@@ -203,7 +106,6 @@ export function CreateApiKeyPage() {
       {credentials && (
         <SaveCredentialsModal
           open={true}
-          onClose={handleCredentialsDone}
           onDone={handleCredentialsDone}
           credentials={credentials}
         />

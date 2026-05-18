@@ -1,0 +1,88 @@
+{
+  "files": {
+    "gov-data/README.md": {
+      "status": "done",
+      "size": 5555,
+      "target_bucket": "joe-test-all",
+      "etag": "64783821a7686167f301162e4c8f65fb",
+      "version_id": "ff36f5d1-7c66-40b4-99a3-b2de7950f7e7"
+    },
+    "gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip": {
+      "status": "done",
+      "size": 740853,
+      "target_bucket": "joe-test-all",
+      "etag": "3e808c62e789c7eb12b761370aa2d84b",
+      "version_id": "d4469514-e025-4038-9704-57534ab4ab83"
+    },
+    "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-0397e/v1.zip": {
+      "status": "done",
+      "size": 21037826,
+      "target_bucket": "joe-test-all",
+      "etag": "107550d682c8367ec79b9f92a3f9f053",
+      "version_id": "c8b5cd68-ade8-452a-954f-7a30eca69372"
+    },
+    "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-54c47/v1.zip": {
+      "status": "done",
+      "size": 21082117,
+      "target_bucket": "joe-test-all",
+      "etag": "4cb66abefd99d0fd375345cc04d4d80b",
+      "version_id": "07f69d31-59b3-421a-b10d-5dfff2cd0860"
+    },
+    "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-aa506/v1.zip": {
+      "status": "done",
+      "size": 21079670,
+      "target_bucket": "joe-test-all",
+      "etag": "d668418032d226c63bdb1291c6b940ba",
+      "version_id": "31072e52-1975-4012-a683-0182d13ea6b8"
+    },
+    "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex/v1.zip": {
+      "status": "done",
+      "size": 21031150,
+      "target_bucket": "joe-test-all",
+      "etag": "63378acd3532477e2e6370cf6fdd7148",
+      "version_id": "844fecc7-c7e4-4191-8ec1-d4890f0e0bd4"
+    },
+    "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-10-probability-of-e/v1.zip": {
+      "status": "done",
+      "size": 21018082,
+      "target_bucket": "joe-test-all",
+      "etag": "0ed038e5d24624ab6fee485eacecfceb",
+      "version_id": "29c3ecdc-d8e7-4e25-89fc-e4ccff2e80a5"
+    },
+    "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-2-probability-of-ex/v1.zip": {
+      "status": "done",
+      "size": 21034256,
+      "target_bucket": "joe-test-all",
+      "etag": "5e19df14a4751973259672f3be54d4e3",
+      "version_id": "87d11b5d-e271-4df3-b9ac-144a879baa40"
+    },
+    "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-50-probability-of-e/v1.zip": {
+      "status": "done",
+      "size": 21027592,
+      "target_bucket": "joe-test-all",
+      "etag": "4cd2c3930143660f1ad4a692ca7b047d",
+      "version_id": "696db490-749f-433d-80a5-4f6f02ff86bb"
+    },
+    "gov-data/collections/data_gov/0-25-meter-backscatter-jpeg-image-with-world-file-of-the-nearshore-seafloor-off-of-kill-de/v1.zip": {
+      "status": "done",
+      "size": 21041409,
+      "target_bucket": "joe-test-all",
+      "etag": "cc748535cc6cf1876742aaceba714c10",
+      "version_id": "fb484433-3b5f-4e4b-9bb4-99c71c281adc"
+    },
+    "gov-data/collections/data_gov/0-3-meter-backscatter-jpeg-image-with-world-file-of-the-nearshore-seafloor-off-of-avalon-b/v1.zip": {
+      "status": "done",
+      "size": 21086222,
+      "target_bucket": "joe-test-all",
+      "etag": "d8e3a59b62bc60dd8a2513fc5ace322c",
+      "version_id": "133b708c-8fb6-438c-a0e3-66b0e7a578d4"
+    },
+    "gov-data/collections/data_gov/0-3-meter-backscatter-jpeg-image-with-world-file-of-the-nearshore-seafloor-off-of-duck-nc-/v1.zip": {
+      "status": "done",
+      "size": 21041442,
+      "target_bucket": "joe-test-all",
+      "etag": "39ebf458e83534b88ad5511bd3ef71ed",
+      "version_id": "bf0a3d3e-0ea4-453f-ba5d-77a93347dc13"
+    }
+  }
+}

@@ -12,7 +12,7 @@ import {
   GetItemCommand,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { OrgRole } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
@@ -54,6 +54,11 @@ vi.mock('../lib/auth-secrets.js', () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
   }),
+}));
+
+const mockCreateBillingTrial = vi.fn().mockResolvedValue(undefined);
+vi.mock('../lib/create-billing-trial.js', () => ({
+  createBillingTrial: (args: unknown) => mockCreateBillingTrial(args),
 }));
 
 const mockJwtVerify = vi.fn();
@@ -146,7 +151,6 @@ describe('authMiddleware', () => {
             pk: { S: `ORG#${existingOrgId}` },
             sk: { S: 'PROFILE' },
             name: { S: 'example.com' },
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: FINAL_SETUP_STATUS },
           },
         });
@@ -217,7 +221,6 @@ describe('authMiddleware', () => {
             pk: { S: `ORG#${existingOrgId}` },
             sk: { S: 'PROFILE' },
             name: { S: 'example.com' },
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: FINAL_SETUP_STATUS },
           },
         });
@@ -289,7 +292,6 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
           },
         });
@@ -343,7 +345,6 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
           },
         });
@@ -399,124 +400,16 @@ describe('authMiddleware', () => {
       });
     });
 
-    it('returns 403 ORG_NOT_CONFIRMED when org is not confirmed', async () => {
-      const existingUserId = 'existing-user-uuid';
-      const existingOrgId = 'existing-org-uuid';
-
-      mockJwtVerify.mockResolvedValue({
-        payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
-      });
-
-      ddbMock
-        .on(GetItemCommand, {
-          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
-        })
-        .resolves({
-          Item: {
-            pk: { S: `SUB#${MOCK_SUB}` },
-            sk: { S: 'IDENTITY' },
-            userId: { S: existingUserId },
-            orgId: { S: existingOrgId },
-            email: { S: MOCK_EMAIL },
-          },
-        });
-
-      ddbMock
-        .on(GetItemCommand, {
-          Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
-        })
-        .resolves({
-          Item: {
-            pk: { S: `ORG#${existingOrgId}` },
-            sk: { S: 'PROFILE' },
-            name: { S: 'example.com' },
-            orgConfirmed: { BOOL: false },
-            setupStatus: { S: 'FILONE_ORG_CREATED' },
-          },
-        });
-
-      const { before } = authMiddleware();
-      const event = buildEvent({
-        cookies: [`hs_access_token=valid-token`],
-      });
-      const request = buildMiddyRequest(event);
-
-      const result = await before(request);
-
-      expectErrorResponse(result, 403, {
-        message: 'Please create an organization to continue.',
-        code: ApiErrorCode.ORG_NOT_CONFIRMED,
-      });
-    });
-
-    it('allows bypass routes through when org is not confirmed', async () => {
-      const existingUserId = 'existing-user-uuid';
-      const existingOrgId = 'existing-org-uuid';
-
-      mockJwtVerify.mockResolvedValue({
-        payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
-      });
-
-      ddbMock
-        .on(GetItemCommand, {
-          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
-        })
-        .resolves({
-          Item: {
-            pk: { S: `SUB#${MOCK_SUB}` },
-            sk: { S: 'IDENTITY' },
-            userId: { S: existingUserId },
-            orgId: { S: existingOrgId },
-            email: { S: MOCK_EMAIL },
-          },
-        });
-
-      ddbMock
-        .on(GetItemCommand, {
-          Key: { pk: { S: `ORG#${existingOrgId}` }, sk: { S: 'PROFILE' } },
-        })
-        .resolves({
-          Item: {
-            pk: { S: `ORG#${existingOrgId}` },
-            sk: { S: 'PROFILE' },
-            name: { S: 'example.com' },
-            orgConfirmed: { BOOL: false },
-            setupStatus: { S: 'FILONE_ORG_CREATED' },
-          },
-        });
-
-      const { before } = authMiddleware();
-      const event = buildEvent({
-        cookies: [`hs_access_token=valid-token`],
-        rawPath: '/api/me',
-      });
-      const request = buildMiddyRequest(event);
-
-      const result = await before(request);
-
-      expect(result).toBeUndefined();
-      expect(getUserInfoFromEvent(event)).toStrictEqual({
-        sub: MOCK_SUB,
-        userId: existingUserId,
-        orgId: existingOrgId,
-        email: undefined,
-        emailVerified: false,
-        name: undefined,
-        picture: undefined,
-      });
-    });
-
-    it('creates new user and org when no UserInfoTable record exists', async () => {
+    it('creates new user and org with auto-confirmed name and triggers setup + billing trial', async () => {
       // First call: access token verify; second call: ID token verify
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, name: 'Alice Johnson' } });
 
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
 
       const { before } = authMiddleware();
-      // Use bypass route so the handler proceeds (org is unconfirmed)
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
         rawPath: '/api/me',
@@ -532,7 +425,7 @@ describe('authMiddleware', () => {
         orgId: MOCK_ORG_ID,
         email: MOCK_EMAIL,
         emailVerified: false,
-        name: undefined,
+        name: 'Alice Johnson',
         picture: undefined,
       });
 
@@ -567,15 +460,14 @@ describe('authMiddleware', () => {
             },
           },
         },
-        // Org profile
+        // Org profile — derived from JWT name claim
         {
           Put: {
             TableName: 'UserInfoTable',
             Item: {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: 'PROFILE' },
-              name: { S: 'Example' },
-              orgConfirmed: { BOOL: false },
+              name: { S: 'Alice Org' },
               setupStatus: { S: 'FILONE_ORG_CREATED' },
               createdBy: { S: MOCK_USER_ID },
               createdAt: { S: expect.any(String) },
@@ -595,6 +487,35 @@ describe('authMiddleware', () => {
           },
         },
       ]);
+
+      expect(mockCreateBillingTrial).toHaveBeenCalledWith({
+        userId: MOCK_USER_ID,
+        orgId: MOCK_ORG_ID,
+        email: MOCK_EMAIL,
+      });
+    });
+
+    it('falls back to email-derived org name when no JWT name claim is present', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        rawPath: '/api/me',
+      });
+      const request = buildMiddyRequest(event);
+
+      await before(request);
+
+      const transactCalls = ddbMock.commandCalls(TransactWriteItemsCommand);
+      const orgItem = transactCalls[0].args[0].input.TransactItems?.[2].Put?.Item;
+      expect(orgItem?.name).toEqual({ S: 'Example' });
+      expect(orgItem?.orgConfirmed).toBeUndefined();
     });
 
     it('refreshes tokens when access token is expired but refresh token is valid', async () => {
@@ -639,7 +560,6 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
           },
         });
@@ -701,7 +621,6 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
           },
         });
@@ -737,7 +656,6 @@ describe('authMiddleware', () => {
         .resolvesOnce({ Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } } })
         .resolvesOnce({
           Item: {
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
           },
         });
@@ -820,7 +738,6 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            orgConfirmed: { BOOL: true },
             setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
           },
         });

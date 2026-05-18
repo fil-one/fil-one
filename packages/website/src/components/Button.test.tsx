@@ -12,14 +12,14 @@ vi.mock('@tanstack/react-router', () => ({
 
 describe('Button', () => {
   it('renders children', () => {
-    render(<Button variant="filled">Click me</Button>);
+    render(<Button variant="primary">Click me</Button>);
     expect(screen.getByText('Click me')).toBeInTheDocument();
   });
 
   it('handles click events', () => {
     const onClick = vi.fn();
     render(
-      <Button variant="filled" onClick={onClick}>
+      <Button variant="primary" onClick={onClick}>
         Click
       </Button>,
     );
@@ -29,7 +29,7 @@ describe('Button', () => {
 
   it('renders as disabled', () => {
     render(
-      <Button variant="filled" disabled>
+      <Button variant="primary" disabled>
         Disabled
       </Button>,
     );
@@ -38,7 +38,7 @@ describe('Button', () => {
 
   it('renders as a link when href is provided', () => {
     render(
-      <Button variant="filled" href="/test">
+      <Button variant="primary" href="/test">
         Link
       </Button>,
     );

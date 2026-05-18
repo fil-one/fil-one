@@ -56,7 +56,7 @@ describe('aurora-tenant-setup-consumer handler', () => {
 
     await handler(buildSQSEvent(message), buildContext());
 
-    expect(mockProcessTenantSetup).toHaveBeenCalledWith(message);
+    expect(mockProcessTenantSetup).toHaveBeenCalledWith('org-1');
   });
 
   it('throws when batch contains more than one record', async () => {

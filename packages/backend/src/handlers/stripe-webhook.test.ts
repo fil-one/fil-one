@@ -1,12 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
   DeleteItemCommand,
+  GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 import { buildEvent } from '../test/lambda-test-utilities.js';
+import { type MetricEvent, reportMetric } from '../lib/metrics.js';
 import { SubscriptionStatus } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -16,7 +19,17 @@ import { SubscriptionStatus } from '@filone/shared';
 vi.mock('sst', () => ({
   Resource: {
     BillingTable: { name: 'BillingTable' },
+    UserInfoTable: { name: 'UserInfoTable' },
   },
+}));
+
+const mockUpdateTenantStatus = vi.fn();
+vi.mock('../lib/aurora-backoffice.js', () => ({
+  updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
+}));
+
+vi.mock('../lib/org-setup-status.js', () => ({
+  isOrgSetupComplete: (status: string | undefined) => status === 'AURORA_S3_ACCESS_KEY_CREATED',
 }));
 
 const mockConstructEvent = vi.fn();
@@ -31,6 +44,12 @@ vi.mock('../lib/stripe-client.js', () => ({
   }),
   getWebhookSecret: vi.fn().mockResolvedValue('whsec_test_fake'),
 }));
+
+vi.mock('../lib/metrics.js', () => ({
+  reportMetric: vi.fn(),
+}));
+
+const reportMetricMock = vi.mocked(reportMetric);
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -137,19 +156,56 @@ function setupPaymentMethodsRetrieve() {
   mockPaymentMethodsRetrieve.mockResolvedValue(mockPaymentMethod());
 }
 
+const MOCK_ORG_ID = 'test-org-uuid';
+const MOCK_AURORA_TENANT_ID = 'aurora-tenant-123';
+
+function setupAuroraTenantResolution() {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'BillingTable',
+      Key: { pk: { S: `CUSTOMER#${MOCK_USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+    })
+    .resolves({
+      Item: marshall({ pk: `CUSTOMER#${MOCK_USER_ID}`, sk: 'SUBSCRIPTION', orgId: MOCK_ORG_ID }),
+    });
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+    })
+    .resolves({
+      Item: marshall({
+        pk: `ORG#${MOCK_ORG_ID}`,
+        sk: 'PROFILE',
+        auroraTenantId: MOCK_AURORA_TENANT_ID,
+        setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+      }),
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('stripe-webhook handler', () => {
+  function dunningEmissions(): MetricEvent[] {
+    return reportMetricMock.mock.calls
+      .map(([event]) => event)
+      .filter((e) => (e as { DunningEscalation?: unknown }).DunningEscalation === 1);
+  }
+
   beforeEach(() => {
     ddbMock.reset();
     ddbMock.on(PutItemCommand).resolves({});
     ddbMock.on(UpdateItemCommand).resolves({});
     ddbMock.on(DeleteItemCommand).resolves({});
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
     mockConstructEvent.mockReset();
     mockCustomersRetrieve.mockReset();
     mockPaymentMethodsRetrieve.mockReset();
+    mockUpdateTenantStatus.mockReset();
+    mockUpdateTenantStatus.mockResolvedValue(undefined);
+    reportMetricMock.mockReset();
   });
 
   // -----------------------------------------------------------------------
@@ -397,6 +453,58 @@ describe('stripe-webhook handler', () => {
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
+    it('skips DDB update when Stripe status is incomplete (unmappable)', async () => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      setupStripeEvent('customer.subscription.created', mockSubscription({ status: 'incomplete' }));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(consoleSpy).toHaveBeenCalledWith(
+        '[stripe-webhook] Unmappable Stripe status, skipping update',
+        expect.objectContaining({ stripeStatus: 'incomplete' }),
+      );
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      consoleSpy.mockRestore();
+    });
+
+    it('maps incomplete_expired to canceled', async () => {
+      setupStripeEvent(
+        'customer.subscription.created',
+        mockSubscription({ status: 'incomplete_expired' }),
+      );
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      expect(updateCalls[0].args[0].input).toEqual(
+        expect.objectContaining({
+          ExpressionAttributeValues: expect.objectContaining({
+            ':status': { S: SubscriptionStatus.Canceled },
+          }),
+        }),
+      );
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('maps unpaid to past_due', async () => {
+      setupStripeEvent('customer.subscription.created', mockSubscription({ status: 'unpaid' }));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      expect(updateCalls[0].args[0].input).toEqual(
+        expect.objectContaining({
+          ExpressionAttributeValues: expect.objectContaining({
+            ':status': { S: SubscriptionStatus.PastDue },
+          }),
+        }),
+      );
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
     it('falls back to customer lookup when userId is empty string', async () => {
       setupStripeEvent(
         'customer.subscription.created',
@@ -500,6 +608,13 @@ describe('stripe-webhook handler', () => {
   // 4b. customer.updated
   // -----------------------------------------------------------------------
   describe('customer.updated', () => {
+    let consoleSpy: MockInstance | undefined;
+
+    afterEach(() => {
+      consoleSpy?.mockRestore();
+      consoleSpy = undefined;
+    });
+
     it('updates payment method in DynamoDB when default_payment_method is expanded object', async () => {
       setupStripeEvent('customer.updated', mockCustomerObject());
 
@@ -566,7 +681,7 @@ describe('stripe-webhook handler', () => {
       expect(deleteCalls).toHaveLength(1);
     });
 
-    it('throws when invoice_settings.default_payment_method is null', async () => {
+    it('skips update when default_payment_method is null', async () => {
       setupStripeEvent(
         'customer.updated',
         mockCustomerObject({
@@ -575,14 +690,57 @@ describe('stripe-webhook handler', () => {
       );
 
       const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+
+      // This handler path should not perform any DynamoDB updates or deletes.
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+    });
+
+    it('skips update for trial-creation customer.updated event (currency null → usd, no default_payment_method)', async () => {
+      const TRIAL_USER_ID = '2bfd6596-4ccb-47a8-b508-bf64fdb44d4e';
+      const TRIAL_ORG_ID = '7d352bd8-ed9e-4f2a-8ec3-6ba7ae356525';
+      const TRIAL_CUSTOMER_ID = 'cus_UN4LxyuGMbKzKz';
+      const TRIAL_EVENT_ID = 'evt_1TOKCkAQEKri8lBk4HwPEKWK';
+
+      consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+      mockConstructEvent.mockReturnValue({
+        id: TRIAL_EVENT_ID,
+        type: 'customer.updated',
+        data: {
+          object: {
+            id: TRIAL_CUSTOMER_ID,
+            object: 'customer',
+            currency: 'usd',
+            invoice_settings: {
+              default_payment_method: null,
+              custom_fields: null,
+              footer: null,
+              rendering_options: null,
+            },
+            metadata: {
+              userId: TRIAL_USER_ID,
+              orgId: TRIAL_ORG_ID,
+            },
+          },
+          previous_attributes: { currency: null },
+        },
       });
 
-      const deleteCalls = ddbMock.commandCalls(DeleteItemCommand);
-      expect(deleteCalls).toHaveLength(1);
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+
+      // This handler path should not perform any DynamoDB updates or deletes.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('customer.updated without default_payment_method'),
+        expect.objectContaining({ customerId: TRIAL_CUSTOMER_ID, userId: TRIAL_USER_ID }),
+      );
     });
   });
 
@@ -667,6 +825,69 @@ describe('stripe-webhook handler', () => {
       await handler(buildWebhookEvent('{}'));
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
+
+    it('calls updateTenantStatus WRITE_LOCKED and writes auroraTenantStatus to org profile', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: MOCK_AURORA_TENANT_ID,
+        status: 'WRITE_LOCKED',
+      });
+
+      // Verify org profile update with auroraTenantStatus
+      const orgProfileUpdate = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .find(
+          (c) =>
+            c.args[0].input.TableName === 'UserInfoTable' &&
+            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'WRITE_LOCKED',
+        );
+      expect(orgProfileUpdate).toBeDefined();
+      expect(orgProfileUpdate!.args[0].input.Key).toEqual({
+        pk: { S: `ORG#${MOCK_ORG_ID}` },
+        sk: { S: 'PROFILE' },
+      });
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('does not fail webhook when Aurora WRITE_LOCK fails', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+      mockUpdateTenantStatus.mockRejectedValue(new Error('Aurora API error'));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      // DynamoDB update should still have happened
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      // Org profile auroraTenantStatus must NOT be updated when updateTenantStatus fails
+      const orgProfileUpdate = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .find(
+          (c) =>
+            c.args[0].input.TableName === 'UserInfoTable' &&
+            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'WRITE_LOCKED',
+        );
+      expect(orgProfileUpdate).toBeUndefined();
+      // Webhook should still return 200
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('skips Aurora call when billing record has no orgId', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      // GetItemCommand returns no orgId (default mock returns undefined Item)
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -708,6 +929,7 @@ describe('stripe-webhook handler', () => {
           ':active': { S: SubscriptionStatus.Active },
           ':now': { S: expect.any(String) },
         },
+        ReturnValues: 'ALL_OLD',
       });
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
@@ -752,6 +974,52 @@ describe('stripe-webhook handler', () => {
       const result = await handler(buildWebhookEvent('{}'));
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('calls updateTenantStatus ACTIVE and writes auroraTenantStatus to org profile', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: MOCK_AURORA_TENANT_ID,
+        status: 'ACTIVE',
+      });
+
+      // Verify org profile update with auroraTenantStatus
+      const orgProfileUpdate = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .find(
+          (c) =>
+            c.args[0].input.TableName === 'UserInfoTable' &&
+            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'ACTIVE',
+        );
+      expect(orgProfileUpdate).toBeDefined();
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('does not fail webhook when Aurora re-activation fails', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+      mockUpdateTenantStatus.mockRejectedValue(new Error('Aurora API error'));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      // Org profile auroraTenantStatus must NOT be updated when updateTenantStatus fails
+      const orgProfileUpdate = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .find(
+          (c) =>
+            c.args[0].input.TableName === 'UserInfoTable' &&
+            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'ACTIVE',
+        );
+      expect(orgProfileUpdate).toBeUndefined();
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
@@ -878,6 +1146,360 @@ describe('stripe-webhook handler', () => {
         body: JSON.stringify({ message: 'Idempotency check error' }),
       });
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 10. DunningEscalation metric (EMF via reportMetric)
+  // -----------------------------------------------------------------------
+  describe('DunningEscalation metric', () => {
+    it('emits stage=entered on first payment_failed (attempt_count=1)', async () => {
+      setupStripeEvent(
+        'invoice.payment_failed',
+        mockInvoice({
+          attempt_count: 1,
+          last_finalization_error: { code: 'card_declined' },
+        }),
+      );
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      const emissions = dunningEmissions();
+      expect(emissions).toHaveLength(1);
+      expect(emissions[0]).toMatchObject({
+        stage: 'entered',
+        reason: 'card_declined',
+        attemptBucket: '1',
+        DunningEscalation: 1,
+      });
+      expect(emissions[0]._aws).toMatchObject({
+        CloudWatchMetrics: [
+          {
+            Namespace: 'FilOne',
+            Dimensions: [['stage', 'reason', 'attemptBucket']],
+            Metrics: [{ Name: 'DunningEscalation', Unit: 'Count' }],
+          },
+        ],
+      });
+    });
+
+    it('emits stage=retry on subsequent payment_failed (attempt_count>=2)', async () => {
+      setupStripeEvent(
+        'invoice.payment_failed',
+        mockInvoice({
+          attempt_count: 2,
+          last_finalization_error: { code: 'insufficient_funds' },
+        }),
+      );
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'retry',
+        reason: 'insufficient_funds',
+        attemptBucket: '2',
+      });
+    });
+
+    it('buckets attempt_count>=4 into "4+"', async () => {
+      setupStripeEvent(
+        'invoice.payment_failed',
+        mockInvoice({
+          attempt_count: 5,
+          last_finalization_error: { code: 'card_declined' },
+        }),
+      );
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'retry',
+        attemptBucket: '4+',
+      });
+    });
+
+    it('reports reason="unknown" when last_finalization_error missing', async () => {
+      setupStripeEvent('invoice.payment_failed', mockInvoice({ attempt_count: 1 }));
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'entered',
+        reason: 'unknown',
+      });
+    });
+
+    it('emits stage=canceled with cancellation_details.reason=payment_failed', async () => {
+      setupStripeEvent(
+        'customer.subscription.deleted',
+        mockSubscription({
+          cancellation_details: { reason: 'payment_failed' },
+          latest_invoice: { id: 'in_latest', attempt_count: 3 },
+        }),
+      );
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'canceled',
+        reason: 'payment_failed',
+        attemptBucket: '3',
+      });
+    });
+
+    it('labels canceled by cancellation_requested when voluntary', async () => {
+      setupStripeEvent(
+        'customer.subscription.deleted',
+        mockSubscription({
+          cancellation_details: { reason: 'cancellation_requested' },
+        }),
+      );
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'canceled',
+        reason: 'cancellation_requested',
+        attemptBucket: 'unknown',
+      });
+      // Grace-period behavior must still run regardless of reason
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+    });
+
+    it('labels canceled as reason="unknown" when cancellation_details absent', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'canceled',
+        reason: 'unknown',
+      });
+    });
+
+    it('emits stage=recovered when prior status was past_due', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 2 }));
+      setupCustomerRetrieve();
+      ddbMock.on(UpdateItemCommand).resolves({
+        Attributes: marshall({ subscriptionStatus: SubscriptionStatus.PastDue }),
+      });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'recovered',
+        reason: 'past_due',
+        attemptBucket: '2',
+      });
+    });
+
+    it('emits stage=recovered with reason=grace_period when prior status was grace_period', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 4 }));
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+      ddbMock.on(UpdateItemCommand, { TableName: TABLE_NAME }).resolves({
+        Attributes: marshall({ subscriptionStatus: SubscriptionStatus.GracePeriod }),
+      });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()[0]).toMatchObject({
+        stage: 'recovered',
+        reason: 'grace_period',
+        attemptBucket: '4+',
+      });
+      // Aurora re-activation must still run
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: MOCK_AURORA_TENANT_ID,
+        status: 'ACTIVE',
+      });
+    });
+
+    it('does NOT emit recovered on normal renewal (prior status was active)', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 1 }));
+      setupCustomerRetrieve();
+      ddbMock.on(UpdateItemCommand).resolves({
+        Attributes: marshall({ subscriptionStatus: SubscriptionStatus.Active }),
+      });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()).toHaveLength(0);
+    });
+
+    it('does NOT emit on unrelated events (customer.subscription.created)', async () => {
+      setupStripeEvent('customer.subscription.created', mockSubscription());
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(dunningEmissions()).toHaveLength(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 11. InvoicePaid metric (EMF via reportMetric)
+  // -----------------------------------------------------------------------
+  describe('InvoicePaid metric', () => {
+    function invoicePaidEmissions(): MetricEvent[] {
+      return reportMetricMock.mock.calls
+        .map(([event]) => event)
+        .filter((e) => (e as { InvoicePaid?: unknown }).InvoicePaid === 1);
+    }
+
+    it('emits one InvoicePaid event on invoice.payment_succeeded', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      const emissions = invoicePaidEmissions();
+      expect(emissions).toHaveLength(1);
+      expect(emissions[0]).toMatchObject({ InvoicePaid: 1 });
+      expect(emissions[0]._aws).toMatchObject({
+        CloudWatchMetrics: [
+          {
+            Namespace: 'FilOne',
+            Dimensions: [[]],
+            Metrics: [{ Name: 'InvoicePaid', Unit: 'Count' }],
+          },
+        ],
+      });
+    });
+
+    it('does not emit even when invoice.customer is null', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ customer: null }));
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(invoicePaidEmissions()).toHaveLength(0);
+    });
+
+    it('does NOT emit on invoice.payment_failed', async () => {
+      setupStripeEvent('invoice.payment_failed', mockInvoice({ attempt_count: 1 }));
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(invoicePaidEmissions()).toHaveLength(0);
+    });
+
+    it('does NOT emit on unrelated events (customer.subscription.created)', async () => {
+      setupStripeEvent('customer.subscription.created', mockSubscription());
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(invoicePaidEmissions()).toHaveLength(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 12. InvoiceFinalized metric (EMF via reportMetric)
+  // -----------------------------------------------------------------------
+  describe('InvoiceFinalized metric', () => {
+    function invoiceFinalizedEmissions(): MetricEvent[] {
+      return reportMetricMock.mock.calls
+        .map(([event]) => event)
+        .filter((e) => (e as { InvoiceFinalized?: unknown }).InvoiceFinalized === 1);
+    }
+
+    it('emits one InvoiceFinalized event on invoice.finalized', async () => {
+      setupStripeEvent('invoice.finalized', mockInvoice());
+
+      await handler(buildWebhookEvent('{}'));
+
+      const emissions = invoiceFinalizedEmissions();
+      expect(emissions).toHaveLength(1);
+      expect(emissions[0]).toMatchObject({ InvoiceFinalized: 1 });
+      expect(emissions[0]._aws).toMatchObject({
+        CloudWatchMetrics: [
+          {
+            Namespace: 'FilOne',
+            Dimensions: [[]],
+            Metrics: [{ Name: 'InvoiceFinalized', Unit: 'Count' }],
+          },
+        ],
+      });
+    });
+
+    it('does NOT emit on invoice.finalization_failed', async () => {
+      setupStripeEvent('invoice.finalization_failed', mockInvoice());
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(invoiceFinalizedEmissions()).toHaveLength(0);
+    });
+
+    it('does NOT emit on invoice.payment_succeeded', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(invoiceFinalizedEmissions()).toHaveLength(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 13. InvoiceFinalizationFailed metric (EMF via reportMetric)
+  // -----------------------------------------------------------------------
+  describe('InvoiceFinalizationFailed metric', () => {
+    function invoiceFinalizationFailedEmissions(): MetricEvent[] {
+      return reportMetricMock.mock.calls
+        .map(([event]) => event)
+        .filter(
+          (e) => (e as { InvoiceFinalizationFailed?: unknown }).InvoiceFinalizationFailed === 1,
+        );
+    }
+
+    it('emits with reason from last_finalization_error.code', async () => {
+      setupStripeEvent(
+        'invoice.finalization_failed',
+        mockInvoice({ last_finalization_error: { code: 'tax_calculation_failed' } }),
+      );
+
+      await handler(buildWebhookEvent('{}'));
+
+      const emissions = invoiceFinalizationFailedEmissions();
+      expect(emissions).toHaveLength(1);
+      expect(emissions[0]).toMatchObject({
+        reason: 'tax_calculation_failed',
+        InvoiceFinalizationFailed: 1,
+      });
+      expect(emissions[0]._aws).toMatchObject({
+        CloudWatchMetrics: [
+          {
+            Namespace: 'FilOne',
+            Dimensions: [['reason']],
+            Metrics: [{ Name: 'InvoiceFinalizationFailed', Unit: 'Count' }],
+          },
+        ],
+      });
+    });
+
+    it('emits with reason="unknown" when last_finalization_error missing', async () => {
+      setupStripeEvent('invoice.finalization_failed', mockInvoice());
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(invoiceFinalizationFailedEmissions()[0]).toMatchObject({
+        reason: 'unknown',
+      });
+    });
+
+    it('does NOT emit on invoice.finalized', async () => {
+      setupStripeEvent('invoice.finalized', mockInvoice());
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(invoiceFinalizationFailedEmissions()).toHaveLength(0);
     });
   });
 });
