@@ -96,18 +96,6 @@ export default $config({
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
     });
 
-    // ── SQS Queues ─────────────────────────────────────────────────
-    const tenantSetupDlq = new sst.aws.Queue('AuroraTenantSetupDlq', {
-      fifo: true,
-    });
-
-    const tenantSetupQueue = new sst.aws.Queue('AuroraTenantSetupQueue', {
-      fifo: true,
-      dlq: tenantSetupDlq.arn,
-      // Make visibility timeout longer than the Lambda timeout to avoid multiple retries
-      visibilityTimeout: '90 seconds',
-    });
-
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
@@ -358,7 +346,6 @@ export default $config({
       billingTable,
       userInfoTable,
       userFilesBucket,
-      tenantSetupQueue,
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
@@ -718,37 +705,6 @@ export default $config({
         },
       ],
     });
-
-    // ── Tenant setup consumer ──────────────────────────────────────
-    const tenantSetupFn = createFn('AuroraTenantSetup', {
-      handler: 'packages/backend/src/handlers/aurora-tenant-setup.handler',
-      link: [userInfoTable, auroraBackofficeToken],
-      environment: {
-        ...auroraEnv,
-        ...sharedEnv,
-      },
-      permissions: [
-        {
-          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
-        },
-        // queue.subscribe(fn.arn) passes an ARN, so SST skips attaching
-        // SQS permissions automatically — we must add them here.
-        {
-          actions: [
-            'sqs:ChangeMessageVisibility',
-            'sqs:DeleteMessage',
-            'sqs:GetQueueAttributes',
-            'sqs:GetQueueUrl',
-            'sqs:ReceiveMessage',
-          ],
-          resources: [tenantSetupQueue.arn],
-        },
-      ],
-      timeout: '60 seconds',
-    });
-
-    tenantSetupQueue.subscribe(tenantSetupFn.arn, { batch: { size: 1 } });
 
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {

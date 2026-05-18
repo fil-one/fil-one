@@ -45,7 +45,6 @@ vi.mock('sst', () => ({
     Auth0ClientId: { value: 'test-client-id' },
     Auth0ClientSecret: { value: 'test-client-secret' },
     AuroraBackofficeToken: { value: 'test-aurora-token' },
-    AuroraTenantSetupQueue: { url: 'https://sqs.us-east-1.amazonaws.com/123/setup-queue' },
   },
 }));
 
