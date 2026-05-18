@@ -9,6 +9,7 @@ import type { CreateAccessKeyResponse, S3Region } from '@filone/shared';
 import { Button } from './Button.js';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal/index.js';
 import { SaveCredentialsModal } from './SaveCredentialsModal.js';
+import { SlowOperationIndicator } from './SlowOperationIndicator.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -105,13 +106,16 @@ export function AddBucketKeyModal({
         </div>
       </ModalBody>
       <ModalFooter>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={handleClose}>
-            Cancel
-          </Button>
-          <Button variant="primary" disabled={!form.canSubmit} onClick={form.handleSubmit}>
-            {form.creating ? 'Creating...' : 'Create API key'}
-          </Button>
+        <div className="flex flex-col gap-3">
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={handleClose}>
+              Cancel
+            </Button>
+            <Button variant="primary" disabled={!form.canSubmit} onClick={form.handleSubmit}>
+              {form.creating ? 'Creating...' : 'Create API key'}
+            </Button>
+          </div>
+          <SlowOperationIndicator isLoading={form.creating} operation="Creating access key" />
         </div>
       </ModalFooter>
     </Modal>
