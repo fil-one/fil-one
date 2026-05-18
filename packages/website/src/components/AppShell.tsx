@@ -4,6 +4,8 @@ import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
 import { getUsage } from '../lib/api';
 import { queryKeys } from '../lib/query-client.js';
+import { AddOnStateProvider } from '../contexts/addOnState.js';
+import { IntegrationStateProvider } from '../contexts/integrationState.js';
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -16,26 +18,28 @@ export function AppShell({ children }: AppShellProps) {
   const tenantStatus = usage?.tenantStatus;
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
-      {tenantStatus === 'WRITE_LOCKED' && (
-        <Banner variant="warning" action={{ label: 'Upgrade', href: '/billing' }}>
-          Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.
-        </Banner>
-      )}
-      {tenantStatus === 'DISABLED' && (
-        <Banner variant="error" action={{ label: 'Manage account', href: '/billing' }}>
-          Account disabled. Visit billing to restore access.
-        </Banner>
-      )}
-      <div className="flex flex-1 overflow-hidden">
-        <div className={`flex-shrink-0 transition-all duration-200 ${collapsed ? 'w-20' : 'w-60'}`}>
-          <SidebarNav collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+    <AddOnStateProvider>
+      <IntegrationStateProvider>
+        <div className="flex h-screen flex-col overflow-hidden">
+          {tenantStatus === 'WRITE_LOCKED' && (
+            <Banner variant="warning" action={{ label: 'Upgrade', href: '/billing' }}>
+              Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.
+            </Banner>
+          )}
+
+          <div className="flex flex-1 overflow-hidden">
+            <div
+              className={`flex-shrink-0 transition-all duration-200 ${collapsed ? 'w-20' : 'w-60'}`}
+            >
+              <SidebarNav collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+            </div>
+            <main className="flex-1 overflow-auto bg-zinc-50">
+              {children}
+              <div className="h-10 shrink-0" aria-hidden="true" />
+            </main>
+          </div>
         </div>
-        <main className="flex-1 overflow-auto bg-zinc-50">
-          {children}
-          <div className="h-10 shrink-0" aria-hidden="true" />
-        </main>
-      </div>
-    </div>
+      </IntegrationStateProvider>
+    </AddOnStateProvider>
   );
 }

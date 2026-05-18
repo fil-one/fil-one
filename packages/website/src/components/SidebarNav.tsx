@@ -11,6 +11,8 @@ import {
   ChatCircleIcon,
   SignOutIcon,
   QuestionIcon,
+  RobotIcon,
+  ChatTeardropDotsIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useMatchRoute } from '@tanstack/react-router';
@@ -24,6 +26,7 @@ import { Button } from './Button.js';
 import { ProgressBar } from './ProgressBar.js';
 import { StatusIndicator } from './StatusIndicator.js';
 import { Tooltip } from './Tooltip.js';
+import { useAddOnState } from '../contexts/addOnState.js';
 
 type SidebarNavProps = {
   collapsed: boolean;
@@ -36,12 +39,33 @@ type NavItem = {
   label: string;
 };
 
-const navItems: NavItem[] = [
-  { path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard' },
-  { path: '/buckets', icon: DatabaseIcon, label: 'Buckets' },
-  { path: '/api-keys', icon: KeyIcon, label: 'API Keys' },
-  { path: '/billing', icon: CreditCardIcon, label: 'Billing' },
-  { path: '/settings', icon: GearIcon, label: 'Settings' },
+type NavGroup = {
+  label?: string;
+  items: NavItem[];
+  showDot?: boolean;
+};
+
+const navGroups: NavGroup[] = [
+  {
+    items: [{ path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard' }],
+  },
+  {
+    label: 'Storage',
+    items: [
+      { path: '/buckets', icon: DatabaseIcon, label: 'Buckets' },
+      { path: '/api-keys', icon: KeyIcon, label: 'API Keys' },
+    ],
+  },
+  {
+    label: 'Compute',
+    showDot: true,
+    items: [{ path: '/rag-pipeline', icon: ChatTeardropDotsIcon, label: 'RAG Pipeline' }],
+  },
+  {
+    label: 'Add-ons',
+    showDot: true,
+    items: [{ path: '/ai-agent-toolkit', icon: RobotIcon, label: 'AI Agent Toolkit' }],
+  },
 ];
 
 type NavLinksProps = {
@@ -50,37 +74,59 @@ type NavLinksProps = {
 };
 
 function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
+  const { states } = useAddOnState();
+
   return (
-    <div className="flex flex-col gap-0.5 p-2">
-      {navItems.map(({ path, icon: Icon, label }) => {
-        const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
-        const link = (
-          <Link
-            key={path}
-            to={path}
-            aria-label={label}
-            className={[
-              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-              collapsed ? 'justify-center' : '',
-              isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-            activeProps={{ className: 'bg-brand-50 text-brand-700' }}
-          >
-            <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
-            {!collapsed && <span>{label}</span>}
-          </Link>
-        );
-        if (collapsed) {
-          return (
-            <Tooltip key={path} content={label} side="right">
-              {link}
-            </Tooltip>
-          );
-        }
-        return link;
-      })}
+    <div className="flex flex-col p-2">
+      {navGroups.map((group, gi) => (
+        <div key={gi} className={gi > 0 ? 'mt-2' : ''}>
+          {!collapsed && group.label && (
+            <p className="mb-1 px-3 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+              {group.label}
+            </p>
+          )}
+          <div className="flex flex-col gap-0.5">
+            {group.items.map(({ path, icon: Icon, label }) => {
+              const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
+              const addOnStatus = group.showDot ? states[path] : undefined;
+              const dot = addOnStatus === 'active'
+                ? 'bg-green-500'
+                : addOnStatus === 'disabled'
+                  ? 'bg-zinc-300'
+                  : null;
+
+              const link = (
+                <Link
+                  key={path}
+                  to={path}
+                  aria-label={label}
+                  className={[
+                    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                    collapsed ? 'justify-center' : '',
+                    isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
+                  ].filter(Boolean).join(' ')}
+                >
+                  <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
+                  {!collapsed && (
+                    <>
+                      <span className="flex-1">{label}</span>
+                      {dot && <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${dot}`} />}
+                    </>
+                  )}
+                </Link>
+              );
+              if (collapsed) {
+                return (
+                  <Tooltip key={path} content={label} side="right">
+                    {link}
+                  </Tooltip>
+                );
+              }
+              return <div key={path}>{link}</div>;
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -412,7 +458,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           )}
         </div>
 
-        {/* Primary nav items */}
+        {/* Nav */}
         <NavLinks collapsed={collapsed} matchRoute={matchRoute} />
 
         {/* Spacer */}
@@ -434,6 +480,35 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           graceEndsLabel={graceEndsLabel}
           isPastDue={isPastDue}
         />
+
+        {/* Bottom utility nav */}
+        <div className="p-2 flex flex-col gap-0.5">
+          {[
+            { path: '/billing', icon: CreditCardIcon, label: 'Billing' },
+            { path: '/settings', icon: GearIcon, label: 'Settings' },
+          ].map(({ path, icon: Icon, label }) => {
+            const isActive = Boolean(matchRoute({ to: path }));
+            const link = (
+              <Link
+                key={path}
+                to={path}
+                aria-label={label}
+                className={[
+                  'flex items-center gap-3 rounded-lg px-3 py-1.5 text-xs transition-colors',
+                  collapsed ? 'justify-center' : '',
+                  isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-500 hover:bg-zinc-100',
+                ].filter(Boolean).join(' ')}
+              >
+                <Icon size={16} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
+                {!collapsed && <span>{label}</span>}
+              </Link>
+            );
+            if (collapsed) {
+              return <Tooltip key={path} content={label} side="right">{link}</Tooltip>;
+            }
+            return <div key={path}>{link}</div>;
+          })}
+        </div>
 
         {/* Footer: Help + System status */}
         <div className="border-t border-zinc-200 p-2 flex flex-col gap-0.5">
