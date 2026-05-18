@@ -11,9 +11,15 @@ import { MfaSettings } from '../components/MfaSettings';
 import { SettingRow } from '../components/SettingRow';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { getMe, updateProfile, changePassword } from '../lib/api.js';
+import {
+  getMe,
+  updateProfile,
+  changePassword,
+  getPreferences,
+  updatePreferences,
+} from '../lib/api.js';
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
-import type { ConnectionProvider, MeResponse } from '@filone/shared';
+import type { ConnectionProvider, MeResponse, PreferencesResponse } from '@filone/shared';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
@@ -295,28 +301,51 @@ function ProfileSaveBar({ form }: { form: ReturnType<typeof useProfileForm> }) {
 // Notifications section
 // ---------------------------------------------------------------------------
 
-function NotificationsSection() {
+export function NotificationsSection() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data: prefs, isPending } = useQuery({
+    queryKey: queryKeys.preferences,
+    queryFn: getPreferences,
+  });
+
+  const mutation = useMutation({
+    mutationFn: updatePreferences,
+    onSuccess: (result) => {
+      queryClient.setQueryData<PreferencesResponse>(queryKeys.preferences, result);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to update preferences');
+    },
+  });
+
+  const marketingEnabled = prefs?.marketingEmailsOptedIn ?? false;
+
   return (
     <SectionCard
       icon={BellIcon}
       title="Notifications"
       description="Manage your notification preferences"
     >
-      <div className="flex flex-col gap-3 opacity-50">
-        <ToggleRow
-          label="Email notifications"
-          description="Get notified about your uploads and when approaching storage limits"
-          enabled={false}
-          disabled
-        />
+      <div className="flex flex-col gap-3">
+        <div className="opacity-50">
+          <ToggleRow
+            label="Email notifications"
+            description="Get notified about your uploads and when approaching storage limits"
+            enabled={false}
+            disabled
+          />
+          <p className="text-xs text-zinc-400 italic">Coming soon</p>
+        </div>
         <div className="h-px bg-[#e1e4ea]" />
         <ToggleRow
           label="Marketing emails"
           description="Receive updates about new features"
-          enabled={false}
-          disabled
+          enabled={marketingEnabled}
+          disabled={isPending && !prefs}
+          saving={mutation.isPending}
+          onChange={() => mutation.mutate({ marketingEmailsOptedIn: !marketingEnabled })}
         />
-        <p className="text-xs text-zinc-400 italic">Coming soon</p>
       </div>
     </SectionCard>
   );

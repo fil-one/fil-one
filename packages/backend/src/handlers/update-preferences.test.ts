@@ -17,7 +17,7 @@ vi.mock('sst', () => ({
     Auth0ClientId: { value: 'test-client-id' },
     Auth0ClientSecret: { value: 'test-client-secret' },
     AuroraBackofficeToken: { value: 'test-aurora-token' },
-    HubSpotAccessToken: { value: 'test-hubspot-token' },
+    HubSpotServiceKey: { value: 'test-hubspot-key' },
   },
 }));
 

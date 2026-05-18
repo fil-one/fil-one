@@ -52,7 +52,7 @@ export default $config({
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
-    const hubSpotAccessToken = new sst.Secret('HubSpotAccessToken');
+    const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
     const sendGridApiKey =
       $app.stage === 'staging' || $app.stage === 'production'
         ? new sst.Secret('SendGridApiKey')
@@ -613,7 +613,7 @@ export default $config({
       method: 'PATCH',
       routePath: '/api/me/preferences',
       handler: 'update-preferences',
-      extraLink: [hubSpotAccessToken],
+      extraLink: [hubSpotServiceKey],
     });
     addRoute({
       method: 'POST',
