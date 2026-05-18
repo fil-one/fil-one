@@ -1,8 +1,6 @@
+// oxlint-disable max-lines
 import { useState } from 'react';
-import {
-  CaretDownIcon,
-  CheckIcon,
-} from '@phosphor-icons/react/dist/ssr';
+import { CaretDownIcon, CheckIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Alert } from './Alert.js';
 import { Badge } from './Badge.js';
@@ -97,7 +95,9 @@ function UseCasesSection({ useCases }: { useCases: ComingSoonUseCase[] }) {
       <div className="grid grid-cols-3 gap-4">
         {useCases.map((uc) => (
           <div key={uc.title} className="rounded-xl border border-zinc-200 bg-zinc-50 p-5">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">{uc.category}</p>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
+              {uc.category}
+            </p>
             <p className="mb-1.5 text-sm font-semibold text-zinc-900">{uc.title}</p>
             <p className="text-sm leading-relaxed text-zinc-500">{uc.description}</p>
           </div>
@@ -137,13 +137,11 @@ function WhyFilOneSection({ items }: { items: { title: string; description: stri
 function PricingCard({
   headline,
   subline,
-  features,
   inclusions,
   onJoinClick,
 }: {
   headline: string;
   subline: string;
-  features: ComingSoonFeature[];
   inclusions: string[];
   onJoinClick: () => void;
 }) {
@@ -206,9 +204,7 @@ function AccordionItem({ question, answer }: ComingSoonFaq) {
           className={`flex-shrink-0 text-zinc-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
         />
       </button>
-      {open && (
-        <p className="pb-4 text-sm leading-relaxed text-zinc-500">{answer}</p>
-      )}
+      {open && <p className="pb-4 text-sm leading-relaxed text-zinc-500">{answer}</p>}
     </div>
   );
 }
@@ -249,7 +245,7 @@ function InterestForm({
           description={`Thanks for sharing your use case. We'll reach out when ${title} is ready for alpha access.`}
         />
         <div className="mt-4 flex justify-end">
-          <Button type="button" variant="secondary" size="md" onClick={onSuccess}>
+          <Button type="button" variant="ghost" size="md" onClick={onSuccess}>
             Close
           </Button>
         </div>
@@ -267,7 +263,9 @@ function InterestForm({
           <Select value={workload} onChange={setWorkload}>
             <option value="">Select…</option>
             {config.workloadTypes.map((t) => (
-              <option key={t} value={t}>{t}</option>
+              <option key={t} value={t}>
+                {t}
+              </option>
             ))}
           </Select>
         </div>
@@ -279,7 +277,9 @@ function InterestForm({
           <Select value={provider} onChange={setProvider}>
             <option value="">Select…</option>
             {config.providers.map((p) => (
-              <option key={p} value={p}>{p}</option>
+              <option key={p} value={p}>
+                {p}
+              </option>
             ))}
           </Select>
         </div>
@@ -291,7 +291,9 @@ function InterestForm({
           <Select value={timeline} onChange={setTimeline}>
             <option value="">Select…</option>
             {config.timelines.map((t) => (
-              <option key={t} value={t}>{t}</option>
+              <option key={t} value={t}>
+                {t}
+              </option>
             ))}
           </Select>
         </div>
@@ -312,8 +314,7 @@ function InterestForm({
 
       <div className="mt-5">
         <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
-          Notes{' '}
-          <span className="normal-case tracking-normal text-zinc-400">(optional)</span>
+          Notes <span className="normal-case tracking-normal text-zinc-400">(optional)</span>
         </label>
         <textarea
           rows={3}
@@ -358,10 +359,8 @@ export function ComingSoonPage({
     <>
       <div className="px-10 py-12 pb-20">
         <div className="flex items-start gap-12">
-
           {/* ── Left: scrollable content ── */}
           <div className="flex-1 min-w-0 space-y-20">
-
             {/* Hero */}
             <div>
               <Heading tag="h1" size="2xl" description={description} className="mb-10">
@@ -398,7 +397,6 @@ export function ComingSoonPage({
                 ))}
               </div>
             </section>
-
           </div>
 
           {/* ── Right: sticky card ── */}
@@ -406,7 +404,6 @@ export function ComingSoonPage({
             <PricingCard
               headline={pricing.headline}
               subline={pricing.subline}
-              features={features}
               inclusions={pricing.inclusions}
               onJoinClick={() => setModalOpen(true)}
             />
@@ -422,7 +419,6 @@ export function ComingSoonPage({
               </div>
             )}
           </div>
-
         </div>
       </div>
 
@@ -527,10 +523,8 @@ export function AddOnDisabledPage({
     <>
       <div className="px-10 py-12 pb-20">
         <div className="flex items-start gap-12">
-
           {/* ── Left: scrollable content ── */}
           <div className="flex-1 min-w-0 space-y-20">
-
             {/* Hero */}
             <div>
               <Heading tag="h1" size="2xl" description={description} className="mb-10">
@@ -555,7 +549,6 @@ export function AddOnDisabledPage({
 
             {/* Why Fil One */}
             <WhyFilOneSection items={whyFilOne} />
-
           </div>
 
           {/* ── Right: sticky enable card ── */}
@@ -569,15 +562,12 @@ export function AddOnDisabledPage({
               onEnableClick={() => setConfirmOpen(true)}
             />
           </div>
-
         </div>
       </div>
 
       {/* Confirmation modal */}
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} size="sm">
-        <ModalHeader onClose={() => setConfirmOpen(false)}>
-          Enable {title}?
-        </ModalHeader>
+        <ModalHeader onClose={() => setConfirmOpen(false)}>Enable {title}?</ModalHeader>
         <ModalBody>
           <p className="text-sm text-zinc-600 mb-4">
             Enabling this add-on will add a usage-based fee to your monthly Fil One invoice.
@@ -595,8 +585,19 @@ export function AddOnDisabledPage({
           )}
         </ModalBody>
         <ModalFooter>
-          <Button variant="ghost" size="md" onClick={() => setConfirmOpen(false)}>Cancel</Button>
-          <Button variant="primary" size="md" onClick={() => { setConfirmOpen(false); onEnable(); }}>Enable</Button>
+          <Button variant="ghost" size="md" onClick={() => setConfirmOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => {
+              setConfirmOpen(false);
+              onEnable();
+            }}
+          >
+            Enable
+          </Button>
         </ModalFooter>
       </Modal>
     </>
