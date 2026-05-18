@@ -66,7 +66,7 @@ function SectionCard({
 }
 
 // ---------------------------------------------------------------------------
-// ToggleRow (for notifications)
+// Toggle row (for notifications)
 // ---------------------------------------------------------------------------
 
 function ToggleRow({
@@ -108,6 +108,35 @@ function ToggleRow({
         />
       </button>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Managed-by-provider field (read-only with provider link)
+// ---------------------------------------------------------------------------
+
+function ProviderManagedField({
+  value,
+  provider,
+}: {
+  value: string;
+  provider?: ConnectionProvider;
+}) {
+  return (
+    <>
+      <Input value={value} onChange={() => {}} disabled />
+      <p className="text-[11px] text-zinc-500">
+        Managed by {provider?.label}.{' '}
+        <a
+          href={provider?.profileUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-500 hover:underline"
+        >
+          Update at {provider?.label}
+        </a>
+      </p>
+    </>
   );
 }
 
@@ -167,35 +196,6 @@ function NotificationsSection() {
         )}
       </div>
     </SectionCard>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Managed-by-provider field (read-only with provider link)
-// ---------------------------------------------------------------------------
-
-function ProviderManagedField({
-  value,
-  provider,
-}: {
-  value: string;
-  provider?: ConnectionProvider;
-}) {
-  return (
-    <>
-      <Input value={value} onChange={() => {}} disabled />
-      <p className="text-[11px] text-zinc-500">
-        Managed by {provider?.label}.{' '}
-        <a
-          href={provider?.profileUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-500 hover:underline"
-        >
-          Update at {provider?.label}
-        </a>
-      </p>
-    </>
   );
 }
 
