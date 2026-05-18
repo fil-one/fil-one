@@ -1399,4 +1399,107 @@ describe('stripe-webhook handler', () => {
       expect(invoicePaidEmissions()).toHaveLength(0);
     });
   });
+
+  // -----------------------------------------------------------------------
+  // 12. InvoiceFinalized metric (EMF via reportMetric)
+  // -----------------------------------------------------------------------
+  describe('InvoiceFinalized metric', () => {
+    function invoiceFinalizedEmissions(): MetricEvent[] {
+      return reportMetricMock.mock.calls
+        .map(([event]) => event)
+        .filter((e) => (e as { InvoiceFinalized?: unknown }).InvoiceFinalized === 1);
+    }
+
+    it('emits one InvoiceFinalized event on invoice.finalized', async () => {
+      setupStripeEvent('invoice.finalized', mockInvoice());
+
+      await handler(buildWebhookEvent('{}'));
+
+      const emissions = invoiceFinalizedEmissions();
+      expect(emissions).toHaveLength(1);
+      expect(emissions[0]).toMatchObject({ InvoiceFinalized: 1 });
+      expect(emissions[0]._aws).toMatchObject({
+        CloudWatchMetrics: [
+          {
+            Namespace: 'FilOne',
+            Dimensions: [[]],
+            Metrics: [{ Name: 'InvoiceFinalized', Unit: 'Count' }],
+          },
+        ],
+      });
+    });
+
+    it('does NOT emit on invoice.finalization_failed', async () => {
+      setupStripeEvent('invoice.finalization_failed', mockInvoice());
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(invoiceFinalizedEmissions()).toHaveLength(0);
+    });
+
+    it('does NOT emit on invoice.payment_succeeded', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(invoiceFinalizedEmissions()).toHaveLength(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 13. InvoiceFinalizationFailed metric (EMF via reportMetric)
+  // -----------------------------------------------------------------------
+  describe('InvoiceFinalizationFailed metric', () => {
+    function invoiceFinalizationFailedEmissions(): MetricEvent[] {
+      return reportMetricMock.mock.calls
+        .map(([event]) => event)
+        .filter(
+          (e) => (e as { InvoiceFinalizationFailed?: unknown }).InvoiceFinalizationFailed === 1,
+        );
+    }
+
+    it('emits with reason from last_finalization_error.code', async () => {
+      setupStripeEvent(
+        'invoice.finalization_failed',
+        mockInvoice({ last_finalization_error: { code: 'tax_calculation_failed' } }),
+      );
+
+      await handler(buildWebhookEvent('{}'));
+
+      const emissions = invoiceFinalizationFailedEmissions();
+      expect(emissions).toHaveLength(1);
+      expect(emissions[0]).toMatchObject({
+        reason: 'tax_calculation_failed',
+        InvoiceFinalizationFailed: 1,
+      });
+      expect(emissions[0]._aws).toMatchObject({
+        CloudWatchMetrics: [
+          {
+            Namespace: 'FilOne',
+            Dimensions: [['reason']],
+            Metrics: [{ Name: 'InvoiceFinalizationFailed', Unit: 'Count' }],
+          },
+        ],
+      });
+    });
+
+    it('emits with reason="unknown" when last_finalization_error missing', async () => {
+      setupStripeEvent('invoice.finalization_failed', mockInvoice());
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(invoiceFinalizationFailedEmissions()[0]).toMatchObject({
+        reason: 'unknown',
+      });
+    });
+
+    it('does NOT emit on invoice.finalized', async () => {
+      setupStripeEvent('invoice.finalized', mockInvoice());
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(invoiceFinalizationFailedEmissions()).toHaveLength(0);
+    });
+  });
 });
