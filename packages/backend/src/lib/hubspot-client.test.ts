@@ -74,7 +74,7 @@ describe('syncMarketingPreference', () => {
       subscriptionId: 2233676376,
       statusState: 'SUBSCRIBED',
       channel: 'EMAIL',
-      legalBasis: 'CONSENT_WITH_NOTICE',
+      legalBasis: 'LEGITIMATE_INTEREST_CLIENT',
       legalBasisExplanation: 'User toggled marketing email preference in account settings',
     });
   });

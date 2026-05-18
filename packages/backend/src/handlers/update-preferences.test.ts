@@ -150,7 +150,7 @@ describe('PATCH /api/me/preferences handler', () => {
     expect(mockSyncMarketingPreference).toHaveBeenCalledWith(MOCK_EMAIL, true);
   });
 
-  it('succeeds even when HubSpot sync fails', async () => {
+  it('fails the request and skips the DDB write when HubSpot sync fails', async () => {
     mockSyncMarketingPreference.mockRejectedValue(new Error('HubSpot API down'));
 
     const result = await handler(
@@ -158,14 +158,10 @@ describe('PATCH /api/me/preferences handler', () => {
       buildContext(),
     );
 
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({ marketingEmailsOptedIn: false }),
-    });
+    expect(result).toMatchObject({ statusCode: 500 });
 
-    // DynamoDB was still updated
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1);
+    // DynamoDB was NOT updated — HubSpot is the gating step
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('returns 400 for invalid JSON body', async () => {

@@ -37,6 +37,10 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   const { marketingEmailsOptedIn } = parsed.data;
 
+  if (email) {
+    await syncMarketingPreference(email, marketingEmailsOptedIn);
+  }
+
   await getDynamoClient().send(
     new UpdateItemCommand({
       TableName: Resource.UserInfoTable.name,
@@ -51,19 +55,6 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       },
     }),
   );
-
-  // Best-effort sync to HubSpot — don't fail the request if it errors
-  if (email) {
-    try {
-      await syncMarketingPreference(email, marketingEmailsOptedIn);
-    } catch (err) {
-      console.error('[update-preferences] HubSpot sync failed', {
-        error: (err as Error).message,
-        email,
-        marketingEmailsOptedIn,
-      });
-    }
-  }
 
   return new ResponseBuilder()
     .status(200)

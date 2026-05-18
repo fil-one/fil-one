@@ -2,7 +2,6 @@ import { Resource } from 'sst';
 
 const HUBSPOT_BASE_URL = 'https://api.hubapi.com';
 
-// TODO: Replace with actual subscription type ID from HubSpot portal.
 // Look up via: GET https://api.hubapi.com/communication-preferences/2026-03/definitions
 const MARKETING_SUBSCRIPTION_TYPE_ID = 2233676376;
 
@@ -64,7 +63,7 @@ async function updateSubscriptionStatus(
         subscriptionId,
         statusState: optedIn ? 'SUBSCRIBED' : 'UNSUBSCRIBED',
         channel: 'EMAIL',
-        legalBasis: 'CONSENT_WITH_NOTICE',
+        legalBasis: 'LEGITIMATE_INTEREST_CLIENT',
         legalBasisExplanation: 'User toggled marketing email preference in account settings',
       }),
     },
