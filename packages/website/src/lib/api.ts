@@ -2,6 +2,7 @@ import { API_URL } from '../env.js';
 import { ApiErrorCode, CSRF_COOKIE_NAME } from '@filone/shared';
 import type { StepUpRequiredResponse } from '@filone/shared';
 import { redirectToStepUp } from './step-up.js';
+import type { PreferencesResponse, UpdatePreferencesRequest } from '@filone/shared';
 
 // Prevents multiple simultaneous 401 responses from each triggering a redirect.
 let isRedirecting = false;
@@ -134,6 +135,19 @@ export function changePassword(): Promise<{ message: string }> {
 
 export function resendVerificationEmail(): Promise<{ message: string }> {
   return apiRequest<{ message: string }>('/me/resend-verification', { method: 'POST' });
+}
+
+// ── Preferences API ─────────────────────────────────────────────────────
+
+export function getPreferences(): Promise<PreferencesResponse> {
+  return apiRequest<PreferencesResponse>('/me/preferences');
+}
+
+export function updatePreferences(data: UpdatePreferencesRequest): Promise<PreferencesResponse> {
+  return apiRequest<PreferencesResponse>('/me/preferences', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
 }
 
 // ── MFA API ──────────────────────────────────────────────────────────────

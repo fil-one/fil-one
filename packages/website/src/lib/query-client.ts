@@ -39,4 +39,5 @@ export const queryKeys = {
   bucketAccessKeys: (bucketName: string) => ['access-keys', bucketName] as const,
   bucketAnalytics: (bucketName: string) => ['bucket-analytics', bucketName] as const,
   instatusSummary: ['instatus-summary'] as const,
+  preferences: ['preferences'] as const,
 };
