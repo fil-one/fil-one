@@ -1,0 +1,103 @@
+import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import type {
+  AccessKeyPermission,
+  GranularPermission,
+  ProviderId,
+  RetentionDurationType,
+  RetentionMode,
+  S3Region,
+} from '@filone/shared';
+
+export type EnsureTenantReadyResult =
+  | { ok: true; tenantId: string }
+  | { ok: false; errorResponse: APIGatewayProxyStructuredResultV2 };
+
+export interface PresignerContext {
+  endpointUrl: string;
+  region: string;
+  credentials: { accessKeyId: string; secretAccessKey: string };
+  forcePathStyle: boolean;
+}
+
+export interface BucketSummary {
+  name: string;
+  createdAt: string;
+  versioning?: boolean;
+  encrypted?: boolean;
+}
+
+export interface BucketDetails extends BucketSummary {
+  objectLockEnabled?: boolean;
+  defaultRetention?: RetentionMode;
+  retentionDuration?: number;
+  retentionDurationType?: RetentionDurationType;
+}
+
+export interface CreateBucketArgs {
+  tenantId: string;
+  name: string;
+  versioning?: boolean;
+  lock?: boolean;
+  retention?: {
+    enabled: boolean;
+    mode: RetentionMode;
+    duration: number;
+    durationType: RetentionDurationType;
+  };
+}
+
+export interface IssueAccessKeyOpts {
+  keyName: string;
+  permissions: AccessKeyPermission[];
+  granularPermissions?: GranularPermission[];
+  buckets?: string[];
+  expiresAt?: string | null;
+}
+
+export interface IssuedAccessKey {
+  id: string;
+  accessKeyId: string;
+  accessKeySecret: string;
+  createdAt: string;
+}
+
+export class BucketAlreadyExistsError extends Error {
+  constructor(bucketName: string) {
+    super(`Bucket "${bucketName}" already exists`);
+    this.name = 'BucketAlreadyExistsError';
+  }
+}
+
+export class AccessKeyAlreadyExistsError extends Error {
+  constructor() {
+    super('An access key with this name already exists');
+    this.name = 'AccessKeyAlreadyExistsError';
+  }
+}
+
+export class AccessKeyValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AccessKeyValidationError';
+  }
+}
+
+export interface ServiceOrchestrator {
+  readonly id: ProviderId;
+  readonly region: S3Region;
+
+  ensureTenantReady(orgId: string): Promise<EnsureTenantReadyResult>;
+
+  createBucket(args: CreateBucketArgs): Promise<void>;
+  deleteBucket(tenantId: string, name: string): Promise<void>;
+  listBuckets(tenantId: string): Promise<BucketSummary[]>;
+  getBucket(tenantId: string, name: string): Promise<BucketDetails | null>;
+
+  issueConsoleAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey>;
+  recoverConsoleAccessKey(
+    tenantId: string,
+    keyName: string,
+  ): Promise<{ id: string; accessKeyId: string; createdAt: string } | undefined>;
+
+  getPresignerContext(tenantId: string): Promise<PresignerContext>;
+}

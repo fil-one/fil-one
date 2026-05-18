@@ -6,13 +6,11 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { CreateAccessKeySchema, S3_REGION } from '@filone/shared';
 import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
+import { orchestratorForRegion } from '../lib/service-orchestrator/registry.js';
 import {
-  AuroraValidationError,
-  createAuroraAccessKey,
-  DuplicateKeyNameError,
-  findAuroraAccessKeyByName,
-} from '../lib/aurora-portal.js';
-import { ensureTenantReady } from '../lib/aurora-tenant-setup.js';
+  AccessKeyAlreadyExistsError,
+  AccessKeyValidationError,
+} from '../lib/service-orchestrator/service-orchestrator.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -50,6 +48,9 @@ export async function baseHandler(
   const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
   const expiresAt = parsed.data.expiresAt ?? null;
 
+  // Phase A: only the Aurora region is supported in handlers. Phase B will
+  // open this up via getAvailableRegions(stage) once the Fortilyx
+  // orchestrator is registered.
   if (region !== undefined && region !== S3_REGION) {
     return new ResponseBuilder()
       .status(400)
@@ -59,14 +60,14 @@ export async function baseHandler(
 
   const { orgId } = getUserInfo(event);
 
-  const ready = await ensureTenantReady(orgId);
+  const orchestrator = orchestratorForRegion(S3_REGION);
+  const ready = await orchestrator.ensureTenantReady(orgId);
   if (!ready.ok) return ready.errorResponse;
-  const { auroraTenantId } = ready;
+  const { tenantId } = ready;
 
-  let auroraKey;
+  let issued;
   try {
-    auroraKey = await createAuroraAccessKey({
-      tenantId: auroraTenantId,
+    issued = await orchestrator.issueConsoleAccessKey(tenantId, {
       keyName,
       permissions,
       granularPermissions,
@@ -74,14 +75,14 @@ export async function baseHandler(
       expiresAt,
     });
   } catch (err) {
-    if (err instanceof DuplicateKeyNameError) {
-      await recoverDuplicateKey(orgId, auroraTenantId, keyName);
+    if (err instanceof AccessKeyAlreadyExistsError) {
+      await recoverDuplicateKey(orgId, tenantId, keyName, orchestrator);
       return new ResponseBuilder()
         .status(409)
         .body<ErrorResponse>({ message: 'An access key with this name already exists' })
         .build();
     }
-    if (err instanceof AuroraValidationError) {
+    if (err instanceof AccessKeyValidationError) {
       return new ResponseBuilder()
         .status(400)
         .body<ErrorResponse>({ message: err.message })
@@ -95,10 +96,10 @@ export async function baseHandler(
       TableName: Resource.UserInfoTable.name,
       Item: marshall({
         pk: `ORG#${orgId}`,
-        sk: `ACCESSKEY#${auroraKey.id}`,
+        sk: `ACCESSKEY#${issued.id}`,
         keyName,
-        accessKeyId: auroraKey.accessKeyId,
-        createdAt: auroraKey.createdAt,
+        accessKeyId: issued.accessKeyId,
+        createdAt: issued.createdAt,
         status: 'active',
         permissions,
         ...(granularPermissions?.length ? { granularPermissions } : {}),
@@ -112,19 +113,20 @@ export async function baseHandler(
   return new ResponseBuilder()
     .status(201)
     .body<CreateAccessKeyResponse>({
-      id: auroraKey.id,
+      id: issued.id,
       keyName,
-      accessKeyId: auroraKey.accessKeyId,
-      secretAccessKey: auroraKey.accessKeySecret,
-      createdAt: auroraKey.createdAt,
+      accessKeyId: issued.accessKeyId,
+      secretAccessKey: issued.accessKeySecret,
+      createdAt: issued.createdAt,
     })
     .build();
 }
 
 async function recoverDuplicateKey(
   orgId: string,
-  auroraTenantId: string,
+  tenantId: string,
   keyName: string,
+  orchestrator: ReturnType<typeof orchestratorForRegion>,
 ): Promise<void> {
   // Check if we already have a DynamoDB record for this key
   const { Items: existingKeys } = await getDynamoClient().send(
@@ -143,18 +145,15 @@ async function recoverDuplicateKey(
     return; // Simple duplicate — nothing to recover
   }
 
-  // Partial failure: Aurora key exists but DynamoDB record is missing.
-  // Recover by fetching key details from Aurora and writing the DB record.
-  const auroraKey = await findAuroraAccessKeyByName({
-    tenantId: auroraTenantId,
-    keyName,
-  });
+  // Partial failure: provider key exists but DynamoDB record is missing.
+  // Recover by fetching key details from the provider and writing the DB record.
+  const recovered = await orchestrator.recoverConsoleAccessKey(tenantId, keyName);
 
-  if (!auroraKey) {
-    // Shouldn't happen — Aurora returned 409 but key not found in list.
+  if (!recovered) {
+    // Shouldn't happen — provider returned conflict but key not found in list.
     // Just return and let the user see the 409 message.
     console.error(
-      `Aurora returned 409 for key "${keyName}" but key not found in Aurora list for tenant ${auroraTenantId}`,
+      `Provider returned conflict for key "${keyName}" but key not found in list for tenant ${tenantId}`,
     );
     return;
   }
@@ -164,17 +163,17 @@ async function recoverDuplicateKey(
       TableName: Resource.UserInfoTable.name,
       Item: marshall({
         pk: `ORG#${orgId}`,
-        sk: `ACCESSKEY#${auroraKey.id}`,
+        sk: `ACCESSKEY#${recovered.id}`,
         keyName,
-        accessKeyId: auroraKey.accessKeyId,
-        createdAt: auroraKey.createdAt,
+        accessKeyId: recovered.accessKeyId,
+        createdAt: recovered.createdAt,
         status: 'active',
       }),
     }),
   );
 
   console.log(
-    `Recovered DynamoDB record for Aurora access key "${keyName}" (id=${auroraKey.id}) for org ${orgId}`,
+    `Recovered DynamoDB record for access key "${keyName}" (id=${recovered.id}) for org ${orgId}`,
   );
 }
 
