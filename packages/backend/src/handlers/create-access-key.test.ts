@@ -13,15 +13,15 @@ vi.mock('sst', () => ({
 }));
 
 const mockEnsureTenantReady = vi.fn();
-const mockIssueConsoleAccessKey = vi.fn();
-const mockRecoverConsoleAccessKey = vi.fn();
+const mockIssueAccessKey = vi.fn();
+const mockRecoverAccessKeyByName = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
   region: 'eu-west-1',
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
-  issueConsoleAccessKey: (...args: unknown[]) => mockIssueConsoleAccessKey(...args),
-  recoverConsoleAccessKey: (...args: unknown[]) => mockRecoverConsoleAccessKey(...args),
+  issueAccessKey: (...args: unknown[]) => mockIssueAccessKey(...args),
+  recoverAccessKeyByName: (...args: unknown[]) => mockRecoverAccessKeyByName(...args),
 };
 
 vi.mock('../lib/service-orchestrator/registry.js', () => ({
@@ -71,7 +71,7 @@ describe('create-access-key baseHandler', () => {
 
   it('returns 201 with keyName, accessKeyId, and secretAccessKey on success', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockIssueConsoleAccessKey.mockResolvedValue(issuedAccessKey());
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -87,14 +87,14 @@ describe('create-access-key baseHandler', () => {
     });
   });
 
-  it('calls orchestrator.issueConsoleAccessKey with correct params', async () => {
+  it('calls orchestrator.issueAccessKey with correct params', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockIssueConsoleAccessKey.mockResolvedValue(issuedAccessKey());
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(mockIssueConsoleAccessKey).toHaveBeenCalledWith('aurora-t-1', {
+    expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
       keyName: 'My Key',
       permissions: ['read', 'write', 'list', 'delete'],
       granularPermissions: undefined,
@@ -105,7 +105,7 @@ describe('create-access-key baseHandler', () => {
 
   it('stores access key in DynamoDB without the secret', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockIssueConsoleAccessKey.mockResolvedValue(issuedAccessKey());
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     await baseHandler(event);
@@ -129,7 +129,7 @@ describe('create-access-key baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(400);
-    expect(mockIssueConsoleAccessKey).not.toHaveBeenCalled();
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 
   const invalidKeyNameCases: Record<string, string> = {
@@ -148,13 +148,13 @@ describe('create-access-key baseHandler', () => {
       const result = await baseHandler(event);
 
       expect(result.statusCode).toBe(400);
-      expect(mockIssueConsoleAccessKey).not.toHaveBeenCalled();
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
     });
   }
 
   it('trims whitespace from keyName', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockIssueConsoleAccessKey.mockResolvedValue(issuedAccessKey());
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
       body: JSON.stringify({ keyName: '  My Key  ', permissions: ['read'], bucketScope: 'all' }),
@@ -163,7 +163,7 @@ describe('create-access-key baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockIssueConsoleAccessKey).toHaveBeenCalledWith('aurora-t-1', {
+    expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
       keyName: 'My Key',
       permissions: ['read'],
       granularPermissions: undefined,
@@ -176,7 +176,7 @@ describe('create-access-key baseHandler', () => {
 
   it('passes YYYY-MM-DD expiresAt through as-is', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockIssueConsoleAccessKey.mockResolvedValue(issuedAccessKey());
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
       body: JSON.stringify({
@@ -189,7 +189,7 @@ describe('create-access-key baseHandler', () => {
     });
     await baseHandler(event);
 
-    expect(mockIssueConsoleAccessKey).toHaveBeenCalledWith(
+    expect(mockIssueAccessKey).toHaveBeenCalledWith(
       'aurora-t-1',
       expect.objectContaining({ expiresAt: '2026-06-01' }),
     );
@@ -197,7 +197,7 @@ describe('create-access-key baseHandler', () => {
 
   it('stores the YYYY-MM-DD expiresAt in DynamoDB (not RFC3339)', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockIssueConsoleAccessKey.mockResolvedValue(issuedAccessKey());
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
       body: JSON.stringify({
@@ -230,7 +230,7 @@ describe('create-access-key baseHandler', () => {
     expect(JSON.parse(result.body!)).toStrictEqual({
       message: 'expiresAt must be in YYYY-MM-DD format',
     });
-    expect(mockIssueConsoleAccessKey).not.toHaveBeenCalled();
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 
   it('returns 400 when expiresAt is a timestamp formatted as ISO date-time string', async () => {
@@ -250,7 +250,7 @@ describe('create-access-key baseHandler', () => {
     expect(JSON.parse(result.body!)).toStrictEqual({
       message: 'expiresAt must be in YYYY-MM-DD format',
     });
-    expect(mockIssueConsoleAccessKey).not.toHaveBeenCalled();
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 
   it('returns 400 for invalid JSON body', async () => {
@@ -269,12 +269,12 @@ describe('create-access-key baseHandler', () => {
     expect(result.statusCode).toBe(503);
     const body = JSON.parse(result.body!);
     expect(body.message).toMatch(/setting up your account/i);
-    expect(mockIssueConsoleAccessKey).not.toHaveBeenCalled();
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 
   it('drives tenant setup via ensureTenantReady before creating the access key', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockIssueConsoleAccessKey.mockResolvedValue(issuedAccessKey());
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     await baseHandler(event);
@@ -283,7 +283,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('throws when the orchestrator fails', async () => {
-    mockIssueConsoleAccessKey.mockRejectedValue(new Error('Aurora API error'));
+    mockIssueAccessKey.mockRejectedValue(new Error('Aurora API error'));
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
 
@@ -292,7 +292,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('returns 409 when duplicate key already exists in DynamoDB', async () => {
-    mockIssueConsoleAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
+    mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
     ddbMock.on(QueryCommand).resolves({
       Items: [
         {
@@ -318,9 +318,9 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('returns 409 and recovers DynamoDB record on partial failure', async () => {
-    mockIssueConsoleAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
+    mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
     ddbMock.on(QueryCommand).resolves({ Items: [] });
-    mockRecoverConsoleAccessKey.mockResolvedValue({
+    mockRecoverAccessKeyByName.mockResolvedValue({
       id: 'aurora-key-1',
       accessKeyId: 'AKIA1234567890',
       createdAt: '2026-03-10T00:00:00Z',
@@ -351,7 +351,7 @@ describe('create-access-key baseHandler', () => {
   describe('region', () => {
     beforeEach(() => {
       ddbMock.on(PutItemCommand).resolves({});
-      mockIssueConsoleAccessKey.mockResolvedValue(issuedAccessKey());
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
     });
 
     it('succeeds when region is missing (back-compat with legacy callers)', async () => {
@@ -398,7 +398,7 @@ describe('create-access-key baseHandler', () => {
       expect(result.statusCode).toBe(400);
       const body = JSON.parse(result.body!);
       expect(body.message).toContain('Unsupported region');
-      expect(mockIssueConsoleAccessKey).not.toHaveBeenCalled();
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
     });
   });
 });

@@ -52,7 +52,7 @@ export async function baseHandler(
 
   const orchestrator = orchestratorForRegion(S3_REGION);
   const ready = await orchestrator.ensureTenantReady(orgId);
-  if (!ready.ok) return tenantNotReadyResponse(ready.reason);
+  if (!ready.ok) return tenantNotReadyResponse();
   const { tenantId } = ready;
 
   try {

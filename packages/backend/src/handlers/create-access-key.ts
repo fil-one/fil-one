@@ -63,12 +63,12 @@ export async function baseHandler(
 
   const orchestrator = orchestratorForRegion(S3_REGION);
   const ready = await orchestrator.ensureTenantReady(orgId);
-  if (!ready.ok) return tenantNotReadyResponse(ready.reason);
+  if (!ready.ok) return tenantNotReadyResponse();
   const { tenantId } = ready;
 
   let accessKey;
   try {
-    accessKey = await orchestrator.issueConsoleAccessKey(tenantId, {
+    accessKey = await orchestrator.issueAccessKey(tenantId, {
       keyName,
       permissions,
       granularPermissions,
@@ -148,7 +148,7 @@ async function recoverDuplicateKey(
 
   // Partial failure: provider key exists but DynamoDB record is missing.
   // Recover by fetching key details from the provider and writing the DB record.
-  const recovered = await orchestrator.recoverConsoleAccessKey(tenantId, keyName);
+  const recovered = await orchestrator.recoverAccessKeyByName(tenantId, keyName);
 
   if (!recovered) {
     // Shouldn't happen — provider returned conflict but key not found in list.

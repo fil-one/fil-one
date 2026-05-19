@@ -372,7 +372,7 @@ describe('auroraOrchestrator', () => {
     });
   });
 
-  describe('issueConsoleAccessKey', () => {
+  describe('issueAccessKey', () => {
     it('forwards key params and translates the issued key', async () => {
       mockCreateAuroraAccessKey.mockResolvedValue({
         id: 'k1',
@@ -381,7 +381,7 @@ describe('auroraOrchestrator', () => {
         createdAt: '2026-01-01T00:00:00Z',
       });
 
-      const result = await auroraOrchestrator.issueConsoleAccessKey('aurora-t-1', {
+      const result = await auroraOrchestrator.issueAccessKey('aurora-t-1', {
         keyName: 'console',
         permissions: ['read', 'write'],
         granularPermissions: ['ListBucketVersions'] as never,
@@ -409,7 +409,7 @@ describe('auroraOrchestrator', () => {
       mockCreateAuroraAccessKey.mockRejectedValue(new DuplicateKeyNameError());
 
       await expect(
-        auroraOrchestrator.issueConsoleAccessKey('aurora-t-1', {
+        auroraOrchestrator.issueAccessKey('aurora-t-1', {
           keyName: 'k',
           permissions: ['read'],
         }),
@@ -419,7 +419,7 @@ describe('auroraOrchestrator', () => {
     it('maps AuroraValidationError to AccessKeyValidationError and preserves the message', async () => {
       mockCreateAuroraAccessKey.mockRejectedValue(new AuroraValidationError('bad name'));
 
-      const promise = auroraOrchestrator.issueConsoleAccessKey('aurora-t-1', {
+      const promise = auroraOrchestrator.issueAccessKey('aurora-t-1', {
         keyName: 'k',
         permissions: ['read'],
       });
@@ -431,7 +431,7 @@ describe('auroraOrchestrator', () => {
       mockCreateAuroraAccessKey.mockRejectedValue(new Error('upstream 500'));
 
       await expect(
-        auroraOrchestrator.issueConsoleAccessKey('aurora-t-1', {
+        auroraOrchestrator.issueAccessKey('aurora-t-1', {
           keyName: 'k',
           permissions: ['read'],
         }),
@@ -439,7 +439,7 @@ describe('auroraOrchestrator', () => {
     });
   });
 
-  describe('recoverConsoleAccessKey', () => {
+  describe('recoverAccessKeyByName', () => {
     it('delegates to findAuroraAccessKeyByName', async () => {
       mockFindAuroraAccessKeyByName.mockResolvedValue({
         id: 'k1',
@@ -447,7 +447,7 @@ describe('auroraOrchestrator', () => {
         createdAt: '2026-01-01T00:00:00Z',
       });
 
-      const result = await auroraOrchestrator.recoverConsoleAccessKey('aurora-t-1', 'console');
+      const result = await auroraOrchestrator.recoverAccessKeyByName('aurora-t-1', 'console');
 
       expect(result).toEqual({
         id: 'k1',
@@ -463,7 +463,7 @@ describe('auroraOrchestrator', () => {
     it('returns undefined when no matching key exists', async () => {
       mockFindAuroraAccessKeyByName.mockResolvedValue(undefined);
 
-      const result = await auroraOrchestrator.recoverConsoleAccessKey('aurora-t-1', 'missing');
+      const result = await auroraOrchestrator.recoverAccessKeyByName('aurora-t-1', 'missing');
 
       expect(result).toBeUndefined();
     });

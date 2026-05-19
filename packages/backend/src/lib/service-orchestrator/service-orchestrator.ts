@@ -83,6 +83,7 @@ export class AccessKeyValidationError extends Error {
   }
 }
 
+// TODO: Clarify diff between orgId and tenantId
 export interface ServiceOrchestrator {
   readonly id: ProviderId;
   readonly region: S3Region;
@@ -103,8 +104,8 @@ export interface ServiceOrchestrator {
   listBuckets(tenantId: string): Promise<BucketSummary[]>;
   getBucket(tenantId: string, name: string): Promise<BucketDetails | null>;
 
-  issueConsoleAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey>;
-  recoverConsoleAccessKey(
+  issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey>;
+  recoverAccessKeyByName(
     tenantId: string,
     keyName: string,
   ): Promise<{ id: string; accessKeyId: string; createdAt: string } | undefined>;

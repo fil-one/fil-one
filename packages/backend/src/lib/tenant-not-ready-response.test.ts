@@ -3,7 +3,7 @@ import { tenantNotReadyResponse } from './tenant-not-ready-response.js';
 
 describe('tenantNotReadyResponse', () => {
   it('returns a 503 with the setup-incomplete message', () => {
-    const result = tenantNotReadyResponse('setup-incomplete');
+    const result = tenantNotReadyResponse();
     expect(result.statusCode).toBe(503);
     const body = JSON.parse(result.body as string);
     expect(body).toEqual({

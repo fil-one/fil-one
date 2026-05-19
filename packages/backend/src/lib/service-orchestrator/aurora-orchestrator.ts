@@ -180,10 +180,7 @@ export const auroraOrchestrator: ServiceOrchestrator = {
     };
   },
 
-  async issueConsoleAccessKey(
-    tenantId: string,
-    opts: IssueAccessKeyOpts,
-  ): Promise<IssuedAccessKey> {
+  async issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey> {
     try {
       const key = await createAuroraAccessKey({
         tenantId,
@@ -210,7 +207,7 @@ export const auroraOrchestrator: ServiceOrchestrator = {
     }
   },
 
-  async recoverConsoleAccessKey(tenantId: string, keyName: string) {
+  async recoverAccessKeyByName(tenantId: string, keyName: string) {
     return findAuroraAccessKeyByName({ tenantId, keyName });
   },
 
