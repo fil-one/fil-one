@@ -10,6 +10,7 @@ import { orchestratorForRegion } from '../lib/service-orchestrator/service-orche
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
+  IssuedAccessKey,
 } from '../lib/service-orchestrator/service-orchestrator.js';
 import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
@@ -66,7 +67,7 @@ export async function baseHandler(
   if (!ready.ok) return tenantNotReadyResponse();
   const { tenantId } = ready;
 
-  let accessKey;
+  let accessKey: IssuedAccessKey;
   try {
     accessKey = await orchestrator.issueAccessKey(tenantId, {
       keyName,
