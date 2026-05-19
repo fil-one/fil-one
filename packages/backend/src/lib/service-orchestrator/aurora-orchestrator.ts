@@ -1,12 +1,14 @@
 // Aurora-backed ServiceOrchestrator. Delegates to the existing per-call modules
 // (aurora-tenant-setup for the lazy setup state machine, aurora-portal for
-// bucket and access-key ops, aurora-s3-client for SSM-cached S3 credentials).
+// bucket and access-key ops) and looks up SSM-cached S3 credentials directly.
 //
 // PROFILE-row attributes used: `auroraTenantId`, `setupStatus`,
 // `setupFailureCount` — unchanged from before this refactor so existing
 // production tenants keep working with no migration.
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { S3Region, getS3Endpoint } from '@filone/shared';
 import type {
@@ -28,7 +30,7 @@ import {
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
 } from '../aurora-portal.js';
-import { deleteBucket as s3DeleteBucket, getAuroraS3Credentials } from '../aurora-s3-client.js';
+import { deleteBucket as s3DeleteBucket } from '../s3-presigner.js';
 import { getDynamoClient } from '../ddb-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import {
@@ -47,6 +49,46 @@ import type {
 } from './service-orchestrator.js';
 
 const dynamo = getDynamoClient();
+const ssm = new SSMClient({});
+const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
+export const _resetSsmCacheForTesting = () => ssmCache.clear();
+
+interface AuroraS3Credentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+async function getAuroraS3Credentials(
+  stage: string,
+  tenantId: string,
+): Promise<AuroraS3Credentials> {
+  const cacheKey = `${stage}/${tenantId}`;
+  const cached = ssmCache.get(cacheKey);
+  if (cached) return JSON.parse(cached) as AuroraS3Credentials;
+
+  let value: string | undefined;
+  try {
+    const { Parameter } = await ssm.send(
+      new GetParameterCommand({
+        Name: `/filone/${stage}/aurora-s3/access-key/${tenantId}`,
+        WithDecryption: true,
+      }),
+    );
+    value = Parameter?.Value;
+  } catch (err) {
+    if ((err as { name?: string }).name === 'ParameterNotFound') {
+      throw new Error(`Aurora S3 credentials not found in SSM for tenant ${tenantId}`);
+    }
+    throw err;
+  }
+
+  if (!value) {
+    throw new Error(`Aurora S3 credentials not found in SSM for tenant ${tenantId}`);
+  }
+
+  ssmCache.set(cacheKey, value);
+  return JSON.parse(value) as AuroraS3Credentials;
+}
 
 function getStage(): string {
   return process.env.FILONE_STAGE!;
@@ -114,7 +156,7 @@ export const auroraOrchestrator: ServiceOrchestrator = {
 
   async deleteBucket(tenantId: string, bucketName: string): Promise<void> {
     const ctx = await this.getPresignerContext(tenantId);
-    await s3DeleteBucket(ctx.endpointUrl, ctx.credentials, bucketName);
+    await s3DeleteBucket(ctx, bucketName);
   },
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {

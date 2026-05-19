@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -13,6 +14,7 @@ vi.mock('sst', () => ({
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
+const ssmMock = mockClient(SSMClient);
 
 const mockEnsureAuroraTenantReady = vi.fn();
 vi.mock('../aurora-tenant-setup.js', () => ({
@@ -36,10 +38,8 @@ vi.mock('../aurora-portal.js', async (importOriginal) => {
 });
 
 const mockS3DeleteBucket = vi.fn();
-const mockGetAuroraS3Credentials = vi.fn();
-vi.mock('../aurora-s3-client.js', () => ({
+vi.mock('../s3-presigner.js', () => ({
   deleteBucket: (...args: unknown[]) => mockS3DeleteBucket(...args),
-  getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
 }));
 
 const mockPortalListBuckets = vi.fn();
@@ -53,7 +53,7 @@ vi.mock('@filone/aurora-portal-client', () => ({
 process.env.FILONE_STAGE = 'test';
 process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu/api';
 
-import { auroraOrchestrator } from './aurora-orchestrator.js';
+import { auroraOrchestrator, _resetSsmCacheForTesting } from './aurora-orchestrator.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -69,9 +69,23 @@ import {
 // Tests
 // ---------------------------------------------------------------------------
 
+function mockSsmCredentials(
+  tenantId: string,
+  credentials: { accessKeyId: string; secretAccessKey: string },
+) {
+  ssmMock
+    .on(GetParameterCommand, {
+      Name: `/filone/test/aurora-s3/access-key/${tenantId}`,
+      WithDecryption: true,
+    })
+    .resolves({ Parameter: { Value: JSON.stringify(credentials) } });
+}
+
 describe('auroraOrchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    ssmMock.reset();
+    _resetSsmCacheForTesting();
   });
 
   it('exposes the Aurora provider id and region', () => {
@@ -197,7 +211,7 @@ describe('auroraOrchestrator', () => {
 
   describe('deleteBucket', () => {
     it('builds a presigner context and calls S3 deleteBucket with it', async () => {
-      mockGetAuroraS3Credentials.mockResolvedValue({
+      mockSsmCredentials('aurora-t-1', {
         accessKeyId: 'AKIA_X',
         secretAccessKey: 'secret_X',
       });
@@ -205,10 +219,13 @@ describe('auroraOrchestrator', () => {
 
       await auroraOrchestrator.deleteBucket('aurora-t-1', 'my-bucket');
 
-      expect(mockGetAuroraS3Credentials).toHaveBeenCalledWith('test', 'aurora-t-1');
       expect(mockS3DeleteBucket).toHaveBeenCalledWith(
-        expect.stringContaining('aur.lu'),
-        { accessKeyId: 'AKIA_X', secretAccessKey: 'secret_X' },
+        {
+          endpointUrl: expect.stringContaining('aur.lu'),
+          region: 'auto',
+          credentials: { accessKeyId: 'AKIA_X', secretAccessKey: 'secret_X' },
+          forcePathStyle: true,
+        },
         'my-bucket',
       );
     });
@@ -460,7 +477,7 @@ describe('auroraOrchestrator', () => {
 
   describe('getPresignerContext', () => {
     it('returns endpoint + credentials with Aurora-specific knobs', async () => {
-      mockGetAuroraS3Credentials.mockResolvedValue({
+      mockSsmCredentials('aurora-t-1', {
         accessKeyId: 'AK',
         secretAccessKey: 'SK',
       });
@@ -473,7 +490,6 @@ describe('auroraOrchestrator', () => {
         credentials: { accessKeyId: 'AK', secretAccessKey: 'SK' },
         forcePathStyle: true,
       });
-      expect(mockGetAuroraS3Credentials).toHaveBeenCalledWith('test', 'aurora-t-1');
     });
   });
 });
