@@ -4,8 +4,8 @@ import { auroraOrchestrator } from './aurora-orchestrator.js';
 import type { ServiceOrchestrator } from './service-orchestrator.js';
 
 // Phase A: only Aurora is registered. Phase B will add the FTH
-// orchestrator behind the existing UsMidwest1 → 'fth' mapping in
-// shared/constants.ts.
+// orchestrator behind the existing UsEast1 / 'us-east-1' → 'fth'
+// mapping in shared/constants.ts.
 const orchestrators = new Map<ProviderId, ServiceOrchestrator>([['aurora', auroraOrchestrator]]);
 
 export function getOrchestrator(id: ProviderId): ServiceOrchestrator {
