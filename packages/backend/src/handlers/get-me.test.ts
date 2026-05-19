@@ -23,11 +23,6 @@ vi.mock('../lib/auth-secrets.js', () => ({
   }),
 }));
 
-const mockTriggerTenantSetup = vi.fn();
-vi.mock('../lib/trigger-tenant-setup.js', () => ({
-  triggerTenantSetup: (...args: unknown[]) => mockTriggerTenantSetup(...args),
-}));
-
 const mockGetMfaEnrollments = vi.fn();
 vi.mock('../lib/auth0-management.js', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -77,7 +72,6 @@ describe('GET /api/me handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    mockTriggerTenantSetup.mockResolvedValue({});
 
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
@@ -102,7 +96,7 @@ describe('GET /api/me handler', () => {
       });
   });
 
-  it('returns orgSetupComplete: true when setupStatus is AURORA_S3_ACCESS_KEY_CREATED', async () => {
+  it('returns the org profile', async () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
@@ -126,144 +120,6 @@ describe('GET /api/me handler', () => {
         orgName: 'Example Corp',
         emailVerified: true,
         email: MOCK_EMAIL,
-        orgSetupComplete: true,
-        mfaEnrollments: [],
-        connectionType: 'auth0',
-      }),
-    });
-  });
-
-  it('returns orgSetupComplete: false when setupStatus is FILONE_ORG_CREATED', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          setupStatus: { S: 'FILONE_ORG_CREATED' },
-        },
-      });
-
-    const result = await handler(authenticatedEvent(), buildContext());
-
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({
-        orgId: MOCK_ORG_ID,
-        orgName: 'Example Corp',
-        emailVerified: true,
-        email: MOCK_EMAIL,
-        orgSetupComplete: false,
-        mfaEnrollments: [],
-        connectionType: 'auth0',
-      }),
-    });
-  });
-
-  it('returns orgSetupComplete: false when setupStatus is missing', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-        },
-      });
-
-    const result = await handler(authenticatedEvent(), buildContext());
-
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({
-        orgId: MOCK_ORG_ID,
-        orgName: 'Example Corp',
-        emailVerified: true,
-        email: MOCK_EMAIL,
-        orgSetupComplete: false,
-        mfaEnrollments: [],
-        connectionType: 'auth0',
-      }),
-    });
-  });
-
-  it('triggers tenant setup when setup is incomplete', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          setupStatus: { S: 'FILONE_ORG_CREATED' },
-        },
-      });
-
-    await handler(authenticatedEvent(), buildContext());
-
-    expect(mockTriggerTenantSetup).toHaveBeenCalledWith({
-      orgId: MOCK_ORG_ID,
-      orgName: 'Example Corp',
-    });
-  });
-
-  it('does not trigger tenant setup when setup is already complete', async () => {
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          setupStatus: { S: FINAL_SETUP_STATUS },
-        },
-      });
-
-    await handler(authenticatedEvent(), buildContext());
-
-    expect(mockTriggerTenantSetup).not.toHaveBeenCalled();
-  });
-
-  it('returns success even when triggerTenantSetup fails', async () => {
-    mockTriggerTenantSetup.mockRejectedValue(new Error('SQS timeout'));
-
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `ORG#${MOCK_ORG_ID}` },
-          sk: { S: 'PROFILE' },
-          name: { S: 'Example Corp' },
-          setupStatus: { S: 'FILONE_ORG_CREATED' },
-        },
-      });
-
-    const result = await handler(authenticatedEvent(), buildContext());
-
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({
-        orgId: MOCK_ORG_ID,
-        orgName: 'Example Corp',
-        emailVerified: true,
-        email: MOCK_EMAIL,
-        orgSetupComplete: false,
         mfaEnrollments: [],
         connectionType: 'auth0',
       }),
@@ -287,14 +143,9 @@ describe('GET /api/me handler', () => {
         orgName: '',
         emailVerified: true,
         email: MOCK_EMAIL,
-        orgSetupComplete: false,
         mfaEnrollments: [],
         connectionType: 'auth0',
       }),
-    });
-    expect(mockTriggerTenantSetup).toHaveBeenCalledWith({
-      orgId: MOCK_ORG_ID,
-      orgName: '',
     });
   });
 
@@ -359,7 +210,6 @@ describe('GET /api/me handler', () => {
         orgName: 'Example Corp',
         emailVerified: true,
         email: MOCK_EMAIL,
-        orgSetupComplete: true,
         mfaEnrollments: [
           {
             id: 'webauthn-roaming|dev_abc',
