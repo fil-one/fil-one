@@ -11,6 +11,7 @@ import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   IssuedAccessKey,
+  ServiceOrchestrator,
 } from '../lib/service-orchestrator/service-orchestrator.js';
 import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
