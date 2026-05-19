@@ -180,7 +180,7 @@ describe('presign baseHandler', () => {
 
   // ── Tenant readiness ────────────────────────────────────────────────
 
-  it('returns 503 when the orchestrator says tenant is not ready', async () => {
+  it('returns 503 when the orchestrator tenant is not ready', async () => {
     mockIsTenantReady.mockResolvedValue(null);
 
     const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }]);

@@ -127,7 +127,7 @@ async function recoverDuplicateKey(
   orgId: string,
   tenantId: string,
   keyName: string,
-  orchestrator: ReturnType<typeof getOrchestratorForRegion>,
+  orchestrator: ServiceOrchestrator,
 ): Promise<void> {
   // Check if we already have a DynamoDB record for this key
   const { Items: existingKeys } = await getDynamoClient().send(

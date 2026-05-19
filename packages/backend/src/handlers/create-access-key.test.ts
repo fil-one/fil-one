@@ -293,7 +293,7 @@ describe('create-access-key baseHandler', () => {
     expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
   });
 
-  it('returns 409 when duplicate key already exists in DynamoDB', async () => {
+  it('returns 409 when the orchestrator rejects duplicate key name and key exists in DynamoDB', async () => {
     mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
     ddbMock.on(QueryCommand).resolves({
       Items: [
