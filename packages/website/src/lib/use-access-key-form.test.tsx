@@ -127,7 +127,7 @@ describe('useAccessKeyForm — region change', () => {
     act(() => result.current.setSelectedBuckets(['a', 'b']));
     expect(result.current.selectedBuckets).toEqual(['a', 'b']);
 
-    rerender({ region: S3Region.UsMidwest1 });
+    rerender({ region: S3Region.UsEast1 });
     expect(result.current.selectedBuckets).toEqual([]);
   });
 
@@ -138,7 +138,7 @@ describe('useAccessKeyForm — region change', () => {
       result.current.setSelectedBuckets(['a']);
     });
 
-    rerender({ region: S3Region.UsMidwest1 });
+    rerender({ region: S3Region.UsEast1 });
     expect(result.current.bucketScope).toBe('specific');
     expect(result.current.selectedBuckets).toEqual([]);
   });
