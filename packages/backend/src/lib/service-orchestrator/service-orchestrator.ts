@@ -120,7 +120,7 @@ export interface ServiceOrchestrator {
   getBucket(tenantId: string, name: string): Promise<BucketDetails | null>;
 
   issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey>;
-  recoverAccessKeyByName(
+  findAccessKeyByName(
     tenantId: string,
     keyName: string,
   ): Promise<{ id: string; accessKeyId: string; createdAt: string } | undefined>;

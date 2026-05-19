@@ -20,12 +20,10 @@ export type ProviderId = 'aurora' | 'fth';
 
 /**
  * Map a region to the backend that serves it. Users see only regions; provider
- * selection is intentionally hidden behind {@link S3Region}. `UsMidwest1` is
- * reserved for the FTH backend (its actual upstream endpoint is `us-east-1`,
- * see {@link getS3Endpoint}).
+ * selection is intentionally hidden behind {@link S3Region}.
  */
 export function regionToProvider(region: S3Region): ProviderId {
-  return region === S3Region.UsMidwest1 ? 'fth' : 'aurora';
+  return region === S3Region.UsEast1 ? 'fth' : 'aurora';
 }
 
 /** Human-readable region labels. */

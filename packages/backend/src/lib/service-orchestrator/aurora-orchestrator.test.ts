@@ -439,7 +439,7 @@ describe('auroraOrchestrator', () => {
     });
   });
 
-  describe('recoverAccessKeyByName', () => {
+  describe('findAccessKeyByName', () => {
     it('delegates to findAuroraAccessKeyByName', async () => {
       mockFindAuroraAccessKeyByName.mockResolvedValue({
         id: 'k1',
@@ -447,7 +447,7 @@ describe('auroraOrchestrator', () => {
         createdAt: '2026-01-01T00:00:00Z',
       });
 
-      const result = await auroraOrchestrator.recoverAccessKeyByName('aurora-t-1', 'console');
+      const result = await auroraOrchestrator.findAccessKeyByName('aurora-t-1', 'console');
 
       expect(result).toEqual({
         id: 'k1',
@@ -463,7 +463,7 @@ describe('auroraOrchestrator', () => {
     it('returns undefined when no matching key exists', async () => {
       mockFindAuroraAccessKeyByName.mockResolvedValue(undefined);
 
-      const result = await auroraOrchestrator.recoverAccessKeyByName('aurora-t-1', 'missing');
+      const result = await auroraOrchestrator.findAccessKeyByName('aurora-t-1', 'missing');
 
       expect(result).toBeUndefined();
     });

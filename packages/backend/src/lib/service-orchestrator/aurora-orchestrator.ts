@@ -207,7 +207,7 @@ export const auroraOrchestrator: ServiceOrchestrator = {
     }
   },
 
-  async recoverAccessKeyByName(tenantId: string, keyName: string) {
+  async findAccessKeyByName(tenantId: string, keyName: string) {
     return findAuroraAccessKeyByName({ tenantId, keyName });
   },
 

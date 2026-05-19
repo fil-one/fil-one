@@ -14,14 +14,14 @@ vi.mock('sst', () => ({
 
 const mockEnsureTenantReady = vi.fn();
 const mockIssueAccessKey = vi.fn();
-const mockRecoverAccessKeyByName = vi.fn();
+const mockFindAccessKeyByName = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
   region: 'eu-west-1',
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
   issueAccessKey: (...args: unknown[]) => mockIssueAccessKey(...args),
-  recoverAccessKeyByName: (...args: unknown[]) => mockRecoverAccessKeyByName(...args),
+  findAccessKeyByName: (...args: unknown[]) => mockFindAccessKeyByName(...args),
 };
 
 vi.mock('../lib/service-orchestrator/registry.js', () => ({
@@ -320,7 +320,7 @@ describe('create-access-key baseHandler', () => {
   it('returns 409 and recovers DynamoDB record on partial failure', async () => {
     mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
     ddbMock.on(QueryCommand).resolves({ Items: [] });
-    mockRecoverAccessKeyByName.mockResolvedValue({
+    mockFindAccessKeyByName.mockResolvedValue({
       id: 'aurora-key-1',
       accessKeyId: 'AKIA1234567890',
       createdAt: '2026-03-10T00:00:00Z',
