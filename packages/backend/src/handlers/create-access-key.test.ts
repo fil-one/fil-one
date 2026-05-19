@@ -383,13 +383,13 @@ describe('create-access-key baseHandler', () => {
       expect(result.statusCode).toBe(201);
     });
 
-    it('rejects us-midwest-1', async () => {
+    it('rejects us-east-1', async () => {
       const event = buildEvent({
         body: JSON.stringify({
           keyName: 'My Key',
           permissions: ['read'],
           bucketScope: 'all',
-          region: 'us-midwest-1',
+          region: 'us-east-1',
         }),
         userInfo: USER_INFO,
       });
