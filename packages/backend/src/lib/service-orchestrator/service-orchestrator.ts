@@ -83,7 +83,22 @@ export class AccessKeyValidationError extends Error {
   }
 }
 
-// TODO: Clarify diff between orgId and tenantId
+/**
+ * orgId vs tenantId:
+ * - `orgId` is our internal org identifier — a UUID generated on a
+ *   user's first authenticated request and persisted in UserInfoTable.
+ *   Provider-agnostic, one per org, attached to every request
+ *   via `event.requestContext.userInfo.orgId`.
+ * - `tenantId` is the provider-specific identifier the data-plane API
+ *   accepts (e.g. `auroraTenantId`). It maps 1:1 to `(orgId, providerId)`
+ *   and is stored on the `ORG#{orgId}/PROFILE` DDB row.
+ *
+ * `ensureTenantReady` / `isTenantReady` take `orgId` because they own the
+ * setup state machine (status, failure counts, transitions) which lives on
+ * the org row. Every other method takes `tenantId` directly — those are
+ * stateless data-plane calls, and callers are expected to have resolved
+ * org → tenant via ensure/isReady first.
+ */
 export interface ServiceOrchestrator {
   readonly id: ProviderId;
   readonly region: S3Region;
