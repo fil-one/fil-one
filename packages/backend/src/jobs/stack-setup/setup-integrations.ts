@@ -12,6 +12,7 @@ import type {
   CloudFormationCustomResourceResponse,
 } from 'aws-lambda';
 import { onExecutePostLogin } from './mfa-action.js';
+import { setupAuth0PasskeyAuth } from './setup-passkey.js';
 
 // ── Custom resource property types ────────────────────────────────────
 
@@ -449,6 +450,11 @@ async function setupAuth0MfaAction(domain: string): Promise<void> {
   }
 }
 
+async function setupAuth0PasskeyAuthForStage(domain: string): Promise<void> {
+  const token = await getAuth0ManagementToken(domain);
+  await setupAuth0PasskeyAuth(domain, token);
+}
+
 // ── CloudFormation Custom Resource response ───────────────────────────
 
 async function sendCfnResponse(event: SetupEvent, response: SetupResponse): Promise<void> {
@@ -515,6 +521,7 @@ async function handleSetup(
   if (ctx.isStagingOrProd) {
     tasks.push(setupAuth0EmailProvider(ctx.mgmtDomain, ctx.stage === 'production'));
     tasks.push(setupAuth0MfaAction(ctx.mgmtDomain));
+    tasks.push(setupAuth0PasskeyAuthForStage(ctx.mgmtDomain));
   }
 
   const [stripeResult] = await Promise.all(tasks);

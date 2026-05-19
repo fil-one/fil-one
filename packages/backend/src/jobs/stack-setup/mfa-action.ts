@@ -24,6 +24,7 @@ export interface MfaFactor {
 export interface AuthenticationMethod {
   name: string;
   timestamp?: string;
+  performed_amr?: string[];
 }
 
 export interface PostLoginEvent {
@@ -59,6 +60,14 @@ export async function onExecutePostLogin(event: PostLoginEvent, api: PostLoginAp
   const hasMfa = enrolledFactors.length > 0;
   const authMethods = event.authentication?.methods || [];
   const usedRecoveryCode = authMethods.some((m) => m.name === 'recovery-code');
+  // Passkeys are phishing-resistant and user-verifying; Auth0 marks them with
+  // performed_amr 'phr'. Accepting a passkey login as satisfying MFA matches
+  // the industry pattern (GitHub, Google, Microsoft) and is what Auth0
+  // recommends. Use the AMR claim rather than the method name — Auth0 has
+  // shifted name strings historically (`passkey`, `webauthn`, ...), but the
+  // AMR contract is stable.
+  const usedPasskey = authMethods.some((m) => (m.performed_amr || []).includes('phr'));
+  if (usedPasskey) return;
 
   // Recovery-code redemption means the user just lost their device. Force
   // re-enrollment of a fresh strong factor on this same login transaction.

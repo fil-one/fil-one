@@ -110,7 +110,7 @@ pnpx sst secret set GrafanaLokiAuth '<instanceId>:<apiKey>' [--stage <stage>]
 
 Omit `--stage` to set for your personal dev stage (defaults to OS username).
 
-There are two Auth0 M2M credentials with different scopes — see the [Auth0 M2M Setup](#auth0-machine-to-machine-m2m-application) section below. The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below. The `GrafanaLokiAuth` secret is from Grafana Cloud — see the [Observability](#observability) section below.
+There are two Auth0 M2M credentials with different scopes — see [`Auth0OneTimeSetup.md`](./Auth0OneTimeSetup.md). The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below. The `GrafanaLokiAuth` secret is from Grafana Cloud — see the [Observability](#observability) section below.
 
 ## Commands
 
@@ -299,88 +299,13 @@ Example PR To add `staging.fil.one`: https://github.com/FilecoinFoundationWeb/Fi
 
 ## Auth0
 
-Two Auth0 tenants are used:
+Auth0 powers authentication: Universal Login, two M2M applications per tenant (deploy-time and runtime), MFA, and passkeys as primary authentication. Most of this is automated by the deploy-time setup Lambda — but a handful of dashboard toggles must be configured manually once per tenant before the first deploy.
 
-| Environment | Tenant        | Domain                              | Dashboard                                                                                                                      |
-| ----------- | ------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Staging/dev | **FilOneDev** | `dev-oar2nhqh58xf5pwf.us.auth0.com` | [Dashboard](https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ/settings) |
-| Production  | **fil-one**   | `fil-one.us.auth0.com`              | [Dashboard](https://manage.auth0.com/dashboard/us/fil-one)                                                                     |
+The full operator runbook (tenant settings, application settings, MFA, passkeys, and both M2M apps) is in [`Auth0OneTimeSetup.md`](./Auth0OneTimeSetup.md). For the design rationale, see the ADRs under `docs/architectural-decisions/`:
 
-Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecret`). See the "Set SST secrets" step above.
-
-**Callback and logout URLs are configured automatically during deploy** — no manual Dashboard edits needed. The deploy-time setup Lambda adds the correct URLs for the deployed domain (custom domain or CloudFront).
-
-**Application settings** (Applications > your app > Settings):
-
-- Under **Advanced Settings > Grant Types**, ensure **Authorization Code** and **Refresh Token** are enabled.
-
-**API setup** (APIs > Create API):
-
-- **Identifier (audience)**: `app.fil.one` (prod) — this must match `AUTH0_AUDIENCE` in `sst.config.ts`. It's what makes Auth0 issue a JWT access token (instead of an opaque one) and is the `aud` claim the middleware validates.
-- Under the API's **Machine to Machine Applications** tab, authorize your application so it can exchange tokens.
-
-### Auth0 MFA Setup
-
-MFA is opt-in per user (database and social connections). Auth0 handles enrollment and challenge via Universal Login. See `docs/architectural-decisions/2026-03-mfa-enrollment.md` for the full architectural decision record.
-
-Two separate M2M applications are used to limit the scope of credentials exposed to Lambda functions.
-
-#### Deploy automation (`Auth0MgmtClientId` / `Auth0MgmtClientSecret`)
-
-Used only by the deploy-time setup Lambda to configure Auth0 on each deploy. Not available to runtime Lambda functions.
-
-**1. Enable MFA factors** (Security > Multi-factor Auth) — manual, one-time per tenant:
-
-- Enable **One-time Password** (authenticator apps)
-- Enable **WebAuthn with FIDO Security Keys** (passkeys/security keys)
-- Enable **WebAuthn with FIDO Device Biometrics** (fingerprint, Face ID)
-- Do **not** enable **Email** or **SMS** — turning Email on tenant-wide causes Auth0 to auto-enroll every verified-email user into email MFA, defeating the strong-factor-only design
-- Set policy to **"Never"** (MFA is controlled entirely by the Post-Login Action)
-- Under additional settings, enable **"Customize MFA Factors using Actions"**
-
-**2. Post-Login Action** — automated on deploy:
-
-The deploy-time setup Lambda (`setup-integrations`) automatically creates, deploys, and binds an `MFA Enrollment Trigger` Action to the Login flow (staging/production only). This Action checks `app_metadata.mfa_enrolling` on each login — when `true`, it triggers MFA enrollment via Universal Login and clears the flag after success. No manual Action setup is needed.
-
-### Auth0 Machine-to-Machine (M2M) Applications
-
-Two separate M2M applications per tenant limit the blast radius of credentials. The deploy-time app is only available to the setup Lambda; the runtime app is available to request-time handlers.
-
-#### Deploy automation (`Auth0MgmtClientId` / `Auth0MgmtClientSecret`)
-
-Used only by the deploy-time setup Lambda to configure Auth0 on each deploy.
-
-| Environment | App name          | Dashboard                                                                                                                     |
-| ----------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Staging     | `SSTSetupM2MApp`  | [Settings](https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/WaVEvlq7iAirQa15CPPZJX0leTKWPJgw/settings) |
-| Production  | Deploy Automation | [Settings](https://manage.auth0.com/dashboard/us/fil-one/applications/8t5J60CfojuktFBqppOseY8IzYQYYrcv/settings)              |
-
-**Required scopes** (Applications > M2M app > APIs > Auth0 Management API):
-
-`read:clients`, `update:clients`, `read:email_provider`, `create:email_provider`, `update:email_provider`, `create:actions`, `read:actions`, `update:actions`, `read:triggers`, `update:triggers`
-
-```bash
-pnpx sst secret set Auth0MgmtClientId <M2M-client-id> [--stage <stage>]
-pnpx sst secret set Auth0MgmtClientSecret <M2M-client-secret> [--stage <stage>]
-```
-
-#### Runtime user management (`Auth0MgmtRuntimeClientId` / `Auth0MgmtRuntimeClientSecret`)
-
-Used by request-time Lambda handlers (`update-profile`, `resend-verification`, `enroll-mfa`, `disable-mfa`, `delete-mfa-enrollment`, `get-me`) to manage user records, trigger verification emails, and manage MFA enrollments.
-
-| Environment | App name    | Dashboard                                                                                                                     |
-| ----------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Staging     | Runtime M2M | [Settings](https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/CCONYSKqPecSTV8fxpfQJ7TLu6JseYSz/settings) |
-| Production  | Runtime M2M | [Settings](https://manage.auth0.com/dashboard/us/fil-one/applications/1VydX3EOVZDHmVF3IdKa7n7pzRuczj7O/settings)              |
-
-**Required scopes** (Applications > M2M app > APIs > Auth0 Management API):
-
-`read:users`, `update:users`, `update:users_app_metadata`, `create:user_tickets`, `delete:users`, `delete:guardian_enrollments`, `read:authentication_methods`, `create:authentication_methods`, `delete:authentication_methods`
-
-```bash
-pnpx sst secret set Auth0MgmtRuntimeClientId <M2M-client-id> [--stage <stage>]
-pnpx sst secret set Auth0MgmtRuntimeClientSecret <M2M-client-secret> [--stage <stage>]
-```
+- `2026-03-authentication.md` — baseline auth + Universal Login + cookie session
+- `2026-03-mfa-enrollment.md` — MFA factor selection + Post-Login Action
+- `2026-05-passkey-primary-authentication.md` — passkeys as primary authentication
 
 ## Stripe (Billing)
 

@@ -244,6 +244,34 @@ export async function getMfaEnrollments(sub: string): Promise<GuardianEnrollment
   return result;
 }
 
+export interface PasskeyAuthenticator {
+  id: string;
+  name?: string;
+  created_at?: string;
+}
+
+/**
+ * List passkey authenticators for a user. Passkeys land in
+ * `/api/v2/users/{id}/authentication-methods` as `type: 'passkey'` (distinct
+ * from the `webauthn-roaming` / `webauthn-platform` MFA factors). Returned
+ * separately from `getMfaEnrollments` so MFA and primary-factor passkeys
+ * remain semantically distinct.
+ */
+export async function getPasskeyAuthenticators(sub: string): Promise<PasskeyAuthenticator[]> {
+  const domain = getDomain();
+  const token = await getManagementToken();
+  const resp = await fetch(
+    `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/authentication-methods`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  await throwIfNotOk(resp, 'Auth0 list authentication methods (passkeys) failed');
+
+  const methods = (await resp.json()) as Auth0AuthenticationMethod[];
+  return methods
+    .filter((m) => m.type === 'passkey' && m.confirmed !== false)
+    .map((m) => ({ id: m.id, name: m.name, created_at: m.created_at }));
+}
+
 /**
  * Delete a single Guardian enrollment by ID.
  */

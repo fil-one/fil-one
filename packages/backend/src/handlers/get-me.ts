@@ -6,7 +6,11 @@ import type { MeResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
-import { getConnectionType, getMfaEnrollments } from '../lib/auth0-management.js';
+import {
+  getConnectionType,
+  getMfaEnrollments,
+  getPasskeyAuthenticators,
+} from '../lib/auth0-management.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -17,7 +21,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   const includeMfa = event.queryStringParameters?.include === 'mfa';
 
-  const [{ Item }, enrollments] = await Promise.all([
+  const [{ Item }, enrollments, passkeys] = await Promise.all([
     getDynamoClient().send(
       new GetItemCommand({
         TableName: Resource.UserInfoTable.name,
@@ -28,6 +32,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       }),
     ),
     includeMfa ? getMfaEnrollments(sub) : Promise.resolve([]),
+    includeMfa ? getPasskeyAuthenticators(sub) : Promise.resolve([]),
   ]);
 
   const orgName = Item?.name?.S ?? '';
@@ -46,6 +51,13 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       name: e.name,
       ...(e.enrolled_at && { createdAt: e.enrolled_at }),
     })),
+    ...(includeMfa && {
+      passkeys: passkeys.map((p) => ({
+        id: p.id,
+        name: p.name,
+        ...(p.created_at && { createdAt: p.created_at }),
+      })),
+    }),
     picture,
     connectionType,
   };
