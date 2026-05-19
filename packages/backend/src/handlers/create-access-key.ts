@@ -1,4 +1,4 @@
-import { GetItemCommand, PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import { PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
@@ -12,8 +12,8 @@ import {
   DuplicateKeyNameError,
   findAuroraAccessKeyByName,
 } from '../lib/aurora-portal.js';
+import { ensureTenantReady } from '../lib/aurora-tenant-setup.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -24,7 +24,7 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 
 // TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
-// eslint-disable-next-line max-lines-per-function, complexity/complexity
+// eslint-disable-next-line complexity/complexity
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -59,25 +59,9 @@ export async function baseHandler(
 
   const { orgId } = getUserInfo(event);
 
-  // Look up org profile to get auroraTenantId
-  const { Item: orgProfile } = await getDynamoClient().send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-    }),
-  );
-
-  const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    console.warn('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
-    return new ResponseBuilder()
-      .status(503)
-      .body<ErrorResponse>({
-        message: 'We are still setting up your account. Please try again in a moment.',
-      })
-      .build();
-  }
+  const ready = await ensureTenantReady(orgId);
+  if (!ready.ok) return ready.errorResponse;
+  const { auroraTenantId } = ready;
 
   let auroraKey;
   try {

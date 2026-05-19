@@ -16,10 +16,15 @@ import {
 import { Resource } from 'sst';
 import { updateTenantStatus } from '../lib/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { reportMetric } from '../lib/metrics.js';
 import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
+import {
+  emitDunningEscalation,
+  emitInvoiceFinalizationFailed,
+  emitInvoiceFinalized,
+  emitInvoicePaid,
+} from '../lib/stripe-webhook-metrics.js';
 
 const dynamo = getDynamoClient();
 
@@ -86,41 +91,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
   // 4. Process event
   try {
-    switch (stripeEvent.type) {
-      case 'customer.subscription.created':
-      case 'customer.subscription.updated': {
-        const subscription = stripeEvent.data.object as Stripe.Subscription;
-        await handleSubscriptionUpdate(tableName, subscription);
-        break;
-      }
-      case 'customer.subscription.deleted': {
-        const subscription = stripeEvent.data.object as Stripe.Subscription;
-        await handleSubscriptionDeleted(tableName, subscription);
-        break;
-      }
-      case 'customer.updated': {
-        const customer = stripeEvent.data.object as Stripe.Customer;
-        await handleCustomerUpdated(tableName, customer);
-        break;
-      }
-      case 'customer.subscription.trial_will_end': {
-        const subscription = stripeEvent.data.object as Stripe.Subscription;
-        console.log('[stripe-webhook] Trial ending soon for customer:', subscription.customer);
-        break;
-      }
-      case 'invoice.payment_succeeded': {
-        const invoice = stripeEvent.data.object as Stripe.Invoice;
-        await handlePaymentSucceeded(tableName, invoice);
-        break;
-      }
-      case 'invoice.payment_failed': {
-        const invoice = stripeEvent.data.object as Stripe.Invoice;
-        await handlePaymentFailed(tableName, invoice);
-        break;
-      }
-      default:
-        console.log('[stripe-webhook] Unhandled event type:', stripeEvent.type);
-    }
+    await processStripeEvent(tableName, stripeEvent);
   } catch (err) {
     console.error('[stripe-webhook] Error processing event:', err);
     // Release idempotency claim so Stripe retries can reprocess
@@ -133,6 +104,53 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
   }
 
   return { statusCode: 200, body: JSON.stringify({ received: true }) };
+}
+
+async function processStripeEvent(tableName: string, stripeEvent: Stripe.Event): Promise<void> {
+  switch (stripeEvent.type) {
+    case 'customer.subscription.created':
+    case 'customer.subscription.updated': {
+      const subscription = stripeEvent.data.object as Stripe.Subscription;
+      await handleSubscriptionUpdate(tableName, subscription);
+      return;
+    }
+    case 'customer.subscription.deleted': {
+      const subscription = stripeEvent.data.object as Stripe.Subscription;
+      await handleSubscriptionDeleted(tableName, subscription);
+      return;
+    }
+    case 'customer.updated': {
+      const customer = stripeEvent.data.object as Stripe.Customer;
+      await handleCustomerUpdated(tableName, customer);
+      return;
+    }
+    case 'customer.subscription.trial_will_end': {
+      const subscription = stripeEvent.data.object as Stripe.Subscription;
+      console.log('[stripe-webhook] Trial ending soon for customer:', subscription.customer);
+      return;
+    }
+    case 'invoice.payment_succeeded': {
+      const invoice = stripeEvent.data.object as Stripe.Invoice;
+      await handlePaymentSucceeded(tableName, invoice);
+      return;
+    }
+    case 'invoice.payment_failed': {
+      const invoice = stripeEvent.data.object as Stripe.Invoice;
+      await handlePaymentFailed(tableName, invoice);
+      return;
+    }
+    case 'invoice.finalized': {
+      emitInvoiceFinalized();
+      return;
+    }
+    case 'invoice.finalization_failed': {
+      const invoice = stripeEvent.data.object as Stripe.Invoice;
+      emitInvoiceFinalizationFailed(invoice.last_finalization_error?.code ?? 'unknown');
+      return;
+    }
+    default:
+      console.log('[stripe-webhook] Unhandled event type:', stripeEvent.type);
+  }
 }
 
 function getCustomerIdString(customer: string | Stripe.Customer | Stripe.DeletedCustomer): string {
@@ -338,7 +356,7 @@ async function handleSubscriptionDeleted(
   emitDunningEscalation({
     stage: 'canceled',
     reason: subscription.cancellation_details?.reason ?? 'unknown',
-    attemptBucket: bucketAttempt(attemptCount),
+    attemptCount: attemptCount ?? 0,
   });
 
   // Best-effort: set Aurora tenant to WRITE_LOCKED during grace period.
@@ -395,7 +413,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
     emitDunningEscalation({
       stage: 'recovered',
       reason: priorStatus,
-      attemptBucket: bucketAttempt(invoice.attempt_count),
+      attemptCount: invoice.attempt_count ?? 0,
     });
   }
 
@@ -417,53 +435,6 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   } catch (error) {
     console.error('[stripe-webhook] Failed to re-activate Aurora tenant', { userId, error });
   }
-}
-
-type DunningStage = 'entered' | 'retry' | 'recovered' | 'canceled';
-
-function bucketAttempt(n: number | null | undefined): string {
-  if (!n || n < 1) return 'unknown';
-  if (n >= 4) return '4+';
-  return String(n);
-}
-
-function emitDunningEscalation(args: {
-  stage: DunningStage;
-  reason: string;
-  attemptBucket: string;
-}): void {
-  reportMetric({
-    _aws: {
-      Timestamp: Date.now(),
-      CloudWatchMetrics: [
-        {
-          Namespace: 'FilOne',
-          Dimensions: [['stage', 'reason', 'attemptBucket']],
-          Metrics: [{ Name: 'DunningEscalation', Unit: 'Count' }],
-        },
-      ],
-    },
-    stage: args.stage,
-    reason: args.reason,
-    attemptBucket: args.attemptBucket,
-    DunningEscalation: 1,
-  });
-}
-
-function emitInvoicePaid(): void {
-  reportMetric({
-    _aws: {
-      Timestamp: Date.now(),
-      CloudWatchMetrics: [
-        {
-          Namespace: 'FilOne',
-          Dimensions: [[]],
-          Metrics: [{ Name: 'InvoicePaid', Unit: 'Count' }],
-        },
-      ],
-    },
-    InvoicePaid: 1,
-  });
 }
 
 async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): Promise<void> {
@@ -501,6 +472,6 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
   emitDunningEscalation({
     stage: attemptCount <= 1 ? 'entered' : 'retry',
     reason: invoice.last_finalization_error?.code ?? 'unknown',
-    attemptBucket: bucketAttempt(attemptCount),
+    attemptCount: attemptCount,
   });
 }

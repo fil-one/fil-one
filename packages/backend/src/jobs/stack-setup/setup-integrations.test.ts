@@ -222,6 +222,8 @@ describe('setup-integrations', () => {
           'customer.subscription.trial_will_end',
           'invoice.payment_succeeded',
           'invoice.payment_failed',
+          'invoice.finalized',
+          'invoice.finalization_failed',
         ],
         metadata: { app: 'filone', stage: 'dev' },
       });
