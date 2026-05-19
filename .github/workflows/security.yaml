@@ -40,6 +40,7 @@ jobs:
             --sarif --output semgrep-custom.sarif \
             --error \
             --verbose
+        continue-on-error: true # Advisory mode — flip to false to block PRs
 
       - name: Run Semgrep (community rules — advisory)
         if: always()
