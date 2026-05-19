@@ -1,6 +1,8 @@
 // Auth0 passkey-on-primary-connection setup. Extracted from
 // setup-integrations.ts to keep that file under the max-lines lint cap.
 
+import { getAuth0ManagementToken } from './auth0-mgmt-token.js';
+
 const PASSKEY_CONNECTION_NAME = 'Username-Password-Authentication';
 
 interface Auth0Connection {
@@ -34,16 +36,18 @@ const DESIRED_PASSKEY_OPTIONS: Required<PasskeyOptions> = {
   },
 };
 
-function passkeyShapeMatches(existing: PasskeyOptions | undefined): boolean {
-  const methods = existing?.authentication_methods;
-  const opts = existing?.passkey_options;
-  return (
-    methods?.passkey?.enabled === true &&
-    methods?.password?.enabled === true &&
-    opts?.progressive_enrollment_enabled === true &&
-    opts?.local_enrollment_enabled === true &&
-    opts?.challenge_ui === 'both'
+// Deep-equal against the desired shape so adding a field to DESIRED_PASSKEY_OPTIONS
+// automatically tightens the idempotency check — no risk of the two drifting apart.
+function matchesDesired(existing: unknown, desired: unknown): boolean {
+  if (desired === null || typeof desired !== 'object') return existing === desired;
+  if (existing === null || typeof existing !== 'object') return false;
+  return Object.entries(desired as Record<string, unknown>).every(([key, value]) =>
+    matchesDesired((existing as Record<string, unknown>)[key], value),
   );
+}
+
+function passkeyShapeMatches(existing: PasskeyOptions | undefined): boolean {
+  return matchesDesired(existing, DESIRED_PASSKEY_OPTIONS);
 }
 
 async function throwIfNotOk(resp: Response, label: string): Promise<void> {
@@ -58,7 +62,8 @@ async function throwIfNotOk(resp: Response, label: string): Promise<void> {
  * `options` object is merged so other connection fields (password policy,
  * brute-force protection, etc.) are preserved through the PATCH.
  */
-export async function setupAuth0PasskeyAuth(domain: string, token: string): Promise<void> {
+export async function setupAuth0PasskeyAuth(domain: string): Promise<void> {
+  const token = await getAuth0ManagementToken(domain);
   const headers = {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
