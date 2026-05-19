@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockClient } from 'aws-sdk-client-mock';
+import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -9,6 +11,8 @@ vi.mock('sst', () => ({
     UserInfoTable: { name: 'UserInfoTable' },
   },
 }));
+
+const ddbMock = mockClient(DynamoDBClient);
 
 const mockEnsureAuroraTenantReady = vi.fn();
 vi.mock('../aurora-tenant-setup.js', () => ({
@@ -44,15 +48,6 @@ vi.mock('@filone/aurora-portal-client', () => ({
   createClient: () => 'mock-portal-client',
   listBuckets: (...args: unknown[]) => mockPortalListBuckets(...args),
   getBucketInfo: (...args: unknown[]) => mockPortalGetBucketInfo(...args),
-}));
-
-const mockReadTenantAttrs = vi.fn();
-const mockAdvanceTenantStatus = vi.fn();
-const mockRecordTenantSetupFailure = vi.fn();
-vi.mock('./tenant-helpers.js', () => ({
-  readTenantAttrs: (...args: unknown[]) => mockReadTenantAttrs(...args),
-  advanceTenantStatus: (...args: unknown[]) => mockAdvanceTenantStatus(...args),
-  recordTenantSetupFailure: (...args: unknown[]) => mockRecordTenantSetupFailure(...args),
 }));
 
 process.env.FILONE_STAGE = 'test';
@@ -107,28 +102,35 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('isTenantReady', () => {
-    const AURORA_ATTRS = {
-      statusAttr: 'setupStatus',
-      tenantIdAttr: 'auroraTenantId',
-      failureCountAttr: 'setupFailureCount',
-    };
+    beforeEach(() => {
+      ddbMock.reset();
+    });
 
     it('returns the tenantId when the Aurora setup is terminal', async () => {
-      mockReadTenantAttrs.mockResolvedValue({
-        tenantId: 'aurora-t-1',
-        setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+      ddbMock.on(GetItemCommand).resolves({
+        Item: {
+          auroraTenantId: { S: 'aurora-t-1' },
+          setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
+        },
       });
 
       const result = await auroraOrchestrator.isTenantReady('org-1');
 
       expect(result).toEqual('aurora-t-1');
-      expect(mockReadTenantAttrs).toHaveBeenCalledWith('org-1', AURORA_ATTRS, { consistent: true });
+      expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
+      expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toMatchObject({
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+        ConsistentRead: true,
+      });
     });
 
     it('returns null when the setup status is non-terminal', async () => {
-      mockReadTenantAttrs.mockResolvedValue({
-        tenantId: 'aurora-t-1',
-        setupStatus: 'AURORA_TENANT_API_KEY_CREATED',
+      ddbMock.on(GetItemCommand).resolves({
+        Item: {
+          auroraTenantId: { S: 'aurora-t-1' },
+          setupStatus: { S: 'AURORA_TENANT_API_KEY_CREATED' },
+        },
       });
 
       const result = await auroraOrchestrator.isTenantReady('org-1');
@@ -137,8 +139,8 @@ describe('auroraOrchestrator', () => {
     });
 
     it('returns null when the PROFILE row is missing the tenantId', async () => {
-      mockReadTenantAttrs.mockResolvedValue({
-        setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+      ddbMock.on(GetItemCommand).resolves({
+        Item: { setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' } },
       });
 
       const result = await auroraOrchestrator.isTenantReady('org-1');
@@ -147,24 +149,11 @@ describe('auroraOrchestrator', () => {
     });
 
     it('returns null when no PROFILE row exists', async () => {
-      mockReadTenantAttrs.mockResolvedValue(null);
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
 
       const result = await auroraOrchestrator.isTenantReady('org-1');
 
       expect(result).toBeNull();
-    });
-
-    it('is side-effect-free: never advances status or records a failure', async () => {
-      mockReadTenantAttrs.mockResolvedValue({
-        tenantId: 'aurora-t-1',
-        setupStatus: 'AURORA_TENANT_CREATED',
-      });
-
-      await auroraOrchestrator.isTenantReady('org-1');
-
-      expect(mockAdvanceTenantStatus).not.toHaveBeenCalled();
-      expect(mockRecordTenantSetupFailure).not.toHaveBeenCalled();
-      expect(mockEnsureAuroraTenantReady).not.toHaveBeenCalled();
     });
   });
 

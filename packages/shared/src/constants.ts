@@ -15,17 +15,6 @@ export enum S3Region {
 /** Default S3 region for Fil One. */
 export const S3_REGION = S3Region.EuWest1 satisfies S3Region;
 
-/** Backend service providers. A region maps to exactly one provider via {@link regionToProvider}. */
-export type ProviderId = 'aurora' | 'fth';
-
-/**
- * Map a region to the backend that serves it. Users see only regions; provider
- * selection is intentionally hidden behind {@link S3Region}.
- */
-export function regionToProvider(region: S3Region): ProviderId {
-  return region === S3Region.UsEast1 ? 'fth' : 'aurora';
-}
-
 /** Human-readable region labels. */
 export const REGION_LABELS: Record<S3Region, string> = {
   [S3Region.EuWest1]: 'Europe (France)',

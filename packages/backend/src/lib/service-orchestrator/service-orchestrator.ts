@@ -1,7 +1,6 @@
 import type {
   AccessKeyPermission,
   GranularPermission,
-  ProviderId,
   RetentionDurationType,
   RetentionMode,
   S3Region,
@@ -100,7 +99,7 @@ export class AccessKeyValidationError extends Error {
  * org → tenant via ensure/isReady first.
  */
 export interface ServiceOrchestrator {
-  readonly id: ProviderId;
+  readonly id: string;
   readonly region: S3Region;
 
   ensureTenantReady(orgId: string): Promise<string | null>;
@@ -115,9 +114,9 @@ export interface ServiceOrchestrator {
   isTenantReady(orgId: string): Promise<string | null>;
 
   createBucket(args: CreateBucketArgs): Promise<void>;
-  deleteBucket(tenantId: string, name: string): Promise<void>;
+  deleteBucket(tenantId: string, bucketName: string): Promise<void>;
   listBuckets(tenantId: string): Promise<BucketSummary[]>;
-  getBucket(tenantId: string, name: string): Promise<BucketDetails | null>;
+  getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null>;
 
   issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey>;
   findAccessKeyByName(

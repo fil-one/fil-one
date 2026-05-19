@@ -23,9 +23,8 @@ export {
   PAID_GRACE_DAYS,
   UNLIMITED,
   getUsageLimits,
-  regionToProvider,
 } from './constants.js';
-export type { UsageLimits, ProviderId } from './constants.js';
+export type { UsageLimits } from './constants.js';
 export { formatBytes, formatBytesShort } from './formatBytes.js';
 export type {
   MeResponse,

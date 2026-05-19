@@ -6,6 +6,8 @@
 // `setupFailureCount` — unchanged from before this refactor so existing
 // production tenants keep working with no migration.
 
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { Resource } from 'sst';
 import { S3Region, getS3Endpoint } from '@filone/shared';
 import type {
   AccessKeyPermission,
@@ -27,8 +29,8 @@ import {
   getAuroraPortalApiKey,
 } from '../aurora-portal.js';
 import { deleteBucket as s3DeleteBucket, getAuroraS3Credentials } from '../aurora-s3-client.js';
+import { getDynamoClient } from '../ddb-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
-import { readTenantAttrs } from './tenant-helpers.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -43,6 +45,8 @@ import type {
   PresignerContext,
   ServiceOrchestrator,
 } from './service-orchestrator.js';
+
+const dynamo = getDynamoClient();
 
 function getStage(): string {
   return process.env.FILONE_STAGE!;
@@ -71,18 +75,17 @@ export const auroraOrchestrator: ServiceOrchestrator = {
   },
 
   async isTenantReady(orgId): Promise<string | null> {
-    const attrs = await readTenantAttrs(
-      orgId,
-      {
-        statusAttr: 'setupStatus',
-        tenantIdAttr: 'auroraTenantId',
-        failureCountAttr: 'setupFailureCount',
-      },
-      { consistent: true },
+    const { Item } = await dynamo.send(
+      new GetItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+        ConsistentRead: true,
+      }),
     );
-    if (!attrs?.tenantId) return null;
-    if (!isOrgSetupComplete(attrs.setupStatus)) return null;
-    return attrs.tenantId;
+    const tenantId = Item?.auroraTenantId?.S;
+    if (!tenantId) return null;
+    if (!isOrgSetupComplete(Item?.setupStatus?.S)) return null;
+    return tenantId;
   },
 
   async createBucket(args: CreateBucketArgs): Promise<void> {
@@ -109,9 +112,9 @@ export const auroraOrchestrator: ServiceOrchestrator = {
     }
   },
 
-  async deleteBucket(tenantId: string, name: string): Promise<void> {
+  async deleteBucket(tenantId: string, bucketName: string): Promise<void> {
     const ctx = await this.getPresignerContext(tenantId);
-    await s3DeleteBucket(ctx.endpointUrl, ctx.credentials, name);
+    await s3DeleteBucket(ctx.endpointUrl, ctx.credentials, bucketName);
   },
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {
@@ -138,23 +141,25 @@ export const auroraOrchestrator: ServiceOrchestrator = {
       }));
   },
 
-  async getBucket(tenantId: string, name: string): Promise<BucketDetails | null> {
+  async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
     const client = await createPortalReadClient(tenantId);
     const { data, error, response } = await getBucketInfo({
       client,
-      path: { tenantId, bucketName: name },
+      path: { tenantId, bucketName },
       throwOnError: false,
     });
 
     if (error) {
       if (response?.status === 404) return null;
-      throw new Error(`Failed to get bucket "${name}" from Aurora for tenant ${tenantId}`, {
+      throw new Error(`Failed to get bucket "${bucketName}" from Aurora for tenant ${tenantId}`, {
         cause: error,
       });
     }
 
     if (!data?.createdAt) {
-      throw new Error(`Aurora returned incomplete data for bucket "${name}" (tenant ${tenantId})`);
+      throw new Error(
+        `Aurora returned incomplete data for bucket "${bucketName}" (tenant ${tenantId})`,
+      );
     }
 
     const defaultRetention =
@@ -163,7 +168,7 @@ export const auroraOrchestrator: ServiceOrchestrator = {
         : undefined;
 
     return {
-      name: data.name ?? name,
+      name: data.name ?? bucketName,
       createdAt: data.createdAt,
       objectLockEnabled: data.objectLock ?? false,
       versioning: data.versioning ?? false,
