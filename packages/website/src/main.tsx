@@ -1,5 +1,5 @@
-import './zod-config.js';
 import './sentry.js';
+import './zod-config.js';
 import './plausible.js';
 import './styles.css';
 import { StrictMode } from 'react';
