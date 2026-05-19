@@ -22,7 +22,7 @@
   }
 
   .tab-panels {
-    @apply mt-4;
+    @apply mt-6;
   }
 
   .tab-panel {

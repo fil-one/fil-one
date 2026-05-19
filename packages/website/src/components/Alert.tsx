@@ -6,15 +6,22 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import clsx from 'clsx';
 
+import { Button } from './Button.js';
 import type { IconBoxColor } from './IconBox.js';
 import { IconBox } from './IconBox.js';
 
 export type AlertVariant = 'blue' | 'green' | 'red' | 'grey' | 'amber';
 
+export type AlertAction = {
+  label: string;
+  onClick: () => void;
+};
+
 export type AlertProps = {
   variant?: AlertVariant;
   title?: string;
   description: string;
+  action?: AlertAction;
 };
 
 const containerStyles: Record<AlertVariant, string> = {
@@ -49,17 +56,24 @@ const iconComponents: Record<AlertVariant, typeof InfoIcon> = {
   amber: WarningIcon,
 };
 
-export function Alert({ variant = 'blue', title, description }: AlertProps) {
+export function Alert({ variant = 'blue', title, description, action }: AlertProps) {
   return (
     <div
-      className={clsx('flex items-start gap-3 rounded-lg border p-3', containerStyles[variant])}
+      className={clsx('flex items-center gap-3 rounded-lg border p-3', containerStyles[variant])}
       role="alert"
     >
       <IconBox icon={iconComponents[variant]} color={iconBoxColors[variant]} size="sm" />
-      <div className="flex flex-1 flex-col gap-1 pt-1">
+      <div className="flex flex-1 flex-col gap-1">
         {title && <span className={clsx('text-sm font-medium', textStyles[variant])}>{title}</span>}
         <span className={clsx('text-xs leading-[18px]', textStyles[variant])}>{description}</span>
       </div>
+      {action && (
+        <div className="flex-shrink-0">
+          <Button variant="ghost" size="sm" onClick={action.onClick}>
+            {action.label}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

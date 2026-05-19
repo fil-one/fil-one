@@ -51,3 +51,20 @@ export const LongDescription: Story = {
       'You have used 95% of your available storage. Consider upgrading your plan or removing unused objects to free up space before uploads are disabled.',
   },
 };
+
+export const WithAction: Story = {
+  args: {
+    variant: 'grey',
+    description: 'These endpoints will be active once you enable RAG Pipeline.',
+    action: { label: 'Enable RAG Pipeline', onClick: () => {} },
+  },
+};
+
+export const WithActionAndTitle: Story = {
+  args: {
+    variant: 'amber',
+    title: 'Feature not enabled',
+    description: 'Enable this feature to start using the integration.',
+    action: { label: 'Enable now', onClick: () => {} },
+  },
+};

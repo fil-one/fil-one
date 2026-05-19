@@ -858,11 +858,7 @@ function BrowseGroupModal({
                           <Badge color="green" size="sm" strength="strong">
                             Connected
                           </Badge>
-                          <Button
-                            variant="tertiary"
-                            size="sm"
-                            onClick={() => onDisconnect(item.name)}
-                          >
+                          <Button variant="ghost" size="sm" onClick={() => onDisconnect(item.name)}>
                             Disconnect
                           </Button>
                         </>
@@ -1079,7 +1075,7 @@ function AiAgentToolkitProductView({
           <div className="mt-1 flex flex-shrink-0 items-center gap-2.5">
             {enabled ? (
               <Button
-                variant="tertiary"
+                variant="ghost"
                 size="sm"
                 icon={ProhibitIcon}
                 onClick={() => setConfirmOpen(true)}

@@ -1,17 +1,21 @@
 /* eslint-disable max-lines */
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   ChatCircleIcon,
+  CheckIcon,
   CubeIcon,
+  LightningIcon,
   PaperPlaneTiltIcon,
   ProhibitIcon,
   TerminalIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
+import { Alert } from '../components/Alert.js';
 import { Badge } from '../components/Badge.js';
 import { Button } from '../components/Button.js';
 import { Card } from '../components/Card.js';
 import { CodeBlock } from '../components/CodeBlock.js';
+import { EmptyStateCard } from '../components/EmptyStateCard.js';
 import { Heading } from '../components/Heading/Heading.js';
 import { Input } from '../components/Input.js';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../components/Modal/index.js';
@@ -35,12 +39,6 @@ const MOCK_BUCKETS = [
 ];
 
 const INDEXED_BUCKETS = MOCK_BUCKETS.filter((b) => b.indexed);
-
-function bucketArg(selected: string[]): string {
-  if (selected.length === 0 || selected.includes(ALL_BUCKETS_VALUE)) return '*';
-  if (selected.length === 1) return selected[0];
-  return selected.join(',');
-}
 
 // ---------------------------------------------------------------------------
 // ToggleConfirmModal
@@ -75,21 +73,21 @@ function ToggleConfirmModal({
                 Pricing
               </p>
               <div className="space-y-2.5">
-                <div className="flex items-baseline justify-between gap-3">
+                <div className="flex items-center justify-between gap-6">
                   <span className="text-sm text-zinc-600">Per TB stored (with indexing)</span>
-                  <span className="text-sm font-semibold text-zinc-900">Flat monthly fee</span>
+                  <span className="flex-shrink-0 text-sm font-semibold text-zinc-900">
+                    $15 / TB / month
+                  </span>
                 </div>
-                <div className="flex items-baseline justify-between gap-3">
+                <div className="flex items-center justify-between gap-6">
                   <span className="text-sm text-zinc-600">LLM / embedding costs</span>
-                  <span className="text-sm font-semibold text-zinc-900">
-                    Billed by your provider
+                  <span className="flex-shrink-0 text-sm font-semibold text-zinc-900">
+                    Your provider
                   </span>
                 </div>
               </div>
             </div>
-            <p className="text-xs text-zinc-500">
-              Rates published before launch. Disable at any time.
-            </p>
+            <p className="text-xs text-zinc-500">Disable at any time.</p>
           </div>
         )}
       </ModalBody>
@@ -111,15 +109,19 @@ function ToggleConfirmModal({
 
 function BucketsTab({ enabled }: { enabled: boolean }) {
   return (
-    <section className="space-y-4">
-      <Heading tag="h2" size="lg">
+    <section className="space-y-6">
+      <Heading
+        tag="h2"
+        size="lg"
+        description="Manage which buckets are indexed and available for querying."
+      >
         Buckets
       </Heading>
       <Card padding="none" className="overflow-hidden">
         {MOCK_BUCKETS.map((b, i) => (
           <div
             key={b.name}
-            className={`flex items-center justify-between px-5 py-4 ${i < MOCK_BUCKETS.length - 1 ? 'border-b border-zinc-100' : ''}`}
+            className={`flex items-center justify-between px-5 py-4 transition-opacity ${i < MOCK_BUCKETS.length - 1 ? 'border-b border-zinc-100' : ''} ${!enabled ? 'opacity-60' : ''}`}
           >
             <div className="flex items-center gap-3">
               <span
@@ -128,7 +130,19 @@ function BucketsTab({ enabled }: { enabled: boolean }) {
               <div>
                 <p className="text-sm font-medium text-zinc-800">{b.name}</p>
                 <p className="text-xs text-zinc-400">
-                  {enabled && b.indexed ? `Last synced ${b.lastSynced ?? '—'}` : 'Not indexed'}
+                  {!enabled || !b.indexed ? (
+                    'Not indexed'
+                  ) : (
+                    <>
+                      <span className="text-zinc-500">{b.files.toLocaleString()}</span>
+                      {' files indexed'}
+                      <span aria-hidden="true"> · </span>
+                      <span className="text-zinc-500">{b.size}</span>
+                      <span aria-hidden="true"> · </span>
+                      {'Last synced '}
+                      <span className="text-zinc-500">{b.lastSynced ?? '—'}</span>
+                    </>
+                  )}
                 </p>
               </div>
             </div>
@@ -140,9 +154,6 @@ function BucketsTab({ enabled }: { enabled: boolean }) {
           </div>
         ))}
       </Card>
-      {!enabled && (
-        <p className="text-sm text-zinc-500">Enable RAG Pipeline to start indexing your buckets.</p>
-      )}
     </section>
   );
 }
@@ -154,11 +165,18 @@ function BucketsTab({ enabled }: { enabled: boolean }) {
 type ModelSectionProps = {
   icon: React.ReactNode;
   heading: string;
+  description: string;
   providerOptions: Array<{ value: string; label: string }>;
   modelOptions: Array<{ value: string; label: string }>;
 };
 
-function ModelSection({ icon, heading, providerOptions, modelOptions }: ModelSectionProps) {
+function ModelSection({
+  icon,
+  heading,
+  description,
+  providerOptions,
+  modelOptions,
+}: ModelSectionProps) {
   const [provider, setProvider] = useState(providerOptions[0]?.value ?? '');
   const [model, setModel] = useState(modelOptions[0]?.value ?? '');
   const [apiKey, setApiKey] = useState('');
@@ -170,10 +188,13 @@ function ModelSection({ icon, heading, providerOptions, modelOptions }: ModelSec
   }
 
   return (
-    <Card padding="md" className="space-y-5">
-      <div className="flex items-center gap-2">
-        <span className="text-zinc-500">{icon}</span>
-        <span className="text-sm font-semibold text-zinc-800">{heading}</span>
+    <div className="space-y-5">
+      <div className="mb-4">
+        <div className="flex items-center gap-2">
+          <span className="text-zinc-400">{icon}</span>
+          <span className="text-sm font-semibold text-zinc-800">{heading}</span>
+        </div>
+        <p className="mt-1 text-xs text-zinc-500">{description}</p>
       </div>
       <div>
         <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
@@ -211,12 +232,17 @@ function ModelSection({ icon, heading, providerOptions, modelOptions }: ModelSec
             onChange={setApiKey}
             className="flex-1"
           />
-          <Button variant="ghost" size="md" onClick={handleSave}>
-            {saved ? 'Saved ✓' : 'Save'}
+          <Button
+            variant="ghost"
+            size="md"
+            icon={saved ? CheckIcon : undefined}
+            onClick={handleSave}
+          >
+            {saved ? 'Saved' : 'Save'}
           </Button>
         </div>
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -224,94 +250,55 @@ function ModelSection({ icon, heading, providerOptions, modelOptions }: ModelSec
 // ModelsTab
 // ---------------------------------------------------------------------------
 
-function ModelsTab() {
+function ModelsTab({ enabled }: { enabled: boolean }) {
   return (
-    <div className="space-y-10">
-      <ModelSection
-        icon={<CubeIcon size={18} />}
-        heading="Embedding model"
-        providerOptions={[
-          { value: 'openai', label: 'OpenAI' },
-          { value: 'anthropic', label: 'Anthropic' },
-          { value: 'cohere', label: 'Cohere' },
-          { value: 'self-hosted', label: 'Self-hosted' },
-        ]}
-        modelOptions={[
-          { value: 'text-embedding-3-small', label: 'text-embedding-3-small' },
-          { value: 'text-embedding-3-large', label: 'text-embedding-3-large' },
-          { value: 'text-embedding-ada-002', label: 'text-embedding-ada-002' },
-        ]}
-      />
-      <ModelSection
-        icon={<ChatCircleIcon size={18} />}
-        heading="Completion model"
-        providerOptions={[
-          { value: 'openai', label: 'OpenAI' },
-          { value: 'anthropic', label: 'Anthropic' },
-          { value: 'cohere', label: 'Cohere' },
-        ]}
-        modelOptions={[
-          { value: 'gpt-4o', label: 'gpt-4o' },
-          { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
-          { value: 'claude-3-5-sonnet', label: 'claude-3-5-sonnet' },
-        ]}
-      />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ChatBucketPicker
-// ---------------------------------------------------------------------------
-
-function ChatBucketPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
-  const options = [
-    { value: ALL_BUCKETS_VALUE, label: 'All buckets' },
-    ...INDEXED_BUCKETS.map((b) => ({ value: b.name, label: b.name })),
-  ];
-
-  const selected = options.find((o) => o.value === value) ?? options[0];
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 shadow-xs hover:bg-zinc-50"
+    <div className="space-y-6">
+      <Heading
+        tag="h2"
+        size="lg"
+        description="Configure the models used for indexing and querying your buckets."
       >
-        {selected?.label}
-        <span className="text-zinc-400">▾</span>
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 min-w-[180px] rounded-lg border border-zinc-200 bg-white py-1 shadow-md">
-          {options.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => {
-                onChange(opt.value);
-                setOpen(false);
-              }}
-              className="w-full px-4 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50"
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      )}
+        Models
+      </Heading>
+      <div
+        className={`grid grid-cols-2 gap-6${!enabled ? ' pointer-events-none select-none opacity-60' : ''}`}
+      >
+        <Card padding="md">
+          <ModelSection
+            icon={<CubeIcon size={16} />}
+            heading="Index model"
+            description="Creates embeddings when files are uploaded to your buckets."
+            providerOptions={[
+              { value: 'openai', label: 'OpenAI' },
+              { value: 'anthropic', label: 'Anthropic' },
+              { value: 'cohere', label: 'Cohere' },
+              { value: 'self-hosted', label: 'Self-hosted' },
+            ]}
+            modelOptions={[
+              { value: 'text-embedding-3-small', label: 'text-embedding-3-small' },
+              { value: 'text-embedding-3-large', label: 'text-embedding-3-large' },
+              { value: 'text-embedding-ada-002', label: 'text-embedding-ada-002' },
+            ]}
+          />
+        </Card>
+        <Card padding="md">
+          <ModelSection
+            icon={<ChatCircleIcon size={16} />}
+            heading="Query model"
+            description="Generates answers when you search across your indexed buckets."
+            providerOptions={[
+              { value: 'openai', label: 'OpenAI' },
+              { value: 'anthropic', label: 'Anthropic' },
+              { value: 'cohere', label: 'Cohere' },
+            ]}
+            modelOptions={[
+              { value: 'gpt-4o', label: 'gpt-4o' },
+              { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+              { value: 'claude-3-5-sonnet', label: 'claude-3-5-sonnet' },
+            ]}
+          />
+        </Card>
+      </div>
     </div>
   );
 }
@@ -325,24 +312,50 @@ function ChatTab({ enabled, goToBuckets }: { enabled: boolean; goToBuckets: () =
   const [input, setInput] = useState('');
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <ChatBucketPicker value={chatBucket} onChange={setChatBucket} />
-        <Badge color={enabled ? 'blue' : 'amber'} size="sm">
-          Test mode
-        </Badge>
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <Heading
+          tag="h2"
+          size="lg"
+          description="Ask questions across your indexed buckets directly from here."
+        >
+          <span className="inline-flex items-center gap-2.5">
+            Chat
+            {enabled && (
+              <Badge color="blue" size="sm">
+                Test mode
+              </Badge>
+            )}
+          </span>
+        </Heading>
+        {enabled && (
+          <div className="mt-1 flex flex-shrink-0 items-center gap-3">
+            <span className="flex-shrink-0 text-xs font-medium text-zinc-400">Select bucket</span>
+            <div className="w-44">
+              <Select value={chatBucket} onChange={setChatBucket}>
+                <option value={ALL_BUCKETS_VALUE}>All buckets</option>
+                {INDEXED_BUCKETS.map((b) => (
+                  <option key={b.name} value={b.name}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+        )}
       </div>
 
       {!enabled ? (
-        <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
-          <PaperPlaneTiltIcon size={56} className="text-zinc-300" />
-          <p className="max-w-xs text-sm text-zinc-500">
-            Enable RAG Pipeline to start chatting with your buckets.
-          </p>
-          <Button variant="primary" size="sm" onClick={goToBuckets}>
+        <EmptyStateCard
+          icon={PaperPlaneTiltIcon}
+          iconColor="grey"
+          title="Chat isn't available yet"
+          description="Enable RAG Pipeline to start chatting with your buckets."
+        >
+          <Button variant="ghost" size="sm" onClick={goToBuckets}>
             Enable RAG Pipeline
           </Button>
-        </div>
+        </EmptyStateCard>
       ) : (
         <Card padding="none" className="flex h-96 flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto p-5">
@@ -375,97 +388,14 @@ function ChatTab({ enabled, goToBuckets }: { enabled: boolean; goToBuckets: () =
 }
 
 // ---------------------------------------------------------------------------
-// BucketDropdown (multi-select with checkboxes)
-// ---------------------------------------------------------------------------
-
-function BucketDropdown({
-  selected,
-  onChange,
-}: {
-  selected: string[];
-  onChange: (v: string[]) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
-  const options = [
-    { value: ALL_BUCKETS_VALUE, label: 'All buckets' },
-    ...MOCK_BUCKETS.map((b) => ({ value: b.name, label: b.name })),
-  ];
-
-  function toggle(value: string) {
-    if (value === ALL_BUCKETS_VALUE) {
-      onChange(selected.includes(ALL_BUCKETS_VALUE) ? [] : [ALL_BUCKETS_VALUE]);
-      return;
-    }
-    const next = selected.includes(value)
-      ? selected.filter((v) => v !== value && v !== ALL_BUCKETS_VALUE)
-      : [...selected.filter((v) => v !== ALL_BUCKETS_VALUE), value];
-    onChange(next);
-  }
-
-  const label =
-    selected.length === 0
-      ? 'Select buckets'
-      : selected.includes(ALL_BUCKETS_VALUE)
-        ? 'All buckets'
-        : selected.length === 1
-          ? (selected[0] ?? 'Select buckets')
-          : `${String(selected.length)} buckets`;
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 shadow-xs hover:bg-zinc-50"
-      >
-        {label}
-        <span className="text-zinc-400">▾</span>
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 min-w-[200px] rounded-lg border border-zinc-200 bg-white py-1 shadow-md">
-          {options.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => toggle(opt.value)}
-              className="flex w-full items-center gap-2.5 px-4 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-50"
-            >
-              <span
-                className={`flex h-4 w-4 items-center justify-center rounded border ${selected.includes(opt.value) ? 'border-brand-600 bg-brand-600' : 'border-zinc-300'}`}
-              >
-                {selected.includes(opt.value) && (
-                  <span className="block h-2 w-2 rounded-sm bg-white" />
-                )}
-              </span>
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // IntegrateTab
 // ---------------------------------------------------------------------------
 
-function IntegrateTab() {
-  const [selected, setSelected] = useState<string[]>([ALL_BUCKETS_VALUE]);
+function IntegrateTab({ enabled }: { enabled: boolean }) {
+  const [selected, setSelected] = useState<string>(ALL_BUCKETS_VALUE);
 
-  const arg = bucketArg(selected);
+  const arg = selected === ALL_BUCKETS_VALUE ? '*' : selected;
   const mcpCode = JSON.stringify(
     {
       mcpServers: {
@@ -484,31 +414,58 @@ function IntegrateTab() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <Heading tag="h2" size="lg">
-          Integrate with your buckets
+      <div className="flex items-start justify-between gap-4">
+        <Heading
+          tag="h2"
+          size="lg"
+          description="Connect your buckets to AI apps and your own code."
+        >
+          Integrate
         </Heading>
-        <p className="mt-1 text-sm text-zinc-500">
-          Drop RAG Pipeline into your app in a few lines. Pick the buckets you want to query and
-          copy the config below.
-        </p>
+        {enabled && (
+          <div className="mt-1 flex flex-shrink-0 items-center gap-3">
+            <span className="flex-shrink-0 text-xs font-medium text-zinc-400">Select bucket</span>
+            <div className="w-44">
+              <Select value={selected} onChange={setSelected}>
+                <option value={ALL_BUCKETS_VALUE}>All buckets</option>
+                {MOCK_BUCKETS.map((b) => (
+                  <option key={b.name} value={b.name}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+        )}
       </div>
-      <BucketDropdown selected={selected} onChange={setSelected} />
-      <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-2">
+      {!enabled && (
+        <Alert
+          variant="grey"
+          description="These endpoints will be active once you enable RAG Pipeline."
+        />
+      )}
+      <div className="grid grid-cols-2 divide-x divide-zinc-100">
+        <div className="pr-6">
           <div className="flex items-center gap-2">
-            <Badge color="grey" size="sm" strength="subtle">
-              <TerminalIcon size={12} />
-            </Badge>
+            <TerminalIcon size={16} className="text-zinc-400" />
             <span className="text-sm font-semibold text-zinc-800">MCP endpoint</span>
           </div>
-          <CodeBlock code={mcpCode} language="json" />
+          <p className="mt-1 text-xs text-zinc-500">
+            For Claude Desktop, Cursor, and any MCP-compatible client.
+          </p>
+          <div className={`mt-4${!enabled ? ' pointer-events-none select-none blur-md' : ''}`}>
+            <CodeBlock code={mcpCode} language="json" />
+          </div>
         </div>
-        <div className="space-y-2">
+        <div className="pl-6">
           <div className="flex items-center gap-2">
+            <LightningIcon size={16} className="text-zinc-400" />
             <span className="text-sm font-semibold text-zinc-800">Query API</span>
           </div>
-          <CodeBlock code={queryCode} language="bash" />
+          <p className="mt-1 text-xs text-zinc-500">Call directly from your app or agent.</p>
+          <div className={`mt-4${!enabled ? ' pointer-events-none select-none blur-md' : ''}`}>
+            <CodeBlock code={queryCode} language="bash" />
+          </div>
         </div>
       </div>
     </div>
@@ -531,14 +488,16 @@ function RagPipelineView({ enabled, onToggle }: { enabled: boolean; onToggle: ()
 
   const stats = enabled
     ? [
-        { label: 'Files indexed', value: '1,247' },
-        { label: 'Index size', value: '324 MB' },
-        { label: 'Last synced', value: '1 min ago' },
+        { label: 'Files indexed', value: '1,247', sub: 'across all buckets' },
+        { label: 'Index size', value: '324 MB', sub: 'total storage used' },
+        { label: 'Last synced', value: '1 min ago', sub: 'most recent bucket' },
+        { label: 'Est. cost', value: '$4.86', sub: '$15 / TB / month' },
       ]
     : [
-        { label: 'Files indexed', value: '—' },
-        { label: 'Index size', value: '—' },
-        { label: 'Last synced', value: '—' },
+        { label: 'Files indexed', value: '—', sub: 'Available once enabled' },
+        { label: 'Index size', value: '—', sub: 'Available once enabled' },
+        { label: 'Last synced', value: '—', sub: 'Available once enabled' },
+        { label: 'Est. cost', value: '—', sub: 'Available once enabled' },
       ];
 
   return (
@@ -571,7 +530,7 @@ function RagPipelineView({ enabled, onToggle }: { enabled: boolean; onToggle: ()
             <div className="mt-1 flex-shrink-0">
               {enabled ? (
                 <Button
-                  variant="tertiary"
+                  variant="ghost"
                   size="sm"
                   icon={ProhibitIcon}
                   onClick={() => setConfirmOpen(true)}
@@ -587,15 +546,30 @@ function RagPipelineView({ enabled, onToggle }: { enabled: boolean; onToggle: ()
           </div>
 
           <div
-            className={`grid grid-cols-3 gap-3 ${!enabled ? 'pointer-events-none select-none opacity-40' : ''}`}
+            className={`grid grid-cols-4 gap-3 ${!enabled ? 'pointer-events-none select-none opacity-60' : ''}`}
           >
             {stats.map((s) => (
-              <div key={s.label} className="rounded-xl border border-zinc-200 bg-white p-4">
-                <p className="mb-1 text-[11px] text-zinc-400">{s.label}</p>
-                <p className="text-xl font-semibold text-zinc-900">{s.value}</p>
+              <div key={s.label} className="rounded-xl border border-zinc-200 bg-white p-5">
+                <p className="mb-2.5 text-xs font-medium uppercase tracking-wider text-zinc-500">
+                  {s.label}
+                </p>
+                <p className="text-xl font-semibold text-zinc-950">{s.value}</p>
+                <p className="mt-1 text-xs text-zinc-400">{s.sub}</p>
               </div>
             ))}
           </div>
+
+          {enabled && (
+            <div className="rounded-xl border border-blue-100 bg-blue-50 px-5 py-4">
+              <p className="text-sm font-semibold text-blue-900">
+                Saving you ~12 hours and ~$47 in embedding costs this month.
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-blue-500">
+                Every file has a unique content address (CID) — so only changed files are ever
+                re-indexed. No full corpus scans, no redundant embedding calls.
+              </p>
+            </div>
+          )}
 
           <Tabs key={jumpKey} defaultIndex={defaultTab}>
             <TabList>
@@ -609,13 +583,13 @@ function RagPipelineView({ enabled, onToggle }: { enabled: boolean; onToggle: ()
                 <BucketsTab enabled={enabled} />
               </TabPanel>
               <TabPanel>
-                <ModelsTab />
+                <ModelsTab enabled={enabled} />
               </TabPanel>
               <TabPanel>
                 <ChatTab enabled={enabled} goToBuckets={goToBuckets} />
               </TabPanel>
               <TabPanel>
-                <IntegrateTab />
+                <IntegrateTab enabled={enabled} />
               </TabPanel>
             </TabPanels>
           </Tabs>
