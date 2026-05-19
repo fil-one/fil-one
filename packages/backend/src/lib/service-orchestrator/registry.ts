@@ -3,8 +3,8 @@ import { regionToProvider } from '@filone/shared';
 import { auroraOrchestrator } from './aurora-orchestrator.js';
 import type { ServiceOrchestrator } from './service-orchestrator.js';
 
-// Phase A: only Aurora is registered. Phase B will add the Fortilyx
-// orchestrator behind the existing UsMidwest1 → 'fortilyx' mapping in
+// Phase A: only Aurora is registered. Phase B will add the FTH
+// orchestrator behind the existing UsMidwest1 → 'fth' mapping in
 // shared/constants.ts.
 const orchestrators = new Map<ProviderId, ServiceOrchestrator>([['aurora', auroraOrchestrator]]);
 

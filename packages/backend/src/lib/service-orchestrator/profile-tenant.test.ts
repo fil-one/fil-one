@@ -27,10 +27,10 @@ const AURORA_ATTRS = {
   failureCountAttr: 'setupFailureCount',
 };
 
-const FORTILYX_ATTRS = {
-  statusAttr: 'fortilyxSetupStatus',
-  tenantIdAttr: 'fortilyxTenantId',
-  failureCountAttr: 'fortilyxSetupFailureCount',
+const FTH_ATTRS = {
+  statusAttr: 'fthSetupStatus',
+  tenantIdAttr: 'fthTenantId',
+  failureCountAttr: 'fthSetupFailureCount',
 };
 
 describe('profile-tenant readTenantAttrs', () => {
@@ -64,19 +64,19 @@ describe('profile-tenant readTenantAttrs', () => {
     });
   });
 
-  it('reads Fortilyx-shaped attributes from the same PROFILE row', async () => {
+  it('reads FTH-shaped attributes from the same PROFILE row', async () => {
     ddbMock.on(GetItemCommand).resolves({
       Item: {
         pk: { S: 'ORG#org-1' },
         sk: { S: 'PROFILE' },
-        fortilyxTenantId: { S: 'fortilyx-c-1' },
-        fortilyxSetupStatus: { S: 'FTH_ACCESS_KEY_CREATED' },
-        fortilyxSetupFailureCount: { N: '0' },
+        fthTenantId: { S: 'fth-c-1' },
+        fthSetupStatus: { S: 'FTH_ACCESS_KEY_CREATED' },
+        fthSetupFailureCount: { N: '0' },
       },
     });
-    const result = await readTenantAttrs('org-1', FORTILYX_ATTRS);
+    const result = await readTenantAttrs('org-1', FTH_ATTRS);
     expect(result).toEqual({
-      tenantId: 'fortilyx-c-1',
+      tenantId: 'fth-c-1',
       setupStatus: 'FTH_ACCESS_KEY_CREATED',
       setupFailureCount: 0,
       orgName: undefined,

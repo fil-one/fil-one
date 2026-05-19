@@ -20,13 +20,13 @@ vi.mock('../lib/aurora-backoffice.js', () => ({
   getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...(args as [])),
 }));
 
-const mockEnsureTenantReady = vi.fn();
+const mockIsTenantReady = vi.fn();
 const mockListBuckets = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
   region: 'eu-west-1',
-  ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
+  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
   listBuckets: (...args: unknown[]) => mockListBuckets(...args),
 };
 
@@ -73,9 +73,9 @@ function flatTrend(length: number, value: number) {
 
 function setTenant(tenantId?: string) {
   if (tenantId) {
-    mockEnsureTenantReady.mockResolvedValue({ ok: true, tenantId });
+    mockIsTenantReady.mockResolvedValue({ tenantId });
   } else {
-    mockEnsureTenantReady.mockResolvedValue({ ok: false, reason: 'setup-incomplete' });
+    mockIsTenantReady.mockResolvedValue(null);
   }
 }
 

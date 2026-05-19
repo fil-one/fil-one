@@ -18,14 +18,14 @@ const presignerContext = {
   forcePathStyle: true,
 };
 
-const mockEnsureTenantReady = vi.fn();
+const mockIsTenantReady = vi.fn();
 const mockGetPresignerContext = vi.fn();
 const mockOrchestratorDeleteBucket = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
   region: 'eu-west-1',
-  ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
+  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
   getPresignerContext: (...args: unknown[]) => mockGetPresignerContext(...args),
   deleteBucket: (...args: unknown[]) => mockOrchestratorDeleteBucket(...args),
 };
@@ -57,7 +57,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 describe('delete-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnsureTenantReady.mockResolvedValue({ ok: true, tenantId: 'aurora-t-1' });
+    mockIsTenantReady.mockResolvedValue({ tenantId: 'aurora-t-1' });
     mockGetPresignerContext.mockResolvedValue(presignerContext);
   });
 
@@ -108,14 +108,14 @@ describe('delete-bucket baseHandler', () => {
     expect(mockOrchestratorDeleteBucket).not.toHaveBeenCalled();
   });
 
-  it('returns 503 when tenant is not ready', async () => {
-    mockEnsureTenantReady.mockResolvedValue({ ok: false, reason: 'setup-incomplete' });
+  it('returns 404 when tenant is not ready (no tenant means no bucket)', async () => {
+    mockIsTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
-    expect(result.statusCode).toBe(503);
+    expect(result.statusCode).toBe(404);
     expect(mockGetPresignerContext).not.toHaveBeenCalled();
   });
 });

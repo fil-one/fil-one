@@ -46,6 +46,15 @@ vi.mock('@filone/aurora-portal-client', () => ({
   getBucketInfo: (...args: unknown[]) => mockPortalGetBucketInfo(...args),
 }));
 
+const mockReadTenantAttrs = vi.fn();
+const mockAdvanceTenantStatus = vi.fn();
+const mockRecordTenantSetupFailure = vi.fn();
+vi.mock('./profile-tenant.js', () => ({
+  readTenantAttrs: (...args: unknown[]) => mockReadTenantAttrs(...args),
+  advanceTenantStatus: (...args: unknown[]) => mockAdvanceTenantStatus(...args),
+  recordTenantSetupFailure: (...args: unknown[]) => mockRecordTenantSetupFailure(...args),
+}));
+
 process.env.FILONE_STAGE = 'test';
 process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu/api';
 
@@ -94,6 +103,68 @@ describe('auroraOrchestrator', () => {
       const result = await auroraOrchestrator.ensureTenantReady('org-1');
 
       expect(result).toEqual({ ok: false, reason: 'setup-incomplete' });
+    });
+  });
+
+  describe('isTenantReady', () => {
+    const AURORA_ATTRS = {
+      statusAttr: 'setupStatus',
+      tenantIdAttr: 'auroraTenantId',
+      failureCountAttr: 'setupFailureCount',
+    };
+
+    it('returns the tenantId when the Aurora setup is terminal', async () => {
+      mockReadTenantAttrs.mockResolvedValue({
+        tenantId: 'aurora-t-1',
+        setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+      });
+
+      const result = await auroraOrchestrator.isTenantReady('org-1');
+
+      expect(result).toEqual({ tenantId: 'aurora-t-1' });
+      expect(mockReadTenantAttrs).toHaveBeenCalledWith('org-1', AURORA_ATTRS, { consistent: true });
+    });
+
+    it('returns null when the setup status is non-terminal', async () => {
+      mockReadTenantAttrs.mockResolvedValue({
+        tenantId: 'aurora-t-1',
+        setupStatus: 'AURORA_TENANT_API_KEY_CREATED',
+      });
+
+      const result = await auroraOrchestrator.isTenantReady('org-1');
+
+      expect(result).toBeNull();
+    });
+
+    it('returns null when the PROFILE row is missing the tenantId', async () => {
+      mockReadTenantAttrs.mockResolvedValue({
+        setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+      });
+
+      const result = await auroraOrchestrator.isTenantReady('org-1');
+
+      expect(result).toBeNull();
+    });
+
+    it('returns null when no PROFILE row exists', async () => {
+      mockReadTenantAttrs.mockResolvedValue(null);
+
+      const result = await auroraOrchestrator.isTenantReady('org-1');
+
+      expect(result).toBeNull();
+    });
+
+    it('is side-effect-free: never advances status or records a failure', async () => {
+      mockReadTenantAttrs.mockResolvedValue({
+        tenantId: 'aurora-t-1',
+        setupStatus: 'AURORA_TENANT_CREATED',
+      });
+
+      await auroraOrchestrator.isTenantReady('org-1');
+
+      expect(mockAdvanceTenantStatus).not.toHaveBeenCalled();
+      expect(mockRecordTenantSetupFailure).not.toHaveBeenCalled();
+      expect(mockEnsureAuroraTenantReady).not.toHaveBeenCalled();
     });
   });
 

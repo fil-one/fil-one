@@ -27,6 +27,8 @@ import {
   getAuroraPortalApiKey,
 } from '../aurora-portal.js';
 import { deleteBucket as s3DeleteBucket, getAuroraS3Credentials } from '../aurora-s3-client.js';
+import { isOrgSetupComplete } from '../org-setup-status.js';
+import { readTenantAttrs } from './profile-tenant.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -71,6 +73,21 @@ export const auroraOrchestrator: ServiceOrchestrator = {
     // abstraction boundary we collapse all of those into the single
     // 'setup-incomplete' reason; handlers translate that into HTTP.
     return { ok: false, reason: 'setup-incomplete' };
+  },
+
+  async isTenantReady(orgId): Promise<{ tenantId: string } | null> {
+    const attrs = await readTenantAttrs(
+      orgId,
+      {
+        statusAttr: 'setupStatus',
+        tenantIdAttr: 'auroraTenantId',
+        failureCountAttr: 'setupFailureCount',
+      },
+      { consistent: true },
+    );
+    if (!attrs?.tenantId) return null;
+    if (!isOrgSetupComplete(attrs.setupStatus)) return null;
+    return { tenantId: attrs.tenantId };
   },
 
   async createBucket(args: CreateBucketArgs): Promise<void> {

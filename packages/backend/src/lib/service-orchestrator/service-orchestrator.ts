@@ -89,6 +89,15 @@ export interface ServiceOrchestrator {
 
   ensureTenantReady(orgId: string): Promise<EnsureTenantReadyResult>;
 
+  /**
+   * Side-effect-free readiness check. Returns the tenantId if the org's tenant
+   * for this provider is fully set up, otherwise null. Unlike
+   * ensureTenantReady, this never advances the setup state machine — safe to
+   * call from GET handlers that should not trigger Portal/Backoffice API
+   * calls or DDB writes.
+   */
+  isTenantReady(orgId: string): Promise<{ tenantId: string } | null>;
+
   createBucket(args: CreateBucketArgs): Promise<void>;
   deleteBucket(tenantId: string, name: string): Promise<void>;
   listBuckets(tenantId: string): Promise<BucketSummary[]>;

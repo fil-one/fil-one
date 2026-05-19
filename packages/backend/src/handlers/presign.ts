@@ -184,8 +184,8 @@ export async function baseHandler(
   }
 
   const orchestrator = orchestratorForRegion(S3_REGION);
-  const ready = await orchestrator.ensureTenantReady(orgId);
-  if (!ready.ok) return tenantNotReadyResponse(ready.reason);
+  const ready = await orchestrator.isTenantReady(orgId);
+  if (!ready) return tenantNotReadyResponse('setup-incomplete');
 
   const ctx = await orchestrator.getPresignerContext(ready.tenantId);
 

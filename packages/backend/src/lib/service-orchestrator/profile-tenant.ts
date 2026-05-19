@@ -2,8 +2,8 @@
 // on the ORG#{orgId}/PROFILE row.
 //
 // Each provider supplies its own attribute names (Aurora uses the legacy
-// `setupStatus`, `auroraTenantId`, `setupFailureCount`; Fortilyx will use
-// `fortilyxSetupStatus`, `fortilyxTenantId`, `fortilyxSetupFailureCount`).
+// `setupStatus`, `auroraTenantId`, `setupFailureCount`; FTH will use
+// `fthSetupStatus`, `fthTenantId`, `fthSetupFailureCount`).
 // `setupStatus` values are opaque strings — providers must not compare values
 // across providers, since each owns its own state-machine enum.
 //

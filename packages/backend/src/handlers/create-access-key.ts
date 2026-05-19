@@ -50,7 +50,7 @@ export async function baseHandler(
   const expiresAt = parsed.data.expiresAt ?? null;
 
   // Phase A: only the Aurora region is supported in handlers. Phase B will
-  // open this up via getAvailableRegions(stage) once the Fortilyx
+  // open this up via getAvailableRegions(stage) once the FTH
   // orchestrator is registered.
   if (region !== undefined && region !== S3_REGION) {
     return new ResponseBuilder()
@@ -66,9 +66,9 @@ export async function baseHandler(
   if (!ready.ok) return tenantNotReadyResponse(ready.reason);
   const { tenantId } = ready;
 
-  let issued;
+  let accessKey;
   try {
-    issued = await orchestrator.issueConsoleAccessKey(tenantId, {
+    accessKey = await orchestrator.issueConsoleAccessKey(tenantId, {
       keyName,
       permissions,
       granularPermissions,
@@ -97,10 +97,10 @@ export async function baseHandler(
       TableName: Resource.UserInfoTable.name,
       Item: marshall({
         pk: `ORG#${orgId}`,
-        sk: `ACCESSKEY#${issued.id}`,
+        sk: `ACCESSKEY#${accessKey.id}`,
         keyName,
-        accessKeyId: issued.accessKeyId,
-        createdAt: issued.createdAt,
+        accessKeyId: accessKey.accessKeyId,
+        createdAt: accessKey.createdAt,
         status: 'active',
         permissions,
         ...(granularPermissions?.length ? { granularPermissions } : {}),
@@ -114,11 +114,11 @@ export async function baseHandler(
   return new ResponseBuilder()
     .status(201)
     .body<CreateAccessKeyResponse>({
-      id: issued.id,
+      id: accessKey.id,
       keyName,
-      accessKeyId: issued.accessKeyId,
-      secretAccessKey: issued.accessKeySecret,
-      createdAt: issued.createdAt,
+      accessKeyId: accessKey.accessKeyId,
+      secretAccessKey: accessKey.accessKeySecret,
+      createdAt: accessKey.createdAt,
     })
     .build();
 }

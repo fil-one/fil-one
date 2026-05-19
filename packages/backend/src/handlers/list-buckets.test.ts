@@ -10,13 +10,13 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockEnsureTenantReady = vi.fn();
+const mockIsTenantReady = vi.fn();
 const mockListBuckets = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
   region: 'eu-west-1',
-  ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
+  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
   listBuckets: (...args: unknown[]) => mockListBuckets(...args),
 };
 
@@ -43,7 +43,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 describe('list-buckets baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnsureTenantReady.mockResolvedValue({ ok: true, tenantId: 'aurora-t-1' });
+    mockIsTenantReady.mockResolvedValue({ tenantId: 'aurora-t-1' });
   });
 
   it('returns 200 with buckets from the orchestrator', async () => {
@@ -136,7 +136,7 @@ describe('list-buckets baseHandler', () => {
   });
 
   it('returns 200 with empty array when tenant is not ready', async () => {
-    mockEnsureTenantReady.mockResolvedValue({ ok: false, reason: 'setup-incomplete' });
+    mockIsTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);

@@ -35,8 +35,8 @@ export async function baseHandler(
   const period = event.queryStringParameters?.period === '30d' ? 30 : 7;
 
   const orchestrator = orchestratorForRegion(S3_REGION);
-  const ready = await orchestrator.ensureTenantReady(orgId);
-  const tenantId = ready.ok ? ready.tenantId : undefined;
+  const ready = await orchestrator.isTenantReady(orgId);
+  const tenantId = ready?.tenantId;
 
   const [bucketActivities, keyActivities] = await Promise.all([
     fetchBucketActivities(orgId, tenantId),
@@ -123,8 +123,8 @@ async function buildTimeSeries(
   from.setUTCDate(from.getUTCDate() - period + 1);
   from.setUTCHours(0, 0, 0, 0);
 
-  // getStorageSamples is Aurora-specific (no Fortilyx equivalent). Phase B will
-  // expose this as `provider.getStorageSamples?(tenantId)` and Fortilyx will
+  // getStorageSamples is Aurora-specific (no FTH equivalent). Phase B will
+  // expose this as `provider.getStorageSamples?(tenantId)` and FTH will
   // return [] until the upstream endpoint exists.
   const storageSamples = tenantId
     ? await getStorageSamples({

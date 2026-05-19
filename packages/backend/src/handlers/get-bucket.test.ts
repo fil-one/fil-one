@@ -10,13 +10,13 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockEnsureTenantReady = vi.fn();
+const mockIsTenantReady = vi.fn();
 const mockGetBucket = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
   region: 'eu-west-1',
-  ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
+  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
   getBucket: (...args: unknown[]) => mockGetBucket(...args),
 };
 
@@ -43,7 +43,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 describe('get-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnsureTenantReady.mockResolvedValue({ ok: true, tenantId: 'aurora-t-1' });
+    mockIsTenantReady.mockResolvedValue({ tenantId: 'aurora-t-1' });
   });
 
   it('returns 200 with bucket data from the orchestrator', async () => {
@@ -173,14 +173,14 @@ describe('get-bucket baseHandler', () => {
     expect(body).toStrictEqual({ message: 'Bucket name is required' });
   });
 
-  it('returns 503 when tenant is not ready', async () => {
-    mockEnsureTenantReady.mockResolvedValue({ ok: false, reason: 'setup-incomplete' });
+  it('returns 404 when tenant is not ready (no tenant means no bucket)', async () => {
+    mockIsTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
-    expect(result.statusCode).toBe(503);
+    expect(result.statusCode).toBe(404);
     expect(mockGetBucket).not.toHaveBeenCalled();
   });
 });

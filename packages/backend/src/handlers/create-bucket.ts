@@ -39,7 +39,7 @@ export async function baseHandler(
   const { name, region, versioning, lock, retention } = parsed.data;
 
   // Phase A: only the Aurora region is supported in handlers. Phase B will
-  // open this up via getAvailableRegions(stage) once the Fortilyx
+  // open this up via getAvailableRegions(stage) once the FTH
   // orchestrator is registered.
   if (region !== S3_REGION) {
     return new ResponseBuilder()

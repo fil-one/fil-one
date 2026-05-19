@@ -5,7 +5,6 @@ import { S3_REGION } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { orchestratorForRegion } from '../lib/service-orchestrator/registry.js';
 import { listObjects } from '../lib/service-orchestrator/s3-presigner.js';
-import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
 import { isNoSuchBucketError } from '../lib/s3-errors.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -29,8 +28,13 @@ export async function baseHandler(
   const { orgId } = getUserInfo(event);
 
   const orchestrator = orchestratorForRegion(S3_REGION);
-  const ready = await orchestrator.ensureTenantReady(orgId);
-  if (!ready.ok) return tenantNotReadyResponse(ready.reason);
+  const ready = await orchestrator.isTenantReady(orgId);
+  if (!ready) {
+    return new ResponseBuilder()
+      .status(404)
+      .body<ErrorResponse>({ message: 'Bucket not found' })
+      .build();
+  }
 
   const ctx = await orchestrator.getPresignerContext(ready.tenantId);
 

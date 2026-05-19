@@ -19,13 +19,13 @@ const presignerContext = {
   forcePathStyle: true,
 };
 
-const mockEnsureTenantReady = vi.fn();
+const mockIsTenantReady = vi.fn();
 const mockGetPresignerContext = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
   region: 'eu-west-1',
-  ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
+  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
   getPresignerContext: (...args: unknown[]) => mockGetPresignerContext(...args),
 };
 
@@ -81,7 +81,7 @@ describe('presign baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv('FILONE_STAGE', 'test');
-    mockEnsureTenantReady.mockResolvedValue({ ok: true, tenantId: 'aurora-t-1' });
+    mockIsTenantReady.mockResolvedValue({ tenantId: 'aurora-t-1' });
     mockGetPresignerContext.mockResolvedValue(presignerContext);
   });
 
@@ -181,7 +181,7 @@ describe('presign baseHandler', () => {
   // ── Tenant readiness ────────────────────────────────────────────────
 
   it('returns 503 when the orchestrator says tenant is not ready', async () => {
-    mockEnsureTenantReady.mockResolvedValue({ ok: false, reason: 'setup-incomplete' });
+    mockIsTenantReady.mockResolvedValue(null);
 
     const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }]);
     const result = await baseHandler(event);
