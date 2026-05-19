@@ -45,10 +45,13 @@ jobs:
         if: always()
         run: |
           semgrep scan \
-            --config p/ci \
+            --config p/typescript \
+            --config p/jwt \
+            --config p/owasp-top-ten \
+            --config p/secrets \
+            --config p/security-audit \
             --metrics=off \
             --sarif --output semgrep-community.sarif \
-            --error \
             --verbose
         continue-on-error: true # Advisory — community rules may be noisy
 
