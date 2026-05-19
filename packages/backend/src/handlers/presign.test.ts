@@ -29,7 +29,7 @@ const mockOrchestrator = {
   getPresignerContext: (...args: unknown[]) => mockGetPresignerContext(...args),
 };
 
-vi.mock('../lib/service-orchestrator/registry.js', () => ({
+vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
   orchestratorForRegion: () => mockOrchestrator,
 }));
 
@@ -41,7 +41,7 @@ const mockGetPresignedGetObjectUrl = vi.fn();
 const mockGetPresignedPutObjectUrl = vi.fn();
 const mockGetPresignedDeleteObjectUrl = vi.fn();
 
-vi.mock('../lib/service-orchestrator/s3-presigner.js', () => ({
+vi.mock('../lib/s3-presigner.js', () => ({
   getPresignedListObjectsUrl: (...args: unknown[]) => mockGetPresignedListObjectsUrl(...args),
   getPresignedListObjectVersionsUrl: (...args: unknown[]) =>
     mockGetPresignedListObjectVersionsUrl(...args),

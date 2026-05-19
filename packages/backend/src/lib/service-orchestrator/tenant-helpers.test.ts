@@ -19,7 +19,7 @@ import {
   advanceTenantStatus,
   readTenantAttrs,
   recordTenantSetupFailure,
-} from './profile-tenant.js';
+} from './tenant-helpers.js';
 
 const AURORA_ATTRS = {
   statusAttr: 'setupStatus',
@@ -33,7 +33,7 @@ const FTH_ATTRS = {
   failureCountAttr: 'fthSetupFailureCount',
 };
 
-describe('profile-tenant readTenantAttrs', () => {
+describe('tenant-helpers readTenantAttrs', () => {
   beforeEach(() => {
     ddbMock.reset();
   });
@@ -97,7 +97,7 @@ describe('profile-tenant readTenantAttrs', () => {
   });
 });
 
-describe('profile-tenant advanceTenantStatus', () => {
+describe('tenant-helpers advanceTenantStatus', () => {
   beforeEach(() => {
     ddbMock.reset();
   });
@@ -159,7 +159,7 @@ describe('profile-tenant advanceTenantStatus', () => {
   });
 });
 
-describe('profile-tenant recordTenantSetupFailure', () => {
+describe('tenant-helpers recordTenantSetupFailure', () => {
   beforeEach(() => {
     ddbMock.reset();
   });

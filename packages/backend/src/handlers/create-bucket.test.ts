@@ -20,7 +20,7 @@ const mockOrchestrator = {
   createBucket: (...args: unknown[]) => mockCreateBucket(...args),
 };
 
-vi.mock('../lib/service-orchestrator/registry.js', () => ({
+vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
   orchestratorForRegion: () => mockOrchestrator,
 }));
 

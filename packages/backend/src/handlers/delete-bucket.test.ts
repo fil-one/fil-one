@@ -30,12 +30,12 @@ const mockOrchestrator = {
   deleteBucket: (...args: unknown[]) => mockOrchestratorDeleteBucket(...args),
 };
 
-vi.mock('../lib/service-orchestrator/registry.js', () => ({
+vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
   orchestratorForRegion: () => mockOrchestrator,
 }));
 
 const mockListObjects = vi.fn();
-vi.mock('../lib/service-orchestrator/s3-presigner.js', () => ({
+vi.mock('../lib/s3-presigner.js', () => ({
   listObjects: (...args: unknown[]) => mockListObjects(...args),
 }));
 

@@ -24,7 +24,7 @@ const mockOrchestrator = {
   findAccessKeyByName: (...args: unknown[]) => mockFindAccessKeyByName(...args),
 };
 
-vi.mock('../lib/service-orchestrator/registry.js', () => ({
+vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
   orchestratorForRegion: () => mockOrchestrator,
 }));
 

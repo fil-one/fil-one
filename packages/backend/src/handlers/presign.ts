@@ -8,7 +8,7 @@ import type {
   PresignResponse,
   PresignResponseItem,
 } from '@filone/shared';
-import { orchestratorForRegion } from '../lib/service-orchestrator/registry.js';
+import { orchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
 import type { PresignerContext } from '../lib/service-orchestrator/service-orchestrator.js';
 import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
 import {
@@ -19,7 +19,7 @@ import {
   getPresignedListObjectVersionsUrl,
   getPresignedListObjectsUrl,
   getPresignedPutObjectUrl,
-} from '../lib/service-orchestrator/s3-presigner.js';
+} from '../lib/s3-presigner.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';

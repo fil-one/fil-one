@@ -16,7 +16,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { S3Object } from '@filone/shared';
-import type { PresignerContext } from './service-orchestrator.js';
+import type { PresignerContext } from './service-orchestrator/service-orchestrator.js';
 
 function clientFor(ctx: PresignerContext): S3Client {
   return new S3Client({

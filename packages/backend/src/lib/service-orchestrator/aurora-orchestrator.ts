@@ -28,7 +28,7 @@ import {
 } from '../aurora-portal.js';
 import { deleteBucket as s3DeleteBucket, getAuroraS3Credentials } from '../aurora-s3-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
-import { readTenantAttrs } from './profile-tenant.js';
+import { readTenantAttrs } from './tenant-helpers.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,

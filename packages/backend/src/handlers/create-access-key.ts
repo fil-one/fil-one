@@ -6,7 +6,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { CreateAccessKeySchema, S3_REGION } from '@filone/shared';
 import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { orchestratorForRegion } from '../lib/service-orchestrator/registry.js';
+import { orchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,

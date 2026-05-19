@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { S3Region } from '@filone/shared';
-import { getOrchestrator, orchestratorForRegion } from './registry.js';
+import { getOrchestrator, orchestratorForRegion } from './service-orchestrator-registry.js';
 
 describe('service-orchestrator registry', () => {
   it('returns the Aurora orchestrator for id "aurora"', () => {
