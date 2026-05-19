@@ -156,7 +156,7 @@ export function DashboardPage() {
       id: 'upload-object',
       icon: ArrowUpIcon,
       title: 'Upload an object',
-      subtitle: 'Store files on Filecoin',
+      subtitle: 'Store files on Fil One',
       href: '/buckets',
       done: usage.objects.count > 0,
     },
