@@ -24,7 +24,10 @@ export async function baseHandler(
   const orchestrator = getOrchestratorForRegion(S3_REGION);
   const tenantId = await orchestrator.isTenantReady(orgId);
   if (!tenantId) {
-    return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
+    return new ResponseBuilder()
+      .status(503)
+      .body({ message: 'Tenant setup is not complete, please try again later' })
+      .build();
   }
 
   const details = await orchestrator.getBucket(tenantId, bucketName);

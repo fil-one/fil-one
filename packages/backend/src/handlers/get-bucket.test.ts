@@ -173,14 +173,14 @@ describe('get-bucket baseHandler', () => {
     expect(body).toStrictEqual({ message: 'Bucket name is required' });
   });
 
-  it('returns 404 when tenant is not ready (no tenant means no bucket)', async () => {
+  it('returns 503 when tenant is missing', async () => {
     mockIsTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
-    expect(result.statusCode).toBe(404);
+    expect(result.statusCode).toBe(503);
     expect(mockGetBucket).not.toHaveBeenCalled();
   });
 });

@@ -108,14 +108,14 @@ describe('delete-bucket baseHandler', () => {
     expect(mockOrchestratorDeleteBucket).not.toHaveBeenCalled();
   });
 
-  it('returns 404 when tenant is not ready (no tenant means no bucket)', async () => {
+  it('returns 503 when tenant is not ready', async () => {
     mockIsTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
-    expect(result.statusCode).toBe(404);
+    expect(result.statusCode).toBe(503);
     expect(mockGetPresignerContext).not.toHaveBeenCalled();
   });
 });

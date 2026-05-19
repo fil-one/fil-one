@@ -77,7 +77,9 @@ async function getAuroraS3Credentials(
     value = Parameter?.Value;
   } catch (err) {
     if ((err as { name?: string }).name === 'ParameterNotFound') {
-      throw new Error(`Aurora S3 credentials not found in SSM for tenant ${tenantId}`);
+      throw new Error(`Aurora S3 credentials not found in SSM for tenant ${tenantId}`, {
+        cause: err,
+      });
     }
     throw err;
   }
@@ -148,7 +150,7 @@ export const auroraOrchestrator: ServiceOrchestrator = {
       });
     } catch (err) {
       if (err instanceof PortalBucketAlreadyExistsError) {
-        throw new BucketAlreadyExistsError(args.bucketName);
+        throw new BucketAlreadyExistsError(args.bucketName, { cause: err });
       }
       throw err;
     }
@@ -240,10 +242,10 @@ export const auroraOrchestrator: ServiceOrchestrator = {
       };
     } catch (err) {
       if (err instanceof DuplicateKeyNameError) {
-        throw new AccessKeyAlreadyExistsError();
+        throw new AccessKeyAlreadyExistsError({ cause: err });
       }
       if (err instanceof AuroraValidationError) {
-        throw new AccessKeyValidationError(err.message);
+        throw new AccessKeyValidationError(err.message, { cause: err });
       }
       throw err;
     }

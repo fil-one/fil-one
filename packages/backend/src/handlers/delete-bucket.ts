@@ -31,8 +31,8 @@ export async function baseHandler(
   const tenantId = await orchestrator.isTenantReady(orgId);
   if (!tenantId) {
     return new ResponseBuilder()
-      .status(404)
-      .body<ErrorResponse>({ message: 'Bucket not found' })
+      .status(503)
+      .body<ErrorResponse>({ message: 'Tenant setup is not complete, please try again later' })
       .build();
   }
 

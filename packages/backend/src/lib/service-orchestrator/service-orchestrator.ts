@@ -62,22 +62,22 @@ export interface IssuedAccessKey {
 }
 
 export class BucketAlreadyExistsError extends Error {
-  constructor(bucketName: string) {
-    super(`Bucket "${bucketName}" already exists`);
+  constructor(bucketName: string, options?: ErrorOptions) {
+    super(`Bucket "${bucketName}" already exists`, options);
     this.name = 'BucketAlreadyExistsError';
   }
 }
 
 export class AccessKeyAlreadyExistsError extends Error {
-  constructor() {
-    super('An access key with this name already exists');
+  constructor(options?: ErrorOptions) {
+    super('An access key with this name already exists', options);
     this.name = 'AccessKeyAlreadyExistsError';
   }
 }
 
 export class AccessKeyValidationError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'AccessKeyValidationError';
   }
 }
