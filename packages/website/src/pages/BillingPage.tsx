@@ -28,6 +28,7 @@ import { ChoosePlanDialog } from '../components/billing/ChoosePlanDialog.js';
 import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
 import { ContactSalesDialog } from '../components/billing/ContactSalesDialog.js';
 import { queryKeys } from '../lib/query-client.js';
+import { Overline } from '../components/Overline';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -272,17 +273,16 @@ export function BillingPage() {
         </div>
       )}
 
-      {/* Grace period warning banner */}
-      {isGracePeriod && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <WarningIcon size={20} className="text-amber-600 flex-shrink-0" weight="fill" />
-          <span className="text-sm text-amber-800">
-            {isTrialExpiredGrace
-              ? `Your free trial has expired.${graceDays !== null ? ` ${graceDays} days remaining` : ''} to upgrade or download your data.`
-              : `Subscription canceled.${graceDays !== null ? ` ${graceDays} days remaining` : ''} to reactivate or download your data.`}{' '}
+      {/* Canceled banner */}
+      {isCanceled && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <WarningIcon size={20} className="text-red-600 flex-shrink-0" weight="fill" />
+          <span className="text-sm text-red-800">
+            Your account has been canceled.{' '}
             <button type="button" onClick={handleUpgradeClick} className="font-semibold underline">
-              {isTrialExpiredGrace ? 'Upgrade now' : 'Reactivate'}
-            </button>
+              Reactivate
+            </button>{' '}
+            to regain access.
           </span>
         </div>
       )}
@@ -295,9 +295,11 @@ export function BillingPage() {
             className={`rounded-lg border bg-white flex flex-col gap-4 py-4 px-5 shadow-sm ${
               isActive || isPastDue
                 ? 'border-green-200'
-                : isCanceled
-                  ? 'border-red-200'
-                  : 'border-brand-200'
+                : isGracePeriod
+                  ? 'border-amber-200'
+                  : isCanceled
+                    ? 'border-red-200'
+                    : 'border-brand-200'
             }`}
           >
             <div className="flex items-center justify-between">
@@ -377,7 +379,7 @@ export function BillingPage() {
                 }`}
               >
                 <p
-                  className={`text-[13px] font-medium ${isCanceled ? 'text-red-800' : 'text-zinc-900'}`}
+                  className={`text-[13px] font-medium ${isCanceled ? 'text-red-800' : isGracePeriod ? 'text-amber-800' : 'text-zinc-900'}`}
                 >
                   {isCanceled
                     ? 'Reactivate your subscription to regain full access'
@@ -386,7 +388,7 @@ export function BillingPage() {
                       : 'Reactivate your subscription to restore full access'}
                 </p>
                 <Button
-                  variant={isCanceled ? 'destructive' : 'primary'}
+                  variant={isCanceled ? 'destructive' : 'warning'}
                   size="sm"
                   icon={ArrowRightIcon}
                   iconPosition="right"
@@ -582,9 +584,7 @@ export function BillingPage() {
           <div className="rounded-lg border border-zinc-200 bg-white shadow-sm overflow-hidden p-px">
             {/* Header */}
             <div className="flex flex-col gap-[6px] px-4 pt-4 pb-[13px] border-b border-zinc-200/50 bg-zinc-50">
-              <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-zinc-500">
-                Pay-as-you-go
-              </p>
+              <Overline>Pay-as-you-go</Overline>
               <div className="flex items-baseline gap-1">
                 <span className="text-3xl font-bold leading-9 text-zinc-900">$4.99</span>
                 <span className="text-[12px] leading-[18px] text-zinc-500">/ TB / month</span>
@@ -626,9 +626,7 @@ export function BillingPage() {
 
           {/* Need more? section */}
           <div className="flex flex-col gap-1 mt-5 px-1">
-            <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-zinc-500">
-              Need more?
-            </p>
+            <Overline>Need more?</Overline>
             <p className="text-[12px] leading-[19.5px] text-zinc-500">
               The <strong className="font-medium text-zinc-900">Business plan</strong> offers volume
               discounts, SLA guarantees, and dedicated support.
