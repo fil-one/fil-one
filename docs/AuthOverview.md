@@ -48,12 +48,12 @@ Background reading: [`docs/architectural-decisions/2026-03-mfa-enrollment.md`](h
 
 ### Middleware (Middy)
 
-| Area                                                       | File                                                                                                                                                                  |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Auth middleware (JWT verify, refresh, identity resolution) | [`packages/backend/src/middleware/auth.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/auth.ts)                            |
-| CSRF middleware                                            | [`packages/backend/src/middleware/csrf.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/csrf.ts)                            |
+| Area                                                       | File                                                                                                                                                                   |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auth middleware (JWT verify, refresh, identity resolution) | [`packages/backend/src/middleware/auth.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/auth.ts)                             |
+| CSRF middleware                                            | [`packages/backend/src/middleware/csrf.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/csrf.ts)                             |
 | Subscription/authorization middleware                      | [`packages/backend/src/middleware/subscription-guard.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/subscription-guard.ts) |
-| MFA step-up middleware (`requireFreshMfa`)                 | [`packages/backend/src/middleware/require-fresh-mfa.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/require-fresh-mfa.ts)  |
+| MFA step-up middleware (`requireFreshMfa`)                 | [`packages/backend/src/middleware/require-fresh-mfa.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/middleware/require-fresh-mfa.ts)   |
 
 ### Backend (handlers, lib, infra)
 
@@ -76,10 +76,10 @@ Background reading: [`docs/architectural-decisions/2026-03-mfa-enrollment.md`](h
 
 ### Frontend (SPA — `packages/website`)
 
-| Area                                                 | File                                                                                                                                                  |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SPA API wrapper (cookies, CSRF header, 401 handling) | [`packages/website/src/lib/api.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/api.ts)                            |
-| SPA route guard (logged-in + email-verified checks)  | [`packages/website/src/routes/_app.tsx`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/routes/_app.tsx)                  |
+| Area                                                 | File                                                                                                                                                   |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| SPA API wrapper (cookies, CSRF header, 401 handling) | [`packages/website/src/lib/api.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/lib/api.ts)                             |
+| SPA route guard (logged-in + email-verified checks)  | [`packages/website/src/routes/_app.tsx`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/routes/_app.tsx)                   |
 | SPA sign-in entry                                    | [`packages/website/src/routes/_auth/sign-in.tsx`](https://github.com/filecoin-project/fil-one/blob/main/packages/website/src/routes/_auth/sign-in.tsx) |
 
 ## Auth0 integration
@@ -127,7 +127,7 @@ All cookies use `Secure; SameSite=Lax; Path=/`. `Lax` (not `Strict`) is required
 
 There is no `Authorization: Bearer` path. Cookie-only so JS cannot access the sensitive user tokens.
 
-Hs stands for "hyperspace", the original codename. 
+Hs stands for "hyperspace", the original codename.
 
 ## Middleware chain
 
@@ -188,7 +188,7 @@ So this is entirely expandable to multiple users in one org and we can attach di
 
 ### Roles
 
-`OrgRole.Admin` is the only role assigned today (creator-as-admin). Auth0 RBAC is wired in the auth middleware design but not enforced in production — see the "RBAC (Planned)" section of the auth ADR. We do not need to use RBAC and can instead use resource based authZ which is also supported by Auth0 as an alternative and we have some notion of already between CSRF token enforcement and the stripe middleware guard. 
+`OrgRole.Admin` is the only role assigned today (creator-as-admin). Auth0 RBAC is wired in the auth middleware design but not enforced in production — see the "RBAC (Planned)" section of the auth ADR. We do not need to use RBAC and can instead use resource based authZ which is also supported by Auth0 as an alternative and we have some notion of already between CSRF token enforcement and the stripe middleware guard.
 
 For user management in the console, using Roles over resource based Auth0 claims would be easier to implement and simpler for customer. Ultimately use of the S3 Layer is driven through key/credential Sigv4 with IAM style permissions which is the more important AuthZ need. But this means we need to define all the roles necessary and document the permission model vs enabling any sort of fine-grain control over resources. Product should decide on which type of access control is needed and how organizations will work.
 
@@ -206,7 +206,8 @@ enum AccessLevel {
   Write = 'write',
 }
 ```
-Could expand on this concept as a way to do more AuthZ based on Auth0 claims or roles that we configure. 
+
+Could expand on this concept as a way to do more AuthZ based on Auth0 claims or roles that we configure.
 
 ### Subscription state machine
 
@@ -242,7 +243,7 @@ Notably _not_ gated: `/api/me`, `/api/me/resend-verification`, anything under `/
 
 ## Frontend
 
-The SPA (React + TanStack Router, `packages/website`) is the only client. It does not store tokens — it relies on the cookies set by the BFF. Simple & secure. 
+The SPA (React + TanStack Router, `packages/website`) is the only client. It does not store tokens — it relies on the cookies set by the BFF. Simple & secure.
 
 ### Login / logout
 
@@ -338,13 +339,13 @@ Claude code does a great job in doing this given how consistent we apply the pat
 
 This document exists to support the conversation about extending auth/identity to additional services. Things worth pinning down before that:
 
-- **Trust boundary between services.** Today the BFF is the only thing that holds Auth0 client credentials, talks to the Management API, and reads the user→org mapping. A second service can either (a) call the console API as the source of truth, or (b) verify Auth0 access tokens directly and look up its own `userId/orgId` mapping in `UserInfoTable`. Strong preference for the former since it means no other service needs to deal with our Auth0 instance. We should expose service to service authN/Z mechanism of some sort and define which APIs we want to support for this. 
+- **Trust boundary between services.** Today the BFF is the only thing that holds Auth0 client credentials, talks to the Management API, and reads the user→org mapping. A second service can either (a) call the console API as the source of truth, or (b) verify Auth0 access tokens directly and look up its own `userId/orgId` mapping in `UserInfoTable`. Strong preference for the former since it means no other service needs to deal with our Auth0 instance. We should expose service to service authN/Z mechanism of some sort and define which APIs we want to support for this.
 - **Token format for service-to-service.** Auth0 access tokens are issued for `aud=https://app.fil.one`. A separate audience per service (or a federated machine token) is cleaner than reusing the user token.
 - **Where authorization decisions live.** All AuthZ decisions live in the backend. Frontend "reacts" to the data and http responses.
-- **RBAC.** The roles table has one entry today and all users are admin. If we plan to share User Identity across services, agreeing on the role/permission model now avoids re-mapping later. Lots of product requirements needs on how we want to enable permissions with multi-user accounts. Strong preference to use Auth0 to manage organizations which can give access to more features like 3P SSO, potentially in the future and support email invite to orgs so a user gets a sign up link specific to the organization that already exists. 
-- **Service to Service AuthN/Z**. We have 2 kinds of operations we implicitly support: 1. User operations, 2. (S3) Service operations. 
-  - *User operations* include things like billing changes, org name changes, viewing S3 usage dashboard, etc. This is the core Console API and these are all user interactions. These things could expand to service operations with a different AuthN/Z model if we are supporting external developer customers to programmatically do these things (very large amount of work).
-  - *Service operations* are S3 operations: PutObject, get object, head object (read metadata), etc. These directly call Aurora through presigned urls and have no need (or want) to go through our Console API layer. We have a secret Access Key we manage on their behalf and we can still do this while abiding by any User Permission model we decide on. 
-  - *Slightly ambiguous* since these are only accessible to users right now, but should likely be considered service operations since they are supported by S3: things like Creating Aurora Buckets, Creating Aurora access keys, etc. Right now, we use special permissions with service to service auth with aurora for these operations since they are not supported in the S3 layer. I'd argue these are spiritually *Service operations* and worth unifying with any permission model we expose with the other service operations in the same way AWS IAM does for S3 + other service. But as of today they are user operations. 
+- **RBAC.** The roles table has one entry today and all users are admin. If we plan to share User Identity across services, agreeing on the role/permission model now avoids re-mapping later. Lots of product requirements needs on how we want to enable permissions with multi-user accounts. Strong preference to use Auth0 to manage organizations which can give access to more features like 3P SSO, potentially in the future and support email invite to orgs so a user gets a sign up link specific to the organization that already exists.
+- **Service to Service AuthN/Z**. We have 2 kinds of operations we implicitly support: 1. User operations, 2. (S3) Service operations.
+  - _User operations_ include things like billing changes, org name changes, viewing S3 usage dashboard, etc. This is the core Console API and these are all user interactions. These things could expand to service operations with a different AuthN/Z model if we are supporting external developer customers to programmatically do these things (very large amount of work).
+  - _Service operations_ are S3 operations: PutObject, get object, head object (read metadata), etc. These directly call Aurora through presigned urls and have no need (or want) to go through our Console API layer. We have a secret Access Key we manage on their behalf and we can still do this while abiding by any User Permission model we decide on.
+  - _Slightly ambiguous_ since these are only accessible to users right now, but should likely be considered service operations since they are supported by S3: things like Creating Aurora Buckets, Creating Aurora access keys, etc. Right now, we use special permissions with service to service auth with aurora for these operations since they are not supported in the S3 layer. I'd argue these are spiritually _Service operations_ and worth unifying with any permission model we expose with the other service operations in the same way AWS IAM does for S3 + other service. But as of today they are user operations.
 
-So, in summary, Auth0 is the source of truth for user identity. Limited Authorization controls exist. For user authorization, need to define product requirements on how we want to enable management of authorization and how we want to enable multiple user/logins for the same tenant/organization. And for service operations we also need to define product requirements on what we need to support. We implicitly have another set of APIs for service level operations that is currently only gated by user specific authN/Z but should be expanded to support outside our console. And the service operations for S3 are supported through the sigv4 signed via console-managed access keys tied to a user/organization. 
+So, in summary, Auth0 is the source of truth for user identity. Limited Authorization controls exist. For user authorization, need to define product requirements on how we want to enable management of authorization and how we want to enable multiple user/logins for the same tenant/organization. And for service operations we also need to define product requirements on what we need to support. We implicitly have another set of APIs for service level operations that is currently only gated by user specific authN/Z but should be expanded to support outside our console. And the service operations for S3 are supported through the sigv4 signed via console-managed access keys tied to a user/organization.
