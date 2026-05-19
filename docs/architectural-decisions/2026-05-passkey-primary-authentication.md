@@ -8,7 +8,7 @@
 
 The platform already supports two passkey shapes as **MFA factors** — `webauthn-platform` (device biometrics) and `webauthn-roaming` (security keys). Those are layered on top of a password as a second factor. See `2026-03-mfa-enrollment.md`.
 
-This ADR covers passkeys as **primary authentication** on the database connection (`Username-Password-Authentication`): a passwordless sign-in/sign-up where the user authenticates with a passkey instead of (or alongside) a password. Auth0 documents this at https://auth0.com/docs/authenticate/database-connections/passkeys.
+This ADR covers passkeys as **primary authentication** on the database connection (`Username-Password-Authentication`): a passwordless sign-in where the user authenticates with a passkey alongside their existing password. Auth0 documents this at https://auth0.com/docs/authenticate/database-connections/passkeys.
 
 Auth0 Universal Login owns the WebAuthn ceremonies. The work here is tenant configuration (one PATCH on the connection) plus a small change to the Post-Login Action so a passkey login isn't double-challenged for MFA.
 
@@ -17,14 +17,6 @@ Auth0 Universal Login owns the WebAuthn ceremonies. The work here is tenant conf
 ### Custom WebAuthn ceremonies in the SPA vs. Auth0 Universal Login
 
 Auth0 Universal Login already implements the WebAuthn registration/assertion flow, including the discoverable-credential UX, browser autofill hints, and per-OS biometric prompts. Building our own would duplicate that work and add security surface. **Pick Universal Login.**
-
-### Append to existing ADRs vs. dedicated ADR
-
-`2026-03-authentication.md` covers the password+OAuth baseline; `2026-03-mfa-enrollment.md` covers MFA factor selection. Passkey-as-primary is a distinct decision from both — different threat model, different Auth0 surface, different operational constraints (e.g., relying-party domain). Co-locating would conflate three things that need to be reasoned about separately. **Pick a dedicated ADR; cross-link from the other two.**
-
-### Force passkey-only vs. additive with password fallback
-
-Auth0 does not currently support disabling password authentication on a database connection. Passkey-only is not reachable today. **Pick additive with password fallback**, with a note to revisit when Auth0 ships the toggle.
 
 ### Progressive Enrollment on by default vs. opt-in via settings link
 
@@ -54,7 +46,7 @@ Enable passkeys on the `Username-Password-Authentication` connection with the fo
 
 The PATCH is applied by `setupAuth0PasskeyAuth` in `packages/backend/src/jobs/stack-setup/setup-passkey.ts`, called from the `setup-integrations` deploy Lambda on staging and production. Dev stacks share a tenant with staging and inherit whatever staging deployed last.
 
-Passwords stay enabled because Auth0 does not yet support disabling password auth on a database connection. The desired end state is passkey-only with password recovery as a fallback channel; record that here so we can flip the toggle when it ships.
+Passwords remain enabled alongside passkeys. Passkey login is additive — users can sign in with either factor.
 
 ### Post-Login Action: MFA skipped on passkey logins
 
@@ -87,17 +79,15 @@ The deploy-time M2M app gains `read:connections` and `update:connections`. The r
 
 ## Out of Scope
 
-- **Forcing passkey-only signups** — not supported by Auth0 today. Revisit when the password-disable toggle ships.
 - **Native iOS/Android passkey integration** — we're web-only.
 - **Custom WebAuthn ceremonies in the SPA** — Universal Login owns this.
 - **Cross-device passkey sync** — platform concern (iCloud Keychain, Google Password Manager).
 - **Re-enrollment flow when a user moves to a new device** — Progressive Enrollment on the next login covers it.
-- **Step-up auth on passkey deletion** — Stage B already wires `requireMfa` on the delete endpoint. The broader step-up roadmap is tracked in the MFA ADR.
+- **Step-up auth on passkey deletion** — already wired via `requireMfa` on the delete endpoint. The broader step-up roadmap is tracked in the MFA ADR.
 
 ## References
 
-- ADR: `2026-03-authentication.md` (baseline auth + Universal Login + cookie session)
 - ADR: `2026-03-mfa-enrollment.md` (MFA factor selection + Post-Login Action)
 - Auth0 docs: https://auth0.com/docs/authenticate/database-connections/passkeys
 - Auth0 Management API: `PATCH /api/v2/connections/{id}` — `options.authentication_methods.passkey`, `options.passkey_options`
-- README: `### Auth0 Passkey Setup` (operator runbook)
+- `Auth0OneTimeSetup.md` — operator runbook for tenant prerequisites

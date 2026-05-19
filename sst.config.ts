@@ -311,7 +311,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              Version: '2.9',
+              Version: '2.91',
             },
           },
         },

@@ -303,7 +303,6 @@ Auth0 powers authentication: Universal Login, two M2M applications per tenant (d
 
 The full operator runbook (tenant settings, application settings, MFA, passkeys, and both M2M apps) is in [`Auth0OneTimeSetup.md`](./Auth0OneTimeSetup.md). For the design rationale, see the ADRs under `docs/architectural-decisions/`:
 
-- `2026-03-authentication.md` — baseline auth + Universal Login + cookie session
 - `2026-03-mfa-enrollment.md` — MFA factor selection + Post-Login Action
 - `2026-05-passkey-primary-authentication.md` — passkeys as primary authentication
 

@@ -21,6 +21,7 @@ import {
   type PasskeyEnrollment,
 } from '@filone/shared';
 import { queryKeys } from '../lib/query-client.js';
+import { formatDate } from '../lib/time.js';
 
 const REGENERATE_ACTION = 'regenerate-recovery-code';
 
@@ -296,11 +297,6 @@ function EnableView() {
 }
 
 const DELETE_PASSKEY_ACTION = 'delete-passkey';
-
-function formatDate(iso?: string): string | undefined {
-  if (!iso) return undefined;
-  return new Date(iso).toLocaleDateString();
-}
 
 function mostRecentPasskey(passkeys: PasskeyEnrollment[]): PasskeyEnrollment | undefined {
   return passkeys
