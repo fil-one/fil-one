@@ -4,7 +4,7 @@ import { clsx } from 'clsx';
 import { BaseLink, type BaseLinkProps } from './BaseLink';
 import { Icon as IconComponent, type IconProps } from './Icon';
 
-export type ButtonVariant = 'primary' | 'ghost' | 'tertiary' | 'destructive';
+export type ButtonVariant = 'primary' | 'ghost' | 'tertiary' | 'destructive' | 'warning';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 export type ButtonIconPosition = 'left' | 'right';
 
@@ -26,6 +26,7 @@ const variantClasses: Record<ButtonVariant, string> = {
   ghost: 'button--ghost',
   tertiary: 'button--tertiary',
   destructive: 'button--destructive',
+  warning: 'button--warning',
 };
 
 const sizeClasses: Record<ButtonSize, string> = {

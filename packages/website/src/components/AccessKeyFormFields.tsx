@@ -96,7 +96,7 @@ export function AccessKeyFormFields({
       {/* Bucket scope */}
       <FormField
         label="Which buckets can this key access?"
-        description="Restrict access to specific buckets or allow all"
+        description="Restrict access to specific buckets or allow all buckets in this region"
       >
         <AccessKeyBucketScopeFields
           bucketScope={bucketScope}
