@@ -28,15 +28,15 @@ export async function baseHandler(
   const { orgId } = getUserInfo(event);
 
   const orchestrator = getOrchestratorForRegion(S3_REGION);
-  const ready = await orchestrator.isTenantReady(orgId);
-  if (!ready) {
+  const tenantId = await orchestrator.isTenantReady(orgId);
+  if (!tenantId) {
     return new ResponseBuilder()
       .status(404)
       .body<ErrorResponse>({ message: 'Bucket not found' })
       .build();
   }
 
-  const ctx = await orchestrator.getPresignerContext(ready.tenantId);
+  const ctx = await orchestrator.getPresignerContext(tenantId);
 
   try {
     const objects = await listObjects({ ctx, bucket: bucketName, maxKeys: 1 });
@@ -48,7 +48,7 @@ export async function baseHandler(
         .build();
     }
 
-    await orchestrator.deleteBucket(ready.tenantId, bucketName);
+    await orchestrator.deleteBucket(tenantId, bucketName);
   } catch (err) {
     if (isNoSuchBucketError(err)) {
       return new ResponseBuilder()

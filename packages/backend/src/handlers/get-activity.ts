@@ -35,8 +35,7 @@ export async function baseHandler(
   const period = event.queryStringParameters?.period === '30d' ? 30 : 7;
 
   const orchestrator = getOrchestratorForRegion(S3_REGION);
-  const ready = await orchestrator.isTenantReady(orgId);
-  const tenantId = ready?.tenantId;
+  const tenantId = await orchestrator.isTenantReady(orgId);
 
   const [bucketActivities, keyActivities] = await Promise.all([
     fetchBucketActivities(orgId, tenantId),
@@ -61,7 +60,7 @@ export async function baseHandler(
 
 async function fetchBucketActivities(
   orgId: string,
-  tenantId: string | undefined,
+  tenantId: string | null,
 ): Promise<RecentActivity[]> {
   // Swallow errors so the dashboard still renders.
   if (!tenantId) return [];
@@ -115,7 +114,7 @@ async function fetchAccessKeyActivities(orgId: string): Promise<RecentActivity[]
 }
 
 async function buildTimeSeries(
-  tenantId: string | undefined,
+  tenantId: string | null,
   period: number,
 ): Promise<ActivityResponse['trends']> {
   const now = new Date();

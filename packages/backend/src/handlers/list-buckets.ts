@@ -17,12 +17,12 @@ export async function baseHandler(
   const { orgId } = getUserInfo(event);
 
   const orchestrator = getOrchestratorForRegion(S3_REGION);
-  const ready = await orchestrator.isTenantReady(orgId);
-  if (!ready) {
+  const tenantId = await orchestrator.isTenantReady(orgId);
+  if (!tenantId) {
     return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets: [] }).build();
   }
 
-  const summaries = await orchestrator.listBuckets(ready.tenantId);
+  const summaries = await orchestrator.listBuckets(tenantId);
 
   const buckets: Bucket[] = summaries.map((b) => ({
     name: b.name,

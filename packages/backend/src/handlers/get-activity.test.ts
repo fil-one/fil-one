@@ -73,7 +73,7 @@ function flatTrend(length: number, value: number) {
 
 function setTenant(tenantId?: string) {
   if (tenantId) {
-    mockIsTenantReady.mockResolvedValue({ tenantId });
+    mockIsTenantReady.mockResolvedValue(tenantId);
   } else {
     mockIsTenantReady.mockResolvedValue(null);
   }

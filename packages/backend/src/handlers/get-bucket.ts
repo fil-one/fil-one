@@ -22,12 +22,12 @@ export async function baseHandler(
   }
 
   const orchestrator = getOrchestratorForRegion(S3_REGION);
-  const ready = await orchestrator.isTenantReady(orgId);
-  if (!ready) {
+  const tenantId = await orchestrator.isTenantReady(orgId);
+  if (!tenantId) {
     return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
   }
 
-  const details = await orchestrator.getBucket(ready.tenantId, bucketName);
+  const details = await orchestrator.getBucket(tenantId, bucketName);
   if (!details) {
     return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
   }

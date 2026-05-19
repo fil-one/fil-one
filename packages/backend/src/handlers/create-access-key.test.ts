@@ -66,7 +66,7 @@ describe('create-access-key baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    mockEnsureTenantReady.mockResolvedValue({ ok: true, tenantId: 'aurora-t-1' });
+    mockEnsureTenantReady.mockResolvedValue('aurora-t-1');
   });
 
   it('returns 201 with keyName, accessKeyId, and secretAccessKey on success', async () => {
@@ -263,7 +263,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('returns 503 with a retry message when tenant setup is incomplete', async () => {
-    mockEnsureTenantReady.mockResolvedValue({ ok: false, reason: 'setup-incomplete' });
+    mockEnsureTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);

@@ -90,7 +90,7 @@ describe('auroraOrchestrator', () => {
 
       const result = await auroraOrchestrator.ensureTenantReady('org-1');
 
-      expect(result).toEqual({ ok: true, tenantId: 'aurora-t-1' });
+      expect(result).toEqual('aurora-t-1');
       expect(mockEnsureAuroraTenantReady).toHaveBeenCalledWith('org-1');
     });
 
@@ -102,7 +102,7 @@ describe('auroraOrchestrator', () => {
 
       const result = await auroraOrchestrator.ensureTenantReady('org-1');
 
-      expect(result).toEqual({ ok: false, reason: 'setup-incomplete' });
+      expect(result).toBeNull();
     });
   });
 
@@ -121,7 +121,7 @@ describe('auroraOrchestrator', () => {
 
       const result = await auroraOrchestrator.isTenantReady('org-1');
 
-      expect(result).toEqual({ tenantId: 'aurora-t-1' });
+      expect(result).toEqual('aurora-t-1');
       expect(mockReadTenantAttrs).toHaveBeenCalledWith('org-1', AURORA_ATTRS, { consistent: true });
     });
 
@@ -174,7 +174,7 @@ describe('auroraOrchestrator', () => {
 
       await auroraOrchestrator.createBucket({
         tenantId: 'aurora-t-1',
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         versioning: true,
         lock: true,
         retention: { enabled: true, mode: 'compliance', duration: 30, durationType: 'd' },
@@ -193,7 +193,7 @@ describe('auroraOrchestrator', () => {
       mockCreateAuroraBucket.mockRejectedValue(new PortalBucketAlreadyExistsError('dup'));
 
       await expect(
-        auroraOrchestrator.createBucket({ tenantId: 'aurora-t-1', name: 'dup' }),
+        auroraOrchestrator.createBucket({ tenantId: 'aurora-t-1', bucketName: 'dup' }),
       ).rejects.toBeInstanceOf(BucketAlreadyExistsError);
     });
 
@@ -201,7 +201,7 @@ describe('auroraOrchestrator', () => {
       mockCreateAuroraBucket.mockRejectedValue(new Error('upstream 500'));
 
       await expect(
-        auroraOrchestrator.createBucket({ tenantId: 'aurora-t-1', name: 'b' }),
+        auroraOrchestrator.createBucket({ tenantId: 'aurora-t-1', bucketName: 'b' }),
       ).rejects.toThrow('upstream 500');
     });
   });

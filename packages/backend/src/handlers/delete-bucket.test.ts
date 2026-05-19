@@ -57,7 +57,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 describe('delete-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockIsTenantReady.mockResolvedValue({ tenantId: 'aurora-t-1' });
+    mockIsTenantReady.mockResolvedValue('aurora-t-1');
     mockGetPresignerContext.mockResolvedValue(presignerContext);
   });
 

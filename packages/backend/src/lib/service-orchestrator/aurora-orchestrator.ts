@@ -38,7 +38,6 @@ import type {
   BucketDetails,
   BucketSummary,
   CreateBucketArgs,
-  EnsureTenantReadyResult,
   IssueAccessKeyOpts,
   IssuedAccessKey,
   PresignerContext,
@@ -65,17 +64,13 @@ export const auroraOrchestrator: ServiceOrchestrator = {
   id: 'aurora',
   region: S3Region.EuWest1 as S3RegionType,
 
-  async ensureTenantReady(orgId): Promise<EnsureTenantReadyResult> {
+  async ensureTenantReady(orgId): Promise<string | null> {
     const result = await ensureAuroraTenantReady(orgId);
-    if (result.ok) return { ok: true, tenantId: result.auroraTenantId };
-    // aurora-tenant-setup currently builds a 503 APIGateway response for any
-    // setup failure (still-running, transient API error, etc.). At the
-    // abstraction boundary we collapse all of those into the single
-    // 'setup-incomplete' reason; handlers translate that into HTTP.
-    return { ok: false, reason: 'setup-incomplete' };
+    if (result.ok) return result.auroraTenantId;
+    return null;
   },
 
-  async isTenantReady(orgId): Promise<{ tenantId: string } | null> {
+  async isTenantReady(orgId): Promise<string | null> {
     const attrs = await readTenantAttrs(
       orgId,
       {
@@ -87,14 +82,14 @@ export const auroraOrchestrator: ServiceOrchestrator = {
     );
     if (!attrs?.tenantId) return null;
     if (!isOrgSetupComplete(attrs.setupStatus)) return null;
-    return { tenantId: attrs.tenantId };
+    return attrs.tenantId;
   },
 
   async createBucket(args: CreateBucketArgs): Promise<void> {
     try {
       await createAuroraBucket({
         tenantId: args.tenantId,
-        bucketName: args.name,
+        bucketName: args.bucketName,
         versioning: args.versioning,
         lock: args.lock,
         retention: args.retention as
@@ -108,7 +103,7 @@ export const auroraOrchestrator: ServiceOrchestrator = {
       });
     } catch (err) {
       if (err instanceof PortalBucketAlreadyExistsError) {
-        throw new BucketAlreadyExistsError(args.name);
+        throw new BucketAlreadyExistsError(args.bucketName);
       }
       throw err;
     }

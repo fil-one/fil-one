@@ -184,10 +184,10 @@ export async function baseHandler(
   }
 
   const orchestrator = getOrchestratorForRegion(S3_REGION);
-  const ready = await orchestrator.isTenantReady(orgId);
-  if (!ready) return tenantNotReadyResponse();
+  const tenantId = await orchestrator.isTenantReady(orgId);
+  if (!tenantId) return tenantNotReadyResponse();
 
-  const ctx = await orchestrator.getPresignerContext(ready.tenantId);
+  const ctx = await orchestrator.getPresignerContext(tenantId);
 
   const items = await Promise.all(ops.map((op) => presignOp(op, ctx)));
 

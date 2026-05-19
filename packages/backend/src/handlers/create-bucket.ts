@@ -51,14 +51,13 @@ export async function baseHandler(
   const { orgId } = getUserInfo(event);
 
   const orchestrator = getOrchestratorForRegion(S3_REGION);
-  const ready = await orchestrator.ensureTenantReady(orgId);
-  if (!ready.ok) return tenantNotReadyResponse();
-  const { tenantId } = ready;
+  const tenantId = await orchestrator.ensureTenantReady(orgId);
+  if (!tenantId) return tenantNotReadyResponse();
 
   try {
     await orchestrator.createBucket({
       tenantId,
-      name,
+      bucketName: name,
       versioning,
       lock,
       retention,

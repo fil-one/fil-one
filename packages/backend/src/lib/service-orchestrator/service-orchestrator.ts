@@ -36,7 +36,7 @@ export interface BucketDetails extends BucketSummary {
 
 export interface CreateBucketArgs {
   tenantId: string;
-  name: string;
+  bucketName: string;
   versioning?: boolean;
   lock?: boolean;
   retention?: {
@@ -103,7 +103,7 @@ export interface ServiceOrchestrator {
   readonly id: ProviderId;
   readonly region: S3Region;
 
-  ensureTenantReady(orgId: string): Promise<EnsureTenantReadyResult>;
+  ensureTenantReady(orgId: string): Promise<string | null>;
 
   /**
    * Side-effect-free readiness check. Returns the tenantId if the org's tenant
@@ -112,7 +112,7 @@ export interface ServiceOrchestrator {
    * call from GET handlers that should not trigger Portal/Backoffice API
    * calls or DDB writes.
    */
-  isTenantReady(orgId: string): Promise<{ tenantId: string } | null>;
+  isTenantReady(orgId: string): Promise<string | null>;
 
   createBucket(args: CreateBucketArgs): Promise<void>;
   deleteBucket(tenantId: string, name: string): Promise<void>;

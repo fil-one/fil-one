@@ -43,7 +43,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 describe('get-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockIsTenantReady.mockResolvedValue({ tenantId: 'aurora-t-1' });
+    mockIsTenantReady.mockResolvedValue('aurora-t-1');
   });
 
   it('returns 200 with bucket data from the orchestrator', async () => {

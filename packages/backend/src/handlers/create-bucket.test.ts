@@ -46,7 +46,7 @@ function validBody() {
 describe('create-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnsureTenantReady.mockResolvedValue({ ok: true, tenantId: 'aurora-t-1' });
+    mockEnsureTenantReady.mockResolvedValue('aurora-t-1');
   });
 
   it('returns 201 and calls orchestrator.createBucket on success', async () => {
@@ -58,7 +58,7 @@ describe('create-bucket baseHandler', () => {
     expect(result.statusCode).toBe(201);
     expect(mockCreateBucket).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
-      name: 'my-bucket',
+      bucketName: 'my-bucket',
       versioning: false,
       lock: false,
       retention: undefined,
@@ -75,7 +75,7 @@ describe('create-bucket baseHandler', () => {
   });
 
   it('returns 503 with a retry message when tenant setup is incomplete', async () => {
-    mockEnsureTenantReady.mockResolvedValue({ ok: false, reason: 'setup-incomplete' });
+    mockEnsureTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -121,7 +121,7 @@ describe('create-bucket baseHandler', () => {
     expect(result.statusCode).toBe(201);
     expect(mockCreateBucket).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
-      name: 'my-bucket',
+      bucketName: 'my-bucket',
       versioning: true,
       lock: true,
       retention: { enabled: true, mode: 'governance', duration: 30, durationType: 'd' },
@@ -137,7 +137,7 @@ describe('create-bucket baseHandler', () => {
     expect(result.statusCode).toBe(201);
     expect(mockCreateBucket).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
-      name: 'my-bucket',
+      bucketName: 'my-bucket',
       versioning: false,
       lock: false,
       retention: undefined,
