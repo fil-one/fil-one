@@ -105,7 +105,7 @@ export function AccessKeyBucketScopeFields({
                       checked={selectedBuckets.includes(name)}
                       onChange={() => toggleBucket(name)}
                     />
-                    <span className="text-sm font-normal text-zinc-900">{name}</span>
+                    <span className="text-xs font-normal text-zinc-900">{name}</span>
                   </label>
                 ))}
               </div>
