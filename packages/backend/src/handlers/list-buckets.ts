@@ -2,7 +2,7 @@ import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { Bucket, ListBucketsResponse, ErrorResponse } from '@filone/shared';
+import type { Bucket, ListBucketsResponse } from '@filone/shared';
 import { S3_REGION } from '@filone/shared';
 import { Resource } from 'sst';
 import { createClient, listBuckets } from '@filone/aurora-portal-client';
@@ -34,13 +34,7 @@ export async function baseHandler(
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
   const setupStatus = orgProfile?.setupStatus?.S;
   if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    console.warn('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
-    return new ResponseBuilder()
-      .status(503)
-      .body<ErrorResponse>({
-        message: 'Aurora tenant setup is not complete, please try again later',
-      })
-      .build();
+    return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets: [] }).build();
   }
 
   const baseUrl = process.env.AURORA_PORTAL_URL!;

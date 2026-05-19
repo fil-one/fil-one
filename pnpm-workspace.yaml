@@ -8,5 +8,5 @@ trustPolicy: no-downgrade
 packages:
   - 'bin'
   - 'infra'
-  - 'tests/integration'
   - 'packages/*'
+  - 'tests/*'

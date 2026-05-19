@@ -9,10 +9,43 @@ export const DOCS_URL = 'https://docs.fil.one';
 /** Available S3 regions. */
 export enum S3Region {
   EuWest1 = 'eu-west-1',
+  UsEast1 = 'us-east-1',
 }
 
 /** Default S3 region for Fil One. */
-export const S3_REGION = S3Region.EuWest1;
+export const S3_REGION = S3Region.EuWest1 satisfies S3Region;
+
+/** Human-readable region labels. */
+export const REGION_LABELS: Record<S3Region, string> = {
+  [S3Region.EuWest1]: 'Europe (France)',
+  [S3Region.UsEast1]: 'US East (Michigan)',
+};
+
+/** Format a region as `"Europe (France) eu-west-1"`. */
+export function formatRegion(region: S3Region | string): string {
+  const label = REGION_LABELS[region as S3Region];
+  return label ? `${label} ${region}` : region;
+}
+
+/**
+ * Resolve a region value to its human-readable label.
+ *
+ * Defaults to the label of {@link S3_REGION} when the input is null/undefined,
+ * and falls back to the raw region string when it isn't a known {@link S3Region}.
+ */
+export function getRegionLabel(region: S3Region | string | null | undefined): string {
+  const r = region ?? S3_REGION;
+  return REGION_LABELS[r as S3Region] ?? r;
+}
+
+/**
+ * Regions selectable in the given stage. Production currently exposes only
+ * `eu-west-1`; non-production stages also expose `us-east-1` for dogfooding.
+ */
+export function getAvailableRegions(stage: Stage | string): S3Region[] {
+  if (stage === Stage.Production) return [S3Region.EuWest1];
+  return [S3Region.EuWest1, S3Region.UsEast1];
+}
 
 /**
  * Build the S3-compatible endpoint URL for a given region and stage.
@@ -26,6 +59,28 @@ export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
   const base = 's3.fil.one';
   // const base = stage === Stage.Production ? 's3.fil.one' : 's3.staging.fil.one';
   return `https://${region}.${base}`;
+}
+
+/**
+ * Auth0 tenant domain used by the deployment for user authentication.
+ *
+ * Production uses a custom domain (`auth.fil.one`); all other stages —
+ * staging, per-PR previews, personal dev — share the dev tenant.
+ */
+export function getAuth0Domain(stage: Stage | string): string {
+  return stage === Stage.Production ? 'auth.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
+}
+
+/**
+ * Infer the deployment stage from the hostname a deployment is served on.
+ *
+ * The production website is the only deployment served from `app.fil.one`;
+ * staging, per-PR previews and personal dev all share a non-production
+ * Auth0 tenant and are treated as {@link Stage.Staging} for the purposes
+ * of stage-derived config (Auth0 domain, S3 endpoint, etc.).
+ */
+export function getStageFromHostname(hostname: string): Stage {
+  return hostname === 'app.fil.one' ? Stage.Production : Stage.Staging;
 }
 
 /** Cookie name for the OAuth state parameter (CSRF protection for login flow). */

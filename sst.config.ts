@@ -95,18 +95,6 @@ export default $config({
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
     });
 
-    // ── SQS Queues ─────────────────────────────────────────────────
-    const tenantSetupDlq = new sst.aws.Queue('AuroraTenantSetupDlq', {
-      fifo: true,
-    });
-
-    const tenantSetupQueue = new sst.aws.Queue('AuroraTenantSetupQueue', {
-      fifo: true,
-      dlq: tenantSetupDlq.arn,
-      // Make visibility timeout longer than the Lambda timeout to avoid multiple retries
-      visibilityTimeout: '90 seconds',
-    });
-
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
@@ -163,7 +151,7 @@ export default $config({
       },
     });
 
-    const { getS3Endpoint, S3_REGION, Stage } = await import('@filone/shared');
+    const { getAuth0Domain, getS3Endpoint, S3_REGION, Stage } = await import('@filone/shared');
     const auroraS3GatewayUrl = getS3Endpoint(
       S3_REGION,
       isProduction ? Stage.Production : Stage.Staging,
@@ -181,7 +169,7 @@ export default $config({
         securityHeadersConfig: {
           contentSecurityPolicy: {
             // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://plausible.io https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io/api ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://plausible.io https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io/api https://fil-one.instatus.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
@@ -280,7 +268,7 @@ export default $config({
 
     const siteUrl = router.url;
 
-    const auth0Domain = isProduction ? 'auth.fil.one' : 'dev-oar2nhqh58xf5pwf.us.auth0.com';
+    const auth0Domain = getAuth0Domain($app.stage);
     // Auth0 Management API requires the canonical tenant domain — custom domains don't support /api/v2/
     const auth0MgmtDomain = isProduction ? 'fil-one.us.auth0.com' : auth0Domain;
 
@@ -323,7 +311,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              Version: '2.2',
+              Version: '2.9',
             },
           },
         },
@@ -357,7 +345,6 @@ export default $config({
       billingTable,
       userInfoTable,
       userFilesBucket,
-      tenantSetupQueue,
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
@@ -381,10 +368,10 @@ export default $config({
     const auroraEnv = {
       AURORA_BACKOFFICE_URL: isProduction
         ? 'https://api-backoffice.aur.lu/api'
-        : 'https://api.backoffice.dev.aur.lu/api',
+        : 'https://api-backoffice.dev.aur.lu/api',
       AURORA_PORTAL_URL: isProduction
         ? 'https://api-portal.aur.lu/api'
-        : 'https://api.portal.dev.aur.lu/api',
+        : 'https://api-portal.dev.aur.lu/api',
       AURORA_PARTNER_ID: 'ff',
       AURORA_REGION_ID: 'ff',
     };
@@ -429,6 +416,7 @@ export default $config({
       extraLink?: (typeof allResources)[number][];
       provisionedConcurrency?: number;
       memory?: sst.aws.FunctionArgs['memory'];
+      timeout?: sst.aws.FunctionArgs['timeout'];
     }
 
     function addRoute({
@@ -440,6 +428,7 @@ export default $config({
       extraLink,
       provisionedConcurrency,
       memory,
+      timeout,
     }: AddRouteProps) {
       // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
       const fnName = handler
@@ -455,7 +444,7 @@ export default $config({
           ...extraEnv,
         },
         permissions,
-        timeout: '10 seconds',
+        timeout: timeout ?? '10 seconds',
         ...(memory ? { memory } : {}),
         ...(provisionedConcurrency && provisionedConcurrency > 0
           ? {
@@ -498,9 +487,15 @@ export default $config({
       method: 'POST',
       routePath: '/api/buckets',
       handler: 'create-bucket',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: auroraEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+        },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      timeout: '30 seconds',
     });
     addRoute({
       method: 'GET',
@@ -527,8 +522,14 @@ export default $config({
       method: 'POST',
       routePath: '/api/access-keys',
       handler: 'create-access-key',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: auroraEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+        },
+      ],
+      timeout: '30 seconds',
     });
     addRoute({
       method: 'DELETE',
@@ -581,6 +582,8 @@ export default $config({
       method: 'GET',
       routePath: '/api/me',
       handler: 'get-me',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
@@ -599,8 +602,35 @@ export default $config({
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
 
-    // ── Org routes ──────────────────────────────────────────────────
-    addRoute({ method: 'POST', routePath: '/api/org/confirm', handler: 'confirm-org' });
+    // ── MFA routes ──────────────────────────────────────────────────
+    addRoute({
+      method: 'POST',
+      routePath: '/api/mfa/enroll',
+      handler: 'enroll-mfa',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/mfa/disable',
+      handler: 'disable-mfa',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/mfa/enrollments/{enrollmentId}',
+      handler: 'delete-mfa-enrollment',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/mfa/recovery-code/regenerate',
+      handler: 'regenerate-recovery-code',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
 
     // ── Usage + Dashboard routes ─────────────────────────────────────
     addRoute({
@@ -663,37 +693,6 @@ export default $config({
       ],
     });
 
-    // ── Tenant setup consumer ──────────────────────────────────────
-    const tenantSetupFn = createFn('AuroraTenantSetup', {
-      handler: 'packages/backend/src/handlers/aurora-tenant-setup.handler',
-      link: [userInfoTable, auroraBackofficeToken],
-      environment: {
-        ...auroraEnv,
-        ...sharedEnv,
-      },
-      permissions: [
-        {
-          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
-        },
-        // queue.subscribe(fn.arn) passes an ARN, so SST skips attaching
-        // SQS permissions automatically — we must add them here.
-        {
-          actions: [
-            'sqs:ChangeMessageVisibility',
-            'sqs:DeleteMessage',
-            'sqs:GetQueueAttributes',
-            'sqs:GetQueueUrl',
-            'sqs:ReceiveMessage',
-          ],
-          resources: [tenantSetupQueue.arn],
-        },
-      ],
-      timeout: '60 seconds',
-    });
-
-    tenantSetupQueue.subscribe(tenantSetupFn.arn, { batch: { size: 1 } });
-
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
@@ -739,6 +738,21 @@ export default $config({
       // run the Lambda every 12 hours, one hour after usage reporting (08:00 and 20:00 UTC).
       schedule: 'cron(0 8/12 * * ? *)',
       function: gracePeriodEnforcer.arn,
+    });
+
+    // ── Subscription drift checker (cron-based, observe-only) ───────
+    const subscriptionDriftChecker = createFn('SubscriptionDriftChecker', {
+      handler: 'packages/backend/src/jobs/subscription-drift-checker.handler',
+      link: [billingTable, userInfoTable, auroraBackofficeToken],
+      environment: auroraEnv,
+      timeout: '300 seconds',
+      memory: '256 MB',
+    });
+
+    new sst.aws.CronV2('SubscriptionDriftCheckerCron', {
+      // run the Lambda every 12 hours, staggered 2h after grace-period (10:00 and 22:00 UTC).
+      schedule: 'cron(0 10/12 * * ? *)',
+      function: subscriptionDriftChecker.arn,
     });
 
     return {

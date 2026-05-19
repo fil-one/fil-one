@@ -2,8 +2,8 @@ import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { Resource } from 'sst';
-import { GB_BYTES, TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT } from '@filone/shared';
-import { getStripeClient } from '../lib/stripe-client.js';
+import { GB_BYTES, TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT, formatBytes } from '@filone/shared';
+import { getStripeClient, updateCustomerMetadata } from '../lib/stripe-client.js';
 import {
   getStorageSamples,
   getOperationsSamples,
@@ -12,6 +12,7 @@ import {
 } from '../lib/aurora-backoffice.js';
 import type { ModelsTenantStatus } from '../lib/aurora-backoffice.js';
 import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
+import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
 import { calculateAverageUsage } from '../lib/usage-calculator.js';
 
 const dynamo = getDynamoClient();
@@ -19,6 +20,7 @@ const dynamo = getDynamoClient();
 export interface UsageReportingWorkerPayload {
   orgId: string;
   auroraTenantId: string;
+  orgName?: string;
   subscriptionId: string;
   stripeCustomerId: string;
   currentPeriodStart: string;
@@ -68,6 +70,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const {
     orgId,
     auroraTenantId,
+    orgName,
     subscriptionId,
     stripeCustomerId,
     currentPeriodStart,
@@ -75,32 +78,46 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     reportDate,
   } = event;
 
-  console.log('[usage-worker] Processing', {
-    orgId,
-    subscriptionId,
-    subscriptionStatus,
-    reportDate,
-  });
+  const meterEventName = process.env.STRIPE_METER_EVENT_NAME;
+  if (!meterEventName) {
+    throw new Error('STRIPE_METER_EVENT_NAME env var is not set');
+  }
 
   const now = new Date().toISOString();
   const isTrial = subscriptionStatus === 'trialing';
 
   // Fetch storage, egress, and (for trials) tenant info in parallel
-  const [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
-    getStorageSamples({
-      tenantId: auroraTenantId,
-      from: currentPeriodStart,
-      to: now,
-      window: '1h',
-    }),
-    getOperationsSamples({
-      tenantId: auroraTenantId,
-      from: currentPeriodStart,
-      to: now,
-      window: '24h',
-    }),
-    isTrial ? getTenantInfo({ tenantId: auroraTenantId }) : null,
-  ]);
+  let storageSamples: Awaited<ReturnType<typeof getStorageSamples>>;
+  let operationsSamples: Awaited<ReturnType<typeof getOperationsSamples>>;
+  let tenantInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
+  try {
+    [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
+      getStorageSamples({
+        tenantId: auroraTenantId,
+        from: currentPeriodStart,
+        to: now,
+        window: '1h',
+      }),
+      getOperationsSamples({
+        tenantId: auroraTenantId,
+        from: currentPeriodStart,
+        to: now,
+        window: '24h',
+      }),
+      isTrial ? getTenantInfo({ tenantId: auroraTenantId }) : null,
+    ]);
+  } catch (error) {
+    const e = error as Error & { cause?: unknown };
+    console.error('[usage-worker] Aurora fetch failed', {
+      orgId,
+      auroraTenantId,
+      subscriptionId,
+      message: e.message,
+      cause: e.cause,
+      stack: e.stack,
+    });
+    throw error;
+  }
 
   const usage = calculateAverageUsage(storageSamples);
   const averageStorageGbUsed = usage.averageStorageBytesUsed / GB_BYTES;
@@ -110,15 +127,19 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     0,
   );
 
-  console.log('[usage-worker] Usage calculated', {
+  const { reported } = await reportStorageToStripe({
     orgId,
-    sampleCount: usage.sampleCount,
+    subscriptionId,
+    stripeCustomerId,
     averageStorageGbUsed,
-    currentStorageBytes,
-    totalEgressBytes,
+    meterEventName,
   });
 
-  await reportStorageToStripe(stripeCustomerId, averageStorageGbUsed);
+  const orgSyncAction = await syncOrgMetadata({
+    stripeCustomerId,
+    orgName,
+    currentStorageBytes,
+  });
 
   const lockAction = isTrial
     ? await safeEnforceTrialLocks({
@@ -142,30 +163,53 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     totalEgressBytes,
     sampleCount: usage.sampleCount,
     lockAction,
+    reportedToStripe: reported,
+    orgSyncAction,
   });
-
-  console.log('[usage-worker] Audit record written', { orgId, reportDate });
 }
 
-async function reportStorageToStripe(
-  stripeCustomerId: string,
-  averageStorageGbUsed: number,
-): Promise<void> {
-  if (averageStorageGbUsed <= 0) return;
+// Stripe SDK errors expose `code` on the error object; matches StripeInvalidRequestError 404s.
+const isStripeResourceMissing = (err: unknown): boolean =>
+  typeof err === 'object' && err !== null && (err as { code?: string }).code === 'resource_missing';
+
+async function reportStorageToStripe(params: {
+  orgId: string;
+  subscriptionId: string;
+  stripeCustomerId: string;
+  averageStorageGbUsed: number;
+  meterEventName: string;
+}): Promise<{ reported: boolean }> {
+  const { orgId, subscriptionId, stripeCustomerId, averageStorageGbUsed, meterEventName } = params;
+  if (averageStorageGbUsed <= 0) return { reported: false };
 
   const stripe = getStripeClient();
-  await stripe.billing.meterEvents.create({
-    event_name: process.env.STRIPE_METER_EVENT_NAME ?? '',
-    payload: {
-      stripe_customer_id: stripeCustomerId,
-      value: String(averageStorageGbUsed),
-    },
-    timestamp: Math.floor(Date.now() / 1000),
-  });
+  try {
+    await stripe.billing.meterEvents.create({
+      event_name: meterEventName,
+      payload: {
+        stripe_customer_id: stripeCustomerId,
+        value: String(averageStorageGbUsed),
+      },
+      timestamp: Math.floor(Date.now() / 1000),
+    });
+  } catch (error) {
+    if (isStripeResourceMissing(error)) {
+      console.warn('[usage-worker] Stripe customer missing — skipping meter event', {
+        orgId,
+        subscriptionId,
+        stripeCustomerId,
+        averageStorageGbUsed,
+        code: 'resource_missing',
+      });
+      return { reported: false };
+    }
+    throw error;
+  }
   console.log('[usage-worker] Stripe meter event created', {
     stripeCustomerId,
     averageStorageGbUsed,
   });
+  return { reported: true };
 }
 
 async function safeEnforceTrialLocks(params: {
@@ -186,6 +230,28 @@ async function safeEnforceTrialLocks(params: {
   }
 }
 
+async function syncOrgMetadata(params: {
+  stripeCustomerId: string;
+  orgName: string | undefined;
+  currentStorageBytes: number;
+}): Promise<string> {
+  if (!params.orgName && params.currentStorageBytes === 0) return 'skipped:nothing-to-sync';
+  try {
+    const metadata: Record<string, string> = {
+      [STRIPE_METADATA_KEYS.storageUsed]: formatBytes(params.currentStorageBytes),
+    };
+    if (params.orgName) metadata[STRIPE_METADATA_KEYS.organizationName] = params.orgName;
+    await updateCustomerMetadata(params.stripeCustomerId, metadata);
+    return 'ok';
+  } catch (error) {
+    console.error('[usage-worker] Failed to sync org metadata', {
+      stripeCustomerId: params.stripeCustomerId,
+      error,
+    });
+    return `error:${(error as Error).message}`;
+  }
+}
+
 async function writeUsageAuditRecord(params: {
   orgId: string;
   subscriptionId: string;
@@ -198,6 +264,8 @@ async function writeUsageAuditRecord(params: {
   totalEgressBytes: number;
   sampleCount: number;
   lockAction: string;
+  reportedToStripe: boolean;
+  orgSyncAction: string;
 }): Promise<void> {
   const ttl = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60; // 365 days
   await dynamo.send(
@@ -216,8 +284,9 @@ async function writeUsageAuditRecord(params: {
         averageStorageGbUsed: params.averageStorageGbUsed,
         totalEgressBytes: params.totalEgressBytes,
         sampleCount: params.sampleCount,
-        reportedToStripe: params.averageStorageGbUsed > 0,
+        reportedToStripe: params.reportedToStripe,
         lockAction: params.lockAction,
+        orgSyncAction: params.orgSyncAction,
         createdAt: new Date().toISOString(),
         ttl,
       }),

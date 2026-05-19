@@ -4,6 +4,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import type { ListBucketsResponse } from '@filone/shared';
+import { S3_REGION } from '@filone/shared';
 
 import { queryKeys } from '../lib/query-client';
 import { useAccessKeyForm } from '../lib/use-access-key-form';
@@ -11,7 +12,12 @@ import { AccessKeyFormFields } from './AccessKeyFormFields';
 
 const mockBuckets: ListBucketsResponse = {
   buckets: [
-    { name: 'my-bucket', region: 'us-east-1', createdAt: '2026-01-15T00:00:00Z', isPublic: false },
+    {
+      name: 'my-bucket',
+      region: 'us-east-1',
+      createdAt: '2026-01-15T00:00:00Z',
+      isPublic: false,
+    },
     { name: 'backups', region: 'us-east-1', createdAt: '2026-02-20T00:00:00Z', isPublic: false },
     { name: 'media', region: 'eu-west-1', createdAt: '2026-03-01T00:00:00Z', isPublic: true },
   ],
@@ -33,21 +39,38 @@ const meta: Meta<typeof AccessKeyFormFields> = {
 export default meta;
 type Story = StoryObj<typeof AccessKeyFormFields>;
 
-function AccessKeyFormFieldsStoryContent({ pinnedBucket }: { pinnedBucket?: string }) {
+type StoryContentProps = {
+  pinnedBucket?: string;
+  showRegionSelector?: boolean;
+};
+
+function AccessKeyFormFieldsStoryContent({
+  pinnedBucket,
+  showRegionSelector = true,
+}: StoryContentProps) {
+  const [region, setRegion] = useState(S3_REGION);
   const form = useAccessKeyForm({
     defaultBucket: pinnedBucket,
+    region,
     onSuccess: () => {},
   });
 
-  return <AccessKeyFormFields form={form} pinnedBucket={pinnedBucket} />;
+  return (
+    <AccessKeyFormFields
+      form={form}
+      pinnedBucket={pinnedBucket}
+      region={region}
+      onRegionChange={showRegionSelector ? setRegion : undefined}
+    />
+  );
 }
 
-function AccessKeyFormFieldsWrapper({ pinnedBucket }: { pinnedBucket?: string }) {
+function AccessKeyFormFieldsWrapper(props: StoryContentProps) {
   const [queryClient] = useState(createSeededQueryClient);
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AccessKeyFormFieldsStoryContent pinnedBucket={pinnedBucket} />
+      <AccessKeyFormFieldsStoryContent {...props} />
     </QueryClientProvider>
   );
 }
@@ -58,4 +81,8 @@ export const Default: Story = {
 
 export const WithPinnedBucket: Story = {
   render: () => <AccessKeyFormFieldsWrapper pinnedBucket="my-bucket" />,
+};
+
+export const WithoutRegionSelector: Story = {
+  render: () => <AccessKeyFormFieldsWrapper showRegionSelector={false} />,
 };

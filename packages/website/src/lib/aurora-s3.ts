@@ -1,4 +1,10 @@
-import type { ListObjectsResponse, S3Object, ObjectRetentionInfo } from '@filone/shared';
+import type {
+  ListObjectsResponse,
+  ListObjectVersionsResponse,
+  S3Object,
+  S3ObjectVersion,
+  ObjectRetentionInfo,
+} from '@filone/shared';
 
 // ── S3 XML Response Parsers ────────────────────────────────────────
 
@@ -41,6 +47,80 @@ export function parseListObjectsResponse(xml: string): ListObjectsResponse {
   return { objects, nextToken, isTruncated };
 }
 
+function parseVersionElements(doc: Document): S3ObjectVersion[] {
+  const results: S3ObjectVersion[] = [];
+  const elements = doc.getElementsByTagName('Version');
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    const key = getText(el, 'Key');
+    if (!key) continue;
+    const etag = getText(el, 'ETag');
+    results.push({
+      key,
+      versionId: getText(el, 'VersionId') ?? '',
+      isLatest: getText(el, 'IsLatest') === 'true',
+      isDeleteMarker: false,
+      sizeBytes: parseInt(getText(el, 'Size') ?? '0', 10),
+      lastModified: getText(el, 'LastModified') ?? new Date().toISOString(),
+      ...(etag && { etag }),
+    });
+  }
+  return results;
+}
+
+function parseDeleteMarkerElements(doc: Document): S3ObjectVersion[] {
+  const results: S3ObjectVersion[] = [];
+  const elements = doc.getElementsByTagName('DeleteMarker');
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    const key = getText(el, 'Key');
+    if (!key) continue;
+    results.push({
+      key,
+      versionId: getText(el, 'VersionId') ?? '',
+      isLatest: getText(el, 'IsLatest') === 'true',
+      isDeleteMarker: true,
+      sizeBytes: 0,
+      lastModified: getText(el, 'LastModified') ?? new Date().toISOString(),
+    });
+  }
+  return results;
+}
+
+/**
+ * Parse an S3 ListObjectVersions XML response into our ListObjectVersionsResponse shape.
+ */
+export function parseListObjectVersionsResponse(xml: string): ListObjectVersionsResponse {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+
+  const errorNode = doc.querySelector('parsererror');
+  if (errorNode) {
+    throw new Error(
+      `Failed to parse S3 ListObjectVersions response: ${errorNode.textContent ?? 'unknown parse error'}`,
+    );
+  }
+
+  const versions = [...parseVersionElements(doc), ...parseDeleteMarkerElements(doc)];
+
+  // Sort by key ascending, then by lastModified descending within the same key
+  versions.sort((a, b) => {
+    const keyCompare = a.key.localeCompare(b.key);
+    if (keyCompare !== 0) return keyCompare;
+    return new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime();
+  });
+
+  const nextKeyMarker = getText(doc.documentElement, 'NextKeyMarker');
+  const nextVersionIdMarker = getText(doc.documentElement, 'NextVersionIdMarker');
+  const isTruncated = getText(doc.documentElement, 'IsTruncated') === 'true';
+
+  return {
+    versions,
+    ...(nextKeyMarker && { nextKeyMarker }),
+    ...(nextVersionIdMarker && { nextVersionIdMarker }),
+    isTruncated,
+  };
+}
+
 /**
  * Parse an S3 HeadObject response (HTTP headers only) into metadata.
  */
@@ -54,7 +134,6 @@ export function parseHeadObjectResponse(
   etag?: string;
   contentType?: string;
   metadata: Record<string, string>;
-  filCid?: string;
 } {
   const headers = response.headers;
 
@@ -67,7 +146,6 @@ export function parseHeadObjectResponse(
 
   const etag = headers.get('etag') ?? undefined;
   const contentType = headers.get('content-type') ?? undefined;
-  const filCid = headers.get('x-fil-cid') ?? undefined;
 
   return {
     key,
@@ -78,7 +156,6 @@ export function parseHeadObjectResponse(
     ...(etag && { etag }),
     ...(contentType && { contentType }),
     metadata,
-    ...(filCid && { filCid }),
   };
 }
 

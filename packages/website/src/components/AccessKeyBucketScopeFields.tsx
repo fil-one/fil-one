@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { SpinnerIcon } from '@phosphor-icons/react/dist/ssr';
-import type { AccessKeyBucketScope, ListBucketsResponse } from '@filone/shared';
+import type { AccessKeyBucketScope, ListBucketsResponse, S3Region } from '@filone/shared';
 
 import { apiRequest } from '../lib/api.js';
 import { Checkbox } from './Checkbox.js';
@@ -16,6 +16,8 @@ type AccessKeyBucketScopeFieldsProps = {
   onSelectedBucketsChange: (buckets: string[]) => void;
   /** Always show this bucket in the list even when unchecked (e.g. the bucket being created). */
   pinnedBucket?: string;
+  /** Filter the picker list to buckets in this region. */
+  region: S3Region;
 };
 
 export function AccessKeyBucketScopeFields({
@@ -24,13 +26,19 @@ export function AccessKeyBucketScopeFields({
   selectedBuckets,
   onSelectedBucketsChange,
   pinnedBucket,
+  region,
 }: AccessKeyBucketScopeFieldsProps) {
   const { data, isPending, isError, error } = useQuery({
     queryKey: queryKeys.buckets,
     queryFn: () => apiRequest<ListBucketsResponse>('/buckets'),
     enabled: bucketScope === 'specific',
   });
-  const buckets = data?.buckets.map((b) => b.name) ?? [];
+  // TODO: forward `region` to the `/buckets` API endpoint so filtering happens
+  // on the backend, once the buckets API supports per-bucket region metadata.
+  // https://linear.app/filecoin-foundation/issue/FIL-324/move-filtering-bucket-regions-to-backend
+  const buckets = (data?.buckets ?? [])
+    .filter((b) => !region || b.region === region)
+    .map((b) => b.name);
   const loading = isPending && bucketScope === 'specific';
 
   function toggleBucket(name: string) {
@@ -97,7 +105,7 @@ export function AccessKeyBucketScopeFields({
                       checked={selectedBuckets.includes(name)}
                       onChange={() => toggleBucket(name)}
                     />
-                    <span className="text-sm font-normal text-zinc-900">{name}</span>
+                    <span className="text-xs font-normal text-zinc-900">{name}</span>
                   </label>
                 ))}
               </div>

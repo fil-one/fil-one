@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
@@ -20,12 +20,16 @@ vi.mock('../lib/org-profile.js', () => ({
 }));
 
 const mockMeterEventsCreate = vi.fn().mockResolvedValue({});
+const mockCustomersUpdate = vi.fn().mockResolvedValue({});
 vi.mock('../lib/stripe-client.js', () => ({
   getStripeClient: () => ({
     billing: {
       meterEvents: { create: mockMeterEventsCreate },
     },
+    customers: { update: mockCustomersUpdate },
   }),
+  updateCustomerMetadata: (customerId: string, metadata: Record<string, string>) =>
+    mockCustomersUpdate(customerId, { metadata }),
 }));
 
 const mockGetStorageSamples = vi.fn();
@@ -51,6 +55,7 @@ import { handler } from './usage-reporting-worker.js';
 
 const basePayload: UsageReportingWorkerPayload = {
   orgId: 'org-1',
+  orgName: 'Acme Corp',
   auroraTenantId: 'aurora-tenant-123',
   subscriptionId: 'sub_123',
   stripeCustomerId: 'cus_123',
@@ -278,6 +283,139 @@ describe('usage-reporting-worker', () => {
   });
 
   // -----------------------------------------------------------------------
+  // STRIPE_METER_EVENT_NAME validation
+  // -----------------------------------------------------------------------
+  describe('STRIPE_METER_EVENT_NAME validation', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('throws a descriptive error when env var is unset', async () => {
+      vi.stubEnv('STRIPE_METER_EVENT_NAME', undefined);
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
+      ]);
+
+      await expect(handler(basePayload)).rejects.toThrow(
+        'STRIPE_METER_EVENT_NAME env var is not set',
+      );
+      expect(mockMeterEventsCreate).not.toHaveBeenCalled();
+    });
+
+    it('throws a descriptive error when env var is empty string', async () => {
+      vi.stubEnv('STRIPE_METER_EVENT_NAME', '');
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
+      ]);
+
+      await expect(handler(basePayload)).rejects.toThrow(
+        'STRIPE_METER_EVENT_NAME env var is not set',
+      );
+      expect(mockMeterEventsCreate).not.toHaveBeenCalled();
+    });
+
+    it('validates env var even when usage is zero (fails fast on misconfig)', async () => {
+      vi.stubEnv('STRIPE_METER_EVENT_NAME', '');
+      mockGetStorageSamples.mockResolvedValue([]);
+
+      await expect(handler(basePayload)).rejects.toThrow(
+        'STRIPE_METER_EVENT_NAME env var is not set',
+      );
+      expect(mockMeterEventsCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Stripe resource_missing — customer deleted upstream
+  // -----------------------------------------------------------------------
+  describe('Stripe resource_missing — customer deleted upstream', () => {
+    function makeResourceMissingError(): Error {
+      const err = new Error('No such customer: cus_123') as Error & { code: string };
+      err.code = 'resource_missing';
+      return err;
+    }
+
+    it('does not throw when Stripe returns resource_missing', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
+      ]);
+      mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
+
+      await expect(handler(basePayload)).resolves.toBeUndefined();
+    });
+
+    it('audit record has reportedToStripe: false when meter event hits resource_missing', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
+      ]);
+      mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
+
+      await handler(basePayload);
+
+      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      expect(putCalls).toHaveLength(1);
+      const item = putCalls[0].args[0].input.Item!;
+      expect(item.reportedToStripe).toEqual({ BOOL: false });
+    });
+
+    it('logs structured warn with orgId, subscriptionId, stripeCustomerId on resource_missing', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
+      ]);
+      mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
+
+      await handler(basePayload);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Stripe customer missing'),
+        expect.objectContaining({
+          orgId: 'org-1',
+          subscriptionId: 'sub_123',
+          stripeCustomerId: 'cus_123',
+          code: 'resource_missing',
+        }),
+      );
+
+      warnSpy.mockRestore();
+    });
+
+    it('continues with trial lock enforcement when meter event hits resource_missing', async () => {
+      const trialPayload: UsageReportingWorkerPayload = {
+        ...basePayload,
+        subscriptionStatus: 'trialing',
+      };
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 },
+      ]);
+      mockGetOperationsSamples.mockResolvedValue([]);
+      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
+      mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
+
+      await handler(trialPayload);
+
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: 'aurora-tenant-123',
+        status: 'WRITE_LOCKED',
+      });
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.lockAction).toEqual({ S: 'WRITE_LOCKED' });
+      expect(item.reportedToStripe).toEqual({ BOOL: false });
+    });
+
+    it('still propagates non-resource_missing Stripe errors', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
+      ]);
+      const err = new Error('rate limited') as Error & { code: string };
+      err.code = 'rate_limit';
+      mockMeterEventsCreate.mockRejectedValueOnce(err);
+
+      await expect(handler(basePayload)).rejects.toThrow('rate limited');
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Idempotency — running twice
   // -----------------------------------------------------------------------
   describe('idempotency — running twice', () => {
@@ -374,6 +512,143 @@ describe('usage-reporting-worker', () => {
       for (const call of putCalls) {
         expect(call.args[0].input.Item!.lockAction).toEqual({ S: 'skipped:paid' });
       }
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Org metadata sync to Stripe
+  // -----------------------------------------------------------------------
+  describe('org metadata sync', () => {
+    it('syncs organization_name and storage to Stripe with latest snapshot', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500_000_000_000 },
+        { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1_500_000_000_000 },
+      ]);
+
+      await handler(basePayload);
+
+      expect(mockCustomersUpdate).toHaveBeenCalledOnce();
+      expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
+        metadata: {
+          storage_used: '1.5 TB',
+          organization_name: 'Acme Corp',
+        },
+      });
+    });
+
+    it('sync failure is swallowed and recorded in audit', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
+      ]);
+      mockCustomersUpdate.mockRejectedValueOnce(new Error('Stripe metadata error'));
+
+      await expect(handler(basePayload)).resolves.toBeUndefined();
+
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.orgSyncAction.S).toMatch(/^error:/);
+    });
+
+    it('skips sync when no org name and zero storage', async () => {
+      mockGetStorageSamples.mockResolvedValue([]);
+
+      await handler({ ...basePayload, orgName: undefined });
+
+      expect(mockCustomersUpdate).not.toHaveBeenCalled();
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.orgSyncAction).toEqual({ S: 'skipped:nothing-to-sync' });
+    });
+
+    it('syncs storage only when org name missing', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 2_000_000_000_000 },
+      ]);
+
+      await handler({ ...basePayload, orgName: undefined });
+
+      expect(mockCustomersUpdate).toHaveBeenCalledOnce();
+      expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
+        metadata: { storage_used: '2 TB' },
+      });
+    });
+
+    it('audit record includes orgSyncAction on success', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
+      ]);
+
+      await handler(basePayload);
+
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.orgSyncAction).toEqual({ S: 'ok' });
+    });
+
+    it('syncs sub-GB storage with MB units', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 100_000_000 }, // 100 MB
+      ]);
+
+      await handler({ ...basePayload, orgName: undefined });
+
+      expect(mockCustomersUpdate).toHaveBeenCalledOnce();
+      expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
+        metadata: { storage_used: '100 MB' },
+      });
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.orgSyncAction).toEqual({ S: 'ok' });
+    });
+
+    // ---------------------------------------------------------------------
+    // Adaptive unit selection — storage formatted in B / KB / MB / GB / TB
+    // ---------------------------------------------------------------------
+    describe('adaptive storage units', () => {
+      it.each([
+        { label: 'bytes', bytesUsed: 500, expected: '500 B' },
+        { label: 'kilobytes', bytesUsed: 1_000, expected: '1 KB' },
+        { label: 'kilobytes (fractional)', bytesUsed: 1_500, expected: '1.5 KB' },
+        { label: 'megabytes', bytesUsed: 5_200_000, expected: '5.2 MB' },
+        { label: 'megabytes (round)', bytesUsed: 100_000_000, expected: '100 MB' },
+        { label: 'gigabytes', bytesUsed: 10_000_000_000, expected: '10 GB' },
+        { label: 'gigabytes (fractional)', bytesUsed: 1_500_000_000, expected: '1.5 GB' },
+        { label: 'terabytes', bytesUsed: 1_000_000_000_000, expected: '1 TB' },
+        { label: 'terabytes (fractional)', bytesUsed: 2_500_000_000_000, expected: '2.5 TB' },
+      ])('formats $label as "$expected"', async ({ bytesUsed, expected }) => {
+        mockGetStorageSamples.mockResolvedValue([{ timestamp: '2024-01-01T00:00:00Z', bytesUsed }]);
+
+        await handler({ ...basePayload, orgName: undefined });
+
+        expect(mockCustomersUpdate).toHaveBeenCalledOnce();
+        expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
+          metadata: { storage_used: expected },
+        });
+      });
+
+      it('uses currentStorageBytes (latest sample), not the average', async () => {
+        // Two samples: average is 750 GB, latest snapshot is 1.5 TB
+        mockGetStorageSamples.mockResolvedValue([
+          { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 0 },
+          { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1_500_000_000_000 },
+        ]);
+
+        await handler({ ...basePayload, orgName: undefined });
+
+        expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
+          metadata: { storage_used: '1.5 TB' },
+        });
+      });
+
+      it('reports "0 B" when org name present and storage is zero', async () => {
+        mockGetStorageSamples.mockResolvedValue([]);
+
+        await handler(basePayload); // basePayload has orgName: 'Acme Corp'
+
+        expect(mockCustomersUpdate).toHaveBeenCalledOnce();
+        expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
+          metadata: {
+            storage_used: '0 B',
+            organization_name: 'Acme Corp',
+          },
+        });
+      });
     });
   });
 });

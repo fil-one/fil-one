@@ -17,6 +17,7 @@ vi.mock('sst', () => ({
 
 const mockGetAuroraS3Credentials = vi.fn();
 const mockGetPresignedListObjectsUrl = vi.fn();
+const mockGetPresignedListObjectVersionsUrl = vi.fn();
 const mockGetPresignedHeadObjectUrl = vi.fn();
 const mockGetPresignedGetObjectRetentionUrl = vi.fn();
 const mockGetPresignedGetObjectUrl = vi.fn();
@@ -26,6 +27,8 @@ const mockGetPresignedDeleteObjectUrl = vi.fn();
 vi.mock('../lib/aurora-s3-client.js', () => ({
   getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
   getPresignedListObjectsUrl: (...args: unknown[]) => mockGetPresignedListObjectsUrl(...args),
+  getPresignedListObjectVersionsUrl: (...args: unknown[]) =>
+    mockGetPresignedListObjectVersionsUrl(...args),
   getPresignedHeadObjectUrl: (...args: unknown[]) => mockGetPresignedHeadObjectUrl(...args),
   getPresignedGetObjectRetentionUrl: (...args: unknown[]) =>
     mockGetPresignedGetObjectRetentionUrl(...args),
@@ -220,7 +223,7 @@ describe('presign baseHandler', () => {
 
     const event = buildPresignEvent([
       { op: 'listObjects', bucket: 'b' },
-      { op: 'headObject', bucket: 'b', key: 'k', includeFilMeta: true },
+      { op: 'headObject', bucket: 'b', key: 'k' },
     ]);
     const result = await baseHandler(event);
 
@@ -359,5 +362,105 @@ describe('presign baseHandler', () => {
     // Should be ~300s in the future (with some tolerance)
     expect(expiresAt).toBeGreaterThan(before + 290_000);
     expect(expiresAt).toBeLessThan(before + 310_000);
+  });
+
+  // ── listObjectVersions ────────────────────────────────────────────
+
+  it('returns presigned URL for listObjectVersions', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetPresignedListObjectVersionsUrl.mockResolvedValue(
+      'https://s3.example.com/versions?signed',
+    );
+
+    const event = buildPresignEvent([{ op: 'listObjectVersions', bucket: 'b', prefix: 'docs/' }]);
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body as string);
+    expect(body.items[0]).toMatchObject({
+      url: 'https://s3.example.com/versions?signed',
+      method: 'GET',
+    });
+    expect(mockGetPresignedListObjectVersionsUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ bucket: 'b', prefix: 'docs/' }),
+    );
+  });
+
+  it('allows listObjectVersions during grace period (read-only)', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetPresignedListObjectVersionsUrl.mockResolvedValue(
+      'https://s3.example.com/versions?signed',
+    );
+
+    const event = buildPresignEvent([{ op: 'listObjectVersions', bucket: 'b' }], {
+      subscriptionStatus: SubscriptionStatus.GracePeriod,
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+  });
+
+  // ── versionId forwarding ──────────────────────────────────────────
+
+  it('forwards versionId for headObject', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetPresignedHeadObjectUrl.mockResolvedValue('https://s3.example.com/head?signed');
+
+    const event = buildPresignEvent([
+      { op: 'headObject', bucket: 'b', key: 'k', versionId: 'v-123' },
+    ]);
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    expect(mockGetPresignedHeadObjectUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'k', versionId: 'v-123' }),
+    );
+  });
+
+  it('forwards versionId for getObject', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetPresignedGetObjectUrl.mockResolvedValue('https://s3.example.com/get?signed');
+
+    const event = buildPresignEvent([
+      { op: 'getObject', bucket: 'b', key: 'k', versionId: 'v-456' },
+    ]);
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    expect(mockGetPresignedGetObjectUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'k', versionId: 'v-456' }),
+    );
+  });
+
+  it('forwards versionId for deleteObject', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetPresignedDeleteObjectUrl.mockResolvedValue('https://s3.example.com/delete?signed');
+
+    const event = buildPresignEvent([
+      { op: 'deleteObject', bucket: 'b', key: 'k', versionId: 'v-789' },
+    ]);
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    expect(mockGetPresignedDeleteObjectUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'k', versionId: 'v-789' }),
+    );
+  });
+
+  it('forwards versionId for getObjectRetention', async () => {
+    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
+    mockGetPresignedGetObjectRetentionUrl.mockResolvedValue(
+      'https://s3.example.com/retention?signed',
+    );
+
+    const event = buildPresignEvent([
+      { op: 'getObjectRetention', bucket: 'b', key: 'k', versionId: 'v-abc' },
+    ]);
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    expect(mockGetPresignedGetObjectRetentionUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'k', versionId: 'v-abc' }),
+    );
   });
 });

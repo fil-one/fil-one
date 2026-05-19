@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   SquaresFourIcon,
   DatabaseIcon,
@@ -22,6 +22,7 @@ import { daysUntil, formatDateTime } from '../lib/time.js';
 
 import { Button } from './Button.js';
 import { ProgressBar } from './ProgressBar.js';
+import { StatusIndicator } from './StatusIndicator.js';
 import { Tooltip } from './Tooltip.js';
 
 type SidebarNavProps = {
@@ -93,12 +94,9 @@ type StatusBannersProps = {
   storagePct: number;
   egressUsed: number;
   egressPct: number;
-  isGracePeriod: boolean;
-  isTrialExpiredGrace: boolean;
   graceDays: number | null;
   graceEndsLabel: string | undefined;
   isPastDue: boolean;
-  isCanceled: boolean;
 };
 
 function StatusBanners({
@@ -110,69 +108,43 @@ function StatusBanners({
   storagePct,
   egressUsed,
   egressPct,
-  isGracePeriod,
-  isTrialExpiredGrace,
   graceDays,
   graceEndsLabel,
   isPastDue,
-  isCanceled,
 }: StatusBannersProps) {
   return (
     <>
       {!collapsed && isTrialing && (
-        <div className="border-t border-zinc-200 px-3 py-4">
-          <p className="text-xs font-medium text-zinc-900" title={trialEndsLabel}>
-            {trialDays !== null ? `${trialDays} days left in trial` : 'Trial active'}
-          </p>
-          <div className="mt-2.5 space-y-2.5">
-            <div>
-              <div className="mb-1 flex items-center justify-between text-xs">
-                <span className="text-zinc-500">Storage</span>
-                <span className="text-zinc-700">{formatBytes(storageUsed)} / 1 TB</span>
+        <div className="border-t border-zinc-200 px-3 py-3">
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+            <p className="text-xs font-medium text-zinc-900" title={trialEndsLabel}>
+              {trialDays !== null ? `${trialDays} days left in trial` : 'Trial active'}
+            </p>
+            <div className="mt-2.5 space-y-2.5">
+              <div>
+                <div className="mb-1 flex items-center justify-between text-xs">
+                  <span className="text-zinc-500">Storage</span>
+                  <span className="text-zinc-700">{formatBytes(storageUsed)} / 1 TB</span>
+                </div>
+                <ProgressBar value={storagePct} size="sm" label="Storage usage" />
               </div>
-              <ProgressBar value={storagePct} size="sm" label="Storage usage" />
-            </div>
-            <div>
-              <div className="mb-1 flex items-center justify-between text-xs">
-                <span className="text-zinc-500">Egress</span>
-                <span className="text-zinc-700">{formatBytes(egressUsed)} / 2 TB</span>
+              <div>
+                <div className="mb-1 flex items-center justify-between text-xs">
+                  <span className="text-zinc-500">Egress</span>
+                  <span className="text-zinc-700">{formatBytes(egressUsed)} / 2 TB</span>
+                </div>
+                <ProgressBar value={egressPct} size="sm" label="Egress usage" />
               </div>
-              <ProgressBar value={egressPct} size="sm" label="Egress usage" />
+            </div>
+            <div className="mt-3">
+              <Button variant="ghost" size="sm" href="/billing" className="w-full justify-center">
+                Upgrade
+              </Button>
             </div>
           </div>
-          <div className="mt-3">
-            <Button variant="primary" href="/billing" className="w-full justify-center text-xs">
-              Upgrade
-            </Button>
-          </div>
         </div>
       )}
-      {!collapsed && isGracePeriod && isTrialExpiredGrace && (
-        <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
-          <p className="text-xs font-medium text-amber-800" title={graceEndsLabel}>
-            Your free trial has expired.{graceDays !== null ? ` ${graceDays} days left` : ''} to
-            upgrade or download your data.
-          </p>
-          <div className="mt-3">
-            <Button variant="primary" href="/billing" className="w-full justify-center text-xs">
-              Upgrade
-            </Button>
-          </div>
-        </div>
-      )}
-      {!collapsed && isGracePeriod && !isTrialExpiredGrace && (
-        <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
-          <p className="text-xs font-medium text-amber-800" title={graceEndsLabel}>
-            Subscription canceled.{graceDays !== null ? ` ${graceDays} days left` : ''} to
-            reactivate or download your data.
-          </p>
-          <div className="mt-3">
-            <Button variant="primary" href="/billing" className="w-full justify-center text-xs">
-              Reactivate
-            </Button>
-          </div>
-        </div>
-      )}
+
       {!collapsed && isPastDue && (
         <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
           <p className="text-xs font-medium text-amber-800" title={graceEndsLabel}>
@@ -182,18 +154,6 @@ function StatusBanners({
           <div className="mt-3">
             <Button variant="primary" href="/billing" className="w-full justify-center text-xs">
               Update payment
-            </Button>
-          </div>
-        </div>
-      )}
-      {!collapsed && isCanceled && (
-        <div className="border-t border-red-200 bg-red-50 px-3 py-4">
-          <p className="text-xs font-medium text-red-800">
-            Account canceled. Reactivate to regain access.
-          </p>
-          <div className="mt-3">
-            <Button variant="primary" href="/billing" className="w-full justify-center text-xs">
-              Reactivate
             </Button>
           </div>
         </div>
@@ -218,7 +178,7 @@ export function HelpMenu({
   onToggle,
 }: HelpMenuProps) {
   return (
-    <div className="relative border-t border-zinc-200 p-2">
+    <div className="relative">
       {collapsed ? (
         <Tooltip content="Help" side="right">
           <button
@@ -236,9 +196,9 @@ export function HelpMenu({
           ref={helpButtonRef}
           type="button"
           onClick={onToggle}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-100"
         >
-          <QuestionIcon size={18} className="flex-shrink-0 text-zinc-400" />
+          <QuestionIcon size={16} className="flex-shrink-0 text-zinc-400" />
           Help
         </button>
       )}
@@ -286,9 +246,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const initial = displayName.charAt(0).toUpperCase();
 
   const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
-  const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod;
   const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
-  const isCanceled = billing?.subscription.status === SubscriptionStatus.Canceled;
   const trialDays =
     isTrialing && billing?.subscription.trialEndsAt
       ? daysUntil(billing.subscription.trialEndsAt)
@@ -302,8 +260,6 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const graceEndsLabel = billing?.subscription.gracePeriodEndsAt
     ? `Expires ${formatDateTime(billing.subscription.gracePeriodEndsAt)}`
     : undefined;
-  const isTrialExpiredGrace = isGracePeriod && !!billing?.subscription.trialEndsAt;
-
   const isActivePaid = billing?.subscription.status === SubscriptionStatus.Active;
   const limits = getUsageLimits(!!isActivePaid);
   const storageUsed = usage?.storage.usedBytes ?? 0;
@@ -315,27 +271,34 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const egressPct =
     limits.egressLimitBytes > 0 ? Math.min(100, (egressUsed / limits.egressLimitBytes) * 100) : 0;
 
-  function handleClickOutside(e: React.MouseEvent) {
-    if (
-      userMenuRef.current &&
-      !userMenuRef.current.contains(e.target as Node) &&
-      userButtonRef.current &&
-      !userButtonRef.current.contains(e.target as Node)
-    ) {
-      setUserMenuOpen(false);
+  useEffect(() => {
+    if (!userMenuOpen && !helpMenuOpen) return;
+    function handleMouseDown(e: MouseEvent) {
+      if (
+        userMenuOpen &&
+        userMenuRef.current &&
+        !userMenuRef.current.contains(e.target as Node) &&
+        userButtonRef.current &&
+        !userButtonRef.current.contains(e.target as Node)
+      ) {
+        setUserMenuOpen(false);
+      }
+      if (
+        helpMenuOpen &&
+        helpMenuRef.current &&
+        !helpMenuRef.current.contains(e.target as Node) &&
+        helpButtonRef.current &&
+        !helpButtonRef.current.contains(e.target as Node)
+      ) {
+        setHelpMenuOpen(false);
+      }
     }
-    if (
-      helpMenuRef.current &&
-      !helpMenuRef.current.contains(e.target as Node) &&
-      helpButtonRef.current &&
-      !helpButtonRef.current.contains(e.target as Node)
-    ) {
-      setHelpMenuOpen(false);
-    }
-  }
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [userMenuOpen, helpMenuOpen]);
 
   return (
-    <div className="h-full" onClick={handleClickOutside}>
+    <div className="h-full">
       <nav className="relative flex h-full flex-col border-r border-zinc-200 bg-white">
         {/* Expand toggle (collapsed) — centered on the sidebar's right border */}
         {collapsed && (
@@ -358,6 +321,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           <button
             ref={userButtonRef}
             type="button"
+            data-testid="user-profile"
             onClick={() => setUserMenuOpen((o) => !o)}
             className={[
               'flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-zinc-100',
@@ -432,22 +396,22 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           storagePct={storagePct}
           egressUsed={egressUsed}
           egressPct={egressPct}
-          isGracePeriod={isGracePeriod}
-          isTrialExpiredGrace={isTrialExpiredGrace}
           graceDays={graceDays}
           graceEndsLabel={graceEndsLabel}
           isPastDue={isPastDue}
-          isCanceled={isCanceled}
         />
 
-        {/* Help button */}
-        <HelpMenu
-          collapsed={collapsed}
-          helpMenuOpen={helpMenuOpen}
-          helpMenuRef={helpMenuRef}
-          helpButtonRef={helpButtonRef}
-          onToggle={() => setHelpMenuOpen((o) => !o)}
-        />
+        {/* Footer: Help + System status */}
+        <div className="border-t border-zinc-200 p-2 flex flex-col gap-0.5">
+          <HelpMenu
+            collapsed={collapsed}
+            helpMenuOpen={helpMenuOpen}
+            helpMenuRef={helpMenuRef}
+            helpButtonRef={helpButtonRef}
+            onToggle={() => setHelpMenuOpen((o) => !o)}
+          />
+          <StatusIndicator collapsed={collapsed} />
+        </div>
       </nav>
     </div>
   );
