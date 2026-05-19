@@ -6,7 +6,6 @@ import {
   CaretDownIcon,
   CaretUpIcon,
   PlusIcon,
-  CheckIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
 import {
@@ -24,9 +23,11 @@ import { Heading } from '../components/Heading/Heading';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
+import { FormField } from '../components/FormField';
+import { Overline } from '../components/Overline';
 import { Input } from '../components/Input';
+import { Select } from '../components/Select';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
-import { RegionSelect } from '../components/RegionSelect';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
 import { SlowOperationIndicator } from '../components/SlowOperationIndicator';
 import { useToast } from '../components/Toast';
@@ -216,10 +217,9 @@ export function CreateBucketPage() {
           aria-label="Back to buckets"
           onClick={() => navigate({ to: '/buckets' })}
         />
-        <div>
-          <Heading tag="h1">Create bucket</Heading>
-          <p className="text-[13px] text-zinc-500">S3-compatible storage on Filecoin</p>
-        </div>
+        <Heading tag="h1" description="S3-compatible storage on Filecoin">
+          Create bucket
+        </Heading>
       </div>
 
       {/* Two-column layout */}
@@ -228,13 +228,16 @@ export function CreateBucketPage() {
         <div className="w-[520px] shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-5">
             {/* Bucket name */}
-            <div className="flex flex-col gap-2.5">
-              <label htmlFor="bucket-name" className="text-xs font-medium text-zinc-900">
-                Bucket name
-              </label>
+            <FormField
+              htmlFor="bucket-name"
+              label="Bucket name"
+              description="3-63 characters. Lowercase letters, numbers, and hyphens only. Must be globally unique."
+              error={nameError ?? undefined}
+            >
               <Input
                 id="bucket-name"
                 value={name}
+                invalid={!!nameError}
                 onChange={(v) => {
                   setName(v);
                   if (nameError) validateName(v);
@@ -245,23 +248,23 @@ export function CreateBucketPage() {
                 placeholder="my-storage-bucket"
                 autoComplete="off"
               />
-              {nameError ? (
-                <p className="text-[11px] leading-relaxed text-red-600">{nameError}</p>
-              ) : (
-                <p className="text-[11px] leading-relaxed text-zinc-500">
-                  3-63 characters. Lowercase letters, numbers, and hyphens only. Must be globally
-                  unique.
-                </p>
-              )}
-            </div>
+            </FormField>
 
             {/* Region */}
-            <div className="flex flex-col gap-2.5">
-              <label htmlFor="bucket-region" className="text-xs font-medium text-zinc-900">
-                Region
-              </label>
-              <RegionSelect id="bucket-region" value={region} onChange={setRegion} />
-            </div>
+            <FormField
+              htmlFor="bucket-region"
+              label="Region"
+              description="More regions coming soon."
+            >
+              <Select
+                id="bucket-region"
+                value={region}
+                onChange={(v) => setRegion(v as typeof S3_REGION)}
+                disabled
+              >
+                <option value={S3_REGION}>Europe (eu-west-1)</option>
+              </Select>
+            </FormField>
 
             {/* Object settings */}
             <ObjectSettingsFields
@@ -291,7 +294,7 @@ export function CreateBucketPage() {
               >
                 <div className="flex items-center gap-2">
                   <PlusIcon size={14} className="text-zinc-500" aria-hidden="true" />
-                  <span className="text-[13px] text-zinc-900">Create new key</span>
+                  <span className="text-sm text-zinc-900">Create new key</span>
                 </div>
                 {createKeyToggled ? (
                   <CaretUpIcon size={14} className="text-zinc-500" aria-hidden="true" />
@@ -326,17 +329,11 @@ export function CreateBucketPage() {
             </div>
 
             {/* Submit button */}
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={CheckIcon}
-              disabled={!canSubmit}
-              onClick={handleSubmit}
-            >
+            <Button variant="primary" size="lg" disabled={!canSubmit} onClick={handleSubmit}>
               {creating
                 ? 'Creating...'
                 : createKeyToggled
-                  ? 'Create bucket and access key'
+                  ? 'Create bucket and API key'
                   : 'Create bucket'}
             </Button>
             <SlowOperationIndicator isLoading={creating} operation="Creating bucket" />
@@ -345,24 +342,22 @@ export function CreateBucketPage() {
 
         {/* Right: Info sidebar */}
         <div className="sticky top-0 w-60 shrink-0 self-start pt-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[1px] text-zinc-500">
-            Included by default
-          </p>
+          <Overline>Included by default</Overline>
 
           <div className="mt-3 flex flex-col">
             {/* Encryption */}
             <div className="flex flex-col gap-0.5 py-3">
-              <span className="text-[13px] font-semibold text-zinc-900">Encryption</span>
+              <span className="text-sm font-medium text-zinc-900">Encryption</span>
               <p className="text-xs leading-relaxed text-zinc-500">
-                All data is encrypted at rest by default.
+                All data is encrypted at rest.
               </p>
             </div>
 
             {/* Private */}
             <div className="flex flex-col gap-0.5 border-t border-zinc-200/60 py-3">
-              <span className="text-[13px] font-semibold text-zinc-900">Private</span>
+              <span className="text-sm font-medium text-zinc-900">Private</span>
               <p className="text-xs leading-relaxed text-zinc-500">
-                All buckets are private by default. Access requires an API key.
+                All buckets are private. Access requires an API key.
               </p>
             </div>
           </div>
