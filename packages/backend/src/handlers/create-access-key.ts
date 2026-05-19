@@ -6,7 +6,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { CreateAccessKeySchema, S3_REGION } from '@filone/shared';
 import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { orchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -62,7 +62,7 @@ export async function baseHandler(
 
   const { orgId } = getUserInfo(event);
 
-  const orchestrator = orchestratorForRegion(S3_REGION);
+  const orchestrator = getOrchestratorForRegion(S3_REGION);
   const ready = await orchestrator.ensureTenantReady(orgId);
   if (!ready.ok) return tenantNotReadyResponse();
   const { tenantId } = ready;
@@ -128,7 +128,7 @@ async function recoverDuplicateKey(
   orgId: string,
   tenantId: string,
   keyName: string,
-  orchestrator: ReturnType<typeof orchestratorForRegion>,
+  orchestrator: ReturnType<typeof getOrchestratorForRegion>,
 ): Promise<void> {
   // Check if we already have a DynamoDB record for this key
   const { Items: existingKeys } = await getDynamoClient().send(

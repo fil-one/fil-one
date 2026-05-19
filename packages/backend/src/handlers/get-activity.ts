@@ -7,7 +7,7 @@ import { S3_REGION } from '@filone/shared';
 import type { ActivityResponse, RecentActivity, UsageDataPoint } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { orchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -34,7 +34,7 @@ export async function baseHandler(
   );
   const period = event.queryStringParameters?.period === '30d' ? 30 : 7;
 
-  const orchestrator = orchestratorForRegion(S3_REGION);
+  const orchestrator = getOrchestratorForRegion(S3_REGION);
   const ready = await orchestrator.isTenantReady(orgId);
   const tenantId = ready?.tenantId;
 
@@ -66,7 +66,7 @@ async function fetchBucketActivities(
   // Swallow errors so the dashboard still renders.
   if (!tenantId) return [];
 
-  const orchestrator = orchestratorForRegion(S3_REGION);
+  const orchestrator = getOrchestratorForRegion(S3_REGION);
   try {
     const buckets = await orchestrator.listBuckets(tenantId);
     return buckets.map((bucket) => ({

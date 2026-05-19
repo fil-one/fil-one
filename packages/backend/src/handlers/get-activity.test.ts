@@ -31,7 +31,7 @@ const mockOrchestrator = {
 };
 
 vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
-  orchestratorForRegion: () => mockOrchestrator,
+  getOrchestratorForRegion: () => mockOrchestrator,
 }));
 
 process.env.FILONE_STAGE = 'test';

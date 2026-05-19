@@ -3,7 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
 import { CreateBucketSchema, S3_REGION } from '@filone/shared';
-import { orchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
 import { BucketAlreadyExistsError } from '../lib/service-orchestrator/service-orchestrator.js';
 import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -50,7 +50,7 @@ export async function baseHandler(
 
   const { orgId } = getUserInfo(event);
 
-  const orchestrator = orchestratorForRegion(S3_REGION);
+  const orchestrator = getOrchestratorForRegion(S3_REGION);
   const ready = await orchestrator.ensureTenantReady(orgId);
   if (!ready.ok) return tenantNotReadyResponse();
   const { tenantId } = ready;

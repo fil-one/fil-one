@@ -30,7 +30,7 @@ const mockOrchestrator = {
 };
 
 vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
-  orchestratorForRegion: () => mockOrchestrator,
+  getOrchestratorForRegion: () => mockOrchestrator,
 }));
 
 const mockGetPresignedListObjectsUrl = vi.fn();

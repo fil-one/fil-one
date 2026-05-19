@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { S3Region } from '@filone/shared';
-import { getOrchestrator, orchestratorForRegion } from './service-orchestrator-registry.js';
+import { getOrchestrator, getOrchestratorForRegion } from './service-orchestrator-registry.js';
 
 describe('service-orchestrator registry', () => {
   it('returns the Aurora orchestrator for id "aurora"', () => {
@@ -9,7 +9,7 @@ describe('service-orchestrator registry', () => {
   });
 
   it('routes eu-west-1 to the Aurora orchestrator', () => {
-    const orchestrator = orchestratorForRegion(S3Region.EuWest1);
+    const orchestrator = getOrchestratorForRegion(S3Region.EuWest1);
     expect(orchestrator.id).toBe('aurora');
   });
 
@@ -18,7 +18,7 @@ describe('service-orchestrator registry', () => {
   // with that region must throw a clear error rather than silently falling
   // back to Aurora.
   it('throws for us-east-1 because FTH is not yet registered', () => {
-    expect(() => orchestratorForRegion(S3Region.UsEast1)).toThrow(
+    expect(() => getOrchestratorForRegion(S3Region.UsEast1)).toThrow(
       /No service orchestrator registered for provider "fth"/,
     );
   });

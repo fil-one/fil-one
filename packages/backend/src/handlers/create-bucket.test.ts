@@ -21,7 +21,7 @@ const mockOrchestrator = {
 };
 
 vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
-  orchestratorForRegion: () => mockOrchestrator,
+  getOrchestratorForRegion: () => mockOrchestrator,
 }));
 
 import { baseHandler } from './create-bucket.js';

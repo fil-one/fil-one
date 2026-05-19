@@ -3,7 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { Bucket, GetBucketResponse } from '@filone/shared';
 import { S3_REGION } from '@filone/shared';
-import { orchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -21,7 +21,7 @@ export async function baseHandler(
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
   }
 
-  const orchestrator = orchestratorForRegion(S3_REGION);
+  const orchestrator = getOrchestratorForRegion(S3_REGION);
   const ready = await orchestrator.isTenantReady(orgId);
   if (!ready) {
     return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();

@@ -31,7 +31,7 @@ const mockOrchestrator = {
 };
 
 vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
-  orchestratorForRegion: () => mockOrchestrator,
+  getOrchestratorForRegion: () => mockOrchestrator,
 }));
 
 const mockListObjects = vi.fn();

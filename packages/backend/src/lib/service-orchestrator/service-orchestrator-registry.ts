@@ -16,6 +16,6 @@ export function getOrchestrator(id: ProviderId): ServiceOrchestrator {
   return orchestrator;
 }
 
-export function orchestratorForRegion(region: S3Region): ServiceOrchestrator {
+export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator {
   return getOrchestrator(regionToProvider(region));
 }

@@ -8,7 +8,7 @@ import type {
   PresignResponse,
   PresignResponseItem,
 } from '@filone/shared';
-import { orchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
 import type { PresignerContext } from '../lib/service-orchestrator/service-orchestrator.js';
 import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
 import {
@@ -183,7 +183,7 @@ export async function baseHandler(
     }
   }
 
-  const orchestrator = orchestratorForRegion(S3_REGION);
+  const orchestrator = getOrchestratorForRegion(S3_REGION);
   const ready = await orchestrator.isTenantReady(orgId);
   if (!ready) return tenantNotReadyResponse();
 
