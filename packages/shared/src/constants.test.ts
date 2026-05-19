@@ -140,9 +140,7 @@ describe('formatRegion', () => {
   });
 
   it('formats us-east-1 as "<label> <code>"', () => {
-    expect(formatRegion(S3Region.UsEast1)).toBe(
-      `${REGION_LABELS[S3Region.UsEast1]} us-east-1`,
-    );
+    expect(formatRegion(S3Region.UsEast1)).toBe(`${REGION_LABELS[S3Region.UsEast1]} us-east-1`);
   });
 
   it('returns the raw region for unknown values', () => {
