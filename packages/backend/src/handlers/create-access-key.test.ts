@@ -234,6 +234,8 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('returns 400 when expiresAt is a timestamp formatted as ISO date-time string', async () => {
+    // "joes 30 day key with all" was failing because the old CreateAccessKeyModal
+    // sent d.toISOString() (with milliseconds) instead of YYYY-MM-DD
     const isoTimestamp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
     const event = buildEvent({
       body: JSON.stringify({
@@ -319,6 +321,7 @@ describe('create-access-key baseHandler', () => {
 
   it('returns 409 and recovers DynamoDB record on partial failure', async () => {
     mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
+    // No matching key in DynamoDB — partial failure
     ddbMock.on(QueryCommand).resolves({ Items: [] });
     mockFindAccessKeyByName.mockResolvedValue({
       id: 'aurora-key-1',

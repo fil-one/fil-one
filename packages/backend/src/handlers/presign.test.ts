@@ -332,6 +332,7 @@ describe('presign baseHandler', () => {
 
     const body = JSON.parse(result.body as string);
     const expiresAt = new Date(body.items[0].expiresAt).getTime();
+    // Should be ~300s in the future (with some tolerance)
     expect(expiresAt).toBeGreaterThan(before + 290_000);
     expect(expiresAt).toBeLessThan(before + 310_000);
   });
