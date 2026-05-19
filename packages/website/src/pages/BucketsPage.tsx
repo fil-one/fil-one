@@ -174,7 +174,7 @@ export function BucketsPage() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Tooltip
-                      content="Bucket must be empty to delete"
+                      content="Deleting buckets is not available yet"
                       side="left"
                       className="align-middle"
                     >
