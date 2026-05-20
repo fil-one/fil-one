@@ -2,11 +2,16 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
-import { UserIcon, BellIcon, ShieldCheckIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
+import { UserIcon, BellIcon, ShieldCheckIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Heading } from '../components/Heading/Heading';
+import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
+import { Card } from '../components/Card';
+import { IconBox } from '../components/IconBox';
+import { FormField } from '../components/FormField';
 import { Input } from '../components/Input';
+import { Link } from '../components/Link';
 import { MfaSettings } from '../components/MfaSettings';
 import { SettingRow } from '../components/SettingRow';
 import { Spinner } from '../components/Spinner';
@@ -24,74 +29,26 @@ function SectionCard({
   icon: IconComp,
   title,
   description,
-  danger,
   children,
 }: {
   icon: PhosphorIcon;
   title: string;
   description: string;
-  danger?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div
-      className={`rounded-lg border bg-white shadow-sm ${
-        danger ? 'border-red-200' : 'border-[#e1e4ea]'
-      }`}
-    >
+    <Card padding="none">
       <div className="flex items-center gap-2.5 p-5 pb-0">
-        <div
-          className={`flex size-8 items-center justify-center rounded-lg ${
-            danger ? 'bg-red-50' : 'bg-zinc-100'
-          }`}
-        >
-          <IconComp size={16} className={danger ? 'text-red-600' : 'text-zinc-500'} />
-        </div>
+        <IconBox icon={IconComp} color="blue" size="md" />
         <div>
-          <Heading tag="h2" size="sm" className={danger ? 'text-red-600' : undefined}>
+          <Heading tag="h2" size="sm">
             {title}
           </Heading>
-          <p className="text-[13px] text-zinc-500">{description}</p>
+          <p className="text-sm text-zinc-500">{description}</p>
         </div>
       </div>
       <div className="p-5">{children}</div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Toggle row (for notifications)
-// ---------------------------------------------------------------------------
-
-function ToggleRow({
-  label,
-  description,
-  enabled,
-  disabled,
-}: {
-  label: string;
-  description: string;
-  enabled: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between py-1">
-      <div>
-        <p className="text-[13px] font-medium text-zinc-900">{label}</p>
-        <p className="text-xs text-zinc-500">{description}</p>
-      </div>
-      <div
-        className={`flex h-6 w-11 items-center rounded-full border-2 border-transparent p-0.5 ${
-          enabled ? 'bg-blue-500' : 'bg-zinc-300'
-        } ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-      >
-        <div
-          className={`size-5 rounded-full bg-white shadow transition-transform ${
-            enabled ? 'translate-x-5' : 'translate-x-0'
-          }`}
-        />
-      </div>
-    </div>
+    </Card>
   );
 }
 
@@ -109,16 +66,16 @@ function ProviderManagedField({
   return (
     <>
       <Input value={value} onChange={() => {}} disabled />
-      <p className="text-[11px] text-zinc-500">
+      <p className="text-xs text-zinc-500">
         Managed by {provider?.label}.{' '}
-        <a
-          href={provider?.profileUrl}
+        <Link
+          href={provider?.profileUrl ?? ''}
+          variant="accent"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-blue-500 hover:underline"
         >
           Update at {provider?.label}
-        </a>
+        </Link>
       </p>
     </>
   );
@@ -230,31 +187,48 @@ function ProfileSection({ me }: { me: MeResponse }) {
     <SectionCard icon={UserIcon} title="Profile" description="Your personal information">
       <div className="flex flex-col gap-4">
         <div className="flex gap-3">
-          <div className="flex flex-1 flex-col gap-1.5">
-            <label className="text-[13px] font-medium text-zinc-900">Full name</label>
-            {social ? (
-              <ProviderManagedField value={form.name} provider={provider} />
-            ) : (
-              <Input value={form.name} onChange={form.setName} placeholder="Your full name" />
-            )}
+          <div className="flex flex-1 flex-col">
+            <FormField label="Full name" htmlFor="profile-name">
+              {social ? (
+                <ProviderManagedField value={form.name} provider={provider} />
+              ) : (
+                <Input
+                  id="profile-name"
+                  value={form.name}
+                  onChange={form.setName}
+                  placeholder="Your full name"
+                />
+              )}
+            </FormField>
           </div>
-          <div className="flex flex-1 flex-col gap-1.5">
-            <label className="text-[13px] font-medium text-zinc-900">Company name</label>
-            <Input value={form.orgName} onChange={form.setOrgName} placeholder="Your company" />
+          <div className="flex flex-1 flex-col">
+            <FormField label="Company name" htmlFor="profile-org-name">
+              <Input
+                id="profile-org-name"
+                value={form.orgName}
+                onChange={form.setOrgName}
+                placeholder="Your company"
+              />
+            </FormField>
           </div>
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[13px] font-medium text-zinc-900">Email</label>
+        <FormField
+          label="Email"
+          htmlFor="profile-email"
+          description={!social ? 'You will need to verify any email change.' : undefined}
+        >
           {social ? (
             <ProviderManagedField value={form.email} provider={provider} />
           ) : (
-            <>
-              <Input value={form.email} onChange={form.setEmail} placeholder="you@example.com" />
-              <p className="text-[11px] text-zinc-500">You will need to verify any email change.</p>
-            </>
+            <Input
+              id="profile-email"
+              value={form.email}
+              onChange={form.setEmail}
+              placeholder="you@example.com"
+            />
           )}
-        </div>
+        </FormField>
 
         <ProfileSaveBar form={form} />
       </div>
@@ -276,7 +250,7 @@ function ProfileSaveBar({ form }: { form: ReturnType<typeof useProfileForm> }) {
       <Button variant="primary" onClick={form.save} disabled={form.isSaving || !form.hasChanges}>
         {form.isSaving ? 'Saving...' : 'Save changes'}
       </Button>
-      {form.hasChanges && <p className="text-[11px] text-zinc-500">Saving: {changedLabels}</p>}
+      {form.hasChanges && <p className="text-xs text-zinc-500">Saving: {changedLabels}</p>}
     </div>
   );
 }
@@ -292,22 +266,7 @@ function NotificationsSection() {
       title="Notifications"
       description="Manage your notification preferences"
     >
-      <div className="flex flex-col gap-3 opacity-50">
-        <ToggleRow
-          label="Email notifications"
-          description="Get notified about your uploads and when approaching storage limits"
-          enabled={false}
-          disabled
-        />
-        <div className="h-px bg-[#e1e4ea]" />
-        <ToggleRow
-          label="Marketing emails"
-          description="Receive updates about new features"
-          enabled={false}
-          disabled
-        />
-        <p className="text-xs text-zinc-400 italic">Coming soon</p>
-      </div>
+      <Alert variant="grey" description="Notification preferences coming soon." showIcon={false} />
     </SectionCard>
   );
 }
@@ -333,7 +292,7 @@ function SecuritySection({ me }: { me: MeResponse }) {
     <SectionCard icon={ShieldCheckIcon} title="Security" description="Manage your account security">
       <div className="flex flex-col gap-3">
         <MfaSettings me={me} />
-        <div className="h-px bg-[#e1e4ea]" />
+        <div className="h-px bg-zinc-200" />
         {!social && (
           <SettingRow
             label="Password"
@@ -350,17 +309,20 @@ function SecuritySection({ me }: { me: MeResponse }) {
           />
         )}
         {social && provider && (
-          <p className="text-xs text-zinc-500">
-            Password is managed by {provider.label}.{' '}
-            <a
-              href={provider.profileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-500 hover:underline"
-            >
-              Visit {provider.label} settings
-            </a>
-          </p>
+          <div className="py-1">
+            <p className="text-sm font-medium text-zinc-900">Password</p>
+            <p className="text-xs text-zinc-500">
+              Managed by {provider.label}.{' '}
+              <Link
+                href={provider.profileUrl}
+                variant="accent"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Update at {provider.label}
+              </Link>
+            </p>
+          </div>
         )}
       </div>
     </SectionCard>
@@ -373,19 +335,15 @@ function SecuritySection({ me }: { me: MeResponse }) {
 
 function DangerSection() {
   return (
-    <SectionCard icon={TrashIcon} title="Danger zone" description="Irreversible actions" danger>
-      <div className="rounded-lg border border-red-200 bg-red-50/50 p-3.5">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-[13px] font-medium text-zinc-900">Delete account</p>
-            <p className="text-xs text-zinc-500">Permanently delete your account and all data</p>
-          </div>
-          <Button variant="ghost" className="cursor-not-allowed opacity-40" disabled>
-            Delete account
-          </Button>
-        </div>
-      </div>
-    </SectionCard>
+    <Card>
+      <p className="text-sm font-medium text-zinc-900">Delete account</p>
+      <p className="text-xs text-zinc-500 mt-1">
+        To permanently delete your account and all data, email{' '}
+        <Link href="mailto:support@fil.one" variant="accent">
+          support@fil.one
+        </Link>
+      </p>
+    </Card>
   );
 }
 

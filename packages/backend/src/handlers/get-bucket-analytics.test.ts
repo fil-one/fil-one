@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import type { ModelStorageMetricsSample } from '../lib/aurora-backoffice.js';
+import type { ModelStorageMetricsSample } from '../lib/aurora/aurora-backoffice.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -16,12 +16,12 @@ vi.mock('sst', () => ({
 
 const mockGetBucketStorageSamples = vi.fn<() => Promise<ModelStorageMetricsSample[]>>();
 
-vi.mock('../lib/aurora-backoffice.js', () => ({
+vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
   getBucketStorageSamples: (...args: unknown[]) => mockGetBucketStorageSamples(...(args as [])),
 }));
 
 const mockGetAuroraPortalApiKey = vi.fn();
-vi.mock('../lib/aurora-portal.js', () => ({
+vi.mock('../lib/aurora/aurora-portal.js', () => ({
   getAuroraPortalApiKey: (...args: unknown[]) => mockGetAuroraPortalApiKey(...args),
 }));
 
