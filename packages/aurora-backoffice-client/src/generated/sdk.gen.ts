@@ -36,6 +36,9 @@ import type {
   GetBucketStorageMetricsData,
   GetBucketStorageMetricsErrors,
   GetBucketStorageMetricsResponses,
+  GetComponentData,
+  GetComponentErrors,
+  GetComponentResponses,
   GetConfigData,
   GetConfigErrors,
   GetConfigResponses,
@@ -119,12 +122,30 @@ import type {
   SetTenantStatusData,
   SetTenantStatusErrors,
   SetTenantStatusResponses,
+  SetupAuthComponentData,
+  SetupAuthComponentErrors,
+  SetupAuthComponentResponses,
+  SetupComputeComponentData,
+  SetupComputeComponentErrors,
+  SetupComputeComponentResponses,
+  SetupS3ComponentData,
+  SetupS3ComponentErrors,
+  SetupS3ComponentResponses,
   SetupTenantData,
   SetupTenantErrors,
   SetupTenantResponses,
+  UpdateAuthComponentData,
+  UpdateAuthComponentErrors,
+  UpdateAuthComponentResponses,
+  UpdateComputeComponentData,
+  UpdateComputeComponentErrors,
+  UpdateComputeComponentResponses,
   UpdateConfigData,
   UpdateConfigErrors,
   UpdateConfigResponses,
+  UpdateS3ComponentData,
+  UpdateS3ComponentErrors,
+  UpdateS3ComponentResponses,
   UpdateThemeData,
   UpdateThemeErrors,
   UpdateThemeResponses,
@@ -133,7 +154,8 @@ import type {
 export type Options<
   TData extends TDataShape = TDataShape,
   ThrowOnError extends boolean = boolean,
-> = Options2<TData, ThrowOnError> & {
+  TResponse = unknown,
+> = Options2<TData, ThrowOnError, TResponse> & {
   /**
    * You can provide a client instance returned by `createClient()` instead of
    * individual options. This might be also useful if you want to implement a
@@ -553,6 +575,126 @@ export const listBuckets = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * Update Auth component settings
+ *
+ * Updates settings (e.g. enabled status) for a component of a tenant
+ */
+export const updateAuthComponent = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateAuthComponentData, ThrowOnError>,
+) =>
+  (options.client ?? client).patch<
+    UpdateAuthComponentResponses,
+    UpdateAuthComponentErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Auth',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * Run Auth component setup process
+ *
+ * Initiates the setup process for Auth component
+ */
+export const setupAuthComponent = <ThrowOnError extends boolean = false>(
+  options: Options<SetupAuthComponentData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    SetupAuthComponentResponses,
+    SetupAuthComponentErrors,
+    ThrowOnError
+  >({ url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Auth/setup', ...options });
+
+/**
+ * Update Compute component settings
+ *
+ * Updates settings (e.g. enabled status) for a component of a tenant
+ */
+export const updateComputeComponent = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateComputeComponentData, ThrowOnError>,
+) =>
+  (options.client ?? client).patch<
+    UpdateComputeComponentResponses,
+    UpdateComputeComponentErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Compute',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * Run Compute component setup process
+ *
+ * Initiates the setup process for Compute component
+ */
+export const setupComputeComponent = <ThrowOnError extends boolean = false>(
+  options: Options<SetupComputeComponentData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    SetupComputeComponentResponses,
+    SetupComputeComponentErrors,
+    ThrowOnError
+  >({ url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Compute/setup', ...options });
+
+/**
+ * Update S3 component settings
+ *
+ * Updates settings (e.g. enabled status) for a component of a tenant
+ */
+export const updateS3Component = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateS3ComponentData, ThrowOnError>,
+) =>
+  (options.client ?? client).patch<
+    UpdateS3ComponentResponses,
+    UpdateS3ComponentErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/S3',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * Run S3 component setup process
+ *
+ * Initiates the setup process for S3 component
+ */
+export const setupS3Component = <ThrowOnError extends boolean = false>(
+  options: Options<SetupS3ComponentData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<SetupS3ComponentResponses, SetupS3ComponentErrors, ThrowOnError>({
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/S3/setup',
+    ...options,
+  });
+
+/**
+ * Get component status and properties
+ *
+ * Get the current status (enabled/disabled) and properties of a component for a tenant
+ */
+export const getComponent = <ThrowOnError extends boolean = false>(
+  options: Options<GetComponentData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<GetComponentResponses, GetComponentErrors, ThrowOnError>({
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/{component}',
+    ...options,
+  });
+
+/**
  * List tenant members
  *
  * Returns users that are members of given org
@@ -572,6 +714,8 @@ export const listTenantMembers = <ThrowOnError extends boolean = false>(
  * Setup tenant
  *
  * Initiates the setup process for a tenant
+ *
+ * @deprecated
  */
 export const setupTenant = <ThrowOnError extends boolean = false>(
   options: Options<SetupTenantData, ThrowOnError>,
