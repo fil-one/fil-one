@@ -61,9 +61,13 @@ for (const role of roles) {
     // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page.getByRole('textbox', { name: 'Email address' }).fill(role.email);
     // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page.getByRole('textbox', { name: 'Password' }).fill(role.password);
     // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
+    await page.getByRole('button', { name: 'Continue without passkeys' }).click();
 
     await expect(page).toHaveURL(/\/dashboard$/);
 
