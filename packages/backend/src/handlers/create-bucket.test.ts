@@ -74,7 +74,7 @@ describe('create-bucket baseHandler', () => {
     expect(mockEnsureTenantReady).toHaveBeenCalledWith('org-1');
   });
 
-  it('returns 503 with a retry message when tenant setup is incomplete', async () => {
+  it('returns 503 with a retry message when tenant setup fails', async () => {
     mockEnsureTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });

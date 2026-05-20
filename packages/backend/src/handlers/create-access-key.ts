@@ -152,7 +152,7 @@ async function recoverDuplicateKey(
   const recovered = await orchestrator.findAccessKeyByName(tenantId, keyName);
 
   if (!recovered) {
-    // Shouldn't happen — provider returned conflict but key not found in list.
+    // Shouldn't happen — orchestrator returned conflict but key not found in list.
     // Just return and let the user see the 409 message.
     console.error(
       `Orchestrator returned conflict for key "${keyName}" but key not found in list for tenant ${tenantId}`,
