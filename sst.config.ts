@@ -51,6 +51,7 @@ export default $config({
     const stripePublishableKey = new sst.Secret('StripePublishableKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
+    const fthToken = new sst.Secret('FthToken');
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const sendGridApiKey =
       $app.stage === 'staging' || $app.stage === 'production'
@@ -351,6 +352,7 @@ export default $config({
       stripePublishableKey,
       stripePriceId,
       auroraBackofficeToken,
+      fthToken,
     ];
     // Management API runtime credentials — linked only to handlers that call the Auth0 Management API
     const mgmtRuntimeResources = [auth0MgmtRuntimeClientId, auth0MgmtRuntimeClientSecret];
@@ -359,6 +361,8 @@ export default $config({
       FILONE_STAGE: $app.stage,
       AUTH0_DOMAIN: auth0Domain,
       AUTH0_AUDIENCE: isProduction ? 'https://app.fil.one' : 'https://staging.fil.one',
+      FTH_API_URL: 'https://api.fortilyx.com',
+      FTH_S3_URL: 'https://us-east-1.fortilyx.com',
     };
 
     if (isProduction) {
