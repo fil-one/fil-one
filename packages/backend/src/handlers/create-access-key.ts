@@ -175,7 +175,7 @@ async function recoverDuplicateKey(
   );
 
   console.log(
-    `Recovered DynamoDB record for access key "${keyName}" (id=${recovered.id}) for org ${orgId}`,
+    `Recovered DynamoDB record for access key "${keyName}" (id=${recovered.id}) for org ${orgId} using ${orchestrator.id} orchestrator`,
   );
 }
 

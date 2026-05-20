@@ -320,7 +320,7 @@ describe('auroraOrchestrator', () => {
       });
     });
 
-    it('coerces defaultRetention "off" to undefined', async () => {
+    it('maps defaultRetention "off" to undefined', async () => {
       mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
       mockPortalGetBucketInfo.mockResolvedValue({
         data: { name: 'b', createdAt: '2026-01-01T00:00:00Z', defaultRetention: 'off' },
