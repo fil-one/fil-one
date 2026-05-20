@@ -22,9 +22,9 @@ export async function baseHandler(
     return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets: [] }).build();
   }
 
-  const summaries = await orchestrator.listBuckets(tenantId);
+  const result = await orchestrator.listBuckets(tenantId);
 
-  const buckets: Bucket[] = summaries.map((b) => ({
+  const buckets: Bucket[] = result.map((b) => ({
     name: b.name,
     region: orchestrator.region,
     createdAt: b.createdAt,

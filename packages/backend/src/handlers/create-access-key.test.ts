@@ -120,6 +120,7 @@ describe('create-access-key baseHandler', () => {
     expect(item.createdAt.S).toBe('2026-03-10T13:36:07.752371Z');
     expect(item.status.S).toBe('active');
     expect(item.bucketScope.S).toBe('all');
+    // Secret must NOT be stored
     expect(item.accessKeySecret).toBeUndefined();
     expect(item.secretAccessKey).toBeUndefined();
   });
@@ -338,6 +339,7 @@ describe('create-access-key baseHandler', () => {
     expect(body).toStrictEqual({
       message: 'An access key with this name already exists',
     });
+    // Verify DynamoDB record was recovered
     const putCalls = ddbMock.commandCalls(PutItemCommand);
     expect(putCalls).toHaveLength(1);
     const item = putCalls[0].args[0].input.Item!;
