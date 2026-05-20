@@ -332,14 +332,14 @@ function extractErrorMessage(body: unknown): string | undefined {
 }
 
 export class FthApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-    public readonly responseBody: unknown,
-    options?: ErrorOptions,
-  ) {
+  readonly status: number;
+  readonly responseBody: unknown;
+
+  constructor(status: number, message: string, responseBody: unknown, options?: ErrorOptions) {
     super(`FTH API request failed (${status}): ${message}`, options);
     this.name = 'FthApiError';
+    this.status = status;
+    this.responseBody = responseBody;
   }
 }
 

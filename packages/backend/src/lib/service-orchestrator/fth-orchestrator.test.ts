@@ -77,14 +77,16 @@ function stubSetupApiCalls() {
     displayName: `FilOne test ${orgId}`,
     createdAt: '2026-01-01T00:00:00Z',
   });
+  mockFthClient.listStorageUsers.mockResolvedValue([]);
   mockFthClient.createStorageUser.mockResolvedValue({
     id: serviceUserId,
     userCode: 'filone-console',
     displayName: 'FilOne Console User',
-    email: `console-${orgId}@filone.internal`,
+    email: `console-${fthClientId}@filone.internal`,
     role: 'storage_user',
     createdAt: '2026-01-01T00:00:00Z',
   });
+  mockFthClient.listAccessKeys.mockResolvedValue([]);
   mockFthClient.createAccessKey.mockResolvedValue({
     accessKeyId: 'AKIATEST',
     secretAccessKey: 'SKTEST',
@@ -135,6 +137,7 @@ describe('fthOrchestrator.ensureTenantReady', () => {
     expect(mockFthClient.createStorageUser).toHaveBeenCalledWith(
       fthClientId,
       expect.objectContaining({
+        email: `console-${fthClientId}@filone.internal`,
         userCode: 'filone-console',
         role: 'storage_user',
         issueS3Credentials: false,
@@ -149,6 +152,7 @@ describe('fthOrchestrator.ensureTenantReady', () => {
         idempotencyKey: `${orgId}-console-key`,
       }),
     );
+    expect(mockFthClient.deleteAccessKey).not.toHaveBeenCalled();
 
     const putCalls = ssmMock.commandCalls(PutParameterCommand);
     expect(putCalls).toHaveLength(1);
@@ -164,6 +168,60 @@ describe('fthOrchestrator.ensureTenantReady', () => {
       ':tenantId': { S: fthClientId },
       ':status': { S: FTH_TENANT_FINAL_SETUP_STATUS },
     });
+  });
+
+  it('reuses the existing filone-console storage user when one is already present', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: profileItem({}) });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    ssmMock.on(PutParameterCommand).resolves({});
+    stubSetupApiCalls();
+    mockFthClient.listStorageUsers.mockResolvedValue([
+      {
+        id: serviceUserId,
+        userCode: 'filone-console',
+        displayName: 'FilOne Console User',
+        email: `console-${fthClientId}@filone.internal`,
+        role: 'storage_user',
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    await fthOrchestrator.ensureTenantReady(orgId);
+
+    expect(mockFthClient.createStorageUser).not.toHaveBeenCalled();
+    expect(mockFthClient.createAccessKey).toHaveBeenCalledWith(
+      fthClientId,
+      serviceUserId,
+      expect.objectContaining({ name: 'filone-console' }),
+    );
+  });
+
+  it('deletes a stale filone-console access key before issuing a new one', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: profileItem({}) });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    ssmMock.on(PutParameterCommand).resolves({});
+    stubSetupApiCalls();
+    mockFthClient.listAccessKeys.mockResolvedValue([
+      {
+        accessKeyId: 'AKIASTALE',
+        name: 'filone-console',
+        permissions: [],
+        buckets: [],
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    mockFthClient.deleteAccessKey.mockResolvedValue(undefined);
+
+    await fthOrchestrator.ensureTenantReady(orgId);
+
+    expect(mockFthClient.deleteAccessKey).toHaveBeenCalledWith(fthClientId, 'AKIASTALE', {
+      idempotencyKey: `${orgId}-console-key-delete`,
+    });
+    expect(mockFthClient.createAccessKey).toHaveBeenCalledWith(
+      fthClientId,
+      serviceUserId,
+      expect.objectContaining({ name: 'filone-console' }),
+    );
   });
 });
 

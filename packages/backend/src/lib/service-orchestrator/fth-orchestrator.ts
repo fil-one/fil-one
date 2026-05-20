@@ -204,14 +204,34 @@ export const fthOrchestrator: ServiceOrchestrator = {
     });
     const tenantId = String(fthClient.id);
 
-    const storageUser = await client.createStorageUser(tenantId, {
-      email: `console-${orgId}@filone.internal`,
-      displayName: 'FilOne Console User',
-      userCode: 'filone-console',
-      role: 'storage_user',
-      issueS3Credentials: false,
-      idempotencyKey: `${orgId}-console-user`,
-    });
+    // The FTH `users.email` column has a global unique index, so scope the
+    // synthetic email by tenantId (which is itself unique per FTH client) to
+    // avoid collisions if a previous client for this org was deleted but its
+    // user row lingers. listStorageUsers first to make this step resumable
+    // within the same tenant.
+    const existingUsers = await client.listStorageUsers(tenantId);
+    const existingServiceUser = existingUsers.find((u) => u.userCode === 'filone-console');
+    const storageUser =
+      existingServiceUser ??
+      (await client.createStorageUser(tenantId, {
+        email: `console-${tenantId}@filone.internal`,
+        displayName: 'FilOne Console User',
+        userCode: 'filone-console',
+        role: 'storage_user',
+        issueS3Credentials: false,
+        idempotencyKey: `${orgId}-console-user`,
+      }));
+
+    // Access-key secrets are only returned at creation, so if a stale
+    // filone-console key lingers from a partial previous run, delete it before
+    // issuing a fresh one — we can't recover the old secret.
+    const existingKeys = await client.listAccessKeys(tenantId);
+    const staleKey = existingKeys.find((k) => k.name === 'filone-console');
+    if (staleKey) {
+      await client.deleteAccessKey(tenantId, staleKey.accessKeyId, {
+        idempotencyKey: `${orgId}-console-key-delete`,
+      });
+    }
 
     const accessKey = await client.createAccessKey(tenantId, String(storageUser.id), {
       name: 'filone-console',
