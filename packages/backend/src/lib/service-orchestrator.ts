@@ -77,6 +77,13 @@ export class AccessKeyValidationError extends Error {
   }
 }
 
+export class NotImplementedError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'NotImplementedError';
+  }
+}
+
 /**
  * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.).
  * Each implementation handles tenant provisioning, bucket lifecycle,

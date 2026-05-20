@@ -37,11 +37,6 @@ vi.mock('./aurora-portal.js', async (importOriginal) => {
   };
 });
 
-const mockS3DeleteBucket = vi.fn();
-vi.mock('../s3-presigner.js', () => ({
-  deleteBucket: (...args: unknown[]) => mockS3DeleteBucket(...args),
-}));
-
 const mockPortalListBuckets = vi.fn();
 const mockPortalGetBucketInfo = vi.fn();
 vi.mock('@filone/aurora-portal-client', () => ({
@@ -60,6 +55,7 @@ import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
+  NotImplementedError,
 } from '../service-orchestrator.js';
 
 // ---------------------------------------------------------------------------
@@ -205,24 +201,10 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('deleteBucket', () => {
-    it('builds a presigner context and calls S3 deleteBucket with it', async () => {
-      mockSsmCredentials('aurora-t-1', {
-        accessKeyId: 'AKIA_X',
-        secretAccessKey: 'secret_X',
-      });
-      mockS3DeleteBucket.mockResolvedValue(undefined);
-
-      await auroraOrchestrator.deleteBucket('aurora-t-1', 'my-bucket');
-
-      expect(mockS3DeleteBucket).toHaveBeenCalledWith(
-        {
-          endpointUrl: expect.stringContaining('aur.lu'),
-          region: 'auto',
-          credentials: { accessKeyId: 'AKIA_X', secretAccessKey: 'secret_X' },
-          forcePathStyle: true,
-        },
-        'my-bucket',
-      );
+    it('throws NotImplementedError — Aurora delete is tracked in FIL-204', async () => {
+      await expect(
+        auroraOrchestrator.deleteBucket('aurora-t-1', 'my-bucket'),
+      ).rejects.toBeInstanceOf(NotImplementedError);
     });
   });
 

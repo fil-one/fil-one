@@ -3,7 +3,6 @@
 // alone knows how to look up credentials and which endpoint/region apply.
 
 import {
-  DeleteBucketCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   GetObjectRetentionCommand,
@@ -42,11 +41,6 @@ export async function listBuckets(ctx: PresignerContext): Promise<ListBucketsRes
       createdAt: b.CreationDate?.toISOString() ?? new Date().toISOString(),
     })),
   };
-}
-
-export async function deleteBucket(ctx: PresignerContext, bucket: string): Promise<void> {
-  const s3 = createS3Client(ctx);
-  await s3.send(new DeleteBucketCommand({ Bucket: bucket }));
 }
 
 export interface ListObjectsOptions {

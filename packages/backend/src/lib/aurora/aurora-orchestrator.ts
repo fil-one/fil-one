@@ -27,17 +27,17 @@ import {
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
 } from '../aurora/aurora-portal.js';
-import { deleteBucket as s3DeleteBucket } from '../s3-presigner.js';
 import { getDynamoClient } from '../ddb-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
-import type {
-  BucketDetails,
-  BucketSummary,
-  CreateBucketArgs,
-  IssueAccessKeyOpts,
-  IssuedAccessKey,
-  PresignerContext,
-  ServiceOrchestrator,
+import {
+  NotImplementedError,
+  type BucketDetails,
+  type BucketSummary,
+  type CreateBucketArgs,
+  type IssueAccessKeyOpts,
+  type IssuedAccessKey,
+  type PresignerContext,
+  type ServiceOrchestrator,
 } from '../service-orchestrator.js';
 
 const dynamo = getDynamoClient();
@@ -140,9 +140,10 @@ export const auroraOrchestrator: ServiceOrchestrator = {
     });
   },
 
-  async deleteBucket(tenantId: string, bucketName: string): Promise<void> {
-    const ctx = await auroraOrchestrator.getPresignerContext(tenantId);
-    await s3DeleteBucket(ctx, bucketName);
+  async deleteBucket(_tenantId: string, _bucketName: string): Promise<void> {
+    // TODO: Implement bucket deletion.
+    // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
+    throw new NotImplementedError('Aurora bucket deletion is not yet supported. See FIL-204.');
   },
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {

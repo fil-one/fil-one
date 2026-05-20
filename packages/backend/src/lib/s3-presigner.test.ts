@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
-  DeleteBucketCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   GetObjectRetentionCommand,
@@ -25,7 +24,6 @@ vi.mock('@aws-sdk/s3-request-presigner', () => ({
 const s3Mock = mockClient(S3Client);
 
 import {
-  deleteBucket,
   getPresignedDeleteObjectUrl,
   getPresignedGetObjectRetentionUrl,
   getPresignedGetObjectUrl,
@@ -107,18 +105,6 @@ describe('s3-presigner direct operations', () => {
       const result = await listBuckets(ctx);
 
       expect(result).toEqual({ buckets: [] });
-    });
-  });
-
-  describe('deleteBucket', () => {
-    it('issues a DeleteBucketCommand for the given bucket', async () => {
-      s3Mock.on(DeleteBucketCommand).resolves({});
-
-      await deleteBucket(ctx, 'my-bucket');
-
-      const calls = s3Mock.commandCalls(DeleteBucketCommand);
-      expect(calls).toHaveLength(1);
-      expect(calls[0].args[0].input).toEqual({ Bucket: 'my-bucket' });
     });
   });
 
