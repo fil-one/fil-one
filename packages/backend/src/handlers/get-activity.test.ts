@@ -107,6 +107,7 @@ describe('get-activity baseHandler', () => {
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(String(result.body));
     expect(body.activities).toStrictEqual([]);
+    // Default period is 7d → 7 entries (from Jan 2 through Jan 8)
     expect(body.trends.storage).toStrictEqual(
       new Array(7).fill({ value: 0, date: expect.any(String) }),
     );
@@ -118,6 +119,7 @@ describe('get-activity baseHandler', () => {
   it('returns trends with missing days zero-filled', async () => {
     vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
     ddbMock.on(QueryCommand).resolves({ Items: [] });
+    // Only provide samples for Jan 1 and Jan 3 — gaps on Jan 2, 4, 5
     mockGetStorageSamples.mockResolvedValue([
       storageSample('2025-12-29T00:00:00.000Z', 1000, 5),
       storageSample('2025-12-31T00:00:00.000Z', 2000, 10),
@@ -126,7 +128,7 @@ describe('get-activity baseHandler', () => {
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);
     const body = JSON.parse(String(result.body));
-
+    // 7-day period from Dec 30 through Jan 5 = 7 entries
     expect(body.trends.storage).toHaveLength(7);
     expect(body.trends.storage[0]).toStrictEqual({ date: '2025-12-30T23:59:59.999Z', value: 0 });
     expect(body.trends.storage[1]).toStrictEqual({ date: '2025-12-31T23:59:59.999Z', value: 2000 });
@@ -146,6 +148,7 @@ describe('get-activity baseHandler', () => {
     const result = await baseHandler(event);
     const body = JSON.parse(String(result.body));
 
+    // Still get a full series of zeroes
     expect(body.trends.storage).toStrictEqual(
       new Array(7).fill({ value: 0, date: expect.any(String) }),
     );
@@ -163,8 +166,10 @@ describe('get-activity baseHandler', () => {
     const result = await baseHandler(event);
     const body = JSON.parse(String(result.body));
 
+    // 30-day period from Jan 2 through Jan 31 = 30 entries
     expect(body.trends.storage).toHaveLength(30);
     expect(body.trends.objects).toHaveLength(30);
+    // First entry should be Jan 2 end-of-day UTC
     expect(body.trends.storage[0].date).toBe('2026-01-02T23:59:59.999Z');
   });
 
@@ -244,7 +249,7 @@ describe('get-activity baseHandler', () => {
     });
     const result = await baseHandler(event);
     const body = JSON.parse(String(result.body));
-
+    // Should fall back to 10, not return empty due to NaN
     expect(body.activities).toHaveLength(1);
   });
 
@@ -421,5 +426,7 @@ describe('get-activity baseHandler', () => {
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(String(result.body));
     expect(body.activities).toStrictEqual([]);
+    // Object activities are temporarily excluded from the feed.
+    // https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard
   });
 });
