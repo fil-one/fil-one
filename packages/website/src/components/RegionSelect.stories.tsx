@@ -20,9 +20,9 @@ export const Default: Story = {
   },
 };
 
-export const UsMidwest1: Story = {
+export const UsEast1: Story = {
   args: {
-    value: S3Region.UsMidwest1,
+    value: S3Region.UsEast1,
     onChange: () => {},
   },
 };

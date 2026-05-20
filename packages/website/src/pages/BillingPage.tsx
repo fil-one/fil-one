@@ -273,17 +273,16 @@ export function BillingPage() {
         </div>
       )}
 
-      {/* Grace period warning banner */}
-      {isGracePeriod && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <WarningIcon size={20} className="text-amber-600 flex-shrink-0" weight="fill" />
-          <span className="text-sm text-amber-800">
-            {isTrialExpiredGrace
-              ? `Your free trial has expired.${graceDays !== null ? ` ${graceDays} days remaining` : ''} to upgrade or download your data.`
-              : `Subscription canceled.${graceDays !== null ? ` ${graceDays} days remaining` : ''} to reactivate or download your data.`}{' '}
+      {/* Canceled banner */}
+      {isCanceled && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <WarningIcon size={20} className="text-red-600 flex-shrink-0" weight="fill" />
+          <span className="text-sm text-red-800">
+            Your account has been canceled.{' '}
             <button type="button" onClick={handleUpgradeClick} className="font-semibold underline">
-              {isTrialExpiredGrace ? 'Upgrade now' : 'Reactivate'}
-            </button>
+              Reactivate
+            </button>{' '}
+            to regain access.
           </span>
         </div>
       )}
@@ -296,9 +295,11 @@ export function BillingPage() {
             className={`rounded-lg border bg-white flex flex-col gap-4 py-4 px-5 shadow-sm ${
               isActive || isPastDue
                 ? 'border-green-200'
-                : isCanceled
-                  ? 'border-red-200'
-                  : 'border-brand-200'
+                : isGracePeriod
+                  ? 'border-amber-200'
+                  : isCanceled
+                    ? 'border-red-200'
+                    : 'border-brand-200'
             }`}
           >
             <div className="flex items-center justify-between">
@@ -378,7 +379,7 @@ export function BillingPage() {
                 }`}
               >
                 <p
-                  className={`text-[13px] font-medium ${isCanceled ? 'text-red-800' : 'text-zinc-900'}`}
+                  className={`text-[13px] font-medium ${isCanceled ? 'text-red-800' : isGracePeriod ? 'text-amber-800' : 'text-zinc-900'}`}
                 >
                   {isCanceled
                     ? 'Reactivate your subscription to regain full access'
@@ -387,7 +388,7 @@ export function BillingPage() {
                       : 'Reactivate your subscription to restore full access'}
                 </p>
                 <Button
-                  variant={isCanceled ? 'destructive' : 'primary'}
+                  variant={isCanceled ? 'destructive' : 'warning'}
                   size="sm"
                   icon={ArrowRightIcon}
                   iconPosition="right"

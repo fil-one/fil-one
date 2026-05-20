@@ -6,7 +6,7 @@ import { BucketPropertiesCard } from './BucketPropertiesCard';
 
 const baseBucket: Bucket = {
   name: 'my-bucket',
-  region: 'us-midwest-1',
+  region: 'us-east-1',
   createdAt: '2026-01-15T00:00:00Z',
   isPublic: false,
 };
