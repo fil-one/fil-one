@@ -172,9 +172,7 @@ function mapPermissionsForFth(
 
 export const fthOrchestrator: ServiceOrchestrator = {
   id: 'fth',
-  // Placeholder until S3Region.UsEast1 is added; the orchestrator is not
-  // wired into getOrchestratorForRegion yet.
-  region: S3Region.UsMidwest1 as S3RegionType,
+  region: S3Region.UsEast1,
 
   // TODO: Replace this simple create-or-skip flow with a real state machine
   // (failure-count tracking, partial-progress resumption, transitional
