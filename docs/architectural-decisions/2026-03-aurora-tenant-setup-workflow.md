@@ -1,6 +1,6 @@
 # ADR: Aurora Tenant Setup Workflow
 
-**Status:** Accepted
+**Status:** Superseded by [2026-05-13-synchronous-tenant-setup-on-first-resource.md](2026-05-13-synchronous-tenant-setup-on-first-resource.md) on 2026-05-13.
 **Created:** 2026-03-06
 **Last updated:** 2026-03-18
 

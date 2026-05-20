@@ -45,7 +45,6 @@ vi.mock('sst', () => ({
     Auth0ClientId: { value: 'test-client-id' },
     Auth0ClientSecret: { value: 'test-client-secret' },
     AuroraBackofficeToken: { value: 'test-aurora-token' },
-    AuroraTenantSetupQueue: { url: 'https://sqs.us-east-1.amazonaws.com/123/setup-queue' },
   },
 }));
 
@@ -54,11 +53,6 @@ vi.mock('../lib/auth-secrets.js', () => ({
     AUTH0_CLIENT_ID: 'test-client-id',
     AUTH0_CLIENT_SECRET: 'test-client-secret',
   }),
-}));
-
-const mockTriggerTenantSetup = vi.fn().mockResolvedValue(undefined);
-vi.mock('../lib/trigger-tenant-setup.js', () => ({
-  triggerTenantSetup: (args: unknown) => mockTriggerTenantSetup(args),
 }));
 
 const mockCreateBillingTrial = vi.fn().mockResolvedValue(undefined);
@@ -492,10 +486,6 @@ describe('authMiddleware', () => {
         },
       ]);
 
-      expect(mockTriggerTenantSetup).toHaveBeenCalledWith({
-        orgId: MOCK_ORG_ID,
-        orgName: 'Alice Org',
-      });
       expect(mockCreateBillingTrial).toHaveBeenCalledWith({
         userId: MOCK_USER_ID,
         orgId: MOCK_ORG_ID,
@@ -524,10 +514,6 @@ describe('authMiddleware', () => {
       const orgItem = transactCalls[0].args[0].input.TransactItems?.[2].Put?.Item;
       expect(orgItem?.name).toEqual({ S: 'Example' });
       expect(orgItem?.orgConfirmed).toBeUndefined();
-      expect(mockTriggerTenantSetup).toHaveBeenCalledWith({
-        orgId: MOCK_ORG_ID,
-        orgName: 'Example',
-      });
     });
 
     it('refreshes tokens when access token is expired but refresh token is valid', async () => {

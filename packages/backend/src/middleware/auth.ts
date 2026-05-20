@@ -22,7 +22,6 @@ import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
-import { triggerTenantSetup } from '../lib/trigger-tenant-setup.js';
 import { createBillingTrial } from '../lib/create-billing-trial.js';
 
 // ---------------------------------------------------------------------------
@@ -282,23 +281,15 @@ async function resolveUserAndOrg(
 
   await createNewUserAndOrg({ sub, userId, orgId, orgName });
 
-  // Fire SQS enqueue + Stripe trial in parallel; both are safe to retry.
-  // triggerTenantSetup is deduped server-side by SQS via MessageDeduplicationId: orgId.
-  // createBillingTrial passes idempotencyKey to Stripe customer/subscription creation,
-  // so duplicate calls return the cached response without creating new resources.
-  const [tenantResult, billingResult] = await Promise.allSettled([
-    triggerTenantSetup({ orgId, orgName }),
-    createBillingTrial({ userId, orgId, email: email ?? undefined }),
-  ]);
-  if (tenantResult.status === 'rejected') {
-    console.error('[auth] Failed to trigger tenant setup for new org', {
-      error: tenantResult.reason,
-      orgId,
-    });
-  }
-  if (billingResult.status === 'rejected') {
+  // Aurora tenant setup is deferred until the user creates their first bucket
+  // or access key — see docs/architectural-decisions/2026-05-13-synchronous-tenant-setup-on-first-resource.md.
+  // Stripe trial is created here because billing must be ready before any
+  // metered operation; createBillingTrial is idempotent via idempotencyKey.
+  try {
+    await createBillingTrial({ userId, orgId, email: email ?? undefined });
+  } catch (error) {
     console.error('[auth] Failed to create billing trial for new org', {
-      error: billingResult.reason,
+      error,
       orgId,
       userId,
     });
