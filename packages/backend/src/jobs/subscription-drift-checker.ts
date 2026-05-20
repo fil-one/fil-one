@@ -2,7 +2,7 @@ import { GetItemCommand, ScanCommand, type AttributeValue } from '@aws-sdk/clien
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
-import { getTenantStatus, type TenantStatusResult } from '../lib/aurora-backoffice.js';
+import { getTenantStatus, type TenantStatusResult } from '../lib/aurora/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { reportMetric } from '../lib/metrics.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
