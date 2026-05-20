@@ -37,11 +37,11 @@ import {
   buildAuroraAccessArray,
   createAuroraAccessKey,
   createAuroraBucket,
-  DuplicateKeyNameError,
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
   _resetSsmCacheForTesting,
 } from './aurora-portal.js';
+import { AccessKeyAlreadyExistsError } from '../service-orchestrator.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -510,7 +510,7 @@ describe('createAuroraAccessKey', () => {
     });
   });
 
-  it('throws DuplicateKeyNameError on 409 response', async () => {
+  it('throws AccessKeyAlreadyExistsError on 409 response', async () => {
     setupSsmMock();
     mockPostAccessKeys.mockResolvedValue({
       data: undefined,
@@ -524,10 +524,10 @@ describe('createAuroraAccessKey', () => {
         keyName: 'my-key',
         permissions: ['read', 'write', 'list', 'delete'],
       });
-      expect.unreachable('Expected DuplicateKeyNameError to be thrown');
+      expect.unreachable('Expected AccessKeyAlreadyExistsError to be thrown');
     } catch (err) {
-      expect(err).toBeInstanceOf(DuplicateKeyNameError);
-      expect((err as DuplicateKeyNameError).message).toBe(
+      expect(err).toBeInstanceOf(AccessKeyAlreadyExistsError);
+      expect((err as AccessKeyAlreadyExistsError).message).toBe(
         'An access key with this name already exists',
       );
     }
