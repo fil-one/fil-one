@@ -59,11 +59,6 @@ import {
   AccessKeyValidationError,
   BucketAlreadyExistsError,
 } from '../service-orchestrator.js';
-import {
-  AuroraValidationError,
-  BucketAlreadyExistsError as PortalBucketAlreadyExistsError,
-  DuplicateKeyNameError,
-} from '../aurora/aurora-portal.js';
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -192,8 +187,8 @@ describe('auroraOrchestrator', () => {
       });
     });
 
-    it('maps Aurora Portal BucketAlreadyExistsError to the abstraction-level error', async () => {
-      mockCreateAuroraBucket.mockRejectedValue(new PortalBucketAlreadyExistsError('dup'));
+    it('propagates BucketAlreadyExistsError from the Aurora portal', async () => {
+      mockCreateAuroraBucket.mockRejectedValue(new BucketAlreadyExistsError('dup'));
 
       await expect(
         auroraOrchestrator.createBucket({ tenantId: 'aurora-t-1', bucketName: 'dup' }),
@@ -411,8 +406,8 @@ describe('auroraOrchestrator', () => {
       });
     });
 
-    it('maps Aurora DuplicateKeyNameError to AccessKeyAlreadyExistsError', async () => {
-      mockCreateAuroraAccessKey.mockRejectedValue(new DuplicateKeyNameError());
+    it('propagates AccessKeyAlreadyExistsError from the Aurora portal', async () => {
+      mockCreateAuroraAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
 
       await expect(
         auroraOrchestrator.issueAccessKey('aurora-t-1', {
@@ -422,8 +417,8 @@ describe('auroraOrchestrator', () => {
       ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
     });
 
-    it('maps AuroraValidationError to AccessKeyValidationError and preserves the message', async () => {
-      mockCreateAuroraAccessKey.mockRejectedValue(new AuroraValidationError('bad name'));
+    it('propagates AccessKeyValidationError from the Aurora portal and preserves the message', async () => {
+      mockCreateAuroraAccessKey.mockRejectedValue(new AccessKeyValidationError('bad name'));
 
       const promise = auroraOrchestrator.issueAccessKey('aurora-t-1', {
         keyName: 'k',

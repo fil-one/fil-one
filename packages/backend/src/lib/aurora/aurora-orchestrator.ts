@@ -22,22 +22,14 @@ import type {
 import { createClient, getBucketInfo, listBuckets } from '@filone/aurora-portal-client';
 import { ensureTenantReady as ensureAuroraTenantReady } from '../aurora/aurora-tenant-setup.js';
 import {
-  AuroraValidationError,
-  BucketAlreadyExistsError as PortalBucketAlreadyExistsError,
   createAuroraAccessKey,
   createAuroraBucket,
-  DuplicateKeyNameError,
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
 } from '../aurora/aurora-portal.js';
 import { deleteBucket as s3DeleteBucket } from '../s3-presigner.js';
 import { getDynamoClient } from '../ddb-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
-import {
-  AccessKeyAlreadyExistsError,
-  AccessKeyValidationError,
-  BucketAlreadyExistsError,
-} from '../service-orchestrator.js';
 import type {
   BucketDetails,
   BucketSummary,
@@ -133,27 +125,20 @@ export const auroraOrchestrator: ServiceOrchestrator = {
   },
 
   async createBucket(args: CreateBucketArgs): Promise<void> {
-    try {
-      await createAuroraBucket({
-        tenantId: args.tenantId,
-        bucketName: args.bucketName,
-        versioning: args.versioning,
-        lock: args.lock,
-        retention: args.retention as
-          | {
-              enabled: boolean;
-              mode: RetentionMode;
-              duration: number;
-              durationType: RetentionDurationType;
-            }
-          | undefined,
-      });
-    } catch (err) {
-      if (err instanceof PortalBucketAlreadyExistsError) {
-        throw new BucketAlreadyExistsError(args.bucketName, { cause: err });
-      }
-      throw err;
-    }
+    await createAuroraBucket({
+      tenantId: args.tenantId,
+      bucketName: args.bucketName,
+      versioning: args.versioning,
+      lock: args.lock,
+      retention: args.retention as
+        | {
+            enabled: boolean;
+            mode: RetentionMode;
+            duration: number;
+            durationType: RetentionDurationType;
+          }
+        | undefined,
+    });
   },
 
   async deleteBucket(tenantId: string, bucketName: string): Promise<void> {
@@ -225,30 +210,20 @@ export const auroraOrchestrator: ServiceOrchestrator = {
   },
 
   async issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey> {
-    try {
-      const key = await createAuroraAccessKey({
-        tenantId,
-        keyName: opts.keyName,
-        permissions: opts.permissions as AccessKeyPermission[],
-        granularPermissions: opts.granularPermissions as GranularPermission[] | undefined,
-        buckets: opts.buckets,
-        expiresAt: opts.expiresAt,
-      });
-      return {
-        id: key.id,
-        accessKeyId: key.accessKeyId,
-        accessKeySecret: key.accessKeySecret,
-        createdAt: key.createdAt,
-      };
-    } catch (err) {
-      if (err instanceof DuplicateKeyNameError) {
-        throw new AccessKeyAlreadyExistsError({ cause: err });
-      }
-      if (err instanceof AuroraValidationError) {
-        throw new AccessKeyValidationError(err.message, { cause: err });
-      }
-      throw err;
-    }
+    const key = await createAuroraAccessKey({
+      tenantId,
+      keyName: opts.keyName,
+      permissions: opts.permissions as AccessKeyPermission[],
+      granularPermissions: opts.granularPermissions as GranularPermission[] | undefined,
+      buckets: opts.buckets,
+      expiresAt: opts.expiresAt,
+    });
+    return {
+      id: key.id,
+      accessKeyId: key.accessKeyId,
+      accessKeySecret: key.accessKeySecret,
+      createdAt: key.createdAt,
+    };
   },
 
   async findAccessKeyByName(tenantId: string, keyName: string) {

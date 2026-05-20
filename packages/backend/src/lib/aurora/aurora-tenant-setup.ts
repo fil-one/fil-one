@@ -320,7 +320,7 @@ async function createAndStoreS3AccessKey(
     accessKeyId = result.accessKeyId;
     accessKeySecret = result.accessKeySecret;
   } catch (err) {
-    if ((err as { name?: string }).name === 'DuplicateKeyNameError') {
+    if ((err as { name?: string }).name === 'AccessKeyAlreadyExistsError') {
       console.log(
         `Aurora S3 access key "filone-console" already exists for tenant ${auroraTenantId}, checking SSM`,
       );
