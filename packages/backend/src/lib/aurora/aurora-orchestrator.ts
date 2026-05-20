@@ -115,7 +115,6 @@ export const auroraOrchestrator: ServiceOrchestrator = {
       new GetItemCommand({
         TableName: Resource.UserInfoTable.name,
         Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-        ConsistentRead: true,
       }),
     );
     const tenantId = Item?.auroraTenantId?.S;
@@ -164,7 +163,9 @@ export const auroraOrchestrator: ServiceOrchestrator = {
       .filter((b): b is typeof b & { name: string; createdAt: string } => !!b.name && !!b.createdAt)
       .map((b) => ({
         name: b.name,
+        region: auroraOrchestrator.region,
         createdAt: b.createdAt,
+        isPublic: false,
         versioning: b.flags?.includes('versioned') ?? false,
         encrypted: b.flags?.includes('encrypted') ?? true,
       }));
@@ -198,7 +199,9 @@ export const auroraOrchestrator: ServiceOrchestrator = {
 
     return {
       name: data.name ?? bucketName,
+      region: auroraOrchestrator.region,
       createdAt: data.createdAt,
+      isPublic: false,
       objectLockEnabled: data.objectLock ?? false,
       versioning: data.versioning ?? false,
       encrypted: data.encrypted ?? true,

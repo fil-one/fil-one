@@ -1,7 +1,7 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { Bucket, ListBucketsResponse } from '@filone/shared';
+import type { ListBucketsResponse } from '@filone/shared';
 import { S3_REGION } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -22,17 +22,7 @@ export async function baseHandler(
     return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets: [] }).build();
   }
 
-  const result = await orchestrator.listBuckets(tenantId);
-
-  const buckets: Bucket[] = result.map((b) => ({
-    name: b.name,
-    region: orchestrator.region,
-    createdAt: b.createdAt,
-    isPublic: false,
-    versioning: b.versioning ?? false,
-    encrypted: b.encrypted ?? true,
-  }));
-
+  const buckets = await orchestrator.listBuckets(tenantId);
   return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets }).build();
 }
 

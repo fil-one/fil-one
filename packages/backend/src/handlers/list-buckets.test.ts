@@ -50,13 +50,17 @@ describe('list-buckets baseHandler', () => {
     mockListBuckets.mockResolvedValue([
       {
         name: 'my-bucket',
+        region: S3_REGION,
         createdAt: '2026-01-01T00:00:00.000Z',
+        isPublic: false,
         versioning: false,
         encrypted: true,
       },
       {
         name: 'other-bucket',
+        region: S3_REGION,
         createdAt: '2026-01-02T00:00:00.000Z',
+        isPublic: false,
         versioning: false,
         encrypted: true,
       },
@@ -93,13 +97,17 @@ describe('list-buckets baseHandler', () => {
     mockListBuckets.mockResolvedValue([
       {
         name: 'versioned-bucket',
+        region: S3_REGION,
         createdAt: '2026-01-01T00:00:00.000Z',
+        isPublic: false,
         versioning: true,
         encrypted: true,
       },
       {
         name: 'unencrypted-bucket',
+        region: S3_REGION,
         createdAt: '2026-01-02T00:00:00.000Z',
+        isPublic: false,
         versioning: false,
         encrypted: false,
       },

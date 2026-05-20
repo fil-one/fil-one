@@ -1,7 +1,7 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { Bucket, GetBucketResponse } from '@filone/shared';
+import type { GetBucketResponse } from '@filone/shared';
 import { S3_REGION } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -30,23 +30,10 @@ export async function baseHandler(
       .build();
   }
 
-  const details = await orchestrator.getBucket(tenantId, bucketName);
-  if (!details) {
+  const bucket = await orchestrator.getBucket(tenantId, bucketName);
+  if (!bucket) {
     return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
   }
-
-  const bucket: Bucket = {
-    name: details.name,
-    region: orchestrator.region,
-    createdAt: details.createdAt,
-    isPublic: false,
-    objectLockEnabled: details.objectLockEnabled ?? false,
-    versioning: details.versioning ?? false,
-    encrypted: details.encrypted ?? true,
-    defaultRetention: details.defaultRetention,
-    retentionDuration: details.retentionDuration,
-    retentionDurationType: details.retentionDurationType,
-  };
 
   return new ResponseBuilder().status(200).body<GetBucketResponse>({ bucket }).build();
 }

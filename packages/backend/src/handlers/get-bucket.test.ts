@@ -49,7 +49,9 @@ describe('get-bucket baseHandler', () => {
   it('returns 200 with bucket data from the orchestrator', async () => {
     mockGetBucket.mockResolvedValue({
       name: 'my-bucket',
+      region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
+      isPublic: false,
       objectLockEnabled: false,
       versioning: false,
       encrypted: true,
@@ -77,7 +79,9 @@ describe('get-bucket baseHandler', () => {
   it('returns objectLockEnabled true when the orchestrator reports it', async () => {
     mockGetBucket.mockResolvedValue({
       name: 'locked-bucket',
+      region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
+      isPublic: false,
       objectLockEnabled: true,
       versioning: false,
       encrypted: true,
@@ -95,7 +99,9 @@ describe('get-bucket baseHandler', () => {
   it('passes through versioning, encryption, and retention fields', async () => {
     mockGetBucket.mockResolvedValue({
       name: 'full-bucket',
+      region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
+      isPublic: false,
       objectLockEnabled: true,
       versioning: true,
       encrypted: true,
@@ -129,7 +135,11 @@ describe('get-bucket baseHandler', () => {
   it('calls orchestrator.getBucket with tenantId and bucketName', async () => {
     mockGetBucket.mockResolvedValue({
       name: 'my-bucket',
+      region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
+      isPublic: false,
+      versioning: false,
+      encrypted: true,
     });
 
     const event = buildEvent({ userInfo: USER_INFO });

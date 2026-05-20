@@ -53,7 +53,9 @@ vi.mock('@filone/aurora-portal-client', () => ({
 process.env.FILONE_STAGE = 'test';
 process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu/api';
 
+import { S3Region } from '@filone/shared';
 import { auroraOrchestrator, _resetSsmCacheForTesting } from './aurora-orchestrator.js';
+import { OrgSetupStatus } from '../org-setup-status.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -119,7 +121,7 @@ describe('auroraOrchestrator', () => {
       ddbMock.on(GetItemCommand).resolves({
         Item: {
           auroraTenantId: { S: 'aurora-t-1' },
-          setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
+          setupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
         },
       });
 
@@ -130,7 +132,6 @@ describe('auroraOrchestrator', () => {
       expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toMatchObject({
         TableName: 'UserInfoTable',
         Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-        ConsistentRead: true,
       });
     });
 
@@ -138,7 +139,7 @@ describe('auroraOrchestrator', () => {
       ddbMock.on(GetItemCommand).resolves({
         Item: {
           auroraTenantId: { S: 'aurora-t-1' },
-          setupStatus: { S: 'AURORA_TENANT_API_KEY_CREATED' },
+          setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         },
       });
 
@@ -149,7 +150,7 @@ describe('auroraOrchestrator', () => {
 
     it('returns null when the PROFILE row is missing the tenantId', async () => {
       ddbMock.on(GetItemCommand).resolves({
-        Item: { setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' } },
+        Item: { setupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED } },
       });
 
       const result = await auroraOrchestrator.isTenantReady('org-1');
@@ -246,10 +247,19 @@ describe('auroraOrchestrator', () => {
       const result = await auroraOrchestrator.listBuckets('aurora-t-1');
 
       expect(result).toEqual([
-        { name: 'a', createdAt: '2026-01-01T00:00:00Z', versioning: false, encrypted: true },
+        {
+          name: 'a',
+          region: S3Region.EuWest1,
+          createdAt: '2026-01-01T00:00:00Z',
+          isPublic: false,
+          versioning: false,
+          encrypted: true,
+        },
         {
           name: 'b',
+          region: S3Region.EuWest1,
           createdAt: '2026-01-02T00:00:00Z',
+          isPublic: false,
           versioning: true,
           encrypted: true,
         },
@@ -310,7 +320,9 @@ describe('auroraOrchestrator', () => {
 
       expect(result).toEqual({
         name: 'b',
+        region: S3Region.EuWest1,
         createdAt: '2026-01-01T00:00:00Z',
+        isPublic: false,
         objectLockEnabled: true,
         versioning: true,
         encrypted: true,
