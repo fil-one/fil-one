@@ -50,7 +50,7 @@ process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu/api';
 
 import { S3Region } from '@filone/shared';
 import { auroraOrchestrator, _resetSsmCacheForTesting } from './aurora-orchestrator.js';
-import { OrgSetupStatus } from '../org-setup-status.js';
+import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../org-setup-status.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -117,7 +117,7 @@ describe('auroraOrchestrator', () => {
       ddbMock.on(GetItemCommand).resolves({
         Item: {
           auroraTenantId: { S: 'aurora-t-1' },
-          setupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
+          setupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 
@@ -146,7 +146,7 @@ describe('auroraOrchestrator', () => {
 
     it('returns null when the PROFILE row is missing the tenantId', async () => {
       ddbMock.on(GetItemCommand).resolves({
-        Item: { setupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED } },
+        Item: { setupStatus: { S: FINAL_SETUP_STATUS } },
       });
 
       const result = await auroraOrchestrator.isTenantReady('org-1');

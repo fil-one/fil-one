@@ -100,7 +100,7 @@ async function createPortalReadClient(tenantId: string) {
   });
 }
 
-export const auroraOrchestrator: ServiceOrchestrator = {
+export const auroraOrchestrator = {
   id: 'aurora',
   region: S3Region.EuWest1 as S3RegionType,
 
@@ -244,4 +244,4 @@ export const auroraOrchestrator: ServiceOrchestrator = {
       forcePathStyle: true,
     };
   },
-};
+} satisfies ServiceOrchestrator;
