@@ -10,16 +10,11 @@ test('paid user signs in via Auth0 and lands on dashboard', async ({ page }) => 
   await page.goto('/');
   await expect(page).toHaveURL(/login/);
 
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await page.getByRole('textbox', { name: 'Email address' }).fill(process.env.E2E_PAID_EMAIL!);
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await page.getByRole('textbox', { name: 'Password' }).fill(process.env.E2E_PAID_PASSWORD!);
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await page.getByRole('button', { name: 'Continue without passkeys' }).click();
+  await page.locator('#username').fill(process.env.E2E_PAID_EMAIL!);
+  await page.locator('button[data-action-button-primary="true"]').click();
+  await page.locator('#password').fill(process.env.E2E_PAID_PASSWORD!);
+  await page.locator('button[data-action-button-primary="true"]').click();
+  await page.locator('button[value="abort-passkey-enrollment"]').click();
 
   await expect(page).toHaveURL(/\/dashboard$/);
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
