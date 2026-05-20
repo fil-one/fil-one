@@ -155,7 +155,7 @@ async function recoverDuplicateKey(
     // Shouldn't happen — provider returned conflict but key not found in list.
     // Just return and let the user see the 409 message.
     console.error(
-      `Provider returned conflict for key "${keyName}" but key not found in list for tenant ${tenantId}`,
+      `Orchestrator returned conflict for key "${keyName}" but key not found in list for tenant ${tenantId}`,
     );
     return;
   }
