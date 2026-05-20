@@ -1,9 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { NoSuchBucket } from '@aws-sdk/client-s3';
-import { getS3Endpoint, S3Region } from '@filone/shared';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -15,20 +11,35 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockGetAuroraS3Credentials = vi.fn();
-const mockListObjects = vi.fn();
-const mockDeleteBucket = vi.fn();
+const presignerContext = {
+  endpointUrl: 'https://s3.dev.aur.lu',
+  region: 'auto',
+  credentials: { accessKeyId: 'AKIA_CONSOLE', secretAccessKey: 's3_secret' },
+  forcePathStyle: true,
+};
 
-vi.mock('../lib/aurora-s3-client.js', () => ({
-  getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
+const mockIsTenantReady = vi.fn();
+const mockGetPresignerContext = vi.fn();
+const mockOrchestratorDeleteBucket = vi.fn();
+
+const mockOrchestrator = {
+  id: 'aurora',
+  region: 'eu-west-1',
+  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
+  getPresignerContext: (...args: unknown[]) => mockGetPresignerContext(...args),
+  deleteBucket: (...args: unknown[]) => mockOrchestratorDeleteBucket(...args),
+};
+
+vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
+  getOrchestratorForRegion: () => mockOrchestrator,
+}));
+
+const mockListObjects = vi.fn();
+vi.mock('../lib/s3-presigner.js', () => ({
   listObjects: (...args: unknown[]) => mockListObjects(...args),
-  deleteBucket: (...args: unknown[]) => mockDeleteBucket(...args),
 }));
 
 process.env.FILONE_STAGE = 'test';
-const expectedS3Url = getS3Endpoint(S3Region.EuWest1, process.env.FILONE_STAGE);
-
-const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './delete-bucket.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
@@ -39,17 +50,6 @@ import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
-function orgProfileWithTenant(tenantId: string) {
-  return {
-    Item: {
-      pk: { S: `ORG#${USER_INFO.orgId}` },
-      sk: { S: 'PROFILE' },
-      auroraTenantId: { S: tenantId },
-      setupStatus: { S: FINAL_SETUP_STATUS },
-    },
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -57,36 +57,23 @@ function orgProfileWithTenant(tenantId: string) {
 describe('delete-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    ddbMock.reset();
+    mockIsTenantReady.mockResolvedValue('aurora-t-1');
+    mockGetPresignerContext.mockResolvedValue(presignerContext);
   });
 
   it('returns 204 after deleting an empty bucket', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
     mockListObjects.mockResolvedValue({ objects: [], isTruncated: false });
-    mockDeleteBucket.mockResolvedValue(undefined);
+    mockOrchestratorDeleteBucket.mockResolvedValue(undefined);
 
     const event = buildEvent({ userInfo: USER_INFO });
     event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(204);
-    expect(mockDeleteBucket).toHaveBeenCalledWith(
-      expectedS3Url,
-      { accessKeyId: 'AKIA_CONSOLE', secretAccessKey: 's3_secret' },
-      'my-bucket',
-    );
+    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('aurora-t-1', 'my-bucket');
   });
 
   it('returns 404 when S3 throws NoSuchBucket', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
     mockListObjects.mockRejectedValue(
       new NoSuchBucket({ message: 'The specified bucket does not exist', $metadata: {} }),
     );
@@ -108,11 +95,6 @@ describe('delete-bucket baseHandler', () => {
   });
 
   it('returns 409 when bucket contains objects', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'AKIA_CONSOLE',
-      secretAccessKey: 's3_secret',
-    });
     mockListObjects.mockResolvedValue({
       objects: [{ key: 'file.txt', sizeBytes: 100, lastModified: '2026-01-01T00:00:00.000Z' }],
       isTruncated: false,
@@ -123,24 +105,17 @@ describe('delete-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(409);
-    expect(mockDeleteBucket).not.toHaveBeenCalled();
+    expect(mockOrchestratorDeleteBucket).not.toHaveBeenCalled();
   });
 
-  it('returns 503 when org setup is not complete', async () => {
-    ddbMock.on(GetItemCommand).resolves({
-      Item: {
-        pk: { S: `ORG#${USER_INFO.orgId}` },
-        sk: { S: 'PROFILE' },
-        auroraTenantId: { S: 'aurora-t-1' },
-        setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
-      },
-    });
+  it('returns 503 when tenant is not ready', async () => {
+    mockIsTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(503);
-    expect(mockGetAuroraS3Credentials).not.toHaveBeenCalled();
+    expect(mockGetPresignerContext).not.toHaveBeenCalled();
   });
 });

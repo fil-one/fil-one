@@ -10,23 +10,22 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockCreateAuroraBucket = vi.fn();
-
-vi.mock('../lib/aurora-portal.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../lib/aurora-portal.js')>();
-  return {
-    ...original,
-    createAuroraBucket: (...args: unknown[]) => mockCreateAuroraBucket(...args),
-  };
-});
-
 const mockEnsureTenantReady = vi.fn();
-vi.mock('../lib/aurora-tenant-setup.js', () => ({
+const mockCreateBucket = vi.fn();
+
+const mockOrchestrator = {
+  id: 'aurora',
+  region: 'eu-west-1',
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
+  createBucket: (...args: unknown[]) => mockCreateBucket(...args),
+};
+
+vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
+  getOrchestratorForRegion: () => mockOrchestrator,
 }));
 
 import { baseHandler } from './create-bucket.js';
-import { BucketAlreadyExistsError } from '../lib/aurora-portal.js';
+import { BucketAlreadyExistsError } from '../lib/service-orchestrator/service-orchestrator.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 import { S3_REGION } from '@filone/shared';
 
@@ -47,17 +46,17 @@ function validBody() {
 describe('create-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnsureTenantReady.mockResolvedValue({ ok: true, auroraTenantId: 'aurora-t-1' });
+    mockEnsureTenantReady.mockResolvedValue('aurora-t-1');
   });
 
-  it('returns 201 and calls createAuroraBucket on success', async () => {
-    mockCreateAuroraBucket.mockResolvedValue(undefined);
+  it('returns 201 and calls orchestrator.createBucket on success', async () => {
+    mockCreateBucket.mockResolvedValue(undefined);
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateAuroraBucket).toHaveBeenCalledWith({
+    expect(mockCreateBucket).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
       bucketName: 'my-bucket',
       versioning: false,
@@ -66,8 +65,8 @@ describe('create-bucket baseHandler', () => {
     });
   });
 
-  it('drives Aurora tenant setup via ensureTenantReady before creating the bucket', async () => {
-    mockCreateAuroraBucket.mockResolvedValue(undefined);
+  it('drives tenant setup via ensureTenantReady before creating the bucket', async () => {
+    mockCreateBucket.mockResolvedValue(undefined);
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     await baseHandler(event);
@@ -75,14 +74,8 @@ describe('create-bucket baseHandler', () => {
     expect(mockEnsureTenantReady).toHaveBeenCalledWith('org-1');
   });
 
-  it('returns 503 with a retry message when tenant setup fails', async () => {
-    const errorResponse = {
-      statusCode: 503,
-      body: JSON.stringify({
-        message: 'We are still setting up your account. Please try again in a moment.',
-      }),
-    };
-    mockEnsureTenantReady.mockResolvedValue({ ok: false, errorResponse });
+  it('returns 503 with a retry message when tenant setup is incomplete', async () => {
+    mockEnsureTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -90,19 +83,19 @@ describe('create-bucket baseHandler', () => {
     expect(result.statusCode).toBe(503);
     const body = JSON.parse(result.body as string);
     expect(body.message).toMatch(/setting up your account/i);
-    expect(mockCreateAuroraBucket).not.toHaveBeenCalled();
+    expect(mockCreateBucket).not.toHaveBeenCalled();
   });
 
-  it('throws when Aurora Portal API fails', async () => {
-    mockCreateAuroraBucket.mockRejectedValue(new Error('Aurora API error'));
+  it('throws when the orchestrator fails', async () => {
+    mockCreateBucket.mockRejectedValue(new Error('Aurora API error'));
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
 
     await expect(baseHandler(event)).rejects.toThrow('Aurora API error');
   });
 
-  it('returns 409 when Aurora bucket already exists', async () => {
-    mockCreateAuroraBucket.mockRejectedValue(new BucketAlreadyExistsError('my-bucket'));
+  it('returns 409 when the bucket already exists', async () => {
+    mockCreateBucket.mockRejectedValue(new BucketAlreadyExistsError('my-bucket'));
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -110,8 +103,8 @@ describe('create-bucket baseHandler', () => {
     expect(result.statusCode).toBe(409);
   });
 
-  it('passes versioning, lock, and retention to createAuroraBucket', async () => {
-    mockCreateAuroraBucket.mockResolvedValue(undefined);
+  it('passes versioning, lock, and retention to orchestrator.createBucket', async () => {
+    mockCreateBucket.mockResolvedValue(undefined);
 
     const event = buildEvent({
       body: JSON.stringify({
@@ -126,7 +119,7 @@ describe('create-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateAuroraBucket).toHaveBeenCalledWith({
+    expect(mockCreateBucket).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
       bucketName: 'my-bucket',
       versioning: true,
@@ -136,13 +129,13 @@ describe('create-bucket baseHandler', () => {
   });
 
   it('defaults versioning and lock to false when not provided', async () => {
-    mockCreateAuroraBucket.mockResolvedValue(undefined);
+    mockCreateBucket.mockResolvedValue(undefined);
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateAuroraBucket).toHaveBeenCalledWith({
+    expect(mockCreateBucket).toHaveBeenCalledWith({
       tenantId: 'aurora-t-1',
       bucketName: 'my-bucket',
       versioning: false,
@@ -161,7 +154,7 @@ describe('create-bucket baseHandler', () => {
     expect(result.statusCode).toBe(400);
     const body = JSON.parse(result.body as string);
     expect(body.message).toContain('Versioning must be enabled');
-    expect(mockCreateAuroraBucket).not.toHaveBeenCalled();
+    expect(mockCreateBucket).not.toHaveBeenCalled();
   });
 
   it('returns 400 when retention is provided without lock', async () => {
@@ -179,7 +172,7 @@ describe('create-bucket baseHandler', () => {
     expect(result.statusCode).toBe(400);
     const body = JSON.parse(result.body as string);
     expect(body.message).toContain('Object Lock must be enabled');
-    expect(mockCreateAuroraBucket).not.toHaveBeenCalled();
+    expect(mockCreateBucket).not.toHaveBeenCalled();
   });
 
   it('returns 400 when region is unsupported', async () => {
@@ -192,6 +185,6 @@ describe('create-bucket baseHandler', () => {
     expect(result.statusCode).toBe(400);
     const body = JSON.parse(result.body as string);
     expect(body.message).toContain('Unsupported region');
-    expect(mockCreateAuroraBucket).not.toHaveBeenCalled();
+    expect(mockCreateBucket).not.toHaveBeenCalled();
   });
 });
