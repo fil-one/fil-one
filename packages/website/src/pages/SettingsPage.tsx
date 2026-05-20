@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
@@ -11,9 +11,15 @@ import { MfaSettings } from '../components/MfaSettings';
 import { SettingRow } from '../components/SettingRow';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { getMe, updateProfile, changePassword } from '../lib/api.js';
+import {
+  changePassword,
+  getMe,
+  getPreferences,
+  updatePreferences,
+  updateProfile,
+} from '../lib/api.js';
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
-import type { ConnectionProvider, MeResponse } from '@filone/shared';
+import type { ConnectionProvider, MeResponse, PreferencesResponse } from '@filone/shared';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
@@ -68,29 +74,39 @@ function ToggleRow({
   description,
   enabled,
   disabled,
+  onChange,
+  saving,
 }: {
   label: string;
   description: string;
   enabled: boolean;
   disabled?: boolean;
+  onChange?: () => void;
+  saving?: boolean;
 }) {
+  const labelId = useId();
+  const interactive = !disabled && !!onChange && !saving;
   return (
     <div className="flex items-center justify-between py-1">
       <div>
-        <p className="text-[13px] font-medium text-zinc-900">{label}</p>
+        <p id={labelId} className="text-[13px] font-medium text-zinc-900">
+          {label}
+        </p>
         <p className="text-xs text-zinc-500">{description}</p>
       </div>
-      <div
-        className={`flex h-6 w-11 items-center rounded-full border-2 border-transparent p-0.5 ${
-          enabled ? 'bg-blue-500' : 'bg-zinc-300'
-        } ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-labelledby={labelId}
+        disabled={!interactive}
+        onClick={interactive ? onChange : undefined}
+        className={`flex h-6 w-11 items-center rounded-full border-2 border-transparent p-0.5 transition-colors ${enabled ? 'bg-blue-500' : 'bg-zinc-300'} ${interactive ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
       >
         <div
-          className={`size-5 rounded-full bg-white shadow transition-transform ${
-            enabled ? 'translate-x-5' : 'translate-x-0'
-          }`}
+          className={`size-5 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0'}`}
         />
-      </div>
+      </button>
     </div>
   );
 }
@@ -123,7 +139,6 @@ function ProviderManagedField({
     </>
   );
 }
-
 // ---------------------------------------------------------------------------
 // Profile section
 // ---------------------------------------------------------------------------
@@ -286,27 +301,55 @@ function ProfileSaveBar({ form }: { form: ReturnType<typeof useProfileForm> }) {
 // ---------------------------------------------------------------------------
 
 function NotificationsSection() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data: prefs, isError } = useQuery({
+    queryKey: queryKeys.preferences,
+    queryFn: getPreferences,
+  });
+
+  const mutation = useMutation({
+    mutationFn: updatePreferences,
+    onSuccess: (result) => {
+      queryClient.setQueryData<PreferencesResponse>(queryKeys.preferences, result);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to update preferences');
+    },
+  });
+
+  const marketingEnabled = prefs?.marketingEmailsOptedIn ?? false;
+
   return (
     <SectionCard
       icon={BellIcon}
       title="Notifications"
       description="Manage your notification preferences"
     >
-      <div className="flex flex-col gap-3 opacity-50">
-        <ToggleRow
-          label="Email notifications"
-          description="Get notified about your uploads and when approaching storage limits"
-          enabled={false}
-          disabled
-        />
+      <div className="flex flex-col gap-3">
+        <div className="opacity-50">
+          <ToggleRow
+            label="Email notifications"
+            description="Get notified about your uploads and when approaching storage limits"
+            enabled={false}
+            disabled
+          />
+          <p className="text-xs text-zinc-400 italic">Coming soon</p>
+        </div>
         <div className="h-px bg-[#e1e4ea]" />
         <ToggleRow
           label="Marketing emails"
           description="Receive updates about new features"
-          enabled={false}
-          disabled
+          enabled={marketingEnabled}
+          disabled={!prefs}
+          saving={mutation.isPending}
+          onChange={() => mutation.mutate({ marketingEmailsOptedIn: !marketingEnabled })}
         />
-        <p className="text-xs text-zinc-400 italic">Coming soon</p>
+        {isError && (
+          <p className="text-xs text-red-500">
+            Couldn&apos;t load preferences. Refresh to try again.
+          </p>
+        )}
       </div>
     </SectionCard>
   );

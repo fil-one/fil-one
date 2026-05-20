@@ -52,6 +52,7 @@ export default $config({
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
+    const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
     const sendGridApiKey =
       $app.stage === 'staging' || $app.stage === 'production'
         ? new sst.Secret('SendGridApiKey')
@@ -594,6 +595,18 @@ export default $config({
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
     addRoute({ method: 'POST', routePath: '/api/me/change-password', handler: 'change-password' });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/me/preferences',
+      handler: 'get-preferences',
+      extraLink: [hubSpotServiceKey],
+    });
+    addRoute({
+      method: 'PATCH',
+      routePath: '/api/me/preferences',
+      handler: 'update-preferences',
+      extraLink: [hubSpotServiceKey],
+    });
     addRoute({
       method: 'POST',
       routePath: '/api/me/resend-verification',

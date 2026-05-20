@@ -36,6 +36,9 @@ export type {
 } from './api/me.js';
 export { UpdateProfileSchema } from './api/me.js';
 
+export type { PreferencesResponse, UpdatePreferencesRequest } from './api/preferences.js';
+export { UpdatePreferencesSchema } from './api/preferences.js';
+
 export { getProvider, isSocialConnection } from './connection-providers.js';
 export type { ConnectionProvider } from './connection-providers.js';
 export {
