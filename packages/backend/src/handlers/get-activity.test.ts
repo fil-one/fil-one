@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import type { ModelStorageMetricsSample } from '../lib/aurora-backoffice.js';
+import type { ModelStorageMetricsSample } from '../lib/aurora/aurora-backoffice.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -16,7 +16,7 @@ vi.mock('sst', () => ({
 
 const mockGetStorageSamples = vi.fn<() => Promise<ModelStorageMetricsSample[]>>();
 
-vi.mock('../lib/aurora-backoffice.js', () => ({
+vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
   getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...(args as [])),
 }));
 
@@ -30,7 +30,7 @@ const mockOrchestrator = {
   listBuckets: (...args: unknown[]) => mockListBuckets(...args),
 };
 
-vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: () => mockOrchestrator,
 }));
 

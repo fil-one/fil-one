@@ -29,7 +29,7 @@ const mockOrchestrator = {
   getPresignerContext: (...args: unknown[]) => mockGetPresignerContext(...args),
 };
 
-vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: () => mockOrchestrator,
 }));
 
@@ -81,7 +81,7 @@ describe('presign baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv('FILONE_STAGE', 'test');
-    mockIsTenantReady.mockResolvedValue({ tenantId: 'aurora-t-1' });
+    mockIsTenantReady.mockResolvedValue('aurora-t-1');
     mockGetPresignerContext.mockResolvedValue(presignerContext);
   });
 

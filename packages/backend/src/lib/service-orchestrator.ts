@@ -6,12 +6,6 @@ import type {
   S3Region,
 } from '@filone/shared';
 
-export type TenantNotReadyReason = 'setup-incomplete';
-
-export type EnsureTenantReadyResult =
-  | { ok: true; tenantId: string }
-  | { ok: false; reason: TenantNotReadyReason };
-
 export interface PresignerContext {
   endpointUrl: string;
   region: string;

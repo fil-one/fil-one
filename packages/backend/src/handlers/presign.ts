@@ -8,8 +8,8 @@ import type {
   PresignResponse,
   PresignResponseItem,
 } from '@filone/shared';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
-import type { PresignerContext } from '../lib/service-orchestrator/service-orchestrator.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import type { PresignerContext } from '../lib/service-orchestrator.js';
 import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
 import {
   getPresignedDeleteObjectUrl,

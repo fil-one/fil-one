@@ -30,7 +30,7 @@ const mockOrchestrator = {
   deleteBucket: (...args: unknown[]) => mockOrchestratorDeleteBucket(...args),
 };
 
-vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: () => mockOrchestrator,
 }));
 

@@ -36,7 +36,7 @@ import {
   listBuckets,
   listObjects,
 } from './s3-presigner.js';
-import type { PresignerContext } from './service-orchestrator/service-orchestrator.js';
+import type { PresignerContext } from './service-orchestrator.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

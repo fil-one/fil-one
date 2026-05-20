@@ -17,7 +17,7 @@ const ddbMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
 
 const mockEnsureAuroraTenantReady = vi.fn();
-vi.mock('../aurora-tenant-setup.js', () => ({
+vi.mock('./aurora-tenant-setup.js', () => ({
   ensureTenantReady: (...args: unknown[]) => mockEnsureAuroraTenantReady(...args),
 }));
 
@@ -26,8 +26,8 @@ const mockCreateAuroraAccessKey = vi.fn();
 const mockFindAuroraAccessKeyByName = vi.fn();
 const mockGetAuroraPortalApiKey = vi.fn();
 
-vi.mock('../aurora-portal.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../aurora-portal.js')>();
+vi.mock('./aurora-portal.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../aurora/aurora-portal.js')>();
   return {
     ...original,
     createAuroraBucket: (...args: unknown[]) => mockCreateAuroraBucket(...args),
@@ -58,12 +58,12 @@ import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
-} from './service-orchestrator.js';
+} from '../service-orchestrator.js';
 import {
   AuroraValidationError,
   BucketAlreadyExistsError as PortalBucketAlreadyExistsError,
   DuplicateKeyNameError,
-} from '../aurora-portal.js';
+} from '../aurora/aurora-portal.js';
 
 // ---------------------------------------------------------------------------
 // Tests

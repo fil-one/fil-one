@@ -1,5 +1,5 @@
 import { S3Region } from '@filone/shared';
-import { auroraOrchestrator } from './aurora-orchestrator.js';
+import { auroraOrchestrator } from './aurora/aurora-orchestrator.js';
 import type { ServiceOrchestrator } from './service-orchestrator.js';
 
 export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator {

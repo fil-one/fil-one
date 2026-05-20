@@ -7,14 +7,14 @@ import { S3_REGION } from '@filone/shared';
 import type { ActivityResponse, RecentActivity, UsageDataPoint } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator/service-orchestrator-registry.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import type { AccessKeyRecord } from '../lib/dynamo-records.js';
-import { getStorageSamples } from '../lib/aurora-backoffice.js';
+import { getStorageSamples } from '../lib/aurora/aurora-backoffice.js';
 
 const dynamo = getDynamoClient();
 

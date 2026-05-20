@@ -24,14 +24,14 @@ const mockOrchestrator = {
   findAccessKeyByName: (...args: unknown[]) => mockFindAccessKeyByName(...args),
 };
 
-vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: () => mockOrchestrator,
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './create-access-key.js';
-import { AccessKeyAlreadyExistsError } from '../lib/service-orchestrator/service-orchestrator.js';
+import { AccessKeyAlreadyExistsError } from '../lib/service-orchestrator.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------

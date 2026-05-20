@@ -5,7 +5,7 @@ import type {
   ModelStorageMetricsSample,
   ModelOperationMetricsSample,
   ModelsTenantWithMetricsManagementResponse,
-} from '../lib/aurora-backoffice.js';
+} from '../lib/aurora/aurora-backoffice.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -22,7 +22,7 @@ const mockGetStorageSamples = vi.fn<() => Promise<ModelStorageMetricsSample[]>>(
 const mockGetOperationsSamples = vi.fn<() => Promise<ModelOperationMetricsSample[]>>();
 const mockGetTenantInfo = vi.fn<() => Promise<ModelsTenantWithMetricsManagementResponse | null>>();
 
-vi.mock('../lib/aurora-backoffice.js', () => ({
+vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
   getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...(args as [])),
   getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...(args as [])),
   getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...(args as [])),

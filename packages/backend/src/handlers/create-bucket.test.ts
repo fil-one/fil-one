@@ -20,12 +20,12 @@ const mockOrchestrator = {
   createBucket: (...args: unknown[]) => mockCreateBucket(...args),
 };
 
-vi.mock('../lib/service-orchestrator/service-orchestrator-registry.js', () => ({
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: () => mockOrchestrator,
 }));
 
 import { baseHandler } from './create-bucket.js';
-import { BucketAlreadyExistsError } from '../lib/service-orchestrator/service-orchestrator.js';
+import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 import { S3_REGION } from '@filone/shared';
 

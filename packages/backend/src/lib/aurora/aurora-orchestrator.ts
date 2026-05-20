@@ -20,7 +20,7 @@ import type {
   S3Region as S3RegionType,
 } from '@filone/shared';
 import { createClient, getBucketInfo, listBuckets } from '@filone/aurora-portal-client';
-import { ensureTenantReady as ensureAuroraTenantReady } from '../aurora-tenant-setup.js';
+import { ensureTenantReady as ensureAuroraTenantReady } from '../aurora/aurora-tenant-setup.js';
 import {
   AuroraValidationError,
   BucketAlreadyExistsError as PortalBucketAlreadyExistsError,
@@ -29,7 +29,7 @@ import {
   DuplicateKeyNameError,
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
-} from '../aurora-portal.js';
+} from '../aurora/aurora-portal.js';
 import { deleteBucket as s3DeleteBucket } from '../s3-presigner.js';
 import { getDynamoClient } from '../ddb-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
@@ -37,7 +37,7 @@ import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
-} from './service-orchestrator.js';
+} from '../service-orchestrator.js';
 import type {
   BucketDetails,
   BucketSummary,
@@ -46,7 +46,7 @@ import type {
   IssuedAccessKey,
   PresignerContext,
   ServiceOrchestrator,
-} from './service-orchestrator.js';
+} from '../service-orchestrator.js';
 
 const dynamo = getDynamoClient();
 const ssm = new SSMClient({});
@@ -157,7 +157,7 @@ export const auroraOrchestrator: ServiceOrchestrator = {
   },
 
   async deleteBucket(tenantId: string, bucketName: string): Promise<void> {
-    const ctx = await this.getPresignerContext(tenantId);
+    const ctx = await auroraOrchestrator.getPresignerContext(tenantId);
     await s3DeleteBucket(ctx, bucketName);
   },
 

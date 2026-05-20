@@ -46,12 +46,12 @@ vi.mock('./aurora-portal.js', () => ({
 }));
 
 const mockReportMetric = vi.fn();
-vi.mock('./metrics.js', () => ({
+vi.mock('../metrics.js', () => ({
   reportMetric: (...args: unknown[]) => mockReportMetric(...args),
 }));
 
 const mockScanAndEmitStuckTenantCount = vi.fn().mockResolvedValue(undefined);
-vi.mock('./stuck-tenant-metric.js', () => ({
+vi.mock('../stuck-tenant-metric.js', () => ({
   scanAndEmitStuckTenantCount: (...args: unknown[]) => mockScanAndEmitStuckTenantCount(...args),
 }));
 
