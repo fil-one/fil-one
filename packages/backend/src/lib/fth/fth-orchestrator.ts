@@ -19,11 +19,7 @@ import {
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { S3Region } from '@filone/shared';
-import type {
-  AccessKeyPermission,
-  GranularPermission,
-  S3Region as S3RegionType,
-} from '@filone/shared';
+import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
 import { getDynamoClient } from '../ddb-client.js';
 import { createFthClient, FthApiError, FthConflictError } from './fth-client.js';
 import type { FthClient } from './fth-client.js';
@@ -333,7 +329,11 @@ export const fthOrchestrator: ServiceOrchestrator = {
       .filter((b): b is typeof b & { Name: string } => !!b.Name)
       .map((b) => ({
         name: b.Name,
+        region: this.region,
         createdAt: b.CreationDate?.toISOString() ?? new Date().toISOString(),
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
       }));
   },
 
@@ -356,7 +356,11 @@ export const fthOrchestrator: ServiceOrchestrator = {
     const found = (list.Buckets ?? []).find((b) => b.Name === bucketName);
     return {
       name: bucketName,
+      region: this.region,
       createdAt: found?.CreationDate?.toISOString() ?? new Date().toISOString(),
+      isPublic: false,
+      versioning: false,
+      encrypted: true,
     };
   },
 

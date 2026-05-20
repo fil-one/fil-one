@@ -493,8 +493,22 @@ describe('fthOrchestrator.listBuckets', () => {
     const result = await fthOrchestrator.listBuckets(fthClientId);
 
     expect(result).toEqual([
-      { name: 'b1', createdAt: '2026-01-01T00:00:00.000Z' },
-      { name: 'b2', createdAt: '2026-02-01T00:00:00.000Z' },
+      {
+        name: 'b1',
+        region: 'us-east-1',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
+      },
+      {
+        name: 'b2',
+        region: 'us-east-1',
+        createdAt: '2026-02-01T00:00:00.000Z',
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
+      },
     ]);
   });
 });

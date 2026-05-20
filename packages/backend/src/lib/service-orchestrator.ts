@@ -6,12 +6,6 @@ import type {
   S3Region,
 } from '@filone/shared';
 
-export type TenantNotReadyReason = 'setup-incomplete';
-
-export type EnsureTenantReadyResult =
-  | { ok: true; tenantId: string }
-  | { ok: false; reason: TenantNotReadyReason };
-
 export interface PresignerContext {
   endpointUrl: string;
   region: string;
@@ -21,9 +15,11 @@ export interface PresignerContext {
 
 export interface BucketSummary {
   name: string;
+  region: S3Region;
   createdAt: string;
-  versioning?: boolean;
-  encrypted?: boolean;
+  isPublic: boolean;
+  versioning: boolean;
+  encrypted: boolean;
 }
 
 export interface BucketDetails extends BucketSummary {
