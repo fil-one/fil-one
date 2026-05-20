@@ -218,6 +218,52 @@ describe('FthClient interceptors', () => {
     expect(seen).toEqual([{ hasResponse: false }]);
   });
 
+  it('replaces the thrown HTTP error with the value returned from an error interceptor', async () => {
+    const client = buildClient({ fetch: mockFetch(500, { message: 'boom' }) });
+
+    const wrapped = new Error('wrapped');
+    client.interceptors.error.use(() => wrapped);
+
+    await expect(client.getClient('x')).rejects.toBe(wrapped);
+  });
+
+  it('replaces the thrown network error with the value returned from an error interceptor', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('fetch failed'));
+    const client = buildClient({ fetch: fetchMock });
+
+    const wrapped = new Error('wrapped network');
+    client.interceptors.error.use(() => wrapped);
+
+    await expect(client.getClient('x')).rejects.toBe(wrapped);
+  });
+
+  it('keeps the original error when an interceptor returns undefined', async () => {
+    const client = buildClient({ fetch: mockFetch(500, { message: 'boom' }) });
+
+    client.interceptors.error.use(() => undefined);
+
+    await expect(client.getClient('x')).rejects.toMatchObject({
+      name: 'FthApiError',
+      status: 500,
+    });
+  });
+
+  it('threads the replaced error through subsequent interceptors', async () => {
+    const client = buildClient({ fetch: mockFetch(500, { message: 'boom' }) });
+
+    const first = new Error('first');
+    const second = new Error('second');
+    const seen: unknown[] = [];
+    client.interceptors.error.use(() => first);
+    client.interceptors.error.use((err) => {
+      seen.push(err);
+      return second;
+    });
+
+    await expect(client.getClient('x')).rejects.toBe(second);
+    expect(seen).toEqual([first]);
+  });
+
   it('runs interceptors in registration order', async () => {
     const fetchMock = mockFetch(200, { id: '1' });
     const client = buildClient({ fetch: fetchMock });

@@ -147,12 +147,15 @@ type ResponseInterceptor = (
   options: InterceptorOptions,
 ) => Response | Promise<Response>;
 
+// Returning a non-undefined value replaces the error that will ultimately be
+// thrown, matching Hey-API's error-interceptor semantics. Returning undefined
+// (including from a `void`-returning callback) keeps the current error.
 type ErrorInterceptor = (
   error: unknown,
   response: Response | undefined,
   request: Request,
   options: InterceptorOptions,
-) => void | Promise<void>;
+) => unknown;
 
 interface InterceptorOptions {
   url?: string;
@@ -206,10 +209,7 @@ async function runRequest<T>(
   try {
     httpResponse = await ctx.fetchImpl(httpRequest);
   } catch (err) {
-    for (const fn of ctx.errorInterceptors) {
-      await fn(err, undefined, httpRequest, interceptorOpts);
-    }
-    throw err;
+    throw await runErrorInterceptors(ctx, err, undefined, httpRequest, interceptorOpts);
   }
 
   for (const fn of ctx.responseInterceptors) {
@@ -220,16 +220,28 @@ async function runRequest<T>(
     const responseBody = await readBodySafe(httpResponse);
     const message = extractErrorMessage(responseBody) ?? httpResponse.statusText;
     const apiError = createApiError(httpResponse.status, message, responseBody);
-    for (const fn of ctx.errorInterceptors) {
-      await fn(apiError, httpResponse, httpRequest, interceptorOpts);
-    }
-    throw apiError;
+    throw await runErrorInterceptors(ctx, apiError, httpResponse, httpRequest, interceptorOpts);
   }
 
   if (httpResponse.status === 204) return undefined as T;
   const text = await httpResponse.text();
   if (!text) return undefined as T;
   return JSON.parse(text) as T;
+}
+
+async function runErrorInterceptors(
+  ctx: RequestContext,
+  initialError: unknown,
+  response: Response | undefined,
+  request: Request,
+  options: InterceptorOptions,
+): Promise<unknown> {
+  let error = initialError;
+  for (const fn of ctx.errorInterceptors) {
+    const result = await fn(error, response, request, options);
+    if (result !== undefined) error = result;
+  }
+  return error;
 }
 
 type RequestFn = <T>(
