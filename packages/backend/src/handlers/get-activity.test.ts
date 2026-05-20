@@ -426,7 +426,7 @@ describe('get-activity baseHandler', () => {
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(String(result.body));
     expect(body.activities).toStrictEqual([]);
-    // Object activities are temporarily excluded from the feed.
-    // https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard
   });
+  // Object activities are temporarily excluded from the feed.
+  // https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard
 });
