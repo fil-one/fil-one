@@ -56,9 +56,24 @@ export function createFthManagementClient(config: FthManagementClientConfig): Ft
   return {
     ...buildEndpointMethods(request),
     interceptors: {
-      request: { use: (fn) => ctx.requestInterceptors.push(fn) },
-      response: { use: (fn) => ctx.responseInterceptors.push(fn) },
-      error: { use: (fn) => ctx.errorInterceptors.push(fn) },
+      request: {
+        use: (fn) => {
+          ctx.requestInterceptors.push(fn);
+          return ctx.requestInterceptors.length - 1;
+        },
+      },
+      response: {
+        use: (fn) => {
+          ctx.responseInterceptors.push(fn);
+          return ctx.responseInterceptors.length - 1;
+        },
+      },
+      error: {
+        use: (fn) => {
+          ctx.errorInterceptors.push(fn);
+          return ctx.errorInterceptors.length - 1;
+        },
+      },
     },
   };
 }
