@@ -33,7 +33,7 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
 
   // Server-side: a protected route should bounce to sign-in.
   await page.goto('/dashboard');
-  await expect(page).toHaveTitle(/Log in/);
+  await expect(page).toHaveURL(/login/);
 
   await context.close();
 });

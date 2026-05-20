@@ -8,7 +8,7 @@ test.use({ storageState: { cookies: [], origins: [] } });
 
 test('paid user signs in via Auth0 and lands on dashboard', async ({ page }) => {
   await page.goto('/');
-  await expect(page).toHaveTitle(/Log in/);
+  await expect(page).toHaveURL(/login/);
 
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('textbox', { name: 'Email address' }).fill(process.env.E2E_PAID_EMAIL!);
