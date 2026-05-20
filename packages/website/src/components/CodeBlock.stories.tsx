@@ -29,7 +29,7 @@ export const MultiLine: Story = {
     code: `import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
 const client = new S3Client({
-  region: "us-midwest-1",
+  region: "us-east-1",
   endpoint: "https://s3.filone.io",
 });
 

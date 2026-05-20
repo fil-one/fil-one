@@ -33,8 +33,7 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
 
   // Server-side: a protected route should bounce to sign-in.
   await page.goto('/dashboard');
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await expect(page.getByText('Sign in')).toBeVisible();
+  await expect(page).toHaveURL(/login/);
 
   await context.close();
 });

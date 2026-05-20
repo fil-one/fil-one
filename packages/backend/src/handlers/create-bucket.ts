@@ -3,8 +3,9 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
 import { CreateBucketSchema, S3_REGION } from '@filone/shared';
-import { createAuroraBucket, BucketAlreadyExistsError } from '../lib/aurora-portal.js';
-import { ensureTenantReady } from '../lib/aurora-tenant-setup.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
+import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -37,6 +38,9 @@ export async function baseHandler(
 
   const { name, region, versioning, lock, retention } = parsed.data;
 
+  // Phase A: only the Aurora region is supported in handlers. Phase B will
+  // open this up via getAvailableRegions(stage) once the FTH
+  // orchestrator is registered.
   if (region !== S3_REGION) {
     return new ResponseBuilder()
       .status(400)
@@ -46,13 +50,12 @@ export async function baseHandler(
 
   const { orgId } = getUserInfo(event);
 
-  const ready = await ensureTenantReady(orgId);
-  if (!ready.ok) return ready.errorResponse;
-  const auroraTenantId = ready.auroraTenantId;
+  const orchestrator = getOrchestratorForRegion(S3_REGION);
+  const tenantId = await orchestrator.ensureTenantReady(orgId);
+  if (!tenantId) return tenantNotReadyResponse();
 
   try {
-    await createAuroraBucket({
-      tenantId: auroraTenantId,
+    await orchestrator.createBucket(tenantId, {
       bucketName: name,
       versioning,
       lock,
