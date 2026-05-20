@@ -147,7 +147,7 @@ async function recoverDuplicateKey(
     return; // Simple duplicate — nothing to recover
   }
 
-  // Partial failure: provider key exists but DynamoDB record is missing.
+  // Partial failure: key exists in Orchestrator's DB, but our DynamoDB record is missing.
   // Recover by fetching key details from the provider and writing the DB record.
   const recovered = await orchestrator.findAccessKeyByName(tenantId, keyName);
 
