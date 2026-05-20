@@ -7,7 +7,7 @@ describe('tenantNotReadyResponse', () => {
     expect(result.statusCode).toBe(503);
     const body = JSON.parse(result.body as string);
     expect(body).toEqual({
-      message: 'We are still setting up your account. Please try again in a moment.',
+      message: 'We are still setting up the region for you. Please try again in a moment.',
     });
   });
 });

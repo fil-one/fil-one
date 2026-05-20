@@ -56,8 +56,7 @@ describe('create-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateBucket).toHaveBeenCalledWith({
-      tenantId: 'aurora-t-1',
+    expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', {
       bucketName: 'my-bucket',
       versioning: false,
       lock: false,
@@ -82,7 +81,7 @@ describe('create-bucket baseHandler', () => {
 
     expect(result.statusCode).toBe(503);
     const body = JSON.parse(result.body as string);
-    expect(body.message).toMatch(/setting up your account/i);
+    expect(body.message).toMatch(/setting up the region for you/i);
     expect(mockCreateBucket).not.toHaveBeenCalled();
   });
 
@@ -119,8 +118,7 @@ describe('create-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateBucket).toHaveBeenCalledWith({
-      tenantId: 'aurora-t-1',
+    expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', {
       bucketName: 'my-bucket',
       versioning: true,
       lock: true,
@@ -135,8 +133,7 @@ describe('create-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateBucket).toHaveBeenCalledWith({
-      tenantId: 'aurora-t-1',
+    expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', {
       bucketName: 'my-bucket',
       versioning: false,
       lock: false,

@@ -188,7 +188,7 @@ describe('presign baseHandler', () => {
 
     expect(result).toMatchObject({
       statusCode: 503,
-      body: expect.stringContaining('setting up your account'),
+      body: expect.stringContaining('setting up the region for you'),
     });
   });
 

@@ -55,8 +55,7 @@ export async function baseHandler(
   if (!tenantId) return tenantNotReadyResponse();
 
   try {
-    await orchestrator.createBucket({
-      tenantId,
+    await orchestrator.createBucket(tenantId, {
       bucketName: name,
       versioning,
       lock,

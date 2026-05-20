@@ -271,7 +271,7 @@ describe('create-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(503);
     const body = JSON.parse(result.body!);
-    expect(body.message).toMatch(/setting up your account/i);
+    expect(body.message).toMatch(/setting up the region for you/i);
     expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 

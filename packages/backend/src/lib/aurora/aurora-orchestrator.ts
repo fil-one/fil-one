@@ -123,9 +123,9 @@ export const auroraOrchestrator: ServiceOrchestrator = {
     return tenantId;
   },
 
-  async createBucket(args: CreateBucketArgs): Promise<void> {
+  async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {
     await createAuroraBucket({
-      tenantId: args.tenantId,
+      tenantId,
       bucketName: args.bucketName,
       versioning: args.versioning,
       lock: args.lock,

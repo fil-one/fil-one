@@ -30,7 +30,6 @@ export interface BucketDetails extends BucketSummary {
 }
 
 export interface CreateBucketArgs {
-  tenantId: string;
   bucketName: string;
   versioning?: boolean;
   lock?: boolean;
@@ -79,37 +78,61 @@ export class AccessKeyValidationError extends Error {
 }
 
 /**
- * orgId vs tenantId:
- * - `orgId` is our internal org identifier — a UUID generated on a
- *   user's first authenticated request and persisted in UserInfoTable.
- *   Provider-agnostic, one per org, attached to every request
- *   via `event.requestContext.userInfo.orgId`.
- * - `tenantId` is the provider-specific identifier the data-plane API
- *   accepts (e.g. `auroraTenantId`). It maps 1:1 to `(orgId, providerId)`
- *   and is stored on the `ORG#{orgId}/PROFILE` DDB row.
+ * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.).
+ * Each implementation handles tenant provisioning, bucket lifecycle,
+ * access-key issuance, and presigning for a service orchestrator in a single region.
+ *
+ * ## orgId vs tenantId
+ *
+ * - `orgId` is our internal org identifier — a UUID generated on a user's
+ *   first authenticated request and persisted in `UserInfoTable`.
+ *   Orchestrator-agnostic, one per org, attached to every request via
+ *   `event.requestContext.userInfo.orgId`.
+ * - `tenantId` is the orchestrator-specific identifier (e.g. `auroraTenantId`).
+ *   It maps 1:1 to `(orgId, orchestratorId)` and is stored on the
+ *   `ORG#{orgId}/PROFILE` DDB row.
  *
  * `ensureTenantReady` / `isTenantReady` take `orgId` because they own the
  * setup state machine (status, failure counts, transitions) which lives on
  * the org row. Every other method takes `tenantId` directly — those are
- * stateless data-plane calls, and callers are expected to have resolved
- * org → tenant via ensure/isReady first.
+ * stateless calls, and callers are expected to have resolved org → tenant
+ * via ensure/isReady first.
  */
 export interface ServiceOrchestrator {
   readonly id: string;
   readonly region: S3Region;
 
+  /**
+   * Resolves the org's tenant on this orchestrator, provisioning it if needed
+   * and advancing the setup state machine on the `ORG#{orgId}/PROFILE` row.
+   *
+   * This call has side effects: it may issue API calls towards service orchestrators,
+   * write to DDB, increment failure counters, and transition status between setup states.
+   * Only call from write paths (POST/PUT/DELETE handlers, background jobs);
+   * GET handlers should use {@link isTenantReady}.
+   *
+   * @param orgId - Internal org UUID from `event.requestContext.userInfo.orgId`.
+   * @returns The resolved `tenantId` once the tenant is fully provisioned,
+   *          or `null` if setup is still in progress or has failed.
+   */
   ensureTenantReady(orgId: string): Promise<string | null>;
 
   /**
-   * Side-effect-free readiness check. Returns the tenantId if the org's tenant
-   * for this provider is fully set up, otherwise null. Unlike
-   * ensureTenantReady, this never advances the setup state machine — safe to
-   * call from GET handlers that should not trigger Portal/Backoffice API
-   * calls or DDB writes.
+   * Side-effect-free readiness check. Reads the current state from DDB and
+   * returns the `tenantId` only if the tenant is already fully set up.
+   *
+   * Unlike {@link ensureTenantReady}, this never advances the setup state
+   * machine, issues Portal/Backoffice API calls, or writes to DDB — safe to
+   * call from GET handlers and other read paths where triggering provisioning
+   * would be inappropriate.
+   *
+   * @param orgId - Internal org UUID.
+   * @returns The `tenantId` if ready, otherwise `null` (not yet provisioned,
+   *          in progress, or failed).
    */
   isTenantReady(orgId: string): Promise<string | null>;
 
-  createBucket(args: CreateBucketArgs): Promise<void>;
+  createBucket(tenantId: string, args: CreateBucketArgs): Promise<void>;
   deleteBucket(tenantId: string, bucketName: string): Promise<void>;
   listBuckets(tenantId: string): Promise<BucketSummary[]>;
   getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null>;

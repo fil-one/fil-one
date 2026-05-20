@@ -100,7 +100,7 @@ describe('auroraOrchestrator', () => {
       expect(mockEnsureAuroraTenantReady).toHaveBeenCalledWith('org-1');
     });
 
-    it("collapses any aurora-tenant-setup failure into reason 'setup-incomplete'", async () => {
+    it('returns null when the Aurora tenant setup fails', async () => {
       mockEnsureAuroraTenantReady.mockResolvedValue({
         ok: false,
         errorResponse: { statusCode: 503, body: JSON.stringify({ message: 'busy' }) },
@@ -117,7 +117,7 @@ describe('auroraOrchestrator', () => {
       ddbMock.reset();
     });
 
-    it('returns the tenantId when the Aurora setup is terminal', async () => {
+    it('returns the tenantId when the Aurora tenant setup is complete', async () => {
       ddbMock.on(GetItemCommand).resolves({
         Item: {
           auroraTenantId: { S: 'aurora-t-1' },
@@ -135,7 +135,7 @@ describe('auroraOrchestrator', () => {
       });
     });
 
-    it('returns null when the setup status is non-terminal', async () => {
+    it('returns null when the Aurora setup status was not completed yet ', async () => {
       ddbMock.on(GetItemCommand).resolves({
         Item: {
           auroraTenantId: { S: 'aurora-t-1' },
@@ -171,8 +171,7 @@ describe('auroraOrchestrator', () => {
     it('forwards all bucket fields to createAuroraBucket', async () => {
       mockCreateAuroraBucket.mockResolvedValue(undefined);
 
-      await auroraOrchestrator.createBucket({
-        tenantId: 'aurora-t-1',
+      await auroraOrchestrator.createBucket('aurora-t-1', {
         bucketName: 'my-bucket',
         versioning: true,
         lock: true,
@@ -192,7 +191,7 @@ describe('auroraOrchestrator', () => {
       mockCreateAuroraBucket.mockRejectedValue(new BucketAlreadyExistsError('dup'));
 
       await expect(
-        auroraOrchestrator.createBucket({ tenantId: 'aurora-t-1', bucketName: 'dup' }),
+        auroraOrchestrator.createBucket('aurora-t-1', { bucketName: 'dup' }),
       ).rejects.toBeInstanceOf(BucketAlreadyExistsError);
     });
 
@@ -200,7 +199,7 @@ describe('auroraOrchestrator', () => {
       mockCreateAuroraBucket.mockRejectedValue(new Error('upstream 500'));
 
       await expect(
-        auroraOrchestrator.createBucket({ tenantId: 'aurora-t-1', bucketName: 'b' }),
+        auroraOrchestrator.createBucket('aurora-t-1', { bucketName: 'b' }),
       ).rejects.toThrow('upstream 500');
     });
   });
