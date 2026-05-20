@@ -1,8 +1,17 @@
 import { API_URL } from '../env.js';
 import { ApiErrorCode, CSRF_COOKIE_NAME } from '@filone/shared';
+import type { StepUpRequiredResponse } from '@filone/shared';
+import { redirectToStepUp } from './step-up.js';
 
 // Prevents multiple simultaneous 401 responses from each triggering a redirect.
 let isRedirecting = false;
+
+/** Sentinel error subclass thrown when the backend returns step_up_required. */
+export class StepUpRequiredError extends Error {
+  constructor() {
+    super('Step-up authentication required');
+  }
+}
 
 function getCsrfToken(): string | undefined {
   return document.cookie
@@ -49,6 +58,13 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   });
 
   if (response.status === 401) {
+    const body = (await response
+      .clone()
+      .json()
+      .catch(() => ({}))) as Partial<StepUpRequiredResponse>;
+    if (body.error === 'step_up_required') {
+      throw new StepUpRequiredError();
+    }
     redirectToLogin();
     // Throw so the caller's promise chain stops — the page is navigating away
     throw Object.assign(new Error('Session expired. Redirecting to login...'), { status: 401 });
@@ -90,11 +106,19 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
 // ── Me / Org API ────────────────────────────────────────────────────────
 
-import type { MeResponse, UpdateProfileRequest, UpdateProfileResponse } from '@filone/shared';
+import type {
+  MeResponse,
+  UpdateProfileRequest,
+  UpdateProfileResponse,
+  RegenerateRecoveryCodeResponse,
+} from '@filone/shared';
 
-export function getMe(options?: { forceRefresh?: boolean }): Promise<MeResponse> {
-  const qs = options?.forceRefresh ? '?forceRefresh=1' : '';
-  return apiRequest<MeResponse>(`/me${qs}`);
+export function getMe(options?: { forceRefresh?: boolean; include?: 'mfa' }): Promise<MeResponse> {
+  const params = new URLSearchParams();
+  if (options?.forceRefresh) params.set('forceRefresh', '1');
+  if (options?.include) params.set('include', options.include);
+  const qs = params.toString();
+  return apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`);
 }
 
 export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfileResponse> {
@@ -110,6 +134,49 @@ export function changePassword(): Promise<{ message: string }> {
 
 export function resendVerificationEmail(): Promise<{ message: string }> {
   return apiRequest<{ message: string }>('/me/resend-verification', { method: 'POST' });
+}
+
+// ── MFA API ──────────────────────────────────────────────────────────────
+
+export async function enrollMfa(): Promise<void> {
+  await apiRequest<{ message: string }>('/mfa/enroll', { method: 'POST' });
+  // Force a fresh login. The backend has set app_metadata.mfa_enrolling = true,
+  // so the Post-Login Action will trigger MFA enrollment via Universal Login.
+  redirectToLogin();
+}
+
+export function disableMfa(): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>('/mfa/disable', { method: 'POST' });
+}
+
+export function deleteMfaEnrollment(enrollmentId: string): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>(`/mfa/enrollments/${encodeURIComponent(enrollmentId)}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Regenerate the user's MFA recovery code. The backend gates this on the
+ * `amr: ["mfa"]` claim in the ID token. When missing, this catches the
+ * StepUpRequiredError and redirects through Auth0 with `acr_values=...
+ * :multi-factor` so the next attempt passes the gate. The redirect navigates
+ * the page away — the returned promise never resolves on the step-up path.
+ */
+export async function regenerateRecoveryCode(
+  options: { stepUpAction?: string } = {},
+): Promise<RegenerateRecoveryCodeResponse> {
+  try {
+    return await apiRequest<RegenerateRecoveryCodeResponse>('/mfa/recovery-code/regenerate', {
+      method: 'POST',
+    });
+  } catch (err) {
+    if (err instanceof StepUpRequiredError) {
+      redirectToStepUp(options.stepUpAction ?? 'regenerate-recovery-code');
+      // Hold the promise — the page is navigating away.
+      return new Promise<RegenerateRecoveryCodeResponse>(() => {});
+    }
+    throw err;
+  }
 }
 
 // ── Usage API ────────────────────────────────────────────────────────────

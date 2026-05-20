@@ -18,18 +18,6 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
-    "AuroraTenantSetup": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "AuroraTenantSetupDlq": {
-      "type": "sst.aws.Queue"
-      "url": string
-    }
-    "AuroraTenantSetupQueue": {
-      "type": "sst.aws.Queue"
-      "url": string
-    }
     "Auth0ClientId": {
       "type": "sst.sst.Secret"
       "value": string
@@ -101,6 +89,18 @@ declare module "sst" {
     "FthToken": {
       "type": "sst.sst.Secret"
       "value": string
+    };
+    "DeleteMfaEnrollment": {
+      "name": string
+      "type": "sst.aws.Function"
+    };
+    "DisableMfa": {
+      "name": string
+      "type": "sst.aws.Function"
+    };
+    "EnrollMfa": {
+      "name": string
+      "type": "sst.aws.Function"
     }
     "GetActivity": {
       "name": string
@@ -151,6 +151,10 @@ declare module "sst" {
       "type": "sst.aws.Bucket"
     }
     "Presign": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "RegenerateRecoveryCode": {
       "name": string
       "type": "sst.aws.Function"
     }

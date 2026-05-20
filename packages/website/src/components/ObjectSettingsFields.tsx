@@ -2,6 +2,7 @@ import type { RetentionDurationType, RetentionMode } from '@filone/shared';
 import { RETENTION_MAX_DAYS, RETENTION_MAX_YEARS } from '@filone/shared';
 
 import { Switch } from './Switch';
+import { RadioOption } from './RadioOption';
 import { Select } from './Select';
 
 type ObjectSettingsFieldsProps = {
@@ -157,35 +158,16 @@ export function ObjectSettingsFields({
                     aria-label="Retention mode"
                   >
                     {RETENTION_MODE_OPTIONS.map((option) => (
-                      <label
+                      <RadioOption
                         key={option.value}
-                        className={`flex cursor-pointer items-center gap-2.5 rounded-lg border px-3.5 py-2.5 ${
-                          retentionMode === option.value
-                            ? 'border-brand-600/40 bg-brand-50/50'
-                            : 'border-zinc-200 bg-zinc-50'
-                        }`}
+                        name="retention-mode"
+                        value={option.value}
+                        checked={retentionMode === option.value}
+                        onChange={() => onRetentionModeChange(option.value)}
+                        description={option.description}
                       >
-                        <input
-                          type="radio"
-                          name="retention-mode"
-                          value={option.value}
-                          checked={retentionMode === option.value}
-                          onChange={() => onRetentionModeChange(option.value)}
-                          aria-describedby={`retention-mode-${option.value}-desc`}
-                          className="accent-brand-600"
-                        />
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-[13px] font-medium leading-snug text-zinc-900">
-                            {option.label}
-                          </span>
-                          <span
-                            id={`retention-mode-${option.value}-desc`}
-                            className="text-[11px] leading-relaxed text-zinc-500"
-                          >
-                            {option.description}
-                          </span>
-                        </div>
-                      </label>
+                        {option.label}
+                      </RadioOption>
                     ))}
                   </div>
                 </fieldset>

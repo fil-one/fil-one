@@ -9,6 +9,7 @@ import { AccessKeyFormFields } from '../components/AccessKeyFormFields.js';
 import { Button } from '../components/Button.js';
 import { IconButton } from '../components/IconButton.js';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal.js';
+import { SlowOperationIndicator } from '../components/SlowOperationIndicator.js';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 
 // ---------------------------------------------------------------------------
@@ -66,6 +67,7 @@ export function CreateApiKeyPage() {
             <Button type="submit" variant="primary" disabled={!form.canSubmit}>
               {form.creating ? 'Creating...' : 'Create API key'}
             </Button>
+            <SlowOperationIndicator isLoading={form.creating} operation="Creating access key" />
           </form>
 
           {/* Right: info panel */}

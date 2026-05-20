@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { SubscriptionStatus } from '@filone/shared';
 import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
-import { getUsage } from '../lib/api';
+import { getUsage, getBilling } from '../lib/api';
 import { queryKeys } from '../lib/query-client.js';
+import { daysUntil } from '../lib/time.js';
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -13,13 +15,20 @@ export function AppShell({ children }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   const { data: usage } = useQuery({ queryKey: queryKeys.usage, queryFn: getUsage });
+  const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
   const tenantStatus = usage?.tenantStatus;
+  const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod;
+  const graceDays = billing?.subscription.gracePeriodEndsAt
+    ? daysUntil(billing.subscription.gracePeriodEndsAt)
+    : null;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {tenantStatus === 'WRITE_LOCKED' && (
         <Banner variant="warning" action={{ label: 'Upgrade', href: '/billing' }}>
-          Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.
+          {isGracePeriod
+            ? `Your free trial has expired.${graceDays !== null ? ` ${graceDays} days left` : ''} to upgrade or download your data.`
+            : 'Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.'}
         </Banner>
       )}
       {tenantStatus === 'DISABLED' && (
