@@ -3,7 +3,7 @@ import type Stripe from 'stripe';
 import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
-import { updateTenantStatus } from './aurora-backoffice.js';
+import { updateTenantStatus } from './aurora/aurora-backoffice.js';
 import { setOrgAuroraTenantStatus } from './org-profile.js';
 import { isOrgSetupComplete } from './org-setup-status.js';
 

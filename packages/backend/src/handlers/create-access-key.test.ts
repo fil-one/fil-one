@@ -12,27 +12,26 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockCreateAuroraAccessKey = vi.fn();
-const mockFindAuroraAccessKeyByName = vi.fn();
-
-vi.mock('../lib/aurora-portal.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../lib/aurora-portal.js')>();
-  return {
-    ...original,
-    createAuroraAccessKey: (...args: unknown[]) => mockCreateAuroraAccessKey(...args),
-    findAuroraAccessKeyByName: (...args: unknown[]) => mockFindAuroraAccessKeyByName(...args),
-  };
-});
-
 const mockEnsureTenantReady = vi.fn();
-vi.mock('../lib/aurora-tenant-setup.js', () => ({
+const mockIssueAccessKey = vi.fn();
+const mockFindAccessKeyByName = vi.fn();
+
+const mockOrchestrator = {
+  id: 'aurora',
+  region: 'eu-west-1',
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
+  issueAccessKey: (...args: unknown[]) => mockIssueAccessKey(...args),
+  findAccessKeyByName: (...args: unknown[]) => mockFindAccessKeyByName(...args),
+};
+
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
+  getOrchestratorForRegion: () => mockOrchestrator,
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './create-access-key.js';
-import { DuplicateKeyNameError } from '../lib/aurora-portal.js';
+import { AccessKeyAlreadyExistsError } from '../lib/service-orchestrator.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -50,15 +49,12 @@ function validBody() {
   });
 }
 
-function auroraAccessKeyResponse(name: string) {
+function issuedAccessKey() {
   return {
     id: 'aurora-key-1',
-    name,
     accessKeyId: 'AKIA1234567890',
     accessKeySecret: 'secret-abc-123',
     createdAt: '2026-03-10T13:36:07.752371Z',
-    modifiedAt: '2026-03-10T13:36:07.752371Z',
-    tenantId: 'aurora-t-1',
   };
 }
 
@@ -70,12 +66,12 @@ describe('create-access-key baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    mockEnsureTenantReady.mockResolvedValue({ ok: true, auroraTenantId: 'aurora-t-1' });
+    mockEnsureTenantReady.mockResolvedValue('aurora-t-1');
   });
 
   it('returns 201 with keyName, accessKeyId, and secretAccessKey on success', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -91,17 +87,17 @@ describe('create-access-key baseHandler', () => {
     });
   });
 
-  it('calls createAuroraAccessKey with correct params', async () => {
+  it('calls orchestrator.issueAccessKey with correct params', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith({
-      tenantId: 'aurora-t-1',
+    expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
       keyName: 'My Key',
       permissions: ['read', 'write', 'list', 'delete'],
+      granularPermissions: undefined,
       buckets: undefined,
       expiresAt: null,
     });
@@ -109,7 +105,7 @@ describe('create-access-key baseHandler', () => {
 
   it('stores access key in DynamoDB without the secret', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     await baseHandler(event);
@@ -134,7 +130,7 @@ describe('create-access-key baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(400);
-    expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 
   const invalidKeyNameCases: Record<string, string> = {
@@ -153,13 +149,13 @@ describe('create-access-key baseHandler', () => {
       const result = await baseHandler(event);
 
       expect(result.statusCode).toBe(400);
-      expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
     });
   }
 
   it('trims whitespace from keyName', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
       body: JSON.stringify({ keyName: '  My Key  ', permissions: ['read'], bucketScope: 'all' }),
@@ -168,10 +164,10 @@ describe('create-access-key baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith({
-      tenantId: 'aurora-t-1',
+    expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
       keyName: 'My Key',
       permissions: ['read'],
+      granularPermissions: undefined,
       buckets: undefined,
       expiresAt: null,
     });
@@ -179,9 +175,9 @@ describe('create-access-key baseHandler', () => {
     expect(body.keyName).toBe('My Key');
   });
 
-  it('passes YYYY-MM-DD expiresAt to Aurora as-is', async () => {
+  it('passes YYYY-MM-DD expiresAt through as-is', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
       body: JSON.stringify({
@@ -194,14 +190,15 @@ describe('create-access-key baseHandler', () => {
     });
     await baseHandler(event);
 
-    expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith(
+    expect(mockIssueAccessKey).toHaveBeenCalledWith(
+      'aurora-t-1',
       expect.objectContaining({ expiresAt: '2026-06-01' }),
     );
   });
 
   it('stores the YYYY-MM-DD expiresAt in DynamoDB (not RFC3339)', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
       body: JSON.stringify({
@@ -234,7 +231,7 @@ describe('create-access-key baseHandler', () => {
     expect(JSON.parse(result.body!)).toStrictEqual({
       message: 'expiresAt must be in YYYY-MM-DD format',
     });
-    expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 
   it('returns 400 when expiresAt is a timestamp formatted as ISO date-time string', async () => {
@@ -256,7 +253,7 @@ describe('create-access-key baseHandler', () => {
     expect(JSON.parse(result.body!)).toStrictEqual({
       message: 'expiresAt must be in YYYY-MM-DD format',
     });
-    expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 
   it('returns 400 for invalid JSON body', async () => {
@@ -267,26 +264,20 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('returns 503 with a retry message when tenant setup fails', async () => {
-    const errorResponse = {
-      statusCode: 503,
-      body: JSON.stringify({
-        message: 'We are still setting up your account. Please try again in a moment.',
-      }),
-    };
-    mockEnsureTenantReady.mockResolvedValue({ ok: false, errorResponse });
+    mockEnsureTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(503);
     const body = JSON.parse(result.body!);
-    expect(body.message).toMatch(/setting up your account/i);
-    expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
+    expect(body.message).toMatch(/setting up the region for you/i);
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 
-  it('drives Aurora tenant setup via ensureTenantReady before creating the access key', async () => {
+  it('drives tenant setup via ensureTenantReady before creating the access key', async () => {
     ddbMock.on(PutItemCommand).resolves({});
-    mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     await baseHandler(event);
@@ -294,8 +285,8 @@ describe('create-access-key baseHandler', () => {
     expect(mockEnsureTenantReady).toHaveBeenCalledWith('org-1');
   });
 
-  it('throws when Aurora Portal API fails', async () => {
-    mockCreateAuroraAccessKey.mockRejectedValue(new Error('Aurora API error'));
+  it('throws when the orchestrator fails', async () => {
+    mockIssueAccessKey.mockRejectedValue(new Error('Aurora API error'));
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
 
@@ -303,8 +294,8 @@ describe('create-access-key baseHandler', () => {
     expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
   });
 
-  it('returns 409 when Aurora rejects duplicate key name and key exists in DynamoDB', async () => {
-    mockCreateAuroraAccessKey.mockRejectedValue(new DuplicateKeyNameError());
+  it('returns 409 when the orchestrator rejects duplicate key name and key exists in DynamoDB', async () => {
+    mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
     ddbMock.on(QueryCommand).resolves({
       Items: [
         {
@@ -330,10 +321,10 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('returns 409 and recovers DynamoDB record on partial failure', async () => {
-    mockCreateAuroraAccessKey.mockRejectedValue(new DuplicateKeyNameError());
+    mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
     // No matching key in DynamoDB — partial failure
     ddbMock.on(QueryCommand).resolves({ Items: [] });
-    mockFindAuroraAccessKeyByName.mockResolvedValue({
+    mockFindAccessKeyByName.mockResolvedValue({
       id: 'aurora-key-1',
       accessKeyId: 'AKIA1234567890',
       createdAt: '2026-03-10T00:00:00Z',
@@ -365,7 +356,7 @@ describe('create-access-key baseHandler', () => {
   describe('region', () => {
     beforeEach(() => {
       ddbMock.on(PutItemCommand).resolves({});
-      mockCreateAuroraAccessKey.mockResolvedValue(auroraAccessKeyResponse('My Key'));
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
     });
 
     it('succeeds when region is missing (back-compat with legacy callers)', async () => {
@@ -412,7 +403,7 @@ describe('create-access-key baseHandler', () => {
       expect(result.statusCode).toBe(400);
       const body = JSON.parse(result.body!);
       expect(body.message).toContain('Unsupported region');
-      expect(mockCreateAuroraAccessKey).not.toHaveBeenCalled();
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
     });
   });
 });

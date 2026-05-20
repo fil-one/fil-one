@@ -18,7 +18,7 @@ import {
 } from '@filone/aurora-backoffice-client';
 import pRetry from 'p-retry';
 import { instrumentClient } from './aurora-api-metrics.js';
-import { getAuroraBackofficeSecrets } from './auth-secrets.js';
+import { getAuroraBackofficeSecrets } from '../auth-secrets.js';
 
 export type {
   ModelOperationMetricsSample,
