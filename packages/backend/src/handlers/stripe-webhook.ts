@@ -14,7 +14,7 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import { updateTenantStatus } from '../lib/aurora-backoffice.js';
+import { updateTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';

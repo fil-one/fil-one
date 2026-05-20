@@ -1,7 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 import { SubscriptionStatus, ApiErrorCode } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -15,7 +12,27 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockGetAuroraS3Credentials = vi.fn();
+const presignerContext = {
+  endpointUrl: 'https://s3.example.com',
+  region: 'auto',
+  credentials: { accessKeyId: 'ak', secretAccessKey: 'sk' },
+  forcePathStyle: true,
+};
+
+const mockIsTenantReady = vi.fn();
+const mockGetPresignerContext = vi.fn();
+
+const mockOrchestrator = {
+  id: 'aurora',
+  region: 'eu-west-1',
+  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
+  getPresignerContext: (...args: unknown[]) => mockGetPresignerContext(...args),
+};
+
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
+  getOrchestratorForRegion: () => mockOrchestrator,
+}));
+
 const mockGetPresignedListObjectsUrl = vi.fn();
 const mockGetPresignedListObjectVersionsUrl = vi.fn();
 const mockGetPresignedHeadObjectUrl = vi.fn();
@@ -24,8 +41,7 @@ const mockGetPresignedGetObjectUrl = vi.fn();
 const mockGetPresignedPutObjectUrl = vi.fn();
 const mockGetPresignedDeleteObjectUrl = vi.fn();
 
-vi.mock('../lib/aurora-s3-client.js', () => ({
-  getAuroraS3Credentials: (...args: unknown[]) => mockGetAuroraS3Credentials(...args),
+vi.mock('../lib/s3-presigner.js', () => ({
   getPresignedListObjectsUrl: (...args: unknown[]) => mockGetPresignedListObjectsUrl(...args),
   getPresignedListObjectVersionsUrl: (...args: unknown[]) =>
     mockGetPresignedListObjectVersionsUrl(...args),
@@ -37,8 +53,6 @@ vi.mock('../lib/aurora-s3-client.js', () => ({
   getPresignedDeleteObjectUrl: (...args: unknown[]) => mockGetPresignedDeleteObjectUrl(...args),
 }));
 
-const ddbMock = mockClient(DynamoDBClient);
-
 import { baseHandler } from './presign.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
@@ -47,17 +61,6 @@ import { buildEvent } from '../test/lambda-test-utilities.js';
 // ---------------------------------------------------------------------------
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
-
-function orgProfileWithTenant(tenantId: string) {
-  return {
-    Item: {
-      pk: { S: `ORG#${USER_INFO.orgId}` },
-      sk: { S: 'PROFILE' },
-      auroraTenantId: { S: tenantId },
-      setupStatus: { S: FINAL_SETUP_STATUS },
-    },
-  };
-}
 
 function buildPresignEvent(ops: unknown[], overrides?: { subscriptionStatus?: string }) {
   const event = buildEvent({
@@ -77,12 +80,9 @@ function buildPresignEvent(ops: unknown[], overrides?: { subscriptionStatus?: st
 describe('presign baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    ddbMock.reset();
     vi.stubEnv('FILONE_STAGE', 'test');
-    mockGetAuroraS3Credentials.mockResolvedValue({
-      accessKeyId: 'ak',
-      secretAccessKey: 'sk',
-    });
+    mockIsTenantReady.mockResolvedValue('aurora-t-1');
+    mockGetPresignerContext.mockResolvedValue(presignerContext);
   });
 
   // ── Validation ──────────────────────────────────────────────────────
@@ -168,7 +168,6 @@ describe('presign baseHandler', () => {
   });
 
   it('allows read-only batch during grace period', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
 
     const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
@@ -179,45 +178,23 @@ describe('presign baseHandler', () => {
     expect(result.statusCode).toBe(200);
   });
 
-  // ── Org setup ───────────────────────────────────────────────────────
+  // ── Tenant readiness ────────────────────────────────────────────────
 
-  it('returns 503 when aurora tenant setup is incomplete', async () => {
-    ddbMock.on(GetItemCommand).resolves({
-      Item: {
-        pk: { S: `ORG#${USER_INFO.orgId}` },
-        sk: { S: 'PROFILE' },
-        auroraTenantId: { S: 'aurora-t-1' },
-        setupStatus: { S: 'AURORA_TENANT_CREATED' },
-      },
-    });
+  it('returns 503 when the orchestrator tenant is not ready', async () => {
+    mockIsTenantReady.mockResolvedValue(null);
 
     const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }]);
     const result = await baseHandler(event);
 
     expect(result).toMatchObject({
       statusCode: 503,
-      body: expect.stringContaining('Aurora tenant setup is not complete'),
+      body: expect.stringContaining('setting up the region for you'),
     });
-  });
-
-  it('returns 503 when auroraTenantId is missing', async () => {
-    ddbMock.on(GetItemCommand).resolves({
-      Item: {
-        pk: { S: `ORG#${USER_INFO.orgId}` },
-        sk: { S: 'PROFILE' },
-      },
-    });
-
-    const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }]);
-    const result = await baseHandler(event);
-
-    expect(result.statusCode).toBe(503);
   });
 
   // ── Successful presigning ───────────────────────────────────────────
 
   it('returns presigned URLs for a read-only batch', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
     mockGetPresignedHeadObjectUrl.mockResolvedValue('https://s3.example.com/head?signed');
 
@@ -242,12 +219,11 @@ describe('presign baseHandler', () => {
           expiresAt: expect.any(String),
         },
       ],
-      endpoint: expect.any(String),
+      endpoint: presignerContext.endpointUrl,
     });
   });
 
   it('preserves item order matching request order', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedGetObjectUrl.mockResolvedValue('https://s3.example.com/get?signed');
     mockGetPresignedDeleteObjectUrl.mockResolvedValue('https://s3.example.com/delete?signed');
     mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
@@ -279,12 +255,11 @@ describe('presign baseHandler', () => {
           expiresAt: expect.any(String),
         },
       ],
-      endpoint: expect.any(String),
+      endpoint: presignerContext.endpointUrl,
     });
   });
 
   it('returns presigned URL for putObject with metadata', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedPutObjectUrl.mockResolvedValue('https://s3.example.com/put?signed');
 
     const event = buildPresignEvent([
@@ -310,7 +285,7 @@ describe('presign baseHandler', () => {
           expiresAt: expect.any(String),
         },
       ],
-      endpoint: expect.any(String),
+      endpoint: presignerContext.endpointUrl,
     });
     expect(mockGetPresignedPutObjectUrl).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -327,7 +302,6 @@ describe('presign baseHandler', () => {
   });
 
   it('returns presigned URL for getObjectRetention', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedGetObjectRetentionUrl.mockResolvedValue(
       'https://s3.example.com/retention?signed',
     );
@@ -345,12 +319,11 @@ describe('presign baseHandler', () => {
           expiresAt: expect.any(String),
         },
       ],
-      endpoint: expect.any(String),
+      endpoint: presignerContext.endpointUrl,
     });
   });
 
   it('includes expiresAt on each item', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
 
     const before = Date.now();
@@ -367,7 +340,6 @@ describe('presign baseHandler', () => {
   // ── listObjectVersions ────────────────────────────────────────────
 
   it('returns presigned URL for listObjectVersions', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedListObjectVersionsUrl.mockResolvedValue(
       'https://s3.example.com/versions?signed',
     );
@@ -387,7 +359,6 @@ describe('presign baseHandler', () => {
   });
 
   it('allows listObjectVersions during grace period (read-only)', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedListObjectVersionsUrl.mockResolvedValue(
       'https://s3.example.com/versions?signed',
     );
@@ -403,7 +374,6 @@ describe('presign baseHandler', () => {
   // ── versionId forwarding ──────────────────────────────────────────
 
   it('forwards versionId for headObject', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedHeadObjectUrl.mockResolvedValue('https://s3.example.com/head?signed');
 
     const event = buildPresignEvent([
@@ -418,7 +388,6 @@ describe('presign baseHandler', () => {
   });
 
   it('forwards versionId for getObject', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedGetObjectUrl.mockResolvedValue('https://s3.example.com/get?signed');
 
     const event = buildPresignEvent([
@@ -433,7 +402,6 @@ describe('presign baseHandler', () => {
   });
 
   it('forwards versionId for deleteObject', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedDeleteObjectUrl.mockResolvedValue('https://s3.example.com/delete?signed');
 
     const event = buildPresignEvent([
@@ -448,7 +416,6 @@ describe('presign baseHandler', () => {
   });
 
   it('forwards versionId for getObjectRetention', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant('aurora-t-1'));
     mockGetPresignedGetObjectRetentionUrl.mockResolvedValue(
       'https://s3.example.com/retention?signed',
     );
