@@ -461,6 +461,16 @@ describe('fthOrchestrator.createBucket', () => {
       }),
     ).rejects.toThrow(/retention/i);
   });
+
+  it('throws when versioning is requested (FTH does not support it)', async () => {
+    await expect(
+      fthOrchestrator.createBucket({
+        tenantId: fthClientId,
+        bucketName: 'my-bucket',
+        versioning: true,
+      }),
+    ).rejects.toThrow(/versioning/i);
+  });
 });
 
 describe('fthOrchestrator.deleteBucket', () => {

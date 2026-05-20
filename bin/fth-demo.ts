@@ -79,6 +79,11 @@ const bucket = await fthOrchestrator.getBucket(tenantId, bucketName);
 console.log(bucket);
 console.log();
 
+if (!bucket) {
+  console.error(`getBucket did not find bucket ${bucketName}`);
+  process.exit(1);
+}
+
 console.log('=== Object CRUD via getPresignerContext ===');
 const ctx = await fthOrchestrator.getPresignerContext(tenantId);
 const s3 = new S3Client({

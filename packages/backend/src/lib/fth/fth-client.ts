@@ -83,7 +83,7 @@ type ErrorInterceptor = (
   response: Response | undefined,
   request: Request,
   options: InterceptorOptions,
-) => unknown;
+) => void | Promise<void>;
 
 interface InterceptorOptions {
   url?: string;

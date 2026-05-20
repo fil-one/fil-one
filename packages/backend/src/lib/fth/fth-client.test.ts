@@ -212,7 +212,6 @@ describe('FthClient interceptors', () => {
     const seen: Array<{ hasResponse: boolean }> = [];
     client.interceptors.error.use((_err, response, _req, _opts) => {
       seen.push({ hasResponse: response !== undefined });
-      return _err;
     });
 
     await expect(client.getClient('x')).rejects.toBeInstanceOf(TypeError);

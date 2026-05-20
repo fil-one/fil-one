@@ -158,10 +158,11 @@ function mapPermissionsForFth(
   for (const p of permissions) {
     for (const s3 of PERMISSION_MAP[p]) mapped.add(s3);
   }
-  // FTH's IAM-style permissions don't model FilOne's `granularPermissions`
-  // (object-version / retention / legal-hold) — they are S3 object operations
-  // that ride on the same s3:GetObject / s3:PutObject permissions. Keeping
-  // granular as a no-op for now; revisit if FTH adds fine-grained controls.
+  // TODO: granularPermissions (object-version / retention / legal-hold) are
+  // silently dropped here. FTH's IAM-style permissions don't model FilOne's
+  // granular controls — they ride on s3:GetObject / s3:PutObject. Revisit
+  // (either map them or reject non-empty granular permissions with
+  // AccessKeyValidationError) before this path serves non-demo callers.
   void granular;
   return [...mapped];
 }
@@ -296,23 +297,23 @@ export const fthOrchestrator: ServiceOrchestrator = {
     if (args.retention?.enabled) {
       throw new Error('FTH does not support default retention on bucket creation');
     }
+    if (args.versioning) {
+      throw new Error('FTH does not support bucket versioning on creation');
+    }
 
     const ctx = await this.getPresignerContext(args.tenantId);
     const s3 = createS3ClientFor(ctx);
     try {
-      await s3.send(new CreateBucketCommand({ Bucket: args.bucketName }));
+      const result = await s3.send(new CreateBucketCommand({ Bucket: args.bucketName }));
+      console.log('CreateBucket result:', result);
     } catch (err) {
+      console.log('CreateBucket error:', err);
       const name = (err as { name?: string }).name;
       if (name === 'BucketAlreadyOwnedByYou' || name === 'BucketAlreadyExists') {
         throw new BucketAlreadyExistsError(args.bucketName, { cause: err as Error });
       }
       throw err;
     }
-    // Versioning is supported by FTH's S3 endpoint; toggle it after create if
-    // requested. Lock/retention are intentionally rejected above.
-    // The PutBucketVersioning command is omitted here to keep the demo simple;
-    // add when a caller needs it.
-    void args.versioning;
   },
 
   async deleteBucket(tenantId: string, bucketName: string): Promise<void> {
