@@ -6,7 +6,7 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand, GetParameterCommand } from '@aws-sdk/client-ssm';
-import { getDynamoClient } from './ddb-client.js';
+import { getDynamoClient } from '../ddb-client.js';
 import { Resource } from 'sst';
 import {
   createAuroraTenant,
@@ -16,11 +16,11 @@ import {
 } from './aurora-backoffice.js';
 import { ACCESS_KEY_PERMISSIONS, ErrorResponse } from '@filone/shared';
 import { createAuroraAccessKey } from './aurora-portal.js';
-import { reportMetric } from './metrics.js';
-import { OrgSetupStatus, isOrgSetupComplete } from './org-setup-status.js';
-import { scanAndEmitStuckTenantCount } from './stuck-tenant-metric.js';
+import { reportMetric } from '../metrics.js';
+import { OrgSetupStatus, isOrgSetupComplete } from '../org-setup-status.js';
+import { scanAndEmitStuckTenantCount } from '../stuck-tenant-metric.js';
 import { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { ResponseBuilder } from './response-builder.js';
+import { ResponseBuilder } from '../response-builder.js';
 
 export { OrgSetupStatus };
 
@@ -320,7 +320,7 @@ async function createAndStoreS3AccessKey(
     accessKeyId = result.accessKeyId;
     accessKeySecret = result.accessKeySecret;
   } catch (err) {
-    if ((err as { name?: string }).name === 'DuplicateKeyNameError') {
+    if ((err as { name?: string }).name === 'AccessKeyAlreadyExistsError') {
       console.log(
         `Aurora S3 access key "filone-console" already exists for tenant ${auroraTenantId}, checking SSM`,
       );

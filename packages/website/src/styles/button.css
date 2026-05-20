@@ -43,7 +43,7 @@
     }
 
     &.button--primary {
-      @apply bg-brand-600 text-white;
+      @apply border border-transparent bg-brand-600 text-white;
 
       &:not(:disabled) {
         &:hover {
@@ -61,7 +61,7 @@
     }
 
     &.button--destructive {
-      @apply bg-red-600 text-white;
+      @apply border border-transparent bg-red-600 text-white;
 
       &:not(:disabled) {
         &:hover {
@@ -116,7 +116,7 @@
     }
 
     &.button--tertiary {
-      @apply text-zinc-600;
+      @apply border border-transparent text-zinc-600;
 
       & .button-custom-icon {
         @apply text-zinc-500;
