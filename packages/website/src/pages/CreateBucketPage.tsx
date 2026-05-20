@@ -20,6 +20,7 @@ import { apiRequest, createAccessKey } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 
 import { Heading } from '../components/Heading/Heading';
+import { Card } from '../components/Card';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
@@ -225,7 +226,7 @@ export function CreateBucketPage() {
       {/* Two-column layout */}
       <div className="flex gap-10">
         {/* Left: White card with form */}
-        <div className="w-[520px] shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+        <Card className="w-[520px] shrink-0 overflow-hidden">
           <div className="flex flex-col gap-5">
             {/* Bucket name */}
             <FormField
@@ -338,7 +339,7 @@ export function CreateBucketPage() {
             </Button>
             <SlowOperationIndicator isLoading={creating} operation="Creating bucket" />
           </div>
-        </div>
+        </Card>
 
         {/* Right: Info sidebar */}
         <div className="sticky top-0 w-60 shrink-0 self-start pt-1">
