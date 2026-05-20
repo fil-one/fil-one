@@ -78,6 +78,24 @@
       }
     }
 
+    &.button--warning {
+      @apply bg-amber-700 text-white;
+
+      &:not(:disabled) {
+        &:hover {
+          @apply bg-amber-600;
+        }
+
+        &:focus {
+          @apply bg-amber-600 outline-2 outline-offset-2 outline-amber-400;
+        }
+      }
+
+      &:disabled {
+        @apply bg-zinc-300 text-zinc-500;
+      }
+    }
+
     &.button--ghost {
       @apply border border-zinc-200 bg-white text-zinc-700;
 

@@ -1,21 +1,20 @@
-import { GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import { QueryCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { getS3Endpoint, S3_REGION } from '@filone/shared';
+import { S3_REGION } from '@filone/shared';
 import type { ActivityResponse, RecentActivity, UsageDataPoint } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraS3Credentials, listBuckets } from '../lib/aurora-s3-client.js';
-import { isOrgSetupComplete } from '../lib/org-setup-status.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import type { AccessKeyRecord } from '../lib/dynamo-records.js';
-import { getStorageSamples } from '../lib/aurora-backoffice.js';
+import { getStorageSamples } from '../lib/aurora/aurora-backoffice.js';
 
 const dynamo = getDynamoClient();
 
@@ -35,19 +34,11 @@ export async function baseHandler(
   );
   const period = event.queryStringParameters?.period === '30d' ? 30 : 7;
 
-  // Look up org profile for Aurora S3 credentials
-  const { Item: orgProfile } = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-    }),
-  );
-
-  const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
+  const orchestrator = getOrchestratorForRegion(S3_REGION);
+  const tenantId = await orchestrator.isTenantReady(orgId);
 
   const [bucketActivities, keyActivities] = await Promise.all([
-    fetchBucketActivities(orgId, auroraTenantId, setupStatus),
+    fetchBucketActivities(orgId, tenantId),
     fetchAccessKeyActivities(orgId),
   ]);
 
@@ -58,7 +49,7 @@ export async function baseHandler(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
 
-  const trends = await buildTimeSeries(auroraTenantId, period);
+  const trends = await buildTimeSeries(tenantId, period);
 
   const response: ActivityResponse = {
     activities: activities.slice(0, limit),
@@ -69,17 +60,14 @@ export async function baseHandler(
 
 async function fetchBucketActivities(
   orgId: string,
-  auroraTenantId: string | undefined,
-  setupStatus: string | undefined,
+  tenantId: string | null,
 ): Promise<RecentActivity[]> {
   // Swallow errors so the dashboard still renders.
-  const stage = process.env.FILONE_STAGE!;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) return [];
+  if (!tenantId) return [];
 
-  const gatewayUrl = getS3Endpoint(S3_REGION, stage);
+  const orchestrator = getOrchestratorForRegion(S3_REGION);
   try {
-    const credentials = await getAuroraS3Credentials(stage, auroraTenantId);
-    const { buckets } = await listBuckets(gatewayUrl, credentials);
+    const buckets = await orchestrator.listBuckets(tenantId);
     return buckets.map((bucket) => ({
       id: `bucket-${bucket.name}`,
       action: 'bucket.created' as const,
@@ -93,10 +81,10 @@ async function fetchBucketActivities(
     if (errName === 'AccessDenied' || errCode === 'AccessDenied') {
       console.warn('[get-activity] AccessDenied listing buckets — tenant may have no buckets yet', {
         orgId,
-        auroraTenantId,
+        tenantId,
       });
     } else {
-      console.error('[get-activity] Failed to list buckets from Aurora S3', { orgId, err });
+      console.error('[get-activity] Failed to list buckets', { orgId, err });
     }
     return [];
   }
@@ -126,7 +114,7 @@ async function fetchAccessKeyActivities(orgId: string): Promise<RecentActivity[]
 }
 
 async function buildTimeSeries(
-  auroraTenantId: string | undefined,
+  tenantId: string | null,
   period: number,
 ): Promise<ActivityResponse['trends']> {
   const now = new Date();
@@ -134,9 +122,12 @@ async function buildTimeSeries(
   from.setUTCDate(from.getUTCDate() - period + 1);
   from.setUTCHours(0, 0, 0, 0);
 
-  const storageSamples = auroraTenantId
+  // getStorageSamples is Aurora-specific (no FTH equivalent). Phase B will
+  // expose this as `provider.getStorageSamples?(tenantId)` and FTH will
+  // return [] until the upstream endpoint exists.
+  const storageSamples = tenantId
     ? await getStorageSamples({
-        tenantId: auroraTenantId,
+        tenantId,
         from: from.toISOString(),
         to: now.toISOString(),
         window: '24h',
