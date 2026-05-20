@@ -98,6 +98,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "FthToken": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "GetActivity": {
       "name": string
       "type": "sst.aws.Function"

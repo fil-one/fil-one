@@ -18,15 +18,6 @@ import {
 } from '@aws-sdk/client-s3';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
-
-// Bridge the gap until sst-env.d.ts is regenerated to include FthToken.
-// SST auto-regenerates that file on `sst dev`/`sst deploy`; once that runs
-// this augmentation becomes a no-op and can be removed.
-declare module 'sst' {
-  interface Resource {
-    FthToken: { type: 'sst.sst.Secret'; value: string };
-  }
-}
 import { S3Region } from '@filone/shared';
 import type {
   AccessKeyPermission,
