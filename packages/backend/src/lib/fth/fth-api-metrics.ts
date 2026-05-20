@@ -1,4 +1,4 @@
-import { reportMetric } from './metrics.js';
+import { reportMetric } from '../metrics.js';
 
 export type FthApiName = 'fth-management';
 

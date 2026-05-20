@@ -36,7 +36,7 @@ import {
   DeleteObjectCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
-import { fthOrchestrator } from '../packages/backend/src/lib/service-orchestrator/fth-orchestrator.js';
+import { fthOrchestrator } from '../packages/backend/src/lib/fth/fth-orchestrator.js';
 
 const PROTECTED_STAGES = ['production'];
 const stage = readFileSync('.sst/stage', 'utf8').trim();

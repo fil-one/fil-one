@@ -25,19 +25,19 @@ import type {
   S3Region as S3RegionType,
 } from '@filone/shared';
 import { getDynamoClient } from '../ddb-client.js';
-import { createFthClient, FthApiError, FthConflictError } from '../fth-client.js';
-import type { FthClient } from '../fth-client.js';
-import { instrumentClient } from '../fth-api-metrics.js';
+import { createFthClient, FthApiError, FthConflictError } from './fth-client.js';
+import type { FthClient } from './fth-client.js';
+import { instrumentClient } from './fth-api-metrics.js';
 import { isNotFoundError } from '../s3-errors.js';
 import {
   FTH_TENANT_FINAL_SETUP_STATUS,
   isFthTenantSetupComplete,
-} from '../fth-tenant-setup-status.js';
+} from './fth-tenant-setup-status.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
-} from './service-orchestrator.js';
+} from '../service-orchestrator.js';
 import type {
   BucketDetails,
   BucketSummary,
@@ -46,7 +46,7 @@ import type {
   IssuedAccessKey,
   PresignerContext,
   ServiceOrchestrator,
-} from './service-orchestrator.js';
+} from '../service-orchestrator.js';
 
 const FTH_FULL_PERMISSIONS = [
   's3:CreateBucket',

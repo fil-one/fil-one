@@ -40,8 +40,8 @@ const mockFthClient = {
   },
 };
 
-vi.mock('../fth-client.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../fth-client.js')>();
+vi.mock('./fth-client.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./fth-client.js')>();
   return {
     ...original,
     createFthClient: vi.fn(() => mockFthClient),
@@ -58,9 +58,9 @@ import {
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   type IssueAccessKeyOpts,
-} from './service-orchestrator.js';
-import { FTH_TENANT_FINAL_SETUP_STATUS, FthTenantSetupStatus } from '../fth-tenant-setup-status.js';
-import { FthApiError, FthConflictError } from '../fth-client.js';
+} from '../service-orchestrator.js';
+import { FTH_TENANT_FINAL_SETUP_STATUS, FthTenantSetupStatus } from './fth-tenant-setup-status.js';
+import { FthApiError, FthConflictError } from './fth-client.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
