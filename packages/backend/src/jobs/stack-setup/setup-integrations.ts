@@ -446,14 +446,6 @@ async function sendCfnResponse(event: SetupEvent, response: SetupResponse): Prom
 
 // ── Orchestration helpers ─────────────────────────────────────────────
 
-// Personal dev stages that may opt in to running tenant-wide Auth0 setup
-// (MFA Action, email provider, passkey connection PATCH) for testing. These
-// share the FilOneDev tenant with staging, so a deploy from one of these
-// stages races with staging deploys against the same Action and connection.
-// The setup steps are idempotent — adding stages here is safe as long as the
-// stage owner is on current code.
-const TESTING_AUTH0_SETUP_STAGES = new Set(['joemuoio']);
-
 interface StageContext {
   stripe: Stripe | undefined;
   mgmtDomain: string;
@@ -525,7 +517,7 @@ async function handleSetup(
 function buildStageContext(stage: string, siteUrl: string): StageContext {
   const isProduction = stage === 'production';
   const isStagingOrProd = stage === 'staging' || isProduction;
-  const runsAuth0TenantSetup = isStagingOrProd || TESTING_AUTH0_SETUP_STAGES.has(stage);
+  const runsAuth0TenantSetup = isStagingOrProd;
   const isPreview = isPreviewStage(stage);
 
   if (isProduction && Resource.StripeSecretKey.value.startsWith('sk_test_')) {

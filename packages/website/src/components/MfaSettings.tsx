@@ -15,6 +15,7 @@ import {
   regenerateRecoveryCode,
 } from '../lib/api.js';
 import {
+  isSocialConnection,
   PASSKEY_PER_USER_LIMIT,
   type MeResponse,
   type MfaEnrollment,
@@ -405,7 +406,7 @@ function useClearStepUpAction(action: string) {
 export function MfaSettings({ me }: { me: MeResponse }) {
   useClearStepUpAction(DELETE_PASSKEY_ACTION);
   const passkeys = me.passkeys ?? [];
-  const showPasskeys = me.passkeys !== undefined;
+  const showPasskeys = me.passkeys !== undefined && !isSocialConnection(me.connectionType);
   return (
     <>
       {me.mfaEnrollments.length > 0 ? <EnrolledView me={me} /> : <EnableView />}

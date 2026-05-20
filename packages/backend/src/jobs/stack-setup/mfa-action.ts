@@ -24,7 +24,6 @@ export interface MfaFactor {
 export interface AuthenticationMethod {
   name: string;
   timestamp?: string;
-  performed_amr?: string[];
 }
 
 export interface PostLoginEvent {
@@ -60,18 +59,25 @@ export async function onExecutePostLogin(event: PostLoginEvent, api: PostLoginAp
   const hasMfa = enrolledFactors.length > 0;
   const authMethods = event.authentication?.methods || [];
   const usedRecoveryCode = authMethods.some((m) => m.name === 'recovery-code');
-  // Passkeys are phishing-resistant and user-verifying; Auth0 marks them with
-  // performed_amr 'phr'. Accepting a passkey login as satisfying MFA matches
-  // the industry pattern (GitHub, Google, Microsoft) and is what Auth0
-  // recommends. Use the AMR claim rather than the method name — Auth0 has
-  // shifted name strings historically (`passkey`, `webauthn`, ...), but the
-  // AMR contract is stable.
-  const usedPasskey = authMethods.some((m) => (m.performed_amr || []).includes('phr'));
-  if (usedPasskey) return;
+  // Auth0 emits the primary-passkey login as `name: 'passkey'` on
+  // event.authentication.methods. (Note: `performed_amr: 'phr'` is a
+  // tenant-log field, not exposed to the Action runtime — only `name` and
+  // `timestamp` are.) Auth0 has used other strings historically for MFA
+  // WebAuthn (`webauthn`, etc.), but primary-passkey-on-connection logins
+  // come through as `'passkey'`.
+  const usedPasskey = authMethods.some((m) => m.name === 'passkey');
 
   // Recovery-code redemption means the user just lost their device. Force
   // re-enrollment of a fresh strong factor on this same login transaction.
   const mfaEnrolling = event.user.app_metadata?.mfa_enrolling === true || usedRecoveryCode;
+
+  // Passkey logins are phishing-resistant and user-verifying; treat them as
+  // satisfying MFA so a user who signed in with a passkey isn't double-
+  // challenged. Matches the industry pattern (GitHub, Google, Microsoft).
+  // EXCEPTION: when the user is actively enrolling (clicked "Add MFA" or
+  // just redeemed a recovery code), fall through to the enrollment branch
+  // below — otherwise the enroll button silently no-ops for passkey users.
+  if (usedPasskey && !mfaEnrolling) return;
 
   // Strong factors users can enroll in. Recovery code is auto-issued by
   // Auth0 when one of these is enrolled — never enrolled directly.

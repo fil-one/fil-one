@@ -57,7 +57,7 @@ Passkeys are enabled as **primary authentication** on the `Username-Password-Aut
 | #   | Setting                | Dashboard path                                                            | Required value                            | Notes                                                                                                               |
 | --- | ---------------------- | ------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | 1   | Universal Login        | Branding > Universal Login                                                | **New** experience                        | Already on per existing setup; verify before enabling passkeys.                                                     |
-| 2   | Identifier First Login | Authentication > Authentication Profile                                   | **Identifier First** (or with biometrics) | Two-step login (email → password/passkey). Required because passkey UI cannot render until the identifier is known. |
+| 2   | Identifier First Login | Authentication > Authentication Profile                                   | **Identifier First** (plain — not "+ Biometrics") | Two-step login (email → password/passkey). **Do not pick "Identifier First + Biometrics"** — that variant enables Auth0's legacy WebAuthn-platform-as-first-factor flow (`webauthn_platform_first_factor: true`), which the API treats as mutually exclusive with passkeys-on-connection and rejects the deploy-time PATCH with `"Passkey authentication is only compatible with Identifier First."`. The autofill-on-email-screen UX comes from `challenge_ui: "both"` on the connection and works under plain Identifier First. |
 | 3   | Custom Login Page      | Branding > Universal Login > Advanced Options > Login                     | **Disabled**                              | Default is disabled; confirm no custom HTML has been added.                                                         |
 | 4   | Custom domain          | Branding > Custom Domains                                                 | **Exactly one** (`auth.fil.one`)          | Relying-party identifier — **changing it invalidates every enrolled passkey**.                                      |
 | 5   | Connection database    | Authentication > Database > `Username-Password-Authentication` > Settings | **"Use my own database" off**             | Already off; confirm.                                                                                               |
@@ -66,7 +66,7 @@ Passkeys are enabled as **primary authentication** on the `Username-Password-Aut
 
 The deploy-time setup Lambda (`setup-integrations`) PATCHes the `Username-Password-Authentication` connection on every staging/production deploy with `authentication_methods.passkey.enabled: true`, `passkey_options.progressive_enrollment_enabled: true`, `passkey_options.local_enrollment_enabled: true`, and `passkey_options.challenge_ui: "both"`. Password authentication stays enabled — Auth0 does not currently support disabling it. No manual dashboard toggling required after the prerequisites above are met.
 
-**3. Required Management API scopes** — the deploy-time M2M app needs `read:connections` and `update:connections` in addition to the scopes listed under "Machine-to-Machine (M2M) Applications" below. The runtime M2M app uses `read:authentication_methods` and `delete:authentication_methods` (already granted for MFA) to list and delete passkeys.
+**3. Required Management API scopes** — the deploy-time M2M app needs `read:connections`, `update:connections`, and `update:connections_options` in addition to the scopes listed under "Machine-to-Machine (M2M) Applications" below. The runtime M2M app uses `read:authentication_methods` and `delete:authentication_methods` (already granted for MFA) to list and delete passkeys.
 
 **4. Operator runbook — relying-party domain changes:**
 
@@ -94,7 +94,7 @@ Used only by the deploy-time setup Lambda to configure Auth0 on each deploy. Not
 
 **Required scopes** (Applications > M2M app > APIs > Auth0 Management API):
 
-`read:clients`, `update:clients`, `read:email_provider`, `create:email_provider`, `update:email_provider`, `create:actions`, `read:actions`, `update:actions`, `read:triggers`, `update:triggers`, `read:connections`, `update:connections`
+`read:clients`, `update:clients`, `read:email_provider`, `create:email_provider`, `update:email_provider`, `create:actions`, `read:actions`, `update:actions`, `read:triggers`, `update:triggers`, `read:connections`, `update:connections`, `update:connections_options`
 
 ```bash
 pnpx sst secret set Auth0MgmtClientId <M2M-client-id> [--stage <stage>]
