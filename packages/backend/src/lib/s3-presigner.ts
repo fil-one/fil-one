@@ -94,13 +94,13 @@ export async function listObjects(options: ListObjectsOptions): Promise<ListObje
 
 // ── Presigned URL generators ────────────────────────────────────────
 
-interface PresignBase {
+interface PresignBaseOptions {
   ctx: PresignerContext;
   bucket: string;
   expiresIn: number;
 }
 
-export interface PresignPutObjectOptions extends PresignBase {
+export interface PresignPutObjectOptions extends PresignBaseOptions {
   key: string;
   contentType?: string;
   metadata?: Record<string, string>;
@@ -109,6 +109,13 @@ export interface PresignPutObjectOptions extends PresignBase {
 export async function getPresignedPutObjectUrl(options: PresignPutObjectOptions): Promise<string> {
   const { ctx, bucket, key, expiresIn, contentType, metadata } = options;
   const s3 = createS3Client(ctx);
+
+  console.log('[s3-presigner] Creating presigned PutObject URL', {
+    endpoint: ctx.endpointUrl,
+    bucket,
+    key,
+    expiresIn,
+  });
 
   return getSignedUrl(
     s3,
@@ -122,7 +129,7 @@ export async function getPresignedPutObjectUrl(options: PresignPutObjectOptions)
   );
 }
 
-export type PresignGetObjectOptions = PresignBase & { key: string; versionId?: string };
+export type PresignGetObjectOptions = PresignBaseOptions & { key: string; versionId?: string };
 
 export async function getPresignedGetObjectUrl(options: PresignGetObjectOptions): Promise<string> {
   const { ctx, bucket, key, expiresIn, versionId } = options;
@@ -139,7 +146,7 @@ export async function getPresignedGetObjectUrl(options: PresignGetObjectOptions)
   );
 }
 
-export interface PresignListObjectsOptions extends PresignBase {
+export interface PresignListObjectsOptions extends PresignBaseOptions {
   prefix?: string;
   delimiter?: string;
   maxKeys?: number;
@@ -165,7 +172,7 @@ export async function getPresignedListObjectsUrl(
   );
 }
 
-export interface PresignListObjectVersionsOptions extends PresignBase {
+export interface PresignListObjectVersionsOptions extends PresignBaseOptions {
   prefix?: string;
   delimiter?: string;
   maxKeys?: number;
@@ -194,7 +201,7 @@ export async function getPresignedListObjectVersionsUrl(
   );
 }
 
-export interface PresignHeadObjectOptions extends PresignBase {
+export interface PresignHeadObjectOptions extends PresignBaseOptions {
   key: string;
   versionId?: string;
 }
@@ -216,7 +223,7 @@ export async function getPresignedHeadObjectUrl(
   );
 }
 
-export type PresignGetObjectRetentionOptions = PresignBase & {
+export type PresignGetObjectRetentionOptions = PresignBaseOptions & {
   key: string;
   versionId?: string;
 };
@@ -238,7 +245,7 @@ export async function getPresignedGetObjectRetentionUrl(
   );
 }
 
-export type PresignDeleteObjectOptions = PresignBase & {
+export type PresignDeleteObjectOptions = PresignBaseOptions & {
   key: string;
   versionId?: string;
 };
