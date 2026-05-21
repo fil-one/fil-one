@@ -35,11 +35,9 @@ interface FthS3Credentials {
 const dynamo = getDynamoClient();
 const ssm = new SSMClient({});
 const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
-const consoleUserCache = new QuickLRU<string, string>({ maxSize: 500 });
 
 export const _resetFthOrchestratorCachesForTesting = () => {
   ssmCache.clear();
-  consoleUserCache.clear();
 };
 
 export const fthOrchestrator: ServiceOrchestrator = {
