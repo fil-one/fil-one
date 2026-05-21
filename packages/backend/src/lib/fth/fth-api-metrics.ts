@@ -8,7 +8,7 @@ export function instrumentClient(
 ): void {
   instrumentApiClient(client, {
     apiName: options.apiName,
-    durationMetricName: 'FthApiDuration',
-    requestCountMetricName: 'FthApiRequestCount',
+    durationMetricName: 'OrchestratorApiRequestDuration',
+    requestCountMetricName: 'OrchestratorApiRequestCount',
   });
 }
