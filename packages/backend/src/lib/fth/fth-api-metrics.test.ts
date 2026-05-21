@@ -53,9 +53,9 @@ describe('instrumentClient', () => {
       endpoint: 'GET /management/v1/clients/{clientRef}',
       statusGroup: '2xx',
       statusCode: 200,
-      FthApiRequestCount: 1,
+      OrchestratorApiRequestCount: 1,
     });
-    expect(metrics[0].FthApiDuration).toBeGreaterThanOrEqual(0);
+    expect(metrics[0].OrchestratorApiRequestDuration).toBeGreaterThanOrEqual(0);
   });
 
   it('reports metric with statusGroup "4xx" for a client error', async () => {
@@ -116,10 +116,10 @@ describe('instrumentClient', () => {
 
     await client.getClient('org-1');
 
-    expect(reportedMetrics()[0].FthApiDuration).toBeGreaterThanOrEqual(0);
+    expect(reportedMetrics()[0].OrchestratorApiRequestDuration).toBeGreaterThanOrEqual(0);
   });
 
-  it('emits the CloudWatch EMF envelope with FthApi metric definitions', async () => {
+  it('emits the CloudWatch EMF envelope with OrchestratorApi metric definitions', async () => {
     const client = buildInstrumentedClient(mockFetch(200, { id: '1' }));
 
     await client.getClient('org-1');
@@ -130,8 +130,8 @@ describe('instrumentClient', () => {
           Namespace: 'FilOne',
           Dimensions: [['apiName', 'endpoint', 'statusGroup']],
           Metrics: [
-            { Name: 'FthApiDuration', Unit: 'Milliseconds' },
-            { Name: 'FthApiRequestCount', Unit: 'Count' },
+            { Name: 'OrchestratorApiRequestDuration', Unit: 'Milliseconds' },
+            { Name: 'OrchestratorApiRequestCount', Unit: 'Count' },
           ],
         },
       ],
