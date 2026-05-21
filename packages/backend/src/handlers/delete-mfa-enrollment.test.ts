@@ -80,10 +80,10 @@ function deleteEnrollmentEvent(enrollmentId: string = MOCK_ENROLLMENT_ID) {
   return event;
 }
 
-function setupAuthMocks() {
-  mockJwtVerify
-    .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-    .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+function setupAuthMocks(idTokenPayload: Record<string, unknown> = { amr: ['mfa'] }) {
+  mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+    payload: { email: MOCK_EMAIL, email_verified: true, ...idTokenPayload },
+  });
 
   ddbMock
     .on(GetItemCommand, {
@@ -233,6 +233,27 @@ describe('DELETE /api/mfa/enrollments/{enrollmentId} handler', () => {
       statusCode: 404,
       body: JSON.stringify({ message: 'Enrollment not found.' }),
     });
+    expect(mockDeleteGuardianEnrollment).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 step_up_required when the ID token has no amr: ["mfa"]', async () => {
+    setupAuthMocks({ amr: ['pwd'] });
+    mockGetMfaEnrollments.mockResolvedValue([
+      {
+        id: MOCK_ENROLLMENT_ID,
+        type: 'webauthn-roaming',
+        status: 'confirmed',
+        source: 'auth-methods',
+      },
+    ]);
+
+    const result = await handler(deleteEnrollmentEvent(), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 401,
+      body: JSON.stringify({ error: 'step_up_required' }),
+    });
+    expect(mockDeleteAuthenticationMethod).not.toHaveBeenCalled();
     expect(mockDeleteGuardianEnrollment).not.toHaveBeenCalled();
   });
 });

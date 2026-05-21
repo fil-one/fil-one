@@ -10,6 +10,7 @@ export {
   formatRegion,
   getRegionLabel,
   getAvailableRegions,
+  isSupportedRegion,
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,

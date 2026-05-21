@@ -4,7 +4,7 @@ import {
   UpdateItemCommand,
   ConditionalCheckFailedException,
 } from '@aws-sdk/client-dynamodb';
-import type { Role } from './roles.ts';
+import type { Role } from './roles.util.ts';
 
 // Patches BillingTable records for E2E test users back to known role-specific
 // state before each run. Trial periods can elapse and `past_due` subscriptions

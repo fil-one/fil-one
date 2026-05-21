@@ -3,6 +3,7 @@
 // alone knows how to look up credentials and which endpoint/region apply.
 
 import {
+  CreateBucketCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   GetObjectRetentionCommand,
@@ -15,6 +16,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { S3Object } from '@filone/shared';
+import { BucketAlreadyExistsError } from './service-orchestrator.js';
 import type { PresignerContext } from './service-orchestrator.js';
 
 function createS3Client(ctx: PresignerContext): S3Client {
@@ -27,6 +29,26 @@ function createS3Client(ctx: PresignerContext): S3Client {
 }
 
 // ── Direct S3 operations (used by handlers that can't presign) ─────
+
+export interface CreateBucketOptions {
+  bucketName: string;
+}
+
+export async function createBucket(
+  ctx: PresignerContext,
+  options: CreateBucketOptions,
+): Promise<void> {
+  const s3 = createS3Client(ctx);
+  try {
+    await s3.send(new CreateBucketCommand({ Bucket: options.bucketName }));
+  } catch (err) {
+    const name = (err as { name?: string }).name;
+    if (name === 'BucketAlreadyOwnedByYou' || name === 'BucketAlreadyExists') {
+      throw new BucketAlreadyExistsError(options.bucketName, { cause: err as Error });
+    }
+    throw err;
+  }
+}
 
 export interface ListBucketsResult {
   buckets: Array<{ name: string; createdAt: string }>;
