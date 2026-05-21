@@ -1,8 +1,9 @@
 import { test as setup, expect } from '@playwright/test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { STORAGE_STATE, type Role } from './roles.ts';
-import { resetBillingState } from './billing-reset.ts';
+import { STORAGE_STATE, type Role } from './roles.util.ts';
+import { resetBillingState } from './billing-reset.util.ts';
+import { maybeSkipPasskeyEnrollment } from './passkey.util.ts';
 
 const REQUIRED_CREDENTIAL_VARS = [
   'E2E_PAID_EMAIL',
@@ -63,17 +64,7 @@ for (const role of roles) {
     await page.locator('#password').fill(role.password);
     await page.locator('button[data-action-button-primary="true"]').click();
 
-    // WebKit doesn't trigger Auth0's passkey enrollment interstitial, so the
-    // user goes straight to /dashboard. Race the two outcomes and only click
-    // the skip button when it actually appears.
-    const skipPasskey = page.locator('button[value="abort-passkey-enrollment"]');
-    await Promise.race([
-      skipPasskey.waitFor({ state: 'visible' }),
-      page.waitForURL(/\/dashboard$/),
-    ]);
-    if (await skipPasskey.isVisible()) {
-      await skipPasskey.click();
-    }
+    await maybeSkipPasskeyEnrollment(page);
 
     await expect(page).toHaveURL(/\/dashboard$/);
 
