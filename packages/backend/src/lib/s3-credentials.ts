@@ -57,6 +57,8 @@ export async function getConsoleS3Credentials(
     throw new Error(`${orchestratorId} S3 credentials not found in SSM for tenant ${tenantId}`);
   }
 
+  // Ensure the value is valid JSON before caching it
+  const credentials = JSON.parse(value) as S3Credentials;
   ssmCache.set(cacheKey, value);
-  return JSON.parse(value) as S3Credentials;
+  return credentials;
 }
