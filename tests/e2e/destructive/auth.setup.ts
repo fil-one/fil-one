@@ -1,8 +1,9 @@
 import { test as setup, expect } from '@playwright/test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { STORAGE_STATE, type Role } from './roles.ts';
-import { resetBillingState } from './billing-reset.ts';
+import { STORAGE_STATE, type Role } from './roles.util.ts';
+import { resetBillingState } from './billing-reset.util.ts';
+import { maybeSkipPasskeyEnrollment } from './passkey.util.ts';
 
 const REQUIRED_CREDENTIAL_VARS = [
   'E2E_PAID_EMAIL',
@@ -62,7 +63,8 @@ for (const role of roles) {
     await page.locator('button[data-action-button-primary="true"]').click();
     await page.locator('#password').fill(role.password);
     await page.locator('button[data-action-button-primary="true"]').click();
-    await page.locator('button[value="abort-passkey-enrollment"]').click();
+
+    await maybeSkipPasskeyEnrollment(page);
 
     await expect(page).toHaveURL(/\/dashboard$/);
 
