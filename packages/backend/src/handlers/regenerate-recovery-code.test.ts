@@ -97,7 +97,7 @@ function setupAuthMocks(idTokenPayload: Record<string, unknown> = { amr: ['mfa']
     .resolves({
       Item: {
         orgConfirmed: { BOOL: true },
-        setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
+        auroraSetupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
       },
     });
 }

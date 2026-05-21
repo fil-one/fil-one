@@ -95,7 +95,7 @@ function mockAuthIdentity() {
         sk: { S: 'PROFILE' },
         name: { S: 'Test Org' },
         auroraTenantId: { S: AURORA_TENANT_ID },
-        setupStatus: { S: FINAL_SETUP_STATUS },
+        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
       },
     });
 }
