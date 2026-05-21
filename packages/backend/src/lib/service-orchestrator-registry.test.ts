@@ -1,8 +1,8 @@
-import { afterEach, describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { S3Region } from '@filone/shared';
 import {
   getOrchestratorForRegion,
-  getOrchestratorsForCurrentStage,
+  getAvailableOrchestrators,
 } from './service-orchestrator-registry.js';
 
 describe('service-orchestrator registry', () => {
@@ -17,22 +17,14 @@ describe('service-orchestrator registry', () => {
   });
 });
 
-describe('getOrchestratorsForCurrentStage', () => {
-  const originalStage = process.env.FILONE_STAGE;
-
-  afterEach(() => {
-    process.env.FILONE_STAGE = originalStage;
-  });
-
+describe('getAvailableOrchestrators', () => {
   it('returns only the Aurora orchestrator in production', () => {
-    process.env.FILONE_STAGE = 'production';
-    const orchestrators = getOrchestratorsForCurrentStage();
+    const orchestrators = getAvailableOrchestrators('production');
     expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora']);
   });
 
   it('returns Aurora and FTH orchestrators in non-production stages', () => {
-    process.env.FILONE_STAGE = 'staging';
-    const orchestrators = getOrchestratorsForCurrentStage();
+    const orchestrators = getAvailableOrchestrators('staging');
     expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth']);
   });
 });

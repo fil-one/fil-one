@@ -2,7 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ListBucketsResponse } from '@filone/shared';
-import { getOrchestratorsForCurrentStage } from '../lib/service-orchestrator-registry.js';
+import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -15,7 +15,7 @@ export async function baseHandler(
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const { orgId } = getUserInfo(event);
 
-  const orchestrators = getOrchestratorsForCurrentStage();
+  const orchestrators = getAvailableOrchestrators(process.env.FILONE_STAGE!);
   const results = await Promise.all(
     orchestrators.map(async (orchestrator) => {
       const tenantId = await orchestrator.isTenantReady(orgId);

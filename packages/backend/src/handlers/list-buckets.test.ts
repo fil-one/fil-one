@@ -31,10 +31,10 @@ const fth: MockOrchestrator = {
   listBuckets: vi.fn(),
 };
 
-const stageOrchestrators = vi.fn<() => MockOrchestrator[]>();
+const stageOrchestrators = vi.fn<(stage: string) => MockOrchestrator[]>();
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getOrchestratorsForCurrentStage: () => stageOrchestrators(),
+  getAvailableOrchestrators: (stage: string) => stageOrchestrators(stage),
 }));
 
 process.env.FILONE_STAGE = 'test';
@@ -143,6 +143,15 @@ describe('list-buckets baseHandler (single-region)', () => {
     await baseHandler(event);
 
     expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
+  });
+
+  it('selects orchestrators using the current FILONE_STAGE', async () => {
+    aurora.listBuckets.mockResolvedValue([]);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    await baseHandler(event);
+
+    expect(stageOrchestrators).toHaveBeenCalledWith('test');
   });
 
   it('throws when the orchestrator returns an error', async () => {
