@@ -27,7 +27,7 @@ import {
 } from '../aurora/aurora-portal.js';
 import { getDynamoClient } from '../ddb-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
-import { getServiceS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
+import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 import {
   NotImplementedError,
   type BucketDetails,
@@ -194,7 +194,7 @@ export const auroraOrchestrator = {
 
   async getPresignerContext(tenantId: string): Promise<PresignerContext> {
     const stage = getStage();
-    const credentials = await getServiceS3Credentials({
+    const credentials = await getConsoleS3Credentials({
       orchestratorId: auroraOrchestrator.id,
       stage,
       tenantId,

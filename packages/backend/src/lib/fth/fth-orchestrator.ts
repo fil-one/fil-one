@@ -25,7 +25,7 @@ import type {
 } from '../service-orchestrator.js';
 
 import { createBucket as s3CreateBucket, listBuckets as s3ListBuckets } from '../s3-presigner.js';
-import { getServiceS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
+import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 
 const dynamo = getDynamoClient();
 
@@ -56,7 +56,7 @@ export const fthOrchestrator = {
   },
 
   async getPresignerContext(tenantId: string): Promise<PresignerContext> {
-    const credentials = await getServiceS3Credentials({
+    const credentials = await getConsoleS3Credentials({
       orchestratorId: fthOrchestrator.id,
       stage: process.env.FILONE_STAGE!,
       tenantId,

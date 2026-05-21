@@ -27,7 +27,7 @@ const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
 
 export const _resetS3CredentialsCacheForTesting = () => ssmCache.clear();
 
-export async function getServiceS3Credentials(
+export async function getConsoleS3Credentials(
   args: GetConsoleS3CredentialsArgs,
 ): Promise<S3Credentials> {
   const { orchestratorId, stage, tenantId } = args;
