@@ -16,7 +16,7 @@ import { Resource } from 'sst';
 import { S3Region } from '@filone/shared';
 import { getDynamoClient } from '../ddb-client.js';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
-import { BucketAlreadyExistsError } from '../service-orchestrator.js';
+import { BucketAlreadyExistsError, NotImplementedError } from '../service-orchestrator.js';
 import type {
   BucketDetails,
   BucketSummary,
@@ -99,7 +99,7 @@ export const fthOrchestrator: ServiceOrchestrator = {
   },
 
   async deleteBucket(_tenantId: string, _bucketName: string): Promise<void> {
-    throw new Error('Not implemented yet');
+    throw new NotImplementedError('Bucket deletion is not implemented in this region yet');
   },
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {
@@ -132,11 +132,11 @@ export const fthOrchestrator: ServiceOrchestrator = {
   },
 
   async issueAccessKey(_tenantId: string, _opts: IssueAccessKeyOpts): Promise<IssuedAccessKey> {
-    throw new Error('Not implemented yet');
+    throw new NotImplementedError('Access key management is not implemented in this region yet');
   },
 
   async findAccessKeyByName(_tenantId: string, _keyName: string) {
-    throw new Error('Not implemented yet');
+    throw new NotImplementedError('Access key management is not implemented in this region yet');
   },
 };
 
