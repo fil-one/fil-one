@@ -160,6 +160,9 @@
         "putObjectLockConfiguration": {
           "type": "integer"
         },
+        "putObjectPart": {
+          "type": "integer"
+        },
         "putObjectRetention": {
           "type": "integer"
         },
@@ -243,6 +246,20 @@
       },
       "type": "object"
     },
+    "models.AuthComponentSetupStatus": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lastSetupStep": {
+          "$ref": "#/definitions/models.SetupStep"
+        },
+        "properties": {
+          "$ref": "#/definitions/models.EmptyComponentProperties"
+        }
+      },
+      "type": "object"
+    },
     "models.BackofficeEnvironmentResponse": {
       "properties": {
         "apiUrl": {
@@ -266,24 +283,58 @@
       },
       "type": "object"
     },
-    "models.ComponentSetupStatus": {
+    "models.Component": {
       "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
         "lastSetupStep": {
           "$ref": "#/definitions/models.SetupStep"
+        },
+        "lastStepAt": {
+          "type": "string"
+        },
+        "name": {
+          "$ref": "#/definitions/models.ComponentName"
+        },
+        "properties": {
+          "type": "object"
+        },
+        "tenantId": {
+          "type": "string"
         }
       },
       "type": "object"
     },
+    "models.ComponentName": {
+      "enum": ["S3", "Compute", "Auth", "Unknown"],
+      "type": "string",
+      "x-enum-varnames": ["ComponentS3", "ComponentCompute", "ComponentAuth", "ComponentUnknown"]
+    },
     "models.ComponentsStatus": {
       "properties": {
         "auth": {
-          "$ref": "#/definitions/models.ComponentSetupStatus"
+          "$ref": "#/definitions/models.AuthComponentSetupStatus"
         },
         "compute": {
-          "$ref": "#/definitions/models.ComponentSetupStatus"
+          "$ref": "#/definitions/models.ComputeComponentSetupStatus"
         },
         "s3": {
-          "$ref": "#/definitions/models.ComponentSetupStatus"
+          "$ref": "#/definitions/models.S3ComponentSetupStatus"
+        }
+      },
+      "type": "object"
+    },
+    "models.ComputeComponentSetupStatus": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lastSetupStep": {
+          "$ref": "#/definitions/models.SetupStep"
+        },
+        "properties": {
+          "$ref": "#/definitions/models.EmptyComponentProperties"
         }
       },
       "type": "object"
@@ -351,6 +402,9 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "models.EmptyComponentProperties": {
       "type": "object"
     },
     "models.GetS3CredentialsResponse": {
@@ -454,7 +508,7 @@
       "properties": {
         "items": {
           "items": {
-            "$ref": "#/definitions/models.TenantWithMetricsManagementResponse"
+            "$ref": "#/definitions/models.TenantWithMetricsBackofficeResponse"
           },
           "type": "array"
         },
@@ -614,6 +668,28 @@
       },
       "type": "object"
     },
+    "models.S3ComponentProperties": {
+      "properties": {
+        "bucketSharingEnabled": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "models.S3ComponentSetupStatus": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lastSetupStep": {
+          "$ref": "#/definitions/models.SetupStep"
+        },
+        "properties": {
+          "$ref": "#/definitions/models.S3ComponentProperties"
+        }
+      },
+      "type": "object"
+    },
     "models.S3CredentialBase": {
       "properties": {
         "id": {
@@ -634,6 +710,8 @@
         "WARM_TIER_ADDED",
         "TENANT_ADMIN_USER_CREATED",
         "TENANT_ADMIN_USER_POLICY_ATTACHED",
+        "CLOUDSTACK_ACCOUNT_CREATED",
+        "CLOUDSTACK_USER_KEYS_CREATED",
         "FINISHED"
       ],
       "type": "string",
@@ -645,10 +723,12 @@
         "WARM_TIER_ADDED",
         "TENANT_ADMIN_USER_CREATED",
         "TENANT_ADMIN_USER_POLICY_ATTACHED",
+        "CLOUDSTACK_ACCOUNT_CREATED",
+        "CLOUDSTACK_USER_KEYS_CREATED",
         "FINISHED"
       ]
     },
-    "models.TenantManagementResponse": {
+    "models.TenantBackofficeResponse": {
       "properties": {
         "accessKeyQuantityLimit": {
           "type": "integer"
@@ -717,7 +797,7 @@
       ],
       "x-enum-varnames": ["DISABLED", "LOCKED", "WRITE_LOCKED", "ACTIVE"]
     },
-    "models.TenantWithMetricsManagementResponse": {
+    "models.TenantWithMetricsBackofficeResponse": {
       "properties": {
         "accessKeyQuantityLimit": {
           "type": "integer"
@@ -1120,6 +1200,14 @@
         },
         "name": {
           "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "services.UpdateComponentRequest": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -2441,7 +2529,7 @@
           "201": {
             "description": "Tenant created successfully",
             "schema": {
-              "$ref": "#/definitions/models.TenantManagementResponse"
+              "$ref": "#/definitions/models.TenantBackofficeResponse"
             }
           },
           "400": {
@@ -2497,7 +2585,7 @@
           "200": {
             "description": "Tenant details",
             "schema": {
-              "$ref": "#/definitions/models.TenantWithMetricsManagementResponse"
+              "$ref": "#/definitions/models.TenantWithMetricsBackofficeResponse"
             }
           },
           "404": {
@@ -2578,6 +2666,429 @@
         "tags": ["Tenants"]
       }
     },
+    "/v1/partners/{partnerId}/tenants/{tenantId}/components/Auth": {
+      "patch": {
+        "consumes": ["application/json"],
+        "description": "Updates settings (e.g. enabled status) for a component of a tenant",
+        "operationId": "UpdateAuthComponent",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Component update fields",
+            "in": "body",
+            "name": "Compute",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/services.UpdateComponentRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Component setup status",
+            "schema": {
+              "$ref": "#/definitions/models.AuthComponentSetupStatus"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Auth component settings",
+        "tags": ["Components"]
+      }
+    },
+    "/v1/partners/{partnerId}/tenants/{tenantId}/components/Auth/setup": {
+      "post": {
+        "description": "Initiates the setup process for Auth component",
+        "operationId": "SetupAuthComponent",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Component setup status",
+            "schema": {
+              "$ref": "#/definitions/models.AuthComponentSetupStatus"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Run Auth component setup process",
+        "tags": ["Components"]
+      }
+    },
+    "/v1/partners/{partnerId}/tenants/{tenantId}/components/Compute": {
+      "patch": {
+        "consumes": ["application/json"],
+        "description": "Updates settings (e.g. enabled status) for a component of a tenant",
+        "operationId": "UpdateComputeComponent",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Component update fields",
+            "in": "body",
+            "name": "Compute",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/services.UpdateComponentRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Component setup status",
+            "schema": {
+              "$ref": "#/definitions/models.ComputeComponentSetupStatus"
+            }
+          },
+          "400": {
+            "description": "Component setup is not finished yet",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Compute component settings",
+        "tags": ["Components"]
+      }
+    },
+    "/v1/partners/{partnerId}/tenants/{tenantId}/components/Compute/setup": {
+      "post": {
+        "description": "Initiates the setup process for Compute component",
+        "operationId": "SetupComputeComponent",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Component setup status",
+            "schema": {
+              "$ref": "#/definitions/models.ComputeComponentSetupStatus"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Run Compute component setup process",
+        "tags": ["Components"]
+      }
+    },
+    "/v1/partners/{partnerId}/tenants/{tenantId}/components/S3": {
+      "patch": {
+        "consumes": ["application/json"],
+        "description": "Updates settings (e.g. enabled status) for a component of a tenant",
+        "operationId": "UpdateS3Component",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Component update fields",
+            "in": "body",
+            "name": "S3",
+            "required": true,
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/services.UpdateComponentRequest"
+                },
+                {
+                  "properties": {
+                    "properties": {
+                      "$ref": "#/definitions/models.S3ComponentProperties"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Component setup status",
+            "schema": {
+              "$ref": "#/definitions/models.S3ComponentSetupStatus"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Update S3 component settings",
+        "tags": ["Components"]
+      }
+    },
+    "/v1/partners/{partnerId}/tenants/{tenantId}/components/S3/setup": {
+      "post": {
+        "description": "Initiates the setup process for S3 component",
+        "operationId": "SetupS3Component",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Component setup status",
+            "schema": {
+              "$ref": "#/definitions/models.S3ComponentSetupStatus"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Run S3 component setup process",
+        "tags": ["Components"]
+      }
+    },
+    "/v1/partners/{partnerId}/tenants/{tenantId}/components/{component}": {
+      "get": {
+        "description": "Get the current status (enabled/disabled) and properties of a component for a tenant",
+        "operationId": "GetComponent",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Component name (S3, Compute, Auth)",
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "$ref": "#/definitions/models.Component"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Tenant Not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Get component status and properties",
+        "tags": ["Components"]
+      }
+    },
     "/v1/partners/{partnerId}/tenants/{tenantId}/members": {
       "get": {
         "description": "Returns users that are members of given org",
@@ -2649,6 +3160,7 @@
     },
     "/v1/partners/{partnerId}/tenants/{tenantId}/setup": {
       "post": {
+        "deprecated": true,
         "description": "Initiates the setup process for a tenant",
         "operationId": "SetupTenant",
         "parameters": [
