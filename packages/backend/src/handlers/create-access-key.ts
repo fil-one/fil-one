@@ -13,9 +13,8 @@ import {
   IssuedAccessKey,
   ServiceOrchestrator,
 } from '../lib/service-orchestrator.js';
-import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
