@@ -40,7 +40,7 @@ export const _resetFthOrchestratorCachesForTesting = () => {
   ssmCache.clear();
 };
 
-export const fthOrchestrator: ServiceOrchestrator = {
+export const fthOrchestrator = {
   id: 'fth',
   region: S3Region.UsEast1,
 
@@ -138,7 +138,7 @@ export const fthOrchestrator: ServiceOrchestrator = {
   async findAccessKeyByName(_tenantId: string, _keyName: string) {
     throw new NotImplementedError('Access key management is not implemented in this region yet');
   },
-};
+} satisfies ServiceOrchestrator;
 
 async function getFthS3Credentials(tenantId: string): Promise<FthS3Credentials> {
   const stage = process.env.FILONE_STAGE!;
