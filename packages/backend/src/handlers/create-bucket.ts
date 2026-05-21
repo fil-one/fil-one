@@ -2,7 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
-import { CreateBucketSchema, S3_REGION } from '@filone/shared';
+import { CreateBucketSchema, S3Region } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
 import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
@@ -38,19 +38,16 @@ export async function baseHandler(
 
   const { name, region, versioning, lock, retention } = parsed.data;
 
-  // Phase A: only the Aurora region is supported in handlers. Phase B will
-  // open this up via getAvailableRegions(stage) once the FTH
-  // orchestrator is registered.
-  if (region !== S3_REGION) {
+  if (!(Object.values(S3Region) as string[]).includes(region)) {
     return new ResponseBuilder()
       .status(400)
-      .body<ErrorResponse>({ message: `Unsupported region. Supported: ${S3_REGION}` })
+      .body<ErrorResponse>({ message: `Unsupported region "${region}"` })
       .build();
   }
 
   const { orgId } = getUserInfo(event);
 
-  const orchestrator = getOrchestratorForRegion(S3_REGION);
+  const orchestrator = getOrchestratorForRegion(region as S3Region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 

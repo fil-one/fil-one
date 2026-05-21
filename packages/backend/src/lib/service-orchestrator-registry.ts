@@ -10,6 +10,6 @@ export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator 
     case S3Region.UsEast1:
       return fthOrchestrator;
     default:
-      throw new Error(`No service orchestrator registered for region "${String(region)}"`);
+      throw new Error(`Unsupported region "${String(region)}".`);
   }
 }
