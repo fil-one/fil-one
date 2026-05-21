@@ -130,4 +130,25 @@ describe('ensureTenantReady', () => {
       ':tenantId': { S: fthClientId },
     });
   });
+
+  it('returns null when setup throws', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock.on(GetItemCommand).rejects(new Error('DDB is down'));
+
+    const result = await ensureTenantReady(orgId);
+
+    expect(result).toBeNull();
+  });
+
+  it('logs the error to console.error when setup throws', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock.on(GetItemCommand).rejects(new Error('DDB is down'));
+
+    await ensureTenantReady(orgId);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[fth-tenant-setup] setup failed',
+      expect.objectContaining({ orgId, error: expect.stringContaining('DDB is down') }),
+    );
+  });
 });

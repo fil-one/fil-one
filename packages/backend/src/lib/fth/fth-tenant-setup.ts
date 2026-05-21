@@ -4,6 +4,7 @@
 // FthTenantSetupStatus) without bloating the orchestrator. See
 // aurora-tenant-setup.ts for the pattern to mirror.
 
+import { format } from 'node:util';
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
@@ -36,11 +37,29 @@ const FTH_FULL_PERMISSIONS = [
 const dynamo = getDynamoClient();
 const ssm = new SSMClient({});
 
+// Public entry point for synchronous tenant setup from request handlers.
+// Returns the fthTenantId on success, or null on any setup failure so the
+// handler can return the standard 503 tenant-not-ready response. The state
+// machine resumes from whatever step is next on the user's retry.
+export async function ensureTenantReady(orgId: string): Promise<string | null> {
+  try {
+    return await processTenantSetup(orgId);
+  } catch (err) {
+    console.error('[fth-tenant-setup] setup failed', {
+      orgId,
+      error: format(err),
+    });
+    // TODO: record failure counter / emit metric here once we build the
+    // state machine (mirror recordSetupFailure in aurora-tenant-setup.ts).
+    return null;
+  }
+}
+
 // TODO: Replace this simple create-or-skip flow with a real state machine
 // (failure-count tracking, partial-progress resumption, transitional
 // statuses from FthTenantSetupStatus) before relying on this in
 // production. See aurora-tenant-setup.ts for the pattern to mirror.
-export async function ensureTenantReady(orgId: string): Promise<string> {
+async function processTenantSetup(orgId: string): Promise<string> {
   const stage = process.env.FILONE_STAGE!;
   const key = { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } };
 

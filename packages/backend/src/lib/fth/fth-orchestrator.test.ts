@@ -49,6 +49,14 @@ describe('fthOrchestrator.ensureTenantReady', () => {
     expect(result).toBe(fthClientId);
     expect(mockEnsureFthTenantReady).toHaveBeenCalledWith(orgId);
   });
+
+  it('returns null when ensureTenantReady from fth-tenant-setup returns null', async () => {
+    mockEnsureFthTenantReady.mockResolvedValue(null);
+
+    const result = await fthOrchestrator.ensureTenantReady(orgId);
+
+    expect(result).toBeNull();
+  });
 });
 
 describe('fthOrchestrator.isTenantReady', () => {
