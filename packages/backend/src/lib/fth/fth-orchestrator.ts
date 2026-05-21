@@ -25,10 +25,7 @@ import type {
 } from '../service-orchestrator.js';
 
 import { createBucket as s3CreateBucket, listBuckets as s3ListBuckets } from '../s3-presigner.js';
-import {
-  getServiceS3Credentials,
-  _resetS3CredentialsCacheForTesting,
-} from '../s3-credentials.js';
+import { getServiceS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 
 const dynamo = getDynamoClient();
 

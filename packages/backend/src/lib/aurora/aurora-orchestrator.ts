@@ -27,10 +27,7 @@ import {
 } from '../aurora/aurora-portal.js';
 import { getDynamoClient } from '../ddb-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
-import {
-  getServiceS3Credentials,
-  _resetS3CredentialsCacheForTesting,
-} from '../s3-credentials.js';
+import { getServiceS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 import {
   NotImplementedError,
   type BucketDetails,
