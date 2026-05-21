@@ -13,6 +13,7 @@ import type { Stripe, StripeCardNumberElementChangeEvent } from '@stripe/stripe-
 import { ActivateSubscriptionRequestSchema } from '@filone/shared';
 
 import { Modal, ModalBody, ModalHeader } from '../Modal/index.js';
+import { Button } from '../Button.js';
 
 import { getStripe } from '../../lib/stripe.js';
 import { activateSubscription } from '../../lib/api.js';
@@ -160,7 +161,7 @@ function PaymentForm({
               type="text"
               value={promotionCode}
               onChange={(e) => setPromotionCode(e.target.value)}
-              placeholder="e.g. WELCOME20"
+              placeholder="Add promo code"
               autoCapitalize="characters"
               autoCorrect="off"
               spellCheck={false}
@@ -176,22 +177,20 @@ function PaymentForm({
         {/* Buttons */}
         <div className="mt-4 border-t border-[#e1e4ea] pt-4 flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center justify-center rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-[17px] py-[9px] text-[13px] font-medium text-[#14181f] shadow-[0px_1px_2px_0px_rgba(20,24,31,0.03)] transition-colors hover:bg-zinc-50"
-            >
+            <Button type="button" variant="ghost" size="md" onClick={onBack}>
               Back
-            </button>
+            </Button>
 
-            <button
+            <Button
               type="submit"
+              variant="primary"
+              size="md"
+              icon={CreditCardIcon}
               disabled={!stripe || loading}
-              className="flex flex-1 items-center justify-center gap-2 rounded-[6px] bg-gradient-to-br from-[#0080ff] to-[#256af4] px-4 py-2 text-[13px] font-medium text-white shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)] transition-opacity hover:opacity-90 disabled:opacity-50"
+              className="flex-1 justify-center"
             >
-              <CreditCardIcon size={16} weight="bold" />
               {loading ? 'Processing...' : 'Start subscription'}
-            </button>
+            </Button>
           </div>
 
           <p className="text-center text-[11px] text-[#677183]">

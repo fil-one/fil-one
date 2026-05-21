@@ -7,6 +7,7 @@ const meta: Meta<typeof Alert> = {
   component: Alert,
   argTypes: {
     variant: { control: 'select', options: ['blue', 'green', 'red', 'grey', 'amber'] },
+    showIcon: { control: 'boolean' },
   },
 };
 
@@ -40,6 +41,14 @@ export const WithoutTitle: Story = {
   args: {
     variant: 'amber',
     description: 'Save your credentials in a safe place. Do not share your secret key with anyone.',
+  },
+};
+
+export const WithoutIcon: Story = {
+  args: {
+    variant: 'grey',
+    description: 'Notification preferences coming soon.',
+    showIcon: false,
   },
 };
 

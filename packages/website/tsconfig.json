@@ -8,12 +8,7 @@
     "noEmit": true,
     "types": ["vite/client", "@testing-library/jest-dom"],
     "paths": {
-      "@filone/shared": ["../shared/src/index.ts"],
-      "@hyperspace/ui/utils": ["../ui/src/utils/index.ts"],
-      "@hyperspace/ui/styles": ["../ui/src/styles/globals.css"],
-      "@hyperspace/ui/constants/tailwindConstants": ["../ui/src/constants/tailwindConstants.ts"],
-      "@hyperspace/ui/config/ui-config": ["../ui/src/config/ui-config.ts"],
-      "@hyperspace/ui/*": ["../ui/src/components/*"]
+      "@filone/shared": ["../shared/src/index.ts"]
     }
   },
   "include": ["src", "../shared/src", ".storybook/*"]

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { STORAGE_STATE } from './roles.ts';
+import { STORAGE_STATE } from './roles.util.ts';
 
 // Cookies set by packages/backend/src/lib/response-builder.ts and cleared by
 // packages/backend/src/handlers/auth-logout.ts.

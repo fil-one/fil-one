@@ -12,6 +12,7 @@ vi.mock('sst', () => ({
 
 const mockEnsureTenantReady = vi.fn();
 const mockCreateBucket = vi.fn();
+const mockGetOrchestratorForRegion = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
@@ -21,13 +22,16 @@ const mockOrchestrator = {
 };
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: () => mockOrchestrator,
+  getOrchestratorForRegion: (...args: unknown[]) => {
+    mockGetOrchestratorForRegion(...args);
+    return mockOrchestrator;
+  },
 }));
 
 import { baseHandler } from './create-bucket.js';
 import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
-import { S3_REGION } from '@filone/shared';
+import { S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -170,6 +174,18 @@ describe('create-bucket baseHandler', () => {
     const body = JSON.parse(result.body as string);
     expect(body.message).toContain('Object Lock must be enabled');
     expect(mockCreateBucket).not.toHaveBeenCalled();
+  });
+
+  it('selects the orchestrator using the region from the request body', async () => {
+    mockCreateBucket.mockResolvedValue(undefined);
+
+    const event = buildEvent({
+      body: JSON.stringify({ name: 'my-bucket', region: S3Region.UsEast1 }),
+      userInfo: USER_INFO,
+    });
+    await baseHandler(event);
+
+    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.UsEast1);
   });
 
   it('returns 400 when region is unsupported', async () => {

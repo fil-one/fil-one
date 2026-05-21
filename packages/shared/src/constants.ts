@@ -48,6 +48,15 @@ export function getAvailableRegions(stage: Stage | string): S3Region[] {
 }
 
 /**
+ * Checks if the region is supported in the given stage.
+ * Provides type-narrowing information to TypeScript, changing `region`
+ * from `string` to `S3Region` when the function returns `true`.
+ */
+export function isSupportedRegion(stage: Stage | string, region: string): region is S3Region {
+  return getAvailableRegions(stage).includes(region as S3Region);
+}
+
+/**
  * Build the S3-compatible endpoint URL for a given region and stage.
  * e.g. https://eu-west-1.s3.fil.one (production) or https://eu-west-1.s3.staging.fil.one (non-prod).
  */

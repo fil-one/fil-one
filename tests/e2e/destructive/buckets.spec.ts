@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
-import { STORAGE_STATE } from './roles.ts';
+import { STORAGE_STATE } from './roles.util.ts';
 
 // Bucket names are globally unique (Aurora-backed) and rejected with 409 if
 // taken, so each test mints a fresh name. We do not delete buckets afterward

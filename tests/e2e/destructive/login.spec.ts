@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { maybeSkipPasskeyEnrollment } from './passkey.util.ts';
 
 // Real UI login smoke test. Starts unauthenticated (no storageState) and exercises
 // the Auth0 login form from scratch to guard the auth.setup.ts pathway from silent
@@ -14,7 +15,8 @@ test('paid user signs in via Auth0 and lands on dashboard', async ({ page }) => 
   await page.locator('button[data-action-button-primary="true"]').click();
   await page.locator('#password').fill(process.env.E2E_PAID_PASSWORD!);
   await page.locator('button[data-action-button-primary="true"]').click();
-  await page.locator('button[value="abort-passkey-enrollment"]').click();
+
+  await maybeSkipPasskeyEnrollment(page);
 
   await expect(page).toHaveURL(/\/dashboard$/);
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators

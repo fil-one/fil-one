@@ -10,7 +10,6 @@ import type {
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import type { PresignerContext } from '../lib/service-orchestrator.js';
-import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
 import {
   getPresignedDeleteObjectUrl,
   getPresignedGetObjectRetentionUrl,
@@ -20,7 +19,7 @@ import {
   getPresignedListObjectsUrl,
   getPresignedPutObjectUrl,
 } from '../lib/s3-presigner.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
