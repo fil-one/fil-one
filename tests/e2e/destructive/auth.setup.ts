@@ -62,7 +62,18 @@ for (const role of roles) {
     await page.locator('button[data-action-button-primary="true"]').click();
     await page.locator('#password').fill(role.password);
     await page.locator('button[data-action-button-primary="true"]').click();
-    await page.locator('button[value="abort-passkey-enrollment"]').click();
+
+    // WebKit doesn't trigger Auth0's passkey enrollment interstitial, so the
+    // user goes straight to /dashboard. Race the two outcomes and only click
+    // the skip button when it actually appears.
+    const skipPasskey = page.locator('button[value="abort-passkey-enrollment"]');
+    await Promise.race([
+      skipPasskey.waitFor({ state: 'visible' }),
+      page.waitForURL(/\/dashboard$/),
+    ]);
+    if (await skipPasskey.isVisible()) {
+      await skipPasskey.click();
+    }
 
     await expect(page).toHaveURL(/\/dashboard$/);
 

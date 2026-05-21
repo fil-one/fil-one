@@ -14,7 +14,15 @@ test('paid user signs in via Auth0 and lands on dashboard', async ({ page }) => 
   await page.locator('button[data-action-button-primary="true"]').click();
   await page.locator('#password').fill(process.env.E2E_PAID_PASSWORD!);
   await page.locator('button[data-action-button-primary="true"]').click();
-  await page.locator('button[value="abort-passkey-enrollment"]').click();
+
+  // WebKit doesn't trigger Auth0's passkey enrollment interstitial, so the
+  // user goes straight to /dashboard. Race the two outcomes and only click
+  // the skip button when it actually appears.
+  const skipPasskey = page.locator('button[value="abort-passkey-enrollment"]');
+  await Promise.race([skipPasskey.waitFor({ state: 'visible' }), page.waitForURL(/\/dashboard$/)]);
+  if (await skipPasskey.isVisible()) {
+    await skipPasskey.click();
+  }
 
   await expect(page).toHaveURL(/\/dashboard$/);
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
