@@ -178,19 +178,9 @@ export const INTEGRATIONS: IntegrationDef[] = [
     initials: 'GP',
     logoSlug: 'openai',
     name: 'ChatGPT',
-    subtitle: 'Power a Custom GPT with your buckets',
-    archetype: 'paste-config',
+    subtitle: 'Authorise ChatGPT with OAuth',
+    archetype: 'oauth',
     group: 'apps',
-    configFile: 'Custom GPT → Configure → Actions',
-    configLanguage: 'yaml',
-    configSnippet: () => `# Paste into the Action's "Schema" field
-openapi: 3.1.0
-info:
-  title: Fil One
-  version: '1.0'
-servers:
-  - url: https://api.fil.one
-# Auth: API key, header "Authorization: Bearer sk-live_..."`,
   },
   {
     initials: '+',
@@ -353,28 +343,6 @@ curl -X PUT https://api.fil.one/v1/buckets/my-bucket/hello.txt \\
         install: 'pip install filone-agent-toolkit',
         snippet: (b) =>
           `from filone import FilOne\n\nfil = FilOne(api_key=os.environ["FILONE_KEY"])\nfil.bucket("${b}").put(file)`,
-      },
-    ],
-  },
-  {
-    initials: 'S3',
-    logoSlug: 'amazons3',
-    name: 'S3 API',
-    subtitle: 'For any S3-compatible client',
-    archetype: 'install',
-    group: 'code',
-    sdkTabs: [
-      {
-        label: 'boto3',
-        install: 'pip install boto3',
-        snippet: (b) =>
-          `import boto3\n\ns3 = boto3.client('s3',\n    endpoint_url='https://api.fil.one',\n    aws_access_key_id='YOUR_KEY',\n    aws_secret_access_key='YOUR_SECRET',\n)\ns3.put_object(Bucket="${b}", Key='hello.txt', Body=b'hello')`,
-      },
-      {
-        label: 'aws-sdk',
-        install: 'npm install @aws-sdk/client-s3',
-        snippet: (b) =>
-          `import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";\n\nconst s3 = new S3Client({\n  endpoint: "https://api.fil.one",\n  credentials: { accessKeyId: "YOUR_KEY", secretAccessKey: "YOUR_SECRET" },\n  region: "auto",\n});\nawait s3.send(new PutObjectCommand({ Bucket: "${b}", Key: "hello.txt", Body: "hello" }));`,
       },
     ],
   },
@@ -1015,22 +983,22 @@ function AiAgentToolkitProductView({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [query, setQuery] = useState('');
 
-  const stats = enabled
-    ? [
-        { label: 'API requests', value: '42,318', sub: 'this month' },
-        { label: 'Last Active', value: '2 min ago', sub: 'last request' },
-        { label: 'Est. Cost', value: '$2.12', sub: '$0.05 / 1k requests' },
-      ]
-    : [
-        { label: 'API requests', value: '—', sub: 'Available once enabled' },
-        { label: 'Last Active', value: '—', sub: 'Available once enabled' },
-        { label: 'Est. Cost', value: '—', sub: 'Available once enabled' },
-      ];
-
   const activeItems = INTEGRATIONS.filter((i) => {
     const s = integrationStates[i.name]?.status;
     return s === 'connected' || s === 'pending';
   });
+
+  const stats = enabled
+    ? [
+        { label: 'API requests', value: '42,318', sub: 'this month' },
+        { label: 'Last Active', value: '2 min ago', sub: 'last request' },
+        { label: 'Connections', value: String(activeItems.length), sub: 'active connections' },
+      ]
+    : [
+        { label: 'API requests', value: '—', sub: 'Available once enabled' },
+        { label: 'Last Active', value: '—', sub: 'Available once enabled' },
+        { label: 'Connections', value: '—', sub: 'Available once enabled' },
+      ];
 
   const GROUP_LABELS: Record<IntegrationGroup, string> = {
     apps: 'AI apps',
@@ -1293,26 +1261,10 @@ function AiAgentToolkitProductView({
               buckets is not affected.
             </p>
           ) : (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
-                  Pricing
-                </p>
-                <div className="space-y-2.5">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-sm text-zinc-600">Per 1,000 API requests</span>
-                    <span className="text-sm font-semibold text-zinc-900">$0.05</span>
-                  </div>
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-sm text-zinc-600">Bucket storage</span>
-                    <span className="text-sm font-semibold text-zinc-900">Standard rate</span>
-                  </div>
-                </div>
-              </div>
-              <p className="text-xs text-zinc-500">
-                Billed monthly on your Fil One invoice. No setup fee. Disable at any time.
-              </p>
-            </div>
+            <p className="text-sm text-zinc-600">
+              The AI Agent Toolkit is included free with your Fil One plan — no extra charge.
+              Disable at any time.
+            </p>
           )}
         </ModalBody>
         <ModalFooter>
