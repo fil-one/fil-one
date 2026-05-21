@@ -14,6 +14,7 @@ import type {
 import { onExecutePostLogin } from './mfa-action.js';
 import { setupAuth0PasskeyAuth } from './setup-passkey.js';
 import { getAuth0ManagementToken } from './auth0-mgmt-token.js';
+import { throwIfNotOk } from '../../lib/auth0-management.js';
 
 // ── Custom resource property types ────────────────────────────────────
 
@@ -185,13 +186,6 @@ async function teardownStripeWebhook(
 }
 
 // ── Auth0 helpers ─────────────────────────────────────────────────────
-
-async function throwIfNotOk(resp: Response, label: string): Promise<void> {
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`${label} (${resp.status}): ${body}`);
-  }
-}
 
 async function getAuth0Client(
   domain: string,
@@ -452,7 +446,6 @@ interface StageContext {
   siteUrl: string;
   stage: string;
   isStagingOrProd: boolean;
-  runsAuth0TenantSetup: boolean;
   isPreview: boolean;
 }
 
@@ -497,7 +490,7 @@ async function handleSetup(
     setupStripeWebhook(ctx.stripe!, ctx.siteUrl, ctx.stage),
     setupAuth0Callbacks(ctx.mgmtDomain, ctx.siteUrl, ctx.isStagingOrProd),
   ];
-  if (ctx.runsAuth0TenantSetup) {
+  if (ctx.isStagingOrProd) {
     tasks.push(setupAuth0EmailProvider(ctx.mgmtDomain, ctx.stage === 'production'));
     tasks.push(setupAuth0MfaAction(ctx.mgmtDomain));
     tasks.push(setupAuth0PasskeyAuth(ctx.mgmtDomain));
@@ -517,7 +510,6 @@ async function handleSetup(
 function buildStageContext(stage: string, siteUrl: string): StageContext {
   const isProduction = stage === 'production';
   const isStagingOrProd = stage === 'staging' || isProduction;
-  const runsAuth0TenantSetup = isStagingOrProd;
   const isPreview = isPreviewStage(stage);
 
   if (isProduction && Resource.StripeSecretKey.value.startsWith('sk_test_')) {
@@ -530,7 +522,6 @@ function buildStageContext(stage: string, siteUrl: string): StageContext {
     siteUrl,
     stage,
     isStagingOrProd,
-    runsAuth0TenantSetup,
     isPreview,
   };
 }

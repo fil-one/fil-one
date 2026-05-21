@@ -9,7 +9,7 @@ function getMgmtDomain(): string {
   return process.env.AUTH0_MGMT_DOMAIN ?? process.env.AUTH0_DOMAIN!;
 }
 
-async function throwIfNotOk(resp: Response, label: string): Promise<void> {
+export async function throwIfNotOk(resp: Response, label: string): Promise<void> {
   if (!resp.ok) {
     const body = await resp.text();
     throw new Error(`${label} (${resp.status}): ${body}`);

@@ -353,7 +353,7 @@ function PasskeySettings({ passkeys }: { passkeys: PasskeyEnrollment[] }) {
   const count = passkeys.length;
   const description =
     count === 0
-      ? 'Sign in with a passkey when prompted on your next login'
+      ? "No passkeys yet — you'll be prompted to add one on your next sign-in"
       : recent?.createdAt
         ? `${count} of ${PASSKEY_PER_USER_LIMIT} enrolled — most recent added ${formatDate(recent.createdAt)}`
         : `${count} of ${PASSKEY_PER_USER_LIMIT} enrolled`;

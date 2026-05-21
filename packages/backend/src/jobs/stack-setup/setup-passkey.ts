@@ -2,7 +2,11 @@
 // setup-integrations.ts to keep that file under the max-lines lint cap.
 
 import { getAuth0ManagementToken } from './auth0-mgmt-token.js';
+import { throwIfNotOk } from '../../lib/auth0-management.js';
 
+// Auth0's default database-connection name. If a tenant ever renames the
+// connection, the list-by-name lookup below will not find it and this setup
+// will throw — surfacing the drift rather than silently no-op'ing.
 const PASSKEY_CONNECTION_NAME = 'Username-Password-Authentication';
 
 interface Auth0Connection {
@@ -48,13 +52,6 @@ function matchesDesired(existing: unknown, desired: unknown): boolean {
 
 function passkeyShapeMatches(existing: PasskeyOptions | undefined): boolean {
   return matchesDesired(existing, DESIRED_PASSKEY_OPTIONS);
-}
-
-async function throwIfNotOk(resp: Response, label: string): Promise<void> {
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`${label} (${resp.status}): ${body}`);
-  }
 }
 
 /**

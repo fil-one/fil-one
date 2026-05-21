@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Created:** 2026-05-19
-**Last updated:** 2026-05-19
+**Last updated:** 2026-05-21
 
 ## Context
 
@@ -50,16 +50,16 @@ Passwords remain enabled alongside passkeys. Passkey login is additive — users
 
 ### Post-Login Action: MFA skipped on passkey logins
 
-A passkey is phishing-resistant and bound to user-verifying biometrics — the industry pattern (GitHub, Google, Microsoft) is to accept it as both factors. Auth0's stable signal for this is `event.authentication.methods[].performed_amr` containing `'phr'` (phishing-resistant). The Post-Login Action returns early when that signal is present:
+A passkey is phishing-resistant and bound to user-verifying biometrics — the industry pattern (GitHub, Google, Microsoft) is to accept it as both factors. Inside the Post-Login Action, the only documented fields on `event.authentication.methods[]` are `name` and `timestamp` ([Auth0 Post-Login Event Object](https://auth0.com/docs/customize/actions/explore-triggers/signup-and-login-triggers/login-trigger/post-login-event-object)), and `name: 'passkey'` is the documented value for a primary-passkey login on a database connection. The Post-Login Action returns early when that signal is present:
 
 ```ts
-const usedPasskey = (event.authentication?.methods ?? []).some((m) =>
-  (m.performed_amr ?? []).includes('phr'),
-);
-if (usedPasskey) return;
+const usedPasskey = (event.authentication?.methods ?? []).some((m) => m.name === 'passkey');
+if (usedPasskey && !mfaEnrolling) return;
 ```
 
-Matching on `performed_amr` (not on `m.name === 'passkey'`) is intentional — Auth0 has historically shifted the method-name strings (`passkey`, `webauthn`, `webauthn-platform`), but the AMR claim is the stable contract and the same signal that surfaces in tenant logs (`details.performed_amr`).
+The exception (`!mfaEnrolling`) covers the case where a passkey user clicked "Add MFA factor" or just redeemed a recovery code — in both cases the Action must fall through to the enrollment branch, otherwise the enroll button silently no-ops for passkey users.
+
+The OIDC `amr` claim that the rest of the system uses (`require-mfa` middleware) is a different surface: it lives on the issued ID token and _does_ carry `phr` for passkey logins. That signal is the right one for request-time gating; it is **not** available on `event.authentication.methods[]` inside the Action runtime. `performed_amr` exists in tenant logs (`details.authentication.methods[].performed_amr`) and as the `amr` claim on the ID token, but not on the Action event object — so matching on `name === 'passkey'` is what the Action runtime exposes today.
 
 ### Settings UI
 
