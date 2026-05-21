@@ -9,8 +9,6 @@
 //     using the service access key stashed in SSM during setup.
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
-import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { S3Region } from '@filone/shared';
 import { getDynamoClient } from '../ddb-client.js';
@@ -27,18 +25,15 @@ import type {
 } from '../service-orchestrator.js';
 
 import { createBucket as s3CreateBucket, listBuckets as s3ListBuckets } from '../s3-presigner.js';
-
-interface FthS3Credentials {
-  accessKeyId: string;
-  secretAccessKey: string;
-}
+import {
+  getServiceS3Credentials,
+  _resetS3CredentialsCacheForTesting,
+} from '../s3-credentials.js';
 
 const dynamo = getDynamoClient();
-const ssm = new SSMClient({});
-const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
 
 export const _resetFthOrchestratorCachesForTesting = () => {
-  ssmCache.clear();
+  _resetS3CredentialsCacheForTesting();
 };
 
 export const fthOrchestrator = {
@@ -64,7 +59,11 @@ export const fthOrchestrator = {
   },
 
   async getPresignerContext(tenantId: string): Promise<PresignerContext> {
-    const credentials = await getFthS3Credentials(tenantId);
+    const credentials = await getServiceS3Credentials({
+      orchestratorId: fthOrchestrator.id,
+      stage: process.env.FILONE_STAGE!,
+      tenantId,
+    });
     return {
       endpointUrl: process.env.FTH_S3_URL!,
       region: 'us-east-1',
@@ -131,33 +130,3 @@ export const fthOrchestrator = {
     throw new NotImplementedError('Access key management is not implemented in this region yet');
   },
 } satisfies ServiceOrchestrator;
-
-async function getFthS3Credentials(tenantId: string): Promise<FthS3Credentials> {
-  const stage = process.env.FILONE_STAGE!;
-  const cacheKey = `${stage}/${tenantId}`;
-  const cached = ssmCache.get(cacheKey);
-  if (cached) return JSON.parse(cached) as FthS3Credentials;
-
-  let value: string | undefined;
-  try {
-    const { Parameter } = await ssm.send(
-      new GetParameterCommand({
-        Name: `/filone/${stage}/fth-s3/access-key/${tenantId}`,
-        WithDecryption: true,
-      }),
-    );
-    value = Parameter?.Value;
-  } catch (err) {
-    if ((err as { name?: string }).name === 'ParameterNotFound') {
-      throw new Error(`FTH S3 credentials not found in SSM for tenant ${tenantId}`, { cause: err });
-    }
-    throw err;
-  }
-
-  if (!value) {
-    throw new Error(`FTH S3 credentials not found in SSM for tenant ${tenantId}`);
-  }
-
-  ssmCache.set(cacheKey, value);
-  return JSON.parse(value) as FthS3Credentials;
-}

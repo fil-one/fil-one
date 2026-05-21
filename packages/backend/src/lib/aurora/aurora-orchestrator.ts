@@ -7,8 +7,6 @@
 // production tenants keep working with no migration.
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
-import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { S3Region, getS3Endpoint } from '@filone/shared';
 import type {
@@ -30,6 +28,10 @@ import {
 import { getDynamoClient } from '../ddb-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import {
+  getServiceS3Credentials,
+  _resetS3CredentialsCacheForTesting,
+} from '../s3-credentials.js';
+import {
   NotImplementedError,
   type BucketDetails,
   type BucketSummary,
@@ -41,48 +43,7 @@ import {
 } from '../service-orchestrator.js';
 
 const dynamo = getDynamoClient();
-const ssm = new SSMClient({});
-const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
-export const _resetSsmCacheForTesting = () => ssmCache.clear();
-
-interface AuroraS3Credentials {
-  accessKeyId: string;
-  secretAccessKey: string;
-}
-
-async function getAuroraS3Credentials(
-  stage: string,
-  tenantId: string,
-): Promise<AuroraS3Credentials> {
-  const cacheKey = `${stage}/${tenantId}`;
-  const cached = ssmCache.get(cacheKey);
-  if (cached) return JSON.parse(cached) as AuroraS3Credentials;
-
-  let value: string | undefined;
-  try {
-    const { Parameter } = await ssm.send(
-      new GetParameterCommand({
-        Name: `/filone/${stage}/aurora-s3/access-key/${tenantId}`,
-        WithDecryption: true,
-      }),
-    );
-    value = Parameter?.Value;
-  } catch (err) {
-    if ((err as { name?: string }).name === 'ParameterNotFound') {
-      throw new Error(`Aurora S3 credentials not found in SSM for tenant ${tenantId}`, {
-        cause: err,
-      });
-    }
-    throw err;
-  }
-
-  if (!value) {
-    throw new Error(`Aurora S3 credentials not found in SSM for tenant ${tenantId}`);
-  }
-
-  ssmCache.set(cacheKey, value);
-  return JSON.parse(value) as AuroraS3Credentials;
-}
+export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting();
 
 function getStage(): string {
   return process.env.FILONE_STAGE!;
@@ -236,7 +197,11 @@ export const auroraOrchestrator = {
 
   async getPresignerContext(tenantId: string): Promise<PresignerContext> {
     const stage = getStage();
-    const credentials = await getAuroraS3Credentials(stage, tenantId);
+    const credentials = await getServiceS3Credentials({
+      orchestratorId: auroraOrchestrator.id,
+      stage,
+      tenantId,
+    });
     return {
       endpointUrl: getS3Endpoint(S3Region.EuWest1, stage),
       region: 'auto',
