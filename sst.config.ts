@@ -385,6 +385,7 @@ export default $config({
 
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
+    const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
     const auroraS3GatewayPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
@@ -489,7 +490,9 @@ export default $config({
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         FTH_S3_URL: fthEnv.FTH_S3_URL,
       },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
@@ -504,7 +507,7 @@ export default $config({
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
         },
       ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
@@ -558,7 +561,9 @@ export default $config({
       method: 'POST',
       routePath: '/api/presign',
       handler: 'presign',
-      permissions: auroraS3GatewayPermissions,
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '512 MB',
     });
@@ -661,7 +666,9 @@ export default $config({
       routePath: '/api/activity',
       handler: 'get-activity',
       extraEnv: auroraEnv,
-      permissions: auroraS3GatewayPermissions,
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
