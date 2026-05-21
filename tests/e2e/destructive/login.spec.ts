@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { maybeSkipPasskeyEnrollment } from './passkey.ts';
 
 // Real UI login smoke test. Starts unauthenticated (no storageState) and exercises
 // the Auth0 login form from scratch to guard the auth.setup.ts pathway from silent
@@ -18,11 +19,7 @@ test('paid user signs in via Auth0 and lands on dashboard', async ({ page }) => 
   // WebKit doesn't trigger Auth0's passkey enrollment interstitial, so the
   // user goes straight to /dashboard. Race the two outcomes and only click
   // the skip button when it actually appears.
-  const skipPasskey = page.locator('button[value="abort-passkey-enrollment"]');
-  await Promise.race([skipPasskey.waitFor({ state: 'visible' }), page.waitForURL(/\/dashboard$/)]);
-  if (await skipPasskey.isVisible()) {
-    await skipPasskey.click();
-  }
+  await maybeSkipPasskeyEnrollment(page);
 
   await expect(page).toHaveURL(/\/dashboard$/);
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
