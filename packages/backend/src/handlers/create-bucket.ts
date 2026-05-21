@@ -2,11 +2,11 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
-import { CreateBucketSchema, getAvailableRegions, S3Region } from '@filone/shared';
+import { CreateBucketSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
 import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -38,16 +38,13 @@ export async function baseHandler(
 
   const { name, region, versioning, lock, retention } = parsed.data;
 
-  if (!getAvailableRegions(process.env.FILONE_STAGE!).includes(region as S3Region)) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: `Unsupported region "${region}"` })
-      .build();
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
+    return unsupportedRegionResponse(region);
   }
 
   const { orgId } = getUserInfo(event);
 
-  const orchestrator = getOrchestratorForRegion(region as S3Region);
+  const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
