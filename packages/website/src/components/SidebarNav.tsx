@@ -94,8 +94,6 @@ type StatusBannersProps = {
   storagePct: number;
   egressUsed: number;
   egressPct: number;
-  isGracePeriod: boolean;
-  isTrialExpiredGrace: boolean;
   graceDays: number | null;
   graceEndsLabel: string | undefined;
   isPastDue: boolean;
@@ -110,8 +108,6 @@ function StatusBanners({
   storagePct,
   egressUsed,
   egressPct,
-  isGracePeriod,
-  isTrialExpiredGrace,
   graceDays,
   graceEndsLabel,
   isPastDue,
@@ -148,32 +144,7 @@ function StatusBanners({
           </div>
         </div>
       )}
-      {!collapsed && isGracePeriod && isTrialExpiredGrace && (
-        <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
-          <p className="text-xs font-medium text-amber-800" title={graceEndsLabel}>
-            Your free trial has expired.{graceDays !== null ? ` ${graceDays} days left` : ''} to
-            upgrade or download your data.
-          </p>
-          <div className="mt-3">
-            <Button variant="primary" href="/billing" className="w-full justify-center text-xs">
-              Upgrade
-            </Button>
-          </div>
-        </div>
-      )}
-      {!collapsed && isGracePeriod && !isTrialExpiredGrace && (
-        <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
-          <p className="text-xs font-medium text-amber-800" title={graceEndsLabel}>
-            Subscription canceled.{graceDays !== null ? ` ${graceDays} days left` : ''} to
-            reactivate or download your data.
-          </p>
-          <div className="mt-3">
-            <Button variant="primary" href="/billing" className="w-full justify-center text-xs">
-              Reactivate
-            </Button>
-          </div>
-        </div>
-      )}
+
       {!collapsed && isPastDue && (
         <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
           <p className="text-xs font-medium text-amber-800" title={graceEndsLabel}>
@@ -275,7 +246,6 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const initial = displayName.charAt(0).toUpperCase();
 
   const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
-  const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod;
   const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
   const trialDays =
     isTrialing && billing?.subscription.trialEndsAt
@@ -290,8 +260,6 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const graceEndsLabel = billing?.subscription.gracePeriodEndsAt
     ? `Expires ${formatDateTime(billing.subscription.gracePeriodEndsAt)}`
     : undefined;
-  const isTrialExpiredGrace = isGracePeriod && !!billing?.subscription.trialEndsAt;
-
   const isActivePaid = billing?.subscription.status === SubscriptionStatus.Active;
   const limits = getUsageLimits(!!isActivePaid);
   const storageUsed = usage?.storage.usedBytes ?? 0;
@@ -428,8 +396,6 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           storagePct={storagePct}
           egressUsed={egressUsed}
           egressPct={egressPct}
-          isGracePeriod={isGracePeriod}
-          isTrialExpiredGrace={isTrialExpiredGrace}
           graceDays={graceDays}
           graceEndsLabel={graceEndsLabel}
           isPastDue={isPastDue}

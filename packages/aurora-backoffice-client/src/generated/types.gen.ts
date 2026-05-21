@@ -62,6 +62,7 @@ export type ModelOperationMetricsSample = {
   putObject?: number;
   putObjectLegalHold?: number;
   putObjectLockConfiguration?: number;
+  putObjectPart?: number;
   putObjectRetention?: number;
   putObjectTagging?: number;
   rxBytes?: number;
@@ -94,6 +95,12 @@ export type ModelStorageMetricsSample = {
   windowSize?: number;
 };
 
+export type ModelsAuthComponentSetupStatus = {
+  enabled?: boolean;
+  lastSetupStep?: ModelsSetupStep;
+  properties?: ModelsEmptyComponentProperties;
+};
+
 export type ModelsBackofficeEnvironmentResponse = {
   apiUrl?: string;
   auth0Audience?: string;
@@ -103,14 +110,29 @@ export type ModelsBackofficeEnvironmentResponse = {
   tracingUrl?: string;
 };
 
-export type ModelsComponentSetupStatus = {
+export type ModelsComponent = {
+  enabled?: boolean;
   lastSetupStep?: ModelsSetupStep;
+  lastStepAt?: string;
+  name?: ModelsComponentName;
+  properties?: {
+    [key: string]: unknown;
+  };
+  tenantId?: string;
 };
 
+export type ModelsComponentName = 'S3' | 'Compute' | 'Auth' | 'Unknown';
+
 export type ModelsComponentsStatus = {
-  auth?: ModelsComponentSetupStatus;
-  compute?: ModelsComponentSetupStatus;
-  s3?: ModelsComponentSetupStatus;
+  auth?: ModelsAuthComponentSetupStatus;
+  compute?: ModelsComputeComponentSetupStatus;
+  s3?: ModelsS3ComponentSetupStatus;
+};
+
+export type ModelsComputeComponentSetupStatus = {
+  enabled?: boolean;
+  lastSetupStep?: ModelsSetupStep;
+  properties?: ModelsEmptyComponentProperties;
 };
 
 export type ModelsCreateBackOfficeTokenRequest = {
@@ -137,6 +159,10 @@ export type ModelsCreateTokenPortalRequest = {
 
 export type ModelsCreateUserResponse = {
   userId?: string;
+};
+
+export type ModelsEmptyComponentProperties = {
+  [key: string]: unknown;
 };
 
 export type ModelsGetS3CredentialsResponse = {
@@ -177,7 +203,7 @@ export type ModelsPaginatedS3CredentialResponse = {
 };
 
 export type ModelsPaginatedTenantsResponse = {
-  items?: Array<ModelsTenantWithMetricsManagementResponse>;
+  items?: Array<ModelsTenantWithMetricsBackofficeResponse>;
   page?: number;
   pageSize?: number;
   totalCount?: number;
@@ -240,6 +266,16 @@ export type ModelsRegionResponse = {
   warmTierCredentialId?: string;
 };
 
+export type ModelsS3ComponentProperties = {
+  bucketSharingEnabled?: boolean;
+};
+
+export type ModelsS3ComponentSetupStatus = {
+  enabled?: boolean;
+  lastSetupStep?: ModelsSetupStep;
+  properties?: ModelsS3ComponentProperties;
+};
+
 export type ModelsS3CredentialBase = {
   id?: string;
   name?: string;
@@ -253,9 +289,11 @@ export type ModelsSetupStep =
   | 'WARM_TIER_ADDED'
   | 'TENANT_ADMIN_USER_CREATED'
   | 'TENANT_ADMIN_USER_POLICY_ATTACHED'
+  | 'CLOUDSTACK_ACCOUNT_CREATED'
+  | 'CLOUDSTACK_USER_KEYS_CREATED'
   | 'FINISHED';
 
-export type ModelsTenantManagementResponse = {
+export type ModelsTenantBackofficeResponse = {
   accessKeyQuantityLimit?: number;
   bucketQuantityLimit?: number;
   bucketSizeLimit?: number;
@@ -277,7 +315,7 @@ export type ModelsTenantSetupResponse = {
 
 export type ModelsTenantStatus = 'DISABLED' | 'LOCKED' | 'WRITE_LOCKED' | 'ACTIVE';
 
-export type ModelsTenantWithMetricsManagementResponse = {
+export type ModelsTenantWithMetricsBackofficeResponse = {
   accessKeyQuantityLimit?: number;
   bucketCount?: number;
   bucketQuantityLimit?: number;
@@ -428,6 +466,10 @@ export type RolesPaginatedRoleResponse = {
 export type RolesRoleResponse = {
   id?: string;
   name?: string;
+};
+
+export type ServicesUpdateComponentRequest = {
+  enabled?: boolean;
 };
 
 export type TenantsUpdateStatusRequest = {
@@ -1425,7 +1467,7 @@ export type CreateTenantResponses = {
   /**
    * Tenant created successfully
    */
-  201: ModelsTenantManagementResponse;
+  201: ModelsTenantBackofficeResponse;
 };
 
 export type CreateTenantResponse = CreateTenantResponses[keyof CreateTenantResponses];
@@ -1463,7 +1505,7 @@ export type GetTenantResponses = {
   /**
    * Tenant details
    */
-  200: ModelsTenantWithMetricsManagementResponse;
+  200: ModelsTenantWithMetricsBackofficeResponse;
 };
 
 export type GetTenantResponse = GetTenantResponses[keyof GetTenantResponses];
@@ -1510,6 +1552,310 @@ export type ListBucketsResponses = {
 };
 
 export type ListBucketsResponse = ListBucketsResponses[keyof ListBucketsResponses];
+
+export type UpdateAuthComponentData = {
+  /**
+   * Component update fields
+   */
+  body: ServicesUpdateComponentRequest;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Auth';
+};
+
+export type UpdateAuthComponentErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Internal server error
+   */
+  500: CommonReturnMessage;
+};
+
+export type UpdateAuthComponentError = UpdateAuthComponentErrors[keyof UpdateAuthComponentErrors];
+
+export type UpdateAuthComponentResponses = {
+  /**
+   * Component setup status
+   */
+  200: ModelsAuthComponentSetupStatus;
+};
+
+export type UpdateAuthComponentResponse =
+  UpdateAuthComponentResponses[keyof UpdateAuthComponentResponses];
+
+export type SetupAuthComponentData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Auth/setup';
+};
+
+export type SetupAuthComponentErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Internal server error
+   */
+  500: CommonReturnMessage;
+};
+
+export type SetupAuthComponentError = SetupAuthComponentErrors[keyof SetupAuthComponentErrors];
+
+export type SetupAuthComponentResponses = {
+  /**
+   * Component setup status
+   */
+  200: ModelsAuthComponentSetupStatus;
+};
+
+export type SetupAuthComponentResponse =
+  SetupAuthComponentResponses[keyof SetupAuthComponentResponses];
+
+export type UpdateComputeComponentData = {
+  /**
+   * Component update fields
+   */
+  body: ServicesUpdateComponentRequest;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Compute';
+};
+
+export type UpdateComputeComponentErrors = {
+  /**
+   * Component setup is not finished yet
+   */
+  400: CommonReturnMessage;
+  /**
+   * Not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Internal server error
+   */
+  500: CommonReturnMessage;
+};
+
+export type UpdateComputeComponentError =
+  UpdateComputeComponentErrors[keyof UpdateComputeComponentErrors];
+
+export type UpdateComputeComponentResponses = {
+  /**
+   * Component setup status
+   */
+  200: ModelsComputeComponentSetupStatus;
+};
+
+export type UpdateComputeComponentResponse =
+  UpdateComputeComponentResponses[keyof UpdateComputeComponentResponses];
+
+export type SetupComputeComponentData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Compute/setup';
+};
+
+export type SetupComputeComponentErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Internal server error
+   */
+  500: CommonReturnMessage;
+};
+
+export type SetupComputeComponentError =
+  SetupComputeComponentErrors[keyof SetupComputeComponentErrors];
+
+export type SetupComputeComponentResponses = {
+  /**
+   * Component setup status
+   */
+  200: ModelsComputeComponentSetupStatus;
+};
+
+export type SetupComputeComponentResponse =
+  SetupComputeComponentResponses[keyof SetupComputeComponentResponses];
+
+export type UpdateS3ComponentData = {
+  /**
+   * Component update fields
+   */
+  body: ServicesUpdateComponentRequest & {
+    properties?: ModelsS3ComponentProperties;
+  };
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/S3';
+};
+
+export type UpdateS3ComponentErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Internal server error
+   */
+  500: CommonReturnMessage;
+};
+
+export type UpdateS3ComponentError = UpdateS3ComponentErrors[keyof UpdateS3ComponentErrors];
+
+export type UpdateS3ComponentResponses = {
+  /**
+   * Component setup status
+   */
+  200: ModelsS3ComponentSetupStatus;
+};
+
+export type UpdateS3ComponentResponse =
+  UpdateS3ComponentResponses[keyof UpdateS3ComponentResponses];
+
+export type SetupS3ComponentData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/S3/setup';
+};
+
+export type SetupS3ComponentErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Internal server error
+   */
+  500: CommonReturnMessage;
+};
+
+export type SetupS3ComponentError = SetupS3ComponentErrors[keyof SetupS3ComponentErrors];
+
+export type SetupS3ComponentResponses = {
+  /**
+   * Component setup status
+   */
+  200: ModelsS3ComponentSetupStatus;
+};
+
+export type SetupS3ComponentResponse = SetupS3ComponentResponses[keyof SetupS3ComponentResponses];
+
+export type GetComponentData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+    /**
+     * Component name (S3, Compute, Auth)
+     */
+    component: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/{component}';
+};
+
+export type GetComponentErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Tenant Not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Internal server error
+   */
+  500: CommonReturnMessage;
+};
+
+export type GetComponentError = GetComponentErrors[keyof GetComponentErrors];
+
+export type GetComponentResponses = {
+  /**
+   * Success
+   */
+  200: ModelsComponent;
+};
+
+export type GetComponentResponse = GetComponentResponses[keyof GetComponentResponses];
 
 export type ListTenantMembersData = {
   body?: never;

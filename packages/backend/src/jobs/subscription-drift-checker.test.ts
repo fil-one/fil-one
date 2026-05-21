@@ -16,7 +16,7 @@ vi.mock('sst', () => ({
 }));
 
 const mockGetTenantStatus = vi.fn();
-vi.mock('../lib/aurora-backoffice.js', () => ({
+vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
   getTenantStatus: (...args: unknown[]) => mockGetTenantStatus(...args),
 }));
 

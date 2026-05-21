@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { STORAGE_STATE } from './roles.ts';
+import { STORAGE_STATE } from './roles.util.ts';
 
 // Cookies set by packages/backend/src/lib/response-builder.ts and cleared by
 // packages/backend/src/handlers/auth-logout.ts.
@@ -33,8 +33,7 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
 
   // Server-side: a protected route should bounce to sign-in.
   await page.goto('/dashboard');
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await expect(page.getByText('Sign in')).toBeVisible();
+  await expect(page).toHaveURL(/login/);
 
   await context.close();
 });

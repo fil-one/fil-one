@@ -2,10 +2,11 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
-import { CreateBucketSchema, S3_REGION } from '@filone/shared';
-import { createAuroraBucket, BucketAlreadyExistsError } from '../lib/aurora-portal.js';
-import { ensureTenantReady } from '../lib/aurora-tenant-setup.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { CreateBucketSchema, isSupportedRegion } from '@filone/shared';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
+import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
+import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -37,22 +38,18 @@ export async function baseHandler(
 
   const { name, region, versioning, lock, retention } = parsed.data;
 
-  if (region !== S3_REGION) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: `Unsupported region. Supported: ${S3_REGION}` })
-      .build();
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
+    return unsupportedRegionResponse(region);
   }
 
   const { orgId } = getUserInfo(event);
 
-  const ready = await ensureTenantReady(orgId);
-  if (!ready.ok) return ready.errorResponse;
-  const auroraTenantId = ready.auroraTenantId;
+  const orchestrator = getOrchestratorForRegion(region);
+  const tenantId = await orchestrator.ensureTenantReady(orgId);
+  if (!tenantId) return tenantNotReadyResponse();
 
   try {
-    await createAuroraBucket({
-      tenantId: auroraTenantId,
+    await orchestrator.createBucket(tenantId, {
       bucketName: name,
       versioning,
       lock,

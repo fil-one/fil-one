@@ -9,8 +9,8 @@ import {
   getOperationsSamples,
   getTenantInfo,
   updateTenantStatus,
-} from '../lib/aurora-backoffice.js';
-import type { ModelsTenantStatus } from '../lib/aurora-backoffice.js';
+} from '../lib/aurora/aurora-backoffice.js';
+import type { ModelsTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
 import { calculateAverageUsage } from '../lib/usage-calculator.js';

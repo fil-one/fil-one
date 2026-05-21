@@ -43,7 +43,7 @@
     }
 
     &.button--primary {
-      @apply bg-brand-600 text-white;
+      @apply border border-transparent bg-brand-600 text-white;
 
       &:not(:disabled) {
         &:hover {
@@ -61,7 +61,7 @@
     }
 
     &.button--destructive {
-      @apply bg-red-600 text-white;
+      @apply border border-transparent bg-red-600 text-white;
 
       &:not(:disabled) {
         &:hover {
@@ -70,6 +70,24 @@
 
         &:focus {
           @apply bg-red-500 outline-2 outline-offset-2 outline-red-400;
+        }
+      }
+
+      &:disabled {
+        @apply bg-zinc-300 text-zinc-500;
+      }
+    }
+
+    &.button--warning {
+      @apply bg-amber-700 text-white;
+
+      &:not(:disabled) {
+        &:hover {
+          @apply bg-amber-600;
+        }
+
+        &:focus {
+          @apply bg-amber-600 outline-2 outline-offset-2 outline-amber-400;
         }
       }
 
@@ -98,7 +116,7 @@
     }
 
     &.button--tertiary {
-      @apply text-zinc-600;
+      @apply border border-transparent text-zinc-600;
 
       & .button-custom-icon {
         @apply text-zinc-500;
