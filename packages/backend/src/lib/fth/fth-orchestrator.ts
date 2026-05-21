@@ -83,7 +83,7 @@ export const fthOrchestrator: ServiceOrchestrator = {
       throw new Error('FTH does not support bucket versioning on creation');
     }
 
-    const ctx = await this.getPresignerContext(tenantId);
+    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
     const s3 = createS3ClientFor(ctx);
     try {
       const result = await s3.send(new CreateBucketCommand({ Bucket: args.bucketName }));
@@ -103,7 +103,7 @@ export const fthOrchestrator: ServiceOrchestrator = {
   },
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {
-    const ctx = await this.getPresignerContext(tenantId);
+    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
     const s3 = createS3ClientFor(ctx);
     // TODO: handle pagination if a tenant has many buckets.
     const result = await s3.send(new ListBucketsCommand({}));
@@ -111,7 +111,7 @@ export const fthOrchestrator: ServiceOrchestrator = {
       .filter((b): b is typeof b & { Name: string } => !!b.Name)
       .map((b) => ({
         name: b.Name,
-        region: this.region,
+        region: fthOrchestrator.region,
         createdAt: b.CreationDate?.toISOString() ?? new Date().toISOString(),
         isPublic: false,
         versioning: false,
@@ -123,7 +123,7 @@ export const fthOrchestrator: ServiceOrchestrator = {
     // TODO: replace with a real implementation
     return {
       name: bucketName,
-      region: this.region,
+      region: fthOrchestrator.region,
       createdAt: new Date().toISOString(),
       isPublic: false,
       versioning: false,
