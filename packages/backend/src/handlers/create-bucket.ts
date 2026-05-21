@@ -1,22 +1,21 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
-import { CreateBucketSchema, S3_REGION } from '@filone/shared';
-import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { createAuroraBucket, BucketAlreadyExistsError } from '../lib/aurora-portal.js';
-import { isOrgSetupComplete } from '../lib/org-setup-status.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { CreateBucketSchema, isSupportedRegion } from '@filone/shared';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
+import {
+  ResponseBuilder,
+  tenantNotReadyResponse,
+  unsupportedRegionResponse,
+} from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
-
-const dynamo = getDynamoClient();
 
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -42,38 +41,18 @@ export async function baseHandler(
 
   const { name, region, versioning, lock, retention } = parsed.data;
 
-  if (region !== S3_REGION) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: `Unsupported region. Supported: ${S3_REGION}` })
-      .build();
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
+    return unsupportedRegionResponse(region);
   }
 
   const { orgId } = getUserInfo(event);
 
-  // Look up org profile to get auroraTenantId
-  const { Item: orgProfile } = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-    }),
-  );
-
-  const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    console.warn('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
-    return new ResponseBuilder()
-      .status(503)
-      .body<ErrorResponse>({
-        message: 'Aurora tenant setup is not complete, please try again later',
-      })
-      .build();
-  }
+  const orchestrator = getOrchestratorForRegion(region);
+  const tenantId = await orchestrator.ensureTenantReady(orgId);
+  if (!tenantId) return tenantNotReadyResponse();
 
   try {
-    await createAuroraBucket({
-      tenantId: auroraTenantId,
+    await orchestrator.createBucket(tenantId, {
       bucketName: name,
       versioning,
       lock,

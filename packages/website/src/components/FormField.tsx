@@ -17,7 +17,7 @@ export function FormField({
 }: FormFieldProps) {
   return (
     <div className="flex flex-col gap-2.5">
-      <label htmlFor={htmlFor} className="text-sm font-medium text-zinc-700">
+      <label htmlFor={htmlFor} className="text-xs font-medium text-zinc-900">
         {label}
         {optional && (
           <span className="ml-1 text-xs font-normal text-(--color-paragraph-text-subtle)">

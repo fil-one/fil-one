@@ -15,7 +15,7 @@ import {
   getStorageSamples,
   getOperationsSamples,
   getTenantInfo,
-} from '../lib/aurora-backoffice.js';
+} from '../lib/aurora/aurora-backoffice.js';
 
 const dynamo = getDynamoClient();
 

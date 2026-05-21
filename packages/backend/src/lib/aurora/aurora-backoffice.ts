@@ -8,24 +8,30 @@ import {
   getTenantStorageMetrics,
   listTenants,
   setTenantStatus,
-  setupTenant,
-  type ModelsComponentsStatus,
+  setupS3Component,
   type ModelsSetupStep,
   type ModelOperationMetricsSample,
   type ModelStorageMetricsSample,
   type ModelsTenantStatus,
-  type ModelsTenantWithMetricsManagementResponse,
+  type ModelsTenantWithMetricsBackofficeResponse,
 } from '@filone/aurora-backoffice-client';
 import pRetry from 'p-retry';
 import { instrumentClient } from './aurora-api-metrics.js';
-import { getAuroraBackofficeSecrets } from './auth-secrets.js';
+import { getAuroraBackofficeSecrets } from '../auth-secrets.js';
 
 export type {
   ModelOperationMetricsSample,
   ModelStorageMetricsSample,
   ModelsTenantStatus,
-  ModelsTenantWithMetricsManagementResponse,
+  ModelsTenantWithMetricsBackofficeResponse,
 };
+
+export class DuplicateTokenNameError extends Error {
+  constructor() {
+    super('An Aurora tenant API token with this name already exists');
+    this.name = 'DuplicateTokenNameError';
+  }
+}
 
 function createBackofficeClient() {
   const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
@@ -132,7 +138,6 @@ export interface SetupAuroraTenantOptions {
 }
 
 export interface SetupAuroraTenantResult {
-  id: string;
   lastSetupStep: ModelsSetupStep;
 }
 
@@ -142,7 +147,7 @@ export async function setupAuroraTenant({
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  const { data, error } = await setupTenant({
+  const { data, error } = await setupS3Component({
     client,
     path: { partnerId, tenantId },
     throwOnError: false,
@@ -161,22 +166,17 @@ export async function setupAuroraTenant({
     throw new Error(`Aurora API did not return setup data for tenant ${tenantId}`);
   }
 
-  const lastSetupStep = deriveOverallSetupStep(data.components);
-  console.log(
-    `Aurora tenant ${tenantId} setup response:`,
-    JSON.stringify(data),
-    `=> overall lastSetupStep=${lastSetupStep}`,
-  );
-  return { id: data.id!, lastSetupStep };
-}
+  const { lastSetupStep } = data;
+  if (!lastSetupStep) {
+    throw new Error(`Aurora API did not return lastSetupStep for tenant ${tenantId}`);
+  }
 
-function deriveOverallSetupStep(components: ModelsComponentsStatus | undefined): ModelsSetupStep {
-  if (!components) return 'NOT_STARTED';
-  // Only check auth & s3 — compute is not set up yet
-  const steps = [components.auth?.lastSetupStep, components.s3?.lastSetupStep].filter(Boolean);
-  if (steps.length === 0) return 'NOT_STARTED';
-  const nonFinished = steps.find((s) => s !== 'FINISHED');
-  return nonFinished ?? 'FINISHED';
+  console.log(
+    `Aurora tenant ${tenantId} S3 setup response:`,
+    JSON.stringify(data),
+    `=> lastSetupStep=${lastSetupStep}`,
+  );
+  return { lastSetupStep };
 }
 
 export interface CreateAuroraTenantApiKeyOptions {
@@ -196,7 +196,7 @@ export async function createAuroraTenantApiKey({
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  const { data, error } = await createTenantToken({
+  const { data, error, response } = await createTenantToken({
     client,
     path: { partnerId, tenantId },
     body: { name: `filone-${orgId}` },
@@ -204,6 +204,9 @@ export async function createAuroraTenantApiKey({
   });
 
   if (error) {
+    if (response?.status === 409) {
+      throw new DuplicateTokenNameError();
+    }
     console.error('Failed to create Aurora API key:', error);
     throw new Error(`Aurora API key creation failed for org ${orgId}`, {
       cause: error,
@@ -431,7 +434,7 @@ export async function getTenantInfo({
   tenantId,
 }: {
   tenantId: string;
-}): Promise<ModelsTenantWithMetricsManagementResponse> {
+}): Promise<ModelsTenantWithMetricsBackofficeResponse> {
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 

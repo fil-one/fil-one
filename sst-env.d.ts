@@ -18,18 +18,6 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
-    "AuroraTenantSetup": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "AuroraTenantSetupDlq": {
-      "type": "sst.aws.Queue"
-      "url": string
-    }
-    "AuroraTenantSetupQueue": {
-      "type": "sst.aws.Queue"
-      "url": string
-    }
     "Auth0ClientId": {
       "type": "sst.sst.Secret"
       "value": string
@@ -109,6 +97,10 @@ declare module "sst" {
     "EnrollMfa": {
       "name": string
       "type": "sst.aws.Function"
+    }
+    "FthManagementApiToken": {
+      "type": "sst.sst.Secret"
+      "value": string
     }
     "GetActivity": {
       "name": string

@@ -5,10 +5,10 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
-import { deleteAuroraAccessKey } from '../lib/aurora-portal.js';
+import { deleteAuroraAccessKey } from '../lib/aurora/aurora-portal.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -55,12 +55,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
   const setupStatus = orgProfile?.setupStatus?.S;
   if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    return new ResponseBuilder()
-      .status(503)
-      .body<ErrorResponse>({
-        message: 'Aurora tenant setup is not complete, please try again later',
-      })
-      .build();
+    return tenantNotReadyResponse();
   }
 
   await deleteAuroraAccessKey({ tenantId: auroraTenantId, auroraKeyId: keyId });

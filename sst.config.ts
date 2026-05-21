@@ -51,6 +51,7 @@ export default $config({
     const stripePublishableKey = new sst.Secret('StripePublishableKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
+    const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const sendGridApiKey =
       $app.stage === 'staging' || $app.stage === 'production'
@@ -93,18 +94,6 @@ export default $config({
         sk: 'string',
       },
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
-    });
-
-    // ── SQS Queues ─────────────────────────────────────────────────
-    const tenantSetupDlq = new sst.aws.Queue('AuroraTenantSetupDlq', {
-      fifo: true,
-    });
-
-    const tenantSetupQueue = new sst.aws.Queue('AuroraTenantSetupQueue', {
-      fifo: true,
-      dlq: tenantSetupDlq.arn,
-      // Make visibility timeout longer than the Lambda timeout to avoid multiple retries
-      visibilityTimeout: '90 seconds',
     });
 
     // ── S3 Bucket for user file storage ──────────────────────────────
@@ -181,7 +170,7 @@ export default $config({
         securityHeadersConfig: {
           contentSecurityPolicy: {
             // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://plausible.io https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io/api https://fil-one.instatus.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://fil-one.instatus.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
@@ -357,13 +346,13 @@ export default $config({
       billingTable,
       userInfoTable,
       userFilesBucket,
-      tenantSetupQueue,
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
       stripePublishableKey,
       stripePriceId,
       auroraBackofficeToken,
+      fthManagementApiToken,
     ];
     // Management API runtime credentials — linked only to handlers that call the Auth0 Management API
     const mgmtRuntimeResources = [auth0MgmtRuntimeClientId, auth0MgmtRuntimeClientSecret];
@@ -389,8 +378,14 @@ export default $config({
       AURORA_REGION_ID: 'ff',
     };
 
+    const fthEnv = {
+      FTH_MANAGEMENT_API_URL: 'https://api.fortilyx.com',
+      FTH_S3_URL: 'https://us-east-1.fortilyx.com',
+    };
+
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
+    const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
     const auroraS3GatewayPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
@@ -429,6 +424,7 @@ export default $config({
       extraLink?: (typeof allResources)[number][];
       provisionedConcurrency?: number;
       memory?: sst.aws.FunctionArgs['memory'];
+      timeout?: sst.aws.FunctionArgs['timeout'];
     }
 
     function addRoute({
@@ -440,6 +436,7 @@ export default $config({
       extraLink,
       provisionedConcurrency,
       memory,
+      timeout,
     }: AddRouteProps) {
       // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
       const fnName = handler
@@ -455,7 +452,7 @@ export default $config({
           ...extraEnv,
         },
         permissions,
-        timeout: '10 seconds',
+        timeout: timeout ?? '10 seconds',
         ...(memory ? { memory } : {}),
         ...(provisionedConcurrency && provisionedConcurrency > 0
           ? {
@@ -489,8 +486,13 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets',
       handler: 'list-buckets',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        FTH_S3_URL: fthEnv.FTH_S3_URL,
+      },
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
@@ -498,15 +500,27 @@ export default $config({
       method: 'POST',
       routePath: '/api/buckets',
       handler: 'create-bucket',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: {
+        ...auroraEnv,
+        ...fthEnv,
+      },
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
+        },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+      timeout: '30 seconds',
     });
     addRoute({
       method: 'GET',
       routePath: '/api/buckets/{name}',
       handler: 'get-bucket',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        FTH_S3_URL: fthEnv.FTH_S3_URL,
+      },
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
@@ -527,8 +541,14 @@ export default $config({
       method: 'POST',
       routePath: '/api/access-keys',
       handler: 'create-access-key',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: auroraEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+        },
+      ],
+      timeout: '30 seconds',
     });
     addRoute({
       method: 'DELETE',
@@ -541,7 +561,9 @@ export default $config({
       method: 'POST',
       routePath: '/api/presign',
       handler: 'presign',
-      permissions: auroraS3GatewayPermissions,
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '512 MB',
     });
@@ -644,7 +666,9 @@ export default $config({
       routePath: '/api/activity',
       handler: 'get-activity',
       extraEnv: auroraEnv,
-      permissions: auroraS3GatewayPermissions,
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
@@ -691,37 +715,6 @@ export default $config({
         },
       ],
     });
-
-    // ── Tenant setup consumer ──────────────────────────────────────
-    const tenantSetupFn = createFn('AuroraTenantSetup', {
-      handler: 'packages/backend/src/handlers/aurora-tenant-setup.handler',
-      link: [userInfoTable, auroraBackofficeToken],
-      environment: {
-        ...auroraEnv,
-        ...sharedEnv,
-      },
-      permissions: [
-        {
-          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
-        },
-        // queue.subscribe(fn.arn) passes an ARN, so SST skips attaching
-        // SQS permissions automatically — we must add them here.
-        {
-          actions: [
-            'sqs:ChangeMessageVisibility',
-            'sqs:DeleteMessage',
-            'sqs:GetQueueAttributes',
-            'sqs:GetQueueUrl',
-            'sqs:ReceiveMessage',
-          ],
-          resources: [tenantSetupQueue.arn],
-        },
-      ],
-      timeout: '60 seconds',
-    });
-
-    tenantSetupQueue.subscribe(tenantSetupFn.arn, { batch: { size: 1 } });
 
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {

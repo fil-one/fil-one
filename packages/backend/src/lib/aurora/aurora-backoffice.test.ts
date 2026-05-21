@@ -5,6 +5,7 @@ import {
   getStorageSamples,
   getOperationsSamples,
   createAuroraTenantApiKey,
+  DuplicateTokenNameError,
   updateTenantStatus,
   getBucketStorageSamples,
 } from './aurora-backoffice.js';
@@ -13,7 +14,7 @@ import {
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('./auth-secrets.js', () => ({
+vi.mock('../auth-secrets.js', () => ({
   getAuroraBackofficeSecrets: () => ({
     AURORA_BACKOFFICE_TOKEN: 'test-aurora-token',
   }),
@@ -25,7 +26,7 @@ vi.mock('./aurora-api-metrics.js', () => ({
 
 const mockPostTenants = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockGetTenants = vi.fn((_options: Record<string, unknown>) => ({}));
-const mockPostSetup = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockSetupS3Component = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockPostTokens = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-aurora-client');
 const mockGetStorage = vi.fn((_options: Record<string, unknown>) => ({}));
@@ -39,7 +40,7 @@ vi.mock('@filone/aurora-backoffice-client', () => ({
   listTenants: (options: Record<string, unknown>) => mockGetTenants(options),
   getTenantStorageMetrics: (options: Record<string, unknown>) => mockGetStorage(options),
   getTenantOperationMetrics: (options: Record<string, unknown>) => mockGetOperations(options),
-  setupTenant: (options: Record<string, unknown>) => mockPostSetup(options),
+  setupS3Component: (options: Record<string, unknown>) => mockSetupS3Component(options),
   createTenantToken: (options: Record<string, unknown>) => mockPostTokens(options),
   setTenantStatus: (options: Record<string, unknown>) => mockSetTenantStatus(options),
   getBucketStorageMetrics: (options: Record<string, unknown>) =>
@@ -140,48 +141,31 @@ describe('setupAuroraTenant', () => {
     vi.clearAllMocks();
   });
 
-  it('returns id and lastSetupStep on success', async () => {
-    mockPostSetup.mockResolvedValue({
-      data: {
-        id: 'tenant-123',
-        components: {
-          auth: { lastSetupStep: 'FINISHED' },
-          compute: { lastSetupStep: 'FINISHED' },
-          s3: { lastSetupStep: 'FINISHED' },
-        },
-      },
+  it('returns lastSetupStep on success', async () => {
+    mockSetupS3Component.mockResolvedValue({
+      data: { enabled: true, lastSetupStep: 'FINISHED' },
       error: undefined,
     });
 
     const result = await setupAuroraTenant({ tenantId: 'tenant-123' });
 
-    expect(result).toStrictEqual({ id: 'tenant-123', lastSetupStep: 'FINISHED' });
+    expect(result).toStrictEqual({ lastSetupStep: 'FINISHED' });
   });
 
   it('returns a non-FINISHED lastSetupStep value', async () => {
-    mockPostSetup.mockResolvedValue({
-      data: {
-        id: 'tenant-123',
-        components: {
-          auth: { lastSetupStep: 'FINISHED' },
-          compute: { lastSetupStep: 'NOT_STARTED' },
-          s3: { lastSetupStep: 'WARM_TIER_ADDED' },
-        },
-      },
+    mockSetupS3Component.mockResolvedValue({
+      data: { enabled: true, lastSetupStep: 'WARM_TIER_ADDED' },
       error: undefined,
     });
 
     const result = await setupAuroraTenant({ tenantId: 'tenant-123' });
 
-    expect(result).toStrictEqual({ id: 'tenant-123', lastSetupStep: 'WARM_TIER_ADDED' });
+    expect(result).toStrictEqual({ lastSetupStep: 'WARM_TIER_ADDED' });
   });
 
-  it('calls setupTenant with correct parameters', async () => {
-    mockPostSetup.mockResolvedValue({
-      data: {
-        id: 'tenant-123',
-        components: { auth: { lastSetupStep: 'FINISHED' }, s3: { lastSetupStep: 'FINISHED' } },
-      },
+  it('calls setupS3Component with correct parameters', async () => {
+    mockSetupS3Component.mockResolvedValue({
+      data: { enabled: true, lastSetupStep: 'FINISHED' },
       error: undefined,
     });
 
@@ -192,7 +176,7 @@ describe('setupAuroraTenant', () => {
       headers: { 'X-Api-Key': 'test-aurora-token' },
     });
 
-    expect(mockPostSetup).toHaveBeenCalledWith({
+    expect(mockSetupS3Component).toHaveBeenCalledWith({
       client: 'mock-aurora-client',
       path: { partnerId: 'test-partner', tenantId: 'tenant-123' },
       throwOnError: false,
@@ -201,7 +185,10 @@ describe('setupAuroraTenant', () => {
   });
 
   it('throws when the Aurora API returns an error', async () => {
-    mockPostSetup.mockResolvedValue({ data: undefined, error: { message: 'Setup failed' } });
+    mockSetupS3Component.mockResolvedValue({
+      data: undefined,
+      error: { message: 'Setup failed' },
+    });
 
     await expect(setupAuroraTenant({ tenantId: 'tenant-456' })).rejects.toThrow(
       'Aurora tenant setup failed for tenant tenant-456',
@@ -209,10 +196,21 @@ describe('setupAuroraTenant', () => {
   });
 
   it('throws when the Aurora API returns no data', async () => {
-    mockPostSetup.mockResolvedValue({ data: undefined, error: undefined });
+    mockSetupS3Component.mockResolvedValue({ data: undefined, error: undefined });
 
     await expect(setupAuroraTenant({ tenantId: 'tenant-789' })).rejects.toThrow(
       'Aurora API did not return setup data for tenant tenant-789',
+    );
+  });
+
+  it('throws when the response is missing lastSetupStep', async () => {
+    mockSetupS3Component.mockResolvedValue({
+      data: { enabled: true },
+      error: undefined,
+    });
+
+    await expect(setupAuroraTenant({ tenantId: 'tenant-789' })).rejects.toThrow(
+      'Aurora API did not return lastSetupStep for tenant tenant-789',
     );
   });
 });
@@ -253,6 +251,19 @@ describe('createAuroraTenantApiKey', () => {
     await expect(
       createAuroraTenantApiKey({ tenantId: 'tenant-1', orgId: 'org-1' }),
     ).rejects.toThrow('Aurora API key creation failed for org org-1');
+  });
+
+  it('throws DuplicateTokenNameError on 409 Conflict', async () => {
+    mockPostTokens.mockResolvedValue({
+      data: undefined,
+      error: { message: 'token name already exists' },
+      response: { status: 409 },
+    });
+
+    expect(DuplicateTokenNameError).toBeDefined();
+    await expect(
+      createAuroraTenantApiKey({ tenantId: 'tenant-1', orgId: 'org-1' }),
+    ).rejects.toBeInstanceOf(DuplicateTokenNameError);
   });
 
   it('throws when response has no token field', async () => {

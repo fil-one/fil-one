@@ -56,6 +56,51 @@ export const InlineGroup: Story = {
   },
 };
 
+export const WithDescription: Story = {
+  args: {
+    name: 'example',
+    value: 'governance',
+    checked: true,
+    onChange: () => {},
+    description: 'Users with special permissions can delete or modify protected objects.',
+    children: 'Governance',
+  },
+};
+
+export const WithDescriptionGroup: Story = {
+  render: () => {
+    const options = [
+      {
+        value: 'governance',
+        label: 'Governance',
+        description: 'Users with special permissions can delete or modify protected objects.',
+      },
+      {
+        value: 'compliance',
+        label: 'Compliance',
+        description: 'No one can delete or modify objects until the retention period expires.',
+      },
+    ];
+    const [value, setValue] = useState('governance');
+    return (
+      <div className="flex flex-col gap-1.5">
+        {options.map((option) => (
+          <RadioOption
+            key={option.value}
+            name="with-description"
+            value={option.value}
+            checked={value === option.value}
+            onChange={() => setValue(option.value)}
+            description={option.description}
+          >
+            {option.label}
+          </RadioOption>
+        ))}
+      </div>
+    );
+  },
+};
+
 export const GridGroup: Story = {
   render: () => {
     const [value, setValue] = useState('never');

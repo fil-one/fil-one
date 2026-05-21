@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { SubscriptionStatus, mapStripeStatus } from './billing.js';
+import {
+  ActivateSubscriptionRequestSchema,
+  SubscriptionStatus,
+  mapStripeStatus,
+} from './billing.js';
 
 describe('mapStripeStatus', () => {
   it('maps active → Active', () => {
@@ -36,5 +40,46 @@ describe('mapStripeStatus', () => {
 
   it('returns null for unknown status strings', () => {
     expect(mapStripeStatus('some_future_status')).toBeNull();
+  });
+});
+
+describe('ActivateSubscriptionRequestSchema', () => {
+  it('accepts an empty object (no promotion code)', () => {
+    const parsed = ActivateSubscriptionRequestSchema.safeParse({});
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.promotionCode).toBeUndefined();
+    }
+  });
+
+  it('accepts a valid promotion code', () => {
+    const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: 'WELCOME20' });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.promotionCode).toBe('WELCOME20');
+    }
+  });
+
+  it('trims surrounding whitespace from the promotion code', () => {
+    const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: '  WELCOME20  ' });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.promotionCode).toBe('WELCOME20');
+    }
+  });
+
+  it('rejects promotion codes shorter than 3 characters', () => {
+    const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: 'ab' });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects promotion codes longer than 40 characters', () => {
+    const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: 'A'.repeat(41) });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects promotion codes containing spaces or punctuation', () => {
+    const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: 'bad code!' });
+    expect(parsed.success).toBe(false);
   });
 });

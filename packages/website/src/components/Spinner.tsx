@@ -43,7 +43,7 @@ export function Spinner({ message, ariaLabel, size = 52 }: SpinnerProps) {
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
       </svg>
-      {message && <p className="text-sm text-zinc-500">{message}</p>}
+      {message && <p className="text-xs leading-relaxed text-zinc-500">{message}</p>}
     </div>
   );
 }

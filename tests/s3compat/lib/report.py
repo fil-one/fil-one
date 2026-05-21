@@ -134,6 +134,15 @@ def _group_field_label(group_label: str) -> str:
     return group_label.title()
 
 
+def _description_section(entry: dict) -> str:
+    """Render the 'Test description' section as a labeled blockquote, or empty."""
+    desc = entry.get("description")
+    if not desc:
+        return ""
+    safe = " ".join(desc.split())
+    return f"**Test description**\n\n> {safe}\n\n"
+
+
 def _render_error(entry: dict) -> dict:
     """Produce {"summary", "body"} for an error entry.
 
@@ -145,13 +154,15 @@ def _render_error(entry: dict) -> dict:
     test = entry.get("test")
     longrepr = entry.get("longrepr")
 
+    description = _description_section(entry)
+
     if test and longrepr:
         outcome = entry.get("outcome", "failed")
         elapsed = entry.get("elapsed_s")
-        meta = f"**{op}** — `{outcome}`"
+        heading = f"**Error stack trace** — `{op}` — `{outcome}`"
         if elapsed is not None:
-            meta += f" — {elapsed}s"
-        body = f"{meta}\n\n```pytb\n{longrepr}\n```"
+            heading += f" — {elapsed}s"
+        body = f"{description}{heading}\n\n```pytb\n{longrepr}\n```"
         return {"summary": test, "body": body}
 
     code = entry.get("error_code") or entry.get("error_type")
@@ -161,7 +172,10 @@ def _render_error(entry: dict) -> dict:
         summary += f" — {code}"
     if msg:
         summary += f": {msg}"
-    body = f"```json\n{json.dumps(entry, indent=2, default=str)}\n```"
+    body = (
+        f"{description}**Error details**\n\n"
+        f"```json\n{json.dumps(entry, indent=2, default=str)}\n```"
+    )
     return {"summary": summary, "body": body}
 
 

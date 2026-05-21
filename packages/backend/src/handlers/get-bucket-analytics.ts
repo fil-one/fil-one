@@ -6,7 +6,7 @@ import type { BucketAnalyticsResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { createClient, getBucketInfo } from '@filone/aurora-portal-client';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAuroraPortalApiKey } from '../lib/aurora-portal.js';
+import { getAuroraPortalApiKey } from '../lib/aurora/aurora-portal.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -14,7 +14,7 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
-import { getBucketStorageSamples } from '../lib/aurora-backoffice.js';
+import { getBucketStorageSamples } from '../lib/aurora/aurora-backoffice.js';
 
 const dynamo = getDynamoClient();
 
