@@ -2,7 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
-import { CreateBucketSchema, S3Region } from '@filone/shared';
+import { CreateBucketSchema, getAvailableRegions, S3Region } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
 import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
@@ -38,7 +38,7 @@ export async function baseHandler(
 
   const { name, region, versioning, lock, retention } = parsed.data;
 
-  if (!(Object.values(S3Region) as string[]).includes(region)) {
+  if (!getAvailableRegions(process.env.FILONE_STAGE!).includes(region as S3Region)) {
     return new ResponseBuilder()
       .status(400)
       .body<ErrorResponse>({ message: `Unsupported region "${region}"` })
