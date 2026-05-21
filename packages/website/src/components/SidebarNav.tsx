@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import { useEffect, useRef, useState } from 'react';
 import {
   SquaresFourIcon,
@@ -89,11 +90,12 @@ function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
             {group.items.map(({ path, icon: Icon, label }) => {
               const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
               const addOnStatus = group.showDot ? states[path] : undefined;
-              const dot = addOnStatus === 'active'
-                ? 'bg-green-500'
-                : addOnStatus === 'disabled'
-                  ? 'bg-zinc-300'
-                  : null;
+              const dot =
+                addOnStatus === 'active'
+                  ? 'bg-green-500'
+                  : addOnStatus === 'disabled'
+                    ? 'bg-zinc-300'
+                    : null;
 
               const link = (
                 <Link
@@ -104,7 +106,9 @@ function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
                     'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
                     collapsed ? 'justify-center' : '',
                     isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
-                  ].filter(Boolean).join(' ')}
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
                 >
                   <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
                   {!collapsed && (
@@ -304,6 +308,7 @@ export function HelpMenu({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function
 export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -464,6 +469,41 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
         {/* Spacer */}
         <div className="flex-1" />
 
+        {/* Bottom utility nav */}
+        <div className="p-2 flex flex-col gap-0.5">
+          {[
+            { path: '/billing', icon: CreditCardIcon, label: 'Billing' },
+            { path: '/settings', icon: GearIcon, label: 'Settings' },
+          ].map(({ path, icon: Icon, label }) => {
+            const isActive = Boolean(matchRoute({ to: path }));
+            const link = (
+              <Link
+                key={path}
+                to={path}
+                aria-label={label}
+                className={[
+                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                  collapsed ? 'justify-center' : '',
+                  isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
+                {!collapsed && <span>{label}</span>}
+              </Link>
+            );
+            if (collapsed) {
+              return (
+                <Tooltip key={path} content={label} side="right">
+                  {link}
+                </Tooltip>
+              );
+            }
+            return <div key={path}>{link}</div>;
+          })}
+        </div>
+
         {/* Status banners */}
         <StatusBanners
           collapsed={collapsed}
@@ -480,35 +520,6 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           graceEndsLabel={graceEndsLabel}
           isPastDue={isPastDue}
         />
-
-        {/* Bottom utility nav */}
-        <div className="p-2 flex flex-col gap-0.5">
-          {[
-            { path: '/billing', icon: CreditCardIcon, label: 'Billing' },
-            { path: '/settings', icon: GearIcon, label: 'Settings' },
-          ].map(({ path, icon: Icon, label }) => {
-            const isActive = Boolean(matchRoute({ to: path }));
-            const link = (
-              <Link
-                key={path}
-                to={path}
-                aria-label={label}
-                className={[
-                  'flex items-center gap-3 rounded-lg px-3 py-1.5 text-xs transition-colors',
-                  collapsed ? 'justify-center' : '',
-                  isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-500 hover:bg-zinc-100',
-                ].filter(Boolean).join(' ')}
-              >
-                <Icon size={16} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
-                {!collapsed && <span>{label}</span>}
-              </Link>
-            );
-            if (collapsed) {
-              return <Tooltip key={path} content={label} side="right">{link}</Tooltip>;
-            }
-            return <div key={path}>{link}</div>;
-          })}
-        </div>
 
         {/* Footer: Help + System status */}
         <div className="border-t border-zinc-200 p-2 flex flex-col gap-0.5">
