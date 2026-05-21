@@ -56,7 +56,7 @@ import {
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   NotImplementedError,
-} from '../service-orchestrator.js';
+} from '../errors.js';
 
 // ---------------------------------------------------------------------------
 // Tests
