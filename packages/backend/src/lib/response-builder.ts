@@ -1,3 +1,4 @@
+import type { ErrorResponse } from '@filone/shared';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
 export const COOKIE_ATTRIBUTES = 'HttpOnly; Secure; SameSite=Lax; Path=/';
@@ -63,4 +64,11 @@ export class ResponseBuilder {
       ...(this._cookies.length > 0 && { cookies: this._cookies }),
     };
   }
+}
+
+export function unsupportedRegionResponse(region: string): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(400)
+    .body<ErrorResponse>({ message: `Unsupported region "${region}"` })
+    .build();
 }
