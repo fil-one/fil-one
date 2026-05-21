@@ -75,13 +75,19 @@ export const fthOrchestrator = {
 
   async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {
     if (args.lock) {
-      throw new Error('FTH does not support object lock on bucket creation');
+      throw new NotImplementedError(
+        'Object lock on bucket creation is not supported in this region yet',
+      );
     }
     if (args.retention?.enabled) {
-      throw new Error('FTH does not support default retention on bucket creation');
+      throw new NotImplementedError(
+        'Retention policy on bucket creation is not supported in this region yet',
+      );
     }
     if (args.versioning) {
-      throw new Error('FTH does not support bucket versioning on creation');
+      throw new NotImplementedError(
+        'Versioning on bucket creation is not supported in this region yet',
+      );
     }
 
     const ctx = await fthOrchestrator.getPresignerContext(tenantId);
