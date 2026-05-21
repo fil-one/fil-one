@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { STORAGE_STATE } from './roles.ts';
+import { STORAGE_STATE } from './roles.util.ts';
 
 // Cookies set by packages/backend/src/lib/response-builder.ts and cleared by
 // packages/backend/src/handlers/auth-logout.ts.
@@ -21,6 +21,7 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
 
   // Wait for the full /logout -> Auth0 /v2/logout -> returnTo chain to settle.
   await page.waitForURL(/^https:\/\/fil\.one\/?$/, { timeout: 30_000 });
+  await expect(page).toHaveURL(/^https:\/\/fil\.one\/?$/);
 
   const cookies = await context.cookies();
   for (const name of AUTH_COOKIES) {

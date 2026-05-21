@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { maybeSkipPasskeyEnrollment } from './passkey.ts';
+import { maybeSkipPasskeyEnrollment } from './passkey.util.ts';
 
 // Real UI login smoke test. Starts unauthenticated (no storageState) and exercises
 // the Auth0 login form from scratch to guard the auth.setup.ts pathway from silent
@@ -16,9 +16,6 @@ test('paid user signs in via Auth0 and lands on dashboard', async ({ page }) => 
   await page.locator('#password').fill(process.env.E2E_PAID_PASSWORD!);
   await page.locator('button[data-action-button-primary="true"]').click();
 
-  // WebKit doesn't trigger Auth0's passkey enrollment interstitial, so the
-  // user goes straight to /dashboard. Race the two outcomes and only click
-  // the skip button when it actually appears.
   await maybeSkipPasskeyEnrollment(page);
 
   await expect(page).toHaveURL(/\/dashboard$/);

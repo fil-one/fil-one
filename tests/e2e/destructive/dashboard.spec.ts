@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { STORAGE_STATE } from './roles.ts';
+import { STORAGE_STATE } from './roles.util.ts';
 
 // Convention: one spec per feature, one describe block per role. Each test name
 // starts with the role being exercised so reports read clearly in CI.
