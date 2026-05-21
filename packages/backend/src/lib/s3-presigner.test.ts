@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
+  CreateBucketCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   GetObjectRetentionCommand,
@@ -24,6 +25,7 @@ vi.mock('@aws-sdk/s3-request-presigner', () => ({
 const s3Mock = mockClient(S3Client);
 
 import {
+  createBucket,
   getPresignedDeleteObjectUrl,
   getPresignedGetObjectRetentionUrl,
   getPresignedGetObjectUrl,
@@ -34,6 +36,7 @@ import {
   listBuckets,
   listObjects,
 } from './s3-presigner.js';
+import { BucketAlreadyExistsError } from './service-orchestrator.js';
 import type { PresignerContext } from './service-orchestrator.js';
 
 // ---------------------------------------------------------------------------
@@ -69,6 +72,46 @@ describe('s3-presigner direct operations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     s3Mock.reset();
+  });
+
+  describe('createBucket', () => {
+    it('sends a CreateBucketCommand with the supplied bucket name', async () => {
+      s3Mock.on(CreateBucketCommand).resolves({});
+
+      await createBucket(ctx, { bucketName: 'my-bucket' });
+
+      const calls = s3Mock.commandCalls(CreateBucketCommand);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].args[0].input).toEqual({ Bucket: 'my-bucket' });
+    });
+
+    const alreadyExistsNames = ['BucketAlreadyOwnedByYou', 'BucketAlreadyExists'];
+    for (const errName of alreadyExistsNames) {
+      it(`maps SDK error "${errName}" to BucketAlreadyExistsError`, async () => {
+        const sdkErr = Object.assign(new Error('already there'), { name: errName });
+        s3Mock.on(CreateBucketCommand).rejects(sdkErr);
+
+        await expect(createBucket(ctx, { bucketName: 'my-bucket' })).rejects.toBeInstanceOf(
+          BucketAlreadyExistsError,
+        );
+      });
+    }
+
+    it('attaches the original SDK error as the cause of BucketAlreadyExistsError', async () => {
+      const sdkErr = Object.assign(new Error('already there'), { name: 'BucketAlreadyExists' });
+      s3Mock.on(CreateBucketCommand).rejects(sdkErr);
+
+      await expect(createBucket(ctx, { bucketName: 'my-bucket' })).rejects.toMatchObject({
+        cause: sdkErr,
+      });
+    });
+
+    it('propagates unrelated SDK errors unchanged', async () => {
+      const sdkErr = Object.assign(new Error('denied'), { name: 'AccessDenied' });
+      s3Mock.on(CreateBucketCommand).rejects(sdkErr);
+
+      await expect(createBucket(ctx, { bucketName: 'my-bucket' })).rejects.toBe(sdkErr);
+    });
   });
 
   describe('listBuckets', () => {

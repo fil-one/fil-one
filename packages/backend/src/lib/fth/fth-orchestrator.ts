@@ -10,13 +10,12 @@
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
-import { S3Client, CreateBucketCommand, ListBucketsCommand } from '@aws-sdk/client-s3';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { S3Region } from '@filone/shared';
 import { getDynamoClient } from '../ddb-client.js';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
-import { BucketAlreadyExistsError, NotImplementedError } from '../service-orchestrator.js';
+import { NotImplementedError } from '../service-orchestrator.js';
 import type {
   BucketDetails,
   BucketSummary,
@@ -26,6 +25,11 @@ import type {
   PresignerContext,
   ServiceOrchestrator,
 } from '../service-orchestrator.js';
+
+import {
+  createBucket as s3CreateBucket,
+  listBuckets as s3ListBuckets,
+} from '../s3-presigner.js';
 
 interface FthS3Credentials {
   accessKeyId: string;
@@ -84,18 +88,7 @@ export const fthOrchestrator = {
     }
 
     const ctx = await fthOrchestrator.getPresignerContext(tenantId);
-    const s3 = createS3ClientFor(ctx);
-    try {
-      const result = await s3.send(new CreateBucketCommand({ Bucket: args.bucketName }));
-      console.log('CreateBucket result:', result);
-    } catch (err) {
-      console.log('CreateBucket error:', err);
-      const name = (err as { name?: string }).name;
-      if (name === 'BucketAlreadyOwnedByYou' || name === 'BucketAlreadyExists') {
-        throw new BucketAlreadyExistsError(args.bucketName, { cause: err as Error });
-      }
-      throw err;
-    }
+    await s3CreateBucket(ctx, { bucketName: args.bucketName });
   },
 
   async deleteBucket(_tenantId: string, _bucketName: string): Promise<void> {
@@ -104,19 +97,15 @@ export const fthOrchestrator = {
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {
     const ctx = await fthOrchestrator.getPresignerContext(tenantId);
-    const s3 = createS3ClientFor(ctx);
-    // TODO: handle pagination if a tenant has many buckets.
-    const result = await s3.send(new ListBucketsCommand({}));
-    return (result.Buckets ?? [])
-      .filter((b): b is typeof b & { Name: string } => !!b.Name)
-      .map((b) => ({
-        name: b.Name,
-        region: fthOrchestrator.region,
-        createdAt: b.CreationDate?.toISOString() ?? new Date().toISOString(),
-        isPublic: false,
-        versioning: false,
-        encrypted: true,
-      }));
+    const { buckets } = await s3ListBuckets(ctx);
+    return buckets.map((b) => ({
+      name: b.name,
+      region: fthOrchestrator.region,
+      createdAt: b.createdAt,
+      isPublic: false,
+      versioning: false,
+      encrypted: true,
+    }));
   },
 
   async getBucket(_tenantId: string, bucketName: string): Promise<BucketDetails | null> {
@@ -168,13 +157,4 @@ async function getFthS3Credentials(tenantId: string): Promise<FthS3Credentials> 
 
   ssmCache.set(cacheKey, value);
   return JSON.parse(value) as FthS3Credentials;
-}
-
-function createS3ClientFor(ctx: PresignerContext): S3Client {
-  return new S3Client({
-    endpoint: ctx.endpointUrl,
-    region: ctx.region,
-    credentials: ctx.credentials,
-    forcePathStyle: ctx.forcePathStyle,
-  });
 }
