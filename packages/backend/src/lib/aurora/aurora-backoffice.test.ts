@@ -14,7 +14,7 @@ import {
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('./auth-secrets.js', () => ({
+vi.mock('../auth-secrets.js', () => ({
   getAuroraBackofficeSecrets: () => ({
     AURORA_BACKOFFICE_TOKEN: 'test-aurora-token',
   }),

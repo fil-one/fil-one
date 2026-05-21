@@ -7,6 +7,7 @@ import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { Spinner } from '../components/Spinner';
+import { Tooltip } from '../components/Tooltip';
 import { useToast } from '../components/Toast';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 
@@ -172,15 +173,20 @@ export function BucketsPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <IconButton
-                      icon={TrashIcon}
-                      aria-label={`Delete bucket ${bucket.name}`}
-                      onClick={() => deleteBucketMutation.mutate(bucket.name)}
-                      // TODO: enable bucket deletion after Aurora implements this operation
-                      // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
-                      disabled
-                      title="Deleting buckets is not available yet"
-                    />
+                    <Tooltip
+                      content="Deleting buckets is not available yet"
+                      side="left"
+                      className="align-middle"
+                    >
+                      <IconButton
+                        icon={TrashIcon}
+                        aria-label={`Delete bucket ${bucket.name}`}
+                        onClick={() => deleteBucketMutation.mutate(bucket.name)}
+                        // TODO: enable bucket deletion after Aurora implements this operation
+                        // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
+                        disabled
+                      />
+                    </Tooltip>
                   </td>
                 </tr>
               ))}

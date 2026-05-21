@@ -15,32 +15,16 @@ import type {
   RetentionDurationType,
   RetentionMode,
 } from '@filone/shared';
+import {
+  AccessKeyAlreadyExistsError,
+  AccessKeyValidationError,
+  BucketAlreadyExistsError,
+} from '../service-orchestrator.js';
 import { instrumentClient } from './aurora-api-metrics.js';
 
 const ssm = new SSMClient({});
 const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
 export const _resetSsmCacheForTesting = () => ssmCache.clear();
-
-export class BucketAlreadyExistsError extends Error {
-  constructor(bucketName: string) {
-    super(`Bucket "${bucketName}" already exists`);
-    this.name = 'BucketAlreadyExistsError';
-  }
-}
-
-export class DuplicateKeyNameError extends Error {
-  constructor() {
-    super('An access key with this name already exists');
-    this.name = 'DuplicateKeyNameError';
-  }
-}
-
-export class AuroraValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'AuroraValidationError';
-  }
-}
 
 async function createPortalClient(tenantId: string) {
   const baseUrl = process.env.AURORA_PORTAL_URL!;
@@ -177,14 +161,14 @@ export async function createAuroraAccessKey({
 
   if (error) {
     if (response?.status === 409) {
-      throw new DuplicateKeyNameError();
+      throw new AccessKeyAlreadyExistsError();
     }
     if (response?.status === 400) {
       const detail =
         typeof error === 'object' && error !== null && 'message' in error
           ? String((error as { message: string }).message)
           : undefined;
-      throw new AuroraValidationError(
+      throw new AccessKeyValidationError(
         detail ?? 'Invalid access key request. Check the key name and try again.',
       );
     }

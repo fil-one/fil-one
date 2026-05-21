@@ -46,12 +46,12 @@ vi.mock('./aurora-portal.js', () => ({
 }));
 
 const mockReportMetric = vi.fn();
-vi.mock('./metrics.js', () => ({
+vi.mock('../metrics.js', () => ({
   reportMetric: (...args: unknown[]) => mockReportMetric(...args),
 }));
 
 const mockScanAndEmitStuckTenantCount = vi.fn().mockResolvedValue(undefined);
-vi.mock('./stuck-tenant-metric.js', () => ({
+vi.mock('../stuck-tenant-metric.js', () => ({
   scanAndEmitStuckTenantCount: (...args: unknown[]) => mockScanAndEmitStuckTenantCount(...args),
 }));
 
@@ -464,7 +464,7 @@ describe('processTenantSetup', () => {
     }
   });
 
-  it('advances status on DuplicateKeyNameError when SSM has credentials', async () => {
+  it('advances status on AccessKeyAlreadyExistsError when SSM has credentials', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
         setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
@@ -473,7 +473,7 @@ describe('processTenantSetup', () => {
     );
     ddbMock.on(UpdateItemCommand).resolves({});
     const duplicateError = new Error('An access key with this name already exists');
-    duplicateError.name = 'DuplicateKeyNameError';
+    duplicateError.name = 'AccessKeyAlreadyExistsError';
     mockCreateAuroraAccessKey.mockRejectedValue(duplicateError);
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: '{}' } });
 
@@ -486,7 +486,7 @@ describe('processTenantSetup', () => {
     });
   });
 
-  it('re-throws DuplicateKeyNameError when SSM does not have credentials after polling', async () => {
+  it('re-throws AccessKeyAlreadyExistsError when SSM does not have credentials after polling', async () => {
     vi.useFakeTimers();
     try {
       ddbMock.on(GetItemCommand).resolves(
@@ -496,7 +496,7 @@ describe('processTenantSetup', () => {
         }),
       );
       const duplicateError = new Error('An access key with this name already exists');
-      duplicateError.name = 'DuplicateKeyNameError';
+      duplicateError.name = 'AccessKeyAlreadyExistsError';
       mockCreateAuroraAccessKey.mockRejectedValue(duplicateError);
       const paramNotFound = new Error('Parameter not found');
       paramNotFound.name = 'ParameterNotFound';
@@ -525,7 +525,7 @@ describe('processTenantSetup', () => {
       );
       ddbMock.on(UpdateItemCommand).resolves({});
       const duplicateError = new Error('An access key with this name already exists');
-      duplicateError.name = 'DuplicateKeyNameError';
+      duplicateError.name = 'AccessKeyAlreadyExistsError';
       mockCreateAuroraAccessKey.mockRejectedValue(duplicateError);
       const paramNotFound = new Error('Parameter not found');
       paramNotFound.name = 'ParameterNotFound';
