@@ -26,10 +26,7 @@ import type {
   ServiceOrchestrator,
 } from '../service-orchestrator.js';
 
-import {
-  createBucket as s3CreateBucket,
-  listBuckets as s3ListBuckets,
-} from '../s3-presigner.js';
+import { createBucket as s3CreateBucket, listBuckets as s3ListBuckets } from '../s3-presigner.js';
 
 interface FthS3Credentials {
   accessKeyId: string;
