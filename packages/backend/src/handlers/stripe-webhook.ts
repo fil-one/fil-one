@@ -186,14 +186,11 @@ async function resolveAuroraTenantId(
         pk: { S: `ORG#${orgId}` },
         sk: { S: 'PROFILE' },
       },
-      // TODO(FIL-382): drop legacy `setupStatus` from ProjectionExpression.
-      ProjectionExpression: 'auroraTenantId, auroraSetupStatus, setupStatus',
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
     }),
   );
   const auroraTenantId = orgResult.Item?.auroraTenantId?.S;
-  // TODO(FIL-382): drop the setupStatus fallback.
-  const setupStatus = orgResult.Item?.auroraSetupStatus?.S ?? orgResult.Item?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
+  if (!auroraTenantId || !isOrgSetupComplete(orgResult.Item?.auroraSetupStatus?.S)) {
     console.warn('[stripe-webhook] Aurora tenant not ready for org:', orgId);
     return null;
   }

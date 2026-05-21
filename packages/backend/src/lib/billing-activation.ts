@@ -62,12 +62,11 @@ export async function unlockAuroraTenant(orgId: string): Promise<void> {
         pk: { S: `ORG#${orgId}` },
         sk: { S: 'PROFILE' },
       },
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
     }),
   );
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  // TODO(FIL-382): drop the setupStatus fallback.
-  const setupStatus = orgProfile?.auroraSetupStatus?.S ?? orgProfile?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
+  if (!auroraTenantId || !isOrgSetupComplete(orgProfile?.auroraSetupStatus?.S)) {
     throw new Error(`Aurora tenant setup is not complete for org ${orgId}`);
   }
   try {

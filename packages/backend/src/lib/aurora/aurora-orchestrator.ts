@@ -3,9 +3,7 @@
 // bucket and access-key ops) and looks up SSM-cached S3 credentials directly.
 //
 // PROFILE-row attributes used: `auroraTenantId`, `auroraSetupStatus`,
-// `auroraSetupFailureCount`. Reads of `auroraSetupStatus` fall back to the
-// legacy `setupStatus` attribute so rows written before the rename keep
-// working until the backfill runs.
+// `auroraSetupFailureCount`.
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
@@ -116,13 +114,12 @@ export const auroraOrchestrator = {
       new GetItemCommand({
         TableName: Resource.UserInfoTable.name,
         Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+        ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
       }),
     );
     const tenantId = Item?.auroraTenantId?.S;
     if (!tenantId) return null;
-    // TODO(FIL-382): drop the setupStatus fallback.
-    const setupStatus = Item?.auroraSetupStatus?.S ?? Item?.setupStatus?.S;
-    if (!isOrgSetupComplete(setupStatus)) return null;
+    if (!isOrgSetupComplete(Item?.auroraSetupStatus?.S)) return null;
     return tenantId;
   },
 

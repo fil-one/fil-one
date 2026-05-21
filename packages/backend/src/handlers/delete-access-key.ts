@@ -50,13 +50,12 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
     }),
   );
 
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  // TODO(FIL-382): drop the setupStatus fallback.
-  const setupStatus = orgProfile?.auroraSetupStatus?.S ?? orgProfile?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
+  if (!auroraTenantId || !isOrgSetupComplete(orgProfile?.auroraSetupStatus?.S)) {
     return tenantNotReadyResponse();
   }
 
