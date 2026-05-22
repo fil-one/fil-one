@@ -46,6 +46,7 @@ process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './disable-mfa.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -101,7 +102,7 @@ function setupAuthMocks(
     .resolves({
       Item: {
         orgConfirmed: { BOOL: true },
-        setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
+        setupStatus: { S: FINAL_SETUP_STATUS },
       },
     });
 }
