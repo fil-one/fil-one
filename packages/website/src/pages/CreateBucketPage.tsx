@@ -130,7 +130,7 @@ export function CreateBucketPage() {
     const parsed = CreateBucketSchema.safeParse(bucketBody);
     if (!parsed.success) {
       const msg = parsed.error.issues[0].message;
-      // Show name errors inline; everything else as a toast
+      // Show bucketName errors inline; everything else as a toast
       if (parsed.error.issues[0].path[0] === 'bucketName') {
         setBucketNameError(msg);
       } else {
