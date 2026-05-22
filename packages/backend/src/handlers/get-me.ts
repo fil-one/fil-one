@@ -20,6 +20,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const { orgId, email, emailVerified, sub, name, picture } = getUserInfo(event);
 
   const includeMfa = event.queryStringParameters?.include === 'mfa';
+  const connectionType = getConnectionType(sub);
 
   const [{ Item }, enrollments, passkeys] = await Promise.all([
     getDynamoClient().send(
@@ -32,12 +33,10 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       }),
     ),
     includeMfa ? getMfaEnrollments(sub) : Promise.resolve([]),
-    includeMfa ? getPasskeyAuthenticators(sub) : Promise.resolve([]),
+    includeMfa && connectionType === 'auth0' ? getPasskeyAuthenticators(sub) : Promise.resolve([]),
   ]);
 
   const orgName = Item?.name?.S ?? '';
-
-  const connectionType = getConnectionType(sub);
 
   const body: MeResponse = {
     orgId,

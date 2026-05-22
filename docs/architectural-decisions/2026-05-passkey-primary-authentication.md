@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Created:** 2026-05-19
-**Last updated:** 2026-05-21
+**Last updated:** 2026-05-22
 
 ## Context
 
@@ -64,6 +64,12 @@ The OIDC `amr` claim that the rest of the system uses (`require-mfa` middleware)
 ### Settings UI
 
 The settings page surfaces a read-only "Passkeys" row when `?include=mfa` returns passkeys. Each passkey can be removed individually; the delete endpoint is gated by step-up auth (`requireMfa`) so a stolen short-lived session can't strip phishing-resistant factors. New enrollments are handled entirely by Auth0 Universal Login via Progressive Enrollment — no SPA enrollment button, no `prompt=login` plumbing.
+
+### Read-path optimization: skip passkey fetch for non-database connections
+
+`GET /api/me?include=mfa` short-circuits `getPasskeyAuthenticators` when the user's connection type isn't `auth0` (i.e., `google-oauth2`, `github`, etc.). The connection is derived from the `sub` prefix via `getConnectionType(sub)` — a pure string split, no extra Auth0 call. Passkeys are configured on the `Username-Password-Authentication` database connection only, so a social-login `sub` has no `type: 'passkey'` entries to return. The optimization saves one Management API roundtrip per Settings page load for every social-login user.
+
+**Tradeoff:** if Auth0 account-linking ever attaches a database identity to a primary social-login user, the database identity's passkeys would not be surfaced through `/api/me`. We do not use account linking today and have no plans to enable it; if that changes, the short-circuit on `connectionType === 'auth0'` must be removed (or widened to include linked-identity inspection). The risk is contained: a user with passkeys can still authenticate with them — they just wouldn't appear in the Settings list.
 
 ### Operational constraints
 

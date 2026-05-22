@@ -273,4 +273,56 @@ describe('GET /api/me handler', () => {
       }),
     });
   });
+
+  it('skips passkey fetch for social-login users (passkeys are database-connection only)', async () => {
+    const socialSub = 'google-oauth2|xyz789';
+    mockJwtVerify.mockResolvedValue({
+      payload: { sub: socialSub, email: MOCK_EMAIL, email_verified: true },
+    });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `SUB#${socialSub}` }, sk: { S: 'IDENTITY' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `SUB#${socialSub}` },
+          sk: { S: 'IDENTITY' },
+          userId: { S: MOCK_USER_ID },
+          orgId: { S: MOCK_ORG_ID },
+          email: { S: MOCK_EMAIL },
+        },
+      });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          orgConfirmed: { BOOL: true },
+          setupStatus: { S: FINAL_SETUP_STATUS },
+        },
+      });
+
+    const result = await handler(authenticatedEvent({ include: 'mfa' }), buildContext());
+
+    expect(mockGetMfaEnrollments).toHaveBeenCalledWith(socialSub);
+    expect(mockGetPasskeyAuthenticators).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({
+        orgId: MOCK_ORG_ID,
+        orgName: 'Example Corp',
+        emailVerified: true,
+        email: MOCK_EMAIL,
+        mfaEnrollments: [],
+        passkeys: [],
+        connectionType: 'google-oauth2',
+      }),
+    });
+  });
 });
