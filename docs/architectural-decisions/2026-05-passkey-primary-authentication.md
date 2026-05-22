@@ -6,7 +6,7 @@
 
 ## Context
 
-The platform already supports two passkey shapes as **MFA factors** — `webauthn-platform` (device biometrics) and `webauthn-roaming` (security keys). Those are layered on top of a password as a second factor. See `2026-03-mfa-enrollment.md`.
+The platform already supports two passkey shapes as **MFA factors** — `webauthn-platform` (device biometrics) and `webauthn-roaming` (security keys). Those are layered on top of a password as a second factor. See [2026-03-mfa-enrollment.md](./2026-03-mfa-enrollment.md).
 
 This ADR covers passkeys as **primary authentication** on the database connection (`Username-Password-Authentication`): a passwordless sign-in where the user authenticates with a passkey alongside their existing password. Auth0 documents this at https://auth0.com/docs/authenticate/database-connections/passkeys.
 
