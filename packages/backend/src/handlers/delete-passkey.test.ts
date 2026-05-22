@@ -130,7 +130,7 @@ describe('DELETE /api/mfa/passkeys/{methodId} handler', () => {
     expect(mockDeleteAuthenticationMethod).toHaveBeenCalledWith(MOCK_SUB, MOCK_PASSKEY_ID);
   });
 
-  it('returns 401 step_up_required when the ID token has no amr: ["mfa"]', async () => {
+  it('returns 401 step_up_required when the ID token has no amr: ["mfa" | "phr"]', async () => {
     setupAuthMocks({ amr: ['pwd'] });
 
     const result = await handler(deletePasskeyEvent(), buildContext());
