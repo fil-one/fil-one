@@ -4,7 +4,7 @@
 **Created:** 2026-04-29
 **Last updated:** 2026-04-30
 
-> **See also:** `2026-05-passkey-primary-authentication.md` — passkey-as-primary login satisfies MFA via the `performed_amr: ['phr']` signal; the Post-Login Action returns early in that case.
+> **See also:** `2026-05-passkey-primary-authentication.md` — passkey-as-primary login satisfies MFA when the Post-Login Action detects `event.authentication.methods[].name === 'passkey'`; the Action returns early in that case.
 
 ## Context
 
