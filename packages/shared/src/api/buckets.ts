@@ -31,7 +31,7 @@ const RetentionSchema = z
 
 export const CreateBucketSchema = z
   .object({
-    name: z
+    bucketName: z
       .string()
       .trim()
       .min(
@@ -61,7 +61,7 @@ export const CreateBucketSchema = z
   });
 
 export interface Bucket {
-  name: string;
+  bucketName: string;
   region: string;
   createdAt: string;
   isPublic: boolean;
@@ -78,7 +78,7 @@ export interface ListBucketsResponse {
 }
 
 export interface CreateBucketRequest {
-  name: string;
+  bucketName: string;
   region: string;
   versioning?: boolean;
   lock?: boolean;

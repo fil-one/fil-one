@@ -163,7 +163,7 @@ export const auroraOrchestrator = {
     return (data?.items ?? [])
       .filter((b): b is typeof b & { name: string; createdAt: string } => !!b.name && !!b.createdAt)
       .map((b) => ({
-        name: b.name,
+        bucketName: b.name,
         region: auroraOrchestrator.region,
         createdAt: b.createdAt,
         isPublic: false,
@@ -199,7 +199,7 @@ export const auroraOrchestrator = {
         : undefined;
 
     return {
-      name: data.name ?? bucketName,
+      bucketName: data.name ?? bucketName,
       region: auroraOrchestrator.region,
       createdAt: data.createdAt,
       isPublic: false,

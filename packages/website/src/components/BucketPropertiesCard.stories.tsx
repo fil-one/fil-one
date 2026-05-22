@@ -5,7 +5,7 @@ import type { Bucket } from '@filone/shared';
 import { BucketPropertiesCard } from './BucketPropertiesCard';
 
 const baseBucket: Bucket = {
-  name: 'my-bucket',
+  bucketName: 'my-bucket',
   region: 'us-east-1',
   createdAt: '2026-01-15T00:00:00Z',
   isPublic: false,
