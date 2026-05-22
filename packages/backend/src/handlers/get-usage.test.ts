@@ -4,7 +4,7 @@ import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import type {
   ModelStorageMetricsSample,
   ModelOperationMetricsSample,
-  ModelsTenantWithMetricsManagementResponse,
+  ModelsTenantWithMetricsBackofficeResponse,
 } from '../lib/aurora/aurora-backoffice.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
@@ -20,7 +20,7 @@ vi.mock('sst', () => ({
 
 const mockGetStorageSamples = vi.fn<() => Promise<ModelStorageMetricsSample[]>>();
 const mockGetOperationsSamples = vi.fn<() => Promise<ModelOperationMetricsSample[]>>();
-const mockGetTenantInfo = vi.fn<() => Promise<ModelsTenantWithMetricsManagementResponse | null>>();
+const mockGetTenantInfo = vi.fn<() => Promise<ModelsTenantWithMetricsBackofficeResponse | null>>();
 
 vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
   getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...(args as [])),

@@ -13,6 +13,7 @@ import {
   CreateBucketSchema,
   CreateAccessKeySchema,
   DOCS_URL,
+  getAvailableRegions,
   getRegionLabel,
 } from '@filone/shared';
 import type { CreateBucketResponse, RetentionMode, RetentionDurationType } from '@filone/shared';
@@ -27,7 +28,8 @@ import { IconButton } from '../components/IconButton';
 import { FormField } from '../components/FormField';
 import { Overline } from '../components/Overline';
 import { Input } from '../components/Input';
-import { Select } from '../components/Select';
+import { RegionSelect } from '../components/RegionSelect';
+import { FILONE_STAGE } from '../env.js';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
 import { SlowOperationIndicator } from '../components/SlowOperationIndicator';
@@ -255,16 +257,13 @@ export function CreateBucketPage() {
             <FormField
               htmlFor="bucket-region"
               label="Region"
-              description="More regions coming soon."
+              description={
+                getAvailableRegions(FILONE_STAGE).length === 1
+                  ? 'More regions coming soon.'
+                  : undefined
+              }
             >
-              <Select
-                id="bucket-region"
-                value={region}
-                onChange={(v) => setRegion(v as typeof S3_REGION)}
-                disabled
-              >
-                <option value={S3_REGION}>Europe (eu-west-1)</option>
-              </Select>
+              <RegionSelect id="bucket-region" value={region} onChange={setRegion} />
             </FormField>
 
             {/* Object settings */}
