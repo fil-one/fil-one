@@ -46,6 +46,7 @@ process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './update-profile.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -105,7 +106,7 @@ describe('PATCH /api/me/profile handler', () => {
       })
       .resolves({
         Item: {
-          auroraSetupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 

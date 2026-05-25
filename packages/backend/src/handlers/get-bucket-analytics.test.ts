@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import type { ModelStorageMetricsSample } from '../lib/aurora/aurora-backoffice.js';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
+import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -165,7 +165,7 @@ describe('GET /api/buckets/{bucketName}/analytics handler', () => {
         pk: { S: `ORG#${USER_INFO.orgId}` },
         sk: { S: 'PROFILE' },
         auroraTenantId: { S: AURORA_TENANT_ID },
-        auroraSetupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
       },
     });
 

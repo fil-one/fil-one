@@ -16,7 +16,7 @@ vi.mock('./metrics.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { scanAndEmitStuckTenantCount } from './stuck-tenant-metric.js';
-import { OrgSetupStatus } from './org-setup-status.js';
+import { FINAL_SETUP_STATUS } from './org-setup-status.js';
 
 describe('scanAndEmitStuckTenantCount', () => {
   beforeEach(() => {
@@ -40,7 +40,7 @@ describe('scanAndEmitStuckTenantCount', () => {
         ':orgPrefix': { S: 'ORG#' },
         ':profile': { S: 'PROFILE' },
         ':three': { N: '3' },
-        ':complete': { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
+        ':complete': { S: FINAL_SETUP_STATUS },
       },
       ProjectionExpression: 'pk',
     });
