@@ -107,7 +107,7 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          setupStatus: { S: FINAL_SETUP_STATUS },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 
@@ -161,7 +161,7 @@ describe('GET /api/me handler', () => {
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
           orgConfirmed: { BOOL: true },
-          setupStatus: { S: FINAL_SETUP_STATUS },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 
@@ -196,7 +196,7 @@ describe('GET /api/me handler', () => {
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
           orgConfirmed: { BOOL: true },
-          setupStatus: { S: FINAL_SETUP_STATUS },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 

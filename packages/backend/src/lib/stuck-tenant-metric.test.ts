@@ -35,7 +35,7 @@ describe('scanAndEmitStuckTenantCount', () => {
     expect(scanCalls).toHaveLength(1);
     expect(scanCalls[0].args[0].input).toMatchObject({
       TableName: 'UserInfoTable',
-      FilterExpression: expect.stringContaining('setupFailureCount >= :three'),
+      FilterExpression: expect.stringContaining('auroraSetupFailureCount >= :three'),
       ExpressionAttributeValues: {
         ':orgPrefix': { S: 'ORG#' },
         ':profile': { S: 'PROFILE' },

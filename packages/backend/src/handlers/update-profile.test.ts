@@ -105,7 +105,7 @@ describe('PATCH /api/me/profile handler', () => {
       })
       .resolves({
         Item: {
-          setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
+          auroraSetupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
         },
       });
 

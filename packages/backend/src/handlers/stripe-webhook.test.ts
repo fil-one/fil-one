@@ -178,7 +178,7 @@ function setupAuroraTenantResolution() {
         pk: `ORG#${MOCK_ORG_ID}`,
         sk: 'PROFILE',
         auroraTenantId: MOCK_AURORA_TENANT_ID,
-        setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+        auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
       }),
     });
 }
