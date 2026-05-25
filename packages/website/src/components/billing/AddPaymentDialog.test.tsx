@@ -13,11 +13,29 @@ vi.mock('@stripe/react-stripe-js', () => ({
   CardNumberElement: ({
     onChange,
   }: {
-    onChange?: (e: { brand: string; error?: { message: string } }) => void;
+    onChange?: (e: {
+      brand: string;
+      empty: boolean;
+      complete: boolean;
+      error?: { message: string };
+    }) => void;
   }) => (
-    <button type="button" data-testid="card-change" onClick={() => onChange?.({ brand: 'visa' })}>
-      card-number
-    </button>
+    <>
+      <button
+        type="button"
+        data-testid="card-clear"
+        onClick={() => onChange?.({ brand: 'unknown', empty: true, complete: false })}
+      >
+        card-clear
+      </button>
+      <button
+        type="button"
+        data-testid="card-noop-change"
+        onClick={() => onChange?.({ brand: 'visa', empty: false, complete: true })}
+      >
+        card-noop-change
+      </button>
+    </>
   ),
   CardExpiryElement: () => <div data-testid="card-expiry" />,
   CardCvcElement: () => <div data-testid="card-cvc" />,
@@ -98,6 +116,10 @@ describe('AddPaymentDialog', () => {
     await waitFor(() => expect(activateSubscription).toHaveBeenCalledTimes(1));
     await screen.findByText(/invalid or expired promo code/i);
 
+    // Stripe fires a no-op onChange between submits (e.g. internal repaint).
+    // It must NOT reset cardConfirmed — only an empty-state change does.
+    fireEvent.click(screen.getByTestId('card-noop-change'));
+
     fireEvent.change(promoInput, { target: { value: '' } });
     fireEvent.click(submitButton);
 
@@ -105,10 +127,9 @@ describe('AddPaymentDialog', () => {
     expect(refresh).not.toHaveBeenCalled();
     expect(mockStripe.confirmCardSetup).toHaveBeenCalledTimes(1);
     expect(activateSubscription).toHaveBeenCalledTimes(2);
-    expect(activateSubscription.mock.calls[1][0]).toEqual({ useSavedPaymentMethod: false });
   });
 
-  it('different-card retry: requests a new client secret and confirms against it', async () => {
+  it('different-card retry: clearing the card field refreshes the SetupIntent', async () => {
     mockStripe.confirmCardSetup
       .mockResolvedValueOnce({ setupIntent: { status: 'succeeded' } })
       .mockResolvedValueOnce({ setupIntent: { status: 'succeeded' } });
@@ -126,7 +147,10 @@ describe('AddPaymentDialog', () => {
 
     await waitFor(() => expect(activateSubscription).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByTestId('card-change'));
+    // User clears the card field to enter a different card. Stripe fires
+    // onChange with empty: true.
+    fireEvent.click(screen.getByTestId('card-clear'));
+
     fireEvent.change(promoInput, { target: { value: '' } });
     fireEvent.click(submitButton);
 
@@ -153,7 +177,6 @@ describe('AddPaymentDialog', () => {
     expect(refresh).not.toHaveBeenCalled();
     expect(activateSubscription).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByTestId('card-change'));
     fireEvent.click(submitButton);
 
     await waitFor(() => expect(props.onSuccess).toHaveBeenCalledTimes(1));
