@@ -14,7 +14,12 @@ import type { ActivateSubscriptionResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
-import { saveBillingRecord, unlockAuroraTenant } from '../lib/billing-activation.js';
+import {
+  resolveSetupIntentPaymentMethod,
+  saveBillingRecord,
+  unlockAuroraTenant,
+} from '../lib/billing-activation.js';
+import type { PaymentMethodResolution } from '../lib/billing-activation.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -23,8 +28,6 @@ import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 const dynamo = getDynamoClient();
-
-type PaymentMethodResolution = string | APIGatewayProxyResultV2;
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId, orgId } = getUserInfo(event);
@@ -214,15 +217,17 @@ function resolveSavedPaymentMethod(record: Record<string, unknown>): PaymentMeth
   const subscriptionStatus = record.subscriptionStatus as SubscriptionStatus | undefined;
   const paymentMethodId = record.paymentMethodId as string | undefined;
 
-  const isCanceled =
+  const canUseSavedCard =
+    subscriptionStatus === SubscriptionStatus.Trialing ||
     subscriptionStatus === SubscriptionStatus.GracePeriod ||
     subscriptionStatus === SubscriptionStatus.Canceled;
 
-  if (!isCanceled) {
+  if (!canUseSavedCard) {
     return new ResponseBuilder()
       .status(400)
       .body({
-        message: 'Only canceled or grace-period subscriptions can use a saved payment method.',
+        message:
+          'Only trialing, canceled, or grace-period subscriptions can use a saved payment method.',
       })
       .build();
   }
@@ -231,38 +236,6 @@ function resolveSavedPaymentMethod(record: Record<string, unknown>): PaymentMeth
     return new ResponseBuilder()
       .status(400)
       .body({ message: 'No saved payment method. Please add a card.' })
-      .build();
-  }
-
-  return paymentMethodId;
-}
-
-async function resolveSetupIntentPaymentMethod(
-  stripe: ReturnType<typeof getStripeClient>,
-  stripeCustomerId: string,
-): Promise<PaymentMethodResolution> {
-  const setupIntents = await stripe.setupIntents.list({
-    customer: stripeCustomerId,
-    limit: 1,
-  });
-
-  const latestSetupIntent = setupIntents.data[0];
-  if (!latestSetupIntent || latestSetupIntent.status !== 'succeeded') {
-    return new ResponseBuilder()
-      .status(400)
-      .body({
-        message: 'No confirmed payment method found. Please complete the payment setup first.',
-      })
-      .build();
-  }
-
-  const pm = latestSetupIntent.payment_method;
-  const paymentMethodId = typeof pm === 'string' ? pm : pm?.id;
-
-  if (!paymentMethodId) {
-    return new ResponseBuilder()
-      .status(400)
-      .body({ message: 'Payment method not found on setup intent.' })
       .build();
   }
 

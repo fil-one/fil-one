@@ -31,3 +31,49 @@ export const Default: Story = {
     );
   },
 };
+
+export const WithSavedCardTrialing: Story = {
+  name: 'With saved card (trialing)',
+  render: () => {
+    const [open, setOpen] = useState(true);
+    return (
+      <>
+        <Button variant="primary" onClick={() => setOpen(true)}>
+          Choose plan
+        </Button>
+        <ChoosePlanDialog
+          open={open}
+          onClose={() => setOpen(false)}
+          onSelectPayAsYouGo={() => setOpen(false)}
+          onContactSales={() => setOpen(false)}
+          savedCardLast4="4242"
+          onUseDifferentCard={() => setOpen(false)}
+          ctaLabel="Upgrade now"
+        />
+      </>
+    );
+  },
+};
+
+export const WithSavedCardCanceled: Story = {
+  name: 'With saved card (canceled/grace)',
+  render: () => {
+    const [open, setOpen] = useState(true);
+    return (
+      <>
+        <Button variant="primary" onClick={() => setOpen(true)}>
+          Choose plan
+        </Button>
+        <ChoosePlanDialog
+          open={open}
+          onClose={() => setOpen(false)}
+          onSelectPayAsYouGo={() => setOpen(false)}
+          onContactSales={() => setOpen(false)}
+          savedCardLast4="4242"
+          onUseDifferentCard={() => setOpen(false)}
+          ctaLabel="Reactivate"
+        />
+      </>
+    );
+  },
+};

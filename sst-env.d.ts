@@ -162,6 +162,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "SavePaymentMethod": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "SetupIntegrations": {
       "name": string
       "type": "sst.aws.Function"

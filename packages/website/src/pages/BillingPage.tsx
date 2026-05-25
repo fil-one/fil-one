@@ -99,6 +99,7 @@ export function BillingPage() {
   // Modal states
   const [planOpen, setPlanOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
+  const [addPaymentOnly, setAddPaymentOnly] = useState(false);
   const [clientSecret, setClientSecret] = useState('');
   const [stripePublishableKey, setStripePublishableKey] = useState('');
   const [contactSalesOpen, setContactSalesOpen] = useState(false);
@@ -149,18 +150,26 @@ export function BillingPage() {
   }
 
   const canReactivateWithSavedCard =
-    Boolean(billing?.paymentMethod?.id) && (isGracePeriod || isCanceled);
+    Boolean(billing?.paymentMethod?.id) && (isTrialing || isGracePeriod || isCanceled);
 
-  async function startNewCardFlow() {
+  const choosePlanCtaLabel =
+    canReactivateWithSavedCard && (isGracePeriod || isCanceled) ? 'Reactivate' : 'Upgrade now';
+
+  async function startNewCardFlow(onlySaveCard: boolean) {
     try {
       const { clientSecret: cs, stripePublishableKey: pk } =
         await apiRequest<CreateSetupIntentResponse>('/billing/setup-intent', { method: 'POST' });
       setClientSecret(cs);
       setStripePublishableKey(pk);
+      setAddPaymentOnly(onlySaveCard);
       setPaymentOpen(true);
     } catch (err) {
       toast.error((err as Error).message || 'Failed to set up payment. Please try again.');
     }
+  }
+
+  async function handleAddPaymentMethod() {
+    await startNewCardFlow(true);
   }
 
   async function handleSelectPayAsYouGo() {
@@ -169,33 +178,40 @@ export function BillingPage() {
     if (canReactivateWithSavedCard) {
       try {
         await activateSubscription({ useSavedPaymentMethod: true });
-        toast.success('Subscription reactivated!');
+        toast.success(
+          isGracePeriod || isCanceled ? 'Subscription reactivated!' : 'Subscription activated!',
+        );
         void queryClient.invalidateQueries({ queryKey: queryKeys.billing });
         void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
         window.dispatchEvent(new CustomEvent('billing:updated'));
       } catch (err) {
-        toast.error((err as Error).message || 'Failed to reactivate. Please try again.');
+        toast.error((err as Error).message || 'Failed to activate. Please try again.');
       }
       return;
     }
 
-    await startNewCardFlow();
+    await startNewCardFlow(false);
   }
 
   async function handleUseDifferentCard() {
     setPlanOpen(false);
-    await startNewCardFlow();
+    await startNewCardFlow(false);
   }
 
   function handlePaymentBack() {
     setPaymentOpen(false);
-    setPlanOpen(true);
+    // The add-card-only flow is entered directly from the Payment method card,
+    // not via the plan dialog — Back should just close, not re-open the picker.
+    if (!addPaymentOnly) {
+      setPlanOpen(true);
+    }
   }
 
   function handlePaymentSuccess() {
+    const wasAddCardOnly = addPaymentOnly;
     setPaymentOpen(false);
     setClientSecret('');
-    toast.success('Subscription activated!');
+    toast.success(wasAddCardOnly ? 'Card saved' : 'Subscription activated!');
     void queryClient.invalidateQueries({ queryKey: queryKeys.billing });
     void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
     window.dispatchEvent(new CustomEvent('billing:updated'));
@@ -499,7 +515,7 @@ export function BillingPage() {
                   variant="ghost"
                   size="sm"
                   icon={CreditCardIcon}
-                  onClick={handleUpgradeClick}
+                  onClick={handleAddPaymentMethod}
                 >
                   Add
                 </Button>
@@ -650,12 +666,14 @@ export function BillingPage() {
         onContactSales={handleContactSales}
         savedCardLast4={canReactivateWithSavedCard ? billing?.paymentMethod?.last4 : undefined}
         onUseDifferentCard={canReactivateWithSavedCard ? handleUseDifferentCard : undefined}
+        ctaLabel={choosePlanCtaLabel}
       />
 
       <AddPaymentDialog
         open={paymentOpen}
         clientSecret={clientSecret}
         stripePublishableKey={stripePublishableKey}
+        saveCardOnly={addPaymentOnly}
         onClose={() => setPaymentOpen(false)}
         onBack={handlePaymentBack}
         onSuccess={handlePaymentSuccess}

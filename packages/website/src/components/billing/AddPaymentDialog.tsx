@@ -16,12 +16,15 @@ import { Modal, ModalBody, ModalHeader } from '../Modal/index.js';
 import { Button } from '../Button.js';
 
 import { getStripe } from '../../lib/stripe.js';
-import { activateSubscription } from '../../lib/api.js';
+import { activateSubscription, savePaymentMethod } from '../../lib/api.js';
 
 type AddPaymentDialogProps = {
   open: boolean;
   clientSecret: string;
   stripePublishableKey: string;
+  // When true: collect the card and save it on file only (no charge, no subscription change).
+  // When false (default): collect the card and activate/upgrade the subscription.
+  saveCardOnly?: boolean;
   onClose: () => void;
   onBack: () => void;
   onSuccess: () => void;
@@ -41,8 +44,9 @@ const ELEMENT_OPTIONS = {
   style: ELEMENT_STYLE,
 };
 
-function PaymentForm({
+export function PaymentForm({
   clientSecret,
+  saveCardOnly = false,
   onClose,
   onBack,
   onSuccess,
@@ -53,6 +57,16 @@ function PaymentForm({
   const [error, setError] = useState<string | null>(null);
   const [_cardBrand, setCardBrand] = useState<string>('unknown');
   const [promotionCode, setPromotionCode] = useState('');
+  // Stripe rejects a second confirmCardSetup against an already-succeeded
+  // SetupIntent. Track per-dialog whether the current SetupIntent was
+  // confirmed so retries (e.g. after a transient backend failure) skip the
+  // confirm step and re-run only the backend call.
+  const [cardConfirmed, setCardConfirmed] = useState(false);
+
+  // Reset when a fresh SetupIntent is fetched (clientSecret changes).
+  useEffect(() => {
+    setCardConfirmed(false);
+  }, [clientSecret]);
 
   function handleCardChange(e: StripeCardNumberElementChangeEvent) {
     setCardBrand(e.brand ?? 'unknown');
@@ -60,6 +74,28 @@ function PaymentForm({
       setError(e.error.message);
     } else {
       setError(null);
+    }
+  }
+
+  function validateForm(code: string): { ok: true; value: string } | { ok: false; error: string } {
+    const body = code ? { promotionCode: code } : {};
+    const parsed = ActivateSubscriptionRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return { ok: false, error: parsed.error.issues[0]?.message ?? 'Form validation error.' };
+    }
+    return { ok: true, value: code };
+  }
+
+  async function submitForm(trimmedPromotionCode: string): Promise<void> {
+    if (saveCardOnly) {
+      await savePaymentMethod();
+    } else {
+      // The shared Zod schema applies a regex to `promotionCode` if present —
+      // sending an empty string fails server-side validation. Omit the field
+      // entirely when the user didn't enter a code.
+      await activateSubscription(
+        trimmedPromotionCode ? { promotionCode: trimmedPromotionCode } : {},
+      );
     }
   }
 
@@ -77,33 +113,39 @@ function PaymentForm({
       return;
     }
 
-    // Validate the promo code against the same zod schema the server uses, so format
-    // typos are caught before we bother creating a Stripe payment method.
-    const trimmedPromotionCode = promotionCode.trim();
-    const body = trimmedPromotionCode ? { promotionCode: trimmedPromotionCode } : {};
-    const parsed = ActivateSubscriptionRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? 'Form validation error.');
-      setLoading(false);
-      return;
+    // Add-card mode never sends a promo code (no charge is initiated).
+    const trimmedPromotionCode = saveCardOnly ? '' : promotionCode.trim();
+    if (!saveCardOnly) {
+      const validation = validateForm(trimmedPromotionCode);
+      if (!validation.ok) {
+        setError(validation.error);
+        setLoading(false);
+        return;
+      }
     }
 
-    const result = await stripe.confirmCardSetup(clientSecret, {
-      payment_method: { card: cardNumberElement },
-    });
+    if (!cardConfirmed) {
+      const result = await stripe.confirmCardSetup(clientSecret, {
+        payment_method: { card: cardNumberElement },
+      });
 
-    if (result.error) {
-      setError(result.error.message ?? 'An error occurred while confirming your card.');
-      setLoading(false);
-      return;
+      if (result.error) {
+        setError(result.error.message ?? 'An error occurred while confirming your card.');
+        setLoading(false);
+        return;
+      }
+      setCardConfirmed(true);
     }
 
-    // Card setup confirmed — activate subscription via API
+    const fallbackError = saveCardOnly
+      ? 'Failed to save payment method.'
+      : 'Failed to activate subscription.';
+
     try {
-      await activateSubscription({ promotionCode: trimmedPromotionCode });
+      await submitForm(trimmedPromotionCode);
       onSuccess();
     } catch (err) {
-      setError((err as Error).message || 'Failed to activate subscription.');
+      setError((err as Error).message || fallbackError);
     } finally {
       setLoading(false);
     }
@@ -113,7 +155,9 @@ function PaymentForm({
     <form onSubmit={handleSubmit}>
       <ModalHeader onClose={onClose}>Add payment method</ModalHeader>
       <ModalBody>
-        <p className="text-sm text-[#677183] mb-4">Pay as you go — $4.99/TB/month</p>
+        {!saveCardOnly && (
+          <p className="text-sm text-[#677183] mb-4">Pay as you go — $4.99/TB/month</p>
+        )}
 
         {/* Security banner */}
         <div className="flex items-center gap-[10px] rounded-lg bg-[rgba(243,244,246,0.5)] p-[10px] mb-4">
@@ -151,24 +195,26 @@ function PaymentForm({
             </div>
           </div>
 
-          {/* Promo code (optional) */}
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="promotion-code" className="text-[13px] font-medium text-[#14181f]">
-              Promo code <span className="font-normal text-[#99a0ae]">(optional)</span>
-            </label>
-            <input
-              id="promotion-code"
-              type="text"
-              value={promotionCode}
-              onChange={(e) => setPromotionCode(e.target.value)}
-              placeholder="Add promo code"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              spellCheck={false}
-              maxLength={40}
-              className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5 text-[13px] text-[#14181f] placeholder:text-[#99a0ae] focus:outline-none focus:ring-1 focus:ring-[#0080ff]"
-            />
-          </div>
+          {/* Promo code (optional) — hidden when only saving the card since no charge is initiated */}
+          {!saveCardOnly && (
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="promotion-code" className="text-[13px] font-medium text-[#14181f]">
+                Promo code <span className="font-normal text-[#99a0ae]">(optional)</span>
+              </label>
+              <input
+                id="promotion-code"
+                type="text"
+                value={promotionCode}
+                onChange={(e) => setPromotionCode(e.target.value)}
+                placeholder="Add promo code"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                maxLength={40}
+                className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5 text-[13px] text-[#14181f] placeholder:text-[#99a0ae] focus:outline-none focus:ring-1 focus:ring-[#0080ff]"
+              />
+            </div>
+          )}
 
           {/* Error */}
           {error && <p className="text-sm text-red-500">{error}</p>}
@@ -178,7 +224,7 @@ function PaymentForm({
         <div className="mt-4 border-t border-[#e1e4ea] pt-4 flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <Button type="button" variant="ghost" size="md" onClick={onBack}>
-              Back
+              {saveCardOnly ? 'Cancel' : 'Back'}
             </Button>
 
             <Button
@@ -189,12 +235,20 @@ function PaymentForm({
               disabled={!stripe || loading}
               className="flex-1 justify-center"
             >
-              {loading ? 'Processing...' : 'Start subscription'}
+              {loading
+                ? saveCardOnly
+                  ? 'Saving...'
+                  : 'Processing...'
+                : saveCardOnly
+                  ? 'Save card'
+                  : 'Start subscription'}
             </Button>
           </div>
 
           <p className="text-center text-[11px] text-[#677183]">
-            Pay only for what you use. Cancel anytime.
+            {saveCardOnly
+              ? "Your card stays on file. You'll only be charged when you upgrade."
+              : 'Pay only for what you use. Cancel anytime.'}
           </p>
         </div>
       </ModalBody>
@@ -206,6 +260,7 @@ export function AddPaymentDialog({
   open,
   clientSecret,
   stripePublishableKey,
+  saveCardOnly = false,
   onClose,
   onBack,
   onSuccess,
@@ -225,6 +280,7 @@ export function AddPaymentDialog({
       <Elements stripe={stripe} options={{ clientSecret }}>
         <PaymentForm
           clientSecret={clientSecret}
+          saveCardOnly={saveCardOnly}
           onClose={onClose}
           onBack={onBack}
           onSuccess={onSuccess}

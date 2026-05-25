@@ -66,6 +66,10 @@ export interface ActivateSubscriptionResponse {
   subscription: Subscription;
 }
 
+export interface SavePaymentMethodResponse {
+  paymentMethod: PaymentMethod;
+}
+
 export interface CreatePortalSessionResponse {
   url: string;
 }

@@ -144,6 +144,7 @@ export type {
   CreateSetupIntentResponse,
   ActivateSubscriptionRequest,
   ActivateSubscriptionResponse,
+  SavePaymentMethodResponse,
   CreatePortalSessionResponse,
   Invoice,
   ListInvoicesResponse,

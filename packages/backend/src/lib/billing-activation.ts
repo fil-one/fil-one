@@ -1,13 +1,49 @@
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type Stripe from 'stripe';
 import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
+import { ResponseBuilder } from './response-builder.js';
 import { updateTenantStatus } from './aurora/aurora-backoffice.js';
 import { setOrgAuroraTenantStatus } from './org-profile.js';
 import { isOrgSetupComplete } from './org-setup-status.js';
 
 const dynamo = getDynamoClient();
+
+export type PaymentMethodResolution = string | APIGatewayProxyResultV2;
+
+export async function resolveSetupIntentPaymentMethod(
+  stripe: Stripe,
+  stripeCustomerId: string,
+): Promise<PaymentMethodResolution> {
+  const setupIntents = await stripe.setupIntents.list({
+    customer: stripeCustomerId,
+    limit: 1,
+  });
+
+  const latestSetupIntent = setupIntents.data[0];
+  if (!latestSetupIntent || latestSetupIntent.status !== 'succeeded') {
+    return new ResponseBuilder()
+      .status(400)
+      .body({
+        message: 'No confirmed payment method found. Please complete the payment setup first.',
+      })
+      .build();
+  }
+
+  const pm = latestSetupIntent.payment_method;
+  const paymentMethodId = typeof pm === 'string' ? pm : pm?.id;
+
+  if (!paymentMethodId) {
+    return new ResponseBuilder()
+      .status(400)
+      .body({ message: 'Payment method not found on setup intent.' })
+      .build();
+  }
+
+  return paymentMethodId;
+}
 
 export async function saveBillingRecord(
   userId: string,

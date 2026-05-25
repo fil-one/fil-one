@@ -204,6 +204,7 @@ import type {
   CreateSetupIntentResponse,
   ActivateSubscriptionRequest,
   ActivateSubscriptionResponse,
+  SavePaymentMethodResponse,
   CreatePortalSessionResponse,
   ListInvoicesResponse,
 } from '@filone/shared';
@@ -222,6 +223,12 @@ export function activateSubscription(
   return apiRequest<ActivateSubscriptionResponse>('/billing/activate', {
     method: 'POST',
     body: JSON.stringify(opts),
+  });
+}
+
+export function savePaymentMethod(): Promise<SavePaymentMethodResponse> {
+  return apiRequest<SavePaymentMethodResponse>('/billing/save-payment-method', {
+    method: 'POST',
   });
 }
 

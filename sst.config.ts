@@ -687,6 +687,11 @@ export default $config({
     });
     addRoute({
       method: 'POST',
+      routePath: '/api/billing/save-payment-method',
+      handler: 'save-payment-method',
+    });
+    addRoute({
+      method: 'POST',
       routePath: '/api/billing/activate',
       handler: 'activate-subscription',
       extraEnv: auroraEnv,

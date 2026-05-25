@@ -549,13 +549,20 @@ describe('activate-subscription handler', () => {
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
   });
 
-  it('rejects useSavedPaymentMethod when subscription is trialing', async () => {
-    ddbMock.on(GetItemCommand).resolvesOnce({
-      Item: buildBillingRecord({
-        subscriptionStatus: SubscriptionStatus.Trialing,
-        paymentMethodId: 'pm_saved_1',
-      }),
-    });
+  it('upgrades a trialing subscription using the saved payment method', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({
+        Item: buildBillingRecord({
+          subscriptionStatus: SubscriptionStatus.Trialing,
+          subscriptionId: 'sub_trial_1',
+          paymentMethodId: 'pm_saved_1',
+        }),
+      })
+      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
 
     const event = buildEvent({
       userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
@@ -564,9 +571,18 @@ describe('activate-subscription handler', () => {
       body: JSON.stringify({ useSavedPaymentMethod: true }),
     });
     const result = await handler(event, {} as never);
+    const body = JSON.parse((result as { body: string }).body);
 
-    expect((result as { statusCode: number }).statusCode).toBe(400);
+    expect(mockSetupIntentsList).not.toHaveBeenCalled();
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsUpdate).toHaveBeenCalledWith('sub_trial_1', {
+      default_payment_method: 'pm_saved_1',
+    });
+    expect(mockSubscriptionsUpdate).toHaveBeenCalledWith('sub_trial_1', {
+      trial_end: 'now',
+      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+    });
+    expect(body.subscription.status).toBe(SubscriptionStatus.Active);
   });
 
   it('rejects useSavedPaymentMethod when no saved payment method exists', async () => {

@@ -9,6 +9,7 @@ type ChoosePlanDialogProps = {
   onContactSales: () => void;
   savedCardLast4?: string;
   onUseDifferentCard?: () => void;
+  ctaLabel?: string;
 };
 
 const PAY_AS_YOU_GO_FEATURES = [
@@ -45,7 +46,9 @@ export function ChoosePlanDialog({
   onContactSales,
   savedCardLast4,
   onUseDifferentCard,
+  ctaLabel,
 }: ChoosePlanDialogProps) {
+  const buttonLabel = ctaLabel ?? (savedCardLast4 ? 'Reactivate' : 'Upgrade now');
   return (
     <Modal open={open} onClose={onClose} size="lg">
       <ModalHeader
@@ -82,7 +85,7 @@ export function ChoosePlanDialog({
                 onClick={onSelectPayAsYouGo}
                 className="w-full justify-center"
               >
-                {savedCardLast4 ? 'Reactivate' : 'Upgrade now'}
+                {buttonLabel}
               </Button>
               {savedCardLast4 && (
                 <p className="mt-2 text-center text-[11px] leading-[16px] text-zinc-500">
