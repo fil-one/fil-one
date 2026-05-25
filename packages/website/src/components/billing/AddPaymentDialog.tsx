@@ -60,6 +60,7 @@ function PaymentForm({
   }, [clientSecret]);
 
   function handleCardChange(e: StripeCardNumberElementChangeEvent) {
+    setCardConfirmed(false);
     setCardBrand(e.brand ?? 'unknown');
     if (e.error) {
       setError(e.error.message);
