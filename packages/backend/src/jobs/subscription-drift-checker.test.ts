@@ -59,7 +59,7 @@ function seedReadyOrg(orgId = ORG_ID, tenantId = TENANT_ID) {
     .resolves({
       Item: marshall({
         auroraTenantId: tenantId,
-        setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+        auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
       }),
     });
 }
@@ -182,7 +182,7 @@ describe('subscription-drift-checker', () => {
       .resolves({
         Item: marshall({
           auroraTenantId: TENANT_ID,
-          setupStatus: 'AURORA_TENANT_CREATED', // not final
+          auroraSetupStatus: 'AURORA_TENANT_CREATED', // not final
         }),
       });
 
@@ -214,7 +214,7 @@ describe('subscription-drift-checker', () => {
       .resolves({
         Item: marshall({
           auroraTenantId: tenantId2,
-          setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+          auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
         }),
       });
 
@@ -284,7 +284,7 @@ describe('subscription-drift-checker', () => {
       .resolves({
         Item: marshall({
           auroraTenantId: tenantIdPage2,
-          setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+          auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
         }),
       });
 

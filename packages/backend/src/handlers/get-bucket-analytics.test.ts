@@ -68,7 +68,7 @@ function orgProfileWithTenant(tenantId: string) {
       pk: { S: `ORG#${USER_INFO.orgId}` },
       sk: { S: 'PROFILE' },
       auroraTenantId: { S: tenantId },
-      setupStatus: { S: FINAL_SETUP_STATUS },
+      auroraSetupStatus: { S: FINAL_SETUP_STATUS },
     },
   };
 }
@@ -165,7 +165,7 @@ describe('GET /api/buckets/{bucketName}/analytics handler', () => {
         pk: { S: `ORG#${USER_INFO.orgId}` },
         sk: { S: 'PROFILE' },
         auroraTenantId: { S: AURORA_TENANT_ID },
-        setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+        auroraSetupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
       },
     });
 

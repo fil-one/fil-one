@@ -95,7 +95,7 @@ function setupAuthMocks(sub: string = MOCK_SUB) {
     })
     .resolves({
       Item: {
-        setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
+        auroraSetupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
       },
     });
 }

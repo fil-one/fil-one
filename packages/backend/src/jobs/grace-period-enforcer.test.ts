@@ -69,7 +69,7 @@ function setupOrgProfile(extra?: Record<string, string>) {
         pk: `ORG#${MOCK_ORG_ID}`,
         sk: 'PROFILE',
         auroraTenantId: MOCK_AURORA_TENANT_ID,
-        setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+        auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
         ...extra,
       }),
     });
@@ -237,7 +237,7 @@ describe('grace-period-enforcer', () => {
           pk: `ORG#${orgId2}`,
           sk: 'PROFILE',
           auroraTenantId: tenantId2,
-          setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+          auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
         }),
       });
 
@@ -273,7 +273,7 @@ describe('grace-period-enforcer', () => {
           pk: `ORG#${MOCK_ORG_ID}`,
           sk: 'PROFILE',
           auroraTenantId: MOCK_AURORA_TENANT_ID,
-          setupStatus: 'AURORA_TENANT_CREATED',
+          auroraSetupStatus: 'AURORA_TENANT_CREATED',
         }),
       });
 
@@ -385,13 +385,13 @@ describe('grace-period-enforcer', () => {
         .resolvesOnce({
           Item: marshall({
             auroraTenantId: MOCK_AURORA_TENANT_ID,
-            setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+            auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
           }),
         })
         .resolvesOnce({
           Item: marshall({
             auroraTenantId: MOCK_AURORA_TENANT_ID,
-            setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+            auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
             auroraTenantStatus: 'WRITE_LOCKED',
           }),
         });

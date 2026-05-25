@@ -100,7 +100,7 @@ function PaymentForm({
 
     // Card setup confirmed — activate subscription via API
     try {
-      await activateSubscription({ promotionCode: trimmedPromotionCode });
+      await activateSubscription(parsed.data);
       onSuccess();
     } catch (err) {
       setError((err as Error).message || 'Failed to activate subscription.');
