@@ -16,6 +16,12 @@ const dynamo = getDynamoClient();
 // At current scale (< few thousand orgs) a Scan with FilterExpression is
 // fine. Errors are logged and swallowed so a transient DynamoDB issue
 // doesn't mask the underlying tenant-setup error to the user.
+//
+// The scan filters by the post-rename attributes `auroraSetupFailureCount`
+// and `auroraSetupStatus`. Legacy rows that haven't been migrated yet are
+// invisible to this gauge — operators triage those via Loki on orgId, as
+// per the dual-name migration runbook. The backfill script is expected to
+// run immediately after deploy on each stage to close that window.
 export async function scanAndEmitStuckTenantCount(): Promise<void> {
   try {
     let stuckCount = 0;
@@ -25,7 +31,7 @@ export async function scanAndEmitStuckTenantCount(): Promise<void> {
         new ScanCommand({
           TableName: Resource.UserInfoTable.name,
           FilterExpression:
-            'begins_with(pk, :orgPrefix) AND sk = :profile AND setupFailureCount >= :three AND setupStatus <> :complete',
+            'begins_with(pk, :orgPrefix) AND sk = :profile AND auroraSetupFailureCount >= :three AND auroraSetupStatus <> :complete',
           ExpressionAttributeValues: {
             ':orgPrefix': { S: 'ORG#' },
             ':profile': { S: 'PROFILE' },

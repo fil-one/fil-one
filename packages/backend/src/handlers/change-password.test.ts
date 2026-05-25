@@ -96,7 +96,7 @@ function setupAuthMocks(sub: string = MOCK_SUB) {
     })
     .resolves({
       Item: {
-        setupStatus: { S: FINAL_SETUP_STATUS },
+        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
       },
     });
 }

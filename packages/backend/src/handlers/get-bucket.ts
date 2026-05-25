@@ -15,7 +15,7 @@ export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const { orgId } = getUserInfo(event);
-  const bucketName = event.pathParameters?.name;
+  const bucketName = event.pathParameters?.bucketName;
 
   if (!bucketName) {
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();

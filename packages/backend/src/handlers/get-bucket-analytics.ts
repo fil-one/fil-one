@@ -22,7 +22,7 @@ export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const { orgId } = getUserInfo(event);
-  const bucketName = event.pathParameters?.name;
+  const bucketName = event.pathParameters?.bucketName;
 
   if (!bucketName) {
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
@@ -36,7 +36,8 @@ export async function baseHandler(
   );
 
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
+  // TODO(FIL-382): drop the setupStatus fallback.
+  const setupStatus = orgProfile?.auroraSetupStatus?.S ?? orgProfile?.setupStatus?.S;
   if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
     console.error('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
     return new ResponseBuilder()

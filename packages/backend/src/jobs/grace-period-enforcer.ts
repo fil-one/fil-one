@@ -26,7 +26,7 @@ interface Candidate {
 
 interface TenantRecord {
   auroraTenantId: string | undefined;
-  setupStatus: string | undefined;
+  auroraSetupStatus: string | undefined;
   currentAuroraStatus: string | undefined;
 }
 
@@ -84,14 +84,14 @@ async function processCandidate(
 ): Promise<CandidateOutcome> {
   // Resolve Aurora tenant for all actions
   const tenant = await resolveTenantForEnforcement(candidate.orgId);
-  const tenantReady = tenant.auroraTenantId && isOrgSetupComplete(tenant.setupStatus);
+  const tenantReady = tenant.auroraTenantId && isOrgSetupComplete(tenant.auroraSetupStatus);
 
   if (!tenantReady) {
     console.warn('[grace-period-enforcer] Tenant not ready, skipping', {
       userId: candidate.userId,
       orgId: candidate.orgId,
       auroraTenantId: tenant.auroraTenantId,
-      setupStatus: tenant.setupStatus,
+      auroraSetupStatus: tenant.auroraSetupStatus,
     });
     return 'skipped';
   }
@@ -167,13 +167,15 @@ async function resolveTenantForEnforcement(orgId: string): Promise<TenantRecord>
         pk: { S: `ORG#${orgId}` },
         sk: { S: 'PROFILE' },
       },
-      ProjectionExpression: 'auroraTenantId, setupStatus, auroraTenantStatus',
+      // TODO(FIL-382): drop legacy `setupStatus` from ProjectionExpression.
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus, setupStatus, auroraTenantStatus',
     }),
   );
 
   return {
     auroraTenantId: orgResult.Item?.auroraTenantId?.S,
-    setupStatus: orgResult.Item?.setupStatus?.S,
+    // TODO(FIL-382): drop the setupStatus fallback.
+    auroraSetupStatus: orgResult.Item?.auroraSetupStatus?.S ?? orgResult.Item?.setupStatus?.S,
     currentAuroraStatus: orgResult.Item?.auroraTenantStatus?.S,
   };
 }

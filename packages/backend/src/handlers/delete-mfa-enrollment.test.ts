@@ -106,7 +106,7 @@ function setupAuthMocks(idTokenPayload: Record<string, unknown> = { amr: ['mfa']
     .resolves({
       Item: {
         orgConfirmed: { BOOL: true },
-        setupStatus: { S: FINAL_SETUP_STATUS },
+        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
       },
     });
 }

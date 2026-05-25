@@ -106,7 +106,7 @@ describe('PATCH /api/me/profile handler', () => {
       })
       .resolves({
         Item: {
-          setupStatus: { S: FINAL_SETUP_STATUS },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 

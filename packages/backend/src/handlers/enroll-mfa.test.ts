@@ -97,7 +97,7 @@ function setupAuthMocks(sub: string = MOCK_SUB) {
     .resolves({
       Item: {
         orgConfirmed: { BOOL: true },
-        setupStatus: { S: FINAL_SETUP_STATUS },
+        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
       },
     });
 }

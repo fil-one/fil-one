@@ -68,7 +68,7 @@ function orgProfileWithTenant(tenantId: string) {
       pk: { S: `ORG#${USER_INFO.orgId}` },
       sk: { S: 'PROFILE' },
       auroraTenantId: { S: tenantId },
-      setupStatus: { S: FINAL_SETUP_STATUS },
+      auroraSetupStatus: { S: FINAL_SETUP_STATUS },
     },
   };
 }
@@ -78,7 +78,7 @@ function authenticatedEvent(bucketName?: string) {
     userInfo: USER_INFO,
   });
   if (bucketName) {
-    event.pathParameters = { name: bucketName };
+    event.pathParameters = { bucketName };
   }
   return event;
 }
@@ -87,7 +87,7 @@ function authenticatedEvent(bucketName?: string) {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('GET /api/buckets/{name}/analytics handler', () => {
+describe('GET /api/buckets/{bucketName}/analytics handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
@@ -165,7 +165,7 @@ describe('GET /api/buckets/{name}/analytics handler', () => {
         pk: { S: `ORG#${USER_INFO.orgId}` },
         sk: { S: 'PROFILE' },
         auroraTenantId: { S: AURORA_TENANT_ID },
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
       },
     });
 

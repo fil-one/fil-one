@@ -56,7 +56,7 @@ function seedReadyOrg(orgId = ORG_ID, tenantId = TENANT_ID) {
     .resolves({
       Item: marshall({
         auroraTenantId: tenantId,
-        setupStatus: FINAL_SETUP_STATUS,
+        auroraSetupStatus: FINAL_SETUP_STATUS,
       }),
     });
 }
@@ -179,7 +179,7 @@ describe('subscription-drift-checker', () => {
       .resolves({
         Item: marshall({
           auroraTenantId: TENANT_ID,
-          setupStatus: OrgSetupStatus.AURORA_TENANT_CREATED, // not final
+          auroraSetupStatus: OrgSetupStatus.AURORA_TENANT_CREATED, // not final
         }),
       });
 
@@ -211,7 +211,7 @@ describe('subscription-drift-checker', () => {
       .resolves({
         Item: marshall({
           auroraTenantId: tenantId2,
-          setupStatus: FINAL_SETUP_STATUS,
+          auroraSetupStatus: FINAL_SETUP_STATUS,
         }),
       });
 
@@ -281,7 +281,7 @@ describe('subscription-drift-checker', () => {
       .resolves({
         Item: marshall({
           auroraTenantId: tenantIdPage2,
-          setupStatus: FINAL_SETUP_STATUS,
+          auroraSetupStatus: FINAL_SETUP_STATUS,
         }),
       });
 

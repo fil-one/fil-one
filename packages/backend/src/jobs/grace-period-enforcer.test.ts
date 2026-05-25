@@ -66,7 +66,7 @@ function setupOrgProfile(extra?: Record<string, string>) {
         pk: `ORG#${MOCK_ORG_ID}`,
         sk: 'PROFILE',
         auroraTenantId: MOCK_AURORA_TENANT_ID,
-        setupStatus: FINAL_SETUP_STATUS,
+        auroraSetupStatus: FINAL_SETUP_STATUS,
         ...extra,
       }),
     });
@@ -234,7 +234,7 @@ describe('grace-period-enforcer', () => {
           pk: `ORG#${orgId2}`,
           sk: 'PROFILE',
           auroraTenantId: tenantId2,
-          setupStatus: FINAL_SETUP_STATUS,
+          auroraSetupStatus: FINAL_SETUP_STATUS,
         }),
       });
 
@@ -270,7 +270,7 @@ describe('grace-period-enforcer', () => {
           pk: `ORG#${MOCK_ORG_ID}`,
           sk: 'PROFILE',
           auroraTenantId: MOCK_AURORA_TENANT_ID,
-          setupStatus: OrgSetupStatus.AURORA_TENANT_CREATED,
+          auroraSetupStatus: OrgSetupStatus.AURORA_TENANT_CREATED,
         }),
       });
 
@@ -382,13 +382,13 @@ describe('grace-period-enforcer', () => {
         .resolvesOnce({
           Item: marshall({
             auroraTenantId: MOCK_AURORA_TENANT_ID,
-            setupStatus: FINAL_SETUP_STATUS,
+            auroraSetupStatus: FINAL_SETUP_STATUS,
           }),
         })
         .resolvesOnce({
           Item: marshall({
             auroraTenantId: MOCK_AURORA_TENANT_ID,
-            setupStatus: FINAL_SETUP_STATUS,
+            auroraSetupStatus: FINAL_SETUP_STATUS,
             auroraTenantStatus: 'WRITE_LOCKED',
           }),
         });

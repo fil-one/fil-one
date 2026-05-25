@@ -53,7 +53,8 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   );
 
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
+  // TODO(FIL-382): drop the setupStatus fallback.
+  const setupStatus = orgProfile?.auroraSetupStatus?.S ?? orgProfile?.setupStatus?.S;
   if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
     return tenantNotReadyResponse();
   }

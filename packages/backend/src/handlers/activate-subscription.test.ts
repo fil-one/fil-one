@@ -87,7 +87,7 @@ function orgProfileWithTenant(tenantId: string) {
       pk: { S: 'ORG#org-1' },
       sk: { S: 'PROFILE' },
       auroraTenantId: { S: tenantId },
-      setupStatus: { S: FINAL_SETUP_STATUS },
+      auroraSetupStatus: { S: FINAL_SETUP_STATUS },
     },
   };
 }
@@ -390,7 +390,7 @@ describe('activate-subscription handler', () => {
           pk: { S: 'ORG#org-1' },
           sk: { S: 'PROFILE' },
           auroraTenantId: { S: 'aurora-t-1' },
-          setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
         },
       });
     ddbMock.on(UpdateItemCommand).resolves({});

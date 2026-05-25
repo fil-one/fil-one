@@ -175,7 +175,7 @@ function setupAuroraTenantResolution() {
         pk: `ORG#${MOCK_ORG_ID}`,
         sk: 'PROFILE',
         auroraTenantId: MOCK_AURORA_TENANT_ID,
-        setupStatus: FINAL_SETUP_STATUS,
+        auroraSetupStatus: FINAL_SETUP_STATUS,
       }),
     });
 }
