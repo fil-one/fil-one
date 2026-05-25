@@ -243,7 +243,7 @@ describe('auroraOrchestrator', () => {
 
       expect(result).toEqual([
         {
-          name: 'a',
+          bucketName: 'a',
           region: S3Region.EuWest1,
           createdAt: '2026-01-01T00:00:00Z',
           isPublic: false,
@@ -251,7 +251,7 @@ describe('auroraOrchestrator', () => {
           encrypted: true,
         },
         {
-          name: 'b',
+          bucketName: 'b',
           region: S3Region.EuWest1,
           createdAt: '2026-01-02T00:00:00Z',
           isPublic: false,
@@ -277,7 +277,7 @@ describe('auroraOrchestrator', () => {
       const result = await auroraOrchestrator.listBuckets('aurora-t-1');
 
       expect(result).toHaveLength(1);
-      expect(result[0]?.name).toBe('a');
+      expect(result[0]?.bucketName).toBe('a');
     });
 
     it('throws when the Aurora Portal returns an error', async () => {
@@ -314,7 +314,7 @@ describe('auroraOrchestrator', () => {
       const result = await auroraOrchestrator.getBucket('aurora-t-1', 'b');
 
       expect(result).toEqual({
-        name: 'b',
+        bucketName: 'b',
         region: S3Region.EuWest1,
         createdAt: '2026-01-01T00:00:00Z',
         isPublic: false,

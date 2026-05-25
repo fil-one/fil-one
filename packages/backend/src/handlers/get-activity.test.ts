@@ -174,7 +174,9 @@ describe('get-activity baseHandler', () => {
   });
 
   it('returns bucket activities without object activities', async () => {
-    mockListBuckets.mockResolvedValue([{ name: 'photos', createdAt: '2026-01-01T00:00:00Z' }]);
+    mockListBuckets.mockResolvedValue([
+      { bucketName: 'photos', createdAt: '2026-01-01T00:00:00Z' },
+    ]);
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     const event = buildEvent({ userInfo: USER_INFO });
@@ -202,9 +204,9 @@ describe('get-activity baseHandler', () => {
 
   it('respects the limit query parameter', async () => {
     mockListBuckets.mockResolvedValue([
-      { name: 'b1', createdAt: '2026-01-01T00:00:00Z' },
-      { name: 'b2', createdAt: '2026-01-02T00:00:00Z' },
-      { name: 'b3', createdAt: '2026-01-03T00:00:00Z' },
+      { bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' },
+      { bucketName: 'b2', createdAt: '2026-01-02T00:00:00Z' },
+      { bucketName: 'b3', createdAt: '2026-01-03T00:00:00Z' },
     ]);
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
@@ -240,7 +242,7 @@ describe('get-activity baseHandler', () => {
   });
 
   it('defaults limit to 10 when limit is non-numeric', async () => {
-    mockListBuckets.mockResolvedValue([{ name: 'b1', createdAt: '2026-01-01T00:00:00Z' }]);
+    mockListBuckets.mockResolvedValue([{ bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' }]);
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     const event = buildEvent({
@@ -254,7 +256,7 @@ describe('get-activity baseHandler', () => {
   });
 
   it('defaults limit to 10 when limit is negative', async () => {
-    mockListBuckets.mockResolvedValue([{ name: 'b1', createdAt: '2026-01-01T00:00:00Z' }]);
+    mockListBuckets.mockResolvedValue([{ bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' }]);
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     const event = buildEvent({
@@ -325,7 +327,7 @@ describe('get-activity baseHandler', () => {
   });
 
   it('returns only bucket activity (no object activities)', async () => {
-    mockListBuckets.mockResolvedValue([{ name: 'data', createdAt: '2025-01-01T00:00:00Z' }]);
+    mockListBuckets.mockResolvedValue([{ bucketName: 'data', createdAt: '2025-01-01T00:00:00Z' }]);
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     const event = buildEvent({ userInfo: USER_INFO });
@@ -350,7 +352,7 @@ describe('get-activity baseHandler', () => {
   });
 
   it('includes key activities sorted with buckets and objects', async () => {
-    mockListBuckets.mockResolvedValue([{ name: 'b1', createdAt: '2026-01-01T00:00:00Z' }]);
+    mockListBuckets.mockResolvedValue([{ bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' }]);
 
     ddbMock
       .on(QueryCommand, {

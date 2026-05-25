@@ -38,7 +38,7 @@ export function AccessKeyBucketScopeFields({
   // https://linear.app/filecoin-foundation/issue/FIL-324/move-filtering-bucket-regions-to-backend
   const buckets = (data?.buckets ?? [])
     .filter((b) => !region || b.region === region)
-    .map((b) => b.name);
+    .map((b) => b.bucketName);
   const loading = isPending && bucketScope === 'specific';
 
   function toggleBucket(name: string) {

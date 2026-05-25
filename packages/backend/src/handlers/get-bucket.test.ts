@@ -48,7 +48,7 @@ describe('get-bucket baseHandler', () => {
 
   it('returns 200 with bucket data from the orchestrator', async () => {
     mockGetBucket.mockResolvedValue({
-      name: 'my-bucket',
+      bucketName: 'my-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
       isPublic: false,
@@ -58,14 +58,14 @@ describe('get-bucket baseHandler', () => {
     });
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { name: 'my-bucket' };
+    event.pathParameters = { bucketName: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(result.body!);
     expect(body).toStrictEqual({
       bucket: {
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: S3_REGION,
         createdAt: '2026-01-15T10:00:00Z',
         isPublic: false,
@@ -78,7 +78,7 @@ describe('get-bucket baseHandler', () => {
 
   it('returns objectLockEnabled true when the orchestrator reports it', async () => {
     mockGetBucket.mockResolvedValue({
-      name: 'locked-bucket',
+      bucketName: 'locked-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
       isPublic: false,
@@ -88,7 +88,7 @@ describe('get-bucket baseHandler', () => {
     });
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { name: 'locked-bucket' };
+    event.pathParameters = { bucketName: 'locked-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(200);
@@ -98,7 +98,7 @@ describe('get-bucket baseHandler', () => {
 
   it('passes through versioning, encryption, and retention fields', async () => {
     mockGetBucket.mockResolvedValue({
-      name: 'full-bucket',
+      bucketName: 'full-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
       isPublic: false,
@@ -111,14 +111,14 @@ describe('get-bucket baseHandler', () => {
     });
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { name: 'full-bucket' };
+    event.pathParameters = { bucketName: 'full-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(result.body!);
     expect(body).toStrictEqual({
       bucket: {
-        name: 'full-bucket',
+        bucketName: 'full-bucket',
         region: S3_REGION,
         createdAt: '2026-01-15T10:00:00Z',
         isPublic: false,
@@ -134,7 +134,7 @@ describe('get-bucket baseHandler', () => {
 
   it('calls orchestrator.getBucket with tenantId and bucketName', async () => {
     mockGetBucket.mockResolvedValue({
-      name: 'my-bucket',
+      bucketName: 'my-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
       isPublic: false,
@@ -143,7 +143,7 @@ describe('get-bucket baseHandler', () => {
     });
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { name: 'my-bucket' };
+    event.pathParameters = { bucketName: 'my-bucket' };
     await baseHandler(event);
 
     expect(mockGetBucket).toHaveBeenCalledWith('aurora-t-1', 'my-bucket');
@@ -153,7 +153,7 @@ describe('get-bucket baseHandler', () => {
     mockGetBucket.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { name: 'nonexistent-bucket' };
+    event.pathParameters = { bucketName: 'nonexistent-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(404);
@@ -167,7 +167,7 @@ describe('get-bucket baseHandler', () => {
     );
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { name: 'my-bucket' };
+    event.pathParameters = { bucketName: 'my-bucket' };
 
     await expect(baseHandler(event)).rejects.toThrow(
       'Failed to get bucket "my-bucket" from Aurora for tenant aurora-t-1',
@@ -187,7 +187,7 @@ describe('get-bucket baseHandler', () => {
     mockIsTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { name: 'my-bucket' };
+    event.pathParameters = { bucketName: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(503);

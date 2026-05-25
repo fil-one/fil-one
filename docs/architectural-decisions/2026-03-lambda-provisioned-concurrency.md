@@ -90,32 +90,32 @@ Apply provisioned concurrency (`provisioned: 1`) to the 12 functions on the crit
 
 The following functions received `provisionedConcurrency: 1` in `sst.config.ts`:
 
-| Function         | Route                                      | Cold start impact                                 |
-| ---------------- | ------------------------------------------ | ------------------------------------------------- |
-| `AuthLogin`      | `GET /login`                               | First step in auth flow; blocks login start       |
-| `AuthCallback`   | `GET /api/auth/callback`                   | Auth0 token exchange; blocks login completion     |
-| `GetMe`          | `GET /api/me`                              | Called on every page load for session validation  |
-| `GetBilling`     | `GET /api/billing`                         | Stripe + DynamoDB; shown on every dashboard visit |
-| `ListBuckets`    | `GET /api/buckets`                         | SSM + Aurora Portal; primary dashboard content    |
-| `GetBucket`      | `GET /api/buckets/{name}`                  | SSM + Aurora Portal; bucket detail page load      |
-| `ListObjects`    | `GET /api/buckets/{name}/objects`          | SSM + Aurora S3; object browser page load         |
-| `HeadObject`     | `GET /api/buckets/{name}/objects/metadata` | SSM + dual Aurora calls; metadata panel load      |
-| `PresignUpload`  | `POST /api/buckets/{name}/objects/presign` | SSM + Aurora S3; blocks upload start              |
-| `ListAccessKeys` | `GET /api/access-keys`                     | DynamoDB; access keys page load                   |
-| `GetUsage`       | `GET /api/usage`                           | Aurora Backoffice; dashboard widget               |
-| `GetActivity`    | `GET /api/activity`                        | Aurora Backoffice + S3; dashboard widget          |
+| Function         | Route                                            | Cold start impact                                 |
+| ---------------- | ------------------------------------------------ | ------------------------------------------------- |
+| `AuthLogin`      | `GET /login`                                     | First step in auth flow; blocks login start       |
+| `AuthCallback`   | `GET /api/auth/callback`                         | Auth0 token exchange; blocks login completion     |
+| `GetMe`          | `GET /api/me`                                    | Called on every page load for session validation  |
+| `GetBilling`     | `GET /api/billing`                               | Stripe + DynamoDB; shown on every dashboard visit |
+| `ListBuckets`    | `GET /api/buckets`                               | SSM + Aurora Portal; primary dashboard content    |
+| `GetBucket`      | `GET /api/buckets/{bucketName}`                  | SSM + Aurora Portal; bucket detail page load      |
+| `ListObjects`    | `GET /api/buckets/{bucketName}/objects`          | SSM + Aurora S3; object browser page load         |
+| `HeadObject`     | `GET /api/buckets/{bucketName}/objects/metadata` | SSM + dual Aurora calls; metadata panel load      |
+| `PresignUpload`  | `POST /api/buckets/{bucketName}/objects/presign` | SSM + Aurora S3; blocks upload start              |
+| `ListAccessKeys` | `GET /api/access-keys`                           | DynamoDB; access keys page load                   |
+| `GetUsage`       | `GET /api/usage`                                 | Aurora Backoffice; dashboard widget               |
+| `GetActivity`    | `GET /api/activity`                              | Aurora Backoffice + S3; dashboard widget          |
 
 The following functions are **excluded** from PC because cold starts are tolerable at their call frequency:
 
-| Function             | Route                                      | Reason                                    |
-| -------------------- | ------------------------------------------ | ----------------------------------------- |
-| `CreateBucket`       | `POST /api/buckets`                        | Infrequent; user expects creation latency |
-| `CreateAccessKey`    | `POST /api/access-keys`                    | Infrequent                                |
-| `DownloadObject`     | `GET /api/buckets/{name}/objects/download` | Presign redirect; slight delay acceptable |
-| `ConfirmOrg`         | `POST /api/org/confirm`                    | One-time onboarding action                |
-| `AuthLogout`         | `GET /logout`                              | Infrequent; redirect delay acceptable     |
-| `ResendVerification` | `POST /api/me/resend-verification`         | Email delivery is already slow            |
-| `ListInvoices`       | `GET /api/billing/invoices`                | Settings page; rarely visited             |
+| Function             | Route                                            | Reason                                    |
+| -------------------- | ------------------------------------------------ | ----------------------------------------- |
+| `CreateBucket`       | `POST /api/buckets`                              | Infrequent; user expects creation latency |
+| `CreateAccessKey`    | `POST /api/access-keys`                          | Infrequent                                |
+| `DownloadObject`     | `GET /api/buckets/{bucketName}/objects/download` | Presign redirect; slight delay acceptable |
+| `ConfirmOrg`         | `POST /api/org/confirm`                          | One-time onboarding action                |
+| `AuthLogout`         | `GET /logout`                                    | Infrequent; redirect delay acceptable     |
+| `ResendVerification` | `POST /api/me/resend-verification`               | Email delivery is already slow            |
+| `ListInvoices`       | `GET /api/billing/invoices`                      | Settings page; rarely visited             |
 
 ### SSM caching: module-scope LRU cache in Aurora client libraries
 

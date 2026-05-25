@@ -78,7 +78,7 @@ function authenticatedEvent(bucketName?: string) {
     userInfo: USER_INFO,
   });
   if (bucketName) {
-    event.pathParameters = { name: bucketName };
+    event.pathParameters = { bucketName };
   }
   return event;
 }
@@ -87,7 +87,7 @@ function authenticatedEvent(bucketName?: string) {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('GET /api/buckets/{name}/analytics handler', () => {
+describe('GET /api/buckets/{bucketName}/analytics handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();

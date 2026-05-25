@@ -63,7 +63,7 @@ describe('list-buckets baseHandler (single-region)', () => {
   it('returns 200 with buckets from the orchestrator', async () => {
     aurora.listBuckets.mockResolvedValue([
       {
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: S3_REGION,
         createdAt: '2026-01-01T00:00:00.000Z',
         isPublic: false,
@@ -71,7 +71,7 @@ describe('list-buckets baseHandler (single-region)', () => {
         encrypted: true,
       },
       {
-        name: 'other-bucket',
+        bucketName: 'other-bucket',
         region: S3_REGION,
         createdAt: '2026-01-02T00:00:00.000Z',
         isPublic: false,
@@ -88,7 +88,7 @@ describe('list-buckets baseHandler (single-region)', () => {
     expect(body).toStrictEqual({
       buckets: [
         {
-          name: 'my-bucket',
+          bucketName: 'my-bucket',
           region: S3_REGION,
           createdAt: '2026-01-01T00:00:00.000Z',
           isPublic: false,
@@ -96,7 +96,7 @@ describe('list-buckets baseHandler (single-region)', () => {
           encrypted: true,
         },
         {
-          name: 'other-bucket',
+          bucketName: 'other-bucket',
           region: S3_REGION,
           createdAt: '2026-01-02T00:00:00.000Z',
           isPublic: false,
@@ -110,7 +110,7 @@ describe('list-buckets baseHandler (single-region)', () => {
   it('passes versioning and encrypted flags through', async () => {
     aurora.listBuckets.mockResolvedValue([
       {
-        name: 'versioned-bucket',
+        bucketName: 'versioned-bucket',
         region: S3_REGION,
         createdAt: '2026-01-01T00:00:00.000Z',
         isPublic: false,
@@ -118,7 +118,7 @@ describe('list-buckets baseHandler (single-region)', () => {
         encrypted: true,
       },
       {
-        name: 'unencrypted-bucket',
+        bucketName: 'unencrypted-bucket',
         region: S3_REGION,
         createdAt: '2026-01-02T00:00:00.000Z',
         isPublic: false,
@@ -201,7 +201,7 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
   it('concatenates buckets from every ready orchestrator in registry order', async () => {
     aurora.listBuckets.mockResolvedValue([
       {
-        name: 'aurora-bucket',
+        bucketName: 'aurora-bucket',
         region: S3Region.EuWest1,
         createdAt: '2026-01-01T00:00:00.000Z',
         isPublic: false,
@@ -211,7 +211,7 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     ]);
     fth.listBuckets.mockResolvedValue([
       {
-        name: 'fth-bucket',
+        bucketName: 'fth-bucket',
         region: S3Region.UsEast1,
         createdAt: '2026-02-01T00:00:00.000Z',
         isPublic: false,
@@ -228,7 +228,7 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     expect(body).toStrictEqual({
       buckets: [
         {
-          name: 'aurora-bucket',
+          bucketName: 'aurora-bucket',
           region: S3Region.EuWest1,
           createdAt: '2026-01-01T00:00:00.000Z',
           isPublic: false,
@@ -236,7 +236,7 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
           encrypted: true,
         },
         {
-          name: 'fth-bucket',
+          bucketName: 'fth-bucket',
           region: S3Region.UsEast1,
           createdAt: '2026-02-01T00:00:00.000Z',
           isPublic: false,
@@ -253,7 +253,7 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     aurora.isTenantReady.mockResolvedValue(null);
     fth.listBuckets.mockResolvedValue([
       {
-        name: 'fth-bucket',
+        bucketName: 'fth-bucket',
         region: S3Region.UsEast1,
         createdAt: '2026-02-01T00:00:00.000Z',
         isPublic: false,
@@ -269,7 +269,7 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     const body = JSON.parse(result.body as string);
     expect(body.buckets).toStrictEqual([
       {
-        name: 'fth-bucket',
+        bucketName: 'fth-bucket',
         region: S3Region.UsEast1,
         createdAt: '2026-02-01T00:00:00.000Z',
         isPublic: false,
