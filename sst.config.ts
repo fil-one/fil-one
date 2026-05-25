@@ -515,7 +515,7 @@ export default $config({
     });
     addRoute({
       method: 'GET',
-      routePath: '/api/buckets/{bucketName}',
+      routePath: '/api/buckets/{name}',
       handler: 'get-bucket',
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
@@ -527,7 +527,7 @@ export default $config({
     });
     addRoute({
       method: 'DELETE',
-      routePath: '/api/buckets/{bucketName}',
+      routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
       permissions: auroraS3GatewayPermissions,
     });
@@ -569,7 +569,7 @@ export default $config({
     });
     addRoute({
       method: 'GET',
-      routePath: '/api/buckets/{bucketName}/analytics',
+      routePath: '/api/buckets/{name}/analytics',
       handler: 'get-bucket-analytics',
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
       extraEnv: auroraEnv,
