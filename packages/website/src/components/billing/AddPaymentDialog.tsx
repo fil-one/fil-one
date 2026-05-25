@@ -53,6 +53,11 @@ function PaymentForm({
   const [error, setError] = useState<string | null>(null);
   const [_cardBrand, setCardBrand] = useState<string>('unknown');
   const [promotionCode, setPromotionCode] = useState('');
+  const [cardConfirmed, setCardConfirmed] = useState(false);
+
+  useEffect(() => {
+    setCardConfirmed(false);
+  }, [clientSecret]);
 
   function handleCardChange(e: StripeCardNumberElementChangeEvent) {
     setCardBrand(e.brand ?? 'unknown');
@@ -88,14 +93,18 @@ function PaymentForm({
       return;
     }
 
-    const result = await stripe.confirmCardSetup(clientSecret, {
-      payment_method: { card: cardNumberElement },
-    });
+    if (!cardConfirmed) {
+      const result = await stripe.confirmCardSetup(clientSecret, {
+        payment_method: { card: cardNumberElement },
+      });
 
-    if (result.error) {
-      setError(result.error.message ?? 'An error occurred while confirming your card.');
-      setLoading(false);
-      return;
+      if (result.error) {
+        setError(result.error.message ?? 'An error occurred while confirming your card.');
+        setLoading(false);
+        return;
+      }
+
+      setCardConfirmed(true);
     }
 
     // Card setup confirmed — activate subscription via API
