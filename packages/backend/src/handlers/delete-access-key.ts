@@ -8,14 +8,13 @@ import { Resource } from 'sst';
 import { deleteAuroraAccessKey } from '../lib/aurora/aurora-portal.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
-import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
 
 const dynamo = getDynamoClient();
 
