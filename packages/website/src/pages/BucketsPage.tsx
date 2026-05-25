@@ -38,7 +38,7 @@ export function BucketsPage() {
     onSuccess: (_, bucketName) => {
       // Optimistically remove from cache, then confirm with a background refetch
       queryClient.setQueryData<ListBucketsResponse>(queryKeys.buckets, (old) =>
-        old ? { buckets: old.buckets.filter((b) => b.name !== bucketName) } : old,
+        old ? { buckets: old.buckets.filter((b) => b.bucketName !== bucketName) } : old,
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
@@ -125,16 +125,16 @@ export function BucketsPage() {
             <tbody>
               {buckets.map((bucket) => (
                 <tr
-                  key={bucket.name}
+                  key={bucket.bucketName}
                   className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50"
                 >
                   <td className="px-4 py-3">
                     <Link
                       to="/buckets/$bucketName"
-                      params={{ bucketName: bucket.name }}
+                      params={{ bucketName: bucket.bucketName }}
                       className="font-medium text-zinc-900 hover:text-brand-600"
                     >
-                      {bucket.name}
+                      {bucket.bucketName}
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-xs">
@@ -180,8 +180,8 @@ export function BucketsPage() {
                     >
                       <IconButton
                         icon={TrashIcon}
-                        aria-label={`Delete bucket ${bucket.name}`}
-                        onClick={() => deleteBucketMutation.mutate(bucket.name)}
+                        aria-label={`Delete bucket ${bucket.bucketName}`}
+                        onClick={() => deleteBucketMutation.mutate(bucket.bucketName)}
                         // TODO: enable bucket deletion after Aurora implements this operation
                         // https://linear.app/filecoin-foundation/issue/FIL-204/delete-bucket
                         disabled

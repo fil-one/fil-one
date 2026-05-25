@@ -69,10 +69,10 @@ async function fetchBucketActivities(
   try {
     const buckets = await orchestrator.listBuckets(tenantId);
     return buckets.map((bucket) => ({
-      id: `bucket-${bucket.name}`,
+      id: `bucket-${bucket.bucketName}`,
       action: 'bucket.created' as const,
       resourceType: 'bucket' as const,
-      resourceName: bucket.name,
+      resourceName: bucket.bucketName,
       timestamp: bucket.createdAt,
     }));
   } catch (err) {
