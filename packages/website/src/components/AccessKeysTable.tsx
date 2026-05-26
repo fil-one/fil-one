@@ -5,7 +5,7 @@ import { DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon } from '@phosphor-icons/rea
 import { IconBox } from './IconBox';
 
 import type { AccessKey } from '@filone/shared';
-import { GRANULAR_PERMISSION_LABELS, S3_REGION, getRegionLabel } from '@filone/shared';
+import { GRANULAR_PERMISSION_LABELS } from '@filone/shared';
 
 import { Badge } from './Badge';
 import { Button } from './Button';
