@@ -129,7 +129,8 @@ export function BucketDetailPage({
   });
   const bucket = bucketData?.bucket ?? null;
 
-  // Objects (via presigned URL — versioned listing)
+  // Objects (via presigned URL — versioned listing). Gated on the bucket
+  // being loaded so /presign is called with the bucket's real region.
   const {
     data: objectsData,
     isPending: objectsLoading,
@@ -137,8 +138,12 @@ export function BucketDetailPage({
     error: objectsError,
   } = useQuery({
     queryKey: queryKeys.objects(bucketName),
+    enabled: !!bucket,
     queryFn: async (): Promise<ListObjectVersionsResponse> => {
-      const { items } = await batchPresign([{ op: 'listObjectVersions', bucket: bucketName }]);
+      const { items } = await batchPresign(
+        [{ op: 'listObjectVersions', bucket: bucketName }],
+        bucketRegion,
+      );
       const response = await executePresignedUrl(items[0].url, items[0].method);
       return parseListObjectVersionsResponse(await response.text());
     },
@@ -179,7 +184,11 @@ export function BucketDetailPage({
     [queryClient, bucketName],
   );
 
-  const objectActions = useObjectActions({ bucketName, onDeleted: invalidateObjectsCache });
+  const objectActions = useObjectActions({
+    bucketName,
+    region: bucketRegion,
+    onDeleted: invalidateObjectsCache,
+  });
 
   const invalidateAccessKeysCache = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
@@ -221,6 +230,7 @@ export function BucketDetailPage({
             void navigate({
               to: '/buckets/$bucketName/upload',
               params: { bucketName },
+              search: { region: bucketRegion },
             })
           }
         >

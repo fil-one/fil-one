@@ -7,8 +7,10 @@ import {
   XIcon,
   CheckCircleIcon,
 } from '@phosphor-icons/react/dist/ssr';
+import { useQuery } from '@tanstack/react-query';
 
-import { formatBytes } from '@filone/shared';
+import type { GetBucketResponse, S3Region } from '@filone/shared';
+import { formatBytes, S3_REGION } from '@filone/shared';
 
 import { Heading } from '../components/Heading/Heading';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -19,6 +21,8 @@ import { Textarea } from '../components/TextArea';
 import { FormField } from '../components/FormField';
 import { ProgressBar } from '../components/ProgressBar';
 import { Spinner } from '../components/Spinner';
+import { apiRequest } from '../lib/api.js';
+import { queryKeys } from '../lib/query-client.js';
 import { useFileUpload } from '../lib/use-file-upload.js';
 
 // ---------------------------------------------------------------------------
@@ -27,17 +31,25 @@ import { useFileUpload } from '../lib/use-file-upload.js';
 
 export type UploadObjectPageProps = {
   bucketName: string;
+  region: S3Region;
 };
 
 // eslint-disable-next-line max-lines-per-function
-export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
+export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) {
   const navigate = useNavigate();
 
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
 
+  const { data: bucketData } = useQuery({
+    queryKey: queryKeys.bucket(bucketName, region),
+    queryFn: () => apiRequest<GetBucketResponse>(`/buckets/${encodeURIComponent(bucketName)}`),
+  });
+  const bucketRegion = (bucketData?.bucket.region as S3Region | undefined) ?? S3_REGION;
+
   const upload = useFileUpload({
     bucketName,
+    region: bucketRegion,
     tags,
     onSuccess: () => {
       void navigate({ to: '/buckets/$bucketName', params: { bucketName } });
@@ -74,7 +86,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
 
   // ---- Render helpers -----------------------------------------------------
 
-  const canUpload = !!upload.selectedFile && !!upload.objectName.trim();
+  const canUpload = !!upload.selectedFile && !!upload.objectName.trim() && !!bucketData;
 
   return (
     <div className="mx-auto max-w-2xl px-10 pt-10">

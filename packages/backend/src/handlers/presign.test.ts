@@ -29,8 +29,10 @@ const mockOrchestrator = {
   getPresignerContext: (...args: unknown[]) => mockGetPresignerContext(...args),
 };
 
+const mockGetOrchestratorForRegion = vi.fn();
+
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: () => mockOrchestrator,
+  getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
 const mockGetPresignedListObjectsUrl = vi.fn();
@@ -62,10 +64,15 @@ import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
-function buildPresignEvent(ops: unknown[], overrides?: { subscriptionStatus?: string }) {
+function buildPresignEvent(
+  ops: unknown[],
+  overrides?: { subscriptionStatus?: string; region?: string | null },
+) {
+  const region = overrides?.region === undefined ? 'eu-west-1' : overrides.region;
   const event = buildEvent({
     body: JSON.stringify(ops),
     userInfo: USER_INFO,
+    ...(region !== null && { queryStringParameters: { region } }),
   });
   if (overrides?.subscriptionStatus) {
     event.requestContext.subscriptionStatus = overrides.subscriptionStatus;
@@ -80,7 +87,8 @@ function buildPresignEvent(ops: unknown[], overrides?: { subscriptionStatus?: st
 describe('presign baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv('FILONE_STAGE', 'test');
+    vi.stubEnv('FILONE_STAGE', 'staging');
+    mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
     mockIsTenantReady.mockResolvedValue('aurora-t-1');
     mockGetPresignerContext.mockResolvedValue(presignerContext);
   });
@@ -88,7 +96,11 @@ describe('presign baseHandler', () => {
   // ── Validation ──────────────────────────────────────────────────────
 
   it('returns 400 for invalid JSON body', async () => {
-    const event = buildEvent({ body: 'not json{', userInfo: USER_INFO });
+    const event = buildEvent({
+      body: 'not json{',
+      userInfo: USER_INFO,
+      queryStringParameters: { region: 'eu-west-1' },
+    });
     const result = await baseHandler(event);
 
     expect(result).toMatchObject({
@@ -429,5 +441,55 @@ describe('presign baseHandler', () => {
     expect(mockGetPresignedGetObjectRetentionUrl).toHaveBeenCalledWith(
       expect.objectContaining({ key: 'k', versionId: 'v-abc' }),
     );
+  });
+
+  // ── Region routing ────────────────────────────────────────────────
+
+  describe('region routing', () => {
+    it('returns 400 when region query parameter is missing', async () => {
+      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], { region: null });
+      const result = await baseHandler(event);
+
+      expect(result).toMatchObject({
+        statusCode: 400,
+        body: expect.stringContaining('region query parameter is required'),
+      });
+      expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
+    });
+
+    it('returns an unsupported-region response when region is not allowed in this stage', async () => {
+      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
+        region: 'ap-south-1',
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(400);
+      expect(result.body).toEqual(expect.stringContaining('ap-south-1'));
+      expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
+    });
+
+    it('rejects us-east-1 when stage is production', async () => {
+      vi.stubEnv('FILONE_STAGE', 'production');
+      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
+        region: 'us-east-1',
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(400);
+      expect(result.body).toEqual(expect.stringContaining('us-east-1'));
+      expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
+    });
+
+    it('routes the request to the orchestrator for the supplied region', async () => {
+      mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
+
+      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
+        region: 'us-east-1',
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(200);
+      expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
+    });
   });
 });

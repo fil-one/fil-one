@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import type { S3Region } from '@filone/shared';
 import { useToast } from '../components/Toast/index.js';
 import { batchPresign } from './use-presign.js';
 
@@ -6,12 +7,13 @@ export type UploadStep = 'idle' | 'uploading' | 'done';
 
 export type UseFileUploadOptions = {
   bucketName: string;
+  region: S3Region;
   /** Tags to include in the upload metadata. Read at upload time. */
   tags?: string[];
   onSuccess?: (key: string, file: File) => void;
 };
 
-export function useFileUpload({ bucketName, tags, onSuccess }: UseFileUploadOptions) {
+export function useFileUpload({ bucketName, region, tags, onSuccess }: UseFileUploadOptions) {
   const { toast } = useToast();
 
   const [uploadStep, setUploadStep] = useState<UploadStep>('idle');
@@ -56,17 +58,20 @@ export function useFileUpload({ bucketName, tags, onSuccess }: UseFileUploadOpti
       const contentType = selectedFile.type || 'application/octet-stream';
 
       const description = objectDescription.trim() || undefined;
-      const { items } = await batchPresign([
-        {
-          op: 'putObject',
-          bucket: bucketName,
-          key,
-          contentType,
-          fileName: selectedFile.name,
-          ...(description && { description }),
-          ...(tags && tags.length > 0 && { tags }),
-        },
-      ]);
+      const { items } = await batchPresign(
+        [
+          {
+            op: 'putObject',
+            bucket: bucketName,
+            key,
+            contentType,
+            fileName: selectedFile.name,
+            ...(description && { description }),
+            ...(tags && tags.length > 0 && { tags }),
+          },
+        ],
+        region,
+      );
       const { url: presignedUrl, method: presignedMethod } = items[0];
       setUploadProgress(1);
 
@@ -100,7 +105,17 @@ export function useFileUpload({ bucketName, tags, onSuccess }: UseFileUploadOpti
       reset();
       toast.error(err instanceof Error ? err.message : 'Upload failed');
     }
-  }, [selectedFile, objectName, objectDescription, bucketName, tags, toast, onSuccess, reset]);
+  }, [
+    selectedFile,
+    objectName,
+    objectDescription,
+    bucketName,
+    region,
+    tags,
+    toast,
+    onSuccess,
+    reset,
+  ]);
 
   return {
     uploadStep,
