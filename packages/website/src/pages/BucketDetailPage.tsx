@@ -1,7 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { ArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
@@ -16,19 +15,8 @@ import { BucketAccessTab } from '../components/BucketAccessTab';
 import type { S3Region } from '@filone/shared';
 import { getS3Endpoint, S3_REGION, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
-
-import type {
-  ListObjectVersionsResponse,
-  GetBucketResponse,
-  ListAccessKeysResponse,
-  BucketAnalyticsResponse,
-} from '@filone/shared';
-import { apiRequest } from '../lib/api.js';
 import { formatDateTime } from '../lib/time.js';
-import { useObjectActions } from '../lib/use-object-actions.js';
-import { queryKeys } from '../lib/query-client.js';
-import { batchPresign } from '../lib/use-presign.js';
-import { parseListObjectVersionsResponse, executePresignedUrl } from '../lib/aurora-s3.js';
+import { useBucketDetail } from '../lib/use-bucket-detail.js';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -39,88 +27,26 @@ export type BucketDetailPageProps = {
   prefix?: string;
 };
 
-// eslint-disable-next-line complexity/complexity
 export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) {
-  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const currentPrefix = prefix ?? '';
+  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
 
-  const setCurrentPrefix = useCallback(
-    (newPrefix: string) => {
-      void navigate({
-        to: '/buckets/$bucketName',
-        params: { bucketName },
-        search: newPrefix ? { prefix: newPrefix } : {},
-        replace: true,
-      });
-    },
-    [navigate, bucketName],
-  );
-
-  // Bucket metadata
-  const { data: bucketData } = useQuery({
-    queryKey: queryKeys.bucket(bucketName),
-    queryFn: () => apiRequest<GetBucketResponse>(`/buckets/${encodeURIComponent(bucketName)}`),
-  });
-  const bucket = bucketData?.bucket ?? null;
-
-  // Objects (via presigned URL — versioned listing)
   const {
-    data: objectsData,
-    isPending: objectsLoading,
-    isError: objectsIsError,
-    error: objectsError,
-  } = useQuery({
-    queryKey: queryKeys.objects(bucketName),
-    queryFn: async (): Promise<ListObjectVersionsResponse> => {
-      const { items } = await batchPresign([{ op: 'listObjectVersions', bucket: bucketName }]);
-      const response = await executePresignedUrl(items[0].url, items[0].method);
-      return parseListObjectVersionsResponse(await response.text());
-    },
-  });
-  const versions = objectsData?.versions ?? [];
-
-  // Bucket analytics (object count + storage)
-  const { data: analyticsData } = useQuery({
-    queryKey: queryKeys.bucketAnalytics(bucketName),
-    queryFn: () =>
-      apiRequest<BucketAnalyticsResponse>(`/buckets/${encodeURIComponent(bucketName)}/analytics`),
-  });
-
-  // Access keys scoped to this bucket
-  const { data: accessKeysData, isPending: accessKeysLoading } = useQuery({
-    queryKey: queryKeys.bucketAccessKeys(bucketName),
-    queryFn: () =>
-      apiRequest<ListAccessKeysResponse>(`/access-keys?bucket=${encodeURIComponent(bucketName)}`),
-  });
-  const accessKeys = accessKeysData?.keys ?? [];
+    setCurrentPrefix,
+    bucket,
+    versions,
+    analyticsData,
+    accessKeys,
+    objectsLoading,
+    objectsIsError,
+    objectsError,
+    accessKeysLoading,
+    objectActions,
+    invalidateAccessKeysCache,
+  } = useBucketDetail(bucketName);
 
   const [addKeyOpen, setAddKeyOpen] = useState(false);
-
-  const invalidateObjectsCache = useCallback(
-    (key: string, versionId?: string) => {
-      if (versionId) {
-        queryClient.setQueryData<ListObjectVersionsResponse>(queryKeys.objects(bucketName), (old) =>
-          old
-            ? {
-                ...old,
-                versions: old.versions.filter((v) => !(v.key === key && v.versionId === versionId)),
-              }
-            : old,
-        );
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName) });
-    },
-    [queryClient, bucketName],
-  );
-
-  const objectActions = useObjectActions({ bucketName, onDeleted: invalidateObjectsCache });
-
-  const invalidateAccessKeysCache = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
-  }, [queryClient]);
 
   if (objectsLoading) {
     return (

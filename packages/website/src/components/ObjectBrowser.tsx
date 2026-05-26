@@ -277,6 +277,49 @@ function LatestVersionRow({
 }
 
 // ---------------------------------------------------------------------------
+// Prefix breadcrumb
+// ---------------------------------------------------------------------------
+
+function PrefixBreadcrumb({
+  currentPrefix,
+  onPrefixChange,
+}: {
+  currentPrefix: string;
+  onPrefixChange: (prefix: string) => void;
+}) {
+  return (
+    <div className="mb-2 flex items-center gap-1 text-sm">
+      <button
+        type="button"
+        onClick={() => onPrefixChange('')}
+        className={`hover:text-brand-600 ${currentPrefix === '' ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
+      >
+        /
+      </button>
+      {currentPrefix
+        .split('/')
+        .filter(Boolean)
+        .map((segment, idx, arr) => {
+          const segmentPrefix = arr.slice(0, idx + 1).join('/') + '/';
+          const isLast = idx === arr.length - 1;
+          return (
+            <span key={segmentPrefix} className="flex items-center gap-1">
+              <span className="text-zinc-400">/</span>
+              <button
+                type="button"
+                onClick={() => onPrefixChange(segmentPrefix)}
+                className={`hover:text-brand-600 ${isLast ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
+              >
+                {segment}
+              </button>
+            </span>
+          );
+        })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -291,7 +334,6 @@ export type ObjectBrowserProps = {
   onDelete: (key: string, versionId?: string) => Promise<void>;
 };
 
-// eslint-disable-next-line max-lines-per-function
 export function ObjectBrowser({
   bucketName,
   versions,
@@ -357,35 +399,7 @@ export function ObjectBrowser({
 
   return (
     <div className="mt-4">
-      {/* Prefix breadcrumb */}
-      <div className="mb-2 flex items-center gap-1 text-sm">
-        <button
-          type="button"
-          onClick={() => onPrefixChange('')}
-          className={`hover:text-brand-600 ${currentPrefix === '' ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
-        >
-          /
-        </button>
-        {currentPrefix
-          .split('/')
-          .filter(Boolean)
-          .map((segment, idx, arr) => {
-            const segmentPrefix = arr.slice(0, idx + 1).join('/') + '/';
-            const isLast = idx === arr.length - 1;
-            return (
-              <span key={segmentPrefix} className="flex items-center gap-1">
-                <span className="text-zinc-400">/</span>
-                <button
-                  type="button"
-                  onClick={() => onPrefixChange(segmentPrefix)}
-                  className={`hover:text-brand-600 ${isLast ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
-                >
-                  {segment}
-                </button>
-              </span>
-            );
-          })}
-      </div>
+      <PrefixBreadcrumb currentPrefix={currentPrefix} onPrefixChange={onPrefixChange} />
 
       {entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
