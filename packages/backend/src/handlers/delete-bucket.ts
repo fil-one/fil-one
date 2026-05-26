@@ -16,7 +16,7 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const bucketName = event.pathParameters?.bucketName;
+  const bucketName = event.pathParameters?.name;
   if (!bucketName) {
     return new ResponseBuilder()
       .status(400)
