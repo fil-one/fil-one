@@ -3,8 +3,8 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CreateAccessKeySchema, S3_REGION } from '@filone/shared';
-import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
+import { CreateAccessKeySchema, S3_REGION, isSupportedRegion } from '@filone/shared';
+import type { CreateAccessKeyResponse, ErrorResponse, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import {
@@ -14,7 +14,11 @@ import {
   ServiceOrchestrator,
 } from '../lib/service-orchestrator.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
+import {
+  ResponseBuilder,
+  tenantNotReadyResponse,
+  unsupportedRegionResponse,
+} from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -46,23 +50,18 @@ export async function baseHandler(
       .build();
   }
 
-  const { keyName, permissions, granularPermissions, bucketScope, region } = parsed.data;
+  const { keyName, permissions, granularPermissions, bucketScope } = parsed.data;
   const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
   const expiresAt = parsed.data.expiresAt ?? null;
+  const region: S3Region = parsed.data.region ?? S3_REGION;
 
-  // Phase A: only the Aurora region is supported in handlers. Phase B will
-  // open this up via getAvailableRegions(stage) once the FTH
-  // orchestrator is registered.
-  if (region !== undefined && region !== S3_REGION) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: `Unsupported region. Supported: ${S3_REGION}` })
-      .build();
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
+    return unsupportedRegionResponse(region);
   }
 
   const { orgId } = getUserInfo(event);
 
-  const orchestrator = getOrchestratorForRegion(S3_REGION);
+  const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
@@ -77,7 +76,7 @@ export async function baseHandler(
     });
   } catch (err) {
     if (err instanceof AccessKeyAlreadyExistsError) {
-      await recoverDuplicateKey(orgId, tenantId, keyName, orchestrator);
+      await recoverDuplicateKey(orgId, tenantId, keyName, region, orchestrator);
       return new ResponseBuilder()
         .status(409)
         .body<ErrorResponse>({ message: 'An access key with this name already exists' })
@@ -102,6 +101,7 @@ export async function baseHandler(
         accessKeyId: accessKey.accessKeyId,
         createdAt: accessKey.createdAt,
         status: 'active',
+        region,
         permissions,
         ...(granularPermissions?.length ? { granularPermissions } : {}),
         bucketScope,
@@ -127,6 +127,7 @@ async function recoverDuplicateKey(
   orgId: string,
   tenantId: string,
   keyName: string,
+  region: S3Region,
   orchestrator: ServiceOrchestrator,
 ): Promise<void> {
   // Check if we already have a DynamoDB record for this key
@@ -169,6 +170,7 @@ async function recoverDuplicateKey(
         accessKeyId: recovered.accessKeyId,
         createdAt: recovered.createdAt,
         status: 'active',
+        region,
       }),
     }),
   );

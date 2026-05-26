@@ -55,7 +55,7 @@ export async function baseHandler(
         (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
       bucketScope: record.bucketScope as AccessKey['bucketScope'],
       buckets: record.buckets as string[] | undefined,
-      region: S3_REGION,
+      region: (record.region as AccessKey['region']) ?? S3_REGION,
       expiresAt: (record.expiresAt as string | undefined) ?? null,
     };
   });

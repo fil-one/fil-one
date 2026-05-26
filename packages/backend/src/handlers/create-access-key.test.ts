@@ -15,6 +15,7 @@ vi.mock('sst', () => ({
 const mockEnsureTenantReady = vi.fn();
 const mockIssueAccessKey = vi.fn();
 const mockFindAccessKeyByName = vi.fn();
+const mockGetOrchestratorForRegion = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
@@ -25,8 +26,13 @@ const mockOrchestrator = {
 };
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: () => mockOrchestrator,
+  getOrchestratorForRegion: (region: string) => {
+    mockGetOrchestratorForRegion(region);
+    return mockOrchestrator;
+  },
 }));
+
+process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -120,6 +126,7 @@ describe('create-access-key baseHandler', () => {
     expect(item.createdAt.S).toBe('2026-03-10T13:36:07.752371Z');
     expect(item.status.S).toBe('active');
     expect(item.bucketScope.S).toBe('all');
+    expect(item.region.S).toBe('eu-west-1');
     // Secret must NOT be stored
     expect(item.accessKeySecret).toBeUndefined();
     expect(item.secretAccessKey).toBeUndefined();
@@ -388,7 +395,7 @@ describe('create-access-key baseHandler', () => {
       expect(result.statusCode).toBe(201);
     });
 
-    it('rejects us-east-1', async () => {
+    it('accepts us-east-1 in non-production stage and routes to FTH', async () => {
       const event = buildEvent({
         body: JSON.stringify({
           keyName: 'My Key',
@@ -400,10 +407,34 @@ describe('create-access-key baseHandler', () => {
       });
       const result = await baseHandler(event);
 
-      expect(result.statusCode).toBe(400);
-      const body = JSON.parse(result.body!);
-      expect(body.message).toContain('Unsupported region');
-      expect(mockIssueAccessKey).not.toHaveBeenCalled();
+      expect(result.statusCode).toBe(201);
+      expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.region.S).toBe('us-east-1');
+    });
+
+    it('rejects us-east-1 in production stage', async () => {
+      const previous = process.env.FILONE_STAGE;
+      process.env.FILONE_STAGE = 'production';
+      try {
+        const event = buildEvent({
+          body: JSON.stringify({
+            keyName: 'My Key',
+            permissions: ['read'],
+            bucketScope: 'all',
+            region: 'us-east-1',
+          }),
+          userInfo: USER_INFO,
+        });
+        const result = await baseHandler(event);
+
+        expect(result.statusCode).toBe(400);
+        const body = JSON.parse(result.body!);
+        expect(body.message).toContain('Unsupported region');
+        expect(mockIssueAccessKey).not.toHaveBeenCalled();
+      } finally {
+        process.env.FILONE_STAGE = previous;
+      }
     });
   });
 });

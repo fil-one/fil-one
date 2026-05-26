@@ -7,6 +7,7 @@ import { S3Client, CreateBucketCommand, ListBucketsCommand } from '@aws-sdk/clie
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
+    FthManagementApiToken: { value: 'kid.secret' },
   },
 }));
 
@@ -19,11 +20,38 @@ vi.mock('./fth-tenant-setup.js', () => ({
   ensureTenantReady: (...args: unknown[]) => mockEnsureFthTenantReady(...args),
 }));
 
+const mockFthClient = {
+  createAccessKey: vi.fn(),
+  listAccessKeys: vi.fn(),
+  deleteAccessKey: vi.fn(),
+  listStorageUsers: vi.fn(),
+};
+
+vi.mock('./fth-management-client.js', async () => {
+  const actual = await vi.importActual<typeof import('./fth-management-client.js')>(
+    './fth-management-client.js',
+  );
+  return {
+    ...actual,
+    createFthManagementClient: vi.fn(() => mockFthClient),
+  };
+});
+
+vi.mock('./fth-api-metrics.js', () => ({
+  instrumentClient: vi.fn(),
+}));
+
 process.env.FILONE_STAGE = 'test';
 process.env.FTH_S3_URL = 'https://s3.fortilyx.test';
+process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
 
 import { fthOrchestrator, _resetFthOrchestratorCachesForTesting } from './fth-orchestrator.js';
-import { BucketAlreadyExistsError } from '../service-orchestrator.js';
+import {
+  AccessKeyAlreadyExistsError,
+  AccessKeyValidationError,
+  BucketAlreadyExistsError,
+} from '../service-orchestrator.js';
+import { FthApiError, FthConflictError, FthNotFoundError } from './fth-management-client.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
@@ -39,6 +67,19 @@ beforeEach(() => {
   vi.clearAllMocks();
   _resetFthOrchestratorCachesForTesting();
 });
+
+function stubConsoleStorageUser() {
+  mockFthClient.listStorageUsers.mockResolvedValue([
+    {
+      id: '7',
+      userCode: 'filone-console',
+      displayName: 'FilOne Console User',
+      email: 'console@example.com',
+      role: 'storage_user',
+      createdAt: '2026-01-01T00:00:00Z',
+    },
+  ]);
+}
 
 describe('fthOrchestrator.ensureTenantReady', () => {
   it('delegates to ensureTenantReady from fth-tenant-setup', async () => {
@@ -155,6 +196,184 @@ describe('fthOrchestrator.createBucket', () => {
     await expect(
       fthOrchestrator.createBucket(fthClientId, { bucketName: 'my-bucket', versioning: true }),
     ).rejects.toThrow(/versioning/i);
+  });
+});
+
+describe('fthOrchestrator.issueAccessKey', () => {
+  const baseOpts = {
+    keyName: 'My Key',
+    permissions: ['read', 'write'] as const,
+    bucketScope: 'all' as const,
+  };
+
+  it('issues a key against the filone-console storage user and returns the credential', async () => {
+    stubConsoleStorageUser();
+    mockFthClient.createAccessKey.mockResolvedValue({
+      id: 'ak-1',
+      accessKeyId: 'AKIAFTH',
+      secretAccessKey: 'sk-secret',
+      name: baseOpts.keyName,
+      permissions: [],
+      buckets: [],
+      createdAt: '2026-03-10T00:00:00Z',
+    });
+
+    const result = await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: baseOpts.keyName,
+      permissions: [...baseOpts.permissions],
+    });
+
+    expect(result).toEqual({
+      id: 'ak-1',
+      accessKeyId: 'AKIAFTH',
+      accessKeySecret: 'sk-secret',
+      createdAt: '2026-03-10T00:00:00Z',
+    });
+    expect(mockFthClient.listStorageUsers).toHaveBeenCalledWith(fthClientId);
+    expect(mockFthClient.createAccessKey).toHaveBeenCalledWith(
+      fthClientId,
+      '7',
+      expect.objectContaining({
+        name: baseOpts.keyName,
+        permissions: expect.arrayContaining(['s3:GetObject', 's3:PutObject', 's3:ListBucket']),
+        buckets: [],
+        expiresAt: null,
+      }),
+    );
+  });
+
+  it('maps FthConflictError to AccessKeyAlreadyExistsError', async () => {
+    stubConsoleStorageUser();
+    mockFthClient.createAccessKey.mockRejectedValue(
+      new FthConflictError('duplicate', { message: 'duplicate' }),
+    );
+
+    await expect(
+      fthOrchestrator.issueAccessKey(fthClientId, {
+        keyName: baseOpts.keyName,
+        permissions: [...baseOpts.permissions],
+      }),
+    ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
+  });
+
+  it('maps 400 FthApiError to AccessKeyValidationError', async () => {
+    stubConsoleStorageUser();
+    mockFthClient.createAccessKey.mockRejectedValue(
+      new FthApiError(400, 'invalid', { message: 'Key name invalid' }),
+    );
+
+    await expect(
+      fthOrchestrator.issueAccessKey(fthClientId, {
+        keyName: baseOpts.keyName,
+        permissions: [...baseOpts.permissions],
+      }),
+    ).rejects.toBeInstanceOf(AccessKeyValidationError);
+  });
+
+  it('throws when the console storage user is missing', async () => {
+    mockFthClient.listStorageUsers.mockResolvedValue([]);
+
+    await expect(
+      fthOrchestrator.issueAccessKey(fthClientId, {
+        keyName: baseOpts.keyName,
+        permissions: [...baseOpts.permissions],
+      }),
+    ).rejects.toThrow(/filone-console/);
+    expect(mockFthClient.createAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('caches the storage user id across calls in the same warm container', async () => {
+    stubConsoleStorageUser();
+    mockFthClient.createAccessKey.mockResolvedValue({
+      accessKeyId: 'AKIAFTH',
+      secretAccessKey: 'sk-secret',
+      name: baseOpts.keyName,
+      permissions: [],
+      buckets: [],
+      createdAt: '2026-03-10T00:00:00Z',
+    });
+
+    await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: 'k1',
+      permissions: ['read'],
+    });
+    await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: 'k2',
+      permissions: ['read'],
+    });
+
+    expect(mockFthClient.listStorageUsers).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('fthOrchestrator.findAccessKeyByName', () => {
+  it('returns id/accessKeyId/createdAt when a key with the given name exists', async () => {
+    mockFthClient.listAccessKeys.mockResolvedValue([
+      {
+        id: 'ak-1',
+        accessKeyId: 'AKIA1',
+        name: 'Other',
+        permissions: [],
+        buckets: [],
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'ak-2',
+        accessKeyId: 'AKIA2',
+        name: 'Wanted',
+        permissions: [],
+        buckets: [],
+        createdAt: '2026-02-01T00:00:00Z',
+      },
+    ]);
+
+    const result = await fthOrchestrator.findAccessKeyByName(fthClientId, 'Wanted');
+
+    expect(result).toEqual({
+      id: 'ak-2',
+      accessKeyId: 'AKIA2',
+      createdAt: '2026-02-01T00:00:00Z',
+    });
+  });
+
+  it('returns undefined when no key matches', async () => {
+    mockFthClient.listAccessKeys.mockResolvedValue([]);
+
+    const result = await fthOrchestrator.findAccessKeyByName(fthClientId, 'Wanted');
+
+    expect(result).toBeUndefined();
+  });
+});
+
+describe('fthOrchestrator.deleteAccessKey', () => {
+  it('delegates to the management client deleteAccessKey', async () => {
+    mockFthClient.deleteAccessKey.mockResolvedValue(undefined);
+
+    await fthOrchestrator.deleteAccessKey(fthClientId, 'ak-1');
+
+    expect(mockFthClient.deleteAccessKey).toHaveBeenCalledWith(
+      fthClientId,
+      'ak-1',
+      expect.objectContaining({ idempotencyKey: expect.any(String) }),
+    );
+  });
+
+  it('treats FthNotFoundError as success (idempotent delete)', async () => {
+    mockFthClient.deleteAccessKey.mockRejectedValue(
+      new FthNotFoundError('not found', { message: 'not found' }),
+    );
+
+    await expect(fthOrchestrator.deleteAccessKey(fthClientId, 'ak-1')).resolves.toBeUndefined();
+  });
+
+  it('rethrows other API errors with context', async () => {
+    mockFthClient.deleteAccessKey.mockRejectedValue(
+      new FthApiError(500, 'boom', { message: 'boom' }),
+    );
+
+    await expect(fthOrchestrator.deleteAccessKey(fthClientId, 'ak-1')).rejects.toThrow(
+      /Failed to delete FTH access key/,
+    );
   });
 });
 
