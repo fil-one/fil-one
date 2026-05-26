@@ -13,7 +13,7 @@ import {
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
 import { OrgRole } from '@filone/shared';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
+import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
 import { expectErrorResponse } from '../test/assert-helpers.js';
@@ -291,7 +291,7 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            auroraSetupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
         });
 
@@ -344,7 +344,7 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            auroraSetupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
         });
 
@@ -466,7 +466,7 @@ describe('authMiddleware', () => {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: 'PROFILE' },
               name: { S: 'Alice Org' },
-              auroraSetupStatus: { S: 'FILONE_ORG_CREATED' },
+              auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: MOCK_USER_ID },
               createdAt: { S: expect.any(String) },
             },
@@ -558,7 +558,7 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            auroraSetupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
         });
 
@@ -619,7 +619,7 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            auroraSetupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
         });
 
@@ -654,7 +654,7 @@ describe('authMiddleware', () => {
         .resolvesOnce({ Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } } })
         .resolvesOnce({
           Item: {
-            auroraSetupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
         });
 
@@ -736,7 +736,7 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            auroraSetupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
         });
 

@@ -174,7 +174,7 @@ describe('fthOrchestrator.listBuckets', () => {
 
     expect(result).toEqual([
       {
-        name: 'b1',
+        bucketName: 'b1',
         region: 'us-east-1',
         createdAt: '2026-01-01T00:00:00.000Z',
         isPublic: false,
@@ -182,7 +182,7 @@ describe('fthOrchestrator.listBuckets', () => {
         encrypted: true,
       },
       {
-        name: 'b2',
+        bucketName: 'b2',
         region: 'us-east-1',
         createdAt: '2026-02-01T00:00:00.000Z',
         isPublic: false,

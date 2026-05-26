@@ -25,13 +25,10 @@ vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
   updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
 }));
 
-vi.mock('../lib/org-setup-status.js', () => ({
-  isOrgSetupComplete: (status: string | undefined) => status === 'AURORA_S3_ACCESS_KEY_CREATED',
-}));
-
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './grace-period-enforcer.js';
+import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -69,7 +66,7 @@ function setupOrgProfile(extra?: Record<string, string>) {
         pk: `ORG#${MOCK_ORG_ID}`,
         sk: 'PROFILE',
         auroraTenantId: MOCK_AURORA_TENANT_ID,
-        auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+        auroraSetupStatus: FINAL_SETUP_STATUS,
         ...extra,
       }),
     });
@@ -237,7 +234,7 @@ describe('grace-period-enforcer', () => {
           pk: `ORG#${orgId2}`,
           sk: 'PROFILE',
           auroraTenantId: tenantId2,
-          auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+          auroraSetupStatus: FINAL_SETUP_STATUS,
         }),
       });
 
@@ -273,7 +270,7 @@ describe('grace-period-enforcer', () => {
           pk: `ORG#${MOCK_ORG_ID}`,
           sk: 'PROFILE',
           auroraTenantId: MOCK_AURORA_TENANT_ID,
-          auroraSetupStatus: 'AURORA_TENANT_CREATED',
+          auroraSetupStatus: OrgSetupStatus.AURORA_TENANT_CREATED,
         }),
       });
 
@@ -385,13 +382,13 @@ describe('grace-period-enforcer', () => {
         .resolvesOnce({
           Item: marshall({
             auroraTenantId: MOCK_AURORA_TENANT_ID,
-            auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+            auroraSetupStatus: FINAL_SETUP_STATUS,
           }),
         })
         .resolvesOnce({
           Item: marshall({
             auroraTenantId: MOCK_AURORA_TENANT_ID,
-            auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+            auroraSetupStatus: FINAL_SETUP_STATUS,
             auroraTenantStatus: 'WRITE_LOCKED',
           }),
         });

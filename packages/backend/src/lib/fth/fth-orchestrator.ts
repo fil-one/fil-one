@@ -102,7 +102,7 @@ export const fthOrchestrator = {
     const ctx = await fthOrchestrator.getPresignerContext(tenantId);
     const { buckets } = await s3ListBuckets(ctx);
     return buckets.map((b) => ({
-      name: b.name,
+      bucketName: b.name,
       region: fthOrchestrator.region,
       createdAt: b.createdAt,
       isPublic: false,
@@ -114,7 +114,7 @@ export const fthOrchestrator = {
   async getBucket(_tenantId: string, bucketName: string): Promise<BucketDetails | null> {
     // TODO: replace with a real implementation
     return {
-      name: bucketName,
+      bucketName,
       region: fthOrchestrator.region,
       createdAt: new Date().toISOString(),
       isPublic: false,

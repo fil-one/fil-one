@@ -39,7 +39,7 @@ export async function baseHandler(
       .build();
   }
 
-  const { name, region, versioning, lock, retention } = parsed.data;
+  const { bucketName, region, versioning, lock, retention } = parsed.data;
 
   if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
     return unsupportedRegionResponse(region);
@@ -53,7 +53,7 @@ export async function baseHandler(
 
   try {
     await orchestrator.createBucket(tenantId, {
-      bucketName: name,
+      bucketName,
       versioning,
       lock,
       retention,
@@ -62,7 +62,7 @@ export async function baseHandler(
     if (err instanceof BucketAlreadyExistsError) {
       return new ResponseBuilder()
         .status(409)
-        .body<ErrorResponse>({ message: `Bucket "${name}" already exists` })
+        .body<ErrorResponse>({ message: `Bucket "${bucketName}" already exists` })
         .build();
     }
     throw err;
@@ -74,7 +74,7 @@ export async function baseHandler(
     .status(201)
     .body<CreateBucketResponse>({
       bucket: {
-        name,
+        bucketName,
         region,
         createdAt: now,
         isPublic: false,

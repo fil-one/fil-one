@@ -3,7 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
+import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -390,7 +390,7 @@ describe('activate-subscription handler', () => {
           pk: { S: 'ORG#org-1' },
           sk: { S: 'PROFILE' },
           auroraTenantId: { S: 'aurora-t-1' },
-          auroraSetupStatus: { S: 'AURORA_TENANT_CREATED' },
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
         },
       });
     ddbMock.on(UpdateItemCommand).resolves({});
