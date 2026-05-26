@@ -155,7 +155,7 @@ export const fthOrchestrator = {
       });
 
       return {
-        id: accessKey.id ?? accessKey.accessKeyId,
+        id: accessKey.accessKeyId,
         accessKeyId: accessKey.accessKeyId,
         accessKeySecret: accessKey.secretAccessKey,
         createdAt: accessKey.createdAt,
@@ -182,24 +182,24 @@ export const fthOrchestrator = {
     const match = keys.find((k) => k.name === keyName);
     if (!match) return undefined;
     return {
-      id: match.id ?? match.accessKeyId,
+      id: match.accessKeyId,
       accessKeyId: match.accessKeyId,
       createdAt: match.createdAt,
     };
   },
 
-  async deleteAccessKey(tenantId: string, accessKeyId: string): Promise<void> {
+  async deleteAccessKey(tenantId: string, keyId: string): Promise<void> {
     const client = createInstrumentedFthClient();
     try {
-      await client.deleteAccessKey(tenantId, accessKeyId, { idempotencyKey: randomUUID() });
+      await client.deleteAccessKey(tenantId, keyId, { idempotencyKey: `delete-${keyId}` });
     } catch (err) {
       if (err instanceof FthNotFoundError) {
         console.log(
-          `FTH access key "${accessKeyId}" not found for tenant ${tenantId}, treating as already deleted`,
+          `FTH access key "${keyId}" not found for tenant ${tenantId}, treating as already deleted`,
         );
         return;
       }
-      throw new Error(`Failed to delete FTH access key "${accessKeyId}" for tenant ${tenantId}`, {
+      throw new Error(`Failed to delete FTH access key "${keyId}" for tenant ${tenantId}`, {
         cause: err,
       });
     }

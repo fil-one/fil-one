@@ -155,7 +155,7 @@ export interface ServiceOrchestrator {
    * (already deleted upstream) is treated as success, not an error. Any other
    * failure should propagate so the caller can leave the DDB row intact.
    */
-  deleteAccessKey(tenantId: string, accessKeyId: string): Promise<void>;
+  deleteAccessKey(tenantId: string, keyId: string): Promise<void>;
 
   getPresignerContext(tenantId: string): Promise<PresignerContext>;
 }

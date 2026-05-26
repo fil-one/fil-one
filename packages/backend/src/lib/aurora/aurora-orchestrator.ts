@@ -238,8 +238,8 @@ export const auroraOrchestrator = {
     return findAuroraAccessKeyByName({ tenantId, keyName });
   },
 
-  async deleteAccessKey(tenantId: string, accessKeyId: string): Promise<void> {
-    await deleteAuroraAccessKey({ tenantId, auroraKeyId: accessKeyId });
+  async deleteAccessKey(tenantId: string, keyId: string): Promise<void> {
+    await deleteAuroraAccessKey({ tenantId, auroraKeyId: keyId });
   },
 
   async getPresignerContext(tenantId: string): Promise<PresignerContext> {

@@ -209,7 +209,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
   it('issues a key against the filone-console storage user and returns the credential', async () => {
     stubConsoleStorageUser();
     mockFthClient.createAccessKey.mockResolvedValue({
-      id: 'ak-1',
+      id: 'AKIAFTH',
       accessKeyId: 'AKIAFTH',
       secretAccessKey: 'sk-secret',
       name: baseOpts.keyName,
@@ -224,7 +224,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
     });
 
     expect(result).toEqual({
-      id: 'ak-1',
+      id: 'AKIAFTH',
       accessKeyId: 'AKIAFTH',
       accessKeySecret: 'sk-secret',
       createdAt: '2026-03-10T00:00:00Z',
@@ -310,7 +310,7 @@ describe('fthOrchestrator.findAccessKeyByName', () => {
   it('returns id/accessKeyId/createdAt when a key with the given name exists', async () => {
     mockFthClient.listAccessKeys.mockResolvedValue([
       {
-        id: 'ak-1',
+        id: 'AKIA1',
         accessKeyId: 'AKIA1',
         name: 'Other',
         permissions: [],
@@ -318,7 +318,7 @@ describe('fthOrchestrator.findAccessKeyByName', () => {
         createdAt: '2026-01-01T00:00:00Z',
       },
       {
-        id: 'ak-2',
+        id: 'AKIA2',
         accessKeyId: 'AKIA2',
         name: 'Wanted',
         permissions: [],
@@ -330,7 +330,7 @@ describe('fthOrchestrator.findAccessKeyByName', () => {
     const result = await fthOrchestrator.findAccessKeyByName(fthClientId, 'Wanted');
 
     expect(result).toEqual({
-      id: 'ak-2',
+      id: 'AKIA2',
       accessKeyId: 'AKIA2',
       createdAt: '2026-02-01T00:00:00Z',
     });
@@ -349,12 +349,12 @@ describe('fthOrchestrator.deleteAccessKey', () => {
   it('delegates to the management client deleteAccessKey', async () => {
     mockFthClient.deleteAccessKey.mockResolvedValue(undefined);
 
-    await fthOrchestrator.deleteAccessKey(fthClientId, 'ak-1');
+    await fthOrchestrator.deleteAccessKey(fthClientId, 'AKIAFTH');
 
     expect(mockFthClient.deleteAccessKey).toHaveBeenCalledWith(
       fthClientId,
-      'ak-1',
-      expect.objectContaining({ idempotencyKey: expect.any(String) }),
+      'AKIAFTH',
+      expect.objectContaining({ idempotencyKey: `delete-AKIAFTH` }),
     );
   });
 
@@ -363,7 +363,7 @@ describe('fthOrchestrator.deleteAccessKey', () => {
       new FthNotFoundError('not found', { message: 'not found' }),
     );
 
-    await expect(fthOrchestrator.deleteAccessKey(fthClientId, 'ak-1')).resolves.toBeUndefined();
+    await expect(fthOrchestrator.deleteAccessKey(fthClientId, 'AKIAFTH')).resolves.toBeUndefined();
   });
 
   it('rethrows other API errors with context', async () => {
@@ -371,7 +371,7 @@ describe('fthOrchestrator.deleteAccessKey', () => {
       new FthApiError(500, 'boom', { message: 'boom' }),
     );
 
-    await expect(fthOrchestrator.deleteAccessKey(fthClientId, 'ak-1')).rejects.toThrow(
+    await expect(fthOrchestrator.deleteAccessKey(fthClientId, 'AKIAFTH')).rejects.toThrow(
       /Failed to delete FTH access key/,
     );
   });
