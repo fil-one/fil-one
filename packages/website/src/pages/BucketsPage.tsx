@@ -15,6 +15,7 @@ import { useToast } from '../components/Toast';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 
 import type { ListBucketsResponse } from '@filone/shared';
+import { S3_REGION, getRegionLabel } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { formatDate } from '../lib/time.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -123,7 +124,10 @@ export function BucketsPage() {
                     {bucket.bucketName}
                   </Link>
                 </Table.Cell>
-                <Table.Cell className="text-zinc-600">{bucket.region}</Table.Cell>
+                <Table.Cell className="text-xs">
+                  <p className="font-medium text-zinc-900">{getRegionLabel(bucket.region)}</p>
+                  <p className="text-zinc-500">{bucket.region ?? S3_REGION}</p>
+                </Table.Cell>
                 <Table.Cell className="text-zinc-600">{formatDate(bucket.createdAt)}</Table.Cell>
                 <Table.Cell>
                   {bucket.isPublic ? (
