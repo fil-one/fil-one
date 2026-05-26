@@ -51,6 +51,7 @@ export default $config({
     const stripePublishableKey = new sst.Secret('StripePublishableKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
+    const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const sendGridApiKey =
       $app.stage === 'staging' || $app.stage === 'production'
@@ -169,7 +170,7 @@ export default $config({
         securityHeadersConfig: {
           contentSecurityPolicy: {
             // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://plausible.io https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io/api https://fil-one.instatus.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://fil-one.instatus.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
@@ -351,6 +352,7 @@ export default $config({
       stripePublishableKey,
       stripePriceId,
       auroraBackofficeToken,
+      fthManagementApiToken,
     ];
     // Management API runtime credentials — linked only to handlers that call the Auth0 Management API
     const mgmtRuntimeResources = [auth0MgmtRuntimeClientId, auth0MgmtRuntimeClientSecret];
@@ -376,8 +378,14 @@ export default $config({
       AURORA_REGION_ID: 'ff',
     };
 
+    const fthEnv = {
+      FTH_MANAGEMENT_API_URL: 'https://api.fortilyx.com',
+      FTH_S3_URL: 'https://us-east-1.fortilyx.com',
+    };
+
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
+    const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
     const auroraS3GatewayPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
@@ -478,8 +486,13 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets',
       handler: 'list-buckets',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        FTH_S3_URL: fthEnv.FTH_S3_URL,
+      },
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
@@ -487,11 +500,14 @@ export default $config({
       method: 'POST',
       routePath: '/api/buckets',
       handler: 'create-bucket',
-      extraEnv: auroraEnv,
+      extraEnv: {
+        ...auroraEnv,
+        ...fthEnv,
+      },
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
         },
       ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
@@ -499,16 +515,19 @@ export default $config({
     });
     addRoute({
       method: 'GET',
-      routePath: '/api/buckets/{name}',
+      routePath: '/api/buckets/{bucketName}',
       handler: 'get-bucket',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        FTH_S3_URL: fthEnv.FTH_S3_URL,
+      },
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
     addRoute({
       method: 'DELETE',
-      routePath: '/api/buckets/{name}',
+      routePath: '/api/buckets/{bucketName}',
       handler: 'delete-bucket',
       permissions: auroraS3GatewayPermissions,
     });
@@ -542,13 +561,15 @@ export default $config({
       method: 'POST',
       routePath: '/api/presign',
       handler: 'presign',
-      permissions: auroraS3GatewayPermissions,
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '512 MB',
     });
     addRoute({
       method: 'GET',
-      routePath: '/api/buckets/{name}/analytics',
+      routePath: '/api/buckets/{bucketName}/analytics',
       handler: 'get-bucket-analytics',
       permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
       extraEnv: auroraEnv,
@@ -645,7 +666,9 @@ export default $config({
       routePath: '/api/activity',
       handler: 'get-activity',
       extraEnv: auroraEnv,
-      permissions: auroraS3GatewayPermissions,
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });

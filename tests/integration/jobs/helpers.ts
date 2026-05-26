@@ -239,7 +239,7 @@ export async function seedOrgProfile(orgId: string, auroraTenantId: string): Pro
         pk: { S: `ORG#${orgId}` },
         sk: { S: 'PROFILE' },
         auroraTenantId: { S: auroraTenantId },
-        setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
+        auroraSetupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
         updatedAt: { S: new Date().toISOString() },
       },
     }),

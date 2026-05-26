@@ -1,16 +1,10 @@
 import { reportMetric } from './metrics.js';
 
-export type AuroraApiName = 'aurora-portal' | 'aurora-backoffice';
-
-export interface InstrumentClientOptions {
-  apiName: AuroraApiName;
-}
-
 interface InterceptorOptions {
   url?: string;
 }
 
-interface InstrumentableClient {
+export interface InstrumentableClient {
   interceptors: {
     request: {
       use(
@@ -39,9 +33,15 @@ interface InstrumentableClient {
   };
 }
 
-export function instrumentClient(
+export interface InstrumentApiClientOptions<ApiName extends string> {
+  apiName: ApiName;
+  durationMetricName: string;
+  requestCountMetricName: string;
+}
+
+export function instrumentApiClient<ApiName extends string>(
   client: InstrumentableClient,
-  options: InstrumentClientOptions,
+  options: InstrumentApiClientOptions<ApiName>,
 ): void {
   const timings = new WeakMap<Request, number>();
 
@@ -55,8 +55,10 @@ export function instrumentClient(
     const duration = start !== undefined ? performance.now() - start : 0;
     const endpoint = `${request.method} ${requestOptions.url ?? 'unknown'}`;
 
-    reportAuroraApiMetric({
+    reportApiMetric({
       apiName: options.apiName,
+      durationMetricName: options.durationMetricName,
+      requestCountMetricName: options.requestCountMetricName,
       endpoint,
       statusGroup: statusGroup(response.status),
       statusCode: response.status,
@@ -74,8 +76,10 @@ export function instrumentClient(
       const duration = start !== undefined ? performance.now() - start : 0;
       const endpoint = `${request.method} ${requestOptions.url ?? 'unknown'}`;
 
-      reportAuroraApiMetric({
+      reportApiMetric({
         apiName: options.apiName,
+        durationMetricName: options.durationMetricName,
+        requestCountMetricName: options.requestCountMetricName,
         endpoint,
         statusGroup: 'network_error',
         statusCode: undefined,
@@ -92,8 +96,10 @@ function statusGroup(status: number): string {
   return `${group}xx`;
 }
 
-function reportAuroraApiMetric(data: {
-  apiName: AuroraApiName;
+function reportApiMetric(data: {
+  apiName: string;
+  durationMetricName: string;
+  requestCountMetricName: string;
   endpoint: string;
   statusGroup: string;
   statusCode: number | undefined;
@@ -107,8 +113,8 @@ function reportAuroraApiMetric(data: {
           Namespace: 'FilOne',
           Dimensions: [['apiName', 'endpoint', 'statusGroup']],
           Metrics: [
-            { Name: 'AuroraApiDuration', Unit: 'Milliseconds' },
-            { Name: 'AuroraApiRequestCount', Unit: 'Count' },
+            { Name: data.durationMetricName, Unit: 'Milliseconds' },
+            { Name: data.requestCountMetricName, Unit: 'Count' },
           ],
         },
       ],
@@ -117,7 +123,7 @@ function reportAuroraApiMetric(data: {
     endpoint: data.endpoint,
     statusGroup: data.statusGroup,
     statusCode: data.statusCode,
-    AuroraApiDuration: data.duration,
-    AuroraApiRequestCount: 1,
+    [data.durationMetricName]: data.duration,
+    [data.requestCountMetricName]: 1,
   });
 }

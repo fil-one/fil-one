@@ -14,7 +14,7 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import { updateTenantStatus } from '../lib/aurora-backoffice.js';
+import { updateTenantStatus as updateAuroraTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
@@ -186,11 +186,13 @@ async function resolveAuroraTenantId(
         pk: { S: `ORG#${orgId}` },
         sk: { S: 'PROFILE' },
       },
-      ProjectionExpression: 'auroraTenantId, setupStatus',
+      // TODO(FIL-382): drop legacy `setupStatus` from ProjectionExpression.
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus, setupStatus',
     }),
   );
   const auroraTenantId = orgResult.Item?.auroraTenantId?.S;
-  const setupStatus = orgResult.Item?.setupStatus?.S;
+  // TODO(FIL-382): drop the setupStatus fallback.
+  const setupStatus = orgResult.Item?.auroraSetupStatus?.S ?? orgResult.Item?.setupStatus?.S;
   if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
     console.warn('[stripe-webhook] Aurora tenant not ready for org:', orgId);
     return null;
@@ -365,7 +367,7 @@ async function handleSubscriptionDeleted(
   try {
     const resolved = await resolveAuroraTenantId(userId, tableName);
     if (resolved) {
-      await updateTenantStatus({ tenantId: resolved.auroraTenantId, status: 'WRITE_LOCKED' });
+      await updateAuroraTenantStatus({ tenantId: resolved.auroraTenantId, status: 'WRITE_LOCKED' });
       await setOrgAuroraTenantStatus(resolved.orgId, 'WRITE_LOCKED');
       console.log('[stripe-webhook] Aurora tenant WRITE_LOCKED', {
         userId,
@@ -424,7 +426,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   try {
     const resolved = await resolveAuroraTenantId(userId, tableName);
     if (resolved) {
-      await updateTenantStatus({ tenantId: resolved.auroraTenantId, status: 'ACTIVE' });
+      await updateAuroraTenantStatus({ tenantId: resolved.auroraTenantId, status: 'ACTIVE' });
       await setOrgAuroraTenantStatus(resolved.orgId, 'ACTIVE');
       console.log('[stripe-webhook] Aurora tenant re-activated', {
         userId,

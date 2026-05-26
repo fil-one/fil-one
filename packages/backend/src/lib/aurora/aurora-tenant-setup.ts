@@ -6,7 +6,7 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand, GetParameterCommand } from '@aws-sdk/client-ssm';
-import { getDynamoClient } from './ddb-client.js';
+import { getDynamoClient } from '../ddb-client.js';
 import { Resource } from 'sst';
 import {
   createAuroraTenant,
@@ -16,11 +16,11 @@ import {
 } from './aurora-backoffice.js';
 import { ACCESS_KEY_PERMISSIONS, ErrorResponse } from '@filone/shared';
 import { createAuroraAccessKey } from './aurora-portal.js';
-import { reportMetric } from './metrics.js';
-import { OrgSetupStatus, isOrgSetupComplete } from './org-setup-status.js';
-import { scanAndEmitStuckTenantCount } from './stuck-tenant-metric.js';
+import { reportMetric } from '../metrics.js';
+import { OrgSetupStatus, isOrgSetupComplete } from '../org-setup-status.js';
+import { scanAndEmitStuckTenantCount } from '../stuck-tenant-metric.js';
 import { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { ResponseBuilder } from './response-builder.js';
+import { ResponseBuilder } from '../response-builder.js';
 
 export { OrgSetupStatus };
 
@@ -89,7 +89,7 @@ export async function processTenantSetup(orgId: string): Promise<{ auroraTenantI
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: orgProfileKey,
-      // Strong consistency: a prior invocation may have advanced setupStatus
+      // Strong consistency: a prior invocation may have advanced auroraSetupStatus
       // milliseconds ago. An eventually-consistent read could see the old
       // status and re-run a step that's already done, widening every race
       // window. ConditionalCheckFailedException on the subsequent write would
@@ -103,9 +103,10 @@ export async function processTenantSetup(orgId: string): Promise<{ auroraTenantI
   }
 
   const orgName = orgProfile.name?.S ?? '';
-  const setupStatus = orgProfile.setupStatus?.S;
+  // TODO(FIL-382): drop the setupStatus fallback.
+  const auroraSetupStatus = orgProfile.auroraSetupStatus?.S ?? orgProfile.setupStatus?.S;
 
-  switch (setupStatus) {
+  switch (auroraSetupStatus) {
     case OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED: {
       const auroraTenantId = orgProfile.auroraTenantId?.S;
       assert(auroraTenantId, `auroraTenantId missing in org profile for org ${orgId}`);
@@ -145,7 +146,7 @@ export async function processTenantSetup(orgId: string): Promise<{ auroraTenantI
     }
 
     default:
-      throw new Error(`Unexpected setupStatus "${setupStatus}" for org ${orgId}`);
+      throw new Error(`Unexpected auroraSetupStatus "${auroraSetupStatus}" for org ${orgId}`);
   }
 }
 
@@ -320,7 +321,7 @@ async function createAndStoreS3AccessKey(
     accessKeyId = result.accessKeyId;
     accessKeySecret = result.accessKeySecret;
   } catch (err) {
-    if ((err as { name?: string }).name === 'DuplicateKeyNameError') {
+    if ((err as { name?: string }).name === 'AccessKeyAlreadyExistsError') {
       console.log(
         `Aurora S3 access key "filone-console" already exists for tenant ${auroraTenantId}, checking SSM`,
       );
@@ -406,15 +407,17 @@ export async function recordSetupFailure(orgId: string): Promise<void> {
     new UpdateItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      UpdateExpression: 'ADD setupFailureCount :one SET updatedAt = :now',
+      UpdateExpression: 'ADD auroraSetupFailureCount :one SET updatedAt = :now',
       // Without this guard, UpdateItem's default upsert would create an
-      // orphan row containing only pk/sk/setupFailureCount/updatedAt when
-      // the org profile is missing (e.g. operational deletion or restore
-      // from an inconsistent backup). The orphan has no setupStatus, so
-      // every future processTenantSetup call hits the default branch and
-      // wedges the org permanently. setupStatus is the canonical marker
-      // of a profile created by the onboarding transaction.
-      ConditionExpression: 'attribute_exists(setupStatus)',
+      // orphan row containing only pk/sk/auroraSetupFailureCount/updatedAt
+      // when the org profile is missing (e.g. operational deletion or
+      // restore from an inconsistent backup). The orphan has no
+      // auroraSetupStatus, so every future processTenantSetup call hits the
+      // default branch and wedges the org permanently. auroraSetupStatus is
+      // the canonical marker of a profile created by the onboarding
+      // transaction.
+      // TODO(FIL-382): drop the `OR attribute_exists(setupStatus)` branch.
+      ConditionExpression: 'attribute_exists(auroraSetupStatus) OR attribute_exists(setupStatus)',
       ExpressionAttributeValues: {
         ':one': { N: '1' },
         ':now': { S: new Date().toISOString() },
@@ -422,7 +425,7 @@ export async function recordSetupFailure(orgId: string): Promise<void> {
       ReturnValues: 'UPDATED_NEW',
     }),
   );
-  const newCount = Number(out.Attributes?.setupFailureCount?.N ?? '0');
+  const newCount = Number(out.Attributes?.auroraSetupFailureCount?.N ?? '0');
   if (newCount === SETUP_FAILURE_ALERT_THRESHOLD) {
     await scanAndEmitStuckTenantCount();
   }
@@ -431,10 +434,11 @@ export async function recordSetupFailure(orgId: string): Promise<void> {
 async function advanceStatus(opts: AdvanceStatusOptions): Promise<'wrote' | 'lost-race'> {
   const isTerminal = isOrgSetupComplete(opts.next);
 
+  // TODO(FIL-382): drop `REMOVE setupStatus`.
   const setExpr =
     opts.writeAuroraTenantId !== undefined
-      ? 'SET auroraTenantId = :auroraTenantId, setupStatus = :status, updatedAt = :now'
-      : 'SET setupStatus = :status, updatedAt = :now';
+      ? 'SET auroraTenantId = :auroraTenantId, auroraSetupStatus = :status, updatedAt = :now REMOVE setupStatus'
+      : 'SET auroraSetupStatus = :status, updatedAt = :now REMOVE setupStatus';
   const exprValues: Record<string, { S: string }> = {
     ':status': { S: opts.next },
     ':expected': { S: opts.expected },
@@ -450,19 +454,26 @@ async function advanceStatus(opts: AdvanceStatusOptions): Promise<'wrote' | 'los
         TableName: Resource.UserInfoTable.name,
         Key: opts.orgProfileKey,
         UpdateExpression: setExpr,
-        ConditionExpression: 'setupStatus = :expected',
+        // TODO(FIL-382): drop the second `OR` branch. The branches are
+        // mutually exclusive: `attribute_not_exists(auroraSetupStatus)` holds
+        // iff the row has not yet been migrated.
+        ConditionExpression:
+          'auroraSetupStatus = :expected OR (attribute_not_exists(auroraSetupStatus) AND setupStatus = :expected)',
         ExpressionAttributeValues: exprValues,
-        // On the terminal advance, read the prior setupFailureCount so we can
-        // refresh the stuck-tenant gauge when this org was previously stuck.
-        // The counter itself is left in place — it is a historical record of
-        // attempts-to-success and is excluded from the gauge by the
-        // setupStatus filter once terminal.
+        // On the terminal advance, read the prior auroraSetupFailureCount so
+        // we can refresh the stuck-tenant gauge when this org was previously
+        // stuck. The counter itself is left in place — it is a historical
+        // record of attempts-to-success and is excluded from the gauge by
+        // the auroraSetupStatus filter once terminal.
         ...(isTerminal ? { ReturnValues: 'ALL_OLD' as const } : {}),
       }),
     );
 
     if (isTerminal) {
-      const priorFailureCount = Number(out.Attributes?.setupFailureCount?.N ?? '0');
+      // TODO(FIL-382): drop the setupFailureCount fallback.
+      const priorFailureCount = Number(
+        out.Attributes?.auroraSetupFailureCount?.N ?? out.Attributes?.setupFailureCount?.N ?? '0',
+      );
       if (priorFailureCount >= SETUP_FAILURE_ALERT_THRESHOLD) {
         await scanAndEmitStuckTenantCount();
       }

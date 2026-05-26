@@ -1,7 +1,9 @@
+// Provider-agnostic S3 presign/list/delete helpers. Each function accepts a
+// PresignerContext supplied by the active ServiceOrchestrator; the orchestrator
+// alone knows how to look up credentials and which endpoint/region apply.
+
 import {
-  S3Client,
-  PutObjectCommand,
-  DeleteBucketCommand,
+  CreateBucketCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   GetObjectRetentionCommand,
@@ -9,76 +11,51 @@ import {
   ListBucketsCommand,
   ListObjectsV2Command,
   ListObjectVersionsCommand,
+  PutObjectCommand,
+  S3Client,
 } from '@aws-sdk/client-s3';
-import type { S3Object } from '@filone/shared';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
-import QuickLRU from 'quick-lru';
+import type { S3Object } from '@filone/shared';
+import { BucketAlreadyExistsError } from './service-orchestrator.js';
+import type { PresignerContext } from './service-orchestrator.js';
 
-const ssm = new SSMClient({});
-const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
-export const _resetSsmCacheForTesting = () => ssmCache.clear();
-
-export interface AuroraS3Credentials {
-  accessKeyId: string;
-  secretAccessKey: string;
-}
-
-function createS3Client(endpointUrl: string, credentials: AuroraS3Credentials): S3Client {
+function createS3Client(ctx: PresignerContext): S3Client {
   return new S3Client({
-    endpoint: endpointUrl,
-    region: 'auto',
-    credentials: {
-      accessKeyId: credentials.accessKeyId,
-      secretAccessKey: credentials.secretAccessKey,
-    },
-    forcePathStyle: true,
+    endpoint: ctx.endpointUrl,
+    region: ctx.region,
+    credentials: ctx.credentials,
+    forcePathStyle: ctx.forcePathStyle,
   });
 }
 
-export async function getAuroraS3Credentials(
-  stage: string,
-  tenantId: string,
-): Promise<AuroraS3Credentials> {
-  const cacheKey = `${stage}/${tenantId}`;
-  const cached = ssmCache.get(cacheKey);
-  if (cached) return JSON.parse(cached) as AuroraS3Credentials;
+// ── Direct S3 operations (used by handlers that can't presign) ─────
 
-  let value: string | undefined;
+export interface CreateBucketOptions {
+  bucketName: string;
+}
+
+export async function createBucket(
+  ctx: PresignerContext,
+  options: CreateBucketOptions,
+): Promise<void> {
+  const s3 = createS3Client(ctx);
   try {
-    const { Parameter } = await ssm.send(
-      new GetParameterCommand({
-        Name: `/filone/${stage}/aurora-s3/access-key/${tenantId}`,
-        WithDecryption: true,
-      }),
-    );
-    value = Parameter?.Value;
+    await s3.send(new CreateBucketCommand({ Bucket: options.bucketName }));
   } catch (err) {
-    if ((err as { name?: string }).name === 'ParameterNotFound') {
-      throw new Error(`Aurora S3 credentials not found in SSM for tenant ${tenantId}`);
+    const name = (err as { name?: string }).name;
+    if (name === 'BucketAlreadyOwnedByYou' || name === 'BucketAlreadyExists') {
+      throw new BucketAlreadyExistsError(options.bucketName, { cause: err as Error });
     }
     throw err;
   }
-
-  if (!value) {
-    throw new Error(`Aurora S3 credentials not found in SSM for tenant ${tenantId}`);
-  }
-
-  ssmCache.set(cacheKey, value);
-  return JSON.parse(value) as AuroraS3Credentials;
 }
-
-// ── Direct S3 operations (used by handlers that can't presign) ─────
 
 export interface ListBucketsResult {
   buckets: Array<{ name: string; createdAt: string }>;
 }
 
-export async function listBuckets(
-  endpointUrl: string,
-  credentials: AuroraS3Credentials,
-): Promise<ListBucketsResult> {
-  const s3 = createS3Client(endpointUrl, credentials);
+export async function listBuckets(ctx: PresignerContext): Promise<ListBucketsResult> {
+  const s3 = createS3Client(ctx);
   const result = await s3.send(new ListBucketsCommand({}));
   return {
     buckets: (result.Buckets ?? []).map((b) => ({
@@ -88,18 +65,8 @@ export async function listBuckets(
   };
 }
 
-export async function deleteBucket(
-  endpointUrl: string,
-  credentials: AuroraS3Credentials,
-  bucket: string,
-): Promise<void> {
-  const s3 = createS3Client(endpointUrl, credentials);
-  await s3.send(new DeleteBucketCommand({ Bucket: bucket }));
-}
-
 export interface ListObjectsOptions {
-  endpointUrl: string;
-  credentials: AuroraS3Credentials;
+  ctx: PresignerContext;
   bucket: string;
   prefix?: string;
   delimiter?: string;
@@ -114,10 +81,8 @@ export interface ListObjectsResult {
 }
 
 export async function listObjects(options: ListObjectsOptions): Promise<ListObjectsResult> {
-  const { endpointUrl, credentials, bucket, prefix, delimiter, maxKeys, continuationToken } =
-    options;
-
-  const s3 = createS3Client(endpointUrl, credentials);
+  const { ctx, bucket, prefix, delimiter, maxKeys, continuationToken } = options;
+  const s3 = createS3Client(ctx);
 
   const result = await s3.send(
     new ListObjectsV2Command({
@@ -146,8 +111,7 @@ export async function listObjects(options: ListObjectsOptions): Promise<ListObje
 // ── Presigned URL generators ────────────────────────────────────────
 
 interface PresignBaseOptions {
-  endpointUrl: string;
-  credentials: AuroraS3Credentials;
+  ctx: PresignerContext;
   bucket: string;
   expiresIn: number;
 }
@@ -159,11 +123,11 @@ export interface PresignPutObjectOptions extends PresignBaseOptions {
 }
 
 export async function getPresignedPutObjectUrl(options: PresignPutObjectOptions): Promise<string> {
-  const { endpointUrl, credentials, bucket, key, expiresIn, contentType, metadata } = options;
-  const s3 = createS3Client(endpointUrl, credentials);
+  const { ctx, bucket, key, expiresIn, contentType, metadata } = options;
+  const s3 = createS3Client(ctx);
 
-  console.log('[aurora-s3] Creating presigned PutObject URL', {
-    endpoint: endpointUrl,
+  console.log('[s3-presigner] Creating presigned PutObject URL', {
+    endpoint: ctx.endpointUrl,
     bucket,
     key,
     expiresIn,
@@ -184,15 +148,8 @@ export async function getPresignedPutObjectUrl(options: PresignPutObjectOptions)
 export type PresignGetObjectOptions = PresignBaseOptions & { key: string; versionId?: string };
 
 export async function getPresignedGetObjectUrl(options: PresignGetObjectOptions): Promise<string> {
-  const { endpointUrl, credentials, bucket, key, expiresIn, versionId } = options;
-  const s3 = createS3Client(endpointUrl, credentials);
-
-  console.log('[aurora-s3] Creating presigned GetObject URL', {
-    endpoint: endpointUrl,
-    bucket,
-    key,
-    expiresIn,
-  });
+  const { ctx, bucket, key, expiresIn, versionId } = options;
+  const s3 = createS3Client(ctx);
 
   return getSignedUrl(
     s3,
@@ -215,17 +172,8 @@ export interface PresignListObjectsOptions extends PresignBaseOptions {
 export async function getPresignedListObjectsUrl(
   options: PresignListObjectsOptions,
 ): Promise<string> {
-  const {
-    endpointUrl,
-    credentials,
-    bucket,
-    expiresIn,
-    prefix,
-    delimiter,
-    maxKeys,
-    continuationToken,
-  } = options;
-  const s3 = createS3Client(endpointUrl, credentials);
+  const { ctx, bucket, expiresIn, prefix, delimiter, maxKeys, continuationToken } = options;
+  const s3 = createS3Client(ctx);
 
   return getSignedUrl(
     s3,
@@ -251,18 +199,9 @@ export interface PresignListObjectVersionsOptions extends PresignBaseOptions {
 export async function getPresignedListObjectVersionsUrl(
   options: PresignListObjectVersionsOptions,
 ): Promise<string> {
-  const {
-    endpointUrl,
-    credentials,
-    bucket,
-    expiresIn,
-    prefix,
-    delimiter,
-    maxKeys,
-    keyMarker,
-    versionIdMarker,
-  } = options;
-  const s3 = createS3Client(endpointUrl, credentials);
+  const { ctx, bucket, expiresIn, prefix, delimiter, maxKeys, keyMarker, versionIdMarker } =
+    options;
+  const s3 = createS3Client(ctx);
 
   return getSignedUrl(
     s3,
@@ -286,8 +225,8 @@ export interface PresignHeadObjectOptions extends PresignBaseOptions {
 export async function getPresignedHeadObjectUrl(
   options: PresignHeadObjectOptions,
 ): Promise<string> {
-  const { endpointUrl, credentials, bucket, key, expiresIn, versionId } = options;
-  const s3 = createS3Client(endpointUrl, credentials);
+  const { ctx, bucket, key, expiresIn, versionId } = options;
+  const s3 = createS3Client(ctx);
 
   return getSignedUrl(
     s3,
@@ -308,8 +247,8 @@ export type PresignGetObjectRetentionOptions = PresignBaseOptions & {
 export async function getPresignedGetObjectRetentionUrl(
   options: PresignGetObjectRetentionOptions,
 ): Promise<string> {
-  const { endpointUrl, credentials, bucket, key, expiresIn, versionId } = options;
-  const s3 = createS3Client(endpointUrl, credentials);
+  const { ctx, bucket, key, expiresIn, versionId } = options;
+  const s3 = createS3Client(ctx);
 
   return getSignedUrl(
     s3,
@@ -330,8 +269,8 @@ export type PresignDeleteObjectOptions = PresignBaseOptions & {
 export async function getPresignedDeleteObjectUrl(
   options: PresignDeleteObjectOptions,
 ): Promise<string> {
-  const { endpointUrl, credentials, bucket, key, expiresIn, versionId } = options;
-  const s3 = createS3Client(endpointUrl, credentials);
+  const { ctx, bucket, key, expiresIn, versionId } = options;
+  const s3 = createS3Client(ctx);
 
   return getSignedUrl(
     s3,

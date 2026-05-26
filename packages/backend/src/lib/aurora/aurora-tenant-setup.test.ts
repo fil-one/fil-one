@@ -46,12 +46,12 @@ vi.mock('./aurora-portal.js', () => ({
 }));
 
 const mockReportMetric = vi.fn();
-vi.mock('./metrics.js', () => ({
+vi.mock('../metrics.js', () => ({
   reportMetric: (...args: unknown[]) => mockReportMetric(...args),
 }));
 
 const mockScanAndEmitStuckTenantCount = vi.fn().mockResolvedValue(undefined);
-vi.mock('./stuck-tenant-metric.js', () => ({
+vi.mock('../stuck-tenant-metric.js', () => ({
   scanAndEmitStuckTenantCount: (...args: unknown[]) => mockScanAndEmitStuckTenantCount(...args),
 }));
 
@@ -102,10 +102,10 @@ describe('processTenantSetup', () => {
     ssmMock.reset();
   });
 
-  it('is a no-op when setupStatus is AURORA_S3_ACCESS_KEY_CREATED', async () => {
+  it('is a no-op when auroraSetupStatus is AURORA_S3_ACCESS_KEY_CREATED', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
         auroraTenantId: { S: 'aurora-t-1' },
       }),
     );
@@ -122,7 +122,7 @@ describe('processTenantSetup', () => {
   it('creates only S3 access key when status is AURORA_TENANT_API_KEY_CREATED', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         auroraTenantId: { S: 'aurora-t-1' },
       }),
     );
@@ -161,14 +161,14 @@ describe('processTenantSetup', () => {
   it('creates full pipeline when status is FILONE_ORG_CREATED', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
         name: { S: 'Test Org' },
       }),
     );
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
-    mockSetupAuroraTenant.mockResolvedValue({ id: 'aurora-t-1', lastSetupStep: 'FINISHED' });
+    mockSetupAuroraTenant.mockResolvedValue({ lastSetupStep: 'FINISHED' });
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_secret', tokenId: 'tok-1' });
     setupDefaultS3AccessKeyMock();
 
@@ -197,8 +197,9 @@ describe('processTenantSetup', () => {
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
       UpdateExpression:
-        'SET auroraTenantId = :auroraTenantId, setupStatus = :status, updatedAt = :now',
-      ConditionExpression: 'setupStatus = :expected',
+        'SET auroraTenantId = :auroraTenantId, auroraSetupStatus = :status, updatedAt = :now REMOVE setupStatus',
+      ConditionExpression:
+        'auroraSetupStatus = :expected OR (attribute_not_exists(auroraSetupStatus) AND setupStatus = :expected)',
       ExpressionAttributeValues: {
         ':auroraTenantId': { S: 'aurora-t-1' },
         ':status': { S: OrgSetupStatus.AURORA_TENANT_CREATED },
@@ -211,8 +212,9 @@ describe('processTenantSetup', () => {
     expect(updateCalls[1].args[0].input).toStrictEqual({
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-      UpdateExpression: 'SET setupStatus = :status, updatedAt = :now',
-      ConditionExpression: 'setupStatus = :expected',
+      UpdateExpression: 'SET auroraSetupStatus = :status, updatedAt = :now REMOVE setupStatus',
+      ConditionExpression:
+        'auroraSetupStatus = :expected OR (attribute_not_exists(auroraSetupStatus) AND setupStatus = :expected)',
       ExpressionAttributeValues: {
         ':status': { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
         ':expected': { S: OrgSetupStatus.AURORA_TENANT_CREATED },
@@ -224,8 +226,9 @@ describe('processTenantSetup', () => {
     expect(updateCalls[2].args[0].input).toStrictEqual({
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-      UpdateExpression: 'SET setupStatus = :status, updatedAt = :now',
-      ConditionExpression: 'setupStatus = :expected',
+      UpdateExpression: 'SET auroraSetupStatus = :status, updatedAt = :now REMOVE setupStatus',
+      ConditionExpression:
+        'auroraSetupStatus = :expected OR (attribute_not_exists(auroraSetupStatus) AND setupStatus = :expected)',
       ExpressionAttributeValues: {
         ':status': { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         ':expected': { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
@@ -234,12 +237,13 @@ describe('processTenantSetup', () => {
     });
 
     // Fourth update: set AURORA_S3_ACCESS_KEY_CREATED, with ALL_OLD so the
-    // post-write check can read the prior setupFailureCount.
+    // post-write check can read the prior auroraSetupFailureCount.
     expect(updateCalls[3].args[0].input).toStrictEqual({
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-      UpdateExpression: 'SET setupStatus = :status, updatedAt = :now',
-      ConditionExpression: 'setupStatus = :expected',
+      UpdateExpression: 'SET auroraSetupStatus = :status, updatedAt = :now REMOVE setupStatus',
+      ConditionExpression:
+        'auroraSetupStatus = :expected OR (attribute_not_exists(auroraSetupStatus) AND setupStatus = :expected)',
       ExpressionAttributeValues: {
         ':status': { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
         ':expected': { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
@@ -268,13 +272,13 @@ describe('processTenantSetup', () => {
   it('runs setup, creates API key, and S3 key when status is AURORA_TENANT_CREATED', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
         auroraTenantId: { S: 'aurora-t-2' },
       }),
     );
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
-    mockSetupAuroraTenant.mockResolvedValue({ id: 'aurora-t-2', lastSetupStep: 'FINISHED' });
+    mockSetupAuroraTenant.mockResolvedValue({ lastSetupStep: 'FINISHED' });
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_key', tokenId: 'tok-2' });
     setupDefaultS3AccessKeyMock();
 
@@ -308,7 +312,7 @@ describe('processTenantSetup', () => {
   it('creates API key and S3 key when status is AURORA_TENANT_SETUP_COMPLETE', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
         auroraTenantId: { S: 'aurora-t-3' },
       }),
     );
@@ -359,7 +363,7 @@ describe('processTenantSetup', () => {
   it('advances status on DuplicateTokenNameError when SSM has the api token', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
         auroraTenantId: { S: 'aurora-t-5' },
       }),
     );
@@ -401,7 +405,7 @@ describe('processTenantSetup', () => {
     try {
       ddbMock.on(GetItemCommand).resolves(
         orgProfileItem({
-          setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           auroraTenantId: { S: 'aurora-t-5' },
         }),
       );
@@ -430,7 +434,7 @@ describe('processTenantSetup', () => {
     try {
       ddbMock.on(GetItemCommand).resolves(
         orgProfileItem({
-          setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           auroraTenantId: { S: 'aurora-t-5' },
         }),
       );
@@ -464,16 +468,16 @@ describe('processTenantSetup', () => {
     }
   });
 
-  it('advances status on DuplicateKeyNameError when SSM has credentials', async () => {
+  it('advances status on AccessKeyAlreadyExistsError when SSM has credentials', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         auroraTenantId: { S: 'aurora-t-4' },
       }),
     );
     ddbMock.on(UpdateItemCommand).resolves({});
     const duplicateError = new Error('An access key with this name already exists');
-    duplicateError.name = 'DuplicateKeyNameError';
+    duplicateError.name = 'AccessKeyAlreadyExistsError';
     mockCreateAuroraAccessKey.mockRejectedValue(duplicateError);
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: '{}' } });
 
@@ -486,17 +490,17 @@ describe('processTenantSetup', () => {
     });
   });
 
-  it('re-throws DuplicateKeyNameError when SSM does not have credentials after polling', async () => {
+  it('re-throws AccessKeyAlreadyExistsError when SSM does not have credentials after polling', async () => {
     vi.useFakeTimers();
     try {
       ddbMock.on(GetItemCommand).resolves(
         orgProfileItem({
-          setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
           auroraTenantId: { S: 'aurora-t-4' },
         }),
       );
       const duplicateError = new Error('An access key with this name already exists');
-      duplicateError.name = 'DuplicateKeyNameError';
+      duplicateError.name = 'AccessKeyAlreadyExistsError';
       mockCreateAuroraAccessKey.mockRejectedValue(duplicateError);
       const paramNotFound = new Error('Parameter not found');
       paramNotFound.name = 'ParameterNotFound';
@@ -519,13 +523,13 @@ describe('processTenantSetup', () => {
     try {
       ddbMock.on(GetItemCommand).resolves(
         orgProfileItem({
-          setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
           auroraTenantId: { S: 'aurora-t-4' },
         }),
       );
       ddbMock.on(UpdateItemCommand).resolves({});
       const duplicateError = new Error('An access key with this name already exists');
-      duplicateError.name = 'DuplicateKeyNameError';
+      duplicateError.name = 'AccessKeyAlreadyExistsError';
       mockCreateAuroraAccessKey.mockRejectedValue(duplicateError);
       const paramNotFound = new Error('Parameter not found');
       paramNotFound.name = 'ParameterNotFound';
@@ -558,7 +562,7 @@ describe('processTenantSetup', () => {
     try {
       ddbMock.on(GetItemCommand).resolves(
         orgProfileItem({
-          setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
           auroraTenantId: { S: 'aurora-t-3' },
         }),
       );
@@ -586,7 +590,7 @@ describe('processTenantSetup', () => {
     try {
       ddbMock.on(GetItemCommand).resolves(
         orgProfileItem({
-          setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
           auroraTenantId: { S: 'aurora-t-3' },
         }),
       );
@@ -612,7 +616,7 @@ describe('processTenantSetup', () => {
   it('emits AuroraTenantSetupDuration when setup completes via the FILONE_ORG_CREATED branch', async () => {
     ddbMock
       .on(GetItemCommand)
-      .resolves(orgProfileItem({ setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }));
+      .resolves(orgProfileItem({ auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }));
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
@@ -648,7 +652,7 @@ describe('processTenantSetup', () => {
     try {
       ddbMock
         .on(GetItemCommand)
-        .resolves(orgProfileItem({ setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }));
+        .resolves(orgProfileItem({ auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }));
       ddbMock.on(UpdateItemCommand).resolves({});
       mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
       mockSetupAuroraTenant.mockResolvedValue({
@@ -675,13 +679,13 @@ describe('processTenantSetup', () => {
   it('does not emit AuroraTenantSetupDuration when resuming from the AURORA_TENANT_CREATED branch', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
         auroraTenantId: { S: 'aurora-t-2' },
       }),
     );
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
-    mockSetupAuroraTenant.mockResolvedValue({ id: 'aurora-t-2', lastSetupStep: 'FINISHED' });
+    mockSetupAuroraTenant.mockResolvedValue({ lastSetupStep: 'FINISHED' });
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp', tokenId: 'tok' });
     setupDefaultS3AccessKeyMock();
 
@@ -695,17 +699,17 @@ describe('processTenantSetup', () => {
     expect(durationCalls).toHaveLength(0);
   });
 
-  it('creates full pipeline when setupStatus is FILONE_ORG_CREATED', async () => {
+  it('creates full pipeline when auroraSetupStatus is FILONE_ORG_CREATED', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
         name: { S: 'Test Org' },
       }),
     );
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-new' });
-    mockSetupAuroraTenant.mockResolvedValue({ id: 'aurora-t-new', lastSetupStep: 'FINISHED' });
+    mockSetupAuroraTenant.mockResolvedValue({ lastSetupStep: 'FINISHED' });
     mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp_new', tokenId: 'tok-new' });
     setupDefaultS3AccessKeyMock();
 
@@ -735,11 +739,11 @@ describe('processTenantSetup', () => {
     );
   });
 
-  it('throws when setupStatus attribute is missing on the org profile', async () => {
+  it('throws when auroraSetupStatus attribute is missing on the org profile', async () => {
     ddbMock.on(GetItemCommand).resolves(orgProfileItem({}));
 
     await expect(processTenantSetup('org-1')).rejects.toThrow(
-      'Unexpected setupStatus "undefined" for org org-1',
+      'Unexpected auroraSetupStatus "undefined" for org org-1',
     );
   });
 
@@ -756,10 +760,10 @@ describe('processTenantSetup', () => {
     // Re-read after CCE: winner has written AURORA_TENANT_CREATED + auroraTenantId.
     ddbMock
       .on(GetItemCommand)
-      .resolvesOnce(orgProfileItem({ setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }))
+      .resolvesOnce(orgProfileItem({ auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }))
       .resolves(
         orgProfileItem({
-          setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
           auroraTenantId: { S: 'aurora-t-race' },
         }),
       );
@@ -780,7 +784,7 @@ describe('processTenantSetup', () => {
   it('continues the chain when runSetup loses the status-advance race', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
         auroraTenantId: { S: 'aurora-t-1' },
       }),
     );
@@ -800,7 +804,7 @@ describe('processTenantSetup', () => {
   it('continues the chain when createAndStoreApiKey loses the status-advance race', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
         auroraTenantId: { S: 'aurora-t-1' },
       }),
     );
@@ -817,7 +821,7 @@ describe('processTenantSetup', () => {
   it('returns silently when createAndStoreS3AccessKey loses the status-advance race', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         auroraTenantId: { S: 'aurora-t-1' },
       }),
     );
@@ -830,10 +834,39 @@ describe('processTenantSetup', () => {
     });
   });
 
+  // Dual-name migration: legacy rows that still carry only the old
+  // `setupStatus` attribute must keep working until the backfill runs.
+  // TODO(FIL-382): drop this test alongside the fallback code.
+  it('reads legacy setupStatus when auroraSetupStatus is absent and migrates the row on write', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      orgProfileItem({
+        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
+        auroraTenantId: { S: 'aurora-t-legacy' },
+      }),
+    );
+    ddbMock.on(UpdateItemCommand).resolves({});
+    ssmMock.on(PutParameterCommand).resolves({});
+    mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp', tokenId: 'tok' });
+    setupDefaultS3AccessKeyMock();
+
+    await processTenantSetup('org-1');
+
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    // Pipeline from AURORA_TENANT_SETUP_COMPLETE has two advances.
+    expect(updateCalls).toHaveLength(2);
+    // Each write removes the legacy attribute and uses the compound conditional.
+    for (const call of updateCalls) {
+      expect(call.args[0].input.UpdateExpression).toContain('REMOVE setupStatus');
+      expect(call.args[0].input.ConditionExpression).toBe(
+        'auroraSetupStatus = :expected OR (attribute_not_exists(auroraSetupStatus) AND setupStatus = :expected)',
+      );
+    }
+  });
+
   it('reads the org profile with strong consistency', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
         auroraTenantId: { S: 'aurora-t-1' },
       }),
     );
@@ -856,14 +889,14 @@ describe('stuck-tenant gauge refresh on terminal advance', () => {
   it('re-emits StuckAuroraTenantSetupCount when prior failureCount was >= 3 (alert clears)', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         auroraTenantId: { S: 'aurora-t-1' },
       }),
     );
     // The path from AURORA_TENANT_API_KEY_CREATED issues exactly one
     // UpdateItem — the terminal advance. Its ALL_OLD response carries the
-    // prior setupFailureCount used by the post-write check.
-    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { setupFailureCount: { N: '5' } } });
+    // prior auroraSetupFailureCount used by the post-write check.
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { auroraSetupFailureCount: { N: '5' } } });
     ssmMock.on(PutParameterCommand).resolves({});
     setupDefaultS3AccessKeyMock();
 
@@ -875,11 +908,11 @@ describe('stuck-tenant gauge refresh on terminal advance', () => {
   it('does not re-emit StuckAuroraTenantSetupCount when prior failureCount was below 3', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         auroraTenantId: { S: 'aurora-t-1' },
       }),
     );
-    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { setupFailureCount: { N: '2' } } });
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { auroraSetupFailureCount: { N: '2' } } });
     ssmMock.on(PutParameterCommand).resolves({});
     setupDefaultS3AccessKeyMock();
 
@@ -891,7 +924,7 @@ describe('stuck-tenant gauge refresh on terminal advance', () => {
   it('does not re-emit StuckAuroraTenantSetupCount when the terminal advance loses the race', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         auroraTenantId: { S: 'aurora-t-1' },
       }),
     );
@@ -917,8 +950,8 @@ describe('recordSetupFailure', () => {
     ddbMock.reset();
   });
 
-  it('atomically increments setupFailureCount via ADD on the org profile', async () => {
-    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { setupFailureCount: { N: '1' } } });
+  it('atomically increments auroraSetupFailureCount via ADD on the org profile', async () => {
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { auroraSetupFailureCount: { N: '1' } } });
 
     await recordSetupFailure('org-1');
 
@@ -927,8 +960,8 @@ describe('recordSetupFailure', () => {
     expect(updateCalls[0].args[0].input).toMatchObject({
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-      UpdateExpression: 'ADD setupFailureCount :one SET updatedAt = :now',
-      ConditionExpression: 'attribute_exists(setupStatus)',
+      UpdateExpression: 'ADD auroraSetupFailureCount :one SET updatedAt = :now',
+      ConditionExpression: 'attribute_exists(auroraSetupStatus) OR attribute_exists(setupStatus)',
       ReturnValues: 'UPDATED_NEW',
     });
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({
@@ -938,7 +971,7 @@ describe('recordSetupFailure', () => {
   });
 
   it('does not call scanAndEmitStuckTenantCount when newCount is below 3', async () => {
-    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { setupFailureCount: { N: '2' } } });
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { auroraSetupFailureCount: { N: '2' } } });
 
     await recordSetupFailure('org-1');
 
@@ -946,7 +979,7 @@ describe('recordSetupFailure', () => {
   });
 
   it('calls scanAndEmitStuckTenantCount when newCount transitions to exactly 3', async () => {
-    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { setupFailureCount: { N: '3' } } });
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { auroraSetupFailureCount: { N: '3' } } });
 
     await recordSetupFailure('org-1');
 
@@ -954,11 +987,23 @@ describe('recordSetupFailure', () => {
   });
 
   it('does not call scanAndEmitStuckTenantCount when newCount is above 3 (already stuck)', async () => {
-    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { setupFailureCount: { N: '4' } } });
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { auroraSetupFailureCount: { N: '4' } } });
 
     await recordSetupFailure('org-1');
 
     expect(mockScanAndEmitStuckTenantCount).not.toHaveBeenCalled();
+  });
+
+  // TODO(FIL-382): drop this test once the legacy-row fallback is removed.
+  it('orphan-row guard accepts legacy rows that only have setupStatus', async () => {
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { auroraSetupFailureCount: { N: '1' } } });
+
+    await recordSetupFailure('org-1');
+
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updateCalls[0].args[0].input.ConditionExpression).toBe(
+      'attribute_exists(auroraSetupStatus) OR attribute_exists(setupStatus)',
+    );
   });
 });
 
@@ -972,7 +1017,7 @@ describe('ensureTenantReady', () => {
   it('returns the auroraTenantId when setup completes successfully', async () => {
     ddbMock
       .on(GetItemCommand)
-      .resolves(orgProfileItem({ setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }));
+      .resolves(orgProfileItem({ auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }));
     ddbMock.on(UpdateItemCommand).resolves({});
     ssmMock.on(PutParameterCommand).resolves({});
     mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-1' });
@@ -988,7 +1033,7 @@ describe('ensureTenantReady', () => {
   it('records a failure and returns 503 error response when processTenantSetup throws', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
         auroraTenantId: { S: 'aurora-t-1' },
       }),
     );
@@ -997,9 +1042,9 @@ describe('ensureTenantReady', () => {
     ddbMock.on(UpdateItemCommand).resolves({});
     ddbMock
       .on(UpdateItemCommand, {
-        UpdateExpression: 'ADD setupFailureCount :one SET updatedAt = :now',
+        UpdateExpression: 'ADD auroraSetupFailureCount :one SET updatedAt = :now',
       })
-      .resolves({ Attributes: { setupFailureCount: { N: '1' } } });
+      .resolves({ Attributes: { auroraSetupFailureCount: { N: '1' } } });
     mockSetupAuroraTenant.mockRejectedValue(new Error('Aurora is down'));
 
     const result = await ensureTenantReady('org-1');
@@ -1010,7 +1055,8 @@ describe('ensureTenantReady', () => {
       .commandCalls(UpdateItemCommand)
       .filter(
         (c) =>
-          c.args[0].input.UpdateExpression === 'ADD setupFailureCount :one SET updatedAt = :now',
+          c.args[0].input.UpdateExpression ===
+          'ADD auroraSetupFailureCount :one SET updatedAt = :now',
       );
     expect(addCalls).toHaveLength(1);
   });

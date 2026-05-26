@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { maybeSkipPasskeyEnrollment } from './passkey.util.ts';
 
 // Real UI login smoke test. Starts unauthenticated (no storageState) and exercises
 // the Auth0 login form from scratch to guard the auth.setup.ts pathway from silent
@@ -8,15 +9,14 @@ test.use({ storageState: { cookies: [], origins: [] } });
 
 test('paid user signs in via Auth0 and lands on dashboard', async ({ page }) => {
   await page.goto('/');
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await expect(page.getByText('Sign in')).toBeVisible();
+  await expect(page).toHaveURL(/login/);
 
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await page.getByRole('textbox', { name: 'Email address' }).fill(process.env.E2E_PAID_EMAIL!);
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await page.getByRole('textbox', { name: 'Password' }).fill(process.env.E2E_PAID_PASSWORD!);
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.locator('#username').fill(process.env.E2E_PAID_EMAIL!);
+  await page.locator('button[data-action-button-primary="true"]').click();
+  await page.locator('#password').fill(process.env.E2E_PAID_PASSWORD!);
+  await page.locator('button[data-action-button-primary="true"]').click();
+
+  await maybeSkipPasskeyEnrollment(page);
 
   await expect(page).toHaveURL(/\/dashboard$/);
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators

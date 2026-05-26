@@ -3,7 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
+import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ vi.mock('sst', () => ({
 }));
 
 const mockUpdateTenantStatus = vi.fn();
-vi.mock('../lib/aurora-backoffice.js', () => ({
+vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
   updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
 }));
 
@@ -87,7 +87,7 @@ function orgProfileWithTenant(tenantId: string) {
       pk: { S: 'ORG#org-1' },
       sk: { S: 'PROFILE' },
       auroraTenantId: { S: tenantId },
-      setupStatus: { S: FINAL_SETUP_STATUS },
+      auroraSetupStatus: { S: FINAL_SETUP_STATUS },
     },
   };
 }
@@ -390,7 +390,7 @@ describe('activate-subscription handler', () => {
           pk: { S: 'ORG#org-1' },
           sk: { S: 'PROFILE' },
           auroraTenantId: { S: 'aurora-t-1' },
-          setupStatus: { S: 'AURORA_TENANT_CREATED' },
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
         },
       });
     ddbMock.on(UpdateItemCommand).resolves({});

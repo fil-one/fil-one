@@ -24,12 +24,8 @@ vi.mock('sst', () => ({
 }));
 
 const mockUpdateTenantStatus = vi.fn();
-vi.mock('../lib/aurora-backoffice.js', () => ({
+vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
   updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
-}));
-
-vi.mock('../lib/org-setup-status.js', () => ({
-  isOrgSetupComplete: (status: string | undefined) => status === 'AURORA_S3_ACCESS_KEY_CREATED',
 }));
 
 const mockConstructEvent = vi.fn();
@@ -54,6 +50,7 @@ const reportMetricMock = vi.mocked(reportMetric);
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './stripe-webhook.js';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -178,7 +175,7 @@ function setupAuroraTenantResolution() {
         pk: `ORG#${MOCK_ORG_ID}`,
         sk: 'PROFILE',
         auroraTenantId: MOCK_AURORA_TENANT_ID,
-        setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+        auroraSetupStatus: FINAL_SETUP_STATUS,
       }),
     });
 }
