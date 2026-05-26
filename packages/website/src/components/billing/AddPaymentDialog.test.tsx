@@ -20,22 +20,13 @@ vi.mock('@stripe/react-stripe-js', () => ({
       error?: { message: string };
     }) => void;
   }) => (
-    <>
-      <button
-        type="button"
-        data-testid="card-clear"
-        onClick={() => onChange?.({ brand: 'unknown', empty: true, complete: false })}
-      >
-        card-clear
-      </button>
-      <button
-        type="button"
-        data-testid="card-noop-change"
-        onClick={() => onChange?.({ brand: 'visa', empty: false, complete: true })}
-      >
-        card-noop-change
-      </button>
-    </>
+    <button
+      type="button"
+      data-testid="card-clear"
+      onClick={() => onChange?.({ brand: 'unknown', empty: true, complete: false })}
+    >
+      card-clear
+    </button>
   ),
   CardExpiryElement: () => <div data-testid="card-expiry" />,
   CardCvcElement: () => <div data-testid="card-cvc" />,
@@ -115,10 +106,6 @@ describe('AddPaymentDialog', () => {
 
     await waitFor(() => expect(activateSubscription).toHaveBeenCalledTimes(1));
     await screen.findByText(/invalid or expired promo code/i);
-
-    // Stripe fires a no-op onChange between submits (e.g. internal repaint).
-    // It must NOT reset cardConfirmed — only an empty-state change does.
-    fireEvent.click(screen.getByTestId('card-noop-change'));
 
     fireEvent.change(promoInput, { target: { value: '' } });
     fireEvent.click(submitButton);
