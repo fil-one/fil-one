@@ -116,14 +116,19 @@ const multiVersionVersions: S3ObjectVersion[] = [
 ];
 
 function ObjectBrowserHarness(
-  initial: Omit<ObjectBrowserProps, 'onPrefixChange' | 'onDelete' | 'versioningEnabled'> & {
+  initial: Omit<
+    ObjectBrowserProps,
+    'onPrefixChange' | 'onDelete' | 'versioningEnabled' | 'region'
+  > & {
     versioningEnabled?: boolean;
+    region?: S3Region;
   },
 ) {
   const [prefix, setPrefix] = useState(initial.currentPrefix);
   return (
     <ObjectBrowser
       {...initial}
+      region={initial.region ?? S3Region.EuWest1}
       versioningEnabled={initial.versioningEnabled ?? true}
       currentPrefix={prefix}
       onPrefixChange={setPrefix}

@@ -292,6 +292,7 @@ export type ObjectBrowserProps = {
   onDelete: (key: string, versionId?: string) => Promise<void>;
 };
 
+// eslint-disable-next-line max-lines-per-function
 export function ObjectBrowser({
   bucketName,
   region,

@@ -1,8 +1,8 @@
+import z from 'zod';
+import { S3Region } from '@filone/shared';
 import { createRoute } from '@tanstack/react-router';
 import { Route as appRoute } from '../_app';
 import { UploadObjectPage } from '../../pages/UploadObjectPage';
-import { S3Region } from '@filone/shared';
-import z from 'zod';
 
 const uploadObjectSearchSchema = z.object({
   region: z.enum(S3Region),

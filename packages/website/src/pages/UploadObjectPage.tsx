@@ -7,10 +7,9 @@ import {
   XIcon,
   CheckCircleIcon,
 } from '@phosphor-icons/react/dist/ssr';
-import { useQuery } from '@tanstack/react-query';
 
-import type { GetBucketResponse, S3Region } from '@filone/shared';
-import { formatBytes, S3_REGION } from '@filone/shared';
+import type { S3Region } from '@filone/shared';
+import { formatBytes } from '@filone/shared';
 
 import { Heading } from '../components/Heading/Heading';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -21,8 +20,6 @@ import { Textarea } from '../components/TextArea';
 import { FormField } from '../components/FormField';
 import { ProgressBar } from '../components/ProgressBar';
 import { Spinner } from '../components/Spinner';
-import { apiRequest } from '../lib/api.js';
-import { queryKeys } from '../lib/query-client.js';
 import { useFileUpload } from '../lib/use-file-upload.js';
 
 // ---------------------------------------------------------------------------
@@ -41,18 +38,12 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
 
-  const { data: bucketData } = useQuery({
-    queryKey: queryKeys.bucket(bucketName, region),
-    queryFn: () => apiRequest<GetBucketResponse>(`/buckets/${encodeURIComponent(bucketName)}`),
-  });
-  const bucketRegion = (bucketData?.bucket.region as S3Region | undefined) ?? S3_REGION;
-
   const upload = useFileUpload({
     bucketName,
-    region: bucketRegion,
+    region,
     tags,
     onSuccess: () => {
-      void navigate({ to: '/buckets/$bucketName', params: { bucketName } });
+      void navigate({ to: '/buckets/$bucketName', params: { bucketName }, search: { region } });
     },
   });
 
@@ -86,7 +77,7 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
 
   // ---- Render helpers -----------------------------------------------------
 
-  const canUpload = !!upload.selectedFile && !!upload.objectName.trim() && !!bucketData;
+  const canUpload = !!upload.selectedFile && !!upload.objectName.trim();
 
   return (
     <div className="mx-auto max-w-2xl px-10 pt-10">
@@ -104,7 +95,9 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
         <IconButton
           icon={ArrowLeftIcon}
           aria-label="Back to bucket"
-          onClick={() => navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
+          onClick={() =>
+            navigate({ to: '/buckets/$bucketName', params: { bucketName }, search: { region } })
+          }
         />
         <div>
           <Heading tag="h1">Upload object</Heading>

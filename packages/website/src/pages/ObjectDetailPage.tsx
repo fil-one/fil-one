@@ -32,7 +32,6 @@ import type {
   S3Region,
 } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
-import { apiRequest } from '../lib/api.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { queryKeys, queryClient } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
@@ -108,13 +107,6 @@ export function ObjectDetailPage({
 }: ObjectDetailPageProps) {
   const navigate = useNavigate();
 
-  const { data: bucketData } = useQuery({
-    queryKey: queryKeys.bucket(bucketName, region),
-    queryFn: () => apiRequest<GetBucketResponse>(`/buckets/${encodeURIComponent(bucketName)}`),
-  });
-  const bucket = bucketData?.bucket ?? null;
-  const bucketRegion = (bucket?.region as S3Region | undefined) ?? S3_REGION;
-
   const {
     data: metadata,
     isPending,
@@ -122,7 +114,6 @@ export function ObjectDetailPage({
     error,
   } = useQuery({
     queryKey: queryKeys.objectMetadata(bucketName, objectKey, versionId),
-    enabled: !!bucket,
     queryFn: async (): Promise<ObjectMetadataResponse> => {
       const cachedBucket = queryClient.getQueryData<GetBucketResponse>(
         queryKeys.bucket(bucketName, region),
@@ -147,7 +138,7 @@ export function ObjectDetailPage({
             ]
           : []),
       ];
-      const { items } = await batchPresign(bucketRegion, ops);
+      const { items } = await batchPresign(region, ops);
 
       const headResponse = await executePresignedUrl(items[0].url, items[0].method);
       const head = parseHeadObjectResponse(headResponse, objectKey);
@@ -172,7 +163,7 @@ export function ObjectDetailPage({
 
   const objectActions = useObjectActions({
     bucketName,
-    region: bucketRegion,
+    region,
     onDeleted: () => {
       void navigate({
         to: '/buckets/$bucketName',
@@ -362,7 +353,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         bucketName={bucketName}
-        region={bucketRegion}
+        region={region}
         objectKey={objectKey}
         versionId={versionId}
       />
