@@ -129,6 +129,7 @@ export function BucketDetailPage({
   });
   const bucket = bucketData?.bucket ?? null;
 
+  // Objects (via presigned URL — versioned listing)
   const {
     data: objectsData,
     isPending: objectsLoading,
