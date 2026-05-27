@@ -92,12 +92,15 @@ function BucketStatCards({
 export type BucketDetailPageProps = {
   bucketName: string;
   prefix?: string;
-  region?: S3Region;
+  bucketRegion?: S3Region;
 };
 
-export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPageProps) {
-  const effectiveRegion: S3Region = region ?? S3_REGION;
-  const s3Endpoint = getS3Endpoint(effectiveRegion, FILONE_STAGE);
+export function BucketDetailPage({
+  bucketName,
+  prefix,
+  bucketRegion = S3_REGION,
+}: BucketDetailPageProps) {
+  const s3Endpoint = getS3Endpoint(bucketRegion, FILONE_STAGE);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const currentPrefix = prefix ?? '';
@@ -107,10 +110,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
       void navigate({
         to: '/buckets/$bucketName',
         params: { bucketName },
-        search: (prev) => ({
-          ...prev,
-          prefix: newPrefix || undefined,
-        }),
+        search: newPrefix ? { prefix: newPrefix } : {},
         replace: true,
       });
     },
@@ -119,9 +119,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
   // Bucket metadata
   const { data: bucketData } = useQuery({
-    queryKey: queryKeys.bucket(bucketName, effectiveRegion),
+    queryKey: queryKeys.bucket(bucketName, bucketRegion),
     queryFn: () => {
-      const params = new URLSearchParams({ region: effectiveRegion });
+      const params = new URLSearchParams({ region: bucketRegion });
       return apiRequest<GetBucketResponse>(
         `/buckets/${encodeURIComponent(bucketName)}?${params.toString()}`,
       );
@@ -252,7 +252,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
           <TabPanel>
             <ObjectBrowser
               bucketName={bucketName}
-              region={effectiveRegion}
+              region={bucketRegion}
               versions={versions}
               versioningEnabled={bucket?.versioning ?? false}
               currentPrefix={currentPrefix}
@@ -267,7 +267,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
             <BucketAccessTab
               bucketName={bucketName}
               s3Endpoint={s3Endpoint}
-              region={effectiveRegion}
+              region={bucketRegion}
               accessKeys={accessKeys}
               accessKeysLoading={accessKeysLoading}
               onCreateOpen={() => setAddKeyOpen(true)}
@@ -280,7 +280,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         open={addKeyOpen}
         onClose={() => setAddKeyOpen(false)}
         bucketName={bucketName}
-        bucketRegion={effectiveRegion}
+        bucketRegion={bucketRegion}
         onKeyAdded={invalidateAccessKeysCache}
       />
     </div>
