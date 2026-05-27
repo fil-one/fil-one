@@ -207,7 +207,7 @@ describe('get-bucket baseHandler', () => {
     });
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { bucketName: 'my-bucket' };
+    event.pathParameters = { name: 'my-bucket' };
     await baseHandler(event);
 
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3_REGION);
@@ -227,7 +227,7 @@ describe('get-bucket baseHandler', () => {
       userInfo: USER_INFO,
       queryStringParameters: { region: S3Region.UsEast1 },
     });
-    event.pathParameters = { bucketName: 'my-bucket' };
+    event.pathParameters = { name: 'my-bucket' };
     await baseHandler(event);
 
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.UsEast1);
@@ -238,7 +238,7 @@ describe('get-bucket baseHandler', () => {
       userInfo: USER_INFO,
       queryStringParameters: { region: 'us-west-2' },
     });
-    event.pathParameters = { bucketName: 'my-bucket' };
+    event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(400);
