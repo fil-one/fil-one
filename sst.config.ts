@@ -521,7 +521,9 @@ export default $config({
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         FTH_S3_URL: fthEnv.FTH_S3_URL,
       },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
