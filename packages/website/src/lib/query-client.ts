@@ -1,5 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
-import { S3_REGION, type S3Region } from '@filone/shared';
+import { type S3Region } from '@filone/shared';
 
 export const ME_STALE_TIME = 10 * 60_000;
 
@@ -30,8 +30,7 @@ export const queryKeys = {
   activityRecent: (limit: number) => ['activity', 'recent', limit] as const,
   activityTrends: (period: '7d' | '30d') => ['activity', 'trends', period] as const,
   buckets: ['buckets'] as const,
-  bucket: (bucketName: string, region: S3Region = S3_REGION) =>
-    ['bucket', bucketName, region] as const,
+  bucket: (bucketName: string, region: S3Region) => ['bucket', bucketName, region] as const,
   objects: (bucketName: string) => ['objects', bucketName] as const,
   objectMetadata: (bucketName: string, objectKey: string, versionId?: string) =>
     ['object-metadata', bucketName, objectKey, ...(versionId ? [versionId] : [])] as const,

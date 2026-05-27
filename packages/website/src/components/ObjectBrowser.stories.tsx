@@ -9,7 +9,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router';
 
-import type { S3ObjectVersion } from '@filone/shared';
+import { S3Region, type S3ObjectVersion } from '@filone/shared';
 
 import { ObjectBrowser, type ObjectBrowserProps } from './ObjectBrowser';
 
@@ -164,6 +164,7 @@ export const Empty: Story = {
   render: () => (
     <ObjectBrowserHarness
       bucketName="my-bucket"
+      region={S3Region.EuWest1}
       versions={[]}
       currentPrefix=""
       onDownload={() => {}}
@@ -176,6 +177,7 @@ export const RootListing: Story = {
   render: () => (
     <ObjectBrowserHarness
       bucketName="my-bucket"
+      region={S3Region.EuWest1}
       versions={sampleVersions}
       currentPrefix=""
       onDownload={() => {}}
@@ -188,6 +190,7 @@ export const InsideFolder: Story = {
   render: () => (
     <ObjectBrowserHarness
       bucketName="my-bucket"
+      region={S3Region.EuWest1}
       versions={sampleVersions}
       currentPrefix="images/"
       onDownload={() => {}}
@@ -200,6 +203,7 @@ export const NestedFolder: Story = {
   render: () => (
     <ObjectBrowserHarness
       bucketName="my-bucket"
+      region={S3Region.EuWest1}
       versions={sampleVersions}
       currentPrefix="images/thumbnails/"
       onDownload={() => {}}
@@ -212,6 +216,7 @@ export const EmptyFolderPath: Story = {
   render: () => (
     <ObjectBrowserHarness
       bucketName="my-bucket"
+      region={S3Region.EuWest1}
       versions={sampleVersions}
       currentPrefix="missing/"
       onDownload={() => {}}
@@ -224,6 +229,7 @@ export const Downloading: Story = {
   render: () => (
     <ObjectBrowserHarness
       bucketName="my-bucket"
+      region={S3Region.EuWest1}
       versions={sampleVersions}
       currentPrefix=""
       onDownload={() => {}}
@@ -236,6 +242,7 @@ export const MultipleVersions: Story = {
   render: () => (
     <ObjectBrowserHarness
       bucketName="my-bucket"
+      region={S3Region.EuWest1}
       versions={multiVersionVersions}
       currentPrefix=""
       onDownload={() => {}}
@@ -248,6 +255,7 @@ export const VersioningDisabled: Story = {
   render: () => (
     <ObjectBrowserHarness
       bucketName="my-bucket"
+      region={S3Region.EuWest1}
       versions={sampleVersions}
       versioningEnabled={false}
       currentPrefix=""
@@ -261,6 +269,7 @@ export const DeleteMarker: Story = {
   render: () => (
     <ObjectBrowserHarness
       bucketName="my-bucket"
+      region={S3Region.EuWest1}
       versions={[
         {
           key: 'deleted-file.log',

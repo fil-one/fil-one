@@ -205,8 +205,6 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     );
   }
 
-  const bucketRegion: S3Region = effectiveRegion;
-
   return (
     <div className="px-10 pt-10">
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
@@ -232,7 +230,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
       {bucket && (
         <p className="mb-6 text-sm text-zinc-500">
-          {bucketRegion} &bull; Created {formatDateTime(bucket.createdAt)}
+          {bucket.region} &bull; Created {formatDateTime(bucket.createdAt)}
         </p>
       )}
 
@@ -254,6 +252,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
           <TabPanel>
             <ObjectBrowser
               bucketName={bucketName}
+              region={effectiveRegion}
               versions={versions}
               versioningEnabled={bucket?.versioning ?? false}
               currentPrefix={currentPrefix}
@@ -268,7 +267,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
             <BucketAccessTab
               bucketName={bucketName}
               s3Endpoint={s3Endpoint}
-              region={bucketRegion}
+              region={effectiveRegion}
               accessKeys={accessKeys}
               accessKeysLoading={accessKeysLoading}
               onCreateOpen={() => setAddKeyOpen(true)}
@@ -281,7 +280,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         open={addKeyOpen}
         onClose={() => setAddKeyOpen(false)}
         bucketName={bucketName}
-        bucketRegion={bucketRegion}
+        bucketRegion={effectiveRegion}
         onKeyAdded={invalidateAccessKeysCache}
       />
     </div>

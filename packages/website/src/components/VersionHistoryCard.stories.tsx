@@ -7,7 +7,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router';
 
-import type { S3ObjectVersion } from '@filone/shared';
+import { S3Region, type S3ObjectVersion } from '@filone/shared';
 
 import { VersionHistoryCard, VersionRowBadge } from './VersionHistoryCard';
 
@@ -87,6 +87,7 @@ type Story = StoryObj<typeof VersionHistoryCard>;
 export const MultipleVersions: Story = {
   render: () => (
     <VersionHistoryCard
+      region={S3Region.EuWest1}
       bucketName="my-bucket"
       versions={multipleVersions}
       currentVersionId={multipleVersions[0].versionId}
@@ -97,6 +98,7 @@ export const MultipleVersions: Story = {
 export const ViewingHistoricalVersion: Story = {
   render: () => (
     <VersionHistoryCard
+      region={S3Region.EuWest1}
       bucketName="my-bucket"
       versions={multipleVersions}
       currentVersionId={multipleVersions[1].versionId}
@@ -107,6 +109,7 @@ export const ViewingHistoricalVersion: Story = {
 export const WithDeleteMarker: Story = {
   render: () => (
     <VersionHistoryCard
+      region={S3Region.EuWest1}
       bucketName="my-bucket"
       versions={withDeleteMarker}
       currentVersionId={withDeleteMarker[0].versionId}
@@ -121,6 +124,7 @@ export const SingleVersionRendersNothing: Story = {
         Card is not rendered when there is only one version.
       </p>
       <VersionHistoryCard
+        region={S3Region.EuWest1}
         bucketName="my-bucket"
         versions={[multipleVersions[0]]}
         currentVersionId={multipleVersions[0].versionId}

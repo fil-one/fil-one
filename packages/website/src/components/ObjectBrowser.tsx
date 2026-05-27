@@ -12,7 +12,7 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 
 import { formatBytes } from '@filone/shared';
-import type { S3ObjectVersion } from '@filone/shared';
+import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -282,6 +282,7 @@ function LatestVersionRow({
 
 export type ObjectBrowserProps = {
   bucketName: string;
+  region: S3Region;
   versions: S3ObjectVersion[];
   versioningEnabled: boolean;
   currentPrefix: string;
@@ -293,6 +294,7 @@ export type ObjectBrowserProps = {
 
 export function ObjectBrowser({
   bucketName,
+  region,
   versions,
   versioningEnabled,
   currentPrefix,
@@ -347,7 +349,7 @@ export function ObjectBrowser({
     void navigate({
       to: '/buckets/$bucketName/objects',
       params: { bucketName },
-      search: { key, versionId },
+      search: { key, region, versionId },
     });
   }
 
