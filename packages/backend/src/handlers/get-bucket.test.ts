@@ -60,7 +60,7 @@ describe('get-bucket baseHandler', () => {
     });
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { bucketName: 'my-bucket' };
+    event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(200);
@@ -90,7 +90,7 @@ describe('get-bucket baseHandler', () => {
     });
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { bucketName: 'locked-bucket' };
+    event.pathParameters = { name: 'locked-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(200);
@@ -113,7 +113,7 @@ describe('get-bucket baseHandler', () => {
     });
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { bucketName: 'full-bucket' };
+    event.pathParameters = { name: 'full-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(200);
@@ -145,7 +145,7 @@ describe('get-bucket baseHandler', () => {
     });
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { bucketName: 'my-bucket' };
+    event.pathParameters = { name: 'my-bucket' };
     await baseHandler(event);
 
     expect(mockGetBucket).toHaveBeenCalledWith('aurora-t-1', 'my-bucket');
@@ -155,7 +155,7 @@ describe('get-bucket baseHandler', () => {
     mockGetBucket.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { bucketName: 'nonexistent-bucket' };
+    event.pathParameters = { name: 'nonexistent-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(404);
@@ -169,7 +169,7 @@ describe('get-bucket baseHandler', () => {
     );
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { bucketName: 'my-bucket' };
+    event.pathParameters = { name: 'my-bucket' };
 
     await expect(baseHandler(event)).rejects.toThrow(
       'Failed to get bucket "my-bucket" from Aurora for tenant aurora-t-1',
@@ -189,7 +189,7 @@ describe('get-bucket baseHandler', () => {
     mockIsTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { bucketName: 'my-bucket' };
+    event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(503);
