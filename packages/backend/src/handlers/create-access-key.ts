@@ -3,7 +3,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CreateAccessKeySchema, S3_REGION, isSupportedRegion } from '@filone/shared';
+import { CreateAccessKeySchema, isSupportedRegion } from '@filone/shared';
 import type { CreateAccessKeyResponse, ErrorResponse, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
@@ -28,7 +28,6 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 
 // TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
-// eslint-disable-next-line complexity/complexity
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -50,10 +49,9 @@ export async function baseHandler(
       .build();
   }
 
-  const { keyName, permissions, granularPermissions, bucketScope } = parsed.data;
+  const { keyName, permissions, granularPermissions, bucketScope, region } = parsed.data;
   const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
   const expiresAt = parsed.data.expiresAt ?? null;
-  const region: S3Region = parsed.data.region ?? S3_REGION;
 
   if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
     return unsupportedRegionResponse(region);

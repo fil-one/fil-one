@@ -3,8 +3,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import { S3_REGION } from '@filone/shared';
-import type { ErrorResponse, S3Region } from '@filone/shared';
+import { ErrorResponse, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
@@ -44,8 +43,8 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   }
 
   // Legacy rows written before multi-region routing don't carry a `region`
-  // attribute — those predate FTH, so they belong to Aurora (S3_REGION).
-  const region: S3Region = (Item.region?.S as S3Region | undefined) ?? S3_REGION;
+  // attribute — those predate FTH, so they belong to Aurora (eu-west-1).
+  const region: S3Region = (Item.region?.S as S3Region | undefined) ?? S3Region.EuWest1;
   const orchestrator = getOrchestratorForRegion(region);
 
   const tenantId = await orchestrator.isTenantReady(orgId);

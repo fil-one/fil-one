@@ -165,7 +165,12 @@ describe('create-access-key baseHandler', () => {
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
-      body: JSON.stringify({ keyName: '  My Key  ', permissions: ['read'], bucketScope: 'all' }),
+      body: JSON.stringify({
+        keyName: '  My Key  ',
+        permissions: ['read'],
+        bucketScope: 'all',
+        region: 'eu-west-1',
+      }),
       userInfo: USER_INFO,
     });
     const result = await baseHandler(event);
@@ -192,6 +197,7 @@ describe('create-access-key baseHandler', () => {
         permissions: ['read'],
         bucketScope: 'all',
         expiresAt: '2026-06-01',
+        region: 'eu-west-1',
       }),
       userInfo: USER_INFO,
     });
@@ -213,6 +219,7 @@ describe('create-access-key baseHandler', () => {
         permissions: ['read'],
         bucketScope: 'all',
         expiresAt: '2026-06-01',
+        region: 'eu-west-1',
       }),
       userInfo: USER_INFO,
     });
@@ -229,6 +236,7 @@ describe('create-access-key baseHandler', () => {
         permissions: ['read'],
         bucketScope: 'all',
         expiresAt: '2026-04-16T12:34:56.789Z',
+        region: 'eu-west-1',
       }),
       userInfo: USER_INFO,
     });
@@ -251,6 +259,7 @@ describe('create-access-key baseHandler', () => {
         permissions: ['read', 'write', 'list', 'delete'],
         bucketScope: 'all',
         expiresAt: isoTimestamp,
+        region: 'eu-west-1',
       }),
       userInfo: USER_INFO,
     });
@@ -366,7 +375,7 @@ describe('create-access-key baseHandler', () => {
       mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
     });
 
-    it('succeeds when region is missing (back-compat with legacy callers)', async () => {
+    it('fails when region is missing', async () => {
       const event = buildEvent({
         body: JSON.stringify({
           keyName: 'My Key',
@@ -377,7 +386,7 @@ describe('create-access-key baseHandler', () => {
       });
       const result = await baseHandler(event);
 
-      expect(result.statusCode).toBe(201);
+      expect(result.statusCode).toBe(400);
     });
 
     it('accepts eu-west-1', async () => {
