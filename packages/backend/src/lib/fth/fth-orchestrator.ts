@@ -12,7 +12,7 @@ import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
-import { S3Region } from '@filone/shared';
+import { getS3Endpoint, S3Region } from '@filone/shared';
 import { getDynamoClient } from '../ddb-client.js';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
 import { NotImplementedError } from '../service-orchestrator.js';
@@ -64,9 +64,10 @@ export const fthOrchestrator = {
   },
 
   async getPresignerContext(tenantId: string): Promise<PresignerContext> {
+    const stage = process.env.FILONE_STAGE!;
     const credentials = await getFthS3Credentials(tenantId);
     return {
-      endpointUrl: process.env.FTH_S3_URL!,
+      endpointUrl: getS3Endpoint(fthOrchestrator.region, stage),
       region: 'us-east-1',
       credentials,
       forcePathStyle: true,
