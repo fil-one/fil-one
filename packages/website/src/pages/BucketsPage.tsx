@@ -119,7 +119,7 @@ export function BucketsPage() {
                   <Link
                     to="/buckets/$bucketName"
                     params={{ bucketName: bucket.bucketName }}
-                    search={{ region: (bucket.region as S3Region) ?? S3_REGION }}
+                    search={{ region: bucket.region as S3Region }}
                     className="font-medium text-zinc-900 hover:text-brand-600"
                   >
                     {bucket.bucketName}

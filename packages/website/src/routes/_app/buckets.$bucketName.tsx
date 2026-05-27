@@ -1,25 +1,23 @@
+import z from 'zod';
 import { createRoute } from '@tanstack/react-router';
-import { type S3Region } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 import { Route as appRoute } from '../_app';
 import { BucketDetailPage } from '../../pages/BucketDetailPage';
 
-type BucketSearchParams = {
-  prefix?: string;
-  region?: S3Region;
-};
+const bucketSearchSchema = z.object({
+  prefix: z.string().optional(),
+  region: z.enum(S3Region),
+});
 
 function BucketDetailRoute() {
   const { bucketName } = Route.useParams();
   const { prefix, region } = Route.useSearch();
-  return <BucketDetailPage bucketName={bucketName} prefix={prefix} bucketRegion={region} />;
+  return <BucketDetailPage bucketName={bucketName} prefix={prefix} region={region} />;
 }
 
 export const Route = createRoute({
   path: '/buckets/$bucketName',
   getParentRoute: () => appRoute,
   component: BucketDetailRoute,
-  validateSearch: (search: Record<string, unknown>): BucketSearchParams => ({
-    prefix: typeof search.prefix === 'string' ? search.prefix : undefined,
-    region: typeof search.region === 'string' ? (search.region as S3Region) : undefined,
-  }),
+  validateSearch: bucketSearchSchema,
 });

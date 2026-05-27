@@ -13,7 +13,7 @@ import { BucketPropertiesCard } from '../components/BucketPropertiesCard';
 import { ObjectBrowser } from '../components/ObjectBrowser';
 import { BucketAccessTab } from '../components/BucketAccessTab';
 import type { S3Region } from '@filone/shared';
-import { getS3Endpoint, S3_REGION, formatBytes } from '@filone/shared';
+import { getS3Endpoint, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 
 import type {
@@ -92,15 +92,11 @@ function BucketStatCards({
 export type BucketDetailPageProps = {
   bucketName: string;
   prefix?: string;
-  bucketRegion?: S3Region;
+  region: S3Region;
 };
 
-export function BucketDetailPage({
-  bucketName,
-  prefix,
-  bucketRegion = S3_REGION,
-}: BucketDetailPageProps) {
-  const s3Endpoint = getS3Endpoint(bucketRegion, FILONE_STAGE);
+export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPageProps) {
+  const s3Endpoint = getS3Endpoint(region, FILONE_STAGE);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const currentPrefix = prefix ?? '';
@@ -110,18 +106,18 @@ export function BucketDetailPage({
       void navigate({
         to: '/buckets/$bucketName',
         params: { bucketName },
-        search: newPrefix ? { prefix: newPrefix } : {},
+        search: { region, ...(newPrefix ? { prefix: newPrefix } : {}) },
         replace: true,
       });
     },
-    [navigate, bucketName],
+    [navigate, bucketName, region],
   );
 
   // Bucket metadata
   const { data: bucketData } = useQuery({
-    queryKey: queryKeys.bucket(bucketName, bucketRegion),
+    queryKey: queryKeys.bucket(bucketName, region),
     queryFn: () => {
-      const params = new URLSearchParams({ region: bucketRegion });
+      const params = new URLSearchParams({ region });
       return apiRequest<GetBucketResponse>(
         `/buckets/${encodeURIComponent(bucketName)}?${params.toString()}`,
       );
@@ -221,6 +217,7 @@ export function BucketDetailPage({
             void navigate({
               to: '/buckets/$bucketName/upload',
               params: { bucketName },
+              search: { region },
             })
           }
         >
@@ -252,7 +249,7 @@ export function BucketDetailPage({
           <TabPanel>
             <ObjectBrowser
               bucketName={bucketName}
-              region={bucketRegion}
+              region={region}
               versions={versions}
               versioningEnabled={bucket?.versioning ?? false}
               currentPrefix={currentPrefix}
@@ -267,7 +264,7 @@ export function BucketDetailPage({
             <BucketAccessTab
               bucketName={bucketName}
               s3Endpoint={s3Endpoint}
-              region={bucketRegion}
+              region={region}
               accessKeys={accessKeys}
               accessKeysLoading={accessKeysLoading}
               onCreateOpen={() => setAddKeyOpen(true)}
@@ -280,7 +277,7 @@ export function BucketDetailPage({
         open={addKeyOpen}
         onClose={() => setAddKeyOpen(false)}
         bucketName={bucketName}
-        bucketRegion={bucketRegion}
+        region={region}
         onKeyAdded={invalidateAccessKeysCache}
       />
     </div>

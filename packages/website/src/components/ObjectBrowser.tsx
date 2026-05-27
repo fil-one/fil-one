@@ -333,7 +333,11 @@ export function ObjectBrowser({
           variant="primary"
           icon={ArrowUpIcon}
           onClick={() =>
-            void navigate({ to: '/buckets/$bucketName/upload', params: { bucketName } })
+            void navigate({
+              to: '/buckets/$bucketName/upload',
+              params: { bucketName },
+              search: { region },
+            })
           }
         >
           Upload object

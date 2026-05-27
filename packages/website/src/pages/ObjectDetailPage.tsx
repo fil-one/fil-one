@@ -167,6 +167,7 @@ export function ObjectDetailPage({
       void navigate({
         to: '/buckets/$bucketName',
         params: { bucketName },
+        search: { region },
       });
     },
   });
@@ -234,7 +235,13 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         <IconButton
           icon={ArrowLeftIcon}
           aria-label="Back to bucket"
-          onClick={() => void navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
+          onClick={() =>
+            void navigate({
+              to: '/buckets/$bucketName',
+              params: { bucketName },
+              search: { region },
+            })
+          }
         />
         <div className="min-w-0 flex-1">
           <Heading tag="h1" className="truncate">
