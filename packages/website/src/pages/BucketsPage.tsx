@@ -120,11 +120,7 @@ export function BucketsPage() {
                   <Link
                     to="/buckets/$bucketName"
                     params={{ bucketName: bucket.bucketName }}
-                    search={
-                      isSupportedRegion(FILONE_STAGE, bucket.region)
-                        ? { region: bucket.region }
-                        : undefined
-                    }
+                    search={ region: bucket.region }
                     className="font-medium text-zinc-900 hover:text-brand-600"
                   >
                     {bucket.bucketName}

@@ -95,8 +95,7 @@ export type BucketDetailPageProps = {
   region?: S3Region;
 };
 
-export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPageProps) {
-  const effectiveRegion: S3Region = region ?? S3_REGION;
+export function BucketDetailPage({ bucketName, prefix, region = S3_REGION }: BucketDetailPageProps) {
   const s3Endpoint = getS3Endpoint(effectiveRegion, FILONE_STAGE);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -109,7 +108,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         params: { bucketName },
         search: (prev) => ({
           ...prev,
-          prefix: newPrefix || undefined,
+          prefix: newPrefix ? { prefix: newPrefix } : {},
         }),
         replace: true,
       });
@@ -205,7 +204,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     );
   }
 
-  const bucketRegion: S3Region = effectiveRegion;
+  const bucketRegion = effectiveRegion;
 
   return (
     <div className="px-10 pt-10">

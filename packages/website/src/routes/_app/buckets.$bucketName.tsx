@@ -22,7 +22,7 @@ export const Route = createRoute({
   validateSearch: (search: Record<string, unknown>): BucketSearchParams => ({
     prefix: typeof search.prefix === 'string' ? search.prefix : undefined,
     region:
-      typeof search.region === 'string' && isSupportedRegion(FILONE_STAGE, search.region)
+      typeof search.region === 'string' 
         ? search.region
         : undefined,
   }),
