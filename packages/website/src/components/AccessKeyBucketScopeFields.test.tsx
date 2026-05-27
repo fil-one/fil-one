@@ -8,9 +8,9 @@ import { queryKeys } from '../lib/query-client.js';
 import { AccessKeyBucketScopeFields } from './AccessKeyBucketScopeFields.js';
 
 const defaultBuckets: Bucket[] = [
-  { name: 'us-a', region: 'us-east-1', createdAt: '2026-01-01T00:00:00Z', isPublic: false },
-  { name: 'us-b', region: 'us-east-1', createdAt: '2026-01-02T00:00:00Z', isPublic: false },
-  { name: 'eu-a', region: 'eu-west-1', createdAt: '2026-01-03T00:00:00Z', isPublic: false },
+  { bucketName: 'us-a', region: 'us-east-1', createdAt: '2026-01-01T00:00:00Z', isPublic: false },
+  { bucketName: 'us-b', region: 'us-east-1', createdAt: '2026-01-02T00:00:00Z', isPublic: false },
+  { bucketName: 'eu-a', region: 'eu-west-1', createdAt: '2026-01-03T00:00:00Z', isPublic: false },
 ];
 
 function renderWith(props: {
@@ -73,7 +73,12 @@ describe('AccessKeyBucketScopeFields region filtering', () => {
     renderWith({
       region: S3Region.UsEast1,
       buckets: [
-        { name: 'eu-a', region: 'eu-west-1', createdAt: '2026-01-03T00:00:00Z', isPublic: false },
+        {
+          bucketName: 'eu-a',
+          region: 'eu-west-1',
+          createdAt: '2026-01-03T00:00:00Z',
+          isPublic: false,
+        },
       ],
     });
     expect(screen.getByText('No buckets found.')).toBeInTheDocument();

@@ -47,7 +47,7 @@ export function CreateBucketPage() {
   const queryClient = useQueryClient();
 
   // Bucket fields
-  const [name, setName] = useState('');
+  const [bucketName, setBucketName] = useState('');
   const [region, setRegion] = useState(S3_REGION);
 
   // Object settings
@@ -62,7 +62,7 @@ export function CreateBucketPage() {
   const [createKeyToggled, setCreateKeyToggled] = useState(false);
 
   // Validation
-  const [nameError, setNameError] = useState<string | null>(null);
+  const [bucketNameError, setBucketNameError] = useState<string | null>(null);
 
   // Submit state
   const [creating, setCreating] = useState(false);
@@ -88,21 +88,21 @@ export function CreateBucketPage() {
   useEffect(() => {
     if (!createKeyToggled) return;
     const prev = prevBucketNameRef.current;
-    const next = name.trim();
+    const next = bucketName.trim();
     prevBucketNameRef.current = next;
     form.setSelectedBuckets((buckets) => {
       const withoutPrev = prev ? buckets.filter((b) => b !== prev) : buckets;
       return next ? [...withoutPrev, next] : withoutPrev;
     });
-  }, [name, createKeyToggled, region]); // form.setSelectedBuckets is a stable useState setter
+  }, [bucketName, createKeyToggled, region]); // form.setSelectedBuckets is a stable useState setter
 
-  function validateName(value: string) {
-    const result = CreateBucketSchema.shape.name.safeParse(value);
+  function validateBucketName(value: string) {
+    const result = CreateBucketSchema.shape.bucketName.safeParse(value);
     if (!result.success) {
-      setNameError(result.error.issues[0].message);
+      setBucketNameError(result.error.issues[0].message);
       return false;
     }
-    setNameError(null);
+    setBucketNameError(null);
     return true;
   }
 
@@ -111,7 +111,7 @@ export function CreateBucketPage() {
     if (createKeyToggled && form.permissions.length === 0) return;
 
     const bucketBody = {
-      name: name.trim(),
+      bucketName: bucketName.trim(),
       region,
       versioning,
       lock,
@@ -130,9 +130,9 @@ export function CreateBucketPage() {
     const parsed = CreateBucketSchema.safeParse(bucketBody);
     if (!parsed.success) {
       const msg = parsed.error.issues[0].message;
-      // Show name errors inline; everything else as a toast
-      if (parsed.error.issues[0].path[0] === 'name') {
-        setNameError(msg);
+      // Show bucketName errors inline; everything else as a toast
+      if (parsed.error.issues[0].path[0] === 'bucketName') {
+        setBucketNameError(msg);
       } else {
         toast.error(msg);
       }
@@ -142,13 +142,13 @@ export function CreateBucketPage() {
     setCreating(true);
 
     // Step 1: Create the bucket
-    let bucketName: string;
+    let createdBucketName: string;
     try {
       const { bucket } = await apiRequest<CreateBucketResponse>('/buckets', {
         method: 'POST',
         body: JSON.stringify(parsed.data),
       });
-      bucketName = bucket.name;
+      createdBucketName = bucket.bucketName;
       void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
     } catch (err) {
@@ -171,7 +171,7 @@ export function CreateBucketPage() {
       if (!parsed.success) {
         toast.error(parsed.error.issues[0].message);
         setCreating(false);
-        void navigate({ to: '/buckets/$bucketName', params: { bucketName } });
+        void navigate({ to: '/buckets/$bucketName', params: { bucketName: createdBucketName } });
         return;
       }
       try {
@@ -191,12 +191,12 @@ export function CreateBucketPage() {
     }
 
     setCreating(false);
-    void navigate({ to: '/buckets/$bucketName', params: { bucketName } });
+    void navigate({ to: '/buckets/$bucketName', params: { bucketName: createdBucketName } });
   }
 
   function handleCredentialsDone() {
     setCredentials(null);
-    void navigate({ to: '/buckets/$bucketName', params: { bucketName: name.trim() } });
+    void navigate({ to: '/buckets/$bucketName', params: { bucketName: bucketName.trim() } });
   }
 
   const accessKeyNameValid = createKeyToggled
@@ -209,7 +209,8 @@ export function CreateBucketPage() {
       form.permissions.length > 0 &&
       (form.bucketScope !== 'specific' || form.selectedBuckets.length > 0));
 
-  const canSubmit = name.trim().length > 0 && !nameError && !creating && accessKeyFormValid;
+  const canSubmit =
+    bucketName.trim().length > 0 && !bucketNameError && !creating && accessKeyFormValid;
 
   return (
     <div className="mx-auto flex max-w-[860px] flex-col gap-6 py-12">
@@ -235,18 +236,18 @@ export function CreateBucketPage() {
               htmlFor="bucket-name"
               label="Bucket name"
               description="3-63 characters. Lowercase letters, numbers, and hyphens only. Must be globally unique."
-              error={nameError ?? undefined}
+              error={bucketNameError ?? undefined}
             >
               <Input
                 id="bucket-name"
-                value={name}
-                invalid={!!nameError}
+                value={bucketName}
+                invalid={!!bucketNameError}
                 onChange={(v) => {
-                  setName(v);
-                  if (nameError) validateName(v);
+                  setBucketName(v);
+                  if (bucketNameError) validateBucketName(v);
                 }}
                 onBlur={() => {
-                  if (name.trim()) validateName(name);
+                  if (bucketName.trim()) validateBucketName(bucketName);
                 }}
                 placeholder="my-storage-bucket"
                 autoComplete="off"
@@ -321,7 +322,7 @@ export function CreateBucketPage() {
                   </p>
                   <AccessKeyFormFields
                     form={form}
-                    pinnedBucket={name.trim() || undefined}
+                    pinnedBucket={bucketName.trim() || undefined}
                     region={region}
                   />
                 </div>
