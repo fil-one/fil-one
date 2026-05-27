@@ -563,6 +563,9 @@ export default $config({
       method: 'POST',
       routePath: '/api/presign',
       handler: 'presign',
+      extraEnv: {
+        FTH_S3_URL: fthEnv.FTH_S3_URL,
+      },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
       ],
