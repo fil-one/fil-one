@@ -1,5 +1,5 @@
-import { z } from 'zod';
 import { createRoute } from '@tanstack/react-router';
+import { z } from 'zod';
 import { Route as appRoute } from '../_app';
 import { ObjectDetailPage } from '../../pages/ObjectDetailPage';
 import { S3Region } from '@filone/shared';

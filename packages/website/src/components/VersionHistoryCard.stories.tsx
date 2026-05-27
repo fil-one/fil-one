@@ -87,8 +87,8 @@ type Story = StoryObj<typeof VersionHistoryCard>;
 export const MultipleVersions: Story = {
   render: () => (
     <VersionHistoryCard
-      bucketName="my-bucket"
       region={S3Region.EuWest1}
+      bucketName="my-bucket"
       versions={multipleVersions}
       currentVersionId={multipleVersions[0].versionId}
     />
@@ -98,8 +98,8 @@ export const MultipleVersions: Story = {
 export const ViewingHistoricalVersion: Story = {
   render: () => (
     <VersionHistoryCard
-      bucketName="my-bucket"
       region={S3Region.EuWest1}
+      bucketName="my-bucket"
       versions={multipleVersions}
       currentVersionId={multipleVersions[1].versionId}
     />
@@ -109,8 +109,8 @@ export const ViewingHistoricalVersion: Story = {
 export const WithDeleteMarker: Story = {
   render: () => (
     <VersionHistoryCard
-      bucketName="my-bucket"
       region={S3Region.EuWest1}
+      bucketName="my-bucket"
       versions={withDeleteMarker}
       currentVersionId={withDeleteMarker[0].versionId}
     />
@@ -124,8 +124,8 @@ export const SingleVersionRendersNothing: Story = {
         Card is not rendered when there is only one version.
       </p>
       <VersionHistoryCard
-        bucketName="my-bucket"
         region={S3Region.EuWest1}
+        bucketName="my-bucket"
         versions={[multipleVersions[0]]}
         currentVersionId={multipleVersions[0].versionId}
       />
