@@ -78,7 +78,7 @@ function authenticatedEvent(bucketName?: string) {
     userInfo: USER_INFO,
   });
   if (bucketName) {
-    event.pathParameters = { bucketName };
+    event.pathParameters = { name: bucketName };
   }
   return event;
 }
