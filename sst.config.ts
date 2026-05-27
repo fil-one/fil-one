@@ -541,7 +541,10 @@ export default $config({
       method: 'POST',
       routePath: '/api/access-keys',
       handler: 'create-access-key',
-      extraEnv: auroraEnv,
+      extraEnv: {
+        ...auroraEnv,
+        ...fthEnv,
+      },
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
@@ -554,8 +557,16 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/access-keys/{keyId}',
       handler: 'delete-access-key',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        ...fthEnv,
+      },
+      permissions: [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [auroraApiKeySsmArn],
+        },
+      ],
     });
     addRoute({
       method: 'POST',
