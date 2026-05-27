@@ -58,20 +58,17 @@ export function useFileUpload({ bucketName, region, tags, onSuccess }: UseFileUp
       const contentType = selectedFile.type || 'application/octet-stream';
 
       const description = objectDescription.trim() || undefined;
-      const { items } = await batchPresign(
-        [
-          {
-            op: 'putObject',
-            bucket: bucketName,
-            key,
-            contentType,
-            fileName: selectedFile.name,
-            ...(description && { description }),
-            ...(tags && tags.length > 0 && { tags }),
-          },
-        ],
-        region,
-      );
+      const { items } = await batchPresign(region, [
+        {
+          op: 'putObject',
+          bucket: bucketName,
+          key,
+          contentType,
+          fileName: selectedFile.name,
+          ...(description && { description }),
+          ...(tags && tags.length > 0 && { tags }),
+        },
+      ]);
       const { url: presignedUrl, method: presignedMethod } = items[0];
       setUploadProgress(1);
 

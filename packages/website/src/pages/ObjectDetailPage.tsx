@@ -147,7 +147,7 @@ export function ObjectDetailPage({
             ]
           : []),
       ];
-      const { items } = await batchPresign(ops, bucketRegion);
+      const { items } = await batchPresign(bucketRegion, ops);
 
       const headResponse = await executePresignedUrl(items[0].url, items[0].method);
       const head = parseHeadObjectResponse(headResponse, objectKey);

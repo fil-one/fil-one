@@ -140,10 +140,9 @@ export function BucketDetailPage({
     queryKey: queryKeys.objects(bucketName),
     enabled: !!bucket,
     queryFn: async (): Promise<ListObjectVersionsResponse> => {
-      const { items } = await batchPresign(
-        [{ op: 'listObjectVersions', bucket: bucketName }],
-        bucketRegion,
-      );
+      const { items } = await batchPresign(bucketRegion, [
+        { op: 'listObjectVersions', bucket: bucketName },
+      ]);
       const response = await executePresignedUrl(items[0].url, items[0].method);
       return parseListObjectVersionsResponse(await response.text());
     },

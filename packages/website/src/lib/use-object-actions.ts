@@ -19,10 +19,9 @@ export function useObjectActions({ bucketName, region, onDeleted }: UseObjectAct
     async (key: string, versionId?: string) => {
       setDeleting(key);
       try {
-        const { items } = await batchPresign(
-          [{ op: 'deleteObject', bucket: bucketName, key, ...(versionId && { versionId }) }],
-          region,
-        );
+        const { items } = await batchPresign(region, [
+          { op: 'deleteObject', bucket: bucketName, key, ...(versionId && { versionId }) },
+        ]);
         await executePresignedUrl(items[0].url, items[0].method);
         toast.success('Object deleted');
         onDeleted?.(key, versionId);
@@ -40,10 +39,9 @@ export function useObjectActions({ bucketName, region, onDeleted }: UseObjectAct
     async (key: string, versionId?: string) => {
       setDownloading(key);
       try {
-        const { items } = await batchPresign(
-          [{ op: 'getObject', bucket: bucketName, key, ...(versionId && { versionId }) }],
-          region,
-        );
+        const { items } = await batchPresign(region, [
+          { op: 'getObject', bucket: bucketName, key, ...(versionId && { versionId }) },
+        ]);
         window.open(items[0].url, '_blank', 'noopener,noreferrer');
         toast.success('Download started');
       } catch (err) {
@@ -66,18 +64,15 @@ export function useObjectActions({ bucketName, region, onDeleted }: UseObjectAct
       const { versionId, expiresIn } = options;
       setGeneratingUrl(true);
       try {
-        const { items } = await batchPresign(
-          [
-            {
-              op: 'getObject',
-              bucket: bucketName,
-              key,
-              ...(versionId && { versionId }),
-              ...(expiresIn && { expiresIn }),
-            },
-          ],
-          region,
-        );
+        const { items } = await batchPresign(region, [
+          {
+            op: 'getObject',
+            bucket: bucketName,
+            key,
+            ...(versionId && { versionId }),
+            ...(expiresIn && { expiresIn }),
+          },
+        ]);
         return { url: items[0].url, expiresAt: items[0].expiresAt };
       } catch (err) {
         console.error('Failed to generate presigned URL:', err);
