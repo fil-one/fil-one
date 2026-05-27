@@ -129,8 +129,6 @@ export function BucketDetailPage({
   });
   const bucket = bucketData?.bucket ?? null;
 
-  // Objects (via presigned URL — versioned listing). Gated on the bucket
-  // being loaded so /presign is called with the bucket's real region.
   const {
     data: objectsData,
     isPending: objectsLoading,
@@ -138,7 +136,6 @@ export function BucketDetailPage({
     error: objectsError,
   } = useQuery({
     queryKey: queryKeys.objects(bucketName),
-    enabled: !!bucket,
     queryFn: async (): Promise<ListObjectVersionsResponse> => {
       const { items } = await batchPresign(bucketRegion, [
         { op: 'listObjectVersions', bucket: bucketName },
