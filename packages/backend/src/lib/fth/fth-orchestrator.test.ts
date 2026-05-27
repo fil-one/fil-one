@@ -20,7 +20,6 @@ vi.mock('./fth-tenant-setup.js', () => ({
 }));
 
 process.env.FILONE_STAGE = 'test';
-process.env.FTH_S3_URL = 'https://s3.fortilyx.test';
 
 import { fthOrchestrator, _resetFthOrchestratorCachesForTesting } from './fth-orchestrator.js';
 import { BucketAlreadyExistsError } from '../service-orchestrator.js';
@@ -90,7 +89,7 @@ describe('fthOrchestrator.getPresignerContext', () => {
     const ctx = await fthOrchestrator.getPresignerContext(fthClientId);
 
     expect(ctx).toEqual({
-      endpointUrl: 'https://s3.fortilyx.test',
+      endpointUrl: 'https://us-east-1.fortilyx.com',
       region: 'us-east-1',
       credentials: { accessKeyId: 'AK1', secretAccessKey: 'SK1' },
       forcePathStyle: true,
