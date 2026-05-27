@@ -92,10 +92,12 @@ function BucketStatCards({
 export type BucketDetailPageProps = {
   bucketName: string;
   prefix?: string;
+  region?: S3Region;
 };
 
-export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) {
-  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
+export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPageProps) {
+  const effectiveRegion: S3Region = region ?? S3_REGION;
+  const s3Endpoint = getS3Endpoint(effectiveRegion, FILONE_STAGE);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const currentPrefix = prefix ?? '';
@@ -105,7 +107,10 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
       void navigate({
         to: '/buckets/$bucketName',
         params: { bucketName },
-        search: newPrefix ? { prefix: newPrefix } : {},
+        search: (prev) => ({
+          ...prev,
+          prefix: newPrefix || undefined,
+        }),
         replace: true,
       });
     },
@@ -114,8 +119,13 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
 
   // Bucket metadata
   const { data: bucketData } = useQuery({
-    queryKey: queryKeys.bucket(bucketName),
-    queryFn: () => apiRequest<GetBucketResponse>(`/buckets/${encodeURIComponent(bucketName)}`),
+    queryKey: queryKeys.bucket(bucketName, effectiveRegion),
+    queryFn: () => {
+      const params = new URLSearchParams({ region: effectiveRegion });
+      return apiRequest<GetBucketResponse>(
+        `/buckets/${encodeURIComponent(bucketName)}?${params.toString()}`,
+      );
+    },
   });
   const bucket = bucketData?.bucket ?? null;
 
@@ -195,7 +205,7 @@ export function BucketDetailPage({ bucketName, prefix }: BucketDetailPageProps) 
     );
   }
 
-  const bucketRegion = (bucket?.region as S3Region | undefined) ?? S3_REGION;
+  const bucketRegion: S3Region = effectiveRegion;
 
   return (
     <div className="px-10 pt-10">

@@ -1,15 +1,18 @@
 import { createRoute } from '@tanstack/react-router';
+import { isSupportedRegion, type S3Region } from '@filone/shared';
 import { Route as appRoute } from '../_app';
 import { BucketDetailPage } from '../../pages/BucketDetailPage';
+import { FILONE_STAGE } from '../../env';
 
 type BucketSearchParams = {
   prefix?: string;
+  region?: S3Region;
 };
 
 function BucketDetailRoute() {
   const { bucketName } = Route.useParams();
-  const { prefix } = Route.useSearch();
-  return <BucketDetailPage bucketName={bucketName} prefix={prefix} />;
+  const { prefix, region } = Route.useSearch();
+  return <BucketDetailPage bucketName={bucketName} prefix={prefix} region={region} />;
 }
 
 export const Route = createRoute({
@@ -18,5 +21,9 @@ export const Route = createRoute({
   component: BucketDetailRoute,
   validateSearch: (search: Record<string, unknown>): BucketSearchParams => ({
     prefix: typeof search.prefix === 'string' ? search.prefix : undefined,
+    region:
+      typeof search.region === 'string' && isSupportedRegion(FILONE_STAGE, search.region)
+        ? search.region
+        : undefined,
   }),
 });

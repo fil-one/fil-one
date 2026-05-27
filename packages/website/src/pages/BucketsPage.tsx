@@ -12,8 +12,9 @@ import { useToast } from '../components/Toast';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 
 import type { ListBucketsResponse } from '@filone/shared';
-import { S3_REGION, getRegionLabel } from '@filone/shared';
+import { S3_REGION, getRegionLabel, isSupportedRegion } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
+import { FILONE_STAGE } from '../env';
 import { formatDate } from '../lib/time.js';
 import { queryKeys } from '../lib/query-client.js';
 
@@ -132,6 +133,11 @@ export function BucketsPage() {
                     <Link
                       to="/buckets/$bucketName"
                       params={{ bucketName: bucket.bucketName }}
+                      search={
+                        isSupportedRegion(FILONE_STAGE, bucket.region)
+                          ? { region: bucket.region }
+                          : undefined
+                      }
                       className="font-medium text-zinc-900 hover:text-brand-600"
                     >
                       {bucket.bucketName}
