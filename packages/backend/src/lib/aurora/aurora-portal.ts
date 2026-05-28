@@ -19,7 +19,7 @@ import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
-} from '../service-orchestrator.js';
+} from '../errors.js';
 import { instrumentClient } from './aurora-api-metrics.js';
 
 const ssm = new SSMClient({});

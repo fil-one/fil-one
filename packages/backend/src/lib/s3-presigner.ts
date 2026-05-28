@@ -16,7 +16,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { S3Object } from '@filone/shared';
-import { BucketAlreadyExistsError } from './service-orchestrator.js';
+import { BucketAlreadyExistsError } from './errors.js';
 import type { PresignerContext } from './service-orchestrator.js';
 
 function createS3Client(ctx: PresignerContext): S3Client {

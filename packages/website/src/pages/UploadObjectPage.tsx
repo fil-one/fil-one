@@ -8,8 +8,7 @@ import {
   CheckCircleIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
-import type { S3Region } from '@filone/shared';
-import { formatBytes } from '@filone/shared';
+import { formatBytes, S3Region } from '@filone/shared';
 
 import { Heading } from '../components/Heading/Heading';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -279,7 +278,13 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
             </p>
             <Button
               variant="primary"
-              onClick={() => void navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
+              onClick={() =>
+                void navigate({
+                  to: '/buckets/$bucketName',
+                  params: { bucketName },
+                  search: { region },
+                })
+              }
             >
               Back to bucket
             </Button>

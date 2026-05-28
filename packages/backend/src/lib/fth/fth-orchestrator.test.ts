@@ -22,7 +22,7 @@ vi.mock('./fth-tenant-setup.js', () => ({
 process.env.FILONE_STAGE = 'test';
 
 import { fthOrchestrator, _resetFthOrchestratorCachesForTesting } from './fth-orchestrator.js';
-import { BucketAlreadyExistsError } from '../service-orchestrator.js';
+import { BucketAlreadyExistsError } from '../errors.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';

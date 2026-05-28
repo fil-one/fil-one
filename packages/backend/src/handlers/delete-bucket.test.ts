@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NotImplementedError } from '../lib/service-orchestrator.js';
+import { NotImplementedError } from '../lib/errors.js';
 
 // ---------------------------------------------------------------------------
 // Mocks

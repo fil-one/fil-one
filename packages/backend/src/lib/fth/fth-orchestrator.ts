@@ -15,7 +15,7 @@ import { Resource } from 'sst';
 import { getS3Endpoint, S3Region } from '@filone/shared';
 import { getDynamoClient } from '../ddb-client.js';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
-import { NotImplementedError } from '../service-orchestrator.js';
+import { NotImplementedError } from '../errors.js';
 import type {
   BucketDetails,
   BucketSummary,
