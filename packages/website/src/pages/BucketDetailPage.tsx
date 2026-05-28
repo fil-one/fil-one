@@ -95,11 +95,7 @@ export type BucketDetailPageProps = {
   region: S3Region;
 };
 
-export function BucketDetailPage({
-  bucketName,
-  prefix,
-  region,
-}: BucketDetailPageProps) {
+export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPageProps) {
   const s3Endpoint = getS3Endpoint(region, FILONE_STAGE);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
