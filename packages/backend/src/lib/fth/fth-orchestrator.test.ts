@@ -23,7 +23,7 @@ process.env.FILONE_STAGE = 'test';
 process.env.FTH_S3_URL = 'https://s3.fortilyx.test';
 
 import { fthOrchestrator, _resetFthOrchestratorCachesForTesting } from './fth-orchestrator.js';
-import { BucketAlreadyExistsError } from '../service-orchestrator.js';
+import { BucketAlreadyExistsError } from '../errors.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
