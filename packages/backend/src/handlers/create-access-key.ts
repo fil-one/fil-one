@@ -7,12 +7,8 @@ import { CreateAccessKeySchema, S3_REGION } from '@filone/shared';
 import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import {
-  AccessKeyAlreadyExistsError,
-  AccessKeyValidationError,
-  IssuedAccessKey,
-  ServiceOrchestrator,
-} from '../lib/service-orchestrator.js';
+import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
+import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
