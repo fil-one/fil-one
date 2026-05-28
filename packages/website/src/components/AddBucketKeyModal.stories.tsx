@@ -56,7 +56,7 @@ export const Default: Story = {
           open={open}
           onClose={() => setOpen(false)}
           bucketName="my-bucket"
-          bucketRegion={S3Region.UsEast1}
+          region={S3Region.UsEast1}
           onKeyAdded={() => {}}
         />
       </QueryClientProvider>

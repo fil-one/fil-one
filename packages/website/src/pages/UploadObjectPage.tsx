@@ -8,7 +8,7 @@ import {
   CheckCircleIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
-import { formatBytes } from '@filone/shared';
+import { formatBytes, S3Region } from '@filone/shared';
 
 import { Heading } from '../components/Heading/Heading';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -27,10 +27,11 @@ import { useFileUpload } from '../lib/use-file-upload.js';
 
 export type UploadObjectPageProps = {
   bucketName: string;
+  region: S3Region;
 };
 
 // eslint-disable-next-line max-lines-per-function
-export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
+export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) {
   const navigate = useNavigate();
 
   const [tags, setTags] = useState<string[]>([]);
@@ -40,7 +41,7 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
     bucketName,
     tags,
     onSuccess: () => {
-      void navigate({ to: '/buckets/$bucketName', params: { bucketName } });
+      void navigate({ to: '/buckets/$bucketName', params: { bucketName }, search: { region } });
     },
   });
 
@@ -92,7 +93,9 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
         <IconButton
           icon={ArrowLeftIcon}
           aria-label="Back to bucket"
-          onClick={() => navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
+          onClick={() =>
+            navigate({ to: '/buckets/$bucketName', params: { bucketName }, search: { region } })
+          }
         />
         <div>
           <Heading tag="h1">Upload object</Heading>
@@ -274,7 +277,13 @@ export function UploadObjectPage({ bucketName }: UploadObjectPageProps) {
             </p>
             <Button
               variant="primary"
-              onClick={() => void navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
+              onClick={() =>
+                void navigate({
+                  to: '/buckets/$bucketName',
+                  params: { bucketName },
+                  search: { region },
+                })
+              }
             >
               Back to bucket
             </Button>

@@ -171,7 +171,11 @@ export function CreateBucketPage() {
       if (!parsed.success) {
         toast.error(parsed.error.issues[0].message);
         setCreating(false);
-        void navigate({ to: '/buckets/$bucketName', params: { bucketName: createdBucketName } });
+        void navigate({
+          to: '/buckets/$bucketName',
+          params: { bucketName: createdBucketName },
+          search: { region },
+        });
         return;
       }
       try {
@@ -191,12 +195,20 @@ export function CreateBucketPage() {
     }
 
     setCreating(false);
-    void navigate({ to: '/buckets/$bucketName', params: { bucketName: createdBucketName } });
+    void navigate({
+      to: '/buckets/$bucketName',
+      params: { bucketName: createdBucketName },
+      search: { region },
+    });
   }
 
   function handleCredentialsDone() {
     setCredentials(null);
-    void navigate({ to: '/buckets/$bucketName', params: { bucketName: bucketName.trim() } });
+    void navigate({
+      to: '/buckets/$bucketName',
+      params: { bucketName: bucketName.trim() },
+      search: { region },
+    });
   }
 
   const accessKeyNameValid = createKeyToggled
