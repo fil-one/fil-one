@@ -143,11 +143,17 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   });
   const versions = objectsData?.versions ?? [];
 
-  // Bucket analytics (object count + storage)
+  // Bucket analytics (object count + storage). Pass region so the backend
+  // can short-circuit non-Aurora buckets (Aurora-backoffice metrics are the
+  // only source today) without trying to look them up in Aurora.
   const { data: analyticsData } = useQuery({
-    queryKey: queryKeys.bucketAnalytics(bucketName),
-    queryFn: () =>
-      apiRequest<BucketAnalyticsResponse>(`/buckets/${encodeURIComponent(bucketName)}/analytics`),
+    queryKey: queryKeys.bucketAnalytics(bucketName, region),
+    queryFn: () => {
+      const params = new URLSearchParams({ region });
+      return apiRequest<BucketAnalyticsResponse>(
+        `/buckets/${encodeURIComponent(bucketName)}/analytics?${params.toString()}`,
+      );
+    },
   });
 
   // Access keys scoped to this bucket

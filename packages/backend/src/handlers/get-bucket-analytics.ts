@@ -3,12 +3,13 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketAnalyticsResponse, ErrorResponse } from '@filone/shared';
+import { S3Region, S3_REGION, isSupportedRegion } from '@filone/shared';
 import { Resource } from 'sst';
 import { createClient, getBucketInfo } from '@filone/aurora-portal-client';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getAuroraPortalApiKey } from '../lib/aurora/aurora-portal.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -26,6 +27,25 @@ export async function baseHandler(
 
   if (!bucketName) {
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
+  }
+
+  const region = event.queryStringParameters?.region ?? S3_REGION;
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
+    return unsupportedRegionResponse(region);
+  }
+
+  // Storage samples come from Aurora's backoffice metrics, which only cover
+  // Aurora-backed buckets. For other regions the metric pipeline isn't in
+  // place yet, so return a zero-filled response — it's better for the
+  // bucket-detail page to render with empty stat cards than to surface a
+  // misleading error.
+  // TODO: read usage via ServiceOrchestrator API
+  // https://linear.app/filecoin-foundation/issue/FIL-345/display-us-region-usage-in-filone-console-ui
+  if (region !== S3Region.EuWest1) {
+    return new ResponseBuilder()
+      .status(200)
+      .body<BucketAnalyticsResponse>({ objectCount: 0, bytesUsed: 0 })
+      .build();
   }
 
   const { Item: orgProfile } = await dynamo.send(

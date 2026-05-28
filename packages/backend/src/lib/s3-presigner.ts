@@ -19,12 +19,34 @@ import type { S3Object } from '@filone/shared';
 import { BucketAlreadyExistsError } from './errors.js';
 import type { PresignerContext } from './service-orchestrator.js';
 
+// AWS SDK JS hoists every `x-amz-*` request header into the presigned URL's
+// query string by default. For S3-compatible backends that strictly validate
+// the canonical query string (Fortilyx/FTH, Aurora's S3 gateway), this
+// produces URLs that look unlike anything boto3 generates and get rejected —
+// Fortilyx returns `{"error":"invalid_presigned_request"}`. `X-Amz-Content-Sha256`
+// is the worst offender: boto3 never adds it to the query, but the SDK JS
+// presigner force-sets the header to `UNSIGNED-PAYLOAD` and then hoists it.
+// Keep it as an unhoisted, unsignable header so it disappears from the URL.
+const PRESIGN_OPTIONS = {
+  unhoistableHeaders: new Set(['x-amz-content-sha256']),
+  unsignableHeaders: new Set(['x-amz-content-sha256']),
+};
+
 function createS3Client(ctx: PresignerContext): S3Client {
   return new S3Client({
     endpoint: ctx.endpointUrl,
     region: ctx.region,
     credentials: ctx.credentials,
     forcePathStyle: ctx.forcePathStyle,
+    // The flexible-checksums middleware (default WHEN_SUPPORTED in SDK JS
+    // 3.717+) hoists `x-amz-checksum-crc32` and `x-amz-sdk-checksum-algorithm`
+    // onto presigned URLs. The hoisted CRC32 is computed over an empty body
+    // (the SDK can't see the body at presign time), so it never matches the
+    // real upload payload and S3-compatible backends reject or hang the PUT.
+    // boto3 (which produces working URLs against the same backends) doesn't
+    // include these params, so disable the middleware here.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
 }
 
@@ -141,7 +163,7 @@ export async function getPresignedPutObjectUrl(options: PresignPutObjectOptions)
       ...(contentType && { ContentType: contentType }),
       ...(metadata && { Metadata: metadata }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
 
@@ -158,7 +180,7 @@ export async function getPresignedGetObjectUrl(options: PresignGetObjectOptions)
       Key: key,
       ...(versionId && { VersionId: versionId }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
 
@@ -184,7 +206,7 @@ export async function getPresignedListObjectsUrl(
       ...(maxKeys && { MaxKeys: maxKeys }),
       ...(continuationToken && { ContinuationToken: continuationToken }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
 
@@ -213,7 +235,7 @@ export async function getPresignedListObjectVersionsUrl(
       ...(keyMarker && { KeyMarker: keyMarker }),
       ...(versionIdMarker && { VersionIdMarker: versionIdMarker }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
 
@@ -235,7 +257,7 @@ export async function getPresignedHeadObjectUrl(
       Key: key,
       ...(versionId && { VersionId: versionId }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
 
@@ -257,7 +279,7 @@ export async function getPresignedGetObjectRetentionUrl(
       Key: key,
       ...(versionId && { VersionId: versionId }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
 
@@ -279,6 +301,6 @@ export async function getPresignedDeleteObjectUrl(
       Key: key,
       ...(versionId && { VersionId: versionId }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
