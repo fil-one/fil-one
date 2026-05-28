@@ -40,7 +40,7 @@ import { S3_REGION, S3Region } from '@filone/shared';
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
 function validBody() {
-  return JSON.stringify({ name: 'my-bucket', region: S3_REGION });
+  return JSON.stringify({ bucketName: 'my-bucket', region: S3_REGION });
 }
 
 // ---------------------------------------------------------------------------
@@ -111,7 +111,7 @@ describe('create-bucket baseHandler', () => {
 
     const event = buildEvent({
       body: JSON.stringify({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: S3_REGION,
         versioning: true,
         lock: true,
@@ -147,7 +147,7 @@ describe('create-bucket baseHandler', () => {
 
   it('returns 400 when lock is true but versioning is false', async () => {
     const event = buildEvent({
-      body: JSON.stringify({ name: 'my-bucket', region: S3_REGION, lock: true }),
+      body: JSON.stringify({ bucketName: 'my-bucket', region: S3_REGION, lock: true }),
       userInfo: USER_INFO,
     });
     const result = await baseHandler(event);
@@ -161,7 +161,7 @@ describe('create-bucket baseHandler', () => {
   it('returns 400 when retention is provided without lock', async () => {
     const event = buildEvent({
       body: JSON.stringify({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: S3_REGION,
         versioning: true,
         retention: { enabled: true, mode: 'governance', duration: 30, durationType: 'd' },
@@ -180,7 +180,7 @@ describe('create-bucket baseHandler', () => {
     mockCreateBucket.mockResolvedValue(undefined);
 
     const event = buildEvent({
-      body: JSON.stringify({ name: 'my-bucket', region: S3Region.UsEast1 }),
+      body: JSON.stringify({ bucketName: 'my-bucket', region: S3Region.UsEast1 }),
       userInfo: USER_INFO,
     });
     await baseHandler(event);
@@ -190,7 +190,7 @@ describe('create-bucket baseHandler', () => {
 
   it('returns 400 when region is unsupported', async () => {
     const event = buildEvent({
-      body: JSON.stringify({ name: 'my-bucket', region: 'us-west-2' }),
+      body: JSON.stringify({ bucketName: 'my-bucket', region: 'us-west-2' }),
       userInfo: USER_INFO,
     });
     const result = await baseHandler(event);

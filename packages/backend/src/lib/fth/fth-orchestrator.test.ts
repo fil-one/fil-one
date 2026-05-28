@@ -174,7 +174,7 @@ describe('fthOrchestrator.listBuckets', () => {
 
     expect(result).toEqual([
       {
-        name: 'b1',
+        bucketName: 'b1',
         region: 'us-east-1',
         createdAt: '2026-01-01T00:00:00.000Z',
         isPublic: false,
@@ -182,7 +182,7 @@ describe('fthOrchestrator.listBuckets', () => {
         encrypted: true,
       },
       {
-        name: 'b2',
+        bucketName: 'b2',
         region: 'us-east-1',
         createdAt: '2026-02-01T00:00:00.000Z',
         isPublic: false,
@@ -190,5 +190,43 @@ describe('fthOrchestrator.listBuckets', () => {
         encrypted: true,
       },
     ]);
+  });
+});
+
+describe('fthOrchestrator.getBucket', () => {
+  beforeEach(() => {
+    ssmMock.on(GetParameterCommand).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
+    });
+  });
+
+  it('returns BucketDetails with createdAt from ListBuckets when the bucket matches', async () => {
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [
+        { Name: 'other', CreationDate: new Date('2026-01-01T00:00:00Z') },
+        { Name: 'my-bucket', CreationDate: new Date('2026-02-15T10:00:00Z') },
+      ],
+    });
+
+    const result = await fthOrchestrator.getBucket(fthClientId, 'my-bucket');
+
+    expect(result).toEqual({
+      bucketName: 'my-bucket',
+      region: 'us-east-1',
+      createdAt: '2026-02-15T10:00:00.000Z',
+      isPublic: false,
+      versioning: false,
+      encrypted: true,
+    });
+  });
+
+  it('returns null when the bucket is not present in ListBuckets', async () => {
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'other', CreationDate: new Date('2026-01-01T00:00:00Z') }],
+    });
+
+    const result = await fthOrchestrator.getBucket(fthClientId, 'missing-bucket');
+
+    expect(result).toBeNull();
   });
 });

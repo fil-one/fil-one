@@ -29,6 +29,7 @@ import type {
   ObjectRetentionInfo,
   GetBucketResponse,
   ListObjectVersionsResponse,
+  S3Region,
 } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 import { useObjectActions } from '../lib/use-object-actions.js';
@@ -71,6 +72,7 @@ function buildMetadataResponse(
 
 export type ObjectDetailPageProps = {
   bucketName: string;
+  region: S3Region;
   objectKey: string;
   versionId?: string;
 };
@@ -97,7 +99,12 @@ async function fetchObjectRetention(
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity/complexity
-export function ObjectDetailPage({ bucketName, objectKey, versionId }: ObjectDetailPageProps) {
+export function ObjectDetailPage({
+  bucketName,
+  region,
+  objectKey,
+  versionId,
+}: ObjectDetailPageProps) {
   const navigate = useNavigate();
 
   const {
@@ -109,7 +116,7 @@ export function ObjectDetailPage({ bucketName, objectKey, versionId }: ObjectDet
     queryKey: queryKeys.objectMetadata(bucketName, objectKey, versionId),
     queryFn: async (): Promise<ObjectMetadataResponse> => {
       const cachedBucket = queryClient.getQueryData<GetBucketResponse>(
-        queryKeys.bucket(bucketName),
+        queryKeys.bucket(bucketName, region),
       );
       const hasObjectLock = cachedBucket?.bucket.objectLockEnabled ?? false;
 
@@ -160,6 +167,7 @@ export function ObjectDetailPage({ bucketName, objectKey, versionId }: ObjectDet
       void navigate({
         to: '/buckets/$bucketName',
         params: { bucketName },
+        search: { region },
       });
     },
   });
@@ -227,7 +235,13 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         <IconButton
           icon={ArrowLeftIcon}
           aria-label="Back to bucket"
-          onClick={() => void navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
+          onClick={() =>
+            void navigate({
+              to: '/buckets/$bucketName',
+              params: { bucketName },
+              search: { region },
+            })
+          }
         />
         <div className="min-w-0 flex-1">
           <Heading tag="h1" className="truncate">
@@ -329,6 +343,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         versions={objectVersions}
         currentVersionId={versionId}
         bucketName={bucketName}
+        region={region}
       />
 
       {/* API access example card */}

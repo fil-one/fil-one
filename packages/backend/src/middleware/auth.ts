@@ -347,7 +347,7 @@ async function createNewUserAndOrg({
               pk: { S: `ORG#${orgId}` },
               sk: { S: 'PROFILE' },
               name: { S: orgName },
-              setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+              auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: userId },
               createdAt: { S: now },
             },

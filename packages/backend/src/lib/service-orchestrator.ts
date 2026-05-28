@@ -14,7 +14,7 @@ export interface PresignerContext {
 }
 
 export interface BucketSummary {
-  name: string;
+  bucketName: string;
   region: S3Region;
   createdAt: string;
   isPublic: boolean;

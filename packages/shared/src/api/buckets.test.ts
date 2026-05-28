@@ -19,7 +19,7 @@ const validRetention = (
 describe('CreateBucketSchema', () => {
   describe('default values', () => {
     it('sets versioning=false and lock=false when omitted', () => {
-      const result = CreateBucketSchema.parse({ name: 'my-bucket', region: 'eu-west-1' });
+      const result = CreateBucketSchema.parse({ bucketName: 'my-bucket', region: 'eu-west-1' });
       expect(result.versioning).toBe(false);
       expect(result.lock).toBe(false);
       expect(result.retention).toBeUndefined();
@@ -29,7 +29,7 @@ describe('CreateBucketSchema', () => {
   describe('valid combinations', () => {
     it('versioning OFF, lock OFF, no retention', () => {
       const result = CreateBucketSchema.parse({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: 'eu-west-1',
         versioning: false,
         lock: false,
@@ -40,7 +40,7 @@ describe('CreateBucketSchema', () => {
 
     it('versioning ON, lock OFF, no retention', () => {
       const result = CreateBucketSchema.parse({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: 'eu-west-1',
         versioning: true,
         lock: false,
@@ -51,7 +51,7 @@ describe('CreateBucketSchema', () => {
 
     it('versioning ON, lock ON, no retention', () => {
       const result = CreateBucketSchema.parse({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: 'eu-west-1',
         versioning: true,
         lock: true,
@@ -62,7 +62,7 @@ describe('CreateBucketSchema', () => {
 
     it('versioning ON, lock ON, governance retention', () => {
       const result = CreateBucketSchema.parse({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: 'eu-west-1',
         versioning: true,
         lock: true,
@@ -78,7 +78,7 @@ describe('CreateBucketSchema', () => {
 
     it('versioning ON, lock ON, compliance retention', () => {
       const result = CreateBucketSchema.parse({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: 'eu-west-1',
         versioning: true,
         lock: true,
@@ -96,7 +96,7 @@ describe('CreateBucketSchema', () => {
   describe('invalid combinations', () => {
     it('rejects lock ON without versioning', () => {
       const result = CreateBucketSchema.safeParse({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: 'eu-west-1',
         versioning: false,
         lock: true,
@@ -110,7 +110,7 @@ describe('CreateBucketSchema', () => {
 
     it('rejects retention without lock', () => {
       const result = CreateBucketSchema.safeParse({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: 'eu-west-1',
         versioning: true,
         lock: false,
@@ -125,7 +125,7 @@ describe('CreateBucketSchema', () => {
 
     it('rejects retention without versioning (both refinements fail)', () => {
       const result = CreateBucketSchema.safeParse({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: 'eu-west-1',
         versioning: false,
         lock: false,
@@ -141,7 +141,7 @@ describe('CreateBucketSchema', () => {
 
   describe('duration bounds', () => {
     const base = {
-      name: 'my-bucket',
+      bucketName: 'my-bucket',
       region: 'eu-west-1',
       versioning: true,
       lock: true,

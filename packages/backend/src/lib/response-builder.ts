@@ -72,3 +72,12 @@ export function unsupportedRegionResponse(region: string): APIGatewayProxyStruct
     .body<ErrorResponse>({ message: `Unsupported region "${region}"` })
     .build();
 }
+
+export function tenantNotReadyResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(503)
+    .body<ErrorResponse>({
+      message: 'We are still setting up the region for you. Please try again in a moment.',
+    })
+    .build();
+}
