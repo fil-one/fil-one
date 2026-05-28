@@ -19,7 +19,7 @@ export type AddBucketKeyModalProps = {
   open: boolean;
   onClose: () => void;
   bucketName: string;
-  bucketRegion: S3Region;
+  region: S3Region;
   onKeyAdded: () => void;
 };
 
@@ -31,7 +31,7 @@ export function AddBucketKeyModal({
   open,
   onClose,
   bucketName,
-  bucketRegion,
+  region,
   onKeyAdded,
 }: AddBucketKeyModalProps) {
   const [credentials, setCredentials] = useState<{
@@ -40,7 +40,7 @@ export function AddBucketKeyModal({
   } | null>(null);
   const form = useAccessKeyForm({
     defaultBucket: bucketName,
-    region: bucketRegion,
+    region: region,
     onSuccess: (response: CreateAccessKeyResponse) => {
       setCredentials({
         accessKeyId: response.accessKeyId,
@@ -67,7 +67,7 @@ export function AddBucketKeyModal({
         <div className="flex gap-6">
           {/* Left: form fields */}
           <div className="flex-1">
-            <AccessKeyFormFields form={form} region={bucketRegion} />
+            <AccessKeyFormFields form={form} region={region} />
           </div>
 
           {/* Right: info panel */}

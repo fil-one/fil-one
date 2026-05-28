@@ -111,12 +111,16 @@ export const fthOrchestrator = {
     }));
   },
 
-  async getBucket(_tenantId: string, bucketName: string): Promise<BucketDetails | null> {
-    // TODO: replace with a real implementation
+  async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
+    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
+    const { buckets } = await s3ListBuckets(ctx);
+    const match = buckets.find((b) => b.name === bucketName);
+    if (!match) return null;
+
     return {
       bucketName,
       region: fthOrchestrator.region,
-      createdAt: new Date().toISOString(),
+      createdAt: match.createdAt,
       isPublic: false,
       versioning: false,
       encrypted: true,
