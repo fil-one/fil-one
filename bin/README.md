@@ -91,5 +91,6 @@ aws iam list-roles --query 'length(Roles)' --output text
 | `tail-logs.sh`              | Tail CloudWatch logs for a Lambda function   |
 | `tail-tenant-setup-logs.sh` | Tail logs for the Aurora tenant setup Lambda |
 | `reset-db.ts`               | Reset the Aurora database for a stage        |
+| `seed-e2e-billing-from-staging.ts` | Mirror the three E2E test users' `UserInfoTable` + `BillingTable` rows from `staging` into the current stage (tenant fields reset) so `pnpm test:e2e` works against a fresh dev stage |
 | `aurora-s3-env.ts`          | Print Aurora S3 environment variables        |
 | `aurora-demo.ts`            | Demo script for Aurora S3 operations         |
