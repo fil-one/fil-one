@@ -281,7 +281,7 @@ async function resolveUserAndOrg(
 
   await createNewUserAndOrg({ sub, userId, orgId, orgName });
 
-  // Aurora tenant setup is deferred until the user creates their first bucket
+  // Tenant setup is deferred until the user creates their first bucket
   // or access key — see docs/architectural-decisions/2026-05-13-synchronous-tenant-setup-on-first-resource.md.
   // Stripe trial is created here because billing must be ready before any
   // metered operation; createBillingTrial is idempotent via idempotencyKey.
@@ -347,7 +347,7 @@ async function createNewUserAndOrg({
               pk: { S: `ORG#${orgId}` },
               sk: { S: 'PROFILE' },
               name: { S: orgName },
-              setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+              auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: userId },
               createdAt: { S: now },
             },

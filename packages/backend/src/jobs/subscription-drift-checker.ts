@@ -2,7 +2,7 @@ import { GetItemCommand, ScanCommand, type AttributeValue } from '@aws-sdk/clien
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
-import { getTenantStatus, type TenantStatusResult } from '../lib/aurora-backoffice.js';
+import { getTenantStatus, type TenantStatusResult } from '../lib/aurora/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { reportMetric } from '../lib/metrics.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
@@ -16,7 +16,7 @@ interface ActiveCandidate {
 
 interface ResolvedTenant {
   auroraTenantId: string | undefined;
-  setupStatus: string | undefined;
+  auroraSetupStatus: string | undefined;
 }
 
 interface RunStats {
@@ -100,7 +100,7 @@ async function scanActiveSubscriptions(billingTableName: string): Promise<Active
 async function evaluateCandidate(candidate: ActiveCandidate, stats: RunStats): Promise<void> {
   try {
     const tenant = await resolveTenant(candidate.orgId);
-    if (!tenant.auroraTenantId || !isOrgSetupComplete(tenant.setupStatus)) {
+    if (!tenant.auroraTenantId || !isOrgSetupComplete(tenant.auroraSetupStatus)) {
       stats.missingTenant += 1;
       return;
     }
@@ -144,12 +144,14 @@ async function resolveTenant(orgId: string): Promise<ResolvedTenant> {
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      ProjectionExpression: 'auroraTenantId, setupStatus',
+      // TODO(FIL-382): drop legacy `setupStatus` from ProjectionExpression.
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus, setupStatus',
     }),
   );
   return {
     auroraTenantId: result.Item?.auroraTenantId?.S,
-    setupStatus: result.Item?.setupStatus?.S,
+    // TODO(FIL-382): drop the setupStatus fallback.
+    auroraSetupStatus: result.Item?.auroraSetupStatus?.S ?? result.Item?.setupStatus?.S,
   };
 }
 

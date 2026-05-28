@@ -16,7 +16,7 @@ vi.mock('./metrics.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { scanAndEmitStuckTenantCount } from './stuck-tenant-metric.js';
-import { OrgSetupStatus } from './org-setup-status.js';
+import { FINAL_SETUP_STATUS } from './org-setup-status.js';
 
 describe('scanAndEmitStuckTenantCount', () => {
   beforeEach(() => {
@@ -35,12 +35,12 @@ describe('scanAndEmitStuckTenantCount', () => {
     expect(scanCalls).toHaveLength(1);
     expect(scanCalls[0].args[0].input).toMatchObject({
       TableName: 'UserInfoTable',
-      FilterExpression: expect.stringContaining('setupFailureCount >= :three'),
+      FilterExpression: expect.stringContaining('auroraSetupFailureCount >= :three'),
       ExpressionAttributeValues: {
         ':orgPrefix': { S: 'ORG#' },
         ':profile': { S: 'PROFILE' },
         ':three': { N: '3' },
-        ':complete': { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
+        ':complete': { S: FINAL_SETUP_STATUS },
       },
       ProjectionExpression: 'pk',
     });

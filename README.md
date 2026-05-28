@@ -14,11 +14,8 @@ hyperspace/
 │   ├── aurora-backoffice-client/ # Generated TS client for Aurora Back Office API
 │   ├── aurora-portal-client/    # Generated TS client for Aurora Portal API
 │   ├── backend/    # Lambda handlers (upload → DynamoDB)
-│   ├── ui/         # UI component library (git submodule → joemocode-business/ui-hyperspace)
 │   └── website/    # Vite + React 19 + TanStack Router SPA + Tailwind v4
 ```
-
-> `packages/ui` is a git submodule — a standalone fork of `@filecoin-foundation/ui-filecoin` adapted for React/Vite. The upstream fork lives at `joemocode-business/filecoin-foundation` for tracking upstream changes. This package does not build on its own! We import the UI components we use and build through Website package. TODO Move this to something more official and not my Github, probably.
 
 ## AWS account
 
@@ -490,40 +487,11 @@ pnpm lint:fix
 pnpm generate:api-clients
 ```
 
-## UI submodule (`packages/ui`)
+## UI components (`packages/website/src/components/`)
 
-`packages/ui` is a git submodule pointing to `joemocode-business/ui-hyperspace` — a fork of `@filecoin-foundation/ui-filecoin` adapted for Vite/React. It is consumed from source by the website (no separate build step in dev).
+UI components live directly in the website package under `packages/website/src/components/`. There is no separate design-system package or git submodule.
 
-**Importing components in the website**
-
-```tsx
-import { Button } from '@hyperspace/ui/Button';
-import { Section } from '@hyperspace/ui/Section/Section';
-import { Heading } from '@hyperspace/ui/Heading';
-```
-
-Styles are loaded globally via `packages/website/src/styles.css` which imports `@hyperspace/ui/styles` (Tailwind v4 theme + component CSS).
-
-**Updating the submodule to a new commit**
-
-```bash
-cd packages/ui
-git pull origin main
-cd ../..
-git add packages/ui
-git commit -m "chore: bump ui submodule"
-```
-
-**Pulling upstream changes from the original library**
-
-The full fork at `joemocode-business/filecoin-foundation` tracks the upstream `FilecoinFoundationWeb/filecoin-foundation`. To bring in upstream changes:
-
-```bash
-# In the filecoin-foundation fork, sync upstream then cherry-pick or copy
-# changed files from packages/ui-filecoin/ into the ui-hyperspace repo manually.
-```
-
-> **Note**: Several components in `packages/ui` use Next.js-specific APIs (`next/navigation`, `next/image`) or `nuqs` and are not usable as-is in this Vite app. These include `Navigation/*`, `Network/*`, and `Search/Search`. They will be adapted for React Router as needed.
+The visual design draws on `@filecoin-foundation/ui-filecoin` as the original inspiration, but all components have been adapted for this Vite/React app and are maintained in-tree.
 
 ## Observability
 

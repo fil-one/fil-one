@@ -15,6 +15,7 @@ export type AlertProps = {
   variant?: AlertVariant;
   title?: string;
   description: string;
+  showIcon?: boolean;
 };
 
 const containerStyles: Record<AlertVariant, string> = {
@@ -49,14 +50,16 @@ const iconComponents: Record<AlertVariant, typeof InfoIcon> = {
   amber: WarningIcon,
 };
 
-export function Alert({ variant = 'blue', title, description }: AlertProps) {
+export function Alert({ variant = 'blue', title, description, showIcon = true }: AlertProps) {
   return (
     <div
       className={clsx('flex items-start gap-3 rounded-lg border p-3', containerStyles[variant])}
       role="alert"
     >
-      <IconBox icon={iconComponents[variant]} color={iconBoxColors[variant]} size="sm" />
-      <div className="flex flex-1 flex-col gap-1 pt-1">
+      {showIcon && (
+        <IconBox icon={iconComponents[variant]} color={iconBoxColors[variant]} size="sm" />
+      )}
+      <div className={clsx('flex flex-1 flex-col gap-1', showIcon && 'pt-1')}>
         {title && <span className={clsx('text-sm font-medium', textStyles[variant])}>{title}</span>}
         <span className={clsx('text-xs leading-[18px]', textStyles[variant])}>{description}</span>
       </div>

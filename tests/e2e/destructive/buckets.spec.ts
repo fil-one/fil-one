@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
-import { STORAGE_STATE } from './roles.ts';
+import { STORAGE_STATE } from './roles.util.ts';
 
 // Bucket names are globally unique (Aurora-backed) and rejected with 409 if
 // taken, so each test mints a fresh name. We do not delete buckets afterward
@@ -35,7 +35,7 @@ async function createBucketWithKey(page: Page, bucketName: string): Promise<void
   await page.getByRole('button', { name: 'Create bucket and access key' }).click();
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('button', { name: 'Done' }).click();
-  await expect(page).toHaveURL(new RegExp(`/buckets/${bucketName}$`));
+  await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}`);
 }
 
 // Opens the first bucket listed at /buckets and returns its name. Upload tests
@@ -46,7 +46,7 @@ async function openFirstBucket(page: Page): Promise<string> {
   const firstBucketLink = page.locator('tbody a[href^="/buckets/"]').first();
   await expect(firstBucketLink).toBeVisible();
   await firstBucketLink.click();
-  await page.waitForURL(/\/buckets\/[^/]+$/);
+  await page.waitForURL((url) => /^\/buckets\/[^/]+$/.test(url.pathname));
   return new URL(page.url()).pathname.split('/').pop()!;
 }
 
@@ -58,7 +58,7 @@ async function submitUpload(page: Page, bucketName: string): Promise<void> {
   // renders one in the empty-state card. `.first()` targets the header button.
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
   await page.getByRole('button', { name: 'Upload object' }).first().click();
-  await expect(page).toHaveURL(new RegExp(`/buckets/${bucketName}/upload$`));
+  await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}/upload`);
 
   // The dropzone forwards clicks to a hidden <input type="file">. Setting
   // files directly on the input is the most reliable way to trigger React's
@@ -88,7 +88,7 @@ test.describe('paid user', () => {
     await submitUpload(page, bucketName);
 
     // On success the upload page navigates back to the bucket detail page.
-    await expect(page).toHaveURL(new RegExp(`/buckets/${bucketName}$`));
+    await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}`);
 
     // The file row has role="button"; its accessible name concatenates the
     // file name and formatted size from the table cells.
@@ -120,7 +120,7 @@ test.describe('trial user', () => {
 
     await submitUpload(page, bucketName);
 
-    await expect(page).toHaveURL(new RegExp(`/buckets/${bucketName}$`));
+    await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}`);
 
     // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await page
@@ -171,6 +171,6 @@ test.describe('unpaid user', () => {
     // signals that the failure has been processed.
     // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
     await expect(page.getByRole('button', { name: /Drop files here or click to/i })).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/buckets/${bucketName}/upload$`));
+    await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}/upload`);
   });
 });

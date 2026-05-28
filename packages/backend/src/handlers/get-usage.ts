@@ -15,7 +15,7 @@ import {
   getStorageSamples,
   getOperationsSamples,
   getTenantInfo,
-} from '../lib/aurora-backoffice.js';
+} from '../lib/aurora/aurora-backoffice.js';
 
 const dynamo = getDynamoClient();
 
@@ -32,7 +32,8 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   );
 
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
+  // TODO(FIL-382): drop the setupStatus fallback.
+  const setupStatus = orgProfile?.auroraSetupStatus?.S ?? orgProfile?.setupStatus?.S;
 
   // 2. Fetch usage data from Aurora in parallel
   const now = new Date();

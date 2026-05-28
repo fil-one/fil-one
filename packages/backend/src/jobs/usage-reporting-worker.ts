@@ -9,9 +9,8 @@ import {
   getOperationsSamples,
   getTenantInfo,
   updateTenantStatus,
-} from '../lib/aurora-backoffice.js';
-import type { ModelsTenantStatus } from '../lib/aurora-backoffice.js';
-import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
+} from '../lib/aurora/aurora-backoffice.js';
+import type { ModelsTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
 import { calculateAverageUsage } from '../lib/usage-calculator.js';
 
@@ -30,13 +29,11 @@ export interface UsageReportingWorkerPayload {
 
 async function enforceTenantLocks({
   tenantId,
-  orgId,
   currentStatus,
   currentStorageBytes,
   totalEgressBytes,
 }: {
   tenantId: string;
-  orgId: string;
   currentStatus: ModelsTenantStatus | undefined;
   currentStorageBytes: number;
   totalEgressBytes: number;
@@ -60,7 +57,6 @@ async function enforceTenantLocks({
       totalEgressBytes,
     });
     await updateTenantStatus({ tenantId, status: desiredStatus });
-    await setOrgAuroraTenantStatus(orgId, desiredStatus);
   }
 
   return desiredStatus;

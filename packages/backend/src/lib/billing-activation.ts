@@ -3,8 +3,7 @@ import type Stripe from 'stripe';
 import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
-import { updateTenantStatus } from './aurora-backoffice.js';
-import { setOrgAuroraTenantStatus } from './org-profile.js';
+import { updateTenantStatus } from './aurora/aurora-backoffice.js';
 import { isOrgSetupComplete } from './org-setup-status.js';
 
 const dynamo = getDynamoClient();
@@ -65,13 +64,13 @@ export async function unlockAuroraTenant(orgId: string): Promise<void> {
     }),
   );
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
+  // TODO(FIL-382): drop the setupStatus fallback.
+  const setupStatus = orgProfile?.auroraSetupStatus?.S ?? orgProfile?.setupStatus?.S;
   if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
     throw new Error(`Aurora tenant setup is not complete for org ${orgId}`);
   }
   try {
     await updateTenantStatus({ tenantId: auroraTenantId, status: 'ACTIVE' });
-    await setOrgAuroraTenantStatus(orgId, 'ACTIVE');
     console.log('[billing-activation] Aurora tenant unlocked', { orgId, auroraTenantId });
   } catch (error) {
     console.error('[billing-activation] Failed to unlock Aurora tenant', {
