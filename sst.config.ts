@@ -152,11 +152,16 @@ export default $config({
       },
     });
 
-    const { getAuth0Domain, getS3Endpoint, S3_REGION, Stage } = await import('@filone/shared');
-    const auroraS3GatewayUrl = getS3Endpoint(
-      S3_REGION,
-      isProduction ? Stage.Production : Stage.Staging,
-    );
+    const { getAuth0Domain, getAvailableRegions, getS3Endpoint, Stage } =
+      await import('@filone/shared');
+    const stageForEndpoints = isProduction ? Stage.Production : Stage.Staging;
+    // The browser hits the S3 endpoint of every region the user can pick from
+    // — list-objects, uploads, downloads, etc. all go directly to S3 — so each
+    // one needs to be in `connect-src` or the browser blocks the request with
+    // a CSP violation before it ever leaves.
+    const s3GatewayUrls = getAvailableRegions(stageForEndpoints)
+      .map((r) => getS3Endpoint(r, stageForEndpoints))
+      .join(' ');
 
     // ── CloudFront security headers (CSP applied to the HTML document) ──
     const sentryCspEndpoint =
@@ -170,7 +175,7 @@ export default $config({
         securityHeadersConfig: {
           contentSecurityPolicy: {
             // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://fil-one.instatus.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://fil-one.instatus.com ${s3GatewayUrls}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
