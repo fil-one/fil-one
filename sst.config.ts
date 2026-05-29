@@ -105,28 +105,36 @@ export default $config({
     const isStaging = stage === 'staging';
     const isEphemeralStage = !isProduction && !isStaging;
 
-    let domainName = 'staging.fil.one';
-    let certArn: string | undefined;
-
-    if (isProduction || isStaging) {
-      domainName = isProduction ? 'app.fil.one' : 'staging.fil.one';
-      // ACM cert must be in us-east-1 for CloudFront
-      const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
-      const cert = await aws.acm.getCertificate(
-        {
-          domain: domainName,
-          statuses: ['ISSUED'],
-        },
-        { provider: usEast1 },
+    // Ephemeral stages become subdomains of dev.fil.one — enforce DNS label rules.
+    if (isEphemeralStage && !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(stage)) {
+      throw new Error(
+        `Invalid stage name "${stage}": must be a valid DNS label ` +
+          `(lowercase a-z, 0-9, hyphens; 1-63 chars; no leading/trailing hyphen).`,
       );
-
-      certArn = cert.arn;
     }
+
+    const domainName = isProduction
+      ? 'app.fil.one'
+      : isStaging
+        ? 'staging.fil.one'
+        : `${stage}.dev.fil.one`;
+
+    // ACM cert must be in us-east-1 for CloudFront. Ephemeral stages share a
+    // wildcard cert for *.dev.fil.one provisioned in the fil-one/infrastructure repo.
+    const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
+    const cert = await aws.acm.getCertificate(
+      {
+        domain: isEphemeralStage ? '*.dev.fil.one' : domainName,
+        statuses: ['ISSUED'],
+      },
+      { provider: usEast1 },
+    );
+    const certArn = cert.arn;
 
     // ── API Gateway ──────────────────────────────────────────────────
     // While we stick to a same origin for both website and API,
     // we want to make sure to lock down to just our origin.
-    const allowedOrigins = domainName ? [`https://${domainName}`] : [];
+    const allowedOrigins = [`https://${domainName}`];
     if (stage !== 'production') {
       allowedOrigins.push('https://localhost:5173');
     }
@@ -228,7 +236,14 @@ export default $config({
           cachePolicy: AWS_CACHING_DISABLED_POLICY,
         },
       },
-      ...(domainName && certArn ? { domain: { name: domainName, dns: false, cert: certArn } } : {}),
+      domain: {
+        name: domainName,
+        // Ephemeral stages: SST creates the Route 53 alias in the delegated
+        // dev.fil.one zone. Staging/prod: records are managed in Cloudflare
+        // by the fil-one/infrastructure Terraform.
+        dns: isEphemeralStage ? sst.aws.dns({ override: true }) : false,
+        cert: certArn,
+      },
       transform: {
         cdn: (args) => {
           args.defaultRootObject = 'index.html';
@@ -312,7 +327,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              Version: '2.9',
+              Version: '2.10',
             },
           },
         },
