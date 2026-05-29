@@ -30,12 +30,20 @@ vi.mock('../lib/stripe-client.js', () => ({
 const mockGetStorageSamples = vi.fn();
 const mockGetOperationsSamples = vi.fn().mockResolvedValue([]);
 const mockGetTenantInfo = vi.fn().mockResolvedValue({ status: 'ACTIVE' });
-const mockUpdateTenantStatus = vi.fn().mockResolvedValue(undefined);
-vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
-  getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
-  getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
-  getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...args),
-  updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
+vi.mock('../lib/aurora/aurora-backoffice.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../lib/aurora/aurora-backoffice.js')>();
+  return {
+    ...original,
+    getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
+    getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
+    getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...args),
+  };
+});
+
+const mockSetTenantStatusAcrossOrchestrators = vi.fn().mockResolvedValue(undefined);
+vi.mock('../lib/tenant-status.js', () => ({
+  setTenantStatusAcrossOrchestrators: (...args: unknown[]) =>
+    mockSetTenantStatusAcrossOrchestrators(...args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -161,7 +169,7 @@ describe('usage-reporting-worker', () => {
     await handler(basePayload);
 
     expect(mockGetTenantInfo).not.toHaveBeenCalled();
-    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+    expect(mockSetTenantStatusAcrossOrchestrators).not.toHaveBeenCalled();
     const putCalls = ddbMock.commandCalls(PutItemCommand);
     const item = putCalls[0].args[0].input.Item!;
     expect(item.lockAction).toEqual({ S: 'skipped:paid' });
@@ -185,7 +193,7 @@ describe('usage-reporting-worker', () => {
       await handler(trialPayload);
 
       expect(mockGetTenantInfo).toHaveBeenCalledOnce();
-      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(mockSetTenantStatusAcrossOrchestrators).not.toHaveBeenCalled();
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'ACTIVE' });
     });
@@ -199,10 +207,7 @@ describe('usage-reporting-worker', () => {
 
       await handler(trialPayload);
 
-      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-        tenantId: 'aurora-tenant-123',
-        status: 'WRITE_LOCKED',
-      });
+      expect(mockSetTenantStatusAcrossOrchestrators).toHaveBeenCalledWith('org-1', 'write-locked');
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'WRITE_LOCKED' });
     });
@@ -218,10 +223,7 @@ describe('usage-reporting-worker', () => {
 
       await handler(trialPayload);
 
-      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-        tenantId: 'aurora-tenant-123',
-        status: 'DISABLED',
-      });
+      expect(mockSetTenantStatusAcrossOrchestrators).toHaveBeenCalledWith('org-1', 'disabled');
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'DISABLED' });
     });
@@ -237,10 +239,7 @@ describe('usage-reporting-worker', () => {
 
       await handler(trialPayload);
 
-      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-        tenantId: 'aurora-tenant-123',
-        status: 'DISABLED',
-      });
+      expect(mockSetTenantStatusAcrossOrchestrators).toHaveBeenCalledWith('org-1', 'disabled');
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'DISABLED' });
     });
@@ -264,7 +263,7 @@ describe('usage-reporting-worker', () => {
       ]);
       mockGetOperationsSamples.mockResolvedValue([]);
       mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
-      mockUpdateTenantStatus.mockRejectedValueOnce(new Error('Aurora down'));
+      mockSetTenantStatusAcrossOrchestrators.mockRejectedValueOnce(new Error('Aurora down'));
 
       await handler(trialPayload);
 
@@ -385,10 +384,7 @@ describe('usage-reporting-worker', () => {
 
       await handler(trialPayload);
 
-      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-        tenantId: 'aurora-tenant-123',
-        status: 'WRITE_LOCKED',
-      });
+      expect(mockSetTenantStatusAcrossOrchestrators).toHaveBeenCalledWith('org-1', 'write-locked');
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'WRITE_LOCKED' });
       expect(item.reportedToStripe).toEqual({ BOOL: false });
@@ -479,7 +475,7 @@ describe('usage-reporting-worker', () => {
       mockGetTenantInfo.mockResolvedValueOnce({ status: 'WRITE_LOCKED' });
       await handler(trialPayload);
 
-      expect(mockUpdateTenantStatus).toHaveBeenCalledTimes(1);
+      expect(mockSetTenantStatusAcrossOrchestrators).toHaveBeenCalledTimes(1);
       // Both audit records still written
       const putCalls = ddbMock.commandCalls(PutItemCommand);
       expect(putCalls).toHaveLength(2);
@@ -496,7 +492,7 @@ describe('usage-reporting-worker', () => {
       await handler(basePayload);
 
       expect(mockGetTenantInfo).not.toHaveBeenCalled();
-      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(mockSetTenantStatusAcrossOrchestrators).not.toHaveBeenCalled();
       const putCalls = ddbMock.commandCalls(PutItemCommand);
       expect(putCalls).toHaveLength(2);
       for (const call of putCalls) {

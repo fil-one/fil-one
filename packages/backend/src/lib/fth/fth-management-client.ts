@@ -7,9 +7,17 @@ import { createApiError } from './fth-api-errors.js';
 
 export * from './fth-api-errors.js';
 
+// Local status union — keeps the low-level client independent of
+// service-orchestrator.ts. Matches FTH's TenantStatus enum.
+export type FthClientStatus = 'active' | 'write-locked' | 'disabled';
+
 export interface FthManagementClient {
   createClient(args: CreateClientArgs): Promise<FthClientRecord>;
   getClient(clientRef: string): Promise<FthClientRecord>;
+  updateClientStatus(
+    clientRef: string,
+    args: { status: FthClientStatus; displayName?: string; idempotencyKey?: string },
+  ): Promise<void>;
 
   createStorageUser(clientRef: string, args: CreateStorageUserArgs): Promise<FthStorageUser>;
   listStorageUsers(clientRef: string): Promise<FthStorageUser[]>;
@@ -265,6 +273,19 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
       ),
     getClient: (clientRef) =>
       request<FthClientRecord>('GET', '/management/v1/clients/{clientRef}', { clientRef }),
+    updateClientStatus: (clientRef, args) =>
+      request<void>(
+        'PATCH',
+        '/management/v1/clients/{clientRef}',
+        { clientRef },
+        {
+          body: {
+            status: args.status,
+            ...(args.displayName !== undefined && { displayName: args.displayName }),
+          },
+          idempotencyKey: args.idempotencyKey,
+        },
+      ),
 
     createStorageUser: (clientRef, args) =>
       request<FthStorageUser>(

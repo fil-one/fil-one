@@ -14,7 +14,11 @@ import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region } from '@filone/shared';
 import { getDynamoClient } from '../ddb-client.js';
-import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
+import {
+  createInstrumentedFthClient,
+  ensureTenantReady as ensureFthTenantReady,
+} from './fth-tenant-setup.js';
+import { FthNotFoundError } from './fth-management-client.js';
 import { NotImplementedError } from '../errors.js';
 import type {
   BucketDetails,
@@ -24,7 +28,15 @@ import type {
   IssuedAccessKey,
   PresignerContext,
   ServiceOrchestrator,
+  TenantStatus,
+  TenantStatusProbe,
 } from '../service-orchestrator.js';
+
+const FTH_TENANT_STATUSES: readonly TenantStatus[] = ['active', 'write-locked', 'disabled'];
+
+function normalizeFthStatus(status: string | undefined): TenantStatus | undefined {
+  return FTH_TENANT_STATUSES.find((s) => s === status);
+}
 
 import { createBucket as s3CreateBucket, listBuckets as s3ListBuckets } from '../s3-presigner.js';
 
@@ -61,6 +73,24 @@ export const fthOrchestrator = {
     if (!tenantId) return null;
     // TODO: check fthTenantSetupStatus
     return tenantId;
+  },
+
+  async updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void> {
+    // FTH uses the same lowercase-dashed status values, so no mapping is needed.
+    // A status PATCH is naturally idempotent, so no idempotency key is sent.
+    const client = createInstrumentedFthClient();
+    await client.updateClientStatus(tenantId, { status });
+  },
+
+  async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
+    const client = createInstrumentedFthClient();
+    try {
+      const record = await client.getClient(tenantId);
+      return { kind: 'ok', status: normalizeFthStatus(record.status) };
+    } catch (cause) {
+      if (cause instanceof FthNotFoundError) return { kind: 'not_found' };
+      return { kind: 'error', cause };
+    }
   },
 
   async getPresignerContext(tenantId: string): Promise<PresignerContext> {

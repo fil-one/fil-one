@@ -131,7 +131,7 @@ async function processTenantSetup(orgId: string): Promise<string> {
   return tenantId;
 }
 
-function createInstrumentedFthClient(): FthManagementClient {
+export function createInstrumentedFthClient(): FthManagementClient {
   const client = createFthManagementClient({
     baseUrl: process.env.FTH_MANAGEMENT_API_URL!,
     token: Resource.FthManagementApiToken.value,

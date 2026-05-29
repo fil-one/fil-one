@@ -57,6 +57,27 @@ export interface IssuedAccessKey {
 }
 
 /**
+ * Orchestrator-agnostic tenant status. These are the three lowercase-dashed
+ * values shared by every orchestrator. Aurora's generated `ModelsTenantStatus`
+ * additionally has a never-used `LOCKED` value we intentionally don't model.
+ */
+export type TenantStatus = 'active' | 'write-locked' | 'disabled';
+
+/**
+ * Result of a live tenant-status probe against an orchestrator's API.
+ *
+ * - `ok` carries the normalized {@link TenantStatus}, or `undefined` when the
+ *   orchestrator reports a status value we don't model.
+ * - `not_found` means the orchestrator has no such tenant (e.g. 404).
+ * - `error` means the probe could not be completed (transport/server error);
+ *   `cause` is the underlying error.
+ */
+export type TenantStatusProbe =
+  | { kind: 'ok'; status: TenantStatus | undefined }
+  | { kind: 'not_found' }
+  | { kind: 'error'; cause: unknown };
+
+/**
  * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.).
  * Each implementation handles tenant provisioning, bucket lifecycle,
  * access-key issuance, and presigning for a service orchestrator in a single region.
@@ -115,6 +136,23 @@ export interface ServiceOrchestrator {
   deleteBucket(tenantId: string, bucketName: string): Promise<void>;
   listBuckets(tenantId: string): Promise<BucketSummary[]>;
   getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null>;
+
+  /**
+   * Sets the tenant's status on this orchestrator's API (e.g. locking or
+   * unlocking writes when billing state changes). Like the other non-setup
+   * methods this is stateless and takes a `tenantId` directly — it calls the
+   * orchestrator API only and does not write to DDB.
+   */
+  updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void>;
+
+  /**
+   * Reads the tenant's current live status from this orchestrator's API. Like
+   * the other non-setup methods it is stateless and takes a `tenantId` directly,
+   * issues an orchestrator API call only, and never writes to DDB. Never throws:
+   * transport/server failures are returned as `{ kind: 'error' }` so background
+   * jobs can classify them (see {@link TenantStatusProbe}).
+   */
+  getTenantStatus(tenantId: string): Promise<TenantStatusProbe>;
 
   issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey>;
   findAccessKeyByName(

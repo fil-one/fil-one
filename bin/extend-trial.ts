@@ -7,6 +7,7 @@
 //   - Stripe subscription (trial_end pushed into the future, or recreated if canceled)
 //   - BillingTable subscription record (trialing + new trial dates, gracePeriodEndsAt cleared)
 //   - Aurora tenant (status → ACTIVE via backoffice API)
+//   - FTH client (status → active via the management API), when the org has an FTH tenant
 // Refuses to run against the "production" stage.
 //
 // You can obtain the `orgId` UUID by inspecting the response to `GET /me`
@@ -48,11 +49,12 @@ if (PROTECTED_STAGES.includes(stage)) {
   process.exit(1);
 }
 
-// Aurora backoffice config — non-prod only. The stage guard above blocks
-// production; we deliberately do not encode the production URL here.
+// Aurora backoffice + FTH management config — non-prod only. The stage guard
+// above blocks production; we deliberately do not encode production URLs here.
 // `sst shell` does not export Lambda-scoped env vars, so we set them locally.
 const AURORA_BACKOFFICE_URL = 'https://api-backoffice.dev.aur.lu/api';
 const AURORA_PARTNER_ID = 'ff';
+const FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.com';
 
 const dynamo = new DynamoDBClient({});
 const stripe = new Stripe(Resource.StripeSecretKey.value);
@@ -61,16 +63,17 @@ const auroraClient = createClient({
   headers: { 'X-Api-Key': Resource.AuroraBackofficeToken.value },
 });
 
-// 1. Resolve orgId → userId + auroraTenantId via UserInfoTable[ORG#{orgId}/PROFILE]
+// 1. Resolve orgId → userId + tenant ids via UserInfoTable[ORG#{orgId}/PROFILE]
 const orgRes = await dynamo.send(
   new GetItemCommand({
     TableName: Resource.UserInfoTable.name,
     Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-    ProjectionExpression: 'createdBy, auroraTenantId',
+    ProjectionExpression: 'createdBy, auroraTenantId, fthTenantId',
   }),
 );
 const userId = orgRes.Item?.createdBy?.S;
 const auroraTenantId = orgRes.Item?.auroraTenantId?.S;
+const fthTenantId = orgRes.Item?.fthTenantId?.S;
 if (!userId) {
   console.error(`No org PROFILE record (or no createdBy) for orgId="${orgId}"`);
   process.exit(1);
@@ -171,11 +174,38 @@ if (auroraError) {
   process.exit(1);
 }
 
+// 7. Unlock FTH client via the management API (only if the org has an FTH tenant).
+// FTH is a peer orchestrator in non-prod stages; mirror the Aurora unlock so the
+// account is re-activated everywhere it exists.
+let fthStatusLine = '(no FTH tenant)';
+if (fthTenantId) {
+  const fthResponse = await fetch(
+    `${FTH_MANAGEMENT_API_URL}/management/v1/clients/${encodeURIComponent(fthTenantId)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${Resource.FthManagementApiToken.value}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ status: 'active' }),
+    },
+  );
+  if (!fthResponse.ok) {
+    console.error('Failed to unlock FTH client.');
+    console.error(`  HTTP ${fthResponse.status} ${fthResponse.statusText}`);
+    console.error('  body:', await fthResponse.text());
+    process.exit(1);
+  }
+  fthStatusLine = 'active (set via FTH management API)';
+}
+
 console.log('After:');
 console.log(`  subscriptionStatus:   trialing`);
 console.log(`  trialStartedAt:       ${now.toISOString()}`);
 console.log(`  trialEndsAt:          ${trialEndsAt.toISOString()}`);
 console.log(`  gracePeriodEndsAt:    (cleared)`);
 console.log(`  aurora tenant status: ACTIVE (set via Aurora backoffice)`);
+console.log(`  fth client status:    ${fthStatusLine}`);
 console.log(`  stripeSubscriptionId: ${activeSubscriptionId}\n`);
 console.log('Done.');

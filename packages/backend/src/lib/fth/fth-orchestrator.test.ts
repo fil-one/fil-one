@@ -15,13 +15,20 @@ const ssmMock = mockClient(SSMClient);
 const s3Mock = mockClient(S3Client);
 
 const mockEnsureFthTenantReady = vi.fn();
+const mockUpdateClientStatus = vi.fn();
+const mockGetClient = vi.fn();
 vi.mock('./fth-tenant-setup.js', () => ({
   ensureTenantReady: (...args: unknown[]) => mockEnsureFthTenantReady(...args),
+  createInstrumentedFthClient: () => ({
+    updateClientStatus: (...args: unknown[]) => mockUpdateClientStatus(...args),
+    getClient: (...args: unknown[]) => mockGetClient(...args),
+  }),
 }));
 
 process.env.FILONE_STAGE = 'test';
 
 import { fthOrchestrator, _resetFthOrchestratorCachesForTesting } from './fth-orchestrator.js';
+import { FthApiError, FthNotFoundError } from './fth-management-client.js';
 import { BucketAlreadyExistsError } from '../errors.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
@@ -78,6 +85,64 @@ describe('fthOrchestrator.isTenantReady', () => {
       expect(result).toBe(expected);
     });
   }
+});
+
+describe('fthOrchestrator.updateTenantStatus', () => {
+  for (const status of ['active', 'write-locked', 'disabled'] as const) {
+    it(`passes "${status}" straight through to updateClientStatus`, async () => {
+      mockUpdateClientStatus.mockResolvedValue(undefined);
+
+      await fthOrchestrator.updateTenantStatus(fthClientId, status);
+
+      expect(mockUpdateClientStatus).toHaveBeenCalledWith(fthClientId, { status });
+    });
+  }
+});
+
+describe('fthOrchestrator.getTenantStatus', () => {
+  for (const status of ['active', 'write-locked', 'disabled'] as const) {
+    it(`returns the normalized "${status}" status from getClient`, async () => {
+      mockGetClient.mockResolvedValue({ id: fthClientId, status });
+
+      const result = await fthOrchestrator.getTenantStatus(fthClientId);
+
+      expect(result).toEqual({ kind: 'ok', status });
+      expect(mockGetClient).toHaveBeenCalledWith(fthClientId);
+    });
+  }
+
+  it('returns status undefined when FTH reports an unmodeled status', async () => {
+    mockGetClient.mockResolvedValue({ id: fthClientId, status: 'provisioning' });
+
+    const result = await fthOrchestrator.getTenantStatus(fthClientId);
+
+    expect(result).toEqual({ kind: 'ok', status: undefined });
+  });
+
+  it('returns status undefined when the client record has no status', async () => {
+    mockGetClient.mockResolvedValue({ id: fthClientId });
+
+    const result = await fthOrchestrator.getTenantStatus(fthClientId);
+
+    expect(result).toEqual({ kind: 'ok', status: undefined });
+  });
+
+  it('maps FthNotFoundError to not_found', async () => {
+    mockGetClient.mockRejectedValue(new FthNotFoundError('nope', undefined));
+
+    const result = await fthOrchestrator.getTenantStatus(fthClientId);
+
+    expect(result).toEqual({ kind: 'not_found' });
+  });
+
+  it('maps any other error to an error result', async () => {
+    const cause = new FthApiError(500, 'boom', undefined);
+    mockGetClient.mockRejectedValue(cause);
+
+    const result = await fthOrchestrator.getTenantStatus(fthClientId);
+
+    expect(result).toEqual({ kind: 'error', cause });
+  });
 });
 
 describe('fthOrchestrator.getPresignerContext', () => {

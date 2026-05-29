@@ -37,6 +37,17 @@ vi.mock('./aurora-portal.js', async (importOriginal) => {
   };
 });
 
+const mockUpdateAuroraTenantStatusApi = vi.fn();
+const mockGetAuroraTenantStatusApi = vi.fn();
+vi.mock('./aurora-backoffice.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../aurora/aurora-backoffice.js')>();
+  return {
+    ...original,
+    updateTenantStatus: (...args: unknown[]) => mockUpdateAuroraTenantStatusApi(...args),
+    getTenantStatus: (...args: unknown[]) => mockGetAuroraTenantStatusApi(...args),
+  };
+});
+
 const mockPortalListBuckets = vi.fn();
 const mockPortalGetBucketInfo = vi.fn();
 vi.mock('@filone/aurora-portal-client', () => ({
@@ -474,6 +485,71 @@ describe('auroraOrchestrator', () => {
       const result = await auroraOrchestrator.findAccessKeyByName('aurora-t-1', 'missing');
 
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('updateTenantStatus', () => {
+    const statusCases: Record<string, 'ACTIVE' | 'WRITE_LOCKED' | 'DISABLED'> = {
+      active: 'ACTIVE',
+      'write-locked': 'WRITE_LOCKED',
+      disabled: 'DISABLED',
+    };
+
+    for (const [status, modelsStatus] of Object.entries(statusCases)) {
+      it(`maps "${status}" to ${modelsStatus} and calls the aurora-backoffice helper`, async () => {
+        mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+
+        await auroraOrchestrator.updateTenantStatus('aurora-t-1', status as never);
+
+        expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledWith({
+          tenantId: 'aurora-t-1',
+          status: modelsStatus,
+        });
+      });
+    }
+  });
+
+  describe('getTenantStatus', () => {
+    const okCases: Record<string, string | undefined> = {
+      ACTIVE: 'active',
+      WRITE_LOCKED: 'write-locked',
+      DISABLED: 'disabled',
+      LOCKED: undefined,
+    };
+
+    for (const [modelsStatus, expected] of Object.entries(okCases)) {
+      it(`maps ${modelsStatus} to ${expected ?? 'undefined'}`, async () => {
+        mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: modelsStatus });
+
+        const result = await auroraOrchestrator.getTenantStatus('aurora-t-1');
+
+        expect(result).toEqual({ kind: 'ok', status: expected });
+      });
+    }
+
+    it('maps an ok result with no status to undefined', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: undefined });
+
+      const result = await auroraOrchestrator.getTenantStatus('aurora-t-1');
+
+      expect(result).toEqual({ kind: 'ok', status: undefined });
+    });
+
+    it('passes a not_found result through unchanged', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'not_found' });
+
+      const result = await auroraOrchestrator.getTenantStatus('aurora-t-1');
+
+      expect(result).toEqual({ kind: 'not_found' });
+    });
+
+    it('passes an error result through unchanged', async () => {
+      const cause = new Error('boom');
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'error', cause });
+
+      const result = await auroraOrchestrator.getTenantStatus('aurora-t-1');
+
+      expect(result).toEqual({ kind: 'error', cause });
     });
   });
 

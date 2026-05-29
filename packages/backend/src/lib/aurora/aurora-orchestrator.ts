@@ -28,6 +28,12 @@ import {
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
 } from '../aurora/aurora-portal.js';
+import {
+  getTenantStatus as getAuroraTenantStatusApi,
+  mapFromModelsTenantStatus,
+  mapToModelsTenantStatus,
+  updateTenantStatus as updateAuroraTenantStatusApi,
+} from '../aurora/aurora-backoffice.js';
 import { getDynamoClient } from '../ddb-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import { NotImplementedError } from '../errors.js';
@@ -39,6 +45,8 @@ import type {
   IssuedAccessKey,
   PresignerContext,
   ServiceOrchestrator,
+  TenantStatus,
+  TenantStatusProbe,
 } from '../service-orchestrator.js';
 
 const dynamo = getDynamoClient();
@@ -124,6 +132,19 @@ export const auroraOrchestrator = {
     const setupStatus = Item?.auroraSetupStatus?.S ?? Item?.setupStatus?.S;
     if (!isOrgSetupComplete(setupStatus)) return null;
     return tenantId;
+  },
+
+  async updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void> {
+    await updateAuroraTenantStatusApi({ tenantId, status: mapToModelsTenantStatus(status) });
+  },
+
+  async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
+    const result = await getAuroraTenantStatusApi({ tenantId });
+    if (result.kind !== 'ok') return result;
+    return {
+      kind: 'ok',
+      status: result.status ? mapFromModelsTenantStatus(result.status) : undefined,
+    };
   },
 
   async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {

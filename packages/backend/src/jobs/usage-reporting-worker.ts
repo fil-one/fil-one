@@ -8,9 +8,11 @@ import {
   getStorageSamples,
   getOperationsSamples,
   getTenantInfo,
-  updateTenantStatus,
+  mapToModelsTenantStatus,
 } from '../lib/aurora/aurora-backoffice.js';
 import type { ModelsTenantStatus } from '../lib/aurora/aurora-backoffice.js';
+import type { TenantStatus } from '../lib/service-orchestrator.js';
+import { setTenantStatusAcrossOrchestrators } from '../lib/tenant-status.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
 import { calculateAverageUsage } from '../lib/usage-calculator.js';
 
@@ -29,37 +31,42 @@ export interface UsageReportingWorkerPayload {
 
 async function enforceTenantLocks({
   tenantId,
+  orgId,
   currentStatus,
   currentStorageBytes,
   totalEgressBytes,
 }: {
   tenantId: string;
+  orgId: string;
   currentStatus: ModelsTenantStatus | undefined;
   currentStorageBytes: number;
   totalEgressBytes: number;
 }): Promise<ModelsTenantStatus> {
-  // Determine desired status (DISABLED > WRITE_LOCKED > ACTIVE)
-  let desiredStatus: ModelsTenantStatus;
+  // Determine desired status (disabled > write-locked > active). The lowercase
+  // TenantStatus is the source of truth; the uppercase ModelsTenantStatus is
+  // derived from it for the change-guard and the returned audit value.
+  let desired: TenantStatus;
   if (totalEgressBytes >= TRIAL_EGRESS_LIMIT) {
-    desiredStatus = 'DISABLED';
+    desired = 'disabled';
   } else if (currentStorageBytes >= TRIAL_STORAGE_LIMIT) {
-    desiredStatus = 'WRITE_LOCKED';
+    desired = 'write-locked';
   } else {
-    desiredStatus = 'ACTIVE';
+    desired = 'active';
   }
+  const desiredModels = mapToModelsTenantStatus(desired);
 
-  if (desiredStatus !== currentStatus) {
+  if (desiredModels !== currentStatus) {
     console.log('[usage-worker] Updating tenant status', {
       tenantId,
       from: currentStatus,
-      to: desiredStatus,
+      to: desiredModels,
       currentStorageBytes,
       totalEgressBytes,
     });
-    await updateTenantStatus({ tenantId, status: desiredStatus });
+    await setTenantStatusAcrossOrchestrators(orgId, desired);
   }
 
-  return desiredStatus;
+  return desiredModels;
 }
 
 export async function handler(event: UsageReportingWorkerPayload): Promise<void> {
