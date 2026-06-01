@@ -12,7 +12,7 @@ import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
-import { S3Region } from '@filone/shared';
+import { getS3Endpoint, S3Region } from '@filone/shared';
 import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
 import { getDynamoClient } from '../ddb-client.js';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
@@ -20,7 +20,7 @@ import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   NotImplementedError,
-} from '../service-orchestrator.js';
+} from '../errors.js';
 import type {
   BucketDetails,
   BucketSummary,
@@ -82,9 +82,10 @@ export const fthOrchestrator = {
   },
 
   async getPresignerContext(tenantId: string): Promise<PresignerContext> {
+    const stage = process.env.FILONE_STAGE!;
     const credentials = await getFthS3Credentials(tenantId);
     return {
-      endpointUrl: process.env.FTH_S3_URL!,
+      endpointUrl: getS3Endpoint(fthOrchestrator.region, stage),
       region: 'us-east-1',
       credentials,
       forcePathStyle: true,
@@ -129,12 +130,16 @@ export const fthOrchestrator = {
     }));
   },
 
-  async getBucket(_tenantId: string, bucketName: string): Promise<BucketDetails | null> {
-    // TODO: replace with a real implementation
+  async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
+    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
+    const { buckets } = await s3ListBuckets(ctx);
+    const match = buckets.find((b) => b.name === bucketName);
+    if (!match) return null;
+
     return {
       bucketName,
       region: fthOrchestrator.region,
-      createdAt: new Date().toISOString(),
+      createdAt: match.createdAt,
       isPublic: false,
       versioning: false,
       encrypted: true,

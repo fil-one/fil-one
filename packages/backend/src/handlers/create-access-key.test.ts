@@ -37,7 +37,7 @@ process.env.FILONE_STAGE = 'test';
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './create-access-key.js';
-import { AccessKeyAlreadyExistsError } from '../lib/service-orchestrator.js';
+import { AccessKeyAlreadyExistsError } from '../lib/errors.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------

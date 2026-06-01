@@ -3,9 +3,9 @@ import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
-} from './service-orchestrator.js';
+} from './errors.js';
 
-describe('service-orchestrator error classes', () => {
+describe('error classes', () => {
   describe('BucketAlreadyExistsError', () => {
     it('carries the bucket name in its message', () => {
       const err = new BucketAlreadyExistsError('my-bucket');

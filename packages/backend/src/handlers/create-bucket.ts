@@ -4,7 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
 import { CreateBucketSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
+import { BucketAlreadyExistsError } from '../lib/errors.js';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
