@@ -8,7 +8,6 @@
 //     getPresignerContext) speak S3 directly against the FTH S3 endpoint
 //     using the service access key stashed in SSM during setup.
 
-import { randomUUID } from 'node:crypto';
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import QuickLRU from 'quick-lru';
@@ -64,7 +63,8 @@ export const fthOrchestrator = {
   region: S3Region.UsEast1,
 
   async ensureTenantReady(orgId: string): Promise<string | null> {
-    return ensureFthTenantReady(orgId);
+    const client = createInstrumentedFthClient();
+    return ensureFthTenantReady(client, orgId);
   },
 
   async isTenantReady(orgId: string): Promise<string | null> {
@@ -151,7 +151,7 @@ export const fthOrchestrator = {
         permissions: buildFthPermissions(opts.permissions, opts.granularPermissions),
         buckets: opts.buckets ?? [],
         expiresAt: opts.expiresAt ?? null,
-        idempotencyKey: randomUUID(),
+        idempotencyKey: `issue-key-${opts.keyName}`,
       });
 
       return {

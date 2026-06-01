@@ -369,6 +369,85 @@ describe('create-access-key baseHandler', () => {
     });
   });
 
+  it('recovers DynamoDB record when same keyName exists only in a different region', async () => {
+    mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        {
+          pk: { S: 'ORG#org-1' },
+          sk: { S: 'ACCESSKEY#fth-key-7' },
+          keyName: { S: 'My Key' },
+          accessKeyId: { S: 'AKIAOTHERREGION' },
+          createdAt: { S: '2026-03-10T00:00:00Z' },
+          status: { S: 'active' },
+          region: { S: 'us-east-1' },
+        },
+      ],
+    });
+    mockFindAccessKeyByName.mockResolvedValue({
+      id: 'aurora-key-1',
+      accessKeyId: 'AKIA1234567890',
+      createdAt: '2026-03-10T00:00:00Z',
+    });
+    ddbMock.on(PutItemCommand).resolves({});
+
+    // validBody() uses region eu-west-1
+    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(409);
+    expect(mockFindAccessKeyByName).toHaveBeenCalled();
+    const putCalls = ddbMock.commandCalls(PutItemCommand);
+    expect(putCalls).toHaveLength(1);
+    const item = putCalls[0].args[0].input.Item!;
+    expect(item).toMatchObject({
+      pk: { S: 'ORG#org-1' },
+      sk: { S: 'ACCESSKEY#aurora-key-1' },
+      keyName: { S: 'My Key' },
+      region: { S: 'eu-west-1' },
+    });
+  });
+
+  it('treats DynamoDB rows without region as eu-west-1 (recovery proceeds when request region differs)', async () => {
+    mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
+    // Legacy row: matching keyName, no `region` attribute -> treated as eu-west-1
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        {
+          pk: { S: 'ORG#org-1' },
+          sk: { S: 'ACCESSKEY#legacy-key-1' },
+          keyName: { S: 'My Key' },
+          accessKeyId: { S: 'AKIALEGACY' },
+          createdAt: { S: '2026-01-01T00:00:00Z' },
+          status: { S: 'active' },
+        },
+      ],
+    });
+    mockFindAccessKeyByName.mockResolvedValue({
+      id: 'fth-key-7',
+      accessKeyId: 'AKIA1234567890',
+      createdAt: '2026-03-10T00:00:00Z',
+    });
+    ddbMock.on(PutItemCommand).resolves({});
+
+    const event = buildEvent({
+      body: JSON.stringify({
+        keyName: 'My Key',
+        permissions: ['read', 'write', 'list', 'delete'],
+        bucketScope: 'all',
+        region: 'us-east-1',
+      }),
+      userInfo: USER_INFO,
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(409);
+    const putCalls = ddbMock.commandCalls(PutItemCommand);
+    expect(putCalls).toHaveLength(1);
+    const item = putCalls[0].args[0].input.Item!;
+    expect(item.region.S).toBe('us-east-1');
+  });
+
   describe('region', () => {
     beforeEach(() => {
       ddbMock.on(PutItemCommand).resolves({});

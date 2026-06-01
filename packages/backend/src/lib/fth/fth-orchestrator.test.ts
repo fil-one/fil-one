@@ -88,7 +88,7 @@ describe('fthOrchestrator.ensureTenantReady', () => {
     const result = await fthOrchestrator.ensureTenantReady(orgId);
 
     expect(result).toBe(fthClientId);
-    expect(mockEnsureFthTenantReady).toHaveBeenCalledWith(orgId);
+    expect(mockEnsureFthTenantReady).toHaveBeenCalledWith(mockFthClient, orgId);
   });
 
   it('returns null when ensureTenantReady from fth-tenant-setup returns null', async () => {

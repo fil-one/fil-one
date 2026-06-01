@@ -28,6 +28,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
 
   const { orgId } = getUserInfo(event);
 
+  // Verify the key belongs to this org
   const { Item } = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,

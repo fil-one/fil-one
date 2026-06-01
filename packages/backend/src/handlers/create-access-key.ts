@@ -3,8 +3,8 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CreateAccessKeySchema, isSupportedRegion } from '@filone/shared';
-import type { CreateAccessKeyResponse, ErrorResponse, S3Region } from '@filone/shared';
+import { CreateAccessKeySchema, S3Region, isSupportedRegion } from '@filone/shared';
+import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import {
@@ -140,7 +140,10 @@ async function recoverDuplicateKey(
     }),
   );
 
-  const alreadyInDb = existingKeys?.some((item) => item.keyName?.S === keyName);
+  const alreadyInDb = existingKeys?.some((item) => {
+    const itemRegion = (item.region?.S as S3Region | undefined) ?? S3Region.EuWest1;
+    return item.keyName?.S === keyName && itemRegion === region;
+  });
   if (alreadyInDb) {
     return; // Simple duplicate — nothing to recover
   }
