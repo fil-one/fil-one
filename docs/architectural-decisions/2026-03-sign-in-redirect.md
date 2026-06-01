@@ -75,7 +75,9 @@ https://staging.fil.one/sign-in
   → 302 https://dev-oar2nhqh58xf5pwf.us.auth0.com/authorize?client_id=hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ&redirect_uri=https%3A%2F%2Fstaging.fil.one%2Fapi%2Fauth%2Fcallback&...&state=<uuid>
 ```
 
-### Example: CloudFront-only (no custom domain)
+### Example: CloudFront-only (no custom domain) — historical
+
+> **Superseded (2026-05):** all stages — including PR previews and personal dev stacks — now serve from a custom domain (`{stage}.dev.fil.one` for ephemeral stages). See [`2026-05-dev-subdomain.md`](./2026-05-dev-subdomain.md). The example below is retained for historical context.
 
 ```
 https://dc6bx6mfz5y94.cloudfront.net/sign-in
@@ -83,7 +85,7 @@ https://dc6bx6mfz5y94.cloudfront.net/sign-in
   → 302 Auth0 authorize URL with redirect_uri=https%3A%2F%2Fdc6bx6mfz5y94.cloudfront.net%2Fapi%2Fauth%2Fcallback
 ```
 
-The CloudFront distribution URL must be registered as an Allowed Callback URL in the Auth0 application settings (handled automatically by the `setup-integrations` stack job on deploy).
+The deployed origin (CloudFront URL then, custom domain now) must be registered as an Allowed Callback URL in the Auth0 application settings — handled automatically by the `setup-integrations` stack job on deploy.
 
 ### Direct API entry point (bookmarkable)
 
