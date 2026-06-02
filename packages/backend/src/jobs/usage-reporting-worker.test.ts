@@ -28,10 +28,16 @@ vi.mock('../lib/stripe-client.js', () => ({
     mockCustomersUpdate(customerId, { metadata }),
 }));
 
-// Orchestrator registry — the worker fetches metrics through this now.
-const mockGetTenantUsageMetrics = vi.fn();
-vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: () => ({ getTenantUsageMetrics: mockGetTenantUsageMetrics }),
+// The worker now calls the Aurora and FTH orchestrators directly. Both route to
+// the same mock fn, which distinguishes regions by the tenantId argument.
+const { mockGetTenantUsageMetrics } = vi.hoisted(() => ({
+  mockGetTenantUsageMetrics: vi.fn(),
+}));
+vi.mock('../lib/aurora/aurora-orchestrator.js', () => ({
+  auroraOrchestrator: { getTenantUsageMetrics: mockGetTenantUsageMetrics },
+}));
+vi.mock('../lib/fth/fth-orchestrator.js', () => ({
+  fthOrchestrator: { getTenantUsageMetrics: mockGetTenantUsageMetrics },
 }));
 
 // aurora-backoffice now only supplies trial-lock status read + write.

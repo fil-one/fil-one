@@ -2,24 +2,19 @@ import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { Resource } from 'sst';
-import {
-  GB_BYTES,
-  TRIAL_STORAGE_LIMIT,
-  TRIAL_EGRESS_LIMIT,
-  formatBytes,
-  S3Region,
-} from '@filone/shared';
+import { GB_BYTES, TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT, formatBytes } from '@filone/shared';
 import { getStripeClient, updateCustomerMetadata } from '../lib/stripe-client.js';
 import { getTenantInfo, updateTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import type { ModelsTenantStatus } from '../lib/aurora/aurora-backoffice.js';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
 import {
   calculateAverageUsage,
   mergeStorageSamples,
   sortStorageSamplesByTimestamp,
 } from '../lib/usage-calculator.js';
-import type { StorageUsageSample, EgressUsageSample } from '../lib/service-orchestrator.js';
+import type { ServiceOrchestrator, TenantUsageMetrics } from '../lib/service-orchestrator.js';
+import { auroraOrchestrator } from '../lib/aurora/aurora-orchestrator.js';
+import { fthOrchestrator } from '../lib/fth/fth-orchestrator.js';
 
 const dynamo = getDynamoClient();
 
@@ -34,13 +29,6 @@ export interface UsageReportingWorkerPayload {
   currentPeriodStart: string;
   subscriptionStatus: string;
   reportDate: string;
-}
-
-interface RegionMetrics {
-  region: S3Region;
-  tenantId: string;
-  storageSamples: StorageUsageSample[];
-  egressSamples: EgressUsageSample[];
 }
 
 interface AggregateUsage {
@@ -108,20 +96,29 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
 
   // Each region the org is provisioned in is fetched independently, then
   // aggregated and reported on the org-level.
-  const orgRegions: { region: S3Region; tenantId: string }[] = [];
-  if (auroraTenantId) orgRegions.push({ region: S3Region.EuWest1, tenantId: auroraTenantId });
-  if (fthTenantId) orgRegions.push({ region: S3Region.UsEast1, tenantId: fthTenantId });
+  const orgRegions: { orchestrator: ServiceOrchestrator; tenantId: string }[] = [];
+  if (auroraTenantId)
+    orgRegions.push({ orchestrator: auroraOrchestrator, tenantId: auroraTenantId });
+  if (fthTenantId) orgRegions.push({ orchestrator: fthOrchestrator, tenantId: fthTenantId });
 
   // Trial lock enforcement is Aurora-only; fetch its tenant info alongside metrics.
   if (orgRegions.length === 0) {
     throw new Error('[usage-worker] No tenant id provided (auroraTenantId or fthTenantId)');
   }
 
-  let regions: RegionMetrics[];
-  let tenantRegionInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
+  let usageMetrics: TenantUsageMetrics[];
+  let auroraTenantInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
   try {
-    [regions, tenantRegionInfo] = await Promise.all([
-      Promise.all(orgRegions.map((t) => fetchRegionUsage(t, currentPeriodStart, now))),
+    [usageMetrics, auroraTenantInfo] = await Promise.all([
+      Promise.all(
+        orgRegions.map((t) =>
+          t.orchestrator.getTenantUsageMetrics(t.tenantId, {
+            from: currentPeriodStart,
+            to: now,
+            interval: '1h',
+          }),
+        ),
+      ),
       isTrial && auroraTenantId ? getTenantInfo({ tenantId: auroraTenantId }) : null,
     ]);
   } catch (error) {
@@ -138,7 +135,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     throw error;
   }
 
-  const aggregate = aggregateUsage(regions);
+  const aggregate = aggregateUsageMetrics(usageMetrics);
   const averageStorageGbUsed = aggregate.averageStorageBytesUsed / GB_BYTES;
 
   const { reported } = await reportStorageToStripe({
@@ -159,7 +156,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     isTrial,
     auroraTenantId,
     orgId,
-    currentStatus: tenantRegionInfo?.status,
+    currentStatus: auroraTenantInfo?.status,
     currentStorageBytes: aggregate.currentStorageBytes,
     totalEgressBytes: aggregate.totalEgressBytes,
   });
@@ -182,57 +179,28 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
 }
 
 /**
- * Fetches one region's raw, normalized usage time series via its orchestrator.
- * No per-region reduction happens here — averaging per-region and summing the
- * means skews billing when series are misaligned, so all scalars are derived
- * once from the merged series in `aggregateUsage`.
- */
-async function fetchRegionUsage(
-  tenant: { region: S3Region; tenantId: string },
-  from: string,
-  to: string,
-): Promise<RegionMetrics> {
-  const orchestrator = getOrchestratorForRegion(tenant.region);
-  const metrics = await orchestrator.getTenantUsageMetrics(tenant.tenantId, {
-    from,
-    to,
-    interval: '1h',
-  });
-  // Orchestrators don't guarantee chronological order; sort once so `.at(-1)`
-  // is the true latest sample and the series fed into `mergeStorageSamples`
-  // (which carries values forward) satisfies its sorted-ascending assumption.
-  return {
-    region: tenant.region,
-    tenantId: tenant.tenantId,
-    storageSamples: sortStorageSamplesByTimestamp(metrics.storage),
-    egressSamples: metrics.egress,
-  };
-}
-
-/**
  * Aggregates per-region data into org-level totals. The storage average is
  * computed by merging the regions' time series (carrying forward each region's
  * last value) and averaging once — summing per-region means skews billing when
  * series are misaligned.
  */
-function aggregateUsage(regions: RegionMetrics[]): AggregateUsage {
-  const crossRegionAverageUsage = calculateAverageUsage(
-    mergeStorageSamples(regions.map((r) => r.storageSamples)),
-  );
-  const currentStorageBytes = regions.reduce(
-    (sum, r) => sum + (r.storageSamples.at(-1)?.bytesUsed ?? 0),
+function aggregateUsageMetrics(usageMetrics: TenantUsageMetrics[]): AggregateUsage {
+  const sortedStorageMetrics = usageMetrics.map((r) => sortStorageSamplesByTimestamp(r.storage));
+  const averageUsage = calculateAverageUsage(mergeStorageSamples(sortedStorageMetrics));
+  const currentStorageBytes = usageMetrics.reduce(
+    (sum, r) => sum + (r.storage.at(-1)?.bytesUsed ?? 0),
     0,
   );
-  const totalEgressBytes = regions.reduce(
-    (sum, r) => sum + r.egressSamples.reduce((s, e) => s + (e.bytesUsed ?? 0), 0),
+  const totalEgressBytes = usageMetrics.reduce(
+    (sum, r) => sum + r.egress.reduce((s, e) => s + (e.bytesUsed ?? 0), 0),
     0,
   );
   return {
-    averageStorageBytesUsed: crossRegionAverageUsage.averageStorageBytesUsed,
+    averageStorageBytesUsed: averageUsage.averageStorageBytesUsed,
     currentStorageBytes,
     totalEgressBytes,
     // Number of distinct timestamps the org-level average is computed over.
-    sampleCount: crossRegionAverageUsage.sampleCount,
+    sampleCount: averageUsage.sampleCount,
   };
 }
 
