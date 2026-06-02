@@ -120,6 +120,42 @@ describe('mergeStorageSamples', () => {
       { timestamp: '2024-01-01T02:00:00Z', bytesUsed: 11000, objectCount: 0 }, // B carried fwd
     ]);
   });
+
+  it('merges a fully disjoint pair onto the union grid via carry-forward', () => {
+    // A and B never share a timestamp; each is carried forward across the
+    // other's instants (0 for each region before its first sample).
+    const a = [
+      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1000, objectCount: 1 },
+      { timestamp: '2024-01-01T02:00:00Z', bytesUsed: 2000, objectCount: 2 },
+    ];
+    const b = [
+      { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 500, objectCount: 3 },
+      { timestamp: '2024-01-01T03:00:00Z', bytesUsed: 700, objectCount: 4 },
+    ];
+
+    expect(mergeStorageSamples([a, b])).toEqual([
+      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1000, objectCount: 1 }, // B not yet provisioned
+      { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1500, objectCount: 4 }, // A carried fwd
+      { timestamp: '2024-01-01T02:00:00Z', bytesUsed: 2500, objectCount: 5 }, // B carried fwd
+      { timestamp: '2024-01-01T03:00:00Z', bytesUsed: 2700, objectCount: 6 }, // A carried fwd
+    ]);
+  });
+
+  it('builds the union grid even when series are interleaved out of overlap', () => {
+    // A's first sample lands between B's two samples — the grid is still the
+    // sorted union, independent of how the series interleave.
+    const a = [{ timestamp: '2024-01-01T01:00:00Z', bytesUsed: 100, objectCount: 0 }];
+    const b = [
+      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 10, objectCount: 0 },
+      { timestamp: '2024-01-01T02:00:00Z', bytesUsed: 20, objectCount: 0 },
+    ];
+
+    expect(mergeStorageSamples([a, b])).toEqual([
+      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 10, objectCount: 0 }, // A not yet provisioned
+      { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 110, objectCount: 0 }, // B carried fwd
+      { timestamp: '2024-01-01T02:00:00Z', bytesUsed: 120, objectCount: 0 }, // A carried fwd
+    ]);
+  });
 });
 
 describe('sortStorageSamplesByTimestamp', () => {

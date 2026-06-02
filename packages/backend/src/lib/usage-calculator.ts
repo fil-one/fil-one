@@ -32,42 +32,40 @@ export function sortStorageSamplesByTimestamp(samples: StorageUsageSample[]): St
 }
 
 /**
- * Merges multiple per-region storage time series into a single org-level series.
+ * Merges per-region storage series into one org-level series, summing each
+ * region's last-known value at every timestamp. Storage is a gauge, so a region
+ * with no sample at a timestamp carries forward its previous value (0 before its
+ * first). This keeps a later `calculateAverageUsage()` accurate when regions
+ * report misaligned timestamps; summing per-region averages would skew billing.
  *
- * Assumes each input series is already sorted ascending by timestamp. Orchestrators
- * do not guarantee chronological order, so callers must sort each series first (e.g.
- * via `sortStorageSamplesByTimestamp`); otherwise carry-forward picks the wrong
- * last-known value. RFC3339 UTC `Z` timestamps sort correctly lexically.
- *
- * Storage is a level (gauge), so for any timestamp where a region has no sample
- * we carry forward that region's last-known value (0 before its first sample).
- * This makes `calculateAverageUsage()` on the result a true org-wide average even
- * when regions return differing sample counts or timestamps — summing per-region
- * averages instead skews billing whenever series are misaligned (partial series,
- * API lag, a newly-provisioned tenant).
+ * Assumes each series is sorted ascending by timestamp (e.g. via
+ * `sortStorageSamplesByTimestamp`) — carry-forward depends on order.
  */
 export function mergeStorageSamples(series: StorageUsageSample[][]): StorageUsageSample[] {
   const timestamps = [...new Set(series.flatMap((s) => s.map((p) => p.timestamp)))].sort();
-  if (timestamps.length === 0) return [];
 
-  const idx = series.map(() => 0);
-  const lastBytes = series.map(() => 0);
-  const lastCount = series.map(() => 0);
+  // Align every region onto the shared timestamp grid, then sum the aligned
+  // grids element-wise — once gaps are filled, the merge is a plain sum.
+  const aligned = series.map((samples) => fillGaps(samples, timestamps));
+  return timestamps.map((timestamp, i) => ({
+    timestamp,
+    bytesUsed: aligned.reduce((sum, s) => sum + s[i].bytesUsed, 0),
+    objectCount: aligned.reduce((sum, s) => sum + s[i].objectCount, 0),
+  }));
+}
 
+/**
+ * Resamples one region's series onto `timestamps`, carrying its last-known value
+ * forward into gaps (0 before its first sample). Assumes both are sorted
+ * ascending by timestamp.
+ */
+function fillGaps(samples: StorageUsageSample[], timestamps: string[]): StorageUsageSample[] {
   return timestamps.map((timestamp) => {
-    series.forEach((s, r) => {
-      // Advance this region's pointer through every sample at or before the
-      // current timestamp, carrying forward its most recent value.
-      while (idx[r] < s.length && s[idx[r]].timestamp <= timestamp) {
-        lastBytes[r] = s[idx[r]].bytesUsed ?? 0;
-        lastCount[r] = s[idx[r]].objectCount ?? 0;
-        idx[r] += 1;
-      }
-    });
+    const latest = samples.filter((s) => s.timestamp <= timestamp).at(-1);
     return {
       timestamp,
-      bytesUsed: lastBytes.reduce((a, b) => a + b, 0),
-      objectCount: lastCount.reduce((a, b) => a + b, 0),
+      bytesUsed: latest?.bytesUsed ?? 0,
+      objectCount: latest?.objectCount ?? 0,
     };
   });
 }

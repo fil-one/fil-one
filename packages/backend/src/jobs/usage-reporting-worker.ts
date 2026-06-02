@@ -14,7 +14,6 @@ import {
 } from '../lib/usage-calculator.js';
 import type { ServiceOrchestrator, TenantUsageMetrics } from '../lib/service-orchestrator.js';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
-// Imported only for its `.id`, to identify the Aurora region for trial-lock enforcement.
 import { auroraOrchestrator } from '../lib/aurora/aurora-orchestrator.js';
 
 const dynamo = getDynamoClient();
