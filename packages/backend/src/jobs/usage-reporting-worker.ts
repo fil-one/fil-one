@@ -206,8 +206,8 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
 function aggregateUsageMetrics(usageMetrics: TenantUsageMetrics[]): AggregateUsage {
   const sortedStorageMetrics = usageMetrics.map((r) => sortStorageSamplesByTimestamp(r.storage));
   const averageUsage = calculateAverageUsage(mergeStorageSamples(sortedStorageMetrics));
-  const currentStorageBytes = usageMetrics.reduce(
-    (sum, r) => sum + (r.storage.at(-1)?.bytesUsed ?? 0),
+  const currentStorageBytes = sortedStorageMetrics.reduce(
+    (sum, r) => sum + (r.at(-1)?.bytesUsed ?? 0),
     0,
   );
   const totalEgressBytes = usageMetrics.reduce(
