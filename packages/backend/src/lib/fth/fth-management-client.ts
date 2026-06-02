@@ -113,6 +113,10 @@ export interface FthAccessKeyWithSecret extends FthAccessKey {
   secretAccessKey: string;
 }
 
+interface FthListResponse<T> {
+  items: T[];
+}
+
 export interface CreateClientArgs {
   externalId: string;
   displayName: string;
@@ -282,10 +286,14 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
           idempotencyKey: args.idempotencyKey,
         },
       ),
-    listStorageUsers: (clientRef) =>
-      request<FthStorageUser[]>('GET', '/management/v1/clients/{clientRef}/storage-users', {
-        clientRef,
-      }),
+    listStorageUsers: async (clientRef) => {
+      const res = await request<FthListResponse<FthStorageUser>>(
+        'GET',
+        '/management/v1/clients/{clientRef}/storage-users',
+        { clientRef },
+      );
+      return res.items ?? [];
+    },
     getStorageUser: (clientRef, userRef) =>
       request<FthStorageUser>('GET', '/management/v1/clients/{clientRef}/storage-users/{userRef}', {
         clientRef,
@@ -307,10 +315,14 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
           idempotencyKey: args.idempotencyKey,
         },
       ),
-    listAccessKeys: (clientRef) =>
-      request<FthAccessKey[]>('GET', '/management/v1/clients/{clientRef}/access-keys', {
-        clientRef,
-      }),
+    listAccessKeys: async (clientRef) => {
+      const res = await request<FthListResponse<FthAccessKey>>(
+        'GET',
+        '/management/v1/clients/{clientRef}/access-keys',
+        { clientRef },
+      );
+      return res.items ?? [];
+    },
     getAccessKey: (clientRef, accessKeyId) =>
       request<FthAccessKey>('GET', '/management/v1/clients/{clientRef}/access-keys/{accessKeyId}', {
         clientRef,
