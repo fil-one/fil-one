@@ -19,6 +19,19 @@ import type { S3Object } from '@filone/shared';
 import { BucketAlreadyExistsError } from './errors.js';
 import type { PresignerContext } from './service-orchestrator.js';
 
+// AWS SDK JS hoists every `x-amz-*` request header into the presigned URL's
+// query string by default.
+//
+// FTH/Fortilyx S3 gateway does not support `x-amz-content-sha256=UNSIGNED-PAYLOAD`.
+//
+// On the other hand, boto3 omits the content hash from the query string entirely. The configuration
+// below forces the SDK JS presigner to keep it as an unhoisted, unsignable header so it disappears
+// from the URL.
+const PRESIGN_OPTIONS = {
+  unhoistableHeaders: new Set(['x-amz-content-sha256']),
+  unsignableHeaders: new Set(['x-amz-content-sha256']),
+};
+
 function createS3Client(ctx: PresignerContext): S3Client {
   return new S3Client({
     endpoint: ctx.endpointUrl,
@@ -141,7 +154,7 @@ export async function getPresignedPutObjectUrl(options: PresignPutObjectOptions)
       ...(contentType && { ContentType: contentType }),
       ...(metadata && { Metadata: metadata }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
 
@@ -158,7 +171,7 @@ export async function getPresignedGetObjectUrl(options: PresignGetObjectOptions)
       Key: key,
       ...(versionId && { VersionId: versionId }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
 
@@ -184,7 +197,7 @@ export async function getPresignedListObjectsUrl(
       ...(maxKeys && { MaxKeys: maxKeys }),
       ...(continuationToken && { ContinuationToken: continuationToken }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
 
@@ -213,7 +226,7 @@ export async function getPresignedListObjectVersionsUrl(
       ...(keyMarker && { KeyMarker: keyMarker }),
       ...(versionIdMarker && { VersionIdMarker: versionIdMarker }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
 
@@ -235,7 +248,7 @@ export async function getPresignedHeadObjectUrl(
       Key: key,
       ...(versionId && { VersionId: versionId }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
 
@@ -257,7 +270,7 @@ export async function getPresignedGetObjectRetentionUrl(
       Key: key,
       ...(versionId && { VersionId: versionId }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
 
@@ -279,6 +292,6 @@ export async function getPresignedDeleteObjectUrl(
       Key: key,
       ...(versionId && { VersionId: versionId }),
     }),
-    { expiresIn },
+    { expiresIn, ...PRESIGN_OPTIONS },
   );
 }
