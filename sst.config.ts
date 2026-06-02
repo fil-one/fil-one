@@ -752,10 +752,18 @@ export default $config({
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
-      link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, auroraBackofficeToken],
+      link: [
+        billingTable,
+        userInfoTable,
+        stripeSecretKey,
+        stripePriceId,
+        auroraBackofficeToken,
+        // FTH orchestrator's getTenantUsageMetrics() reads this via Resource.FthManagementApiToken.
+        fthManagementApiToken,
+      ],
       environment: {
         ...auroraEnv,
-        // The worker resolves stage-available orchestrators via getAvailableOrchestrators().
+        ...fthEnv,
         FILONE_STAGE: $app.stage,
         STRIPE_METER_EVENT_NAME: 'gb_month_meter',
       },
