@@ -46,12 +46,12 @@ import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
-function validBody() {
+function validBody({ keyName, region = 'eu-west-1' }: { keyName?: string; region?: string }) {
   return JSON.stringify({
-    keyName: 'My Key',
+    keyName,
     permissions: ['read', 'write', 'list', 'delete'],
     bucketScope: 'all',
-    region: 'eu-west-1',
+    region,
   });
 }
 
@@ -79,7 +79,7 @@ describe('create-access-key baseHandler', () => {
     ddbMock.on(PutItemCommand).resolves({});
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
-    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
@@ -97,7 +97,7 @@ describe('create-access-key baseHandler', () => {
     ddbMock.on(PutItemCommand).resolves({});
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
-    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     await baseHandler(event);
 
     expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
@@ -113,7 +113,7 @@ describe('create-access-key baseHandler', () => {
     ddbMock.on(PutItemCommand).resolves({});
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
-    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     await baseHandler(event);
 
     const putCalls = ddbMock.commandCalls(PutItemCommand);
@@ -133,7 +133,7 @@ describe('create-access-key baseHandler', () => {
   });
 
   it('returns 400 when keyName is missing', async () => {
-    const event = buildEvent({ body: JSON.stringify({}), userInfo: USER_INFO });
+    const event = buildEvent({ body: validBody({ keyName: undefined }), userInfo: USER_INFO });
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(400);
@@ -150,7 +150,7 @@ describe('create-access-key baseHandler', () => {
   for (const [desc, keyName] of Object.entries(invalidKeyNameCases)) {
     it(`returns 400 when keyName is ${desc}`, async () => {
       const event = buildEvent({
-        body: JSON.stringify({ keyName }),
+        body: validBody({ keyName }),
         userInfo: USER_INFO,
       });
       const result = await baseHandler(event);
@@ -165,11 +165,8 @@ describe('create-access-key baseHandler', () => {
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
     const event = buildEvent({
-      body: JSON.stringify({
+      body: validBody({
         keyName: '  My Key  ',
-        permissions: ['read'],
-        bucketScope: 'all',
-        region: 'eu-west-1',
       }),
       userInfo: USER_INFO,
     });
@@ -178,7 +175,7 @@ describe('create-access-key baseHandler', () => {
     expect(result.statusCode).toBe(201);
     expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
       keyName: 'My Key',
-      permissions: ['read'],
+      permissions: ['read', 'write', 'list', 'delete'],
       granularPermissions: undefined,
       buckets: undefined,
       expiresAt: null,
@@ -282,7 +279,7 @@ describe('create-access-key baseHandler', () => {
   it('returns 503 with a retry message when tenant setup fails', async () => {
     mockEnsureTenantReady.mockResolvedValue(null);
 
-    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(503);
@@ -295,7 +292,7 @@ describe('create-access-key baseHandler', () => {
     ddbMock.on(PutItemCommand).resolves({});
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
 
-    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     await baseHandler(event);
 
     expect(mockEnsureTenantReady).toHaveBeenCalledWith('org-1');
@@ -304,7 +301,7 @@ describe('create-access-key baseHandler', () => {
   it('throws when the orchestrator fails', async () => {
     mockIssueAccessKey.mockRejectedValue(new Error('Aurora API error'));
 
-    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
 
     await expect(baseHandler(event)).rejects.toThrow('Aurora API error');
     expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
@@ -325,7 +322,7 @@ describe('create-access-key baseHandler', () => {
       ],
     });
 
-    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(409);
@@ -347,7 +344,7 @@ describe('create-access-key baseHandler', () => {
     });
     ddbMock.on(PutItemCommand).resolves({});
 
-    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(409);
@@ -391,8 +388,10 @@ describe('create-access-key baseHandler', () => {
     });
     ddbMock.on(PutItemCommand).resolves({});
 
-    // validBody() uses region eu-west-1
-    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const event = buildEvent({
+      body: validBody({ keyName: 'My Key', region: 'eu-west-1' }),
+      userInfo: USER_INFO,
+    });
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(409);
@@ -431,12 +430,7 @@ describe('create-access-key baseHandler', () => {
     ddbMock.on(PutItemCommand).resolves({});
 
     const event = buildEvent({
-      body: JSON.stringify({
-        keyName: 'My Key',
-        permissions: ['read', 'write', 'list', 'delete'],
-        bucketScope: 'all',
-        region: 'us-east-1',
-      }),
+      body: validBody({ keyName: 'My Key', region: 'us-east-1' }),
       userInfo: USER_INFO,
     });
     const result = await baseHandler(event);
@@ -458,7 +452,7 @@ describe('create-access-key baseHandler', () => {
       const event = buildEvent({
         body: JSON.stringify({
           keyName: 'My Key',
-          permissions: ['read', 'write', 'list', 'delete'],
+          permissions: ['read'],
           bucketScope: 'all',
         }),
         userInfo: USER_INFO,
@@ -470,12 +464,7 @@ describe('create-access-key baseHandler', () => {
 
     it('accepts eu-west-1', async () => {
       const event = buildEvent({
-        body: JSON.stringify({
-          keyName: 'My Key',
-          permissions: ['read'],
-          bucketScope: 'all',
-          region: 'eu-west-1',
-        }),
+        body: validBody({ keyName: 'My Key', region: 'eu-west-1' }),
         userInfo: USER_INFO,
       });
       const result = await baseHandler(event);
@@ -485,12 +474,7 @@ describe('create-access-key baseHandler', () => {
 
     it('accepts us-east-1 in non-production stage and routes to FTH', async () => {
       const event = buildEvent({
-        body: JSON.stringify({
-          keyName: 'My Key',
-          permissions: ['read'],
-          bucketScope: 'all',
-          region: 'us-east-1',
-        }),
+        body: validBody({ keyName: 'My Key', region: 'us-east-1' }),
         userInfo: USER_INFO,
       });
       const result = await baseHandler(event);
@@ -506,12 +490,7 @@ describe('create-access-key baseHandler', () => {
       process.env.FILONE_STAGE = 'production';
       try {
         const event = buildEvent({
-          body: JSON.stringify({
-            keyName: 'My Key',
-            permissions: ['read'],
-            bucketScope: 'all',
-            region: 'us-east-1',
-          }),
+          body: validBody({ keyName: 'My Key', region: 'us-east-1' }),
           userInfo: USER_INFO,
         });
         const result = await baseHandler(event);
