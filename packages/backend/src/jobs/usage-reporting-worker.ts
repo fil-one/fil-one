@@ -108,12 +108,12 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
 
   // Each region the org is provisioned in is fetched independently, then
   // aggregated and reported on the org-level.
-  const tenantRegions: { region: S3Region; tenantId: string }[] = [];
-  if (auroraTenantId) tenantRegions.push({ region: S3Region.EuWest1, tenantId: auroraTenantId });
-  if (fthTenantId) tenantRegions.push({ region: S3Region.UsEast1, tenantId: fthTenantId });
+  const orgRegions: { region: S3Region; tenantId: string }[] = [];
+  if (auroraTenantId) orgRegions.push({ region: S3Region.EuWest1, tenantId: auroraTenantId });
+  if (fthTenantId) orgRegions.push({ region: S3Region.UsEast1, tenantId: fthTenantId });
 
   // Trial lock enforcement is Aurora-only; fetch its tenant info alongside metrics.
-  if (tenantRegions.length === 0) {
+  if (orgRegions.length === 0) {
     throw new Error('[usage-worker] No tenant id provided (auroraTenantId or fthTenantId)');
   }
 
@@ -121,7 +121,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   let tenantRegionInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
   try {
     [regions, tenantRegionInfo] = await Promise.all([
-      Promise.all(tenantRegions.map((t) => fetchRegionUsage(t, currentPeriodStart, now))),
+      Promise.all(orgRegions.map((t) => fetchRegionUsage(t, currentPeriodStart, now))),
       isTrial && auroraTenantId ? getTenantInfo({ tenantId: auroraTenantId }) : null,
     ]);
   } catch (error) {
