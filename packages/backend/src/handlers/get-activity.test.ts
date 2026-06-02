@@ -156,6 +156,29 @@ describe('get-activity baseHandler', () => {
     expect(body.trends.objects[2]).toStrictEqual({ date: '2026-01-01T23:59:59.999Z', value: 0 });
   });
 
+  it('picks the latest intra-day reading regardless of sample order', async () => {
+    vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+    // Same UTC day, delivered out of chronological order. The 22:00 reading is
+    // the day's latest and must win even though it is not last in the array.
+    mockGetTenantUsageMetrics.mockResolvedValue({
+      storage: [
+        storageSample('2026-01-03T22:00:00.000Z', 3000, 30),
+        storageSample('2026-01-03T08:00:00.000Z', 1000, 10),
+        storageSample('2026-01-03T15:00:00.000Z', 2000, 20),
+      ],
+      egress: [],
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+    const body = JSON.parse(String(result.body));
+
+    const latest = '2026-01-03T23:59:59.999Z';
+    expect(body.trends.storage.find((p: { date: string }) => p.date === latest).value).toBe(3000);
+    expect(body.trends.objects.find((p: { date: string }) => p.date === latest).value).toBe(30);
+  });
+
   it('returns zero-filled trends when tenant is not ready', async () => {
     vi.setSystemTime(new Date('2026-01-08T12:00:00Z'));
     setTenant(undefined);

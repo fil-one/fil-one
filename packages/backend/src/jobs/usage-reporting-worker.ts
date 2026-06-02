@@ -14,7 +14,12 @@ import { getTenantInfo, updateTenantStatus } from '../lib/aurora/aurora-backoffi
 import type { ModelsTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
-import { calculateAverageUsage } from '../lib/usage-calculator.js';
+import {
+  calculateAverageUsage,
+  mergeStorageSamples,
+  sortStorageSamplesByTimestamp,
+} from '../lib/usage-calculator.js';
+import type { StorageUsageSample } from '../lib/service-orchestrator.js';
 
 const dynamo = getDynamoClient();
 
@@ -110,10 +115,10 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   if (fthTenantId) tenantRegions.push({ region: S3Region.UsEast1, tenantId: fthTenantId });
 
   // Trial lock enforcement is Aurora-only; fetch its tenant info alongside metrics.
-  let regionUsages: RegionUsage[];
+  let regionResults: { usage: RegionUsage; storageSamples: StorageUsageSample[] }[];
   let tenantRegionInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
   try {
-    [regionUsages, tenantRegionInfo] = await Promise.all([
+    [regionResults, tenantRegionInfo] = await Promise.all([
       Promise.all(tenantRegions.map((t) => fetchRegionUsage(t, currentPeriodStart, now))),
       isTrial && auroraTenantId ? getTenantInfo({ tenantId: auroraTenantId }) : null,
     ]);
@@ -131,7 +136,11 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     throw error;
   }
 
-  const aggregate = aggregateUsage(regionUsages);
+  const regionUsages = regionResults.map((r) => r.usage);
+  const aggregate = aggregateUsage(
+    regionUsages,
+    regionResults.map((r) => r.storageSamples),
+  );
   const averageStorageGbUsed = aggregate.averageStorageBytesUsed / GB_BYTES;
 
   const { reported } = await reportStorageToStripe({
@@ -183,34 +192,57 @@ async function fetchRegionUsage(
   tenant: { region: S3Region; tenantId: string },
   from: string,
   to: string,
-): Promise<RegionUsage> {
+): Promise<{ usage: RegionUsage; storageSamples: StorageUsageSample[] }> {
   const orchestrator = getOrchestratorForRegion(tenant.region);
   const metrics = await orchestrator.getTenantUsageMetrics(tenant.tenantId, {
     from,
     to,
     interval: '1h',
   });
-  const usage = calculateAverageUsage(metrics.storage);
+  // Orchestrators don't guarantee chronological order; sort once so `.at(-1)`
+  // is the true latest sample and the series fed into `mergeStorageSamples`
+  // (which carries values forward) satisfies its sorted-ascending assumption.
+  const storageSamples = sortStorageSamplesByTimestamp(metrics.storage);
+  const usage = calculateAverageUsage(storageSamples);
   return {
-    region: tenant.region,
-    tenantId: tenant.tenantId,
-    averageStorageBytesUsed: usage.averageStorageBytesUsed,
-    currentStorageBytes: metrics.storage.at(-1)?.bytesUsed ?? 0,
-    totalEgressBytes: metrics.egress.reduce((sum, sample) => sum + (sample.bytesUsed ?? 0), 0),
-    sampleCount: usage.sampleCount,
+    usage: {
+      region: tenant.region,
+      tenantId: tenant.tenantId,
+      averageStorageBytesUsed: usage.averageStorageBytesUsed,
+      currentStorageBytes: storageSamples.at(-1)?.bytesUsed ?? 0,
+      totalEgressBytes: metrics.egress.reduce((sum, sample) => sum + (sample.bytesUsed ?? 0), 0),
+      sampleCount: usage.sampleCount,
+    },
+    storageSamples,
   };
 }
 
-function aggregateUsage(perRegion: RegionUsage[]): AggregateUsage {
-  return perRegion.reduce<AggregateUsage>(
+/**
+ * Aggregates per-region usage into org-level totals. Storage averages are merged
+ * at the time-series level (carrying forward each region's last value) rather
+ * than summed — summing per-region means skews billing when series are misaligned.
+ * Current storage and egress are legitimately summable across regions.
+ */
+function aggregateUsage(
+  perRegion: RegionUsage[],
+  storageSeries: StorageUsageSample[][],
+): AggregateUsage {
+  const merged = calculateAverageUsage(mergeStorageSamples(storageSeries));
+  const sums = perRegion.reduce(
     (acc, u) => ({
-      averageStorageBytesUsed: acc.averageStorageBytesUsed + u.averageStorageBytesUsed,
       currentStorageBytes: acc.currentStorageBytes + u.currentStorageBytes,
       totalEgressBytes: acc.totalEgressBytes + u.totalEgressBytes,
-      sampleCount: acc.sampleCount + u.sampleCount,
     }),
-    { averageStorageBytesUsed: 0, currentStorageBytes: 0, totalEgressBytes: 0, sampleCount: 0 },
+    { currentStorageBytes: 0, totalEgressBytes: 0 },
   );
+  return {
+    averageStorageBytesUsed: merged.averageStorageBytesUsed,
+    currentStorageBytes: sums.currentStorageBytes,
+    totalEgressBytes: sums.totalEgressBytes,
+    // Number of distinct timestamps the org-level average is computed over;
+    // per-region sample counts remain in the regionUsages breakdown.
+    sampleCount: merged.sampleCount,
+  };
 }
 
 /**

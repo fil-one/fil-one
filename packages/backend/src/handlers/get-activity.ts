@@ -188,15 +188,25 @@ async function fetchStorageByDate(
 ): Promise<Map<string, StorageUsageSample>> {
   // Request 1h granularity: it's the only interval every orchestrator supports
   // (FTH's timeseries endpoint accepts 1h/5m only). The end-of-day key collapses
-  // it to one point per day — the day's latest reading, since samples arrive
-  // chronologically. Swallow errors so one region's outage still renders the rest.
+  // it to one point per day — the day's latest reading. Upstream ordering isn't
+  // guaranteed, so we keep the sample with the greatest timestamp per day rather
+  // than relying on insertion order. Swallow errors so one region's outage still
+  // renders the rest.
   try {
     const { storage } = await orchestrator.getTenantUsageMetrics(tenantId, {
       from: from.toISOString(),
       to: to.toISOString(),
       interval: '1h',
     });
-    return new Map(storage.map((s) => [endOfDay(new Date(s.timestamp)).toISOString(), s] as const));
+    const byDate = new Map<string, StorageUsageSample>();
+    for (const s of storage) {
+      const key = endOfDay(new Date(s.timestamp)).toISOString();
+      const existing = byDate.get(key);
+      if (!existing || new Date(s.timestamp).getTime() > new Date(existing.timestamp).getTime()) {
+        byDate.set(key, s);
+      }
+    }
+    return byDate;
   } catch (err) {
     console.error('[get-activity] Failed to fetch usage metrics', {
       tenantId,

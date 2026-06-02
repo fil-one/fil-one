@@ -758,5 +758,43 @@ describe('usage-reporting-worker', () => {
       // aurora: 1 TB average (single sample), fth: 500 GB average (single sample) → 1.5 TB
       expect(record.averageStorageBytesUsed).toBe(1_500_000_000_000);
     });
+
+    it('both regions with misaligned series: storage average is the carry-forward merge, not the sum of per-region means', async () => {
+      const bothPayload: UsageReportingWorkerPayload = {
+        ...basePayload,
+        auroraTenantId: 'aurora-tenant-123',
+        fthTenantId: 'fth-client-9',
+        subscriptionStatus: 'active',
+      };
+
+      const t0 = '2024-01-01T00:00:00Z';
+      const t1 = '2024-01-01T01:00:00Z';
+      mockGetTenantUsageMetrics.mockImplementation((tenantId: string) => {
+        if (tenantId === 'aurora-tenant-123') {
+          // Steady at 2000 across the whole period.
+          return Promise.resolve({
+            storage: [
+              { timestamp: t0, bytesUsed: 2000 },
+              { timestamp: t1, bytesUsed: 2000 },
+            ],
+            egress: [],
+          });
+        }
+        // fth-client-9: newly provisioned, only reports at t1.
+        return Promise.resolve({
+          storage: [{ timestamp: t1, bytesUsed: 4000 }],
+          egress: [],
+        });
+      });
+
+      await handler(bothPayload);
+
+      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      const record = unmarshall(putCalls[0].args[0].input.Item!);
+
+      // Carry-forward merge: t0 = 2000 + 0, t1 = 2000 + 4000 → avg (2000 + 6000) / 2 = 4000.
+      // Summing per-region means would have wrongly billed 2000 + 4000 = 6000.
+      expect(record.averageStorageBytesUsed).toBe(4000);
+    });
   });
 });
