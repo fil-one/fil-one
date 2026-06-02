@@ -105,16 +105,16 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
 
   // Each region the org is provisioned in is reported independently, then
   // aggregated for the org-level billing surface (Stripe meter + metadata + audit).
-  const tenants: { region: S3Region; tenantId: string }[] = [];
-  if (auroraTenantId) tenants.push({ region: S3Region.EuWest1, tenantId: auroraTenantId });
-  if (fthTenantId) tenants.push({ region: S3Region.UsEast1, tenantId: fthTenantId });
+  const tenantRegions: { region: S3Region; tenantId: string }[] = [];
+  if (auroraTenantId) tenantRegions.push({ region: S3Region.EuWest1, tenantId: auroraTenantId });
+  if (fthTenantId) tenantRegions.push({ region: S3Region.UsEast1, tenantId: fthTenantId });
 
   // Trial lock enforcement is Aurora-only; fetch its tenant info alongside metrics.
-  let perRegion: RegionUsage[];
-  let tenantInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
+  let regionUsages: RegionUsage[];
+  let tenantRegionInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
   try {
-    [perRegion, tenantInfo] = await Promise.all([
-      Promise.all(tenants.map((t) => fetchRegionUsage(t, currentPeriodStart, now))),
+    [regionUsages, tenantRegionInfo] = await Promise.all([
+      Promise.all(tenantRegions.map((t) => fetchRegionUsage(t, currentPeriodStart, now))),
       isTrial && auroraTenantId ? getTenantInfo({ tenantId: auroraTenantId }) : null,
     ]);
   } catch (error) {
@@ -131,7 +131,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     throw error;
   }
 
-  const aggregate = aggregateUsage(perRegion);
+  const aggregate = aggregateUsage(regionUsages);
   const averageStorageGbUsed = aggregate.averageStorageBytesUsed / GB_BYTES;
 
   const { reported } = await reportStorageToStripe({
@@ -152,7 +152,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     isTrial,
     auroraTenantId,
     orgId,
-    currentStatus: tenantInfo?.status,
+    currentStatus: tenantRegionInfo?.status,
     currentStorageBytes: aggregate.currentStorageBytes,
     totalEgressBytes: aggregate.totalEgressBytes,
   });
@@ -171,7 +171,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     lockAction,
     reportedToStripe: reported,
     orgSyncAction,
-    regions: perRegion,
+    regionUsages,
   });
 }
 
@@ -335,7 +335,7 @@ async function writeUsageAuditRecord(params: {
   lockAction: string;
   reportedToStripe: boolean;
   orgSyncAction: string;
-  regions: RegionUsage[];
+  regionUsages: RegionUsage[];
 }): Promise<void> {
   const ttl = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60; // 365 days
   await dynamo.send(
@@ -359,7 +359,7 @@ async function writeUsageAuditRecord(params: {
           lockAction: params.lockAction,
           orgSyncAction: params.orgSyncAction,
           // Per-region breakdown behind the aggregate totals above.
-          regions: params.regions,
+          regions: params.regionUsages,
           createdAt: new Date().toISOString(),
           ttl,
         },
