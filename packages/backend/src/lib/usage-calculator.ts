@@ -34,16 +34,17 @@ export function sortStorageSamplesByTimestamp(samples: StorageUsageSample[]): St
 /**
  * Merges multiple per-region storage time series into a single org-level series.
  *
+ * Assumes each input series is already sorted ascending by timestamp. Orchestrators
+ * do not guarantee chronological order, so callers must sort each series first (e.g.
+ * via `sortStorageSamplesByTimestamp`); otherwise carry-forward picks the wrong
+ * last-known value. RFC3339 UTC `Z` timestamps sort correctly lexically.
+ *
  * Storage is a level (gauge), so for any timestamp where a region has no sample
  * we carry forward that region's last-known value (0 before its first sample).
  * This makes `calculateAverageUsage()` on the result a true org-wide average even
  * when regions return differing sample counts or timestamps — summing per-region
  * averages instead skews billing whenever series are misaligned (partial series,
  * API lag, a newly-provisioned tenant).
- *
- * Assumes each input series is already sorted ascending by timestamp, matching
- * how the orchestrator returns metrics (the worker relies on `.at(-1)` being the
- * latest sample). RFC3339 UTC `Z` timestamps sort correctly lexically.
  */
 export function mergeStorageSamples(series: StorageUsageSample[][]): StorageUsageSample[] {
   const timestamps = [...new Set(series.flatMap((s) => s.map((p) => p.timestamp)))].sort();

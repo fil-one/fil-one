@@ -210,11 +210,10 @@ async function fetchRegionUsage(
 }
 
 /**
- * Aggregates per-region raw series into org-level totals. The storage average is
+ * Aggregates per-region data into org-level totals. The storage average is
  * computed by merging the regions' time series (carrying forward each region's
  * last value) and averaging once — summing per-region means skews billing when
- * series are misaligned. Current storage and egress are legitimately summable
- * across regions.
+ * series are misaligned.
  */
 function aggregateUsage(regions: RegionMetrics[]): AggregateUsage {
   const crossRegionAverageUsage = calculateAverageUsage(
