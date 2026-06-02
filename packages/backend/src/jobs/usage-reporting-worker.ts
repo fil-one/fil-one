@@ -109,7 +109,9 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   if (auroraTenantId) tenantRegions.push({ region: S3Region.EuWest1, tenantId: auroraTenantId });
   if (fthTenantId) tenantRegions.push({ region: S3Region.UsEast1, tenantId: fthTenantId });
 
-  // Trial lock enforcement is Aurora-only; fetch its tenant info alongside metrics.
+  if (tenantRegions.length === 0) {
+    throw new Error('[usage-worker] No tenant id provided (auroraTenantId or fthTenantId)');
+  }
   let regionUsages: RegionUsage[];
   let tenantRegionInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
   try {
