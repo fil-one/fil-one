@@ -67,7 +67,7 @@ export function BucketAccessTab({
           <h2 className="text-base font-medium text-zinc-900">API keys</h2>
           <p className="text-sm text-zinc-500">Keys with access to this bucket</p>
         </div>
-        <Button variant="primary" icon={PlusIcon} onClick={onCreateOpen}>
+        <Button variant="ghost" size="sm" icon={PlusIcon} onClick={onCreateOpen}>
           Add key
         </Button>
       </div>

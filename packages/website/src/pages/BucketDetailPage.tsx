@@ -1,15 +1,16 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowUpIcon, KeyIcon, CubeIcon, HardDrivesIcon } from '@phosphor-icons/react/dist/ssr';
+import { ArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from '../components/Tabs';
 import { Breadcrumb } from '../components/Breadcrumb';
+import { Alert } from '../components/Alert';
 import { Spinner } from '../components/Spinner';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
-import { BucketPropertiesCard } from '../components/BucketPropertiesCard';
+import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { ObjectBrowser } from '../components/ObjectBrowser';
 import { BucketAccessTab } from '../components/BucketAccessTab';
 import type { S3Region } from '@filone/shared';
@@ -29,60 +30,9 @@ import { queryKeys } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
 import { parseListObjectVersionsResponse, executePresignedUrl } from '../lib/aurora-s3.js';
 
-// ---------------------------------------------------------------------------
-// Stat card component
-// ---------------------------------------------------------------------------
-
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: React.ComponentType<{ size: number; className?: string }>;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center gap-4 rounded-lg border border-zinc-200 bg-white px-5 py-4">
-      <div className="flex size-10 items-center justify-center rounded-lg bg-zinc-100">
-        <Icon size={20} className="text-zinc-500" />
-      </div>
-      <div>
-        <p className="text-2xl font-semibold text-zinc-900">{value}</p>
-        <p className="text-xs text-zinc-500">{label}</p>
-      </div>
-    </div>
-  );
-}
-
-function BucketStatCards({
-  analytics,
-  accessKeyCount,
-  accessKeysLoading,
-}: {
-  analytics: BucketAnalyticsResponse | undefined;
-  accessKeyCount: number;
-  accessKeysLoading: boolean;
-}) {
-  return (
-    <div className="mb-6 grid grid-cols-3 gap-4">
-      <StatCard
-        icon={CubeIcon}
-        label="Objects"
-        value={analytics ? analytics.objectCount.toLocaleString() : '—'}
-      />
-      <StatCard
-        icon={HardDrivesIcon}
-        label="Storage used"
-        value={analytics ? formatBytes(analytics.bytesUsed) : '—'}
-      />
-      <StatCard
-        icon={KeyIcon}
-        label="API keys"
-        value={accessKeysLoading ? '—' : accessKeyCount.toLocaleString()}
-      />
-    </div>
-  );
+function formatStorage(bytesUsed: number | undefined): string {
+  if (bytesUsed === undefined) return '—';
+  return formatBytes(bytesUsed);
 }
 
 // ---------------------------------------------------------------------------
@@ -200,8 +150,8 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     return (
       <div className="px-10 pt-10">
         <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
-        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {objectsError?.message ?? 'Failed to load objects'}
+        <div className="mt-4">
+          <Alert variant="red" description={objectsError?.message ?? 'Failed to load objects'} />
         </div>
       </div>
     );
@@ -211,7 +161,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     <div className="px-10 pt-10">
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
 
-      <div className="mt-2 mb-2 flex items-center justify-between">
+      <div className="mt-4 mb-2 flex items-center justify-between">
         <Heading tag="h1" size="xl">
           {bucketName}
         </Heading>
@@ -232,23 +182,27 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
       </div>
 
       {bucket && (
-        <p className="mb-6 text-sm text-zinc-500">
-          {bucket.region} &bull; Created {formatDateTime(bucket.createdAt)}
+        <p className="mb-6 text-sm">
+          <span className="text-zinc-700">{region}</span>
+          <span className="mx-2 text-zinc-400">&bull;</span>
+          <span className="text-xs text-zinc-500">
+            {formatStorage(analyticsData?.bytesUsed)} used
+          </span>
+          <span className="mx-2 text-zinc-400">&bull;</span>
+          <span className="text-xs text-zinc-500">Created {formatDateTime(bucket.createdAt)}</span>
         </p>
       )}
 
-      {bucket && <BucketPropertiesCard bucket={bucket} />}
-
-      <BucketStatCards
-        analytics={analyticsData}
-        accessKeyCount={accessKeys.length}
-        accessKeysLoading={accessKeysLoading}
-      />
+      {bucket && (
+        <div className="mb-6 grid grid-cols-3 gap-4">
+          <BucketPropertyCards bucket={bucket} />
+        </div>
+      )}
 
       <Tabs>
         <TabList>
-          <Tab>Objects</Tab>
-          <Tab>Access</Tab>
+          <Tab>Objects ({versions.length.toLocaleString()})</Tab>
+          <Tab>API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}</Tab>
         </TabList>
 
         <TabPanels>

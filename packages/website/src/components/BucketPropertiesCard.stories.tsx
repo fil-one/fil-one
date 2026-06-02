@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 
 import type { Bucket } from '@filone/shared';
 
-import { BucketPropertiesCard } from './BucketPropertiesCard';
+import { BucketPropertyCards } from './BucketPropertiesCard';
 
 const baseBucket: Bucket = {
   bucketName: 'my-bucket',
@@ -11,30 +11,32 @@ const baseBucket: Bucket = {
   isPublic: false,
 };
 
-const meta: Meta<typeof BucketPropertiesCard> = {
+function BucketPropertyCardsWrapper({ bucket }: { bucket: Bucket }) {
+  return (
+    <div className="grid grid-cols-3 gap-4">
+      <BucketPropertyCards bucket={bucket} />
+    </div>
+  );
+}
+
+const meta: Meta<typeof BucketPropertyCardsWrapper> = {
   title: 'Components/BucketPropertiesCard',
-  component: BucketPropertiesCard,
+  component: BucketPropertyCardsWrapper,
 };
 
 export default meta;
-type Story = StoryObj<typeof BucketPropertiesCard>;
+type Story = StoryObj<typeof BucketPropertyCardsWrapper>;
 
 export const PlainBucket: Story = {
-  args: {
-    bucket: baseBucket,
-  },
+  args: { bucket: baseBucket },
 };
 
 export const VersioningEnabled: Story = {
-  args: {
-    bucket: { ...baseBucket, versioning: true },
-  },
+  args: { bucket: { ...baseBucket, versioning: true } },
 };
 
 export const ObjectLockNoRetention: Story = {
-  args: {
-    bucket: { ...baseBucket, versioning: true, objectLockEnabled: true },
-  },
+  args: { bucket: { ...baseBucket, versioning: true, objectLockEnabled: true } },
 };
 
 export const GovernanceRetentionDays: Story = {
@@ -58,19 +60,6 @@ export const ComplianceRetentionYears: Story = {
       objectLockEnabled: true,
       defaultRetention: 'compliance',
       retentionDuration: 7,
-      retentionDurationType: 'y',
-    },
-  },
-};
-
-export const SingleYearRetention: Story = {
-  args: {
-    bucket: {
-      ...baseBucket,
-      versioning: true,
-      objectLockEnabled: true,
-      defaultRetention: 'compliance',
-      retentionDuration: 1,
       retentionDurationType: 'y',
     },
   },
