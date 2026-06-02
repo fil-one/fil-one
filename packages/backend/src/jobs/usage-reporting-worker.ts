@@ -19,7 +19,7 @@ import {
   mergeStorageSamples,
   sortStorageSamplesByTimestamp,
 } from '../lib/usage-calculator.js';
-import type { StorageUsageSample } from '../lib/service-orchestrator.js';
+import type { StorageUsageSample, EgressUsageSample } from '../lib/service-orchestrator.js';
 
 const dynamo = getDynamoClient();
 
@@ -36,13 +36,11 @@ export interface UsageReportingWorkerPayload {
   reportDate: string;
 }
 
-interface RegionUsage {
+interface RegionMetrics {
   region: S3Region;
   tenantId: string;
-  averageStorageBytesUsed: number;
-  currentStorageBytes: number;
-  totalEgressBytes: number;
-  sampleCount: number;
+  storageSamples: StorageUsageSample[];
+  egressSamples: EgressUsageSample[];
 }
 
 interface AggregateUsage {
@@ -119,10 +117,10 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     throw new Error('[usage-worker] No tenant id provided (auroraTenantId or fthTenantId)');
   }
 
-  let regionResults: { usage: RegionUsage; storageSamples: StorageUsageSample[] }[];
+  let regions: RegionMetrics[];
   let tenantRegionInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
   try {
-    [regionResults, tenantRegionInfo] = await Promise.all([
+    [regions, tenantRegionInfo] = await Promise.all([
       Promise.all(tenantRegions.map((t) => fetchRegionUsage(t, currentPeriodStart, now))),
       isTrial && auroraTenantId ? getTenantInfo({ tenantId: auroraTenantId }) : null,
     ]);
@@ -140,11 +138,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     throw error;
   }
 
-  const regionUsages = regionResults.map((r) => r.usage);
-  const aggregate = aggregateUsage(
-    regionUsages,
-    regionResults.map((r) => r.storageSamples),
-  );
+  const aggregate = aggregateUsage(regions);
   const averageStorageGbUsed = aggregate.averageStorageBytesUsed / GB_BYTES;
 
   const { reported } = await reportStorageToStripe({
@@ -184,19 +178,20 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     lockAction,
     reportedToStripe: reported,
     orgSyncAction,
-    regionUsages,
   });
 }
 
 /**
- * Fetches one region's usage via its orchestrator and reduces the normalized
- * time series to the per-region scalars the billing surface needs.
+ * Fetches one region's raw, normalized usage time series via its orchestrator.
+ * No per-region reduction happens here — averaging per-region and summing the
+ * means skews billing when series are misaligned, so all scalars are derived
+ * once from the merged series in `aggregateUsage`.
  */
 async function fetchRegionUsage(
   tenant: { region: S3Region; tenantId: string },
   from: string,
   to: string,
-): Promise<{ usage: RegionUsage; storageSamples: StorageUsageSample[] }> {
+): Promise<RegionMetrics> {
   const orchestrator = getOrchestratorForRegion(tenant.region);
   const metrics = await orchestrator.getTenantUsageMetrics(tenant.tenantId, {
     from,
@@ -206,46 +201,39 @@ async function fetchRegionUsage(
   // Orchestrators don't guarantee chronological order; sort once so `.at(-1)`
   // is the true latest sample and the series fed into `mergeStorageSamples`
   // (which carries values forward) satisfies its sorted-ascending assumption.
-  const storageSamples = sortStorageSamplesByTimestamp(metrics.storage);
-  const usage = calculateAverageUsage(storageSamples);
   return {
-    usage: {
-      region: tenant.region,
-      tenantId: tenant.tenantId,
-      averageStorageBytesUsed: usage.averageStorageBytesUsed,
-      currentStorageBytes: storageSamples.at(-1)?.bytesUsed ?? 0,
-      totalEgressBytes: metrics.egress.reduce((sum, sample) => sum + (sample.bytesUsed ?? 0), 0),
-      sampleCount: usage.sampleCount,
-    },
-    storageSamples,
+    region: tenant.region,
+    tenantId: tenant.tenantId,
+    storageSamples: sortStorageSamplesByTimestamp(metrics.storage),
+    egressSamples: metrics.egress,
   };
 }
 
 /**
- * Aggregates per-region usage into org-level totals. Storage averages are merged
- * at the time-series level (carrying forward each region's last value) rather
- * than summed — summing per-region means skews billing when series are misaligned.
- * Current storage and egress are legitimately summable across regions.
+ * Aggregates per-region raw series into org-level totals. The storage average is
+ * computed by merging the regions' time series (carrying forward each region's
+ * last value) and averaging once — summing per-region means skews billing when
+ * series are misaligned. Current storage and egress are legitimately summable
+ * across regions.
  */
-function aggregateUsage(
-  perRegion: RegionUsage[],
-  storageSeries: StorageUsageSample[][],
-): AggregateUsage {
-  const merged = calculateAverageUsage(mergeStorageSamples(storageSeries));
-  const sums = perRegion.reduce(
-    (acc, u) => ({
-      currentStorageBytes: acc.currentStorageBytes + u.currentStorageBytes,
-      totalEgressBytes: acc.totalEgressBytes + u.totalEgressBytes,
-    }),
-    { currentStorageBytes: 0, totalEgressBytes: 0 },
+function aggregateUsage(regions: RegionMetrics[]): AggregateUsage {
+  const crossRegionAverageUsage = calculateAverageUsage(
+    mergeStorageSamples(regions.map((r) => r.storageSamples)),
+  );
+  const currentStorageBytes = regions.reduce(
+    (sum, r) => sum + (r.storageSamples.at(-1)?.bytesUsed ?? 0),
+    0,
+  );
+  const totalEgressBytes = regions.reduce(
+    (sum, r) => sum + r.egressSamples.reduce((s, e) => s + (e.bytesUsed ?? 0), 0),
+    0,
   );
   return {
-    averageStorageBytesUsed: merged.averageStorageBytesUsed,
-    currentStorageBytes: sums.currentStorageBytes,
-    totalEgressBytes: sums.totalEgressBytes,
-    // Number of distinct timestamps the org-level average is computed over;
-    // per-region sample counts remain in the regionUsages breakdown.
-    sampleCount: merged.sampleCount,
+    averageStorageBytesUsed: crossRegionAverageUsage.averageStorageBytesUsed,
+    currentStorageBytes,
+    totalEgressBytes,
+    // Number of distinct timestamps the org-level average is computed over.
+    sampleCount: crossRegionAverageUsage.sampleCount,
   };
 }
 
@@ -371,36 +359,30 @@ async function writeUsageAuditRecord(params: {
   lockAction: string;
   reportedToStripe: boolean;
   orgSyncAction: string;
-  regionUsages: RegionUsage[];
 }): Promise<void> {
   const ttl = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60; // 365 days
   await dynamo.send(
     new PutItemCommand({
       TableName: Resource.BillingTable.name,
-      Item: marshall(
-        {
-          pk: `ORG#${params.orgId}`,
-          sk: `USAGE_REPORT#${params.reportDate}`,
-          orgId: params.orgId,
-          subscriptionId: params.subscriptionId,
-          stripeCustomerId: params.stripeCustomerId,
-          currentPeriodStart: params.currentPeriodStart,
-          subscriptionStatus: params.subscriptionStatus,
-          reportDate: params.reportDate,
-          averageStorageBytesUsed: params.averageStorageBytesUsed,
-          averageStorageGbUsed: params.averageStorageGbUsed,
-          totalEgressBytes: params.totalEgressBytes,
-          sampleCount: params.sampleCount,
-          reportedToStripe: params.reportedToStripe,
-          lockAction: params.lockAction,
-          orgSyncAction: params.orgSyncAction,
-          // Per-region breakdown behind the aggregate totals above.
-          regionUsages: params.regionUsages,
-          createdAt: new Date().toISOString(),
-          ttl,
-        },
-        { removeUndefinedValues: true },
-      ),
+      Item: marshall({
+        pk: `ORG#${params.orgId}`,
+        sk: `USAGE_REPORT#${params.reportDate}`,
+        orgId: params.orgId,
+        subscriptionId: params.subscriptionId,
+        stripeCustomerId: params.stripeCustomerId,
+        currentPeriodStart: params.currentPeriodStart,
+        subscriptionStatus: params.subscriptionStatus,
+        reportDate: params.reportDate,
+        averageStorageBytesUsed: params.averageStorageBytesUsed,
+        averageStorageGbUsed: params.averageStorageGbUsed,
+        totalEgressBytes: params.totalEgressBytes,
+        sampleCount: params.sampleCount,
+        reportedToStripe: params.reportedToStripe,
+        lockAction: params.lockAction,
+        orgSyncAction: params.orgSyncAction,
+        createdAt: new Date().toISOString(),
+        ttl,
+      }),
     }),
   );
 }

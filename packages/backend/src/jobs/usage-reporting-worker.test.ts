@@ -699,14 +699,9 @@ describe('usage-reporting-worker', () => {
       expect(putCalls).toHaveLength(1);
       const item = putCalls[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'skipped:region-unsupported' });
-
-      // regions breakdown should have exactly one entry (us-east-1 / fth)
-      const record = unmarshall(item);
-      expect(record.regionUsages).toHaveLength(1);
-      expect(record.regionUsages[0].tenantId).toBe('fth-client-9');
     });
 
-    it('both regions: getTenantUsageMetrics called twice, Stripe value is sum in GB, audit has two region entries', async () => {
+    it('both regions: getTenantUsageMetrics called twice, Stripe value is sum in GB', async () => {
       const bothPayload: UsageReportingWorkerPayload = {
         ...basePayload,
         auroraTenantId: 'aurora-tenant-123',
@@ -748,11 +743,9 @@ describe('usage-reporting-worker', () => {
         }),
       );
 
-      // Audit: regions array has two entries
       const putCalls = ddbMock.commandCalls(PutItemCommand);
       expect(putCalls).toHaveLength(1);
       const record = unmarshall(putCalls[0].args[0].input.Item!);
-      expect(record.regionUsages).toHaveLength(2);
 
       // Aggregate averageStorageBytesUsed is the sum across both regions
       // aurora: 1 TB average (single sample), fth: 500 GB average (single sample) → 1.5 TB
