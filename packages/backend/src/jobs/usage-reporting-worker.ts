@@ -13,16 +13,14 @@ import {
   sortStorageSamplesByTimestamp,
 } from '../lib/usage-calculator.js';
 import type { ServiceOrchestrator, TenantUsageMetrics } from '../lib/service-orchestrator.js';
+import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
+// Imported only for its `.id`, to identify the Aurora region for trial-lock enforcement.
 import { auroraOrchestrator } from '../lib/aurora/aurora-orchestrator.js';
-import { fthOrchestrator } from '../lib/fth/fth-orchestrator.js';
 
 const dynamo = getDynamoClient();
 
 export interface UsageReportingWorkerPayload {
   orgId: string;
-  /** Tenant ids per provisioned region. At least one must be present. */
-  auroraTenantId?: string;
-  fthTenantId?: string;
   orgName?: string;
   subscriptionId: string;
   stripeCustomerId: string;
@@ -73,11 +71,30 @@ async function enforceTenantLocks({
   return desiredStatus;
 }
 
+interface ReadyRegion {
+  orchestrator: ServiceOrchestrator;
+  tenantId: string;
+}
+
+/**
+ * Resolves which stage-available regions the org is provisioned in. Asks each
+ * orchestrator for the current stage to resolve its tenant id (side-effect-free
+ * read), dropping any region where the tenant is not ready.
+ */
+async function resolveReadyRegions(orgId: string): Promise<ReadyRegion[]> {
+  const orchestrators = getAvailableOrchestrators(process.env.FILONE_STAGE!);
+  const resolved = await Promise.all(
+    orchestrators.map(async (orchestrator) => {
+      const tenantId = await orchestrator.isTenantReady(orgId);
+      return tenantId ? { orchestrator, tenantId } : null;
+    }),
+  );
+  return resolved.filter((r): r is ReadyRegion => r !== null);
+}
+
 export async function handler(event: UsageReportingWorkerPayload): Promise<void> {
   const {
     orgId,
-    auroraTenantId,
-    fthTenantId,
     orgName,
     subscriptionId,
     stripeCustomerId,
@@ -94,17 +111,21 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const now = new Date().toISOString();
   const isTrial = subscriptionStatus === 'trialing';
 
-  // Each region the org is provisioned in is fetched independently, then
-  // aggregated and reported on the org-level.
-  const orgRegions: { orchestrator: ServiceOrchestrator; tenantId: string }[] = [];
-  if (auroraTenantId)
-    orgRegions.push({ orchestrator: auroraOrchestrator, tenantId: auroraTenantId });
-  if (fthTenantId) orgRegions.push({ orchestrator: fthOrchestrator, tenantId: fthTenantId });
+  // Resolve which regions this org is provisioned in by asking each
+  // stage-available orchestrator to resolve its tenant id (side-effect-free).
+  // Each region is then fetched independently, aggregated, and reported on the
+  // org-level.
+  const orgRegions = await resolveReadyRegions(orgId);
 
-  // Trial lock enforcement is Aurora-only; fetch its tenant info alongside metrics.
   if (orgRegions.length === 0) {
-    throw new Error('[usage-worker] No tenant id provided (auroraTenantId or fthTenantId)');
+    console.warn('[usage-worker] Org not provisioned in any available region, skipping', { orgId });
+    return;
   }
+
+  // Trial lock enforcement is Aurora-only; identify its tenant id (if any).
+  const auroraTenantId = orgRegions.find(
+    (r) => r.orchestrator.id === auroraOrchestrator.id,
+  )?.tenantId;
 
   let usageMetrics: TenantUsageMetrics[];
   let auroraTenantInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
@@ -125,8 +146,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     const e = error as Error & { cause?: unknown };
     console.error('[usage-worker] Usage metrics fetch failed', {
       orgId,
-      auroraTenantId,
-      fthTenantId,
+      regions: orgRegions.map((r) => ({ region: r.orchestrator.region, tenantId: r.tenantId })),
       subscriptionId,
       message: e.message,
       cause: e.cause,

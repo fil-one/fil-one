@@ -31,7 +31,6 @@ export async function handler(): Promise<void> {
 
   const orgSeen = new Map<string, { subscriptionId: string; stripeCustomerId: string }>();
   let skippedDuplicate = 0;
-  let skippedNoTenant = 0;
   let invoked = 0;
   let failed = 0;
 
@@ -47,20 +46,13 @@ export async function handler(): Promise<void> {
       stripeCustomerId: record.stripeCustomerId,
     });
 
-    const profile = await resolveOrgProfile(record.orgId);
-    if (!profile) {
-      skippedNoTenant++;
-      console.warn('[usage-orchestrator] No tenant id (aurora or fth), skipping', {
-        orgId: record.orgId,
-      });
-      continue;
-    }
+    // Tenant resolution lives in the worker; the orchestrator passes only the
+    // org id (plus billing fields and the org name for Stripe metadata sync).
+    const orgName = await resolveOrgName(record.orgId);
 
     const payload: UsageReportingWorkerPayload = {
       orgId: record.orgId,
-      auroraTenantId: profile.auroraTenantId,
-      fthTenantId: profile.fthTenantId,
-      orgName: profile.orgName,
+      orgName,
       subscriptionId: record.subscriptionId,
       stripeCustomerId: record.stripeCustomerId,
       currentPeriodStart: record.currentPeriodStart,
@@ -81,7 +73,6 @@ export async function handler(): Promise<void> {
     invoked,
     failed,
     skippedDuplicate,
-    skippedNoTenant,
   });
 }
 
@@ -142,11 +133,8 @@ async function scanActiveSubscriptionRecords(
   return records;
 }
 
-async function resolveOrgProfile(
-  orgId: string,
-): Promise<
-  { auroraTenantId?: string; fthTenantId?: string; orgName: string | undefined } | undefined
-> {
+/** Best-effort org name for Stripe metadata sync; `undefined` if the org has no profile/name. */
+async function resolveOrgName(orgId: string): Promise<string | undefined> {
   const profileResult = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
@@ -154,16 +142,12 @@ async function resolveOrgProfile(
         pk: { S: `ORG#${orgId}` },
         sk: { S: 'PROFILE' },
       },
-      ProjectionExpression: 'auroraTenantId, fthTenantId, #n',
+      ProjectionExpression: '#n',
       ExpressionAttributeNames: { '#n': 'name' },
     }),
   );
 
-  const auroraTenantId = profileResult.Item?.auroraTenantId?.S;
-  const fthTenantId = profileResult.Item?.fthTenantId?.S;
-  // Report an org only if it is provisioned in at least one region.
-  if (!auroraTenantId && !fthTenantId) return undefined;
-  return { auroraTenantId, fthTenantId, orgName: profileResult.Item?.name?.S };
+  return profileResult.Item?.name?.S;
 }
 
 async function invokeUsageWorker(

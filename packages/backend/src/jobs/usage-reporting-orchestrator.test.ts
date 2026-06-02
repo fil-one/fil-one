@@ -42,21 +42,21 @@ function subscriptionItem(orgId: string, extra: Record<string, unknown> = {}) {
   );
 }
 
-function orgProfileItem(orgId: string, auroraTenantId?: string, fthTenantId?: string) {
-  if (!auroraTenantId && !fthTenantId) return { Item: undefined };
-  return {
-    Item: marshall({ auroraTenantId, fthTenantId }, { removeUndefinedValues: true }),
-  };
+// The orchestrator now reads the PROFILE row only for the org name (for Stripe
+// metadata sync); tenant resolution moved into the worker.
+function orgProfileItem(name?: string) {
+  if (!name) return { Item: undefined };
+  return { Item: marshall({ name }) };
 }
 
-function mockGetItemForOrgs(orgIds: string[], auroraTenantIdPrefix = 'aurora-') {
+function mockOrgNames(orgIds: string[]) {
   for (const orgId of orgIds) {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
         Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
       })
-      .resolves(orgProfileItem(orgId, `${auroraTenantIdPrefix}${orgId}`));
+      .resolves(orgProfileItem(`Org ${orgId}`));
   }
 }
 
@@ -81,7 +81,7 @@ describe('usage-reporting-orchestrator', () => {
 
   it('invokes worker for a single tenant', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [subscriptionItem('org-1')] });
-    mockGetItemForOrgs(['org-1']);
+    mockOrgNames(['org-1']);
     lambdaMock.on(InvokeCommand).resolves({});
 
     await handler();
@@ -92,15 +92,18 @@ describe('usage-reporting-orchestrator', () => {
       Buffer.from(invokeCalls[0].args[0].input.Payload as Uint8Array).toString(),
     );
     expect(payload.orgId).toBe('org-1');
-    expect(payload.auroraTenantId).toBe('aurora-org-1');
+    expect(payload.orgName).toBe('Org org-1');
     expect(payload.subscriptionId).toBe('sub_org-1');
+    // Tenant resolution moved to the worker — no tenant ids in the payload.
+    expect(payload.auroraTenantId).toBeUndefined();
+    expect(payload.fthTenantId).toBeUndefined();
   });
 
   it('invokes worker for multiple tenants', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [subscriptionItem('org-1'), subscriptionItem('org-2')],
     });
-    mockGetItemForOrgs(['org-1', 'org-2']);
+    mockOrgNames(['org-1', 'org-2']);
     lambdaMock.on(InvokeCommand).resolves({});
 
     await handler();
@@ -118,7 +121,7 @@ describe('usage-reporting-orchestrator', () => {
       .resolvesOnce({
         Items: [subscriptionItem('org-2')],
       });
-    mockGetItemForOrgs(['org-1', 'org-2']);
+    mockOrgNames(['org-1', 'org-2']);
     lambdaMock.on(InvokeCommand).resolves({});
 
     await handler();
@@ -153,7 +156,7 @@ describe('usage-reporting-orchestrator', () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [subscriptionItem('org-1'), subscriptionItem('org-2')],
     });
-    mockGetItemForOrgs(['org-1', 'org-2']);
+    mockOrgNames(['org-1', 'org-2']);
     lambdaMock.on(InvokeCommand).rejectsOnce(new Error('invoke failed')).resolves({});
 
     await handler();
@@ -176,7 +179,7 @@ describe('usage-reporting-orchestrator', () => {
         }),
       ],
     });
-    mockGetItemForOrgs(['shared-org']);
+    mockOrgNames(['shared-org']);
     lambdaMock.on(InvokeCommand).resolves({});
 
     await handler();
@@ -188,85 +191,25 @@ describe('usage-reporting-orchestrator', () => {
       ).toString(),
     );
     expect(payload.orgId).toBe('shared-org');
-    expect(payload.auroraTenantId).toBe('aurora-shared-org');
+    expect(payload.orgName).toBe('Org shared-org');
   });
 
-  it('skips org when auroraTenantId is missing', async () => {
-    ddbMock.on(ScanCommand).resolves({
-      Items: [subscriptionItem('org-no-tenant')],
-    });
+  it('invokes worker even when the org has no profile (orgName undefined)', async () => {
+    // Tenant resolution moved to the worker, so the orchestrator no longer
+    // gates on provisioning state — every active org is handed off.
+    ddbMock.on(ScanCommand).resolves({ Items: [subscriptionItem('org-no-profile')] });
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
     lambdaMock.on(InvokeCommand).resolves({});
 
     await handler();
 
-    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
-  });
-
-  it('skips org with empty profile (no auroraTenantId attribute)', async () => {
-    ddbMock.on(ScanCommand).resolves({
-      Items: [subscriptionItem('org-1'), subscriptionItem('org-2')],
-    });
-    // org-1 has no auroraTenantId, org-2 does
-    ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({ Item: marshall({ pk: 'ORG#org-1', sk: 'PROFILE' }) })
-      .resolvesOnce(orgProfileItem('org-2', 'aurora-org-2'));
-    lambdaMock.on(InvokeCommand).resolves({});
-
-    await handler();
-
-    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
-    const payload = JSON.parse(
-      Buffer.from(
-        lambdaMock.commandCalls(InvokeCommand)[0].args[0].input.Payload as Uint8Array,
-      ).toString(),
-    );
-    expect(payload.orgId).toBe('org-2');
-    expect(payload.auroraTenantId).toBe('aurora-org-2');
-  });
-
-  it('invokes worker for an org provisioned only in the FTH region', async () => {
-    ddbMock.on(ScanCommand).resolves({ Items: [subscriptionItem('org-fth')] });
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: 'ORG#org-fth' }, sk: { S: 'PROFILE' } },
-      })
-      .resolves(orgProfileItem('org-fth', undefined, 'fth-client-7'));
-    lambdaMock.on(InvokeCommand).resolves({});
-
-    await handler();
-
     const invokeCalls = lambdaMock.commandCalls(InvokeCommand);
     expect(invokeCalls).toHaveLength(1);
     const payload = JSON.parse(
       Buffer.from(invokeCalls[0].args[0].input.Payload as Uint8Array).toString(),
     );
-    expect(payload.orgId).toBe('org-fth');
-    expect(payload.fthTenantId).toBe('fth-client-7');
-    expect(payload.auroraTenantId).toBeUndefined();
-  });
-
-  it('carries both tenant ids when the org is provisioned in both regions', async () => {
-    ddbMock.on(ScanCommand).resolves({ Items: [subscriptionItem('org-both')] });
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: 'ORG#org-both' }, sk: { S: 'PROFILE' } },
-      })
-      .resolves(orgProfileItem('org-both', 'aurora-org-both', 'fth-client-8'));
-    lambdaMock.on(InvokeCommand).resolves({});
-
-    await handler();
-
-    const invokeCalls = lambdaMock.commandCalls(InvokeCommand);
-    expect(invokeCalls).toHaveLength(1);
-    const payload = JSON.parse(
-      Buffer.from(invokeCalls[0].args[0].input.Payload as Uint8Array).toString(),
-    );
-    expect(payload.auroraTenantId).toBe('aurora-org-both');
-    expect(payload.fthTenantId).toBe('fth-client-8');
+    expect(payload.orgId).toBe('org-no-profile');
+    expect(payload.orgName).toBeUndefined();
   });
 
   // -----------------------------------------------------------------------
@@ -275,7 +218,7 @@ describe('usage-reporting-orchestrator', () => {
   describe('idempotency — running twice', () => {
     it('invokes worker twice when orchestrator runs twice for same subscription', async () => {
       ddbMock.on(ScanCommand).resolves({ Items: [subscriptionItem('org-1')] });
-      mockGetItemForOrgs(['org-1']);
+      mockOrgNames(['org-1']);
       lambdaMock.on(InvokeCommand).resolves({});
 
       await handler();
@@ -289,8 +232,8 @@ describe('usage-reporting-orchestrator', () => {
       );
       expect(payloads[0].orgId).toBe('org-1');
       expect(payloads[1].orgId).toBe('org-1');
-      expect(payloads[0].auroraTenantId).toBe('aurora-org-1');
-      expect(payloads[1].auroraTenantId).toBe('aurora-org-1');
+      expect(payloads[0].orgName).toBe('Org org-1');
+      expect(payloads[1].orgName).toBe('Org org-1');
     });
 
     it('second run finds no candidates when subscription was canceled between runs', async () => {
@@ -298,7 +241,7 @@ describe('usage-reporting-orchestrator', () => {
         .on(ScanCommand)
         .resolvesOnce({ Items: [subscriptionItem('org-1')] })
         .resolvesOnce({ Items: [] }); // canceled between runs — filtered out by scan
-      mockGetItemForOrgs(['org-1']);
+      mockOrgNames(['org-1']);
       lambdaMock.on(InvokeCommand).resolves({});
 
       await handler();

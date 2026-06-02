@@ -28,16 +28,42 @@ vi.mock('../lib/stripe-client.js', () => ({
     mockCustomersUpdate(customerId, { metadata }),
 }));
 
-// The worker now calls the Aurora and FTH orchestrators directly. Both route to
-// the same mock fn, which distinguishes regions by the tenantId argument.
-const { mockGetTenantUsageMetrics } = vi.hoisted(() => ({
-  mockGetTenantUsageMetrics: vi.fn(),
-}));
-vi.mock('../lib/aurora/aurora-orchestrator.js', () => ({
-  auroraOrchestrator: { getTenantUsageMetrics: mockGetTenantUsageMetrics },
-}));
-vi.mock('../lib/fth/fth-orchestrator.js', () => ({
-  fthOrchestrator: { getTenantUsageMetrics: mockGetTenantUsageMetrics },
+// The worker resolves stage-available orchestrators via the registry, then asks
+// each to resolve its tenant id (isTenantReady) before fetching usage metrics.
+// Both orchestrators route getTenantUsageMetrics to the same mock fn, which
+// distinguishes regions by the tenantId argument.
+const {
+  mockGetTenantUsageMetrics,
+  mockAuroraIsTenantReady,
+  mockFthIsTenantReady,
+  auroraOrchestrator,
+  fthOrchestrator,
+} = vi.hoisted(() => {
+  const mockGetTenantUsageMetrics = vi.fn();
+  const mockAuroraIsTenantReady = vi.fn();
+  const mockFthIsTenantReady = vi.fn();
+  return {
+    mockGetTenantUsageMetrics,
+    mockAuroraIsTenantReady,
+    mockFthIsTenantReady,
+    auroraOrchestrator: {
+      id: 'aurora',
+      region: 'eu-west-1',
+      isTenantReady: mockAuroraIsTenantReady,
+      getTenantUsageMetrics: mockGetTenantUsageMetrics,
+    },
+    fthOrchestrator: {
+      id: 'fth',
+      region: 'us-east-1',
+      isTenantReady: mockFthIsTenantReady,
+      getTenantUsageMetrics: mockGetTenantUsageMetrics,
+    },
+  };
+});
+vi.mock('../lib/aurora/aurora-orchestrator.js', () => ({ auroraOrchestrator }));
+vi.mock('../lib/fth/fth-orchestrator.js', () => ({ fthOrchestrator }));
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
+  getAvailableOrchestrators: () => [auroraOrchestrator, fthOrchestrator],
 }));
 
 // aurora-backoffice now only supplies trial-lock status read + write.
@@ -51,6 +77,8 @@ vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 process.env.STRIPE_METER_EVENT_NAME = 'storage_usage';
+// Registry is mocked, so the value is irrelevant — only presence matters.
+process.env.FILONE_STAGE = 'test';
 
 import { handler } from './usage-reporting-worker.js';
 
@@ -61,7 +89,6 @@ import { handler } from './usage-reporting-worker.js';
 const basePayload: UsageReportingWorkerPayload = {
   orgId: 'org-1',
   orgName: 'Acme Corp',
-  auroraTenantId: 'aurora-tenant-123',
   subscriptionId: 'sub_123',
   stripeCustomerId: 'cus_123',
   currentPeriodStart: '2024-01-01T00:00:00Z',
@@ -79,6 +106,9 @@ describe('usage-reporting-worker', () => {
     vi.clearAllMocks();
     ddbMock.on(PutItemCommand).resolves({});
     mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
+    // Default: org provisioned in Aurora only (mirrors the previous Aurora-only basePayload).
+    mockAuroraIsTenantReady.mockResolvedValue('aurora-tenant-123');
+    mockFthIsTenantReady.mockResolvedValue(null);
   });
 
   it('calls getTenantUsageMetrics with auroraTenantId, not orgId', async () => {
@@ -683,10 +713,10 @@ describe('usage-reporting-worker', () => {
     it('FTH-only org: skips trial lock, sets lockAction skipped:region-unsupported, writes audit with one region entry', async () => {
       const fthOnlyPayload: UsageReportingWorkerPayload = {
         ...basePayload,
-        auroraTenantId: undefined,
-        fthTenantId: 'fth-client-9',
         subscriptionStatus: 'trialing',
       };
+      mockAuroraIsTenantReady.mockResolvedValue(null);
+      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
       mockGetTenantUsageMetrics.mockResolvedValue({
         storage: [{ timestamp: t, bytesUsed: 500_000_000_000 }],
         egress: [{ timestamp: t, bytesUsed: 100_000_000_000 }],
@@ -710,10 +740,9 @@ describe('usage-reporting-worker', () => {
     it('both regions: getTenantUsageMetrics called twice, Stripe value is sum in GB', async () => {
       const bothPayload: UsageReportingWorkerPayload = {
         ...basePayload,
-        auroraTenantId: 'aurora-tenant-123',
-        fthTenantId: 'fth-client-9',
         subscriptionStatus: 'active',
       };
+      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
 
       mockGetTenantUsageMetrics.mockImplementation((tenantId: string) => {
         if (tenantId === 'aurora-tenant-123') {
@@ -761,10 +790,9 @@ describe('usage-reporting-worker', () => {
     it('both regions with misaligned series: storage average is the carry-forward merge, not the sum of per-region means', async () => {
       const bothPayload: UsageReportingWorkerPayload = {
         ...basePayload,
-        auroraTenantId: 'aurora-tenant-123',
-        fthTenantId: 'fth-client-9',
         subscriptionStatus: 'active',
       };
+      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
 
       const t0 = '2024-01-01T00:00:00Z';
       const t1 = '2024-01-01T01:00:00Z';
@@ -794,6 +822,17 @@ describe('usage-reporting-worker', () => {
       // Carry-forward merge: t0 = 2000 + 0, t1 = 2000 + 4000 → avg (2000 + 6000) / 2 = 4000.
       // Summing per-region means would have wrongly billed 2000 + 4000 = 6000.
       expect(record.averageStorageBytesUsed).toBe(4000);
+    });
+
+    it('no ready tenant in any region: returns without reporting or writing an audit', async () => {
+      mockAuroraIsTenantReady.mockResolvedValue(null);
+      mockFthIsTenantReady.mockResolvedValue(null);
+
+      await expect(handler(basePayload)).resolves.toBeUndefined();
+
+      expect(mockGetTenantUsageMetrics).not.toHaveBeenCalled();
+      expect(mockMeterEventsCreate).not.toHaveBeenCalled();
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
   });
 });

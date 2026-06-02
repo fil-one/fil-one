@@ -753,7 +753,12 @@ export default $config({
     const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
       link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, auroraBackofficeToken],
-      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'gb_month_meter' },
+      environment: {
+        ...auroraEnv,
+        // The worker resolves stage-available orchestrators via getAvailableOrchestrators().
+        FILONE_STAGE: $app.stage,
+        STRIPE_METER_EVENT_NAME: 'gb_month_meter',
+      },
       timeout: '60 seconds',
       memory: '256 MB',
     });
