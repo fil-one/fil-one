@@ -25,9 +25,27 @@ const mockOrchestrator = {
   getTenantUsageMetrics: (...args: unknown[]) => mockGetTenantUsageMetrics(...args),
 };
 
+const mockGetAvailableOrchestrators = vi.fn();
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: () => mockOrchestrator,
+  getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
+
+// Builds a fully self-contained fake orchestrator for multi-region tests.
+function makeOrchestrator(opts: {
+  id: string;
+  region: string;
+  tenantId: string | null;
+  buckets?: { bucketName: string; createdAt: string }[];
+  storage?: { timestamp: string; bytesUsed: number; objectCount: number }[];
+}) {
+  return {
+    id: opts.id,
+    region: opts.region,
+    isTenantReady: vi.fn().mockResolvedValue(opts.tenantId),
+    listBuckets: vi.fn().mockResolvedValue(opts.buckets ?? []),
+    getTenantUsageMetrics: vi.fn().mockResolvedValue({ storage: opts.storage ?? [], egress: [] }),
+  };
+}
 
 process.env.FILONE_STAGE = 'test';
 
@@ -85,6 +103,7 @@ describe('get-activity baseHandler', () => {
     ddbMock.reset();
     mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
     mockListBuckets.mockResolvedValue([]);
+    mockGetAvailableOrchestrators.mockReturnValue([mockOrchestrator]);
     setTenant(AURORA_TENANT_ID);
   });
 
@@ -295,7 +314,7 @@ describe('get-activity baseHandler', () => {
     expect(mockGetTenantUsageMetrics).toHaveBeenCalledWith(
       AURORA_TENANT_ID,
       expect.objectContaining({
-        interval: '24h',
+        interval: '1h',
       }),
     );
 
@@ -429,4 +448,93 @@ describe('get-activity baseHandler', () => {
   });
   // Object activities are temporarily excluded from the feed.
   // https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard
+
+  describe('multi-region aggregation', () => {
+    it('merges bucket activities and sums storage trends across all orchestrators', async () => {
+      vi.setSystemTime(new Date('2026-01-02T12:00:00Z'));
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+      const aurora = makeOrchestrator({
+        id: 'aurora',
+        region: 'eu-west-1',
+        tenantId: 'aurora-t',
+        buckets: [{ bucketName: 'eu-bucket', createdAt: '2026-01-01T00:00:00Z' }],
+        storage: [storageSample('2026-01-01T10:00:00.000Z', 1000, 5)],
+      });
+      const fth = makeOrchestrator({
+        id: 'fth',
+        region: 'us-east-1',
+        tenantId: 'fth-t',
+        buckets: [{ bucketName: 'us-bucket', createdAt: '2026-01-01T06:00:00Z' }],
+        storage: [storageSample('2026-01-01T11:00:00.000Z', 500, 0)],
+      });
+      mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+      const event = buildEvent({ userInfo: USER_INFO });
+      const result = await baseHandler(event);
+      const body = JSON.parse(String(result.body));
+
+      // Bucket activities from both regions appear.
+      expect(body.activities.map((a: { resourceName: string }) => a.resourceName).sort()).toEqual([
+        'eu-bucket',
+        'us-bucket',
+      ]);
+
+      // Jan 1 storage is summed across regions: 1000 + 500 = 1500; objects: 5 + 0 = 5.
+      const jan1 = '2026-01-01T23:59:59.999Z';
+      expect(body.trends.storage.find((p: { date: string }) => p.date === jan1).value).toBe(1500);
+      expect(body.trends.objects.find((p: { date: string }) => p.date === jan1).value).toBe(5);
+
+      expect(aurora.getTenantUsageMetrics).toHaveBeenCalledWith('aurora-t', expect.any(Object));
+      expect(fth.getTenantUsageMetrics).toHaveBeenCalledWith('fth-t', expect.any(Object));
+    });
+
+    it('skips orchestrators whose tenant is not ready', async () => {
+      vi.setSystemTime(new Date('2026-01-02T12:00:00Z'));
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+      const aurora = makeOrchestrator({
+        id: 'aurora',
+        region: 'eu-west-1',
+        tenantId: 'aurora-t',
+        buckets: [{ bucketName: 'eu-bucket', createdAt: '2026-01-01T00:00:00Z' }],
+      });
+      const fth = makeOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: null });
+      mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+      const event = buildEvent({ userInfo: USER_INFO });
+      const result = await baseHandler(event);
+      const body = JSON.parse(String(result.body));
+
+      expect(body.activities.map((a: { resourceName: string }) => a.resourceName)).toEqual([
+        'eu-bucket',
+      ]);
+      // The unprovisioned region is never queried for buckets or usage.
+      expect(fth.listBuckets).not.toHaveBeenCalled();
+      expect(fth.getTenantUsageMetrics).not.toHaveBeenCalled();
+    });
+
+    it('still renders other regions when one orchestrator usage fetch fails', async () => {
+      vi.setSystemTime(new Date('2026-01-02T12:00:00Z'));
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+      const aurora = makeOrchestrator({
+        id: 'aurora',
+        region: 'eu-west-1',
+        tenantId: 'aurora-t',
+        storage: [storageSample('2026-01-01T10:00:00.000Z', 2000, 3)],
+      });
+      const fth = makeOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: 'fth-t' });
+      fth.getTenantUsageMetrics.mockRejectedValue(new Error('FTH metrics down'));
+      mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+      const event = buildEvent({ userInfo: USER_INFO });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(200);
+      const body = JSON.parse(String(result.body));
+      const jan1 = '2026-01-01T23:59:59.999Z';
+      expect(body.trends.storage.find((p: { date: string }) => p.date === jan1).value).toBe(2000);
+    });
+  });
 });

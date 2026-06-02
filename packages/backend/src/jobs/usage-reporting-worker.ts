@@ -103,8 +103,8 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const now = new Date().toISOString();
   const isTrial = subscriptionStatus === 'trialing';
 
-  // Each region the org is provisioned in is reported independently, then
-  // aggregated for the org-level billing surface (Stripe meter + metadata + audit).
+  // Each region the org is provisioned in is fetched independently, then
+  // aggregated and reported on the org-level.
   const tenantRegions: { region: S3Region; tenantId: string }[] = [];
   if (auroraTenantId) tenantRegions.push({ region: S3Region.EuWest1, tenantId: auroraTenantId });
   if (fthTenantId) tenantRegions.push({ region: S3Region.UsEast1, tenantId: fthTenantId });
@@ -359,7 +359,7 @@ async function writeUsageAuditRecord(params: {
           lockAction: params.lockAction,
           orgSyncAction: params.orgSyncAction,
           // Per-region breakdown behind the aggregate totals above.
-          regions: params.regionUsages,
+          regionUsages: params.regionUsages,
           createdAt: new Date().toISOString(),
           ttl,
         },

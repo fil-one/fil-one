@@ -3,11 +3,11 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { S3_REGION } from '@filone/shared';
 import type { ActivityResponse, RecentActivity, UsageDataPoint } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
+import type { ServiceOrchestrator, StorageUsageSample } from '../lib/service-orchestrator.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -23,6 +23,11 @@ function endOfDay(d: Date): Date {
   return eod;
 }
 
+interface ReadyTenant {
+  orchestrator: ServiceOrchestrator;
+  tenantId: string;
+}
+
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -33,12 +38,14 @@ export async function baseHandler(
   );
   const period = event.queryStringParameters?.period === '30d' ? 30 : 7;
 
-  const orchestrator = getOrchestratorForRegion(S3_REGION);
-  const tenantId = await orchestrator.isTenantReady(orgId);
+  // The dashboard aggregates activity across every region the org is provisioned
+  // in, so resolve the ready tenant on each available orchestrator.
+  const tenants = await resolveReadyTenants(orgId);
 
-  const [bucketActivities, keyActivities] = await Promise.all([
-    fetchBucketActivities(orgId, tenantId),
+  const [bucketActivities, keyActivities, trends] = await Promise.all([
+    fetchBucketActivities(orgId, tenants),
     fetchAccessKeyActivities(orgId),
+    buildTimeSeries(tenants, period),
   ]);
 
   // TODO: Re-add object activities once we have an event system with Aurora.
@@ -48,8 +55,6 @@ export async function baseHandler(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
 
-  const trends = await buildTimeSeries(tenantId, period);
-
   const response: ActivityResponse = {
     activities: activities.slice(0, limit),
     trends,
@@ -57,14 +62,35 @@ export async function baseHandler(
   return new ResponseBuilder().status(200).body(response).build();
 }
 
+async function resolveReadyTenants(orgId: string): Promise<ReadyTenant[]> {
+  const orchestrators = getAvailableOrchestrators(process.env.FILONE_STAGE!);
+  const resolved = await Promise.all(
+    orchestrators.map(async (orchestrator) => {
+      const tenantId = await orchestrator.isTenantReady(orgId);
+      return tenantId ? { orchestrator, tenantId } : null;
+    }),
+  );
+  return resolved.filter((t): t is ReadyTenant => t !== null);
+}
+
 async function fetchBucketActivities(
   orgId: string,
-  tenantId: string | null,
+  tenants: ReadyTenant[],
 ): Promise<RecentActivity[]> {
-  // Swallow errors so the dashboard still renders.
-  if (!tenantId) return [];
+  const perTenant = await Promise.all(
+    tenants.map(({ orchestrator, tenantId }) =>
+      listBucketActivities(orgId, orchestrator, tenantId),
+    ),
+  );
+  return perTenant.flat();
+}
 
-  const orchestrator = getOrchestratorForRegion(S3_REGION);
+async function listBucketActivities(
+  orgId: string,
+  orchestrator: ServiceOrchestrator,
+  tenantId: string,
+): Promise<RecentActivity[]> {
+  // Swallow per-orchestrator errors so one region's outage still renders the rest.
   try {
     const buckets = await orchestrator.listBuckets(tenantId);
     return buckets.map((bucket) => ({
@@ -81,9 +107,15 @@ async function fetchBucketActivities(
       console.warn('[get-activity] AccessDenied listing buckets — tenant may have no buckets yet', {
         orgId,
         tenantId,
+        region: orchestrator.region,
       });
     } else {
-      console.error('[get-activity] Failed to list buckets', { orgId, err });
+      console.error('[get-activity] Failed to list buckets', {
+        orgId,
+        tenantId,
+        region: orchestrator.region,
+        err,
+      });
     }
     return [];
   }
@@ -113,7 +145,7 @@ async function fetchAccessKeyActivities(orgId: string): Promise<RecentActivity[]
 }
 
 async function buildTimeSeries(
-  tenantId: string | null,
+  tenants: ReadyTenant[],
   period: number,
 ): Promise<ActivityResponse['trends']> {
   const now = new Date();
@@ -121,32 +153,58 @@ async function buildTimeSeries(
   from.setUTCDate(from.getUTCDate() - period + 1);
   from.setUTCHours(0, 0, 0, 0);
 
-  const storageSamples = tenantId
-    ? (
-        await getOrchestratorForRegion(S3_REGION).getTenantUsageMetrics(tenantId, {
-          from: from.toISOString(),
-          to: now.toISOString(),
-          interval: '24h',
-        })
-      ).storage
-    : [];
-
-  // Index samples by end-of-day timestamp
-  const samplesByDate = new Map(
-    storageSamples.map((s) => [endOfDay(new Date(s.timestamp)).toISOString(), s] as const),
+  // Fetch each region's storage series and index it by end-of-day, then sum
+  // across regions per day for the org-wide trend.
+  const perTenantByDate = await Promise.all(
+    tenants.map(({ orchestrator, tenantId }) =>
+      fetchStorageByDate(orchestrator, tenantId, from, now),
+    ),
   );
 
-  // Build full date range with gap-filling
+  // Build full date range with gap-filling, summing all regions for each day.
   const storage: UsageDataPoint[] = [];
   const objects: UsageDataPoint[] = [];
   for (const d = new Date(from); d <= now; d.setUTCDate(d.getUTCDate() + 1)) {
     const date = endOfDay(d).toISOString();
-    const sample = samplesByDate.get(date);
-    storage.push({ date, value: sample?.bytesUsed ?? 0 });
-    objects.push({ date, value: sample?.objectCount ?? 0 });
+    let bytesUsed = 0;
+    let objectCount = 0;
+    for (const byDate of perTenantByDate) {
+      const sample = byDate.get(date);
+      bytesUsed += sample?.bytesUsed ?? 0;
+      objectCount += sample?.objectCount ?? 0;
+    }
+    storage.push({ date, value: bytesUsed });
+    objects.push({ date, value: objectCount });
   }
 
   return { storage, objects };
+}
+
+async function fetchStorageByDate(
+  orchestrator: ServiceOrchestrator,
+  tenantId: string,
+  from: Date,
+  to: Date,
+): Promise<Map<string, StorageUsageSample>> {
+  // Request 1h granularity: it's the only interval every orchestrator supports
+  // (FTH's timeseries endpoint accepts 1h/5m only). The end-of-day key collapses
+  // it to one point per day — the day's latest reading, since samples arrive
+  // chronologically. Swallow errors so one region's outage still renders the rest.
+  try {
+    const { storage } = await orchestrator.getTenantUsageMetrics(tenantId, {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      interval: '1h',
+    });
+    return new Map(storage.map((s) => [endOfDay(new Date(s.timestamp)).toISOString(), s] as const));
+  } catch (err) {
+    console.error('[get-activity] Failed to fetch usage metrics', {
+      tenantId,
+      region: orchestrator.region,
+      err,
+    });
+    return new Map();
+  }
 }
 
 export const handler = middy(baseHandler)
