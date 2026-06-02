@@ -115,6 +115,10 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   if (fthTenantId) tenantRegions.push({ region: S3Region.UsEast1, tenantId: fthTenantId });
 
   // Trial lock enforcement is Aurora-only; fetch its tenant info alongside metrics.
+  if (tenantRegions.length === 0) {
+    throw new Error('[usage-worker] No tenant id provided (auroraTenantId or fthTenantId)');
+  }
+
   let regionResults: { usage: RegionUsage; storageSamples: StorageUsageSample[] }[];
   let tenantRegionInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
   try {
