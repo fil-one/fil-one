@@ -28,6 +28,11 @@ export interface FthManagementClient {
     opts?: { idempotencyKey?: string },
   ): Promise<void>;
 
+  getClientMetricsTimeseries(
+    clientRef: string,
+    query: { from: string; to: string; interval?: string },
+  ): Promise<FthMetricsTimeseriesResponse>;
+
   interceptors: {
     request: { use(fn: RequestInterceptor): number };
     response: { use(fn: ResponseInterceptor): number };
@@ -109,6 +114,33 @@ export interface FthAccessKey {
   createdAt: string;
 }
 
+// Wire shape mirrors the OpenAPI `MetricsTimeseriesResponse` (snake_case is the
+// on-the-wire format). Only `ts` / `usage_avg_bytes` / `egress_bytes` are consumed
+// today; the rest are documented for completeness and future use.
+export interface FthMetricsTimeseriesPoint {
+  ts?: string;
+  usage_avg_bytes?: number;
+  usage_peak_bytes?: number;
+  billable_byte_seconds?: number;
+  billable_object_seconds?: number;
+  egress_bytes?: number;
+  egress_requests?: number;
+}
+
+export interface FthMetricsTimeseriesResponse {
+  from?: string;
+  to?: string;
+  interval?: string;
+  clientId?: number;
+  clientCode?: string;
+  clientName?: string;
+  point_count?: number;
+  points?: FthMetricsTimeseriesPoint[];
+  watermark_at?: string | null;
+  is_partial?: boolean;
+  source_lag_seconds?: number | null;
+}
+
 export interface FthAccessKeyWithSecret extends FthAccessKey {
   secretAccessKey: string;
 }
@@ -178,7 +210,11 @@ function buildHttpRequest(
   ctx: RequestContext,
   method: string,
   path: string,
-  opts: { body?: unknown; idempotencyKey?: string },
+  opts: {
+    body?: unknown;
+    idempotencyKey?: string;
+    query?: Record<string, string | number | undefined | null>;
+  },
 ): Request {
   const headers = new Headers({
     Authorization: `Bearer ${ctx.token}`,
@@ -191,7 +227,20 @@ function buildHttpRequest(
     headers.set('Content-Type', 'application/json');
     init.body = JSON.stringify(opts.body);
   }
-  return new Request(`${ctx.baseUrl}${path}`, init);
+
+  let url = `${ctx.baseUrl}${path}`;
+  if (opts.query) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(opts.query)) {
+      if (value !== undefined && value !== null) {
+        params.set(key, String(value));
+      }
+    }
+    const qs = params.toString();
+    if (qs) url = `${url}?${qs}`;
+  }
+
+  return new Request(url, init);
 }
 
 async function runRequest<T>(
@@ -199,7 +248,11 @@ async function runRequest<T>(
   method: string,
   pathTemplate: string,
   pathParams: Record<string, string>,
-  opts: { body?: unknown; idempotencyKey?: string } = {},
+  opts: {
+    body?: unknown;
+    idempotencyKey?: string;
+    query?: Record<string, string | number | undefined | null>;
+  } = {},
 ): Promise<T> {
   const path = renderPath(pathTemplate, pathParams);
   let httpRequest = buildHttpRequest(ctx, method, path, opts);
@@ -252,7 +305,11 @@ type RequestFn = <T>(
   method: string,
   pathTemplate: string,
   pathParams: Record<string, string>,
-  opts?: { body?: unknown; idempotencyKey?: string },
+  opts?: {
+    body?: unknown;
+    idempotencyKey?: string;
+    query?: Record<string, string | number | undefined | null>;
+  },
 ) => Promise<T>;
 
 function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'interceptors'> {
@@ -334,6 +391,14 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
         '/management/v1/clients/{clientRef}/access-keys/{accessKeyId}',
         { clientRef, accessKeyId },
         { idempotencyKey: opts?.idempotencyKey },
+      ),
+
+    getClientMetricsTimeseries: (clientRef, query) =>
+      request<FthMetricsTimeseriesResponse>(
+        'GET',
+        '/management/v1/clients/{clientRef}/metrics/timeseries',
+        { clientRef },
+        { query: { from: query.from, to: query.to, interval: query.interval } },
       ),
   };
 }

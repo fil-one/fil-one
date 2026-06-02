@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import type { ModelStorageMetricsSample } from '../lib/aurora/aurora-backoffice.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -14,20 +13,16 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockGetStorageSamples = vi.fn<() => Promise<ModelStorageMetricsSample[]>>();
-
-vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
-  getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...(args as [])),
-}));
-
 const mockIsTenantReady = vi.fn();
 const mockListBuckets = vi.fn();
+const mockGetTenantUsageMetrics = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
   region: 'eu-west-1',
   isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
   listBuckets: (...args: unknown[]) => mockListBuckets(...args),
+  getTenantUsageMetrics: (...args: unknown[]) => mockGetTenantUsageMetrics(...args),
 };
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
@@ -63,7 +58,7 @@ function storageSample(
   timestamp: string,
   bytesUsed: number,
   objectCount: number,
-): ModelStorageMetricsSample {
+): { timestamp: string; bytesUsed: number; objectCount: number } {
   return { timestamp, bytesUsed, objectCount };
 }
 
@@ -88,7 +83,7 @@ describe('get-activity baseHandler', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     ddbMock.reset();
-    mockGetStorageSamples.mockResolvedValue([]);
+    mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
     mockListBuckets.mockResolvedValue([]);
     setTenant(AURORA_TENANT_ID);
   });
@@ -120,10 +115,13 @@ describe('get-activity baseHandler', () => {
     vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
     ddbMock.on(QueryCommand).resolves({ Items: [] });
     // Only provide samples for Jan 1 and Jan 3 — gaps on Jan 2, 4, 5
-    mockGetStorageSamples.mockResolvedValue([
-      storageSample('2025-12-29T00:00:00.000Z', 1000, 5),
-      storageSample('2025-12-31T00:00:00.000Z', 2000, 10),
-    ]);
+    mockGetTenantUsageMetrics.mockResolvedValue({
+      storage: [
+        storageSample('2025-12-29T00:00:00.000Z', 1000, 5),
+        storageSample('2025-12-31T00:00:00.000Z', 2000, 10),
+      ],
+      egress: [],
+    });
 
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -152,7 +150,7 @@ describe('get-activity baseHandler', () => {
     expect(body.trends.storage).toStrictEqual(
       new Array(7).fill({ value: 0, date: expect.any(String) }),
     );
-    expect(mockGetStorageSamples).not.toHaveBeenCalled();
+    expect(mockGetTenantUsageMetrics).not.toHaveBeenCalled();
   });
 
   it('fills correct number of entries for 30d period', async () => {
@@ -283,7 +281,7 @@ describe('get-activity baseHandler', () => {
     expect(body.activities).toStrictEqual([]);
   });
 
-  it('passes correct period to Aurora storage API', async () => {
+  it('passes correct period to orchestrator usage metrics', async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     const event = buildEvent({
@@ -294,10 +292,10 @@ describe('get-activity baseHandler', () => {
     const result = await baseHandler(event);
     const body = JSON.parse(String(result.body));
 
-    expect(mockGetStorageSamples).toHaveBeenCalledWith(
+    expect(mockGetTenantUsageMetrics).toHaveBeenCalledWith(
+      AURORA_TENANT_ID,
       expect.objectContaining({
-        tenantId: AURORA_TENANT_ID,
-        window: '24h',
+        interval: '24h',
       }),
     );
 

@@ -2,15 +2,17 @@ import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { Resource } from 'sst';
-import { GB_BYTES, TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT, formatBytes } from '@filone/shared';
-import { getStripeClient, updateCustomerMetadata } from '../lib/stripe-client.js';
 import {
-  getStorageSamples,
-  getOperationsSamples,
-  getTenantInfo,
-  updateTenantStatus,
-} from '../lib/aurora/aurora-backoffice.js';
+  GB_BYTES,
+  TRIAL_STORAGE_LIMIT,
+  TRIAL_EGRESS_LIMIT,
+  formatBytes,
+  S3Region,
+} from '@filone/shared';
+import { getStripeClient, updateCustomerMetadata } from '../lib/stripe-client.js';
+import { getTenantInfo, updateTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import type { ModelsTenantStatus } from '../lib/aurora/aurora-backoffice.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
 import { calculateAverageUsage } from '../lib/usage-calculator.js';
 
@@ -18,13 +20,31 @@ const dynamo = getDynamoClient();
 
 export interface UsageReportingWorkerPayload {
   orgId: string;
-  auroraTenantId: string;
+  /** Tenant ids per provisioned region. At least one must be present. */
+  auroraTenantId?: string;
+  fthTenantId?: string;
   orgName?: string;
   subscriptionId: string;
   stripeCustomerId: string;
   currentPeriodStart: string;
   subscriptionStatus: string;
   reportDate: string;
+}
+
+interface RegionUsage {
+  region: S3Region;
+  tenantId: string;
+  averageStorageBytesUsed: number;
+  currentStorageBytes: number;
+  totalEgressBytes: number;
+  sampleCount: number;
+}
+
+interface AggregateUsage {
+  averageStorageBytesUsed: number;
+  currentStorageBytes: number;
+  totalEgressBytes: number;
+  sampleCount: number;
 }
 
 async function enforceTenantLocks({
@@ -66,6 +86,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const {
     orgId,
     auroraTenantId,
+    fthTenantId,
     orgName,
     subscriptionId,
     stripeCustomerId,
@@ -82,31 +103,26 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const now = new Date().toISOString();
   const isTrial = subscriptionStatus === 'trialing';
 
-  // Fetch storage, egress, and (for trials) tenant info in parallel
-  let storageSamples: Awaited<ReturnType<typeof getStorageSamples>>;
-  let operationsSamples: Awaited<ReturnType<typeof getOperationsSamples>>;
+  // Each region the org is provisioned in is reported independently, then
+  // aggregated for the org-level billing surface (Stripe meter + metadata + audit).
+  const tenants: { region: S3Region; tenantId: string }[] = [];
+  if (auroraTenantId) tenants.push({ region: S3Region.EuWest1, tenantId: auroraTenantId });
+  if (fthTenantId) tenants.push({ region: S3Region.UsEast1, tenantId: fthTenantId });
+
+  // Trial lock enforcement is Aurora-only; fetch its tenant info alongside metrics.
+  let perRegion: RegionUsage[];
   let tenantInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
   try {
-    [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
-      getStorageSamples({
-        tenantId: auroraTenantId,
-        from: currentPeriodStart,
-        to: now,
-        window: '1h',
-      }),
-      getOperationsSamples({
-        tenantId: auroraTenantId,
-        from: currentPeriodStart,
-        to: now,
-        window: '24h',
-      }),
-      isTrial ? getTenantInfo({ tenantId: auroraTenantId }) : null,
+    [perRegion, tenantInfo] = await Promise.all([
+      Promise.all(tenants.map((t) => fetchRegionUsage(t, currentPeriodStart, now))),
+      isTrial && auroraTenantId ? getTenantInfo({ tenantId: auroraTenantId }) : null,
     ]);
   } catch (error) {
     const e = error as Error & { cause?: unknown };
-    console.error('[usage-worker] Aurora fetch failed', {
+    console.error('[usage-worker] Usage metrics fetch failed', {
       orgId,
       auroraTenantId,
+      fthTenantId,
       subscriptionId,
       message: e.message,
       cause: e.cause,
@@ -115,13 +131,8 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     throw error;
   }
 
-  const usage = calculateAverageUsage(storageSamples);
-  const averageStorageGbUsed = usage.averageStorageBytesUsed / GB_BYTES;
-  const currentStorageBytes = storageSamples.at(-1)?.bytesUsed ?? 0;
-  const totalEgressBytes = operationsSamples.reduce(
-    (sum, sample) => sum + (sample.txBytes ?? 0),
-    0,
-  );
+  const aggregate = aggregateUsage(perRegion);
+  const averageStorageGbUsed = aggregate.averageStorageBytesUsed / GB_BYTES;
 
   const { reported } = await reportStorageToStripe({
     orgId,
@@ -134,18 +145,17 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const orgSyncAction = await syncOrgMetadata({
     stripeCustomerId,
     orgName,
-    currentStorageBytes,
+    currentStorageBytes: aggregate.currentStorageBytes,
   });
 
-  const lockAction = isTrial
-    ? await safeEnforceTrialLocks({
-        tenantId: auroraTenantId,
-        orgId,
-        currentStatus: tenantInfo!.status,
-        currentStorageBytes,
-        totalEgressBytes,
-      })
-    : 'skipped:paid';
+  const lockAction = await resolveLockAction({
+    isTrial,
+    auroraTenantId,
+    orgId,
+    currentStatus: tenantInfo?.status,
+    currentStorageBytes: aggregate.currentStorageBytes,
+    totalEgressBytes: aggregate.totalEgressBytes,
+  });
 
   await writeUsageAuditRecord({
     orgId,
@@ -154,13 +164,76 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     currentPeriodStart,
     subscriptionStatus,
     reportDate,
-    averageStorageBytesUsed: usage.averageStorageBytesUsed,
+    averageStorageBytesUsed: aggregate.averageStorageBytesUsed,
     averageStorageGbUsed,
-    totalEgressBytes,
-    sampleCount: usage.sampleCount,
+    totalEgressBytes: aggregate.totalEgressBytes,
+    sampleCount: aggregate.sampleCount,
     lockAction,
     reportedToStripe: reported,
     orgSyncAction,
+    regions: perRegion,
+  });
+}
+
+/**
+ * Fetches one region's usage via its orchestrator and reduces the normalized
+ * time series to the per-region scalars the billing surface needs.
+ */
+async function fetchRegionUsage(
+  tenant: { region: S3Region; tenantId: string },
+  from: string,
+  to: string,
+): Promise<RegionUsage> {
+  const orchestrator = getOrchestratorForRegion(tenant.region);
+  const metrics = await orchestrator.getTenantUsageMetrics(tenant.tenantId, {
+    from,
+    to,
+    interval: '1h',
+  });
+  const usage = calculateAverageUsage(metrics.storage);
+  return {
+    region: tenant.region,
+    tenantId: tenant.tenantId,
+    averageStorageBytesUsed: usage.averageStorageBytesUsed,
+    currentStorageBytes: metrics.storage.at(-1)?.bytesUsed ?? 0,
+    totalEgressBytes: metrics.egress.reduce((sum, sample) => sum + (sample.bytesUsed ?? 0), 0),
+    sampleCount: usage.sampleCount,
+  };
+}
+
+function aggregateUsage(perRegion: RegionUsage[]): AggregateUsage {
+  return perRegion.reduce<AggregateUsage>(
+    (acc, u) => ({
+      averageStorageBytesUsed: acc.averageStorageBytesUsed + u.averageStorageBytesUsed,
+      currentStorageBytes: acc.currentStorageBytes + u.currentStorageBytes,
+      totalEgressBytes: acc.totalEgressBytes + u.totalEgressBytes,
+      sampleCount: acc.sampleCount + u.sampleCount,
+    }),
+    { averageStorageBytesUsed: 0, currentStorageBytes: 0, totalEgressBytes: 0, sampleCount: 0 },
+  );
+}
+
+/**
+ * Trial lock enforcement requires the Aurora control plane (status read +
+ * write). Other regions have no equivalent lock mechanism wired yet, so they
+ * are reported but not enforced.
+ */
+async function resolveLockAction(params: {
+  isTrial: boolean;
+  auroraTenantId: string | undefined;
+  orgId: string;
+  currentStatus: ModelsTenantStatus | undefined;
+  currentStorageBytes: number;
+  totalEgressBytes: number;
+}): Promise<string> {
+  if (!params.isTrial) return 'skipped:paid';
+  if (!params.auroraTenantId) return 'skipped:region-unsupported';
+  return safeEnforceTrialLocks({
+    tenantId: params.auroraTenantId,
+    orgId: params.orgId,
+    currentStatus: params.currentStatus,
+    currentStorageBytes: params.currentStorageBytes,
+    totalEgressBytes: params.totalEgressBytes,
   });
 }
 
@@ -262,30 +335,36 @@ async function writeUsageAuditRecord(params: {
   lockAction: string;
   reportedToStripe: boolean;
   orgSyncAction: string;
+  regions: RegionUsage[];
 }): Promise<void> {
   const ttl = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60; // 365 days
   await dynamo.send(
     new PutItemCommand({
       TableName: Resource.BillingTable.name,
-      Item: marshall({
-        pk: `ORG#${params.orgId}`,
-        sk: `USAGE_REPORT#${params.reportDate}`,
-        orgId: params.orgId,
-        subscriptionId: params.subscriptionId,
-        stripeCustomerId: params.stripeCustomerId,
-        currentPeriodStart: params.currentPeriodStart,
-        subscriptionStatus: params.subscriptionStatus,
-        reportDate: params.reportDate,
-        averageStorageBytesUsed: params.averageStorageBytesUsed,
-        averageStorageGbUsed: params.averageStorageGbUsed,
-        totalEgressBytes: params.totalEgressBytes,
-        sampleCount: params.sampleCount,
-        reportedToStripe: params.reportedToStripe,
-        lockAction: params.lockAction,
-        orgSyncAction: params.orgSyncAction,
-        createdAt: new Date().toISOString(),
-        ttl,
-      }),
+      Item: marshall(
+        {
+          pk: `ORG#${params.orgId}`,
+          sk: `USAGE_REPORT#${params.reportDate}`,
+          orgId: params.orgId,
+          subscriptionId: params.subscriptionId,
+          stripeCustomerId: params.stripeCustomerId,
+          currentPeriodStart: params.currentPeriodStart,
+          subscriptionStatus: params.subscriptionStatus,
+          reportDate: params.reportDate,
+          averageStorageBytesUsed: params.averageStorageBytesUsed,
+          averageStorageGbUsed: params.averageStorageGbUsed,
+          totalEgressBytes: params.totalEgressBytes,
+          sampleCount: params.sampleCount,
+          reportedToStripe: params.reportedToStripe,
+          lockAction: params.lockAction,
+          orgSyncAction: params.orgSyncAction,
+          // Per-region breakdown behind the aggregate totals above.
+          regions: params.regions,
+          createdAt: new Date().toISOString(),
+          ttl,
+        },
+        { removeUndefinedValues: true },
+      ),
     }),
   );
 }

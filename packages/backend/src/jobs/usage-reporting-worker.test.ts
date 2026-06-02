@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
 
 // ---------------------------------------------------------------------------
@@ -27,13 +28,16 @@ vi.mock('../lib/stripe-client.js', () => ({
     mockCustomersUpdate(customerId, { metadata }),
 }));
 
-const mockGetStorageSamples = vi.fn();
-const mockGetOperationsSamples = vi.fn().mockResolvedValue([]);
+// Orchestrator registry — the worker fetches metrics through this now.
+const mockGetTenantUsageMetrics = vi.fn();
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
+  getOrchestratorForRegion: () => ({ getTenantUsageMetrics: mockGetTenantUsageMetrics }),
+}));
+
+// aurora-backoffice now only supplies trial-lock status read + write.
 const mockGetTenantInfo = vi.fn().mockResolvedValue({ status: 'ACTIVE' });
 const mockUpdateTenantStatus = vi.fn().mockResolvedValue(undefined);
 vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
-  getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
-  getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
   getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...args),
   updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
 }));
@@ -68,25 +72,26 @@ describe('usage-reporting-worker', () => {
     ddbMock.reset();
     vi.clearAllMocks();
     ddbMock.on(PutItemCommand).resolves({});
+    mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
   });
 
-  it('calls getStorageSamples with auroraTenantId, not orgId', async () => {
-    mockGetStorageSamples.mockResolvedValue([]);
+  it('calls getTenantUsageMetrics with auroraTenantId, not orgId', async () => {
+    mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
 
     await handler(basePayload);
 
-    expect(mockGetStorageSamples).toHaveBeenCalledWith(
-      expect.objectContaining({ tenantId: 'aurora-tenant-123' }),
+    expect(mockGetTenantUsageMetrics).toHaveBeenCalledWith(
+      'aurora-tenant-123',
+      expect.objectContaining({ interval: '1h' }),
     );
-    expect(mockGetStorageSamples).not.toHaveBeenCalledWith(
-      expect.objectContaining({ tenantId: 'org-1' }),
-    );
+    expect(mockGetTenantUsageMetrics).not.toHaveBeenCalledWith('org-1', expect.anything());
   });
 
   it('reports usage to Stripe and writes audit record', async () => {
-    mockGetStorageSamples.mockResolvedValue([
-      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
-    ]);
+    mockGetTenantUsageMetrics.mockResolvedValue({
+      storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+      egress: [],
+    });
 
     await handler(basePayload);
 
@@ -110,7 +115,7 @@ describe('usage-reporting-worker', () => {
   });
 
   it('skips Stripe when usage is zero, still writes audit', async () => {
-    mockGetStorageSamples.mockResolvedValue([]);
+    mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
 
     await handler(basePayload);
 
@@ -123,25 +128,29 @@ describe('usage-reporting-worker', () => {
   });
 
   it('propagates Stripe API failure', async () => {
-    mockGetStorageSamples.mockResolvedValue([
-      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1000 },
-    ]);
+    mockGetTenantUsageMetrics.mockResolvedValue({
+      storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1000 }],
+      egress: [],
+    });
     mockMeterEventsCreate.mockRejectedValueOnce(new Error('Stripe error'));
 
     await expect(handler(basePayload)).rejects.toThrow('Stripe error');
   });
 
-  it('propagates Aurora API failure', async () => {
-    mockGetStorageSamples.mockRejectedValue(new Error('Aurora timeout'));
+  it('propagates orchestrator API failure', async () => {
+    mockGetTenantUsageMetrics.mockRejectedValue(new Error('Aurora timeout'));
 
     await expect(handler(basePayload)).rejects.toThrow('Aurora timeout');
   });
 
   it('writes correct audit record fields', async () => {
-    mockGetStorageSamples.mockResolvedValue([
-      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500 },
-      { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1500 },
-    ]);
+    mockGetTenantUsageMetrics.mockResolvedValue({
+      storage: [
+        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500 },
+        { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1500 },
+      ],
+      egress: [],
+    });
 
     await handler(basePayload);
 
@@ -156,7 +165,7 @@ describe('usage-reporting-worker', () => {
   });
 
   it('paid user records lockAction as skipped:paid', async () => {
-    mockGetStorageSamples.mockResolvedValue([]);
+    mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
 
     await handler(basePayload);
 
@@ -174,12 +183,10 @@ describe('usage-reporting-worker', () => {
     };
 
     it('trial under limits — no status change', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500_000_000_000 }, // 500 GB
-      ]);
-      mockGetOperationsSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', txBytes: 1_000_000_000_000 }, // 1 TB
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500_000_000_000 }], // 500 GB
+        egress: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }], // 1 TB
+      });
       mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
       await handler(trialPayload);
@@ -191,10 +198,10 @@ describe('usage-reporting-worker', () => {
     });
 
     it('trial storage exceeded — WRITE_LOCKED', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }, // 1.5 TB
-      ]);
-      mockGetOperationsSamples.mockResolvedValue([]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }], // 1.5 TB
+        egress: [],
+      });
       mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
       await handler(trialPayload);
@@ -208,12 +215,10 @@ describe('usage-reporting-worker', () => {
     });
 
     it('trial egress exceeded — DISABLED', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 0 },
-      ]);
-      mockGetOperationsSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', txBytes: 2_500_000_000_000 }, // 2.5 TB
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 0 }],
+        egress: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 2_500_000_000_000 }], // 2.5 TB
+      });
       mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
       await handler(trialPayload);
@@ -227,12 +232,10 @@ describe('usage-reporting-worker', () => {
     });
 
     it('trial both exceeded — DISABLED takes priority over WRITE_LOCKED', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }, // 1.5 TB
-      ]);
-      mockGetOperationsSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', txBytes: 2_500_000_000_000 }, // 2.5 TB
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }], // 1.5 TB
+        egress: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 2_500_000_000_000 }], // 2.5 TB
+      });
       mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
       await handler(trialPayload);
@@ -246,10 +249,10 @@ describe('usage-reporting-worker', () => {
     });
 
     it('audit record includes totalEgressBytes', async () => {
-      mockGetStorageSamples.mockResolvedValue([]);
-      mockGetOperationsSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', txBytes: 500_000_000_000 }, // 500 GB
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [],
+        egress: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500_000_000_000 }], // 500 GB
+      });
       mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
       await handler(trialPayload);
@@ -259,10 +262,10 @@ describe('usage-reporting-worker', () => {
     });
 
     it('records error in lockAction when enforcement fails', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 },
-      ]);
-      mockGetOperationsSamples.mockResolvedValue([]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }],
+        egress: [],
+      });
       mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
       mockUpdateTenantStatus.mockRejectedValueOnce(new Error('Aurora down'));
 
@@ -283,9 +286,10 @@ describe('usage-reporting-worker', () => {
 
     it('throws a descriptive error when env var is unset', async () => {
       vi.stubEnv('STRIPE_METER_EVENT_NAME', undefined);
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+        egress: [],
+      });
 
       await expect(handler(basePayload)).rejects.toThrow(
         'STRIPE_METER_EVENT_NAME env var is not set',
@@ -295,9 +299,10 @@ describe('usage-reporting-worker', () => {
 
     it('throws a descriptive error when env var is empty string', async () => {
       vi.stubEnv('STRIPE_METER_EVENT_NAME', '');
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+        egress: [],
+      });
 
       await expect(handler(basePayload)).rejects.toThrow(
         'STRIPE_METER_EVENT_NAME env var is not set',
@@ -307,7 +312,7 @@ describe('usage-reporting-worker', () => {
 
     it('validates env var even when usage is zero (fails fast on misconfig)', async () => {
       vi.stubEnv('STRIPE_METER_EVENT_NAME', '');
-      mockGetStorageSamples.mockResolvedValue([]);
+      mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
 
       await expect(handler(basePayload)).rejects.toThrow(
         'STRIPE_METER_EVENT_NAME env var is not set',
@@ -327,18 +332,20 @@ describe('usage-reporting-worker', () => {
     }
 
     it('does not throw when Stripe returns resource_missing', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+        egress: [],
+      });
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
 
       await expect(handler(basePayload)).resolves.toBeUndefined();
     });
 
     it('audit record has reportedToStripe: false when meter event hits resource_missing', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+        egress: [],
+      });
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
 
       await handler(basePayload);
@@ -351,9 +358,10 @@ describe('usage-reporting-worker', () => {
 
     it('logs structured warn with orgId, subscriptionId, stripeCustomerId on resource_missing', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+        egress: [],
+      });
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
 
       await handler(basePayload);
@@ -376,10 +384,10 @@ describe('usage-reporting-worker', () => {
         ...basePayload,
         subscriptionStatus: 'trialing',
       };
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 },
-      ]);
-      mockGetOperationsSamples.mockResolvedValue([]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }],
+        egress: [],
+      });
       mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
 
@@ -395,9 +403,10 @@ describe('usage-reporting-worker', () => {
     });
 
     it('still propagates non-resource_missing Stripe errors', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+        egress: [],
+      });
       const err = new Error('rate limited') as Error & { code: string };
       err.code = 'rate_limit';
       mockMeterEventsCreate.mockRejectedValueOnce(err);
@@ -413,9 +422,10 @@ describe('usage-reporting-worker', () => {
     it('Stripe meter event is created on every run', async () => {
       // When the orchestrator runs twice per day
       // Each worker invocation reports usage to Stripe independently.
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+        egress: [],
+      });
 
       await handler(basePayload);
       await handler(basePayload);
@@ -429,9 +439,10 @@ describe('usage-reporting-worker', () => {
     });
 
     it('DynamoDB audit record uses same pk/sk on both runs (safe overwrite)', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+        egress: [],
+      });
 
       await handler(basePayload);
       await handler(basePayload);
@@ -448,7 +459,7 @@ describe('usage-reporting-worker', () => {
     });
 
     it('zero usage — Stripe not called on either run, audit written twice', async () => {
-      mockGetStorageSamples.mockResolvedValue([]);
+      mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
 
       await handler(basePayload);
       await handler(basePayload);
@@ -466,10 +477,12 @@ describe('usage-reporting-worker', () => {
         ...basePayload,
         subscriptionStatus: 'trialing',
       };
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }, // exceeds trial limit
-      ]);
-      mockGetOperationsSamples.mockResolvedValue([]);
+      mockGetTenantUsageMetrics.mockResolvedValue(
+        {
+          storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }],
+          egress: [],
+        }, // exceeds trial limit
+      );
 
       // First run: tenant is ACTIVE → should update to WRITE_LOCKED
       mockGetTenantInfo.mockResolvedValueOnce({ status: 'ACTIVE' });
@@ -488,9 +501,10 @@ describe('usage-reporting-worker', () => {
     });
 
     it('paid user — no tenant enforcement on either run', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+        egress: [],
+      });
 
       await handler(basePayload);
       await handler(basePayload);
@@ -510,10 +524,13 @@ describe('usage-reporting-worker', () => {
   // -----------------------------------------------------------------------
   describe('org metadata sync', () => {
     it('syncs organization_name and storage to Stripe with latest snapshot', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500_000_000_000 },
-        { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1_500_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [
+          { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500_000_000_000 },
+          { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1_500_000_000_000 },
+        ],
+        egress: [],
+      });
 
       await handler(basePayload);
 
@@ -527,9 +544,10 @@ describe('usage-reporting-worker', () => {
     });
 
     it('sync failure is swallowed and recorded in audit', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+        egress: [],
+      });
       mockCustomersUpdate.mockRejectedValueOnce(new Error('Stripe metadata error'));
 
       await expect(handler(basePayload)).resolves.toBeUndefined();
@@ -539,7 +557,7 @@ describe('usage-reporting-worker', () => {
     });
 
     it('skips sync when no org name and zero storage', async () => {
-      mockGetStorageSamples.mockResolvedValue([]);
+      mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
 
       await handler({ ...basePayload, orgName: undefined });
 
@@ -549,9 +567,10 @@ describe('usage-reporting-worker', () => {
     });
 
     it('syncs storage only when org name missing', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 2_000_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 2_000_000_000_000 }],
+        egress: [],
+      });
 
       await handler({ ...basePayload, orgName: undefined });
 
@@ -562,9 +581,10 @@ describe('usage-reporting-worker', () => {
     });
 
     it('audit record includes orgSyncAction on success', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 },
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+        egress: [],
+      });
 
       await handler(basePayload);
 
@@ -573,9 +593,9 @@ describe('usage-reporting-worker', () => {
     });
 
     it('syncs sub-GB storage with MB units', async () => {
-      mockGetStorageSamples.mockResolvedValue([
-        { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 100_000_000 }, // 100 MB
-      ]);
+      mockGetTenantUsageMetrics.mockResolvedValue(
+        { storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 100_000_000 }], egress: [] }, // 100 MB
+      );
 
       await handler({ ...basePayload, orgName: undefined });
 
@@ -602,7 +622,10 @@ describe('usage-reporting-worker', () => {
         { label: 'terabytes', bytesUsed: 1_000_000_000_000, expected: '1 TB' },
         { label: 'terabytes (fractional)', bytesUsed: 2_500_000_000_000, expected: '2.5 TB' },
       ])('formats $label as "$expected"', async ({ bytesUsed, expected }) => {
-        mockGetStorageSamples.mockResolvedValue([{ timestamp: '2024-01-01T00:00:00Z', bytesUsed }]);
+        mockGetTenantUsageMetrics.mockResolvedValue({
+          storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed }],
+          egress: [],
+        });
 
         await handler({ ...basePayload, orgName: undefined });
 
@@ -614,10 +637,13 @@ describe('usage-reporting-worker', () => {
 
       it('uses currentStorageBytes (latest sample), not the average', async () => {
         // Two samples: average is 750 GB, latest snapshot is 1.5 TB
-        mockGetStorageSamples.mockResolvedValue([
-          { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 0 },
-          { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1_500_000_000_000 },
-        ]);
+        mockGetTenantUsageMetrics.mockResolvedValue({
+          storage: [
+            { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 0 },
+            { timestamp: '2024-01-01T01:00:00Z', bytesUsed: 1_500_000_000_000 },
+          ],
+          egress: [],
+        });
 
         await handler({ ...basePayload, orgName: undefined });
 
@@ -627,7 +653,7 @@ describe('usage-reporting-worker', () => {
       });
 
       it('reports "0 B" when org name present and storage is zero', async () => {
-        mockGetStorageSamples.mockResolvedValue([]);
+        mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
 
         await handler(basePayload); // basePayload has orgName: 'Acme Corp'
 
@@ -639,6 +665,98 @@ describe('usage-reporting-worker', () => {
           },
         });
       });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Multi-region
+  // -----------------------------------------------------------------------
+  describe('multi-region', () => {
+    const t = '2024-01-01T00:00:00Z';
+
+    it('FTH-only org: skips trial lock, sets lockAction skipped:region-unsupported, writes audit with one region entry', async () => {
+      const fthOnlyPayload: UsageReportingWorkerPayload = {
+        ...basePayload,
+        auroraTenantId: undefined,
+        fthTenantId: 'fth-client-9',
+        subscriptionStatus: 'trialing',
+      };
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: t, bytesUsed: 500_000_000_000 }],
+        egress: [{ timestamp: t, bytesUsed: 100_000_000_000 }],
+      });
+
+      await handler(fthOnlyPayload);
+
+      // Trial lock enforcement is Aurora-only; getTenantInfo must NOT be called
+      expect(mockGetTenantInfo).not.toHaveBeenCalled();
+
+      // Stripe meter must still be emitted
+      expect(mockMeterEventsCreate).toHaveBeenCalledOnce();
+
+      // Audit record must exist
+      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      expect(putCalls).toHaveLength(1);
+      const item = putCalls[0].args[0].input.Item!;
+      expect(item.lockAction).toEqual({ S: 'skipped:region-unsupported' });
+
+      // regions breakdown should have exactly one entry (us-east-1 / fth)
+      const record = unmarshall(item);
+      expect(record.regions).toHaveLength(1);
+      expect(record.regions[0].tenantId).toBe('fth-client-9');
+    });
+
+    it('both regions: getTenantUsageMetrics called twice, Stripe value is sum in GB, audit has two region entries', async () => {
+      const bothPayload: UsageReportingWorkerPayload = {
+        ...basePayload,
+        auroraTenantId: 'aurora-tenant-123',
+        fthTenantId: 'fth-client-9',
+        subscriptionStatus: 'active',
+      };
+
+      mockGetTenantUsageMetrics.mockImplementation((tenantId: string) => {
+        if (tenantId === 'aurora-tenant-123') {
+          return Promise.resolve({
+            storage: [{ timestamp: t, bytesUsed: 1_000_000_000_000 }],
+            egress: [],
+          });
+        }
+        // fth-client-9
+        return Promise.resolve({
+          storage: [{ timestamp: t, bytesUsed: 500_000_000_000 }],
+          egress: [],
+        });
+      });
+
+      await handler(bothPayload);
+
+      // Must have fetched metrics for each region
+      expect(mockGetTenantUsageMetrics).toHaveBeenCalledTimes(2);
+      expect(mockGetTenantUsageMetrics).toHaveBeenCalledWith(
+        'aurora-tenant-123',
+        expect.objectContaining({ interval: '1h' }),
+      );
+      expect(mockGetTenantUsageMetrics).toHaveBeenCalledWith(
+        'fth-client-9',
+        expect.objectContaining({ interval: '1h' }),
+      );
+
+      // Stripe meter value should be the sum: 1 TB + 500 GB = 1500 GB → '1500'
+      expect(mockMeterEventsCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ value: '1500' }),
+        }),
+      );
+
+      // Audit: regions array has two entries
+      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      expect(putCalls).toHaveLength(1);
+      const record = unmarshall(putCalls[0].args[0].input.Item!);
+      expect(record.regions).toHaveLength(2);
+
+      // Aggregate averageStorageBytesUsed is the sum across both regions
+      // aurora: 1 TB average (single sample), fth: 500 GB average (single sample) → 1.5 TB
+      expect(record.averageStorageBytesUsed).toBe(1_500_000_000_000);
     });
   });
 });

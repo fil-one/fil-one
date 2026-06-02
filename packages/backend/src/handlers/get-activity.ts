@@ -14,7 +14,6 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import type { AccessKeyRecord } from '../lib/dynamo-records.js';
-import { getStorageSamples } from '../lib/aurora/aurora-backoffice.js';
 
 const dynamo = getDynamoClient();
 
@@ -122,23 +121,19 @@ async function buildTimeSeries(
   from.setUTCDate(from.getUTCDate() - period + 1);
   from.setUTCHours(0, 0, 0, 0);
 
-  // getStorageSamples is Aurora-specific (no FTH equivalent). Phase B will
-  // expose this as `provider.getStorageSamples?(tenantId)` and FTH will
-  // return [] until the upstream endpoint exists.
   const storageSamples = tenantId
-    ? await getStorageSamples({
-        tenantId,
-        from: from.toISOString(),
-        to: now.toISOString(),
-        window: '24h',
-      })
+    ? (
+        await getOrchestratorForRegion(S3_REGION).getTenantUsageMetrics(tenantId, {
+          from: from.toISOString(),
+          to: now.toISOString(),
+          interval: '24h',
+        })
+      ).storage
     : [];
 
-  // Index Aurora samples by end-of-day timestamp
+  // Index samples by end-of-day timestamp
   const samplesByDate = new Map(
-    storageSamples
-      .filter((s) => s.timestamp)
-      .map((s) => [endOfDay(new Date(s.timestamp!)).toISOString(), s] as const),
+    storageSamples.map((s) => [endOfDay(new Date(s.timestamp)).toISOString(), s] as const),
   );
 
   // Build full date range with gap-filling

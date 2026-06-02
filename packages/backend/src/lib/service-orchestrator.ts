@@ -56,6 +56,35 @@ export interface IssuedAccessKey {
   createdAt: string;
 }
 
+/** A single point in a tenant's storage-usage time series. */
+export interface StorageUsageSample {
+  timestamp: string;
+  bytesUsed: number;
+  /** 0 when the orchestrator's source has no object-count series (e.g. FTH). */
+  objectCount: number;
+}
+
+/** A single point in a tenant's egress time series. */
+export interface EgressUsageSample {
+  timestamp: string;
+  bytesUsed: number;
+}
+
+/** Normalized, orchestrator-agnostic usage/egress time series for a tenant. */
+export interface TenantUsageMetrics {
+  storage: StorageUsageSample[];
+  egress: EgressUsageSample[];
+}
+
+export interface GetTenantUsageMetricsOptions {
+  /** Inclusive start timestamp, RFC3339 UTC. */
+  from: string;
+  /** Exclusive end timestamp, RFC3339 UTC. */
+  to: string;
+  /** Sampling window applied to BOTH series. Defaults to '1h'. */
+  interval?: string;
+}
+
 /**
  * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.).
  * Each implementation handles tenant provisioning, bucket lifecycle,
@@ -130,4 +159,14 @@ export interface ServiceOrchestrator {
   deleteAccessKey(tenantId: string, keyId: string): Promise<void>;
 
   getPresignerContext(tenantId: string): Promise<PresignerContext>;
+
+  /**
+   * Returns the tenant's storage and egress usage as normalized time series
+   * over `[from, to)`. Read-only — does not mutate tenant state. Backs both the
+   * usage-reporting worker and read-path handlers (e.g. get-activity).
+   */
+  getTenantUsageMetrics(
+    tenantId: string,
+    opts: GetTenantUsageMetricsOptions,
+  ): Promise<TenantUsageMetrics>;
 }

@@ -42,10 +42,10 @@ function subscriptionItem(orgId: string, extra: Record<string, unknown> = {}) {
   );
 }
 
-function orgProfileItem(orgId: string, auroraTenantId?: string) {
-  if (!auroraTenantId) return { Item: undefined };
+function orgProfileItem(orgId: string, auroraTenantId?: string, fthTenantId?: string) {
+  if (!auroraTenantId && !fthTenantId) return { Item: undefined };
   return {
-    Item: marshall({ auroraTenantId }),
+    Item: marshall({ auroraTenantId, fthTenantId }, { removeUndefinedValues: true }),
   };
 }
 
@@ -224,6 +224,49 @@ describe('usage-reporting-orchestrator', () => {
     );
     expect(payload.orgId).toBe('org-2');
     expect(payload.auroraTenantId).toBe('aurora-org-2');
+  });
+
+  it('invokes worker for an org provisioned only in the FTH region', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [subscriptionItem('org-fth')] });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: 'ORG#org-fth' }, sk: { S: 'PROFILE' } },
+      })
+      .resolves(orgProfileItem('org-fth', undefined, 'fth-client-7'));
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    const invokeCalls = lambdaMock.commandCalls(InvokeCommand);
+    expect(invokeCalls).toHaveLength(1);
+    const payload = JSON.parse(
+      Buffer.from(invokeCalls[0].args[0].input.Payload as Uint8Array).toString(),
+    );
+    expect(payload.orgId).toBe('org-fth');
+    expect(payload.fthTenantId).toBe('fth-client-7');
+    expect(payload.auroraTenantId).toBeUndefined();
+  });
+
+  it('carries both tenant ids when the org is provisioned in both regions', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [subscriptionItem('org-both')] });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: 'ORG#org-both' }, sk: { S: 'PROFILE' } },
+      })
+      .resolves(orgProfileItem('org-both', 'aurora-org-both', 'fth-client-8'));
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    const invokeCalls = lambdaMock.commandCalls(InvokeCommand);
+    expect(invokeCalls).toHaveLength(1);
+    const payload = JSON.parse(
+      Buffer.from(invokeCalls[0].args[0].input.Payload as Uint8Array).toString(),
+    );
+    expect(payload.auroraTenantId).toBe('aurora-org-both');
+    expect(payload.fthTenantId).toBe('fth-client-8');
   });
 
   // -----------------------------------------------------------------------
