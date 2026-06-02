@@ -758,7 +758,6 @@ export default $config({
         stripeSecretKey,
         stripePriceId,
         auroraBackofficeToken,
-        // FTH orchestrator's getTenantUsageMetrics() reads this via Resource.FthManagementApiToken.
         fthManagementApiToken,
       ],
       environment: {
