@@ -90,7 +90,7 @@ export function useAccessKeyForm({
       granularPermissions?: GranularPermission[];
       bucketScope: AccessKeyBucketScope;
       buckets?: string[];
-      region?: S3Region;
+      region: S3Region;
       expiresAt?: string | null;
     }) => {
       const parsed = CreateAccessKeySchema.safeParse(body);
