@@ -917,14 +917,18 @@ describe('stripe-webhook handler', () => {
       expect(mockCustomersRetrieve).not.toHaveBeenCalled();
     });
 
-    it('skips when customer has no userId in metadata', async () => {
+    it('fails the webhook (500) when customer.deleted has no userId in metadata', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject({ metadata: {} }));
 
       const result = await handler(buildWebhookEvent('{}'));
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
       expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
     });
 
     it('fails the webhook (500) and releases idempotency when Aurora DISABLE fails', async () => {
