@@ -179,6 +179,18 @@ describe('mergeStorageSamples', () => {
     ]);
   });
 
+  it('collapses timestamps that parse to the same instant onto one grid point', () => {
+    // Two regions label the same instant differently ('...00Z' vs '...00.000Z').
+    // Keying the grid on the raw string would split it into two points; keying on
+    // the parsed instant collapses them so each region contributes once.
+    const a = [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1000, objectCount: 1 }];
+    const b = [{ timestamp: '2024-01-01T00:00:00.000Z', bytesUsed: 500, objectCount: 2 }];
+
+    expect(mergeStorageSamples([a, b])).toEqual([
+      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1500, objectCount: 3 },
+    ]);
+  });
+
   it('merges Aurora-style and FTH-style precision timestamps on a chronological grid', () => {
     // Aurora emits whole-second `...Z`; FTH emits fractional `...sssZ`. The two
     // interleave, and each must carry forward across the other's instants.

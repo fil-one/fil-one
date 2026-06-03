@@ -40,9 +40,19 @@ export function sortStorageSamplesByTimestamp(samples: StorageUsageSample[]): St
  * `sortStorageSamplesByTimestamp`) — carry-forward depends on order.
  */
 export function mergeStorageSamples(series: StorageUsageSample[][]): StorageUsageSample[] {
-  const timestamps = [...new Set(series.flatMap((s) => s.map((p) => p.timestamp)))].sort(
-    (a, b) => Date.parse(a) - Date.parse(b),
-  );
+  // Bucket by parsed time, not raw string: '...00:00:00Z' and '...00:00:00.000Z'
+  // are the same moment and must collapse to one grid point (each region carries
+  // forward across it once). Keep the first label seen per epoch-ms bucket.
+  const timestampByEpochMs = new Map<number, string>();
+  for (const samples of series) {
+    for (const p of samples) {
+      const epochMs = Date.parse(p.timestamp);
+      if (!timestampByEpochMs.has(epochMs)) timestampByEpochMs.set(epochMs, p.timestamp);
+    }
+  }
+  const timestamps = [...timestampByEpochMs.keys()]
+    .sort((a, b) => a - b)
+    .map((epochMs) => timestampByEpochMs.get(epochMs)!);
 
   // Align every region onto the shared timestamp grid, then sum the aligned
   // grids element-wise — once gaps are filled, the merge is a plain sum.
