@@ -192,7 +192,7 @@ export async function baseHandler(
   const hasShareableUrl = ops.some((op) => op.op === 'getObject' && op.expiresIn !== undefined);
   if (isTrial && hasShareableUrl) {
     return new ResponseBuilder()
-      .status(403)
+      .status(402)
       .body<ErrorResponse>({
         message:
           'Generating shareable links is not available on trial accounts. Please upgrade to a paid plan.',

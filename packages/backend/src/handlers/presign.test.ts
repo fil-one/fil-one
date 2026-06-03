@@ -144,7 +144,7 @@ describe('presign baseHandler', () => {
 
   // ── Trial account shareable link blocking ───────────────────────────
 
-  it('returns 403 for trial user generating shareable getObject URL', async () => {
+  it('returns 402 for trial user generating shareable getObject URL', async () => {
     const event = buildPresignEvent(
       [{ op: 'getObject', bucket: 'b', key: 'k', expiresIn: 86400 }],
       { subscriptionStatus: SubscriptionStatus.Trialing },
@@ -152,19 +152,19 @@ describe('presign baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result).toMatchObject({
-      statusCode: 403,
+      statusCode: 402,
       body: expect.stringContaining(ApiErrorCode.TRIAL_PRESIGN_BLOCKED),
     });
   });
 
-  it('returns 403 for new user (no billing record) generating shareable URL', async () => {
+  it('returns 402 for new user (no billing record) generating shareable URL', async () => {
     const event = buildPresignEvent([{ op: 'getObject', bucket: 'b', key: 'k', expiresIn: 3600 }], {
       subscriptionStatus: null,
     });
     const result = await baseHandler(event);
 
     expect(result).toMatchObject({
-      statusCode: 403,
+      statusCode: 402,
       body: expect.stringContaining(ApiErrorCode.TRIAL_PRESIGN_BLOCKED),
     });
   });
@@ -202,7 +202,7 @@ describe('presign baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result).toMatchObject({
-      statusCode: 403,
+      statusCode: 402,
       body: expect.stringContaining(ApiErrorCode.TRIAL_PRESIGN_BLOCKED),
     });
   });
