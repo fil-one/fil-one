@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
+import type { FthManagementClient } from './fth-management-client.js';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -17,11 +18,12 @@ const mockFthClient = {
   createClient: vi.fn(),
   createStorageUser: vi.fn(),
   createAccessKey: vi.fn(),
+  listAccessKeys: vi.fn(),
+  deleteAccessKey: vi.fn(),
+  listStorageUsers: vi.fn(),
 };
 
-vi.mock('./fth-management-client.js', () => ({
-  createFthManagementClient: vi.fn(() => mockFthClient),
-}));
+const fthClient = mockFthClient as unknown as FthManagementClient;
 
 vi.mock('./fth-api-metrics.js', () => ({
   instrumentClient: vi.fn(),
@@ -77,7 +79,7 @@ describe('ensureTenantReady', () => {
       Item: profileItem({ fthTenantId: fthClientId }),
     });
 
-    const result = await ensureTenantReady(orgId);
+    const result = await ensureTenantReady(fthClient, orgId);
 
     expect(result).toBe(fthClientId);
     expect(mockFthClient.createClient).not.toHaveBeenCalled();
@@ -89,7 +91,7 @@ describe('ensureTenantReady', () => {
     ssmMock.on(PutParameterCommand).resolves({});
     stubSetupApiCalls();
 
-    const result = await ensureTenantReady(orgId);
+    const result = await ensureTenantReady(fthClient, orgId);
 
     expect(result).toBe(fthClientId);
     expect(mockFthClient.createClient).toHaveBeenCalledWith({
@@ -135,7 +137,7 @@ describe('ensureTenantReady', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     ddbMock.on(GetItemCommand).rejects(new Error('DDB is down'));
 
-    const result = await ensureTenantReady(orgId);
+    const result = await ensureTenantReady(fthClient, orgId);
 
     expect(result).toBeNull();
   });
@@ -144,7 +146,7 @@ describe('ensureTenantReady', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     ddbMock.on(GetItemCommand).rejects(new Error('DDB is down'));
 
-    await ensureTenantReady(orgId);
+    await ensureTenantReady(fthClient, orgId);
 
     expect(errorSpy).toHaveBeenCalledWith(
       '[fth-tenant-setup] setup failed',

@@ -25,6 +25,7 @@ import { ensureTenantReady as ensureAuroraTenantReady } from '../aurora/aurora-t
 import {
   createAuroraAccessKey,
   createAuroraBucket,
+  deleteAuroraAccessKey,
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
 } from '../aurora/aurora-portal.js';
@@ -235,6 +236,10 @@ export const auroraOrchestrator = {
 
   async findAccessKeyByName(tenantId: string, keyName: string) {
     return findAuroraAccessKeyByName({ tenantId, keyName });
+  },
+
+  async deleteAccessKey(tenantId: string, keyId: string): Promise<void> {
+    await deleteAuroraAccessKey({ tenantId, auroraKeyId: keyId });
   },
 
   async getPresignerContext(tenantId: string): Promise<PresignerContext> {

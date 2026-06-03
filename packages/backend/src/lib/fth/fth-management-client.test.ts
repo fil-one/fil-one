@@ -312,7 +312,7 @@ describe('FthClient endpoint coverage', () => {
   });
 
   it('listStorageUsers GETs the collection', async () => {
-    fetchMock = mockFetch(200, [{ id: '1', userCode: 'u' }]);
+    fetchMock = mockFetch(200, { items: [{ id: '1', userCode: 'u' }] });
     client = buildClient({ fetch: fetchMock });
 
     const result = await client.listStorageUsers('client-1');
@@ -348,7 +348,7 @@ describe('FthClient endpoint coverage', () => {
   });
 
   it('listAccessKeys GETs the client-level collection', async () => {
-    fetchMock = mockFetch(200, []);
+    fetchMock = mockFetch(200, { items: [] });
     client = buildClient({ fetch: fetchMock });
 
     await client.listAccessKeys('client-1');

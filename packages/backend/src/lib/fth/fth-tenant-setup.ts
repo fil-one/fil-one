@@ -9,9 +9,7 @@ import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
-import { createFthManagementClient } from './fth-management-client.js';
 import type { FthManagementClient } from './fth-management-client.js';
-import { instrumentClient } from './fth-api-metrics.js';
 
 const FTH_FULL_PERMISSIONS = [
   's3:CreateBucket',
@@ -41,9 +39,12 @@ const ssm = new SSMClient({});
 // Returns the fthTenantId on success, or null on any setup failure so the
 // handler can return the standard 503 tenant-not-ready response. The state
 // machine resumes from whatever step is next on the user's retry.
-export async function ensureTenantReady(orgId: string): Promise<string | null> {
+export async function ensureTenantReady(
+  client: FthManagementClient,
+  orgId: string,
+): Promise<string | null> {
   try {
-    return await processTenantSetup(orgId);
+    return await processTenantSetup(client, orgId);
   } catch (err) {
     console.error('[fth-tenant-setup] setup failed', {
       orgId,
@@ -59,7 +60,7 @@ export async function ensureTenantReady(orgId: string): Promise<string | null> {
 // (failure-count tracking, partial-progress resumption, transitional
 // statuses from FthTenantSetupStatus) before relying on this in
 // production. See aurora-tenant-setup.ts for the pattern to mirror.
-async function processTenantSetup(orgId: string): Promise<string> {
+async function processTenantSetup(client: FthManagementClient, orgId: string): Promise<string> {
   const stage = process.env.FILONE_STAGE!;
   const key = { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } };
 
@@ -75,8 +76,6 @@ async function processTenantSetup(orgId: string): Promise<string> {
   if (existingTenantId) {
     return existingTenantId;
   }
-
-  const client = createInstrumentedFthClient();
 
   const fthClient = await client.createClient({
     externalId: orgId,
@@ -129,13 +128,4 @@ async function processTenantSetup(orgId: string): Promise<string> {
   );
 
   return tenantId;
-}
-
-function createInstrumentedFthClient(): FthManagementClient {
-  const client = createFthManagementClient({
-    baseUrl: process.env.FTH_MANAGEMENT_API_URL!,
-    token: Resource.FthManagementApiToken.value,
-  });
-  instrumentClient(client, { apiName: 'fth-management' });
-  return client;
 }
