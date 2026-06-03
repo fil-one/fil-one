@@ -142,11 +142,24 @@ describe('presign baseHandler', () => {
     expect(result.statusCode).toBe(400);
   });
 
-  // ── Trial account blocking ─────────────────────────────────────────
+  // ── Trial account shareable link blocking ───────────────────────────
 
-  it('returns 403 for trial accounts', async () => {
-    const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
-      subscriptionStatus: SubscriptionStatus.Trialing,
+  it('returns 403 for trial user generating shareable getObject URL', async () => {
+    const event = buildPresignEvent(
+      [{ op: 'getObject', bucket: 'b', key: 'k', expiresIn: 86400 }],
+      { subscriptionStatus: SubscriptionStatus.Trialing },
+    );
+    const result = await baseHandler(event);
+
+    expect(result).toMatchObject({
+      statusCode: 403,
+      body: expect.stringContaining(ApiErrorCode.TRIAL_PRESIGN_BLOCKED),
+    });
+  });
+
+  it('returns 403 for new user (no billing record) generating shareable URL', async () => {
+    const event = buildPresignEvent([{ op: 'getObject', bucket: 'b', key: 'k', expiresIn: 3600 }], {
+      subscriptionStatus: null,
     });
     const result = await baseHandler(event);
 
@@ -156,10 +169,36 @@ describe('presign baseHandler', () => {
     });
   });
 
-  it('returns 403 when no subscription status is set (new user)', async () => {
-    const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
-      subscriptionStatus: null,
+  it('allows trial user to download (getObject without expiresIn)', async () => {
+    mockGetPresignedGetObjectUrl.mockResolvedValue('https://s3.example.com/get?signed');
+
+    const event = buildPresignEvent([{ op: 'getObject', bucket: 'b', key: 'k' }], {
+      subscriptionStatus: SubscriptionStatus.Trialing,
     });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+  });
+
+  it('allows trial user to list objects', async () => {
+    mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
+
+    const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
+      subscriptionStatus: SubscriptionStatus.Trialing,
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+  });
+
+  it('blocks trial user when batch contains a shareable URL among other ops', async () => {
+    const event = buildPresignEvent(
+      [
+        { op: 'listObjects', bucket: 'b' },
+        { op: 'getObject', bucket: 'b', key: 'k', expiresIn: 604800 },
+      ],
+      { subscriptionStatus: SubscriptionStatus.Trialing },
+    );
     const result = await baseHandler(event);
 
     expect(result).toMatchObject({

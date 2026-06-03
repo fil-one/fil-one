@@ -184,14 +184,18 @@ export async function baseHandler(
   const { orgId } = getUserInfo(event);
 
   // Trial accounts (and users with no billing record yet) cannot generate
-  // presigned URLs — they must upgrade to a paid plan first.
+  // shareable presigned URLs (getObject with custom expiresIn). All other
+  // presign operations remain available so trial users can browse and interact
+  // with bucket contents normally.
   const status = event.requestContext.subscriptionStatus;
-  if (!status || status === SubscriptionStatus.Trialing) {
+  const isTrial = !status || status === SubscriptionStatus.Trialing;
+  const hasShareableUrl = ops.some((op) => op.op === 'getObject' && op.expiresIn !== undefined);
+  if (isTrial && hasShareableUrl) {
     return new ResponseBuilder()
       .status(403)
       .body<ErrorResponse>({
         message:
-          'Presigned URL generation is not available on trial accounts. Please upgrade to a paid plan.',
+          'Generating shareable links is not available on trial accounts. Please upgrade to a paid plan.',
         code: ApiErrorCode.TRIAL_PRESIGN_BLOCKED,
       })
       .build();
@@ -202,17 +206,18 @@ export async function baseHandler(
   // the resolved subscription status on the event, so we can check it here
   // without a second DynamoDB query. If the batch contains write ops
   // (putObject, deleteObject), block during grace period.
-  if (ops.some((op) => WRITE_OPS.has(op.op))) {
-    if (status === SubscriptionStatus.GracePeriod || status === SubscriptionStatus.PastDue) {
-      return new ResponseBuilder()
-        .status(403)
-        .body<ErrorResponse>({
-          message:
-            'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
-          code: ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED,
-        })
-        .build();
-    }
+  const hasWriteOps = ops.some((op) => WRITE_OPS.has(op.op));
+  const isGraceOrPastDue =
+    status === SubscriptionStatus.GracePeriod || status === SubscriptionStatus.PastDue;
+  if (hasWriteOps && isGraceOrPastDue) {
+    return new ResponseBuilder()
+      .status(403)
+      .body<ErrorResponse>({
+        message:
+          'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
+        code: ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED,
+      })
+      .build();
   }
 
   const orchestrator = getOrchestratorForRegion(region);
