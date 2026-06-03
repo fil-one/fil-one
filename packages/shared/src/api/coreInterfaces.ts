@@ -8,6 +8,8 @@ export enum ApiErrorCode {
   SUBSCRIPTION_INACTIVE = 'SUBSCRIPTION_INACTIVE',
   /** Promo code is invalid, expired, or inactive. */
   INVALID_PROMOTION_CODE = 'INVALID_PROMOTION_CODE',
+  /** Too many presign operations — rate limit exceeded. */
+  RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
 }
 
 export interface ErrorResponse {
