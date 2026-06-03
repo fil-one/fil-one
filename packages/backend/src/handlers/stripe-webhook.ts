@@ -123,6 +123,11 @@ async function processStripeEvent(tableName: string, stripeEvent: Stripe.Event):
       await handleCustomerUpdated(tableName, customer);
       return;
     }
+    case 'customer.deleted': {
+      const customer = stripeEvent.data.object as Stripe.Customer;
+      await handleCustomerDeleted(tableName, customer);
+      return;
+    }
     case 'customer.subscription.trial_will_end': {
       const subscription = stripeEvent.data.object as Stripe.Subscription;
       console.log('[stripe-webhook] Trial ending soon for customer:', subscription.customer);
@@ -246,6 +251,54 @@ async function updatePaymentMethod(
       ConditionExpression: 'attribute_exists(pk)',
     }),
   );
+}
+
+async function handleCustomerDeleted(tableName: string, customer: Stripe.Customer): Promise<void> {
+  // The customer.deleted payload carries the full pre-deletion Customer, including metadata.
+  // We do NOT retrieve from Stripe — the customer no longer exists there.
+  const userId = customer.metadata?.userId;
+  if (!userId) {
+    console.warn('[stripe-webhook] customer.deleted without userId in metadata; skipping', {
+      customerId: customer.id,
+    });
+    return;
+  }
+
+  // Disable immediately — no grace period. Aurora first; a failure here throws so the
+  // webhook returns 500 and Stripe retries (there is no cron fallback for canceled records).
+  const resolved = await resolveAuroraTenantId(userId, tableName);
+  if (resolved) {
+    await updateAuroraTenantStatus({ tenantId: resolved.auroraTenantId, status: 'DISABLED' });
+    console.log('[stripe-webhook] Aurora tenant DISABLED (customer.deleted)', {
+      userId,
+      orgId: resolved.orgId,
+      auroraTenantId: resolved.auroraTenantId,
+    });
+  } else {
+    console.warn('[stripe-webhook] customer.deleted: no Aurora tenant to disable', {
+      userId,
+      customerId: customer.id,
+    });
+  }
+
+  const now = new Date();
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: tableName,
+      Key: {
+        pk: { S: `CUSTOMER#${userId}` },
+        sk: { S: 'SUBSCRIPTION' },
+      },
+      UpdateExpression:
+        'SET subscriptionStatus = :status, canceledAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt',
+      ExpressionAttributeValues: {
+        ':status': { S: SubscriptionStatus.Canceled },
+        ':now': { S: now.toISOString() },
+      },
+    }),
+  );
+
+  emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
 
 async function handleSubscriptionUpdate(

@@ -865,6 +865,118 @@ describe('stripe-webhook handler', () => {
   });
 
   // -----------------------------------------------------------------------
+  // 5b. customer.deleted
+  // -----------------------------------------------------------------------
+  describe('customer.deleted', () => {
+    it('disables the customer immediately by setting Canceled status and DISABLING Aurora tenant', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      setupAuroraTenantResolution();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: MOCK_AURORA_TENANT_ID,
+        status: 'DISABLED',
+      });
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+
+      const input = updateCalls[0].args[0].input;
+      expect(input.Key).toEqual({
+        pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
+        sk: { S: 'SUBSCRIPTION' },
+      });
+      expect(input.ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.Canceled,
+      });
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('does not write a grace period', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      setupAuroraTenantResolution();
+
+      await handler(buildWebhookEvent('{}'));
+
+      const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+      expect(input.UpdateExpression).not.toContain('gracePeriodEndsAt = ');
+      expect(input.UpdateExpression).toContain('REMOVE gracePeriodEndsAt');
+      expect(input.ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.Canceled,
+      });
+    });
+
+    it('reads userId from the event payload and never calls Stripe customers.retrieve', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      setupAuroraTenantResolution();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockCustomersRetrieve).not.toHaveBeenCalled();
+    });
+
+    it('skips when customer has no userId in metadata', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject({ metadata: {} }));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('fails the webhook (500) and releases idempotency when Aurora DISABLE fails', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      setupAuroraTenantResolution();
+      mockUpdateTenantStatus.mockRejectedValue(new Error('Aurora API error'));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0); // Aurora throws before the DDB write
+    });
+
+    it('emits a DunningEscalation metric with reason customer_deleted', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      setupAuroraTenantResolution();
+
+      await handler(buildWebhookEvent('{}'));
+
+      const emissions = dunningEmissions();
+      expect(
+        emissions.some(
+          (e) =>
+            (e as { stage?: string }).stage === 'canceled' &&
+            (e as { reason?: string }).reason === 'customer_deleted',
+        ),
+      ).toBe(true);
+    });
+
+    it('still cancels in DynamoDB when there is no Aurora tenant (no orgId)', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      // do NOT call setupAuroraTenantResolution, so GetItemCommand default returns no orgId
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      expect(updateCalls[0].args[0].input.ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.Canceled,
+      });
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // 6. customer.subscription.trial_will_end
   // -----------------------------------------------------------------------
   describe('customer.subscription.trial_will_end', () => {
