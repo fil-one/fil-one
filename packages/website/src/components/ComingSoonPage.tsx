@@ -4,6 +4,7 @@ import { CaretDownIcon, CheckIcon, XIcon } from '@phosphor-icons/react/dist/ssr'
 
 import { getMe } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
+import { track } from '../plausible.js';
 import { Alert } from './Alert.js';
 import { Badge } from './Badge.js';
 import { Button } from './Button.js';
@@ -185,12 +186,12 @@ function AccordionItem({ question, answer }: ComingSoonFaq) {
         aria-controls={panelId}
         className="flex w-full cursor-pointer items-center justify-between gap-4 py-4 text-left group"
       >
-        <span className="text-sm font-medium text-zinc-900 group-hover:text-zinc-600 transition-colors duration-150">
+        <span className="text-sm font-medium text-zinc-900 group-hover:text-zinc-600 transition-colors duration-150 motion-reduce:transition-none">
           {question}
         </span>
         <CaretDownIcon
           size={14}
-          className={`flex-shrink-0 text-zinc-400 group-hover:text-zinc-500 transition-all duration-200 ${open ? 'rotate-180' : ''}`}
+          className={`flex-shrink-0 text-zinc-400 group-hover:text-zinc-500 transition-all duration-200 motion-reduce:transition-none ${open ? 'rotate-180' : ''}`}
         />
       </button>
       {open && (
@@ -451,7 +452,10 @@ export function ComingSoonPage({
               headline={pricing.headline}
               subline={pricing.subline}
               inclusions={pricing.inclusions}
-              onJoinClick={() => setModalOpen(true)}
+              onJoinClick={() => {
+                track('Waitlist CTA clicked', { props: { page: title } });
+                setModalOpen(true);
+              }}
             />
           </div>
 
@@ -498,7 +502,10 @@ export function ComingSoonPage({
             </ModalHeader>
             <InterestForm
               config={interestForm}
-              onSubmitted={() => setSubmitted(true)}
+              onSubmitted={() => {
+                track('Waitlist submitted', { props: { page: title } });
+                setSubmitted(true);
+              }}
               onCancel={closeModal}
             />
           </>
