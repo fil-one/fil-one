@@ -122,6 +122,8 @@ export function PaymentForm({
       return;
     }
 
+    // Validate the promo code against the same zod schema the server uses, so format
+    // typos are caught before we bother creating a Stripe payment method.
     const trimmedPromotionCode = promotionCode.trim();
     const body = trimmedPromotionCode ? { promotionCode: trimmedPromotionCode } : {};
     const parsed = ActivateSubscriptionRequestSchema.safeParse(body);
@@ -138,6 +140,7 @@ export function PaymentForm({
       return;
     }
 
+    // Card setup confirmed — activate subscription via API
     try {
       await activateSubscription(parsed.data);
       onSuccess();
