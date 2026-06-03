@@ -66,7 +66,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
 function buildPresignEvent(
   ops: unknown[],
-  overrides?: { subscriptionStatus?: string; region?: string | null },
+  overrides?: { subscriptionStatus?: string | null; region?: string | null },
 ) {
   const region = overrides?.region === undefined ? 'eu-west-1' : overrides.region;
   const event = buildEvent({
@@ -74,8 +74,14 @@ function buildPresignEvent(
     userInfo: USER_INFO,
     ...(region !== null && { queryStringParameters: { region } }),
   });
-  if (overrides?.subscriptionStatus) {
-    event.requestContext.subscriptionStatus = overrides.subscriptionStatus;
+  // Default to Active so existing tests pass the trial gate.
+  // Pass null explicitly to simulate a user with no billing record.
+  const status =
+    overrides?.subscriptionStatus === undefined
+      ? SubscriptionStatus.Active
+      : overrides.subscriptionStatus;
+  if (status) {
+    event.requestContext.subscriptionStatus = status;
   }
   return event;
 }
@@ -134,6 +140,32 @@ describe('presign baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(400);
+  });
+
+  // ── Trial account blocking ─────────────────────────────────────────
+
+  it('returns 403 for trial accounts', async () => {
+    const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
+      subscriptionStatus: SubscriptionStatus.Trialing,
+    });
+    const result = await baseHandler(event);
+
+    expect(result).toMatchObject({
+      statusCode: 403,
+      body: expect.stringContaining(ApiErrorCode.TRIAL_PRESIGN_BLOCKED),
+    });
+  });
+
+  it('returns 403 when no subscription status is set (new user)', async () => {
+    const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
+      subscriptionStatus: null,
+    });
+    const result = await baseHandler(event);
+
+    expect(result).toMatchObject({
+      statusCode: 403,
+      body: expect.stringContaining(ApiErrorCode.TRIAL_PRESIGN_BLOCKED),
+    });
   });
 
   // ── Grace period / past due write blocking ──────────────────────────

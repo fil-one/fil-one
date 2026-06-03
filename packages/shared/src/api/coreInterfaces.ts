@@ -8,6 +8,8 @@ export enum ApiErrorCode {
   SUBSCRIPTION_INACTIVE = 'SUBSCRIPTION_INACTIVE',
   /** Promo code is invalid, expired, or inactive. */
   INVALID_PROMOTION_CODE = 'INVALID_PROMOTION_CODE',
+  /** Trial accounts cannot generate presigned URLs — upgrade required. */
+  TRIAL_PRESIGN_BLOCKED = 'TRIAL_PRESIGN_BLOCKED',
 }
 
 export interface ErrorResponse {
