@@ -28,7 +28,6 @@ export function calculateAverageUsage(samples: StorageUsageSample[]): UsageCalcu
 export function sortStorageSamplesByTimestamp(samples: StorageUsageSample[]): StorageUsageSample[] {
   return [...samples].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
 }
-}
 
 /**
  * Merges per-region storage series into one org-level series, summing each
@@ -57,12 +56,18 @@ export function mergeStorageSamples(series: StorageUsageSample[][]): StorageUsag
 
 /**
  * Resamples one region's series onto `timestamps`, carrying its last-known value
- * forward into gaps (0 before its first sample). Assumes both are sorted
- * ascending by timestamp.
+ * forward into gaps (0 before its first sample). Assumes both are sorted ascending
+ * by parsed time, so a single pointer walks `samples` once as `timestamps` advances.
  */
 function fillGaps(samples: StorageUsageSample[], timestamps: string[]): StorageUsageSample[] {
+  let i = 0;
+  let latest: StorageUsageSample | undefined;
   return timestamps.map((timestamp) => {
-    const latest = samples.filter((s) => s.timestamp <= timestamp).at(-1);
+    const t = Date.parse(timestamp);
+    while (i < samples.length && Date.parse(samples[i].timestamp) <= t) {
+      latest = samples[i];
+      i += 1;
+    }
     return {
       timestamp,
       bytesUsed: latest?.bytesUsed ?? 0,
