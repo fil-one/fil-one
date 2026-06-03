@@ -11,7 +11,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -41,11 +41,11 @@ export async function baseHandler(
 
   const { bucketName, region, versioning, lock, retention } = parsed.data;
 
-  if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
+  const { orgId } = getUserInfo(event);
+
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region, getVerifiedEmail(event))) {
     return unsupportedRegionResponse(region);
   }
-
-  const { orgId } = getUserInfo(event);
 
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
