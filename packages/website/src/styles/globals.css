@@ -35,7 +35,7 @@
 }
 
 @theme inline {
-  --font-sans: 'Inter', sans-serif;
+  --font-sans: 'Inter Variable', 'Inter', sans-serif;
 }
 
 @utility brand-outline {
