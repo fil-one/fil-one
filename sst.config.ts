@@ -698,7 +698,7 @@ export default $config({
       method: 'GET',
       routePath: '/api/activity',
       handler: 'get-activity',
-      extraEnv: auroraEnv,
+      extraEnv: { ...auroraEnv, ...fthEnv, FILONE_STAGE: $app.stage },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
       ],
