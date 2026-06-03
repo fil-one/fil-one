@@ -60,12 +60,10 @@ function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
             to={path}
             aria-label={label}
             className={[
-              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-              collapsed ? 'justify-center' : '',
+              'flex items-center rounded-lg text-sm transition-colors',
+              collapsed ? 'w-full justify-center py-2' : 'gap-3 px-3 py-2',
               isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
-            ]
-              .filter(Boolean)
-              .join(' ')}
+            ].join(' ')}
             activeProps={{ className: 'bg-brand-50 text-brand-700' }}
           >
             <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
@@ -186,7 +184,7 @@ export function HelpMenu({
             type="button"
             onClick={onToggle}
             aria-label="Help"
-            className="flex w-full items-center justify-center rounded-lg px-3 py-2 text-zinc-600 transition-colors hover:bg-zinc-100"
+            className="flex w-full items-center justify-center rounded-lg py-2 text-zinc-600 transition-colors hover:bg-zinc-100"
           >
             <QuestionIcon size={18} className="text-zinc-400" />
           </button>
@@ -324,11 +322,9 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
             data-testid="user-profile"
             onClick={() => setUserMenuOpen((o) => !o)}
             className={[
-              'flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-zinc-100',
-              collapsed ? 'w-full justify-center' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
+              'flex items-center rounded-lg hover:bg-zinc-100',
+              collapsed ? 'w-full justify-center py-1.5' : 'gap-2.5 px-2 py-1.5',
+            ].join(' ')}
           >
             <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">
               {initial}

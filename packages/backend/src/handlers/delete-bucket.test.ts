@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NotImplementedError } from '../lib/service-orchestrator.js';
+import { NotImplementedError } from '../lib/errors.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -57,7 +57,7 @@ describe('delete-bucket baseHandler', () => {
     mockIsTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { bucketName: 'my-bucket' };
+    event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(503);
@@ -70,7 +70,7 @@ describe('delete-bucket baseHandler', () => {
     );
 
     const event = buildEvent({ userInfo: USER_INFO });
-    event.pathParameters = { bucketName: 'my-bucket' };
+    event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(501);

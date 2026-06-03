@@ -29,7 +29,7 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
 }));
 
 import { baseHandler } from './create-bucket.js';
-import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
+import { BucketAlreadyExistsError } from '../lib/errors.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 import { S3_REGION, S3Region } from '@filone/shared';
 
