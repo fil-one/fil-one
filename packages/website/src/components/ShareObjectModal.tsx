@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowClockwiseIcon, LinkIcon } from '@phosphor-icons/react/dist/ssr';
 import { clsx } from 'clsx';
+import type { S3Region } from '@filone/shared';
 
 import { Button } from './Button';
 import { CopyButton } from './CopyButton';
@@ -21,6 +22,7 @@ export type ShareObjectModalProps = {
   open: boolean;
   onClose: () => void;
   bucketName: string;
+  region: S3Region;
   objectKey: string;
   versionId?: string;
 };
@@ -39,13 +41,14 @@ export function ShareObjectModal({
   open,
   onClose,
   bucketName,
+  region,
   objectKey,
   versionId,
 }: ShareObjectModalProps) {
   const [selected, setSelected] = useState<ExpiryOption>(DEFAULT_OPTION);
   const [generated, setGenerated] = useState<{ url: string; expiresAt: string } | null>(null);
 
-  const { generatePresignedUrl, generatingUrl } = useObjectActions({ bucketName });
+  const { generatePresignedUrl, generatingUrl } = useObjectActions({ bucketName, region });
 
   useEffect(() => {
     if (!open) {

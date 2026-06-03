@@ -16,6 +16,7 @@ export type AlertProps = {
   title?: string;
   description: string;
   showIcon?: boolean;
+  centered?: boolean;
 };
 
 const containerStyles: Record<AlertVariant, string> = {
@@ -38,7 +39,7 @@ const textStyles: Record<AlertVariant, string> = {
   blue: 'text-brand-900',
   green: 'text-green-900',
   red: 'text-red-900',
-  grey: 'text-zinc-900',
+  grey: 'text-zinc-600',
   amber: 'text-amber-900',
 };
 
@@ -50,18 +51,38 @@ const iconComponents: Record<AlertVariant, typeof InfoIcon> = {
   amber: WarningIcon,
 };
 
-export function Alert({ variant = 'blue', title, description, showIcon = true }: AlertProps) {
+export function Alert({
+  variant = 'blue',
+  title,
+  description,
+  showIcon = true,
+  centered = false,
+}: AlertProps) {
   return (
     <div
-      className={clsx('flex items-start gap-3 rounded-lg border p-3', containerStyles[variant])}
+      className={clsx(
+        'flex gap-3 rounded-lg border p-3',
+        centered ? 'items-center justify-center' : 'items-start',
+        containerStyles[variant],
+      )}
       role="alert"
     >
       {showIcon && (
         <IconBox icon={iconComponents[variant]} color={iconBoxColors[variant]} size="sm" />
       )}
-      <div className={clsx('flex flex-1 flex-col gap-1', showIcon && 'pt-1')}>
-        {title && <span className={clsx('text-sm font-medium', textStyles[variant])}>{title}</span>}
-        <span className={clsx('text-xs leading-[18px]', textStyles[variant])}>{description}</span>
+      <div className={clsx('flex flex-col gap-1', !centered && 'flex-1', showIcon && 'pt-1')}>
+        {title && (
+          <span
+            className={clsx('text-sm font-medium', centered && 'text-center', textStyles[variant])}
+          >
+            {title}
+          </span>
+        )}
+        <span
+          className={clsx('text-xs leading-[18px]', centered && 'text-center', textStyles[variant])}
+        >
+          {description}
+        </span>
       </div>
     </div>
   );

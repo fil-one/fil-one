@@ -10,25 +10,38 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockIsTenantReady = vi.fn();
-const mockListBuckets = vi.fn();
+interface MockOrchestrator {
+  id: string;
+  region: string;
+  isTenantReady: ReturnType<typeof vi.fn>;
+  listBuckets: ReturnType<typeof vi.fn>;
+}
 
-const mockOrchestrator = {
+const aurora: MockOrchestrator = {
   id: 'aurora',
   region: 'eu-west-1',
-  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
-  listBuckets: (...args: unknown[]) => mockListBuckets(...args),
+  isTenantReady: vi.fn(),
+  listBuckets: vi.fn(),
 };
 
+const fth: MockOrchestrator = {
+  id: 'fth',
+  region: 'us-east-1',
+  isTenantReady: vi.fn(),
+  listBuckets: vi.fn(),
+};
+
+const stageOrchestrators = vi.fn<(stage: string) => MockOrchestrator[]>();
+
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: () => mockOrchestrator,
+  getAvailableOrchestrators: (stage: string) => stageOrchestrators(stage),
 }));
 
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './list-buckets.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
-import { S3_REGION } from '@filone/shared';
+import { S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -40,16 +53,17 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('list-buckets baseHandler', () => {
+describe('list-buckets baseHandler (single-region)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockIsTenantReady.mockResolvedValue('aurora-t-1');
+    stageOrchestrators.mockReturnValue([aurora]);
+    aurora.isTenantReady.mockResolvedValue('aurora-t-1');
   });
 
   it('returns 200 with buckets from the orchestrator', async () => {
-    mockListBuckets.mockResolvedValue([
+    aurora.listBuckets.mockResolvedValue([
       {
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: S3_REGION,
         createdAt: '2026-01-01T00:00:00.000Z',
         isPublic: false,
@@ -57,7 +71,7 @@ describe('list-buckets baseHandler', () => {
         encrypted: true,
       },
       {
-        name: 'other-bucket',
+        bucketName: 'other-bucket',
         region: S3_REGION,
         createdAt: '2026-01-02T00:00:00.000Z',
         isPublic: false,
@@ -74,7 +88,7 @@ describe('list-buckets baseHandler', () => {
     expect(body).toStrictEqual({
       buckets: [
         {
-          name: 'my-bucket',
+          bucketName: 'my-bucket',
           region: S3_REGION,
           createdAt: '2026-01-01T00:00:00.000Z',
           isPublic: false,
@@ -82,7 +96,7 @@ describe('list-buckets baseHandler', () => {
           encrypted: true,
         },
         {
-          name: 'other-bucket',
+          bucketName: 'other-bucket',
           region: S3_REGION,
           createdAt: '2026-01-02T00:00:00.000Z',
           isPublic: false,
@@ -94,9 +108,9 @@ describe('list-buckets baseHandler', () => {
   });
 
   it('passes versioning and encrypted flags through', async () => {
-    mockListBuckets.mockResolvedValue([
+    aurora.listBuckets.mockResolvedValue([
       {
-        name: 'versioned-bucket',
+        bucketName: 'versioned-bucket',
         region: S3_REGION,
         createdAt: '2026-01-01T00:00:00.000Z',
         isPublic: false,
@@ -104,7 +118,7 @@ describe('list-buckets baseHandler', () => {
         encrypted: true,
       },
       {
-        name: 'unencrypted-bucket',
+        bucketName: 'unencrypted-bucket',
         region: S3_REGION,
         createdAt: '2026-01-02T00:00:00.000Z',
         isPublic: false,
@@ -118,21 +132,32 @@ describe('list-buckets baseHandler', () => {
 
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(result.body as string);
-    expect(body.buckets[0]).toMatchObject({ versioning: true, encrypted: true });
-    expect(body.buckets[1]).toMatchObject({ versioning: false, encrypted: false });
+    const byName = (name: string) =>
+      body.buckets.find((bucket: { bucketName: string }) => bucket.bucketName === name);
+    expect(byName('versioned-bucket')).toMatchObject({ versioning: true, encrypted: true });
+    expect(byName('unencrypted-bucket')).toMatchObject({ versioning: false, encrypted: false });
   });
 
   it('calls orchestrator.listBuckets with the tenant id', async () => {
-    mockListBuckets.mockResolvedValue([]);
+    aurora.listBuckets.mockResolvedValue([]);
 
     const event = buildEvent({ userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(mockListBuckets).toHaveBeenCalledWith('aurora-t-1');
+    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
+  });
+
+  it('selects orchestrators using the current FILONE_STAGE', async () => {
+    aurora.listBuckets.mockResolvedValue([]);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    await baseHandler(event);
+
+    expect(stageOrchestrators).toHaveBeenCalledWith('test');
   });
 
   it('throws when the orchestrator returns an error', async () => {
-    mockListBuckets.mockRejectedValue(
+    aurora.listBuckets.mockRejectedValue(
       new Error('Failed to list buckets from Aurora for tenant aurora-t-1'),
     );
 
@@ -144,7 +169,7 @@ describe('list-buckets baseHandler', () => {
   });
 
   it('returns 200 with empty array when tenant is not ready', async () => {
-    mockIsTenantReady.mockResolvedValue(null);
+    aurora.isTenantReady.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -152,11 +177,11 @@ describe('list-buckets baseHandler', () => {
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(result.body as string);
     expect(body).toStrictEqual({ buckets: [] });
-    expect(mockListBuckets).not.toHaveBeenCalled();
+    expect(aurora.listBuckets).not.toHaveBeenCalled();
   });
 
   it('returns 200 with empty array when no buckets exist', async () => {
-    mockListBuckets.mockResolvedValue([]);
+    aurora.listBuckets.mockResolvedValue([]);
 
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -164,5 +189,151 @@ describe('list-buckets baseHandler', () => {
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(result.body as string);
     expect(body).toStrictEqual({ buckets: [] });
+  });
+});
+
+describe('list-buckets baseHandler (multi-region fan-out)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    stageOrchestrators.mockReturnValue([aurora, fth]);
+    aurora.isTenantReady.mockResolvedValue('aurora-t-1');
+    fth.isTenantReady.mockResolvedValue('fth-t-9');
+  });
+
+  it('concatenates buckets from every ready orchestrator in registry order', async () => {
+    aurora.listBuckets.mockResolvedValue([
+      {
+        bucketName: 'aurora-bucket',
+        region: S3Region.EuWest1,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
+      },
+    ]);
+    fth.listBuckets.mockResolvedValue([
+      {
+        bucketName: 'fth-bucket',
+        region: S3Region.UsEast1,
+        createdAt: '2026-02-01T00:00:00.000Z',
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
+      },
+    ]);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body as string);
+    expect(body).toStrictEqual({
+      buckets: [
+        {
+          bucketName: 'aurora-bucket',
+          region: S3Region.EuWest1,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          isPublic: false,
+          versioning: false,
+          encrypted: true,
+        },
+        {
+          bucketName: 'fth-bucket',
+          region: S3Region.UsEast1,
+          createdAt: '2026-02-01T00:00:00.000Z',
+          isPublic: false,
+          versioning: false,
+          encrypted: true,
+        },
+      ],
+    });
+    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
+    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9');
+  });
+
+  it('sorts buckets alphabetically by name across regions', async () => {
+    aurora.listBuckets.mockResolvedValue([
+      {
+        bucketName: 'zebra-bucket',
+        region: S3Region.EuWest1,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
+      },
+    ]);
+    fth.listBuckets.mockResolvedValue([
+      {
+        bucketName: 'alpha-bucket',
+        region: S3Region.UsEast1,
+        createdAt: '2026-02-01T00:00:00.000Z',
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
+      },
+    ]);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    const body = JSON.parse(result.body as string);
+    expect(body.buckets.map((bucket: { bucketName: string }) => bucket.bucketName)).toStrictEqual([
+      'alpha-bucket',
+      'zebra-bucket',
+    ]);
+  });
+
+  it('skips orchestrators whose tenant is not ready', async () => {
+    aurora.isTenantReady.mockResolvedValue(null);
+    fth.listBuckets.mockResolvedValue([
+      {
+        bucketName: 'fth-bucket',
+        region: S3Region.UsEast1,
+        createdAt: '2026-02-01T00:00:00.000Z',
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
+      },
+    ]);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body as string);
+    expect(body.buckets).toStrictEqual([
+      {
+        bucketName: 'fth-bucket',
+        region: S3Region.UsEast1,
+        createdAt: '2026-02-01T00:00:00.000Z',
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
+      },
+    ]);
+    expect(aurora.listBuckets).not.toHaveBeenCalled();
+  });
+
+  it('returns empty array when no orchestrator has a ready tenant', async () => {
+    aurora.isTenantReady.mockResolvedValue(null);
+    fth.isTenantReady.mockResolvedValue(null);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body as string);
+    expect(body).toStrictEqual({ buckets: [] });
+    expect(aurora.listBuckets).not.toHaveBeenCalled();
+    expect(fth.listBuckets).not.toHaveBeenCalled();
+  });
+
+  it('propagates the error when any orchestrator throws', async () => {
+    aurora.listBuckets.mockResolvedValue([]);
+    fth.listBuckets.mockRejectedValue(new Error('FTH listBuckets blew up'));
+
+    const event = buildEvent({ userInfo: USER_INFO });
+
+    await expect(baseHandler(event)).rejects.toThrow('FTH listBuckets blew up');
   });
 });

@@ -12,6 +12,7 @@ vi.mock('sst', () => ({
 
 const mockEnsureTenantReady = vi.fn();
 const mockCreateBucket = vi.fn();
+const mockGetOrchestratorForRegion = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
@@ -21,13 +22,16 @@ const mockOrchestrator = {
 };
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: () => mockOrchestrator,
+  getOrchestratorForRegion: (...args: unknown[]) => {
+    mockGetOrchestratorForRegion(...args);
+    return mockOrchestrator;
+  },
 }));
 
 import { baseHandler } from './create-bucket.js';
-import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
+import { BucketAlreadyExistsError } from '../lib/errors.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
-import { S3_REGION } from '@filone/shared';
+import { S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,7 +40,7 @@ import { S3_REGION } from '@filone/shared';
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
 function validBody() {
-  return JSON.stringify({ name: 'my-bucket', region: S3_REGION });
+  return JSON.stringify({ bucketName: 'my-bucket', region: S3_REGION });
 }
 
 // ---------------------------------------------------------------------------
@@ -107,7 +111,7 @@ describe('create-bucket baseHandler', () => {
 
     const event = buildEvent({
       body: JSON.stringify({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: S3_REGION,
         versioning: true,
         lock: true,
@@ -143,7 +147,7 @@ describe('create-bucket baseHandler', () => {
 
   it('returns 400 when lock is true but versioning is false', async () => {
     const event = buildEvent({
-      body: JSON.stringify({ name: 'my-bucket', region: S3_REGION, lock: true }),
+      body: JSON.stringify({ bucketName: 'my-bucket', region: S3_REGION, lock: true }),
       userInfo: USER_INFO,
     });
     const result = await baseHandler(event);
@@ -157,7 +161,7 @@ describe('create-bucket baseHandler', () => {
   it('returns 400 when retention is provided without lock', async () => {
     const event = buildEvent({
       body: JSON.stringify({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: S3_REGION,
         versioning: true,
         retention: { enabled: true, mode: 'governance', duration: 30, durationType: 'd' },
@@ -172,9 +176,21 @@ describe('create-bucket baseHandler', () => {
     expect(mockCreateBucket).not.toHaveBeenCalled();
   });
 
+  it('selects the orchestrator using the region from the request body', async () => {
+    mockCreateBucket.mockResolvedValue(undefined);
+
+    const event = buildEvent({
+      body: JSON.stringify({ bucketName: 'my-bucket', region: S3Region.UsEast1 }),
+      userInfo: USER_INFO,
+    });
+    await baseHandler(event);
+
+    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.UsEast1);
+  });
+
   it('returns 400 when region is unsupported', async () => {
     const event = buildEvent({
-      body: JSON.stringify({ name: 'my-bucket', region: 'us-west-2' }),
+      body: JSON.stringify({ bucketName: 'my-bucket', region: 'us-west-2' }),
       userInfo: USER_INFO,
     });
     const result = await baseHandler(event);

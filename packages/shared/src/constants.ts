@@ -48,13 +48,27 @@ export function getAvailableRegions(stage: Stage | string): S3Region[] {
 }
 
 /**
+ * Checks if the region is supported in the given stage.
+ * Provides type-narrowing information to TypeScript, changing `region`
+ * from `string` to `S3Region` when the function returns `true`.
+ */
+export function isSupportedRegion(stage: Stage | string, region: string): region is S3Region {
+  return getAvailableRegions(stage).includes(region as S3Region);
+}
+
+/**
  * Build the S3-compatible endpoint URL for a given region and stage.
  * e.g. https://eu-west-1.s3.fil.one (production) or https://eu-west-1.s3.staging.fil.one (non-prod).
  */
 export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
   //TODO change this when aurora supports staging URL structure through our DNS.
   if (stage != Stage.Production) {
-    return 'https://s3.dev.aur.lu';
+    switch (region) {
+      case S3Region.EuWest1:
+        return 'https://s3.dev.aur.lu';
+      case S3Region.UsEast1:
+        return 'https://us-east-1.fortilyx.com';
+    }
   }
   const base = 's3.fil.one';
   // const base = stage === Stage.Production ? 's3.fil.one' : 's3.staging.fil.one';

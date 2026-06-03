@@ -20,10 +20,6 @@ vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
   getTenantStatus: (...args: unknown[]) => mockGetTenantStatus(...args),
 }));
 
-vi.mock('../lib/org-setup-status.js', () => ({
-  isOrgSetupComplete: (status: string | undefined) => status === 'AURORA_S3_ACCESS_KEY_CREATED',
-}));
-
 const mockReportMetric = vi.fn();
 vi.mock('../lib/metrics.js', () => ({
   reportMetric: (...args: unknown[]) => mockReportMetric(...args),
@@ -32,6 +28,7 @@ vi.mock('../lib/metrics.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './subscription-drift-checker.js';
+import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,7 +56,7 @@ function seedReadyOrg(orgId = ORG_ID, tenantId = TENANT_ID) {
     .resolves({
       Item: marshall({
         auroraTenantId: tenantId,
-        auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+        auroraSetupStatus: FINAL_SETUP_STATUS,
       }),
     });
 }
@@ -182,7 +179,7 @@ describe('subscription-drift-checker', () => {
       .resolves({
         Item: marshall({
           auroraTenantId: TENANT_ID,
-          auroraSetupStatus: 'AURORA_TENANT_CREATED', // not final
+          auroraSetupStatus: OrgSetupStatus.AURORA_TENANT_CREATED, // not final
         }),
       });
 
@@ -214,7 +211,7 @@ describe('subscription-drift-checker', () => {
       .resolves({
         Item: marshall({
           auroraTenantId: tenantId2,
-          auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+          auroraSetupStatus: FINAL_SETUP_STATUS,
         }),
       });
 
@@ -284,7 +281,7 @@ describe('subscription-drift-checker', () => {
       .resolves({
         Item: marshall({
           auroraTenantId: tenantIdPage2,
-          auroraSetupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+          auroraSetupStatus: FINAL_SETUP_STATUS,
         }),
       });
 

@@ -2,11 +2,14 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
-import { CreateBucketSchema, S3_REGION } from '@filone/shared';
+import { CreateBucketSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
-import { tenantNotReadyResponse } from '../lib/tenant-not-ready-response.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { BucketAlreadyExistsError } from '../lib/errors.js';
+import {
+  ResponseBuilder,
+  tenantNotReadyResponse,
+  unsupportedRegionResponse,
+} from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -36,27 +39,21 @@ export async function baseHandler(
       .build();
   }
 
-  const { name, region, versioning, lock, retention } = parsed.data;
+  const { bucketName, region, versioning, lock, retention } = parsed.data;
 
-  // Phase A: only the Aurora region is supported in handlers. Phase B will
-  // open this up via getAvailableRegions(stage) once the FTH
-  // orchestrator is registered.
-  if (region !== S3_REGION) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: `Unsupported region. Supported: ${S3_REGION}` })
-      .build();
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
+    return unsupportedRegionResponse(region);
   }
 
   const { orgId } = getUserInfo(event);
 
-  const orchestrator = getOrchestratorForRegion(S3_REGION);
+  const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
   try {
     await orchestrator.createBucket(tenantId, {
-      bucketName: name,
+      bucketName,
       versioning,
       lock,
       retention,
@@ -65,7 +62,7 @@ export async function baseHandler(
     if (err instanceof BucketAlreadyExistsError) {
       return new ResponseBuilder()
         .status(409)
-        .body<ErrorResponse>({ message: `Bucket "${name}" already exists` })
+        .body<ErrorResponse>({ message: `Bucket "${bucketName}" already exists` })
         .build();
     }
     throw err;
@@ -77,7 +74,7 @@ export async function baseHandler(
     .status(201)
     .body<CreateBucketResponse>({
       bucket: {
-        name,
+        bucketName,
         region,
         createdAt: now,
         isPublic: false,

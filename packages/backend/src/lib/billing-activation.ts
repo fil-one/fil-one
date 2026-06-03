@@ -4,7 +4,6 @@ import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
 import { updateTenantStatus } from './aurora/aurora-backoffice.js';
-import { setOrgAuroraTenantStatus } from './org-profile.js';
 import { isOrgSetupComplete } from './org-setup-status.js';
 
 const dynamo = getDynamoClient();
@@ -71,7 +70,6 @@ export async function unlockAuroraTenant(orgId: string): Promise<void> {
   }
   try {
     await updateTenantStatus({ tenantId: auroraTenantId, status: 'ACTIVE' });
-    await setOrgAuroraTenantStatus(orgId, 'ACTIVE');
     console.log('[billing-activation] Aurora tenant unlocked', { orgId, auroraTenantId });
   } catch (error) {
     console.error('[billing-activation] Failed to unlock Aurora tenant', {

@@ -41,7 +41,7 @@ import {
   getAuroraPortalApiKey,
   _resetSsmCacheForTesting,
 } from './aurora-portal.js';
-import { AccessKeyAlreadyExistsError } from '../service-orchestrator.js';
+import { AccessKeyAlreadyExistsError } from '../errors.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

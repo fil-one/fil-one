@@ -7,7 +7,6 @@
 //   - Stripe subscription (trial_end pushed into the future, or recreated if canceled)
 //   - BillingTable subscription record (trialing + new trial dates, gracePeriodEndsAt cleared)
 //   - Aurora tenant (status → ACTIVE via backoffice API)
-//   - UserInfoTable org profile (auroraTenantStatus → ACTIVE)
 // Refuses to run against the "production" stage.
 //
 // You can obtain the `orgId` UUID by inspecting the response to `GET /me`
@@ -67,7 +66,7 @@ const orgRes = await dynamo.send(
   new GetItemCommand({
     TableName: Resource.UserInfoTable.name,
     Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-    ProjectionExpression: 'createdBy, auroraTenantId, auroraTenantStatus',
+    ProjectionExpression: 'createdBy, auroraTenantId',
   }),
 );
 const userId = orgRes.Item?.createdBy?.S;
@@ -107,7 +106,6 @@ console.log(`  subscriptionStatus:   ${subRes.Item.subscriptionStatus?.S ?? '(un
 console.log(`  trialStartedAt:       ${subRes.Item.trialStartedAt?.S ?? '(unset)'}`);
 console.log(`  trialEndsAt:          ${subRes.Item.trialEndsAt?.S ?? '(unset)'}`);
 console.log(`  gracePeriodEndsAt:    ${subRes.Item.gracePeriodEndsAt?.S ?? '(unset)'}`);
-console.log(`  auroraTenantStatus:   ${orgRes.Item?.auroraTenantStatus?.S ?? '(unset)'}`);
 console.log(`  stripeSubscriptionId: ${subscriptionId}\n`);
 
 // 3. Compute new trial dates
@@ -173,24 +171,11 @@ if (auroraError) {
   process.exit(1);
 }
 
-// 7. Reflect Aurora status in DynamoDB org PROFILE (matches setOrgAuroraTenantStatus)
-await dynamo.send(
-  new UpdateItemCommand({
-    TableName: Resource.UserInfoTable.name,
-    Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-    UpdateExpression: 'SET auroraTenantStatus = :s, updatedAt = :now',
-    ExpressionAttributeValues: {
-      ':s': { S: 'ACTIVE' },
-      ':now': { S: now.toISOString() },
-    },
-  }),
-);
-
 console.log('After:');
 console.log(`  subscriptionStatus:   trialing`);
 console.log(`  trialStartedAt:       ${now.toISOString()}`);
 console.log(`  trialEndsAt:          ${trialEndsAt.toISOString()}`);
 console.log(`  gracePeriodEndsAt:    (cleared)`);
-console.log(`  auroraTenantStatus:   ACTIVE`);
+console.log(`  aurora tenant status: ACTIVE (set via Aurora backoffice)`);
 console.log(`  stripeSubscriptionId: ${activeSubscriptionId}\n`);
 console.log('Done.');

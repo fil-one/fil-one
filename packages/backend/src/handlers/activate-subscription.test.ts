@@ -3,7 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
+import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -307,7 +307,7 @@ describe('activate-subscription handler', () => {
     await handler(event, {} as never);
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(2); // billing update + org profile auroraTenantStatus
+    expect(updateCalls).toHaveLength(1); // billing update only
     const updateExpr = updateCalls[0].args[0].input.UpdateExpression as string;
     // trial_end: 'now' makes Stripe return active, so trialEndsAt should be removed
     expect(updateExpr).toContain('REMOVE trialEndsAt');
@@ -330,7 +330,7 @@ describe('activate-subscription handler', () => {
     await handler(event, {} as never);
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(2); // billing update + org profile auroraTenantStatus
+    expect(updateCalls).toHaveLength(1); // billing update only
     const updateExpr = updateCalls[0].args[0].input.UpdateExpression as string;
     expect(updateExpr).toContain('REMOVE trialEndsAt');
   });
@@ -390,7 +390,7 @@ describe('activate-subscription handler', () => {
           pk: { S: 'ORG#org-1' },
           sk: { S: 'PROFILE' },
           auroraTenantId: { S: 'aurora-t-1' },
-          auroraSetupStatus: { S: 'AURORA_TENANT_CREATED' },
+          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
         },
       });
     ddbMock.on(UpdateItemCommand).resolves({});

@@ -16,7 +16,6 @@ import {
 import { Resource } from 'sst';
 import { updateTenantStatus as updateAuroraTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import {
@@ -186,11 +185,13 @@ async function resolveAuroraTenantId(
         pk: { S: `ORG#${orgId}` },
         sk: { S: 'PROFILE' },
       },
-      ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
+      // TODO(FIL-382): drop legacy `setupStatus` from ProjectionExpression.
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus, setupStatus',
     }),
   );
   const auroraTenantId = orgResult.Item?.auroraTenantId?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(orgResult.Item?.auroraSetupStatus?.S)) {
+  const auroraSetupStatus = orgResult.Item?.auroraSetupStatus?.S;
+  if (!auroraTenantId || !isOrgSetupComplete(auroraSetupStatus)) {
     console.warn('[stripe-webhook] Aurora tenant not ready for org:', orgId);
     return null;
   }
@@ -365,7 +366,6 @@ async function handleSubscriptionDeleted(
     const resolved = await resolveAuroraTenantId(userId, tableName);
     if (resolved) {
       await updateAuroraTenantStatus({ tenantId: resolved.auroraTenantId, status: 'WRITE_LOCKED' });
-      await setOrgAuroraTenantStatus(resolved.orgId, 'WRITE_LOCKED');
       console.log('[stripe-webhook] Aurora tenant WRITE_LOCKED', {
         userId,
         orgId: resolved.orgId,
@@ -424,7 +424,6 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
     const resolved = await resolveAuroraTenantId(userId, tableName);
     if (resolved) {
       await updateAuroraTenantStatus({ tenantId: resolved.auroraTenantId, status: 'ACTIVE' });
-      await setOrgAuroraTenantStatus(resolved.orgId, 'ACTIVE');
       console.log('[stripe-webhook] Aurora tenant re-activated', {
         userId,
         orgId: resolved.orgId,

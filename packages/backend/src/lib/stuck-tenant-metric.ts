@@ -3,7 +3,7 @@ import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 import { reportMetric } from './metrics.js';
-import { OrgSetupStatus } from './org-setup-status.js';
+import { FINAL_SETUP_STATUS } from './org-setup-status.js';
 
 const dynamo = getDynamoClient();
 
@@ -36,7 +36,7 @@ export async function scanAndEmitStuckTenantCount(): Promise<void> {
             ':orgPrefix': { S: 'ORG#' },
             ':profile': { S: 'PROFILE' },
             ':three': { N: '3' },
-            ':complete': { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
+            ':complete': { S: FINAL_SETUP_STATUS },
           },
           ExclusiveStartKey: lastEvaluatedKey,
           ProjectionExpression: 'pk',

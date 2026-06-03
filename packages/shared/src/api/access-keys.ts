@@ -81,8 +81,7 @@ export const CreateAccessKeySchema = z
     granularPermissions: z.array(z.enum(GRANULAR_PERMISSIONS)).optional(),
     bucketScope: z.enum(ACCESS_KEY_BUCKET_SCOPES).default('all'),
     buckets: z.array(z.string()).optional(),
-    // TODO: Make region required after the first deployment
-    region: z.enum(S3Region).optional(),
+    region: z.enum(S3Region),
     expiresAt: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, 'expiresAt must be in YYYY-MM-DD format')
