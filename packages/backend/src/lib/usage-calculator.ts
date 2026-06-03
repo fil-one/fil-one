@@ -23,7 +23,7 @@ export function calculateAverageUsage(samples: StorageUsageSample[]): UsageCalcu
  * parallel multi-range fetches through `dedupeByTimestamp`, which dedupes but
  * does not sort; FTH returns upstream order as-is). Callers that rely on order
  * — `.at(-1)` for the latest sample, and `mergeStorageSamples`'s carry-forward
- * — must sort first. RFC3339 UTC `Z` timestamps sort correctly lexically.
+ * — must sort first using parsed timestamps (e.g. `Date.parse(...)`), not lexical ordering.
  */
 export function sortStorageSamplesByTimestamp(samples: StorageUsageSample[]): StorageUsageSample[] {
   return [...samples].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
