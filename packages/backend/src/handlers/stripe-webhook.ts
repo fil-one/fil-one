@@ -258,10 +258,9 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
   // We do NOT retrieve from Stripe — the customer no longer exists there.
   const userId = customer.metadata?.userId;
   if (!userId) {
-    console.warn('[stripe-webhook] customer.deleted without userId in metadata; skipping', {
-      customerId: customer.id,
-    });
-    return;
+    throw new Error(
+      `[stripe-webhook] customer.deleted missing metadata.userId; cannot disable customer ${customer.id}`,
+    );
   }
 
   // Disable immediately — no grace period. Aurora first; a failure here throws so the
