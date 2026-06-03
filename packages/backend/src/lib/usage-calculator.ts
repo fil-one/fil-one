@@ -26,9 +26,8 @@ export function calculateAverageUsage(samples: StorageUsageSample[]): UsageCalcu
  * — must sort first. RFC3339 UTC `Z` timestamps sort correctly lexically.
  */
 export function sortStorageSamplesByTimestamp(samples: StorageUsageSample[]): StorageUsageSample[] {
-  return [...samples].sort((a, b) =>
-    a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0,
-  );
+  return [...samples].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+}
 }
 
 /**
