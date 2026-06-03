@@ -266,7 +266,12 @@ function NotificationsSection() {
       title="Notifications"
       description="Manage your notification preferences"
     >
-      <Alert variant="grey" description="Notification preferences coming soon." showIcon={false} />
+      <Alert
+        variant="grey"
+        description="Notification preferences coming soon"
+        showIcon={false}
+        centered
+      />
     </SectionCard>
   );
 }
@@ -300,6 +305,7 @@ function SecuritySection({ me }: { me: MeResponse }) {
             action={
               <Button
                 variant="ghost"
+                size="sm"
                 onClick={() => changePasswordMutation.mutate()}
                 disabled={changePasswordMutation.isPending}
               >
@@ -374,7 +380,7 @@ export function SettingsPage() {
         </Heading>
       </div>
 
-      <div className="mt-6 flex max-w-[672px] flex-col gap-6">
+      <div className="mt-6 flex max-w-2xl flex-col gap-6">
         <ProfileSection me={me} />
         <NotificationsSection />
         <SecuritySection me={me} />
