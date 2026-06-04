@@ -9,6 +9,7 @@
 //     using the service access key stashed in SSM during setup.
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
+import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region } from '@filone/shared';
 import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
@@ -39,7 +40,6 @@ import {
 } from './fth-management-client.js';
 import type { FthManagementClient } from './fth-management-client.js';
 import { instrumentClient } from './fth-api-metrics.js';
-import QuickLRU from 'quick-lru';
 
 const FTH_CONSOLE_USER_CODE = 'filone-console';
 
