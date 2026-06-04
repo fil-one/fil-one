@@ -1,10 +1,7 @@
 import type { S3Region } from '@filone/shared';
-import { formatRegion, getAvailableRegions } from '@filone/shared';
-import { useQuery } from '@tanstack/react-query';
+import { formatRegion } from '@filone/shared';
 
-import { FILONE_STAGE } from '../env.js';
-import { getMe } from '../lib/api.js';
-import { queryKeys } from '../lib/query-client.js';
+import { useAvailableRegions } from '../lib/use-available-regions.js';
 import { Select } from './Select';
 
 type RegionSelectProps = {
@@ -15,9 +12,7 @@ type RegionSelectProps = {
 };
 
 export function RegionSelect({ id, value, onChange, disabled }: RegionSelectProps) {
-  const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
-  const allowlistEmail = me?.emailVerified ? me.email : undefined;
-  const regions = getAvailableRegions(FILONE_STAGE, allowlistEmail);
+  const regions = useAvailableRegions();
   const onlyOne = regions.length === 1;
 
   return (
