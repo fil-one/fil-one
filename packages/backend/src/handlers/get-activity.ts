@@ -6,7 +6,6 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ActivityResponse, RecentActivity, UsageDataPoint } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
 import type { ServiceOrchestrator, StorageUsageSample } from '../lib/service-orchestrator.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -14,6 +13,7 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import type { AccessKeyRecord } from '../lib/dynamo-records.js';
+import { ActiveTenant, getActiveTenant } from '../lib/tenant-status.js';
 
 const dynamo = getDynamoClient();
 
@@ -21,11 +21,6 @@ function endOfDay(d: Date): Date {
   const eod = new Date(d);
   eod.setUTCHours(23, 59, 59, 999);
   return eod;
-}
-
-interface ReadyTenant {
-  orchestrator: ServiceOrchestrator;
-  tenantId: string;
 }
 
 export async function baseHandler(
@@ -40,7 +35,7 @@ export async function baseHandler(
 
   // The dashboard aggregates activity across every region the org is provisioned
   // in, so resolve the ready tenant on each available orchestrator.
-  const tenants = await resolveReadyTenants(orgId);
+  const tenants = await getActiveTenant(orgId);
 
   const [bucketActivities, keyActivities, trends] = await Promise.all([
     fetchBucketActivities(orgId, tenants),
@@ -62,20 +57,9 @@ export async function baseHandler(
   return new ResponseBuilder().status(200).body(response).build();
 }
 
-async function resolveReadyTenants(orgId: string): Promise<ReadyTenant[]> {
-  const orchestrators = getAvailableOrchestrators(process.env.FILONE_STAGE!);
-  const resolved = await Promise.all(
-    orchestrators.map(async (orchestrator) => {
-      const tenantId = await orchestrator.isTenantReady(orgId);
-      return tenantId ? { orchestrator, tenantId } : null;
-    }),
-  );
-  return resolved.filter((t): t is ReadyTenant => t !== null);
-}
-
 async function fetchBucketActivities(
   orgId: string,
-  tenants: ReadyTenant[],
+  tenants: ActiveTenant[],
 ): Promise<RecentActivity[]> {
   const perTenant = await Promise.all(
     tenants.map(({ orchestrator, tenantId }) =>
@@ -145,7 +129,7 @@ async function fetchAccessKeyActivities(orgId: string): Promise<RecentActivity[]
 }
 
 async function buildTimeSeries(
-  tenants: ReadyTenant[],
+  tenants: ActiveTenant[],
   period: number,
 ): Promise<ActivityResponse['trends']> {
   const now = new Date();
