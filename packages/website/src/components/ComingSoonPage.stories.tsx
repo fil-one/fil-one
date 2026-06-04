@@ -23,7 +23,7 @@ const sharedProps: ComingSoonPageProps = {
       category: 'Documents',
       title: 'Document Q&A',
       description:
-        'Ask plain-English questions over any PDF, doc, or Markdown file. No setup, no extra tools.',
+        'Ask questions in natural language over any PDF, doc, or Markdown file. No setup, no extra tools.',
     },
     {
       category: 'Knowledge bases',
