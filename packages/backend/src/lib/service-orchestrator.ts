@@ -56,34 +56,6 @@ export interface IssuedAccessKey {
   createdAt: string;
 }
 
-export class BucketAlreadyExistsError extends Error {
-  constructor(bucketName: string, options?: ErrorOptions) {
-    super(`Bucket "${bucketName}" already exists`, options);
-    this.name = 'BucketAlreadyExistsError';
-  }
-}
-
-export class AccessKeyAlreadyExistsError extends Error {
-  constructor(options?: ErrorOptions) {
-    super('An access key with this name already exists', options);
-    this.name = 'AccessKeyAlreadyExistsError';
-  }
-}
-
-export class AccessKeyValidationError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'AccessKeyValidationError';
-  }
-}
-
-export class NotImplementedError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'NotImplementedError';
-  }
-}
-
 /**
  * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.).
  * Each implementation handles tenant provisioning, bucket lifecycle,
@@ -149,6 +121,13 @@ export interface ServiceOrchestrator {
     tenantId: string,
     keyName: string,
   ): Promise<{ id: string; accessKeyId: string; createdAt: string } | undefined>;
+
+  /**
+   * Revokes an access key. Implementations MUST be idempotent: a missing key
+   * (already deleted upstream) is treated as success, not an error. Any other
+   * failure should propagate so the caller can leave the DDB row intact.
+   */
+  deleteAccessKey(tenantId: string, keyId: string): Promise<void>;
 
   getPresignerContext(tenantId: string): Promise<PresignerContext>;
 }

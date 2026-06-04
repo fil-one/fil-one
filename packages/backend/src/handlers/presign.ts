@@ -1,7 +1,12 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { ApiErrorCode, PresignRequestSchema, S3_REGION, SubscriptionStatus } from '@filone/shared';
+import {
+  ApiErrorCode,
+  PresignRequestSchema,
+  SubscriptionStatus,
+  isSupportedRegion,
+} from '@filone/shared';
 import type {
   ErrorResponse,
   PresignOp,
@@ -19,7 +24,11 @@ import {
   getPresignedListObjectsUrl,
   getPresignedPutObjectUrl,
 } from '../lib/s3-presigner.js';
-import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
+import {
+  ResponseBuilder,
+  tenantNotReadyResponse,
+  unsupportedRegionResponse,
+} from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -142,6 +151,17 @@ async function presignOp(op: PresignOp, ctx: PresignerContext): Promise<PresignR
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  const region = event.queryStringParameters?.region;
+  if (!region) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: 'region query parameter is required' })
+      .build();
+  }
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
+    return unsupportedRegionResponse(region);
+  }
+
   let body: unknown;
   try {
     body = JSON.parse(event.body ?? '[]');
@@ -182,7 +202,7 @@ export async function baseHandler(
     }
   }
 
-  const orchestrator = getOrchestratorForRegion(S3_REGION);
+  const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.isTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 

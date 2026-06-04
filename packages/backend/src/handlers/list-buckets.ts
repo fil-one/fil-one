@@ -23,7 +23,7 @@ export async function baseHandler(
       return orchestrator.listBuckets(tenantId);
     }),
   );
-  const buckets = results.flat();
+  const buckets = results.flat().sort((a, b) => a.bucketName.localeCompare(b.bucketName));
   return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets }).build();
 }
 

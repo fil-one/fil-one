@@ -36,7 +36,7 @@ import {
   listBuckets,
   listObjects,
 } from './s3-presigner.js';
-import { BucketAlreadyExistsError } from './service-orchestrator.js';
+import { BucketAlreadyExistsError } from './errors.js';
 import type { PresignerContext } from './service-orchestrator.js';
 
 // ---------------------------------------------------------------------------

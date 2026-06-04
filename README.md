@@ -219,7 +219,7 @@ Tests run inside `sst shell` so that SST resource bindings (table names, Stripe 
 pnpm deploy:dev
 ```
 
-Uses your OS username as the stage name. No custom domain — outputs a CloudFront URL.
+Uses your OS username as the stage name. Serves the app at `https://{username}.dev.fil.one` (the SST stack creates the Route 53 record in the delegated `dev.fil.one` zone — see [`docs/architectural-decisions/2026-05-dev-subdomain.md`](docs/architectural-decisions/2026-05-dev-subdomain.md)). Stage names must be valid DNS labels: lowercase `a-z`, `0-9`, `-`; 1–63 chars; no leading or trailing hyphen.
 
 If you are having trouble deploying after SST changes (e.g., a version bump of SST or drift on components from manual actions), you may need to refresh the stack:
 
@@ -288,11 +288,10 @@ For MFA-specific troubleshooting, see [`docs/architectural-decisions/2026-03-mfa
 
 ## ACM Certificate Provisioning & DNS Setup
 
-Custom domains require an ACM certificate in **us-east-1** (CloudFront requirement):
+Custom domains require an ACM certificate in **us-east-1** (CloudFront requirement). Managed in [`fil-one/infrastructure`](https://github.com/fil-one/infrastructure) via HCP Terraform.
 
-We manage this in another repo: https://github.com/FilecoinFoundationWeb/FilHyperspace-Infrastructure
-
-Example PR To add `staging.fil.one`: https://github.com/FilecoinFoundationWeb/FilHyperspace-Infrastructure/pull/3
+- **`app.fil.one` / `staging.fil.one`** — one ACM cert per domain, DNS-validated through Cloudflare.
+- **`*.dev.fil.one`** — single wildcard cert shared by every ephemeral stage (PR previews and personal dev stacks). `dev.fil.one` is delegated from Cloudflare to a Route 53 hosted zone in the staging AWS account, so SST creates per-stage A/AAAA records without needing a Cloudflare API token. See [`docs/architectural-decisions/2026-05-dev-subdomain.md`](docs/architectural-decisions/2026-05-dev-subdomain.md).
 
 ## Auth0
 
@@ -305,7 +304,7 @@ Two Auth0 tenants are used:
 
 Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecret`). See the "Set SST secrets" step above.
 
-**Callback and logout URLs are configured automatically during deploy** — no manual Dashboard edits needed. The deploy-time setup Lambda adds the correct URLs for the deployed domain (custom domain or CloudFront).
+**Callback and logout URLs are configured automatically during deploy** — no manual Dashboard edits needed. The deploy-time setup Lambda adds the correct URLs for the deployed domain.
 
 **Application settings** (Applications > your app > Settings):
 

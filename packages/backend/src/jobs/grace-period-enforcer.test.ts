@@ -21,8 +21,10 @@ vi.mock('sst', () => ({
 }));
 
 const mockUpdateTenantStatus = vi.fn();
+const mockGetTenantStatus = vi.fn();
 vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
   updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
+  getTenantStatus: (...args: unknown[]) => mockGetTenantStatus(...args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -83,6 +85,8 @@ describe('grace-period-enforcer', () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
     mockUpdateTenantStatus.mockReset();
     mockUpdateTenantStatus.mockResolvedValue(undefined);
+    mockGetTenantStatus.mockReset();
+    mockGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
   });
 
   // -----------------------------------------------------------------------
@@ -126,20 +130,12 @@ describe('grace-period-enforcer', () => {
       tenantId: MOCK_AURORA_TENANT_ID,
       status: 'DISABLED',
     });
-
-    // Org profile: auroraTenantStatus = DISABLED
-    const orgProfileUpdate = updateCalls.find(
-      (c) =>
-        c.args[0].input.TableName === 'UserInfoTable' &&
-        c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'DISABLED',
-    );
-    expect(orgProfileUpdate).toBeDefined();
   });
 
   // -----------------------------------------------------------------------
   // Non-expired grace_period → WRITE_LOCK retry
   // -----------------------------------------------------------------------
-  it('retries WRITE_LOCK for non-expired grace_period when auroraTenantStatus is not set', async () => {
+  it('write-locks a non-expired grace_period tenant that Aurora reports as ACTIVE', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
         buildBillingItem({
@@ -148,7 +144,8 @@ describe('grace-period-enforcer', () => {
         }),
       ],
     });
-    setupOrgProfile(); // no auroraTenantStatus field
+    setupOrgProfile();
+    mockGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
 
     await handler();
 
@@ -156,19 +153,9 @@ describe('grace-period-enforcer', () => {
       tenantId: MOCK_AURORA_TENANT_ID,
       status: 'WRITE_LOCKED',
     });
-
-    // Org profile: auroraTenantStatus = WRITE_LOCKED
-    const orgProfileUpdate = ddbMock
-      .commandCalls(UpdateItemCommand)
-      .find(
-        (c) =>
-          c.args[0].input.TableName === 'UserInfoTable' &&
-          c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'WRITE_LOCKED',
-      );
-    expect(orgProfileUpdate).toBeDefined();
   });
 
-  it('skips WRITE_LOCK when auroraTenantStatus is already WRITE_LOCKED', async () => {
+  it('write-locks when Aurora returns a tenant with no status', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
         buildBillingItem({
@@ -177,13 +164,83 @@ describe('grace-period-enforcer', () => {
         }),
       ],
     });
-    setupOrgProfile({ auroraTenantStatus: 'WRITE_LOCKED' });
+    setupOrgProfile();
+    mockGetTenantStatus.mockResolvedValue({ kind: 'ok', status: undefined });
+
+    await handler();
+
+    expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+      tenantId: MOCK_AURORA_TENANT_ID,
+      status: 'WRITE_LOCKED',
+    });
+  });
+
+  it('skips WRITE_LOCK when Aurora reports the tenant is already WRITE_LOCKED', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: futureDate(5),
+        }),
+      ],
+    });
+    setupOrgProfile();
+    mockGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'WRITE_LOCKED' });
 
     await handler();
 
     expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
-    // No org profile update needed
-    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('skips WRITE_LOCK when Aurora reports the tenant is DISABLED', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: futureDate(5),
+        }),
+      ],
+    });
+    setupOrgProfile();
+    mockGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
+
+    await handler();
+
+    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+  });
+
+  it('skips WRITE_LOCK when Aurora reports the tenant is not found', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: futureDate(5),
+        }),
+      ],
+    });
+    setupOrgProfile();
+    mockGetTenantStatus.mockResolvedValue({ kind: 'not_found' });
+
+    await handler();
+
+    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+  });
+
+  it('does not WRITE_LOCK when the live status probe errors', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: futureDate(5),
+        }),
+      ],
+    });
+    setupOrgProfile();
+    mockGetTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('boom') });
+
+    await handler();
+
+    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
   });
 
   // -----------------------------------------------------------------------
@@ -357,11 +414,12 @@ describe('grace-period-enforcer', () => {
         status: 'DISABLED',
       });
 
-      // UpdateItemCommands: 2 from first run (setOrgAuroraTenantStatus + subscription cancel), 0 from second
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(2);
+      // UpdateItemCommands: 1 from first run (subscription cancel only — the
+      // org-profile mirror write was removed), 0 from second.
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
     });
 
-    it('non-expired grace period — second run skips write_lock when already WRITE_LOCKED', async () => {
+    it('non-expired grace period — second run skips write_lock once Aurora is WRITE_LOCKED', async () => {
       // Both scans return the same grace_period item (write_lock doesn't change subscriptionStatus)
       ddbMock.on(ScanCommand).resolves({
         Items: [
@@ -371,40 +429,19 @@ describe('grace-period-enforcer', () => {
           }),
         ],
       });
+      setupOrgProfile();
 
-      // First run: profile has no auroraTenantStatus → triggers WRITE_LOCK
-      // Second run: profile shows WRITE_LOCKED (set by first run) → skipped
-      ddbMock
-        .on(GetItemCommand, {
-          TableName: 'UserInfoTable',
-          Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-        })
-        .resolvesOnce({
-          Item: marshall({
-            auroraTenantId: MOCK_AURORA_TENANT_ID,
-            auroraSetupStatus: FINAL_SETUP_STATUS,
-          }),
-        })
-        .resolvesOnce({
-          Item: marshall({
-            auroraTenantId: MOCK_AURORA_TENANT_ID,
-            auroraSetupStatus: FINAL_SETUP_STATUS,
-            auroraTenantStatus: 'WRITE_LOCKED',
-          }),
-        });
+      // First run: Aurora reports ACTIVE → triggers WRITE_LOCK.
+      // Second run: Aurora reports WRITE_LOCKED (set by first run) → skipped.
+      mockGetTenantStatus
+        .mockResolvedValueOnce({ kind: 'ok', status: 'ACTIVE' })
+        .mockResolvedValueOnce({ kind: 'ok', status: 'WRITE_LOCKED' });
 
       await handler();
       await handler();
 
-      // Aurora called only on first run
+      // Aurora WRITE_LOCK called only on the first run
       expect(mockUpdateTenantStatus).toHaveBeenCalledTimes(1);
-      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-        tenantId: MOCK_AURORA_TENANT_ID,
-        status: 'WRITE_LOCKED',
-      });
-
-      // Only 1 UpdateItemCommand from first run's setOrgAuroraTenantStatus; second run skips entirely
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
     });
   });
 });

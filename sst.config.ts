@@ -105,28 +105,36 @@ export default $config({
     const isStaging = stage === 'staging';
     const isEphemeralStage = !isProduction && !isStaging;
 
-    let domainName = 'staging.fil.one';
-    let certArn: string | undefined;
-
-    if (isProduction || isStaging) {
-      domainName = isProduction ? 'app.fil.one' : 'staging.fil.one';
-      // ACM cert must be in us-east-1 for CloudFront
-      const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
-      const cert = await aws.acm.getCertificate(
-        {
-          domain: domainName,
-          statuses: ['ISSUED'],
-        },
-        { provider: usEast1 },
+    // Ephemeral stages become subdomains of dev.fil.one — enforce DNS label rules.
+    if (isEphemeralStage && !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(stage)) {
+      throw new Error(
+        `Invalid stage name "${stage}": must be a valid DNS label ` +
+          `(lowercase a-z, 0-9, hyphens; 1-63 chars; no leading/trailing hyphen).`,
       );
-
-      certArn = cert.arn;
     }
+
+    const domainName = isProduction
+      ? 'app.fil.one'
+      : isStaging
+        ? 'staging.fil.one'
+        : `${stage}.dev.fil.one`;
+
+    // ACM cert must be in us-east-1 for CloudFront. Ephemeral stages share a
+    // wildcard cert for *.dev.fil.one provisioned in the fil-one/infrastructure repo.
+    const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
+    const cert = await aws.acm.getCertificate(
+      {
+        domain: isEphemeralStage ? '*.dev.fil.one' : domainName,
+        statuses: ['ISSUED'],
+      },
+      { provider: usEast1 },
+    );
+    const certArn = cert.arn;
 
     // ── API Gateway ──────────────────────────────────────────────────
     // While we stick to a same origin for both website and API,
     // we want to make sure to lock down to just our origin.
-    const allowedOrigins = domainName ? [`https://${domainName}`] : [];
+    const allowedOrigins = [`https://${domainName}`];
     if (stage !== 'production') {
       allowedOrigins.push('https://localhost:5173');
     }
@@ -152,11 +160,16 @@ export default $config({
       },
     });
 
-    const { getAuth0Domain, getS3Endpoint, S3_REGION, Stage } = await import('@filone/shared');
-    const auroraS3GatewayUrl = getS3Endpoint(
-      S3_REGION,
-      isProduction ? Stage.Production : Stage.Staging,
-    );
+    const { getAuth0Domain, getAvailableRegions, getS3Endpoint, Stage } =
+      await import('@filone/shared');
+    const stageForEndpoints = isProduction ? Stage.Production : Stage.Staging;
+    // The browser hits the S3 endpoint of every region the user can pick from
+    // — list-objects, uploads, downloads, etc. all go directly to S3 — so each
+    // one needs to be in `connect-src` or the browser blocks the request with
+    // a CSP violation before it ever leaves.
+    const s3GatewayUrls = getAvailableRegions(stageForEndpoints)
+      .map((r) => getS3Endpoint(r, stageForEndpoints))
+      .join(' ');
 
     // ── CloudFront security headers (CSP applied to the HTML document) ──
     const sentryCspEndpoint =
@@ -170,7 +183,7 @@ export default $config({
         securityHeadersConfig: {
           contentSecurityPolicy: {
             // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://fil-one.instatus.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://fil-one.instatus.com ${s3GatewayUrls}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
@@ -228,7 +241,14 @@ export default $config({
           cachePolicy: AWS_CACHING_DISABLED_POLICY,
         },
       },
-      ...(domainName && certArn ? { domain: { name: domainName, dns: false, cert: certArn } } : {}),
+      domain: {
+        name: domainName,
+        // Ephemeral stages: SST creates the Route 53 alias in the delegated
+        // dev.fil.one zone. Staging/prod: records are managed in Cloudflare
+        // by the fil-one/infrastructure Terraform.
+        dns: isEphemeralStage ? sst.aws.dns({ override: true }) : false,
+        cert: certArn,
+      },
       transform: {
         cdn: (args) => {
           args.defaultRootObject = 'index.html';
@@ -312,7 +332,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              Version: '2.9',
+              Version: '2.10',
             },
           },
         },
@@ -521,7 +541,9 @@ export default $config({
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         FTH_S3_URL: fthEnv.FTH_S3_URL,
       },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
+      ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
@@ -541,7 +563,10 @@ export default $config({
       method: 'POST',
       routePath: '/api/access-keys',
       handler: 'create-access-key',
-      extraEnv: auroraEnv,
+      extraEnv: {
+        ...auroraEnv,
+        ...fthEnv,
+      },
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
@@ -554,8 +579,16 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/access-keys/{keyId}',
       handler: 'delete-access-key',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        ...fthEnv,
+      },
+      permissions: [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [auroraApiKeySsmArn],
+        },
+      ],
     });
     addRoute({
       method: 'POST',
