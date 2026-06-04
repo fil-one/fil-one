@@ -15,7 +15,12 @@ import { queryKeys } from './query-client.js';
  * consistent with one another.
  */
 export function useAvailableRegions(): S3Region[] {
-  const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
+  const { data: me } = useQuery({
+    queryKey: queryKeys.me,
+    queryFn: () => getMe(),
+    enabled: FILONE_STAGE === 'production',
+    staleTime: 10 * 60_000, // 10 minutes
+  });
   const allowlistEmail = me?.emailVerified ? me.email : undefined;
   return getAvailableRegions(FILONE_STAGE, allowlistEmail);
 }
