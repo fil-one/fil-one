@@ -1,6 +1,6 @@
 import { ComingSoonPage } from '../components/ComingSoonPage.js';
 
-export function RagPipelinePage() {
+export function BucketIntelligencePage() {
   return (
     <ComingSoonPage
       title="Bucket Intelligence"

@@ -21,7 +21,7 @@ export const track: typeof plausibleTrack = (...args) => {
   if (!enabled) return;
   try {
     plausibleTrack(...args);
-  } catch {
-    // Swallow analytics failures; they must never affect the user flow.
+  } catch (err) {
+    console.error('Unexpected Plausible error:', err);
   }
 };
