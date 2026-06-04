@@ -22,7 +22,7 @@ import { IconButton } from '../components/IconButton';
 import { ShareObjectModal } from '../components/ShareObjectModal';
 import { Spinner } from '../components/Spinner';
 import { VersionHistoryCard } from '../components/VersionHistoryCard';
-import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
+import { formatBytes, getS3Endpoint, S3_REGION, SubscriptionStatus } from '@filone/shared';
 
 import type {
   ObjectMetadataResponse,
@@ -34,6 +34,7 @@ import type {
 import { FILONE_STAGE } from '../env';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { queryKeys, queryClient } from '../lib/query-client.js';
+import { getBilling } from '../lib/api.js';
 import { batchPresign } from '../lib/use-presign.js';
 import {
   parseHeadObjectResponse,
@@ -158,6 +159,9 @@ export function ObjectDetailPage({
   );
   const objectVersions = (cachedVersions?.versions ?? []).filter((v) => v.key === objectKey);
 
+  const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
+  const canShare = billing?.subscription.status !== SubscriptionStatus.Trialing;
+
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
@@ -259,13 +263,15 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
             tooltipSide="bottom"
             onClick={() => void objectActions.downloadObject(objectKey, versionId)}
           />
-          <IconButton
-            icon={LinkIcon}
-            aria-label="Share object"
-            tooltip="Share object"
-            tooltipSide="bottom"
-            onClick={() => setShareOpen(true)}
-          />
+          {canShare && (
+            <IconButton
+              icon={LinkIcon}
+              aria-label="Share object"
+              tooltip="Share object"
+              tooltipSide="bottom"
+              onClick={() => setShareOpen(true)}
+            />
+          )}
           <IconButton
             icon={TrashIcon}
             aria-label="Delete object"
