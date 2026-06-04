@@ -195,6 +195,7 @@ export const WaitlistModal: Story = {
 function PageWithSuccess(props: ComingSoonPageProps) {
   useEffect(() => {
     // Mock fetch to return a successful HubSpot response
+    const originalFetch = window.fetch;
     window.fetch = async () => new Response(JSON.stringify({ status: 'success' }), { status: 200 });
 
     // Open the modal
@@ -212,7 +213,10 @@ function PageWithSuccess(props: ComingSoonPageProps) {
       submitBtns[0]?.click();
     }, 100);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      window.fetch = originalFetch;
+    };
   }, []);
 
   return <ComingSoonPage {...props} />;

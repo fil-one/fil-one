@@ -194,11 +194,9 @@ function AccordionItem({ question, answer }: ComingSoonFaq) {
           className={`flex-shrink-0 text-zinc-400 group-hover:text-zinc-500 transition-all duration-200 motion-reduce:transition-none ${open ? 'rotate-180' : ''}`}
         />
       </button>
-      {open && (
-        <p id={panelId} className="pb-4 text-sm leading-relaxed text-zinc-500">
-          {answer}
-        </p>
-      )}
+      <p id={panelId} hidden={!open} className="pb-4 text-sm leading-relaxed text-zinc-500">
+        {answer}
+      </p>
     </div>
   );
 }
@@ -454,6 +452,7 @@ export function ComingSoonPage({
               inclusions={pricing.inclusions}
               onJoinClick={() => {
                 track('Waitlist CTA clicked', { props: { page: title } });
+                setSubmitted(false);
                 setModalOpen(true);
               }}
             />
