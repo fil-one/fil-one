@@ -8,7 +8,7 @@ export function BucketIntelligencePage() {
       what="Bucket Intelligence turns your storage into a knowledge base you can talk to. Choose which buckets to index, upload documents as you normally would, and they are automatically indexed using RAG (Retrieval-Augmented Generation): your files are chunked into passages, converted into vector embeddings, and made searchable by meaning. When you ask a question, the most relevant passages are retrieved and passed to an LLM, which generates a precise answer grounded in your actual data. No vector database to run, no pipeline to maintain. Just upload and query."
       features={[
         { title: 'Per-bucket indexing' },
-        { title: 'Ask questions in plain English' },
+        { title: 'Ask questions in natural language' },
         { title: 'Bring your own LLM' },
       ]}
       useCases={[
@@ -60,7 +60,7 @@ export function BucketIntelligencePage() {
         inclusions: [
           'Choose which buckets to index',
           'New files are indexed automatically',
-          'Ask questions in plain English',
+          'Ask questions in natural language',
           'Bring your own LLM keys',
           'Disable at any time',
         ],
