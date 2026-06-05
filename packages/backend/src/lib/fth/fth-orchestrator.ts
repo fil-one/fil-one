@@ -30,7 +30,14 @@ import type {
   ServiceOrchestrator,
 } from '../service-orchestrator.js';
 
-import { createBucket as s3CreateBucket, listBuckets as s3ListBuckets } from '../s3-presigner.js';
+import {
+  createBucket as s3CreateBucket,
+  listBuckets as s3ListBuckets,
+  setBucketVersioning,
+  putObjectLockConfiguration,
+  getBucketVersioning,
+  getBucketObjectLock,
+} from '../s3-presigner.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 import {
   createFthManagementClient,
@@ -90,24 +97,22 @@ export const fthOrchestrator = {
   },
 
   async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {
-    if (args.lock) {
-      throw new NotImplementedError(
-        'Object lock on bucket creation is not supported in this region yet',
-      );
+    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
+    await s3CreateBucket(ctx, {
+      bucketName: args.bucketName,
+      objectLockEnabled: args.lock === true,
+    });
+    if (args.versioning) {
+      await setBucketVersioning(ctx, args.bucketName, true);
     }
     if (args.retention?.enabled) {
-      throw new NotImplementedError(
-        'Retention policy on bucket creation is not supported in this region yet',
-      );
+      await putObjectLockConfiguration(ctx, {
+        bucketName: args.bucketName,
+        mode: args.retention.mode,
+        duration: args.retention.duration,
+        durationType: args.retention.durationType,
+      });
     }
-    if (args.versioning) {
-      throw new NotImplementedError(
-        'Versioning on bucket creation is not supported in this region yet',
-      );
-    }
-
-    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
-    await s3CreateBucket(ctx, { bucketName: args.bucketName });
   },
 
   async deleteBucket(_tenantId: string, _bucketName: string): Promise<void> {
@@ -117,14 +122,16 @@ export const fthOrchestrator = {
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {
     const ctx = await fthOrchestrator.getPresignerContext(tenantId);
     const { buckets } = await s3ListBuckets(ctx);
-    return buckets.map((b) => ({
-      bucketName: b.name,
-      region: fthOrchestrator.region,
-      createdAt: b.createdAt,
-      isPublic: false,
-      versioning: false,
-      encrypted: true,
-    }));
+    return Promise.all(
+      buckets.map(async (b) => ({
+        bucketName: b.name,
+        region: fthOrchestrator.region,
+        createdAt: b.createdAt,
+        isPublic: false,
+        versioning: await getBucketVersioning(ctx, b.name).catch(() => false),
+        encrypted: true,
+      })),
+    );
   },
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
@@ -133,13 +140,22 @@ export const fthOrchestrator = {
     const match = buckets.find((b) => b.name === bucketName);
     if (!match) return null;
 
+    const [versioning, lock] = await Promise.all([
+      getBucketVersioning(ctx, bucketName),
+      getBucketObjectLock(ctx, bucketName),
+    ]);
+
     return {
       bucketName,
       region: fthOrchestrator.region,
       createdAt: match.createdAt,
       isPublic: false,
-      versioning: false,
+      versioning,
       encrypted: true,
+      objectLockEnabled: lock?.objectLockEnabled ?? false,
+      ...(lock?.defaultRetention && { defaultRetention: lock.defaultRetention }),
+      ...(lock?.retentionDuration != null && { retentionDuration: lock.retentionDuration }),
+      ...(lock?.retentionDurationType && { retentionDurationType: lock.retentionDurationType }),
     };
   },
 

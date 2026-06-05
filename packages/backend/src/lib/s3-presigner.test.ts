@@ -3,13 +3,17 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   CreateBucketCommand,
   DeleteObjectCommand,
+  GetBucketVersioningCommand,
   GetObjectCommand,
+  GetObjectLockConfigurationCommand,
   GetObjectRetentionCommand,
   HeadObjectCommand,
   ListBucketsCommand,
   ListObjectVersionsCommand,
   ListObjectsV2Command,
+  PutBucketVersioningCommand,
   PutObjectCommand,
+  PutObjectLockConfigurationCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
 
@@ -26,6 +30,8 @@ const s3Mock = mockClient(S3Client);
 
 import {
   createBucket,
+  getBucketObjectLock,
+  getBucketVersioning,
   getPresignedDeleteObjectUrl,
   getPresignedGetObjectRetentionUrl,
   getPresignedGetObjectUrl,
@@ -35,6 +41,8 @@ import {
   getPresignedPutObjectUrl,
   listBuckets,
   listObjects,
+  putObjectLockConfiguration,
+  setBucketVersioning,
 } from './s3-presigner.js';
 import { BucketAlreadyExistsError } from './errors.js';
 import type { PresignerContext } from './service-orchestrator.js';
@@ -83,6 +91,19 @@ describe('s3-presigner direct operations', () => {
       const calls = s3Mock.commandCalls(CreateBucketCommand);
       expect(calls).toHaveLength(1);
       expect(calls[0].args[0].input).toEqual({ Bucket: 'my-bucket' });
+    });
+
+    it('sends ObjectLockEnabledForBucket:true when objectLockEnabled is set', async () => {
+      s3Mock.on(CreateBucketCommand).resolves({});
+
+      await createBucket(ctx, { bucketName: 'my-bucket', objectLockEnabled: true });
+
+      const calls = s3Mock.commandCalls(CreateBucketCommand);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].args[0].input).toEqual({
+        Bucket: 'my-bucket',
+        ObjectLockEnabledForBucket: true,
+      });
     });
 
     const alreadyExistsNames = ['BucketAlreadyOwnedByYou', 'BucketAlreadyExists'];
@@ -226,6 +247,155 @@ describe('s3-presigner direct operations', () => {
       expect(result.objects[0]).toMatchObject({ key: 'a.txt', sizeBytes: 0 });
       expect(typeof result.objects[0]?.lastModified).toBe('string');
       expect(result.objects[0]?.etag).toBeUndefined();
+    });
+  });
+
+  describe('setBucketVersioning', () => {
+    it('sends Status Enabled when enabled defaults to true', async () => {
+      s3Mock.on(PutBucketVersioningCommand).resolves({});
+
+      await setBucketVersioning(ctx, 'my-bucket');
+
+      const calls = s3Mock.commandCalls(PutBucketVersioningCommand);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].args[0].input).toEqual({
+        Bucket: 'my-bucket',
+        VersioningConfiguration: { Status: 'Enabled' },
+      });
+    });
+
+    it('sends Status Suspended when enabled is false', async () => {
+      s3Mock.on(PutBucketVersioningCommand).resolves({});
+
+      await setBucketVersioning(ctx, 'my-bucket', false);
+
+      const calls = s3Mock.commandCalls(PutBucketVersioningCommand);
+      expect(calls[0].args[0].input).toEqual({
+        Bucket: 'my-bucket',
+        VersioningConfiguration: { Status: 'Suspended' },
+      });
+    });
+  });
+
+  describe('putObjectLockConfiguration', () => {
+    it('maps governance + days duration to a Days rule', async () => {
+      s3Mock.on(PutObjectLockConfigurationCommand).resolves({});
+
+      await putObjectLockConfiguration(ctx, {
+        bucketName: 'my-bucket',
+        mode: 'governance',
+        duration: 7,
+        durationType: 'd',
+      });
+
+      const calls = s3Mock.commandCalls(PutObjectLockConfigurationCommand);
+      expect(calls).toHaveLength(1);
+      const cfg = calls[0].args[0].input.ObjectLockConfiguration;
+      expect(cfg?.ObjectLockEnabled).toBe('Enabled');
+      const retention = cfg?.Rule?.DefaultRetention;
+      expect(retention?.Mode).toBe('GOVERNANCE');
+      expect(retention?.Days).toBe(7);
+      expect(retention?.Years).toBeUndefined();
+    });
+
+    it('maps compliance + years duration to a Years rule', async () => {
+      s3Mock.on(PutObjectLockConfigurationCommand).resolves({});
+
+      await putObjectLockConfiguration(ctx, {
+        bucketName: 'my-bucket',
+        mode: 'compliance',
+        duration: 1,
+        durationType: 'y',
+      });
+
+      const calls = s3Mock.commandCalls(PutObjectLockConfigurationCommand);
+      const retention = calls[0].args[0].input.ObjectLockConfiguration?.Rule?.DefaultRetention;
+      expect(retention?.Mode).toBe('COMPLIANCE');
+      expect(retention?.Years).toBe(1);
+      expect(retention?.Days).toBeUndefined();
+    });
+  });
+
+  describe('getBucketVersioning', () => {
+    it('returns true when Status is Enabled', async () => {
+      s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+
+      expect(await getBucketVersioning(ctx, 'my-bucket')).toBe(true);
+    });
+
+    it('returns false when Status is Suspended', async () => {
+      s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Suspended' });
+
+      expect(await getBucketVersioning(ctx, 'my-bucket')).toBe(false);
+    });
+
+    it('returns false when Status is undefined', async () => {
+      s3Mock.on(GetBucketVersioningCommand).resolves({});
+
+      expect(await getBucketVersioning(ctx, 'my-bucket')).toBe(false);
+    });
+  });
+
+  describe('getBucketObjectLock', () => {
+    it('parses an enabled config with a governance days rule', async () => {
+      s3Mock.on(GetObjectLockConfigurationCommand).resolves({
+        ObjectLockConfiguration: {
+          ObjectLockEnabled: 'Enabled',
+          Rule: { DefaultRetention: { Mode: 'GOVERNANCE', Days: 7 } },
+        },
+      });
+
+      const result = await getBucketObjectLock(ctx, 'my-bucket');
+
+      expect(result).toEqual({
+        objectLockEnabled: true,
+        defaultRetention: 'governance',
+        retentionDuration: 7,
+        retentionDurationType: 'd',
+      });
+    });
+
+    it('parses an enabled config with a compliance years rule', async () => {
+      s3Mock.on(GetObjectLockConfigurationCommand).resolves({
+        ObjectLockConfiguration: {
+          ObjectLockEnabled: 'Enabled',
+          Rule: { DefaultRetention: { Mode: 'COMPLIANCE', Years: 1 } },
+        },
+      });
+
+      const result = await getBucketObjectLock(ctx, 'my-bucket');
+
+      expect(result).toEqual({
+        objectLockEnabled: true,
+        defaultRetention: 'compliance',
+        retentionDuration: 1,
+        retentionDurationType: 'y',
+      });
+    });
+
+    it('omits retention fields when no Rule is present', async () => {
+      s3Mock.on(GetObjectLockConfigurationCommand).resolves({
+        ObjectLockConfiguration: { ObjectLockEnabled: 'Enabled' },
+      });
+
+      const result = await getBucketObjectLock(ctx, 'my-bucket');
+
+      expect(result).toEqual({ objectLockEnabled: true });
+    });
+
+    it('returns null when object lock configuration is not found', async () => {
+      s3Mock
+        .on(GetObjectLockConfigurationCommand)
+        .rejects(Object.assign(new Error('x'), { name: 'ObjectLockConfigurationNotFoundError' }));
+
+      expect(await getBucketObjectLock(ctx, 'my-bucket')).toBeNull();
+    });
+
+    it('rethrows unrelated errors', async () => {
+      const sdkErr = Object.assign(new Error('denied'), { name: 'AccessDenied' });
+      s3Mock.on(GetObjectLockConfigurationCommand).rejects(sdkErr);
+
+      await expect(getBucketObjectLock(ctx, 'my-bucket')).rejects.toBe(sdkErr);
     });
   });
 });

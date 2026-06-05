@@ -5,17 +5,21 @@
 import {
   CreateBucketCommand,
   DeleteObjectCommand,
+  GetBucketVersioningCommand,
   GetObjectCommand,
+  GetObjectLockConfigurationCommand,
   GetObjectRetentionCommand,
   HeadObjectCommand,
   ListBucketsCommand,
   ListObjectsV2Command,
   ListObjectVersionsCommand,
+  PutBucketVersioningCommand,
   PutObjectCommand,
+  PutObjectLockConfigurationCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import type { S3Object } from '@filone/shared';
+import type { RetentionDurationType, RetentionMode, S3Object } from '@filone/shared';
 import { BucketAlreadyExistsError } from './errors.js';
 import type { PresignerContext } from './service-orchestrator.js';
 
@@ -32,6 +36,7 @@ function createS3Client(ctx: PresignerContext): S3Client {
 
 export interface CreateBucketOptions {
   bucketName: string;
+  objectLockEnabled?: boolean;
 }
 
 export async function createBucket(
@@ -40,7 +45,12 @@ export async function createBucket(
 ): Promise<void> {
   const s3 = createS3Client(ctx);
   try {
-    await s3.send(new CreateBucketCommand({ Bucket: options.bucketName }));
+    await s3.send(
+      new CreateBucketCommand({
+        Bucket: options.bucketName,
+        ...(options.objectLockEnabled && { ObjectLockEnabledForBucket: true }),
+      }),
+    );
   } catch (err) {
     const name = (err as { name?: string }).name;
     if (name === 'BucketAlreadyOwnedByYou' || name === 'BucketAlreadyExists') {
@@ -63,6 +73,98 @@ export async function listBuckets(ctx: PresignerContext): Promise<ListBucketsRes
       createdAt: b.CreationDate?.toISOString() ?? new Date().toISOString(),
     })),
   };
+}
+
+// Map between our domain RetentionMode and the S3 wire enum.
+const toS3RetentionMode = (m: RetentionMode) => (m === 'compliance' ? 'COMPLIANCE' : 'GOVERNANCE');
+const fromS3RetentionMode = (m: string): RetentionMode =>
+  m === 'COMPLIANCE' ? 'compliance' : 'governance';
+
+export async function setBucketVersioning(
+  ctx: PresignerContext,
+  bucketName: string,
+  enabled = true,
+): Promise<void> {
+  const s3 = createS3Client(ctx);
+  await s3.send(
+    new PutBucketVersioningCommand({
+      Bucket: bucketName,
+      VersioningConfiguration: { Status: enabled ? 'Enabled' : 'Suspended' },
+    }),
+  );
+}
+
+export interface PutObjectLockConfigurationOptions {
+  bucketName: string;
+  mode: RetentionMode;
+  duration: number;
+  durationType: RetentionDurationType;
+}
+
+export async function putObjectLockConfiguration(
+  ctx: PresignerContext,
+  options: PutObjectLockConfigurationOptions,
+): Promise<void> {
+  const s3 = createS3Client(ctx);
+  await s3.send(
+    new PutObjectLockConfigurationCommand({
+      Bucket: options.bucketName,
+      ObjectLockConfiguration: {
+        ObjectLockEnabled: 'Enabled',
+        Rule: {
+          DefaultRetention: {
+            Mode: toS3RetentionMode(options.mode),
+            ...(options.durationType === 'y'
+              ? { Years: options.duration }
+              : { Days: options.duration }),
+          },
+        },
+      },
+    }),
+  );
+}
+
+export async function getBucketVersioning(
+  ctx: PresignerContext,
+  bucketName: string,
+): Promise<boolean> {
+  const s3 = createS3Client(ctx);
+  const result = await s3.send(new GetBucketVersioningCommand({ Bucket: bucketName }));
+  return result.Status === 'Enabled';
+}
+
+export interface BucketObjectLockState {
+  objectLockEnabled: boolean;
+  defaultRetention?: RetentionMode;
+  retentionDuration?: number;
+  retentionDurationType?: RetentionDurationType;
+}
+
+export async function getBucketObjectLock(
+  ctx: PresignerContext,
+  bucketName: string,
+): Promise<BucketObjectLockState | null> {
+  const s3 = createS3Client(ctx);
+  try {
+    const result = await s3.send(new GetObjectLockConfigurationCommand({ Bucket: bucketName }));
+    const cfg = result.ObjectLockConfiguration;
+    const dr = cfg?.Rule?.DefaultRetention;
+    return {
+      objectLockEnabled: cfg?.ObjectLockEnabled === 'Enabled',
+      ...(dr?.Mode && { defaultRetention: fromS3RetentionMode(dr.Mode) }),
+      ...(dr?.Years != null
+        ? { retentionDuration: dr.Years, retentionDurationType: 'y' as const }
+        : dr?.Days != null
+          ? { retentionDuration: dr.Days, retentionDurationType: 'd' as const }
+          : {}),
+    };
+  } catch (err) {
+    const name = (err as { name?: string }).name;
+    if (name === 'ObjectLockConfigurationNotFoundError') {
+      return null;
+    }
+    throw err;
+  }
 }
 
 export interface ListObjectsOptions {

@@ -2,7 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
-import { S3Client, CreateBucketCommand, ListBucketsCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  CreateBucketCommand,
+  ListBucketsCommand,
+  PutBucketVersioningCommand,
+  PutObjectLockConfigurationCommand,
+  GetBucketVersioningCommand,
+  GetObjectLockConfigurationCommand,
+} from '@aws-sdk/client-s3';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -178,25 +186,68 @@ describe('fthOrchestrator.createBucket', () => {
     ).rejects.toBeInstanceOf(BucketAlreadyExistsError);
   });
 
-  it('throws when lock is requested (FTH does not support it)', async () => {
-    await expect(
-      fthOrchestrator.createBucket(fthClientId, { bucketName: 'my-bucket', lock: true }),
-    ).rejects.toThrow(/lock/i);
+  it('enables versioning via PutBucketVersioning when versioning:true', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    s3Mock.on(PutBucketVersioningCommand).resolves({});
+
+    await fthOrchestrator.createBucket(fthClientId, { bucketName: 'my-bucket', versioning: true });
+
+    const calls = s3Mock.commandCalls(PutBucketVersioningCommand);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args[0].input).toMatchObject({
+      Bucket: 'my-bucket',
+      VersioningConfiguration: { Status: 'Enabled' },
+    });
   });
 
-  it('throws when retention is requested (FTH does not support it)', async () => {
-    await expect(
-      fthOrchestrator.createBucket(fthClientId, {
-        bucketName: 'my-bucket',
-        retention: { enabled: true, mode: 'compliance', duration: 1, durationType: 'd' },
-      }),
-    ).rejects.toThrow(/retention/i);
+  it('passes ObjectLockEnabledForBucket and enables versioning when lock+versioning', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    s3Mock.on(PutBucketVersioningCommand).resolves({});
+
+    await fthOrchestrator.createBucket(fthClientId, {
+      bucketName: 'my-bucket',
+      versioning: true,
+      lock: true,
+    });
+
+    const createCalls = s3Mock.commandCalls(CreateBucketCommand);
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0].args[0].input).toMatchObject({
+      Bucket: 'my-bucket',
+      ObjectLockEnabledForBucket: true,
+    });
+    expect(s3Mock.commandCalls(PutBucketVersioningCommand)).toHaveLength(1);
   });
 
-  it('throws when versioning is requested (FTH does not support it)', async () => {
-    await expect(
-      fthOrchestrator.createBucket(fthClientId, { bucketName: 'my-bucket', versioning: true }),
-    ).rejects.toThrow(/versioning/i);
+  it('configures default retention when versioning+lock+retention', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    s3Mock.on(PutBucketVersioningCommand).resolves({});
+    s3Mock.on(PutObjectLockConfigurationCommand).resolves({});
+
+    await fthOrchestrator.createBucket(fthClientId, {
+      bucketName: 'my-bucket',
+      versioning: true,
+      lock: true,
+      retention: { enabled: true, mode: 'governance', duration: 7, durationType: 'd' },
+    });
+
+    const calls = s3Mock.commandCalls(PutObjectLockConfigurationCommand);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args[0].input).toMatchObject({
+      Bucket: 'my-bucket',
+      ObjectLockConfiguration: {
+        Rule: { DefaultRetention: { Mode: 'GOVERNANCE', Days: 7 } },
+      },
+    });
+  });
+
+  it('does not call PutBucketVersioning or PutObjectLockConfiguration for a plain bucket', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+
+    await fthOrchestrator.createBucket(fthClientId, { bucketName: 'my-bucket' });
+
+    expect(s3Mock.commandCalls(PutBucketVersioningCommand)).toHaveLength(0);
+    expect(s3Mock.commandCalls(PutObjectLockConfigurationCommand)).toHaveLength(0);
   });
 });
 
@@ -389,6 +440,7 @@ describe('fthOrchestrator.listBuckets', () => {
         { Name: 'b2', CreationDate: new Date('2026-02-01T00:00:00Z') },
       ],
     });
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Suspended' });
 
     const result = await fthOrchestrator.listBuckets(fthClientId);
 
@@ -411,6 +463,26 @@ describe('fthOrchestrator.listBuckets', () => {
       },
     ]);
   });
+
+  it('reflects per-bucket versioning state from GetBucketVersioning', async () => {
+    ssmMock.on(GetParameterCommand).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
+    });
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [
+        { Name: 'versioned', CreationDate: new Date('2026-01-01T00:00:00Z') },
+        { Name: 'plain', CreationDate: new Date('2026-02-01T00:00:00Z') },
+      ],
+    });
+    s3Mock.on(GetBucketVersioningCommand).callsFake((input) => ({
+      Status: input.Bucket === 'versioned' ? 'Enabled' : 'Suspended',
+    }));
+
+    const result = await fthOrchestrator.listBuckets(fthClientId);
+
+    expect(result.find((b) => b.bucketName === 'versioned')?.versioning).toBe(true);
+    expect(result.find((b) => b.bucketName === 'plain')?.versioning).toBe(false);
+  });
 });
 
 describe('fthOrchestrator.getBucket', () => {
@@ -427,17 +499,63 @@ describe('fthOrchestrator.getBucket', () => {
         { Name: 'my-bucket', CreationDate: new Date('2026-02-15T10:00:00Z') },
       ],
     });
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Suspended' });
+    const notFound = new Error('not configured');
+    (notFound as Error & { name: string }).name = 'ObjectLockConfigurationNotFoundError';
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(notFound);
 
     const result = await fthOrchestrator.getBucket(fthClientId, 'my-bucket');
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       bucketName: 'my-bucket',
       region: 'us-east-1',
       createdAt: '2026-02-15T10:00:00.000Z',
       isPublic: false,
       versioning: false,
       encrypted: true,
+      objectLockEnabled: false,
     });
+  });
+
+  it('merges versioning + object-lock + retention into BucketDetails', async () => {
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'my-bucket', CreationDate: new Date('2026-02-15T10:00:00Z') }],
+    });
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({
+      ObjectLockConfiguration: {
+        ObjectLockEnabled: 'Enabled',
+        Rule: { DefaultRetention: { Mode: 'GOVERNANCE', Days: 7 } },
+      },
+    });
+
+    const result = await fthOrchestrator.getBucket(fthClientId, 'my-bucket');
+
+    expect(result).toMatchObject({
+      bucketName: 'my-bucket',
+      versioning: true,
+      objectLockEnabled: true,
+      defaultRetention: 'governance',
+      retentionDuration: 7,
+      retentionDurationType: 'd',
+    });
+  });
+
+  it('treats ObjectLockConfigurationNotFoundError as not-locked', async () => {
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'my-bucket', CreationDate: new Date('2026-02-15T10:00:00Z') }],
+    });
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Suspended' });
+    const notFound = new Error('not configured');
+    (notFound as Error & { name: string }).name = 'ObjectLockConfigurationNotFoundError';
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(notFound);
+
+    const result = await fthOrchestrator.getBucket(fthClientId, 'my-bucket');
+
+    expect(result?.objectLockEnabled).toBe(false);
+    expect(result).not.toHaveProperty('defaultRetention');
+    expect(result).not.toHaveProperty('retentionDuration');
+    expect(result).not.toHaveProperty('retentionDurationType');
   });
 
   it('returns null when the bucket is not present in ListBuckets', async () => {
