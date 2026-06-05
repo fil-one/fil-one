@@ -11,7 +11,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
 import type { FthManagementClient } from './fth-management-client.js';
 
-export const FTH_FULL_PERMISSIONS = [
+const FTH_FULL_PERMISSIONS = [
   's3:CreateBucket',
   's3:ListAllMyBuckets',
   's3:DeleteBucket',

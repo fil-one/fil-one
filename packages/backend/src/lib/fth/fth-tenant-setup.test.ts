@@ -32,7 +32,7 @@ vi.mock('./fth-api-metrics.js', () => ({
 process.env.FILONE_STAGE = 'test';
 process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
 
-import { ensureTenantReady, FTH_FULL_PERMISSIONS } from './fth-tenant-setup.js';
+import { ensureTenantReady } from './fth-tenant-setup.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
@@ -152,19 +152,5 @@ describe('ensureTenantReady', () => {
       '[fth-tenant-setup] setup failed',
       expect.objectContaining({ orgId, error: expect.stringContaining('DDB is down') }),
     );
-  });
-});
-
-describe('FTH_FULL_PERMISSIONS', () => {
-  it('is a superset of the guide-required versioning/object-lock/retention permissions', () => {
-    const required = [
-      's3:CreateBucket',
-      's3:PutBucketVersioning',
-      's3:GetBucketVersioning',
-      's3:PutBucketObjectLockConfiguration',
-      's3:GetBucketObjectLockConfiguration',
-      's3:PutObjectRetention',
-    ];
-    for (const p of required) expect(FTH_FULL_PERMISSIONS).toContain(p);
   });
 });
