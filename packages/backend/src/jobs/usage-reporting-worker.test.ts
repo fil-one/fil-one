@@ -28,10 +28,6 @@ vi.mock('../lib/stripe-client.js', () => ({
     mockCustomersUpdate(customerId, { metadata }),
 }));
 
-// The worker resolves stage-available orchestrators via the registry, then asks
-// each to resolve its tenant id (isTenantReady) before fetching usage metrics.
-// Both orchestrators route getTenantUsageMetrics to the same mock fn, which
-// distinguishes regions by the tenantId argument.
 const {
   mockGetTenantUsageMetrics,
   mockAuroraIsTenantReady,
