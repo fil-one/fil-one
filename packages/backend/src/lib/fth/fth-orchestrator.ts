@@ -9,7 +9,6 @@
 //     using the service access key stashed in SSM during setup.
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region } from '@filone/shared';
@@ -34,6 +33,7 @@ import type {
 } from '../service-orchestrator.js';
 
 import { createBucket as s3CreateBucket, listBuckets as s3ListBuckets } from '../s3-presigner.js';
+import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 import {
   createFthManagementClient,
   FthApiError,
@@ -43,20 +43,13 @@ import {
 import type { FthManagementClient } from './fth-management-client.js';
 import { instrumentClient } from './fth-api-metrics.js';
 
-interface FthS3Credentials {
-  accessKeyId: string;
-  secretAccessKey: string;
-}
-
 const FTH_CONSOLE_USER_CODE = 'filone-console';
 
 const dynamo = getDynamoClient();
-const ssm = new SSMClient({});
-const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
 
 export const _resetFthOrchestratorCachesForTesting = () => {
-  ssmCache.clear();
+  _resetS3CredentialsCacheForTesting();
   consoleStorageUserCache.clear();
 };
 
@@ -85,7 +78,11 @@ export const fthOrchestrator = {
 
   async getPresignerContext(tenantId: string): Promise<PresignerContext> {
     const stage = process.env.FILONE_STAGE!;
-    const credentials = await getFthS3Credentials(tenantId);
+    const credentials = await getConsoleS3Credentials({
+      orchestratorId: fthOrchestrator.id,
+      stage,
+      tenantId,
+    });
     return {
       endpointUrl: getS3Endpoint(fthOrchestrator.region, stage),
       region: 'us-east-1',
@@ -293,36 +290,6 @@ function extractFthMessage(err: FthApiError): string | undefined {
     if (typeof message === 'string') return message;
   }
   return undefined;
-}
-
-async function getFthS3Credentials(tenantId: string): Promise<FthS3Credentials> {
-  const stage = process.env.FILONE_STAGE!;
-  const cacheKey = `${stage}/${tenantId}`;
-  const cached = ssmCache.get(cacheKey);
-  if (cached) return JSON.parse(cached) as FthS3Credentials;
-
-  let value: string | undefined;
-  try {
-    const { Parameter } = await ssm.send(
-      new GetParameterCommand({
-        Name: `/filone/${stage}/fth-s3/access-key/${tenantId}`,
-        WithDecryption: true,
-      }),
-    );
-    value = Parameter?.Value;
-  } catch (err) {
-    if ((err as { name?: string }).name === 'ParameterNotFound') {
-      throw new Error(`FTH S3 credentials not found in SSM for tenant ${tenantId}`, { cause: err });
-    }
-    throw err;
-  }
-
-  if (!value) {
-    throw new Error(`FTH S3 credentials not found in SSM for tenant ${tenantId}`);
-  }
-
-  ssmCache.set(cacheKey, value);
-  return JSON.parse(value) as FthS3Credentials;
 }
 
 // User-issued access keys hang off the same `filone-console` storage user that
