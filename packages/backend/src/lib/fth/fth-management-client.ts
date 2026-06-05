@@ -114,10 +114,6 @@ export interface FthAccessKey {
   createdAt: string;
 }
 
-// Wire shape mirrors the OpenAPI `MetricsTimeseriesResponse` (snake_case is the
-// on-the-wire format). Only `ts` / `usage_avg_bytes` / `object_count_avg` /
-// `egress_bytes` are consumed today; the rest are documented for completeness
-// and future use.
 export interface FthMetricsTimeseriesPoint {
   ts?: string;
   usage_avg_bytes?: number;
@@ -216,7 +212,7 @@ function buildHttpRequest(
   opts: {
     body?: unknown;
     idempotencyKey?: string;
-    query?: Record<string, string | number | undefined | null>;
+    query?: URLSearchParams;
   },
 ): Request {
   const headers = new Headers({
@@ -233,13 +229,7 @@ function buildHttpRequest(
 
   let url = `${ctx.baseUrl}${path}`;
   if (opts.query) {
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(opts.query)) {
-      if (value !== undefined && value !== null) {
-        params.set(key, String(value));
-      }
-    }
-    const qs = params.toString();
+    const qs = opts.query.toString();
     if (qs) url = `${url}?${qs}`;
   }
 
@@ -254,7 +244,7 @@ async function runRequest<T>(
   opts: {
     body?: unknown;
     idempotencyKey?: string;
-    query?: Record<string, string | number | undefined | null>;
+    query?: URLSearchParams;
   } = {},
 ): Promise<T> {
   const path = renderPath(pathTemplate, pathParams);
@@ -311,7 +301,7 @@ type RequestFn = <T>(
   opts?: {
     body?: unknown;
     idempotencyKey?: string;
-    query?: Record<string, string | number | undefined | null>;
+    query?: URLSearchParams;
   },
 ) => Promise<T>;
 
@@ -396,13 +386,16 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
         { idempotencyKey: opts?.idempotencyKey },
       ),
 
-    getClientMetricsTimeseries: (clientRef, query) =>
-      request<FthMetricsTimeseriesResponse>(
+    getClientMetricsTimeseries: (clientRef, query) => {
+      const params = new URLSearchParams({ from: query.from, to: query.to });
+      if (query.interval) params.set('interval', query.interval);
+      return request<FthMetricsTimeseriesResponse>(
         'GET',
         '/management/v1/clients/{clientRef}/metrics/timeseries',
         { clientRef },
-        { query: { from: query.from, to: query.to, interval: query.interval } },
-      ),
+        { query: params },
+      );
+    },
   };
 }
 

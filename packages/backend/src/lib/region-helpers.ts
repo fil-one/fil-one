@@ -1,12 +1,12 @@
 import { getAvailableOrchestrators } from './service-orchestrator-registry';
 import type { ServiceOrchestrator } from './service-orchestrator';
 
-export interface ActiveTenant {
+export interface ProvisionedRegion {
   orchestrator: ServiceOrchestrator;
   tenantId: string;
 }
 
-export async function getActiveTenant(orgId: string): Promise<ActiveTenant[]> {
+export async function getProvisionedRegions(orgId: string): Promise<ProvisionedRegion[]> {
   const orchestrators = getAvailableOrchestrators(process.env.FILONE_STAGE!);
   const resolved = await Promise.all(
     orchestrators.map(async (orchestrator) => {
@@ -14,5 +14,5 @@ export async function getActiveTenant(orgId: string): Promise<ActiveTenant[]> {
       return tenantId ? { orchestrator, tenantId } : null;
     }),
   );
-  return resolved.filter((t): t is ActiveTenant => t !== null);
+  return resolved.filter((t): t is ProvisionedRegion => t !== null);
 }

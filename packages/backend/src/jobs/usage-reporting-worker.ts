@@ -12,9 +12,9 @@ import {
   mergeStorageSamples,
   sortStorageSamplesByTimestamp,
 } from '../lib/usage-calculator.js';
-import type { ServiceOrchestrator, TenantUsageMetrics } from '../lib/service-orchestrator.js';
-import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
+import type { TenantUsageMetrics } from '../lib/service-orchestrator.js';
 import { auroraOrchestrator } from '../lib/aurora/aurora-orchestrator.js';
+import { getProvisionedRegions } from '../lib/region-helpers.js';
 
 const dynamo = getDynamoClient();
 
@@ -70,27 +70,6 @@ async function enforceTenantLocks({
   return desiredStatus;
 }
 
-interface ReadyRegion {
-  orchestrator: ServiceOrchestrator;
-  tenantId: string;
-}
-
-/**
- * Resolves which stage-available regions the org is provisioned in. Asks each
- * orchestrator for the current stage to resolve its tenant id (side-effect-free
- * read), dropping any region where the tenant is not ready.
- */
-async function resolveReadyRegions(orgId: string): Promise<ReadyRegion[]> {
-  const orchestrators = getAvailableOrchestrators(process.env.FILONE_STAGE!);
-  const resolved = await Promise.all(
-    orchestrators.map(async (orchestrator) => {
-      const tenantId = await orchestrator.isTenantReady(orgId);
-      return tenantId ? { orchestrator, tenantId } : null;
-    }),
-  );
-  return resolved.filter((r): r is ReadyRegion => r !== null);
-}
-
 export async function handler(event: UsageReportingWorkerPayload): Promise<void> {
   const {
     orgId,
@@ -114,7 +93,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   // stage-available orchestrator to resolve its tenant id (side-effect-free).
   // Each region is then fetched independently, aggregated, and reported on the
   // org-level.
-  const orgRegions = await resolveReadyRegions(orgId);
+  const orgRegions = await getProvisionedRegions(orgId);
 
   if (orgRegions.length === 0) {
     console.warn('[usage-worker] Org not provisioned in any available region, skipping', { orgId });

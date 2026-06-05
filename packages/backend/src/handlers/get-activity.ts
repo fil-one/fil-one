@@ -13,7 +13,7 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import type { AccessKeyRecord } from '../lib/dynamo-records.js';
-import { ActiveTenant, getActiveTenant } from '../lib/tenant-status.js';
+import { ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.js';
 
 const dynamo = getDynamoClient();
 
@@ -35,7 +35,7 @@ export async function baseHandler(
 
   // The dashboard aggregates activity across every region the org is provisioned
   // in, so resolve the ready tenant on each available orchestrator.
-  const tenants = await getActiveTenant(orgId);
+  const tenants = await getProvisionedRegions(orgId);
 
   const [bucketActivities, keyActivities, trends] = await Promise.all([
     fetchBucketActivities(orgId, tenants),
@@ -59,7 +59,7 @@ export async function baseHandler(
 
 async function fetchBucketActivities(
   orgId: string,
-  tenants: ActiveTenant[],
+  tenants: ProvisionedRegion[],
 ): Promise<RecentActivity[]> {
   const perTenant = await Promise.all(
     tenants.map(({ orchestrator, tenantId }) =>
@@ -129,7 +129,7 @@ async function fetchAccessKeyActivities(orgId: string): Promise<RecentActivity[]
 }
 
 async function buildTimeSeries(
-  tenants: ActiveTenant[],
+  tenants: ProvisionedRegion[],
   period: number,
 ): Promise<ActivityResponse['trends']> {
   const now = new Date();
