@@ -148,14 +148,16 @@ export async function getBucketObjectLock(
   try {
     const result = await s3.send(new GetObjectLockConfigurationCommand({ Bucket: bucketName }));
     const cfg = result.ObjectLockConfiguration;
-    const dr = cfg?.Rule?.DefaultRetention;
+    const defaultRetention = cfg?.Rule?.DefaultRetention;
     return {
       objectLockEnabled: cfg?.ObjectLockEnabled === 'Enabled',
-      ...(dr?.Mode && { defaultRetention: fromS3RetentionMode(dr.Mode) }),
-      ...(dr?.Years != null
-        ? { retentionDuration: dr.Years, retentionDurationType: 'y' as const }
-        : dr?.Days != null
-          ? { retentionDuration: dr.Days, retentionDurationType: 'd' as const }
+      ...(defaultRetention?.Mode && {
+        defaultRetention: fromS3RetentionMode(defaultRetention.Mode),
+      }),
+      ...(defaultRetention?.Years != null
+        ? { retentionDuration: defaultRetention.Years, retentionDurationType: 'y' as const }
+        : defaultRetention?.Days != null
+          ? { retentionDuration: defaultRetention.Days, retentionDurationType: 'd' as const }
           : {}),
     };
   } catch (err) {
