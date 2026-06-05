@@ -56,16 +56,20 @@ export interface IssuedAccessKey {
   createdAt: string;
 }
 
-/** A single point in a tenant's storage-usage time series. */
+/**
+ * A single point in a tenant's storage-usage time series.
+ */
 export interface StorageUsageSample {
+  /** Canonical ISO-8601 UTC timestamp (e.g. `2026-01-01T10:00:00.000Z`). */
   timestamp: string;
   bytesUsed: number;
-  /** 0 when the orchestrator's source has no object-count series (e.g. FTH). */
+  /** 0 when the orchestrator's source has no object-count series. */
   objectCount: number;
 }
 
-/** A single point in a tenant's egress time series. */
+/** A single point in a tenant's egress time series. `timestamp` is canonical ISO-8601 UTC (see {@link StorageUsageSample}). */
 export interface EgressUsageSample {
+  /** Canonical ISO-8601 UTC timestamp (e.g. `2026-01-01T10:00:00.000Z`). */
   timestamp: string;
   bytesUsed: number;
 }
@@ -81,7 +85,7 @@ export interface GetTenantUsageMetricsOptions {
   from: string;
   /** Exclusive end timestamp, RFC3339 UTC. */
   to: string;
-  /** Sampling window applied to BOTH series. Defaults to '1h'. */
+  /** Sampling window applied to BOTH series. Defaults to '1d'. */
   interval?: string;
 }
 

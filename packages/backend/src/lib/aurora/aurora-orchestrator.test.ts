@@ -515,20 +515,20 @@ describe('auroraOrchestrator', () => {
       mockGetOperationsSamples.mockResolvedValue([]);
     });
 
-    it('forwards tenantId, from, to and defaults window to "1h" when interval is omitted', async () => {
+    it('forwards tenantId, from, to and defaults window to "1d" when interval is omitted', async () => {
       await auroraOrchestrator.getTenantUsageMetrics('aurora-t-1', { from: FROM, to: TO });
 
       expect(mockGetStorageSamples).toHaveBeenCalledWith({
         tenantId: 'aurora-t-1',
         from: FROM,
         to: TO,
-        window: '1h',
+        window: '1d',
       });
       expect(mockGetOperationsSamples).toHaveBeenCalledWith({
         tenantId: 'aurora-t-1',
         from: FROM,
         to: TO,
-        window: '1h',
+        window: '1d',
       });
     });
 
@@ -559,8 +559,8 @@ describe('auroraOrchestrator', () => {
       });
 
       expect(result.storage).toEqual([
-        { timestamp: '2026-01-01T01:00:00Z', bytesUsed: 1024, objectCount: 5 },
-        { timestamp: '2026-01-01T02:00:00Z', bytesUsed: 0, objectCount: 0 },
+        { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 1024, objectCount: 5 },
+        { timestamp: '2026-01-01T02:00:00.000Z', bytesUsed: 0, objectCount: 0 },
       ]);
     });
 
@@ -576,8 +576,8 @@ describe('auroraOrchestrator', () => {
       });
 
       expect(result.egress).toEqual([
-        { timestamp: '2026-01-01T01:00:00Z', bytesUsed: 512 },
-        { timestamp: '2026-01-01T02:00:00Z', bytesUsed: 0 },
+        { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 512 },
+        { timestamp: '2026-01-01T02:00:00.000Z', bytesUsed: 0 },
       ]);
     });
 
@@ -593,7 +593,7 @@ describe('auroraOrchestrator', () => {
       });
 
       expect(result.storage).toHaveLength(1);
-      expect(result.storage[0]?.timestamp).toBe('2026-01-01T01:00:00Z');
+      expect(result.storage[0]?.timestamp).toBe('2026-01-01T01:00:00.000Z');
     });
 
     it('drops egress samples that are missing a timestamp', async () => {
@@ -608,7 +608,7 @@ describe('auroraOrchestrator', () => {
       });
 
       expect(result.egress).toHaveLength(1);
-      expect(result.egress[0]?.timestamp).toBe('2026-01-01T01:00:00Z');
+      expect(result.egress[0]?.timestamp).toBe('2026-01-01T01:00:00.000Z');
     });
 
     it('returns empty arrays when both helpers return no samples', async () => {

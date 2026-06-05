@@ -115,12 +115,15 @@ export interface FthAccessKey {
 }
 
 // Wire shape mirrors the OpenAPI `MetricsTimeseriesResponse` (snake_case is the
-// on-the-wire format). Only `ts` / `usage_avg_bytes` / `egress_bytes` are consumed
-// today; the rest are documented for completeness and future use.
+// on-the-wire format). Only `ts` / `usage_avg_bytes` / `object_count_avg` /
+// `egress_bytes` are consumed today; the rest are documented for completeness
+// and future use.
 export interface FthMetricsTimeseriesPoint {
   ts?: string;
   usage_avg_bytes?: number;
   usage_peak_bytes?: number;
+  object_count_avg?: number;
+  object_count_peak?: number;
   billable_byte_seconds?: number;
   billable_object_seconds?: number;
   egress_bytes?: number;

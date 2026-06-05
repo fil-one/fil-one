@@ -220,20 +220,20 @@ export const fthOrchestrator = {
     const res = await client.getClientMetricsTimeseries(tenantId, {
       from: opts.from,
       to: opts.to,
-      interval: opts.interval ?? '1h',
+      interval: opts.interval ?? '1d',
     });
     const points = res.points ?? [];
     const storage = points
       .filter((p) => p.ts !== undefined)
       .map((p) => ({
-        timestamp: p.ts!,
+        timestamp: new Date(p.ts!).toISOString(),
         bytesUsed: p.usage_avg_bytes ?? 0,
-        objectCount: 0,
+        objectCount: p.object_count_avg ?? 0,
       }));
     const egress = points
       .filter((p) => p.ts !== undefined)
       .map((p) => ({
-        timestamp: p.ts!,
+        timestamp: new Date(p.ts!).toISOString(),
         bytesUsed: p.egress_bytes ?? 0,
       }));
     return { storage, egress };

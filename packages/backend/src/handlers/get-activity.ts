@@ -170,23 +170,24 @@ async function fetchStorageByDate(
   from: Date,
   to: Date,
 ): Promise<Map<string, StorageUsageSample>> {
-  // Request 1h granularity: it's the only interval every orchestrator supports
-  // (FTH's timeseries endpoint accepts 1h/5m only). The end-of-day key collapses
-  // it to one point per day — the day's latest reading. Upstream ordering isn't
-  // guaranteed, so we keep the sample with the greatest timestamp per day rather
-  // than relying on insertion order. Swallow errors so one region's outage still
-  // renders the rest.
+  // Request 1d granularity: one point per day, which is the resolution this trend
+  // renders at. The end-of-day key still collapses each day to a single reading,
+  // and since upstream ordering isn't guaranteed we keep the sample with the
+  // greatest timestamp per day rather than relying on insertion order. Swallow
+  // errors so one region's outage still renders the rest.
   try {
     const { storage } = await orchestrator.getTenantUsageMetrics(tenantId, {
       from: from.toISOString(),
       to: to.toISOString(),
-      interval: '1h',
+      interval: '1d',
     });
     const byDate = new Map<string, StorageUsageSample>();
     for (const s of storage) {
       const key = endOfDay(new Date(s.timestamp)).toISOString();
       const existing = byDate.get(key);
-      if (!existing || new Date(s.timestamp).getTime() > new Date(existing.timestamp).getTime()) {
+      // Sample timestamps are canonical ISO-8601 UTC (normalized by the
+      // orchestrator), so lexicographic order matches chronological order.
+      if (!existing || s.timestamp > existing.timestamp) {
         byDate.set(key, s);
       }
     }

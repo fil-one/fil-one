@@ -135,7 +135,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
           t.orchestrator.getTenantUsageMetrics(t.tenantId, {
             from: currentPeriodStart,
             to: now,
-            interval: '1h',
+            interval: '1d',
           }),
         ),
       ),

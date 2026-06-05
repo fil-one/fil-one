@@ -118,7 +118,7 @@ describe('usage-reporting-worker', () => {
 
     expect(mockGetTenantUsageMetrics).toHaveBeenCalledWith(
       'aurora-tenant-123',
-      expect.objectContaining({ interval: '1h' }),
+      expect.objectContaining({ interval: '1d' }),
     );
     expect(mockGetTenantUsageMetrics).not.toHaveBeenCalledWith('org-1', expect.anything());
   });
@@ -764,11 +764,11 @@ describe('usage-reporting-worker', () => {
       expect(mockGetTenantUsageMetrics).toHaveBeenCalledTimes(2);
       expect(mockGetTenantUsageMetrics).toHaveBeenCalledWith(
         'aurora-tenant-123',
-        expect.objectContaining({ interval: '1h' }),
+        expect.objectContaining({ interval: '1d' }),
       );
       expect(mockGetTenantUsageMetrics).toHaveBeenCalledWith(
         'fth-client-9',
-        expect.objectContaining({ interval: '1h' }),
+        expect.objectContaining({ interval: '1d' }),
       );
 
       // Stripe meter value should be the sum: 1 TB + 500 GB = 1500 GB → '1500'

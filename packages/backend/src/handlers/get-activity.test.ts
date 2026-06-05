@@ -31,7 +31,7 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
 }));
 
 // Builds a fully self-contained fake orchestrator for multi-region tests.
-function makeOrchestrator(opts: {
+function createMockedOrchestrator(opts: {
   id: string;
   region: string;
   tenantId: string | null;
@@ -337,7 +337,7 @@ describe('get-activity baseHandler', () => {
     expect(mockGetTenantUsageMetrics).toHaveBeenCalledWith(
       AURORA_TENANT_ID,
       expect.objectContaining({
-        interval: '1h',
+        interval: '1d',
       }),
     );
 
@@ -477,14 +477,14 @@ describe('get-activity baseHandler', () => {
       vi.setSystemTime(new Date('2026-01-02T12:00:00Z'));
       ddbMock.on(QueryCommand).resolves({ Items: [] });
 
-      const aurora = makeOrchestrator({
+      const aurora = createMockedOrchestrator({
         id: 'aurora',
         region: 'eu-west-1',
         tenantId: 'aurora-t',
         buckets: [{ bucketName: 'eu-bucket', createdAt: '2026-01-01T00:00:00Z' }],
         storage: [storageSample('2026-01-01T10:00:00.000Z', 1000, 5)],
       });
-      const fth = makeOrchestrator({
+      const fth = createMockedOrchestrator({
         id: 'fth',
         region: 'us-east-1',
         tenantId: 'fth-t',
@@ -516,13 +516,13 @@ describe('get-activity baseHandler', () => {
       vi.setSystemTime(new Date('2026-01-02T12:00:00Z'));
       ddbMock.on(QueryCommand).resolves({ Items: [] });
 
-      const aurora = makeOrchestrator({
+      const aurora = createMockedOrchestrator({
         id: 'aurora',
         region: 'eu-west-1',
         tenantId: 'aurora-t',
         buckets: [{ bucketName: 'eu-bucket', createdAt: '2026-01-01T00:00:00Z' }],
       });
-      const fth = makeOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: null });
+      const fth = createMockedOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: null });
       mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
 
       const event = buildEvent({ userInfo: USER_INFO });
@@ -541,13 +541,13 @@ describe('get-activity baseHandler', () => {
       vi.setSystemTime(new Date('2026-01-02T12:00:00Z'));
       ddbMock.on(QueryCommand).resolves({ Items: [] });
 
-      const aurora = makeOrchestrator({
+      const aurora = createMockedOrchestrator({
         id: 'aurora',
         region: 'eu-west-1',
         tenantId: 'aurora-t',
         storage: [storageSample('2026-01-01T10:00:00.000Z', 2000, 3)],
       });
-      const fth = makeOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: 'fth-t' });
+      const fth = createMockedOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: 'fth-t' });
       fth.getTenantUsageMetrics.mockRejectedValue(new Error('FTH metrics down'));
       mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
 

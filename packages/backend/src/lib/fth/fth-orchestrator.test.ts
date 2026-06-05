@@ -461,13 +461,13 @@ describe('fthOrchestrator.getTenantUsageMetrics', () => {
     mockGetClientMetricsTimeseries.mockResolvedValue({ points: [] });
   });
 
-  it('calls getClientMetricsTimeseries with tenantId as clientRef and defaults interval to "1h"', async () => {
+  it('calls getClientMetricsTimeseries with tenantId as clientRef and defaults interval to "1d"', async () => {
     await fthOrchestrator.getTenantUsageMetrics(fthClientId, { from: FROM, to: TO });
 
     expect(mockGetClientMetricsTimeseries).toHaveBeenCalledWith(fthClientId, {
       from: FROM,
       to: TO,
-      interval: '1h',
+      interval: '1d',
     });
   });
 
@@ -487,8 +487,18 @@ describe('fthOrchestrator.getTenantUsageMetrics', () => {
   it('maps points to normalized storage and egress shapes', async () => {
     mockGetClientMetricsTimeseries.mockResolvedValue({
       points: [
-        { ts: '2026-01-01T01:00:00Z', usage_avg_bytes: 2048, egress_bytes: 512 },
-        { ts: '2026-01-01T02:00:00Z', usage_avg_bytes: 4096, egress_bytes: 1024 },
+        {
+          ts: '2026-01-01T01:00:00Z',
+          usage_avg_bytes: 2048,
+          object_count_avg: 10,
+          egress_bytes: 512,
+        },
+        {
+          ts: '2026-01-01T02:00:00Z',
+          usage_avg_bytes: 4096,
+          object_count_avg: 20,
+          egress_bytes: 1024,
+        },
       ],
     });
 
@@ -498,16 +508,16 @@ describe('fthOrchestrator.getTenantUsageMetrics', () => {
     });
 
     expect(result.storage).toEqual([
-      { timestamp: '2026-01-01T01:00:00Z', bytesUsed: 2048, objectCount: 0 },
-      { timestamp: '2026-01-01T02:00:00Z', bytesUsed: 4096, objectCount: 0 },
+      { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 2048, objectCount: 10 },
+      { timestamp: '2026-01-01T02:00:00.000Z', bytesUsed: 4096, objectCount: 20 },
     ]);
     expect(result.egress).toEqual([
-      { timestamp: '2026-01-01T01:00:00Z', bytesUsed: 512 },
-      { timestamp: '2026-01-01T02:00:00Z', bytesUsed: 1024 },
+      { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 512 },
+      { timestamp: '2026-01-01T02:00:00.000Z', bytesUsed: 1024 },
     ]);
   });
 
-  it('applies ?? 0 defaults for missing usage_avg_bytes and egress_bytes', async () => {
+  it('applies ?? 0 defaults for missing usage_avg_bytes, object_count_avg, and egress_bytes', async () => {
     mockGetClientMetricsTimeseries.mockResolvedValue({
       points: [{ ts: '2026-01-01T01:00:00Z' }],
     });
@@ -518,9 +528,9 @@ describe('fthOrchestrator.getTenantUsageMetrics', () => {
     });
 
     expect(result.storage).toEqual([
-      { timestamp: '2026-01-01T01:00:00Z', bytesUsed: 0, objectCount: 0 },
+      { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 0, objectCount: 0 },
     ]);
-    expect(result.egress).toEqual([{ timestamp: '2026-01-01T01:00:00Z', bytesUsed: 0 }]);
+    expect(result.egress).toEqual([{ timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 0 }]);
   });
 
   it('drops points without ts', async () => {
@@ -538,8 +548,8 @@ describe('fthOrchestrator.getTenantUsageMetrics', () => {
 
     expect(result.storage).toHaveLength(1);
     expect(result.egress).toHaveLength(1);
-    expect(result.storage[0]?.timestamp).toBe('2026-01-01T01:00:00Z');
-    expect(result.egress[0]?.timestamp).toBe('2026-01-01T01:00:00Z');
+    expect(result.storage[0]?.timestamp).toBe('2026-01-01T01:00:00.000Z');
+    expect(result.egress[0]?.timestamp).toBe('2026-01-01T01:00:00.000Z');
   });
 
   it('returns empty arrays when points is undefined', async () => {

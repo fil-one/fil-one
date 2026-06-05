@@ -157,46 +157,43 @@ describe('mergeStorageSamples', () => {
     ]);
   });
 
-  it('carries forward by chronological time when a region mixes RFC3339 precisions', () => {
-    // Region A reports twice within the same second, once without fractional
-    // seconds and once with. Lexically '...00.500Z' sorts BEFORE '...00Z'
-    // (`.` < `Z`), inverting their true order — so a string `<=` comparison
-    // would treat the 0.500s sample as the latest at the 0.000s grid point.
+  it('carries forward sub-second samples in chronological order', () => {
+    // Timestamps are canonical ISO-8601 UTC (`.sssZ`), so sub-second samples sort
+    // and carry forward by plain string order. Region A reports twice within the
+    // same second; B adds a later grid point so carry-forward is exercised.
     const a = [
-      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1000, objectCount: 1 },
+      { timestamp: '2024-01-01T00:00:00.000Z', bytesUsed: 1000, objectCount: 1 },
       { timestamp: '2024-01-01T00:00:00.500Z', bytesUsed: 5000, objectCount: 2 },
     ];
-    // B exists only to add the 00:00:01Z grid point so carry-forward is exercised.
     const b = [
-      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 10, objectCount: 0 },
-      { timestamp: '2024-01-01T00:00:01Z', bytesUsed: 20, objectCount: 0 },
+      { timestamp: '2024-01-01T00:00:00.000Z', bytesUsed: 10, objectCount: 0 },
+      { timestamp: '2024-01-01T00:00:01.000Z', bytesUsed: 20, objectCount: 0 },
     ];
 
     expect(mergeStorageSamples([a, b])).toEqual([
-      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1010, objectCount: 1 }, // A=1000, not yet 5000
+      { timestamp: '2024-01-01T00:00:00.000Z', bytesUsed: 1010, objectCount: 1 }, // A=1000, not yet 5000
       { timestamp: '2024-01-01T00:00:00.500Z', bytesUsed: 5010, objectCount: 2 }, // A=5000, B carried fwd
-      { timestamp: '2024-01-01T00:00:01Z', bytesUsed: 5020, objectCount: 2 }, // A carried fwd, B=20
+      { timestamp: '2024-01-01T00:00:01.000Z', bytesUsed: 5020, objectCount: 2 }, // A carried fwd, B=20
     ]);
   });
 
-  it('collapses timestamps that parse to the same instant onto one grid point', () => {
-    // Two regions label the same instant differently ('...00Z' vs '...00.000Z').
-    // Keying the grid on the raw string would split it into two points; keying on
-    // the parsed instant collapses them so each region contributes once.
-    const a = [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1000, objectCount: 1 }];
+  it('collapses identical timestamps from two regions onto one grid point', () => {
+    // Canonical timestamps make the same instant the same string, so the grid
+    // dedupes it to one point and each region contributes once.
+    const a = [{ timestamp: '2024-01-01T00:00:00.000Z', bytesUsed: 1000, objectCount: 1 }];
     const b = [{ timestamp: '2024-01-01T00:00:00.000Z', bytesUsed: 500, objectCount: 2 }];
 
     expect(mergeStorageSamples([a, b])).toEqual([
-      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1500, objectCount: 3 },
+      { timestamp: '2024-01-01T00:00:00.000Z', bytesUsed: 1500, objectCount: 3 },
     ]);
   });
 
-  it('merges Aurora-style and FTH-style precision timestamps on a chronological grid', () => {
-    // Aurora emits whole-second `...Z`; FTH emits fractional `...sssZ`. The two
-    // interleave, and each must carry forward across the other's instants.
+  it('merges two regions onto a chronological grid via carry-forward', () => {
+    // Both regions emit canonical `.sssZ` timestamps that interleave; each must
+    // carry forward across the other's instants.
     const aurora = [
-      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1000, objectCount: 4 },
-      { timestamp: '2024-01-01T00:00:02Z', bytesUsed: 3000, objectCount: 6 },
+      { timestamp: '2024-01-01T00:00:00.000Z', bytesUsed: 1000, objectCount: 4 },
+      { timestamp: '2024-01-01T00:00:02.000Z', bytesUsed: 3000, objectCount: 6 },
     ];
     const fth = [
       { timestamp: '2024-01-01T00:00:00.250Z', bytesUsed: 100, objectCount: 0 },
@@ -204,10 +201,10 @@ describe('mergeStorageSamples', () => {
     ];
 
     expect(mergeStorageSamples([aurora, fth])).toEqual([
-      { timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1000, objectCount: 4 }, // FTH not yet provisioned
+      { timestamp: '2024-01-01T00:00:00.000Z', bytesUsed: 1000, objectCount: 4 }, // FTH not yet provisioned
       { timestamp: '2024-01-01T00:00:00.250Z', bytesUsed: 1100, objectCount: 4 }, // Aurora carried fwd
       { timestamp: '2024-01-01T00:00:01.750Z', bytesUsed: 1200, objectCount: 4 }, // Aurora carried fwd
-      { timestamp: '2024-01-01T00:00:02Z', bytesUsed: 3200, objectCount: 6 }, // FTH carried fwd
+      { timestamp: '2024-01-01T00:00:02.000Z', bytesUsed: 3200, objectCount: 6 }, // FTH carried fwd
     ]);
   });
 });

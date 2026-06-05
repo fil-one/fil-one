@@ -260,7 +260,7 @@ export const auroraOrchestrator = {
     tenantId: string,
     opts: GetTenantUsageMetricsOptions,
   ): Promise<TenantUsageMetrics> {
-    const window = opts.interval ?? '1h';
+    const window = opts.interval ?? '1d';
     const { from, to } = opts;
 
     const [storageSamples, operationsSamples] = await Promise.all([
@@ -271,7 +271,7 @@ export const auroraOrchestrator = {
     const storage = storageSamples
       .filter((s): s is typeof s & { timestamp: string } => s.timestamp !== undefined)
       .map((s) => ({
-        timestamp: s.timestamp,
+        timestamp: new Date(s.timestamp).toISOString(),
         bytesUsed: s.bytesUsed ?? 0,
         objectCount: s.objectCount ?? 0,
       }));
@@ -279,7 +279,7 @@ export const auroraOrchestrator = {
     const egress = operationsSamples
       .filter((s): s is typeof s & { timestamp: string } => s.timestamp !== undefined)
       .map((s) => ({
-        timestamp: s.timestamp,
+        timestamp: new Date(s.timestamp).toISOString(),
         bytesUsed: s.txBytes ?? 0,
       }));
 
