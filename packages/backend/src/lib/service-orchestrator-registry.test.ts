@@ -1,5 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { S3Region } from '@filone/shared';
+
+// fth-orchestrator builds its FTH management client at import time, so satisfy
+// both inputs createInstrumentedFthClient() touches before the registry import
+// runs: the baseUrl env var and the SST-linked API token.
+vi.hoisted(() => {
+  process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
+});
+
+vi.mock('sst', () => ({
+  Resource: { FthManagementApiToken: { value: 'kid.secret' } },
+}));
 import {
   getOrchestratorForRegion,
   getAvailableOrchestrators,

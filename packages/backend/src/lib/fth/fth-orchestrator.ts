@@ -45,6 +45,7 @@ const FTH_CONSOLE_USER_CODE = 'filone-console';
 
 const dynamo = getDynamoClient();
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
+const client = createInstrumentedFthClient();
 
 export const _resetFthOrchestratorCachesForTesting = () => {
   _resetS3CredentialsCacheForTesting();
@@ -56,7 +57,6 @@ export const fthOrchestrator = {
   region: S3Region.UsEast1,
 
   async ensureTenantReady(orgId: string): Promise<string | null> {
-    const client = createInstrumentedFthClient();
     return ensureFthTenantReady(client, orgId);
   },
 
@@ -145,7 +145,6 @@ export const fthOrchestrator = {
 
   async issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey> {
     const storageUserId = await getFthConsoleStorageUserId(tenantId);
-    const client = createInstrumentedFthClient();
 
     try {
       const accessKey = await client.createAccessKey(tenantId, storageUserId, {
@@ -179,7 +178,6 @@ export const fthOrchestrator = {
   },
 
   async findAccessKeyByName(tenantId: string, keyName: string) {
-    const client = createInstrumentedFthClient();
     const keys = await client.listAccessKeys(tenantId);
     const match = keys.find((k) => k.name === keyName);
     if (!match) return undefined;
@@ -191,7 +189,6 @@ export const fthOrchestrator = {
   },
 
   async deleteAccessKey(tenantId: string, keyId: string): Promise<void> {
-    const client = createInstrumentedFthClient();
     try {
       await client.deleteAccessKey(tenantId, keyId, { idempotencyKey: `delete-${keyId}` });
     } catch (err) {
@@ -271,7 +268,6 @@ async function getFthConsoleStorageUserId(tenantId: string): Promise<string> {
   const cached = consoleStorageUserCache.get(tenantId);
   if (cached) return cached;
 
-  const client = createInstrumentedFthClient();
   const users = await client.listStorageUsers(tenantId);
   const consoleUser = users.find((u) => u.userCode === FTH_CONSOLE_USER_CODE);
   if (!consoleUser) {
