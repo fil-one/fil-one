@@ -260,7 +260,15 @@ describe('s3-presigner presigned URL helpers', () => {
         ContentType: 'text/plain',
         Metadata: { filename: 'k.txt' },
       });
-      expect(lastSignedOptions()).toEqual({ expiresIn: 300 });
+      expect(lastSignedOptions()).toEqual({
+        expiresIn: 300,
+        // x-amz-content-sha256 is force-hoisted to the query string by SDK JS
+        // by default. boto3 omits it entirely and S3-compatible backends like
+        // Fortilyx reject URLs that include it ("invalid_presigned_request"),
+        // so the presigner suppresses it via these two sets.
+        unhoistableHeaders: new Set(['x-amz-content-sha256']),
+        unsignableHeaders: new Set(['x-amz-content-sha256']),
+      });
     });
 
     it('omits ContentType and Metadata when not provided', async () => {
