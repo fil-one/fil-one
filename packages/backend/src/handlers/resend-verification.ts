@@ -27,6 +27,6 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
-  .use(authMiddleware())
+  .use(authMiddleware({ requireVerifiedEmail: false }))
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());

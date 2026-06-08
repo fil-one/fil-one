@@ -8,6 +8,8 @@ export enum ApiErrorCode {
   SUBSCRIPTION_INACTIVE = 'SUBSCRIPTION_INACTIVE',
   /** Promo code is invalid, expired, or inactive. */
   INVALID_PROMOTION_CODE = 'INVALID_PROMOTION_CODE',
+  /** The authenticated user's email address has not been verified. */
+  EMAIL_NOT_VERIFIED = 'EMAIL_NOT_VERIFIED',
 }
 
 export interface ErrorResponse {
