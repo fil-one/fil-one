@@ -12,7 +12,7 @@ import {
   GetItemCommand,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { OrgRole } from '@filone/shared';
+import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
@@ -154,7 +154,7 @@ describe('authMiddleware', () => {
           },
         });
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [
           `hs_access_token=valid-token`,
@@ -348,7 +348,7 @@ describe('authMiddleware', () => {
           },
         });
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`, `hs_id_token=bad-id-token`],
       });
@@ -377,7 +377,7 @@ describe('authMiddleware', () => {
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`],
         rawPath: '/api/me',
@@ -408,7 +408,7 @@ describe('authMiddleware', () => {
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
         rawPath: '/api/me',
@@ -501,7 +501,7 @@ describe('authMiddleware', () => {
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
         rawPath: '/api/me',
@@ -562,7 +562,7 @@ describe('authMiddleware', () => {
           },
         });
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=expired-token`, `hs_refresh_token=valid-refresh`],
       });
@@ -623,7 +623,7 @@ describe('authMiddleware', () => {
           },
         });
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`, `hs_refresh_token=bad-refresh`],
         queryStringParameters: { forceRefresh: '1' },
@@ -658,7 +658,7 @@ describe('authMiddleware', () => {
           },
         });
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`],
         queryStringParameters: { forceRefresh: '1' },
@@ -753,6 +753,156 @@ describe('authMiddleware', () => {
         audience: process.env.AUTH0_AUDIENCE,
         issuer: `https://${process.env.AUTH0_DOMAIN}/`,
       });
+    });
+  });
+
+  describe('verified email gate', () => {
+    const existingUserId = 'gate-user-uuid';
+    const existingOrgId = 'gate-org-uuid';
+
+    function mockExistingUser() {
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+          },
+        });
+    }
+
+    it('returns 403 EMAIL_NOT_VERIFIED by default when email is unverified', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expectErrorResponse(result, 403, {
+        message: 'Email verification required',
+        code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+      });
+    });
+
+    it('allows the request by default when email is verified', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+    });
+
+    it('returns 403 on the refresh path when refreshed claims are unverified', async () => {
+      mockJwtVerify
+        .mockRejectedValueOnce(new Error('token expired'))
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: 'new-access-token',
+          id_token: 'new-id-token',
+          refresh_token: 'new-refresh-token',
+        }),
+      });
+      mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=expired-token`, `hs_refresh_token=valid-refresh`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expectErrorResponse(result, 403, {
+        message: 'Email verification required',
+        code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+      });
+    });
+
+    it('fails closed when the ID token cookie is missing entirely', async () => {
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } });
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expectErrorResponse(result, 403, {
+        message: 'Email verification required',
+        code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+      });
+    });
+
+    it('allows unverified email when requireVerifiedEmail is false', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      mockExistingUser();
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+    });
+
+    it('still creates a new user and org before blocking on unverified email', async () => {
+      // Identity creation is authentication-time work; the gate is an
+      // authorization check that runs after it. A brand-new (unverified)
+      // user must still get their user/org records so /me works.
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expectErrorResponse(result, 403, {
+        message: 'Email verification required',
+        code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+      });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
     });
   });
 
