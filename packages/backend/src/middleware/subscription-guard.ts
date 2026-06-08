@@ -9,9 +9,9 @@ import type {
 } from 'aws-lambda';
 import { ApiErrorCode, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import { Resource } from 'sst';
-import { createBillingTrial } from '../lib/create-billing-trial.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
+import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 
@@ -20,31 +20,14 @@ export enum AccessLevel {
   Write = 'write',
 }
 
-export interface GuardInternal extends Record<string, unknown> {
-  billingTrialPromise?: Promise<void>;
-}
-
-type GuardRequest = Request<
-  APIGatewayProxyEventV2,
-  APIGatewayProxyResultV2,
-  Error,
-  Context,
-  GuardInternal
->;
+type GuardRequest = Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>;
 
 const dynamo = getDynamoClient();
 
 export function subscriptionGuardMiddleware(accessLevel: AccessLevel) {
   return {
     before: (request: GuardRequest) => runSubscriptionGuard(request, accessLevel),
-    after: runSubscriptionGuardAfter,
-  } satisfies MiddlewareObj<
-    APIGatewayProxyEventV2,
-    APIGatewayProxyResultV2,
-    Error,
-    Context,
-    GuardInternal
-  >;
+  } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>;
 }
 
 async function runSubscriptionGuard(
@@ -52,9 +35,11 @@ async function runSubscriptionGuard(
   accessLevel: AccessLevel,
 ): Promise<APIGatewayProxyStructuredResultV2 | void> {
   const event = request.event as AuthenticatedEvent;
-  const { userId, orgId, email } = getUserInfo(event);
+  const { sub, userId, orgId, email, emailVerified } = getUserInfo(event);
   const tableName = Resource.BillingTable.name;
 
+  // Consistent read so a trial just written by the auth middleware (same request)
+  // is visible — otherwise a stale read could falsely block an entitled user.
   const result = await dynamo.send(
     new GetItemCommand({
       TableName: tableName,
@@ -62,13 +47,20 @@ async function runSubscriptionGuard(
         pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
       },
+      ConsistentRead: true,
     }),
   );
 
-  // No billing record → allow access and attempt trial creation in background
+  // No billing record → only entitled (verified, claim-owning) users get a trial.
   if (!result.Item) {
-    request.internal.billingTrialPromise = createBillingTrial({ userId, orgId, email });
-    return;
+    const entitled = await ensureTrialEntitlement({
+      sub,
+      userId,
+      orgId,
+      email: email ?? null,
+      emailVerified,
+    });
+    return entitled ? undefined : buildInactiveResponse();
   }
 
   const record = unmarshall(result.Item);
@@ -100,19 +92,6 @@ async function runSubscriptionGuard(
 
   // Unknown or unhandled status → block (fail closed)
   return buildInactiveResponse();
-}
-
-async function runSubscriptionGuardAfter(request: GuardRequest): Promise<void> {
-  if (request.internal.billingTrialPromise) {
-    try {
-      await request.internal.billingTrialPromise;
-    } catch (error) {
-      console.error(
-        '[subscription-guard] Failed to create billing trial in subscription guard fallback:',
-        error,
-      );
-    }
-  }
 }
 
 /**

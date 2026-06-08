@@ -152,6 +152,15 @@ describe('PATCH /api/me/profile handler', () => {
       email_verified: false,
     });
     expect(mockSendVerificationEmail).toHaveBeenCalledWith(MOCK_SUB);
+
+    // The claim flag is cleared so the new (unverified) address is re-claimed
+    // on the next verified login.
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].args[0].input).toMatchObject({
+      Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+      UpdateExpression: 'REMOVE emailEntitlementClaimed',
+    });
   });
 
   it('rejects name change for social login users', async () => {

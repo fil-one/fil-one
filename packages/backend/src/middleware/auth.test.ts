@@ -55,9 +55,9 @@ vi.mock('../lib/auth-secrets.js', () => ({
   }),
 }));
 
-const mockCreateBillingTrial = vi.fn().mockResolvedValue(undefined);
-vi.mock('../lib/create-billing-trial.js', () => ({
-  createBillingTrial: (args: unknown) => mockCreateBillingTrial(args),
+const mockEnsureTrialEntitlement = vi.fn().mockResolvedValue(true);
+vi.mock('../lib/trial-entitlement.js', () => ({
+  ensureTrialEntitlement: (args: unknown) => mockEnsureTrialEntitlement(args),
 }));
 
 const mockJwtVerify = vi.fn();
@@ -486,10 +486,14 @@ describe('authMiddleware', () => {
         },
       ]);
 
-      expect(mockCreateBillingTrial).toHaveBeenCalledWith({
+      // Entitlement claim + trial are delegated to ensureTrialEntitlement
+      // (verified-email gated). Unit-tested separately in trial-entitlement.test.ts.
+      expect(mockEnsureTrialEntitlement).toHaveBeenCalledWith({
+        sub: MOCK_SUB,
         userId: MOCK_USER_ID,
         orgId: MOCK_ORG_ID,
         email: MOCK_EMAIL,
+        emailVerified: false,
       });
     });
 

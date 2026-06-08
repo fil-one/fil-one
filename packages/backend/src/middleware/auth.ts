@@ -22,7 +22,7 @@ import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
-import { createBillingTrial } from '../lib/create-billing-trial.js';
+import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -230,7 +230,7 @@ async function attachIdentity({
   name: string | null;
   picture: string | null;
 }): Promise<void> {
-  const resolved = await resolveUserAndOrg(sub, email, name);
+  const resolved = await resolveUserAndOrg(sub, email, emailVerified, name);
   (
     event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
   ).userInfo = {
@@ -257,6 +257,7 @@ interface ResolvedIdentity {
 async function resolveUserAndOrg(
   sub: string,
   email: string | null,
+  emailVerified: boolean,
   name: string | null,
 ): Promise<ResolvedIdentity> {
   const tableName = Resource.UserInfoTable.name;
@@ -281,29 +282,26 @@ async function resolveUserAndOrg(
         { userId },
       );
     }
+    // Lazy backfill: claim the entitlement and create the trial on the first
+    // verified login (covers signup-while-unverified and post-email-change).
+    if (result.Item.emailEntitlementClaimed?.BOOL !== true) {
+      await ensureTrialEntitlement({ sub, userId, orgId, email, emailVerified });
+    }
     return { userId, orgId, email };
   }
 
-  // New user — create user, org, and membership records atomically
+  // New user — create user, org, and membership records atomically.
   const userId = crypto.randomUUID();
   const orgId = crypto.randomUUID();
   const orgName = deriveOrgName(name ?? undefined, email ?? undefined);
 
   await createNewUserAndOrg({ sub, userId, orgId, orgName });
 
-  // Tenant setup is deferred until the user creates their first bucket
-  // or access key — see docs/architectural-decisions/2026-05-13-synchronous-tenant-setup-on-first-resource.md.
-  // Stripe trial is created here because billing must be ready before any
-  // metered operation; createBillingTrial is idempotent via idempotencyKey.
-  try {
-    await createBillingTrial({ userId, orgId, email: email ?? undefined });
-  } catch (error) {
-    console.error('[auth] Failed to create billing trial for new org', {
-      error,
-      orgId,
-      userId,
-    });
-  }
+  // Tenant setup is deferred until the user creates their first bucket or access
+  // key — see docs/architectural-decisions/2026-05-13-synchronous-tenant-setup-on-first-resource.md.
+  // The trial is claimed+created here (verified emails only) so billing is ready
+  // before any metered operation; ensureTrialEntitlement is idempotent.
+  await ensureTrialEntitlement({ sub, userId, orgId, email, emailVerified });
 
   return { userId, orgId, email };
 }
