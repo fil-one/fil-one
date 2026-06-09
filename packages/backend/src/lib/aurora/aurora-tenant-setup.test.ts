@@ -197,9 +197,8 @@ describe('processTenantSetup', () => {
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
       UpdateExpression:
-        'SET auroraTenantId = :auroraTenantId, auroraSetupStatus = :status, updatedAt = :now REMOVE setupStatus',
-      ConditionExpression:
-        'auroraSetupStatus = :expected OR (attribute_not_exists(auroraSetupStatus) AND setupStatus = :expected)',
+        'SET auroraTenantId = :auroraTenantId, auroraSetupStatus = :status, updatedAt = :now',
+      ConditionExpression: 'auroraSetupStatus = :expected',
       ExpressionAttributeValues: {
         ':auroraTenantId': { S: 'aurora-t-1' },
         ':status': { S: OrgSetupStatus.AURORA_TENANT_CREATED },
@@ -212,9 +211,8 @@ describe('processTenantSetup', () => {
     expect(updateCalls[1].args[0].input).toStrictEqual({
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-      UpdateExpression: 'SET auroraSetupStatus = :status, updatedAt = :now REMOVE setupStatus',
-      ConditionExpression:
-        'auroraSetupStatus = :expected OR (attribute_not_exists(auroraSetupStatus) AND setupStatus = :expected)',
+      UpdateExpression: 'SET auroraSetupStatus = :status, updatedAt = :now',
+      ConditionExpression: 'auroraSetupStatus = :expected',
       ExpressionAttributeValues: {
         ':status': { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
         ':expected': { S: OrgSetupStatus.AURORA_TENANT_CREATED },
@@ -226,9 +224,8 @@ describe('processTenantSetup', () => {
     expect(updateCalls[2].args[0].input).toStrictEqual({
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-      UpdateExpression: 'SET auroraSetupStatus = :status, updatedAt = :now REMOVE setupStatus',
-      ConditionExpression:
-        'auroraSetupStatus = :expected OR (attribute_not_exists(auroraSetupStatus) AND setupStatus = :expected)',
+      UpdateExpression: 'SET auroraSetupStatus = :status, updatedAt = :now',
+      ConditionExpression: 'auroraSetupStatus = :expected',
       ExpressionAttributeValues: {
         ':status': { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
         ':expected': { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
@@ -241,9 +238,8 @@ describe('processTenantSetup', () => {
     expect(updateCalls[3].args[0].input).toStrictEqual({
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-      UpdateExpression: 'SET auroraSetupStatus = :status, updatedAt = :now REMOVE setupStatus',
-      ConditionExpression:
-        'auroraSetupStatus = :expected OR (attribute_not_exists(auroraSetupStatus) AND setupStatus = :expected)',
+      UpdateExpression: 'SET auroraSetupStatus = :status, updatedAt = :now',
+      ConditionExpression: 'auroraSetupStatus = :expected',
       ExpressionAttributeValues: {
         ':status': { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
         ':expected': { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
@@ -834,35 +830,6 @@ describe('processTenantSetup', () => {
     });
   });
 
-  // Dual-name migration: legacy rows that still carry only the old
-  // `setupStatus` attribute must keep working until the backfill runs.
-  // TODO(FIL-382): drop this test alongside the fallback code.
-  it('reads legacy setupStatus when auroraSetupStatus is absent and migrates the row on write', async () => {
-    ddbMock.on(GetItemCommand).resolves(
-      orgProfileItem({
-        setupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
-        auroraTenantId: { S: 'aurora-t-legacy' },
-      }),
-    );
-    ddbMock.on(UpdateItemCommand).resolves({});
-    ssmMock.on(PutParameterCommand).resolves({});
-    mockCreateAuroraTenantApiKey.mockResolvedValue({ token: 'atp', tokenId: 'tok' });
-    setupDefaultS3AccessKeyMock();
-
-    await processTenantSetup('org-1');
-
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    // Pipeline from AURORA_TENANT_SETUP_COMPLETE has two advances.
-    expect(updateCalls).toHaveLength(2);
-    // Each write removes the legacy attribute and uses the compound conditional.
-    for (const call of updateCalls) {
-      expect(call.args[0].input.UpdateExpression).toContain('REMOVE setupStatus');
-      expect(call.args[0].input.ConditionExpression).toBe(
-        'auroraSetupStatus = :expected OR (attribute_not_exists(auroraSetupStatus) AND setupStatus = :expected)',
-      );
-    }
-  });
-
   it('reads the org profile with strong consistency', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({
@@ -961,7 +928,7 @@ describe('recordSetupFailure', () => {
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
       UpdateExpression: 'ADD auroraSetupFailureCount :one SET updatedAt = :now',
-      ConditionExpression: 'attribute_exists(auroraSetupStatus) OR attribute_exists(setupStatus)',
+      ConditionExpression: 'attribute_exists(auroraSetupStatus)',
       ReturnValues: 'UPDATED_NEW',
     });
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({
@@ -992,18 +959,6 @@ describe('recordSetupFailure', () => {
     await recordSetupFailure('org-1');
 
     expect(mockScanAndEmitStuckTenantCount).not.toHaveBeenCalled();
-  });
-
-  // TODO(FIL-382): drop this test once the legacy-row fallback is removed.
-  it('orphan-row guard accepts legacy rows that only have setupStatus', async () => {
-    ddbMock.on(UpdateItemCommand).resolves({ Attributes: { auroraSetupFailureCount: { N: '1' } } });
-
-    await recordSetupFailure('org-1');
-
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls[0].args[0].input.ConditionExpression).toBe(
-      'attribute_exists(auroraSetupStatus) OR attribute_exists(setupStatus)',
-    );
   });
 });
 
