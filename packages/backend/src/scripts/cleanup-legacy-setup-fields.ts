@@ -99,6 +99,7 @@ async function cleanupRow(opts: CleanupRowOpts): Promise<RowOutcome> {
       TableName: tableName,
       Key: { pk: item.pk, sk: item.sk },
       UpdateExpression: 'REMOVE setupStatus, setupFailureCount',
+      ConditionExpression: 'attribute_exists(auroraSetupStatus)',
     }),
   );
   console.log('[cleanup] removed legacy attrs', { orgId, hasSetupStatus, hasSetupFailureCount });

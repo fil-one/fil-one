@@ -2,7 +2,7 @@
 // (aurora-tenant-setup for the lazy setup state machine, aurora-portal for
 // bucket and access-key ops) and looks up SSM-cached S3 credentials directly.
 //
-// PROFILE-row attributes used: `auroraTenantId`, `auroraSetupStatus`, `auroraSetupFailureCount`.
+// PROFILE-row attributes used: `auroraTenantId` and `auroraSetupStatus`.
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';

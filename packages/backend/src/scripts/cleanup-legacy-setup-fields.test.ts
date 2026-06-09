@@ -8,6 +8,7 @@ import {
 } from '@aws-sdk/client-dynamodb';
 
 import { cleanupLegacySetupFields } from './cleanup-legacy-setup-fields.js';
+import { OrgSetupStatus } from '../lib/org-setup-status.js';
 
 const ddbMock = mockClient(DynamoDBClient);
 const TABLE = 'UserInfoTable';
@@ -28,7 +29,10 @@ describe('cleanupLegacySetupFields', () => {
   it('removes setupStatus and setupFailureCount from a matching row', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
-        row('ORG#a', { setupStatus: { S: 'FILONE_ORG_CREATED' }, setupFailureCount: { N: '2' } }),
+        row('ORG#a', {
+          setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+          setupFailureCount: { N: '2' },
+        }),
       ],
     });
     ddbMock.on(UpdateItemCommand).resolves({});
@@ -46,6 +50,7 @@ describe('cleanupLegacySetupFields', () => {
       TableName: TABLE,
       Key: { pk: { S: 'ORG#a' }, sk: { S: 'PROFILE' } },
       UpdateExpression: 'REMOVE setupStatus, setupFailureCount',
+      ConditionExpression: 'attribute_exists(auroraSetupStatus)',
     });
   });
 
@@ -68,7 +73,7 @@ describe('cleanupLegacySetupFields', () => {
   it('does not call UpdateItem in dry-run mode', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
-        row('ORG#a', { setupStatus: { S: 'FILONE_ORG_CREATED' } }),
+        row('ORG#a', { setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }),
         row('ORG#b', { setupFailureCount: { N: '3' } }),
       ],
     });
@@ -88,11 +93,11 @@ describe('cleanupLegacySetupFields', () => {
     ddbMock
       .on(ScanCommand)
       .resolvesOnce({
-        Items: [row('ORG#a', { setupStatus: { S: 'X' } })],
+        Items: [row('ORG#a', { setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } })],
         LastEvaluatedKey: page1Key,
       })
       .resolvesOnce({
-        Items: [row('ORG#b', { setupStatus: { S: 'Y' } })],
+        Items: [row('ORG#b', { setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } })],
       });
     ddbMock.on(UpdateItemCommand).resolves({});
 
@@ -124,7 +129,9 @@ describe('cleanupLegacySetupFields', () => {
 
   it('skips rows missing pk/sk without calling UpdateItem', async () => {
     ddbMock.on(ScanCommand).resolves({
-      Items: [{ setupStatus: { S: 'X' } } as Record<string, AttributeValue>],
+      Items: [
+        { setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } } as Record<string, AttributeValue>,
+      ],
     });
 
     const result = await cleanupLegacySetupFields({
