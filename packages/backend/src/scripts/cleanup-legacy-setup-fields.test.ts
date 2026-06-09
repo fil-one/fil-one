@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
@@ -24,6 +24,10 @@ describe('cleanupLegacySetupFields', () => {
     ddbMock.reset();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('removes setupStatus and setupFailureCount from a matching row', async () => {
