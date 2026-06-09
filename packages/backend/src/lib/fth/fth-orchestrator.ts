@@ -128,7 +128,7 @@ export const fthOrchestrator = {
         region: fthOrchestrator.region,
         createdAt: b.createdAt,
         isPublic: false,
-        versioning: await getBucketVersioning(ctx, b.name).catch(() => false),
+        versioning: await getBucketVersioning(ctx, b.name),
         encrypted: true,
       })),
     );

@@ -483,6 +483,27 @@ describe('fthOrchestrator.listBuckets', () => {
     expect(result.find((b) => b.bucketName === 'versioned')?.versioning).toBe(true);
     expect(result.find((b) => b.bucketName === 'plain')?.versioning).toBe(false);
   });
+
+  it('propagates GetBucketVersioning failures instead of swallowing them', async () => {
+    ssmMock.on(GetParameterCommand).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
+    });
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') }],
+    });
+    s3Mock.on(GetBucketVersioningCommand).rejects(new Error('AccessDenied'));
+
+    await expect(fthOrchestrator.listBuckets(fthClientId)).rejects.toThrow(/AccessDenied/);
+  });
+
+  it('propagates ListBuckets failures', async () => {
+    ssmMock.on(GetParameterCommand).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
+    });
+    s3Mock.on(ListBucketsCommand).rejects(new Error('ServiceUnavailable'));
+
+    await expect(fthOrchestrator.listBuckets(fthClientId)).rejects.toThrow(/ServiceUnavailable/);
+  });
 });
 
 describe('fthOrchestrator.getBucket', () => {
