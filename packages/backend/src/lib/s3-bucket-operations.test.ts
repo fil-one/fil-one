@@ -22,7 +22,7 @@ import {
 } from './s3-bucket-operations.js';
 import { createS3Client } from './s3-client.js';
 import { BucketAlreadyExistsError } from './errors.js';
-import type { S3ClientContext } from './service-orchestrator.js';
+import type { S3ClientContext } from './s3-client.js';
 
 // ---------------------------------------------------------------------------
 // Mocks

@@ -37,9 +37,9 @@ import type {
   CreateBucketArgs,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  S3ClientContext,
   ServiceOrchestrator,
 } from '../service-orchestrator.js';
+import type { S3ClientContext } from '../s3-client.js';
 
 const dynamo = getDynamoClient();
 export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting();

@@ -27,7 +27,7 @@ import {
   getPresignedListObjectsUrl,
   getPresignedPutObjectUrl,
 } from './s3-presigner.js';
-import type { S3ClientContext } from './service-orchestrator.js';
+import type { S3ClientContext } from './s3-client.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

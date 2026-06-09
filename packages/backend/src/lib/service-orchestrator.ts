@@ -5,13 +5,7 @@ import type {
   RetentionMode,
   S3Region,
 } from '@filone/shared';
-
-export interface S3ClientContext {
-  endpointUrl: string;
-  region: string;
-  credentials: { accessKeyId: string; secretAccessKey: string };
-  forcePathStyle: boolean;
-}
+import { S3ClientContext } from './s3-client';
 
 export interface BucketSummary {
   bucketName: string;

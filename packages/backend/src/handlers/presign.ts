@@ -14,7 +14,7 @@ import type {
   PresignResponseItem,
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import type { S3ClientContext } from '../lib/service-orchestrator.js';
+import type { S3ClientContext } from '../lib/s3-client.js';
 import {
   getPresignedDeleteObjectUrl,
   getPresignedGetObjectRetentionUrl,

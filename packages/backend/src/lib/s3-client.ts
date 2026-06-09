@@ -3,7 +3,13 @@
 // look up credentials and which endpoint/region apply.
 
 import { S3Client } from '@aws-sdk/client-s3';
-import type { S3ClientContext } from './service-orchestrator.js';
+
+export interface S3ClientContext {
+  endpointUrl: string;
+  region: string;
+  credentials: { accessKeyId: string; secretAccessKey: string };
+  forcePathStyle: boolean;
+}
 
 export function createS3Client(ctx: S3ClientContext): S3Client {
   return new S3Client({
