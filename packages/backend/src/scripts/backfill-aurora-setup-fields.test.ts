@@ -8,6 +8,7 @@ import {
 } from '@aws-sdk/client-dynamodb';
 
 import { backfillAuroraSetupFields } from './backfill-aurora-setup-fields.js';
+import { OrgSetupStatus } from '../lib/org-setup-status.js';
 
 const ddbMock = mockClient(DynamoDBClient);
 const TABLE = 'UserInfoTable';
@@ -24,13 +25,13 @@ describe('backfillAuroraSetupFields', () => {
         {
           pk: { S: 'ORG#org-mid' },
           sk: { S: 'PROFILE' },
-          setupStatus: { S: 'AURORA_TENANT_CREATED' },
+          setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
           setupFailureCount: { N: '2' },
         },
         {
           pk: { S: 'ORG#org-final' },
           sk: { S: 'PROFILE' },
-          setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
+          setupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
         },
       ],
     });
@@ -72,7 +73,7 @@ describe('backfillAuroraSetupFields', () => {
         {
           pk: { S: 'ORG#org-a' },
           sk: { S: 'PROFILE' },
-          setupStatus: { S: 'AURORA_TENANT_CREATED' },
+          setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
           setupFailureCount: { N: '1' },
         },
       ],
@@ -94,7 +95,7 @@ describe('backfillAuroraSetupFields', () => {
         {
           pk: { S: 'ORG#org-raced' },
           sk: { S: 'PROFILE' },
-          setupStatus: { S: 'AURORA_TENANT_CREATED' },
+          setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
         },
       ],
     });
@@ -122,7 +123,7 @@ describe('backfillAuroraSetupFields', () => {
           {
             pk: { S: 'ORG#org-page1' },
             sk: { S: 'PROFILE' },
-            setupStatus: { S: 'FILONE_ORG_CREATED' },
+            setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
           },
         ],
         LastEvaluatedKey: { pk: { S: 'ORG#org-page1' }, sk: { S: 'PROFILE' } },
@@ -132,7 +133,7 @@ describe('backfillAuroraSetupFields', () => {
           {
             pk: { S: 'ORG#org-page2' },
             sk: { S: 'PROFILE' },
-            setupStatus: { S: 'AURORA_TENANT_CREATED' },
+            setupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
           },
         ],
       });

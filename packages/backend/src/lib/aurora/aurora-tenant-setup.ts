@@ -103,8 +103,7 @@ export async function processTenantSetup(orgId: string): Promise<{ auroraTenantI
   }
 
   const orgName = orgProfile.name?.S ?? '';
-  // TODO(FIL-382): drop the setupStatus fallback.
-  const auroraSetupStatus = orgProfile.auroraSetupStatus?.S ?? orgProfile.setupStatus?.S;
+  const auroraSetupStatus = orgProfile.auroraSetupStatus?.S;
 
   switch (auroraSetupStatus) {
     case OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED: {
@@ -416,8 +415,7 @@ export async function recordSetupFailure(orgId: string): Promise<void> {
       // default branch and wedges the org permanently. auroraSetupStatus is
       // the canonical marker of a profile created by the onboarding
       // transaction.
-      // TODO(FIL-382): drop the `OR attribute_exists(setupStatus)` branch.
-      ConditionExpression: 'attribute_exists(auroraSetupStatus) OR attribute_exists(setupStatus)',
+      ConditionExpression: 'attribute_exists(auroraSetupStatus)',
       ExpressionAttributeValues: {
         ':one': { N: '1' },
         ':now': { S: new Date().toISOString() },
@@ -434,11 +432,10 @@ export async function recordSetupFailure(orgId: string): Promise<void> {
 async function advanceStatus(opts: AdvanceStatusOptions): Promise<'wrote' | 'lost-race'> {
   const isTerminal = isOrgSetupComplete(opts.next);
 
-  // TODO(FIL-382): drop `REMOVE setupStatus`.
   const setExpr =
     opts.writeAuroraTenantId !== undefined
-      ? 'SET auroraTenantId = :auroraTenantId, auroraSetupStatus = :status, updatedAt = :now REMOVE setupStatus'
-      : 'SET auroraSetupStatus = :status, updatedAt = :now REMOVE setupStatus';
+      ? 'SET auroraTenantId = :auroraTenantId, auroraSetupStatus = :status, updatedAt = :now'
+      : 'SET auroraSetupStatus = :status, updatedAt = :now';
   const exprValues: Record<string, { S: string }> = {
     ':status': { S: opts.next },
     ':expected': { S: opts.expected },
@@ -454,11 +451,7 @@ async function advanceStatus(opts: AdvanceStatusOptions): Promise<'wrote' | 'los
         TableName: Resource.UserInfoTable.name,
         Key: opts.orgProfileKey,
         UpdateExpression: setExpr,
-        // TODO(FIL-382): drop the second `OR` branch. The branches are
-        // mutually exclusive: `attribute_not_exists(auroraSetupStatus)` holds
-        // iff the row has not yet been migrated.
-        ConditionExpression:
-          'auroraSetupStatus = :expected OR (attribute_not_exists(auroraSetupStatus) AND setupStatus = :expected)',
+        ConditionExpression: 'auroraSetupStatus = :expected',
         ExpressionAttributeValues: exprValues,
         // On the terminal advance, read the prior auroraSetupFailureCount so
         // we can refresh the stuck-tenant gauge when this org was previously
@@ -470,10 +463,7 @@ async function advanceStatus(opts: AdvanceStatusOptions): Promise<'wrote' | 'los
     );
 
     if (isTerminal) {
-      // TODO(FIL-382): drop the setupFailureCount fallback.
-      const priorFailureCount = Number(
-        out.Attributes?.auroraSetupFailureCount?.N ?? out.Attributes?.setupFailureCount?.N ?? '0',
-      );
+      const priorFailureCount = Number(out.Attributes?.auroraSetupFailureCount?.N ?? '0');
       if (priorFailureCount >= SETUP_FAILURE_ALERT_THRESHOLD) {
         await scanAndEmitStuckTenantCount();
       }
