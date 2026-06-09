@@ -57,6 +57,7 @@ import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
+  BucketConfigurationError,
 } from '../errors.js';
 import { FthApiError, FthConflictError, FthNotFoundError } from './fth-management-client.js';
 
@@ -239,6 +240,37 @@ describe('fthOrchestrator.createBucket', () => {
         Rule: { DefaultRetention: { Mode: 'GOVERNANCE', Days: 7 } },
       },
     });
+  });
+
+  it('wraps a PutBucketVersioning failure in BucketConfigurationError noting the bucket exists', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    s3Mock.on(PutBucketVersioningCommand).rejects(new Error('AccessDenied'));
+
+    await expect(
+      fthOrchestrator.createBucket(fthClientId, { bucketName: 'my-bucket', versioning: true }),
+    ).rejects.toMatchObject({
+      name: 'BucketConfigurationError',
+      bucketName: 'my-bucket',
+    });
+  });
+
+  it('wraps a PutObjectLockConfiguration failure in BucketConfigurationError', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    s3Mock.on(PutBucketVersioningCommand).resolves({});
+    const cause = new Error('transient S3 error');
+    s3Mock.on(PutObjectLockConfigurationCommand).rejects(cause);
+
+    const err = await fthOrchestrator
+      .createBucket(fthClientId, {
+        bucketName: 'my-bucket',
+        versioning: true,
+        lock: true,
+        retention: { enabled: true, mode: 'governance', duration: 7, durationType: 'd' },
+      })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(BucketConfigurationError);
+    expect(err.cause).toBe(cause);
   });
 
   it('does not call PutBucketVersioning or PutObjectLockConfiguration for a plain bucket', async () => {

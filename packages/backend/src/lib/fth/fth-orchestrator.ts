@@ -18,6 +18,7 @@ import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
+  BucketConfigurationError,
   NotImplementedError,
 } from '../errors.js';
 import type {
@@ -104,16 +105,21 @@ export const fthOrchestrator = {
       bucketName: args.bucketName,
       objectLockEnabled: args.lock === true,
     });
-    if (args.versioning) {
-      await setBucketVersioning(s3, args.bucketName, true);
-    }
-    if (args.retention?.enabled) {
-      await putObjectLockConfiguration(s3, {
-        bucketName: args.bucketName,
-        mode: args.retention.mode,
-        duration: args.retention.duration,
-        durationType: args.retention.durationType,
-      });
+
+    try {
+      if (args.versioning) {
+        await setBucketVersioning(s3, args.bucketName, true);
+      }
+      if (args.retention?.enabled) {
+        await putObjectLockConfiguration(s3, {
+          bucketName: args.bucketName,
+          mode: args.retention.mode,
+          duration: args.retention.duration,
+          durationType: args.retention.durationType,
+        });
+      }
+    } catch (err) {
+      throw new BucketConfigurationError(args.bucketName, { cause: err });
     }
   },
 
