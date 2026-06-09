@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
@@ -448,5 +448,72 @@ describe('fthOrchestrator.getBucket', () => {
     const result = await fthOrchestrator.getBucket(fthClientId, 'missing-bucket');
 
     expect(result).toBeNull();
+  });
+});
+
+describe('consoleStorageUserCache TTL', () => {
+  const baseOpts = {
+    keyName: 'ttl-test-key',
+    permissions: ['read'] as const,
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('re-fetches the storage user id after the 15-minute TTL expires', async () => {
+    vi.useFakeTimers();
+    stubConsoleStorageUser();
+    mockFthClient.createAccessKey.mockResolvedValue({
+      accessKeyId: 'AKIAFTH',
+      secretAccessKey: 'sk-secret',
+      name: baseOpts.keyName,
+      permissions: [],
+      buckets: [],
+      createdAt: '2026-03-10T00:00:00Z',
+    });
+
+    await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: baseOpts.keyName,
+      permissions: [...baseOpts.permissions],
+    });
+
+    // Advance past the 15-minute TTL
+    vi.advanceTimersByTime(15 * 60 * 1000 + 1);
+
+    await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: baseOpts.keyName,
+      permissions: [...baseOpts.permissions],
+    });
+
+    expect(mockFthClient.listStorageUsers).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns the cached storage user id within the 15-minute TTL', async () => {
+    vi.useFakeTimers();
+    stubConsoleStorageUser();
+    mockFthClient.createAccessKey.mockResolvedValue({
+      accessKeyId: 'AKIAFTH',
+      secretAccessKey: 'sk-secret',
+      name: baseOpts.keyName,
+      permissions: [],
+      buckets: [],
+      createdAt: '2026-03-10T00:00:00Z',
+    });
+
+    await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: baseOpts.keyName,
+      permissions: [...baseOpts.permissions],
+    });
+
+    // Advance to just under the 15-minute TTL
+    vi.advanceTimersByTime(14 * 60 * 1000 + 59_000);
+
+    await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: baseOpts.keyName,
+      permissions: [...baseOpts.permissions],
+    });
+
+    expect(mockFthClient.listStorageUsers).toHaveBeenCalledTimes(1);
   });
 });

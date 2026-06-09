@@ -23,7 +23,8 @@ export interface GetConsoleS3CredentialsArgs {
 }
 
 const ssm = new SSMClient({});
-const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
+const SSM_CACHE_TTL_MS = 5 * 60 * 1000;
+const ssmCache = new QuickLRU<string, string>({ maxSize: 500, maxAge: SSM_CACHE_TTL_MS });
 
 export const _resetS3CredentialsCacheForTesting = () => ssmCache.clear();
 
