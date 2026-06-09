@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CaretDownIcon, CheckIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { getMe } from '../lib/api.js';
+import { submitWaitlistForm } from '../lib/hubspot.js';
 import { queryKeys } from '../lib/query-client.js';
 import { track } from '../plausible.js';
 import { Alert } from './Alert.js';
@@ -47,6 +48,7 @@ export type ComingSoonPageProps = {
     subline: string;
     inclusions: string[];
   };
+  hubspotFormGuid: string;
   interestForm: {
     workloadLabel: string;
     workloadTypes: string[];
@@ -244,10 +246,12 @@ function WaitlistSuccess({ title, onClose }: { title: string; onClose: () => voi
 
 function InterestForm({
   config,
+  formGuid,
   onSubmitted,
   onCancel,
 }: {
   config: ComingSoonPageProps['interestForm'];
+  formGuid: string;
   onSubmitted: () => void;
   onCancel: () => void;
 }) {
@@ -255,12 +259,14 @@ function InterestForm({
   const providerId = useId();
   const timelineId = useId();
   const teamSizeId = useId();
+  const storageAmountId = useId();
   const notesId = useId();
 
   const [workload, setWorkload] = useState('');
   const [timeline, setTimeline] = useState('');
   const [provider, setProvider] = useState('');
   const [teamSize, setTeamSize] = useState('');
+  const [storageAmount, setStorageAmount] = useState('');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(false);
@@ -277,42 +283,19 @@ function InterestForm({
     const firstName = spaceIndex !== -1 ? fullName.slice(0, spaceIndex) : fullName;
     const lastName = spaceIndex !== -1 ? fullName.slice(spaceIndex + 1) : '';
 
-    const portalId = import.meta.env.VITE_HUBSPOT_PORTAL_ID;
-    const formGuid = import.meta.env.VITE_HUBSPOT_WAITLIST_FORM_GUID;
-
-    // HubSpot tracking cookie, used to link the submission to the visitor's
-    // analytics session. Only present if the HubSpot tracking script has loaded.
-    const hutk = document.cookie
-      .split('; ')
-      .find((row) => row.startsWith('hubspotutk='))
-      ?.split('=')[1];
-
     try {
-      const res = await fetch(
-        `https://api.hsforms.com/submissions/v3/integration/submit/${portalId}/${formGuid}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fields: [
-              { name: 'firstname', value: firstName },
-              { name: 'lastname', value: lastName },
-              { name: 'email', value: me?.email ?? '' },
-              { name: 'primary_use_case', value: workload },
-              { name: 'how_are_you_handling_rag_today', value: provider },
-              { name: 'timeline', value: timeline },
-              { name: 'team_size', value: teamSize },
-              { name: 'notes', value: notes },
-            ],
-            context: {
-              pageUri: window.location.href,
-              ...(hutk ? { hutk } : {}),
-            },
-          }),
-        },
-      );
-
-      if (!res.ok) throw new Error('Submission failed');
+      await submitWaitlistForm({
+        formId: formGuid,
+        firstName,
+        lastName,
+        email: me?.email ?? '',
+        primaryUseCase: workload,
+        ragProvider: provider,
+        timeline,
+        teamSize,
+        storageAmount,
+        notes,
+      });
       onSubmitted();
     } catch {
       setSubmitError(true);
@@ -366,6 +349,20 @@ function InterestForm({
             <option value="51+ people">51+ people</option>
           </Select>
         </FormField>
+
+        <FormField label="Amount of storage" htmlFor={storageAmountId} className="sm:col-span-2">
+          <Select id={storageAmountId} value={storageAmount} onChange={setStorageAmount}>
+            <option value="">Select…</option>
+            <option value="Less than 25 TB">Less than 25 TB</option>
+            <option value="25 - 50 TB">25 - 50 TB</option>
+            <option value="50 - 100 TB">50 - 100 TB</option>
+            <option value="100 - 150 TB">100 - 150 TB</option>
+            <option value="150 - 250 TB">150 - 250 TB</option>
+            <option value="250 - 500 TB">250 - 500 TB</option>
+            <option value="500 - 1 PB">500 TB - 1 PB</option>
+            <option value="More than 1 PB">More than 1 PB</option>
+          </Select>
+        </FormField>
       </div>
 
       <div className="mt-5">
@@ -414,16 +411,20 @@ export function ComingSoonPage({
   useCases,
   whyFilOne,
   pricing,
+  hubspotFormGuid,
   interestForm,
   faqs,
 }: ComingSoonPageProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
+  function openModal() {
+    setSubmitted(false);
+    setModalOpen(true);
+  }
+
   function closeModal() {
     setModalOpen(false);
-    // Reset to the form view after the close animation finishes
-    setTimeout(() => setSubmitted(false), 200);
   }
 
   return (
@@ -452,8 +453,7 @@ export function ComingSoonPage({
               inclusions={pricing.inclusions}
               onJoinClick={() => {
                 track('Waitlist CTA clicked', { props: { page: title } });
-                setSubmitted(false);
-                setModalOpen(true);
+                openModal();
               }}
             />
           </div>
@@ -501,6 +501,7 @@ export function ComingSoonPage({
             </ModalHeader>
             <InterestForm
               config={interestForm}
+              formGuid={hubspotFormGuid}
               onSubmitted={() => {
                 track('Waitlist submitted', { props: { page: title } });
                 setSubmitted(true);

@@ -3,6 +3,7 @@ import { ComingSoonPage } from '../components/ComingSoonPage.js';
 export function BucketIntelligencePage() {
   return (
     <ComingSoonPage
+      hubspotFormGuid={import.meta.env.VITE_HUBSPOT_BUCKET_INTELLIGENCE_WAITLIST_FORM_GUID}
       title="Bucket Intelligence"
       description="Turn any Fil One bucket into a knowledge base you can ask questions to."
       what="Bucket Intelligence turns your storage into a knowledge base you can talk to. Choose which buckets to index, upload documents as you normally would, and they are automatically indexed using RAG (Retrieval-Augmented Generation): your files are chunked into passages, converted into vector embeddings, and made searchable by meaning. When you ask a question, the most relevant passages are retrieved and passed to an LLM, which generates a precise answer grounded in your actual data. No vector database to run, no pipeline to maintain. Just upload and query."
