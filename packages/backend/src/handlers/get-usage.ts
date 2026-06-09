@@ -28,19 +28,19 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     new GetItemCommand({
       TableName: userInfoTableName,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
     }),
   );
 
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  // TODO(FIL-382): drop the setupStatus fallback.
-  const setupStatus = orgProfile?.auroraSetupStatus?.S ?? orgProfile?.setupStatus?.S;
+  const auroraSetupStatus = orgProfile?.auroraSetupStatus?.S;
 
   // 2. Fetch usage data from Aurora in parallel
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime());
   thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
-  const shouldFetchData = auroraTenantId && isOrgSetupComplete(setupStatus);
+  const shouldFetchData = auroraTenantId && isOrgSetupComplete(auroraSetupStatus);
 
   const [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
     shouldFetchData

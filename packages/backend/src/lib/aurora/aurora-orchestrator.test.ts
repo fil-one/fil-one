@@ -172,20 +172,6 @@ describe('auroraOrchestrator', () => {
 
       expect(result).toBeNull();
     });
-
-    // TODO(FIL-382): drop this once the legacy-row fallback is removed.
-    it('reads legacy setupStatus when auroraSetupStatus is absent (dual-name fallback)', async () => {
-      ddbMock.on(GetItemCommand).resolves({
-        Item: {
-          auroraTenantId: { S: 'aurora-t-legacy' },
-          setupStatus: { S: FINAL_SETUP_STATUS },
-        },
-      });
-
-      const result = await auroraOrchestrator.isTenantReady('org-1');
-
-      expect(result).toEqual('aurora-t-legacy');
-    });
   });
 
   describe('createBucket', () => {

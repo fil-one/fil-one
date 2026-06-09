@@ -12,13 +12,18 @@ function uniqueBucketName(role: string): string {
 
 // In-memory upload fixture so the test does not depend on a checked-in file.
 // Size of 23 bytes — `formatBytes(23)` renders as "23 B", which appears in
-// the bucket-detail row's accessible name after upload.
+// the bucket-detail row's accessible name after upload. The name is created
+// per upload (see `uniqueObjectName`) so reusing a bucket across runs never
+// collides with a previously uploaded object of the same key.
 const UPLOAD_FILE = {
-  name: 'e2e-upload.txt',
   mimeType: 'text/plain',
   buffer: Buffer.from('e2e test upload content'),
 } as const;
 const UPLOAD_FILE_SIZE_LABEL = '23 B';
+
+function uniqueObjectName(): string {
+  return `e2e-upload-${randomUUID()}.txt`;
+}
 
 async function createBucketWithKey(page: Page, bucketName: string): Promise<void> {
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
@@ -51,9 +56,9 @@ async function openFirstBucket(page: Page): Promise<string> {
 }
 
 // Drives the upload form on the bucket detail page: opens the upload page,
-// selects the in-memory file, and submits. Stops at submit so callers can
-// assert success or failure for their role.
-async function submitUpload(page: Page, bucketName: string): Promise<void> {
+// selects the in-memory file under the given object name, and submits. Stops
+// at submit so callers can assert success or failure for their role.
+async function submitUpload(page: Page, bucketName: string, objectName: string): Promise<void> {
   // Header has an unconditional "Upload object" button; an empty bucket also
   // renders one in the empty-state card. `.first()` targets the header button.
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
@@ -63,7 +68,7 @@ async function submitUpload(page: Page, bucketName: string): Promise<void> {
   // The dropzone forwards clicks to a hidden <input type="file">. Setting
   // files directly on the input is the most reliable way to trigger React's
   // onChange handler, which auto-fills the object name from the file name.
-  await page.locator('input[type="file"]').setInputFiles({ ...UPLOAD_FILE });
+  await page.locator('input[type="file"]').setInputFiles({ ...UPLOAD_FILE, name: objectName });
 
   // Submit button on the upload page (different button than the header one
   // we clicked above — this is the form submit).
@@ -84,8 +89,9 @@ test.describe('paid user', () => {
 
   test('paid user can upload object and navigate to it', async ({ page }) => {
     const bucketName = await openFirstBucket(page);
+    const objectName = uniqueObjectName();
 
-    await submitUpload(page, bucketName);
+    await submitUpload(page, bucketName, objectName);
 
     // On success the upload page navigates back to the bucket detail page.
     await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}`);
@@ -93,13 +99,11 @@ test.describe('paid user', () => {
     // The file row has role="button"; its accessible name concatenates the
     // file name and formatted size from the table cells.
     // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-    await page
-      .getByRole('button', { name: `${UPLOAD_FILE.name} ${UPLOAD_FILE_SIZE_LABEL}` })
-      .click();
+    await page.getByRole('button', { name: `${objectName} ${UPLOAD_FILE_SIZE_LABEL}` }).click();
     await expect(page).toHaveURL(
       (url) =>
         url.pathname === `/buckets/${bucketName}/objects` &&
-        url.searchParams.get('key') === UPLOAD_FILE.name,
+        url.searchParams.get('key') === objectName,
     );
   });
 });
@@ -117,19 +121,18 @@ test.describe('trial user', () => {
 
   test('trial user can upload object and navigate to it', async ({ page }) => {
     const bucketName = await openFirstBucket(page);
+    const objectName = uniqueObjectName();
 
-    await submitUpload(page, bucketName);
+    await submitUpload(page, bucketName, objectName);
 
     await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}`);
 
     // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-    await page
-      .getByRole('button', { name: `${UPLOAD_FILE.name} ${UPLOAD_FILE_SIZE_LABEL}` })
-      .click();
+    await page.getByRole('button', { name: `${objectName} ${UPLOAD_FILE_SIZE_LABEL}` }).click();
     await expect(page).toHaveURL(
       (url) =>
         url.pathname === `/buckets/${bucketName}/objects` &&
-        url.searchParams.get('key') === UPLOAD_FILE.name,
+        url.searchParams.get('key') === objectName,
     );
   });
 });
@@ -163,7 +166,7 @@ test.describe('unpaid user', () => {
   test('unpaid user cannot upload object', async ({ page }) => {
     const bucketName = await openFirstBucket(page);
 
-    await submitUpload(page, bucketName);
+    await submitUpload(page, bucketName, uniqueObjectName());
 
     // Presign endpoint returns 403 (GRACE_PERIOD_WRITE_BLOCKED) for past_due
     // accounts; the upload hook catches the error, resets to the idle state,

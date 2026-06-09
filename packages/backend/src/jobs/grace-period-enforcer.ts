@@ -172,8 +172,7 @@ async function resolveTenantForEnforcement(orgId: string): Promise<TenantRecord>
 
   return {
     auroraTenantId: orgResult.Item?.auroraTenantId?.S,
-    // TODO(FIL-382): drop the setupStatus fallback.
-    auroraSetupStatus: orgResult.Item?.auroraSetupStatus?.S ?? orgResult.Item?.setupStatus?.S,
+    auroraSetupStatus: orgResult.Item?.auroraSetupStatus?.S,
   };
 }
 
