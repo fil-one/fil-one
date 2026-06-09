@@ -131,13 +131,13 @@ describe('fthOrchestrator.isTenantReady', () => {
   }
 });
 
-describe('fthOrchestrator.getPresignerContext', () => {
+describe('fthOrchestrator.getS3ClientContext', () => {
   it('reads credentials from SSM and returns the FTH endpoint context', async () => {
     ssmMock.on(GetParameterCommand).resolves({
       Parameter: { Value: JSON.stringify({ accessKeyId: 'AK1', secretAccessKey: 'SK1' }) },
     });
 
-    const ctx = await fthOrchestrator.getPresignerContext(fthClientId);
+    const ctx = await fthOrchestrator.getS3ClientContext(fthClientId);
 
     expect(ctx).toEqual({
       endpointUrl: 'https://us-east-1.fortilyx.com',
@@ -152,8 +152,8 @@ describe('fthOrchestrator.getPresignerContext', () => {
       Parameter: { Value: JSON.stringify({ accessKeyId: 'AK1', secretAccessKey: 'SK1' }) },
     });
 
-    await fthOrchestrator.getPresignerContext(fthClientId);
-    await fthOrchestrator.getPresignerContext(fthClientId);
+    await fthOrchestrator.getS3ClientContext(fthClientId);
+    await fthOrchestrator.getS3ClientContext(fthClientId);
 
     expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(1);
   });

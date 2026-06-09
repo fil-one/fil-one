@@ -1,221 +1,24 @@
-// Provider-agnostic S3 presign/list/delete helpers. Each function accepts a
-// PresignerContext supplied by the active ServiceOrchestrator; the orchestrator
+// Provider-agnostic S3 presigned-URL generators. Each function accepts an
+// S3ClientContext supplied by the active ServiceOrchestrator; the orchestrator
 // alone knows how to look up credentials and which endpoint/region apply.
 
 import {
-  CreateBucketCommand,
   DeleteObjectCommand,
-  GetBucketVersioningCommand,
   GetObjectCommand,
-  GetObjectLockConfigurationCommand,
   GetObjectRetentionCommand,
   HeadObjectCommand,
-  ListBucketsCommand,
   ListObjectsV2Command,
   ListObjectVersionsCommand,
-  PutBucketVersioningCommand,
   PutObjectCommand,
-  PutObjectLockConfigurationCommand,
-  S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import type { RetentionDurationType, RetentionMode, S3Object } from '@filone/shared';
-import { BucketAlreadyExistsError } from './errors.js';
-import type { PresignerContext } from './service-orchestrator.js';
-
-function createS3Client(ctx: PresignerContext): S3Client {
-  return new S3Client({
-    endpoint: ctx.endpointUrl,
-    region: ctx.region,
-    credentials: ctx.credentials,
-    forcePathStyle: ctx.forcePathStyle,
-  });
-}
-
-// ── Direct S3 operations (used by handlers that can't presign) ─────
-
-export interface CreateBucketOptions {
-  bucketName: string;
-  objectLockEnabled?: boolean;
-}
-
-export async function createBucket(
-  ctx: PresignerContext,
-  options: CreateBucketOptions,
-): Promise<void> {
-  const s3 = createS3Client(ctx);
-  try {
-    await s3.send(
-      new CreateBucketCommand({
-        Bucket: options.bucketName,
-        ...(options.objectLockEnabled && { ObjectLockEnabledForBucket: true }),
-      }),
-    );
-  } catch (err) {
-    const name = (err as { name?: string }).name;
-    if (name === 'BucketAlreadyOwnedByYou' || name === 'BucketAlreadyExists') {
-      throw new BucketAlreadyExistsError(options.bucketName, { cause: err as Error });
-    }
-    throw err;
-  }
-}
-
-export interface ListBucketsResult {
-  buckets: Array<{ name: string; createdAt: string }>;
-}
-
-export async function listBuckets(ctx: PresignerContext): Promise<ListBucketsResult> {
-  const s3 = createS3Client(ctx);
-  const result = await s3.send(new ListBucketsCommand({}));
-  return {
-    buckets: (result.Buckets ?? []).map((b) => ({
-      name: b.Name!,
-      createdAt: b.CreationDate?.toISOString() ?? new Date().toISOString(),
-    })),
-  };
-}
-
-// Map between our domain RetentionMode and the S3 wire enum.
-const toS3RetentionMode = (m: RetentionMode) => (m === 'compliance' ? 'COMPLIANCE' : 'GOVERNANCE');
-const fromS3RetentionMode = (m: string): RetentionMode =>
-  m === 'COMPLIANCE' ? 'compliance' : 'governance';
-
-export async function setBucketVersioning(
-  ctx: PresignerContext,
-  bucketName: string,
-  enabled = true,
-): Promise<void> {
-  const s3 = createS3Client(ctx);
-  await s3.send(
-    new PutBucketVersioningCommand({
-      Bucket: bucketName,
-      VersioningConfiguration: { Status: enabled ? 'Enabled' : 'Suspended' },
-    }),
-  );
-}
-
-export interface PutObjectLockConfigurationOptions {
-  bucketName: string;
-  mode: RetentionMode;
-  duration: number;
-  durationType: RetentionDurationType;
-}
-
-export async function putObjectLockConfiguration(
-  ctx: PresignerContext,
-  options: PutObjectLockConfigurationOptions,
-): Promise<void> {
-  const s3 = createS3Client(ctx);
-  await s3.send(
-    new PutObjectLockConfigurationCommand({
-      Bucket: options.bucketName,
-      ObjectLockConfiguration: {
-        ObjectLockEnabled: 'Enabled',
-        Rule: {
-          DefaultRetention: {
-            Mode: toS3RetentionMode(options.mode),
-            ...(options.durationType === 'y'
-              ? { Years: options.duration }
-              : { Days: options.duration }),
-          },
-        },
-      },
-    }),
-  );
-}
-
-export async function getBucketVersioning(
-  ctx: PresignerContext,
-  bucketName: string,
-): Promise<boolean> {
-  const s3 = createS3Client(ctx);
-  const result = await s3.send(new GetBucketVersioningCommand({ Bucket: bucketName }));
-  return result.Status === 'Enabled';
-}
-
-export interface BucketObjectLockState {
-  objectLockEnabled: boolean;
-  defaultRetention?: RetentionMode;
-  retentionDuration?: number;
-  retentionDurationType?: RetentionDurationType;
-}
-
-export async function getBucketObjectLock(
-  ctx: PresignerContext,
-  bucketName: string,
-): Promise<BucketObjectLockState | null> {
-  const s3 = createS3Client(ctx);
-  try {
-    const result = await s3.send(new GetObjectLockConfigurationCommand({ Bucket: bucketName }));
-    const cfg = result.ObjectLockConfiguration;
-    const defaultRetention = cfg?.Rule?.DefaultRetention;
-    return {
-      objectLockEnabled: cfg?.ObjectLockEnabled === 'Enabled',
-      ...(defaultRetention?.Mode && {
-        defaultRetention: fromS3RetentionMode(defaultRetention.Mode),
-      }),
-      ...(defaultRetention?.Years != null
-        ? { retentionDuration: defaultRetention.Years, retentionDurationType: 'y' as const }
-        : defaultRetention?.Days != null
-          ? { retentionDuration: defaultRetention.Days, retentionDurationType: 'd' as const }
-          : {}),
-    };
-  } catch (err) {
-    const name = (err as { name?: string }).name;
-    if (name === 'ObjectLockConfigurationNotFoundError') {
-      return null;
-    }
-    throw err;
-  }
-}
-
-export interface ListObjectsOptions {
-  ctx: PresignerContext;
-  bucket: string;
-  prefix?: string;
-  delimiter?: string;
-  maxKeys?: number;
-  continuationToken?: string;
-}
-
-export interface ListObjectsResult {
-  objects: S3Object[];
-  nextToken?: string;
-  isTruncated: boolean;
-}
-
-export async function listObjects(options: ListObjectsOptions): Promise<ListObjectsResult> {
-  const { ctx, bucket, prefix, delimiter, maxKeys, continuationToken } = options;
-  const s3 = createS3Client(ctx);
-
-  const result = await s3.send(
-    new ListObjectsV2Command({
-      Bucket: bucket,
-      ...(prefix && { Prefix: prefix }),
-      ...(delimiter && { Delimiter: delimiter }),
-      ...(maxKeys && { MaxKeys: maxKeys }),
-      ...(continuationToken && { ContinuationToken: continuationToken }),
-    }),
-  );
-
-  const objects: S3Object[] = (result.Contents ?? []).map((item) => ({
-    key: item.Key!,
-    sizeBytes: item.Size ?? 0,
-    lastModified: item.LastModified?.toISOString() ?? new Date().toISOString(),
-    ...(item.ETag && { etag: item.ETag }),
-  }));
-
-  return {
-    objects,
-    nextToken: result.NextContinuationToken,
-    isTruncated: result.IsTruncated ?? false,
-  };
-}
+import { createS3Client } from './s3-client.js';
+import type { S3ClientContext } from './service-orchestrator.js';
 
 // ── Presigned URL generators ────────────────────────────────────────
 
 interface PresignBaseOptions {
-  ctx: PresignerContext;
+  ctx: S3ClientContext;
   bucket: string;
   expiresIn: number;
 }

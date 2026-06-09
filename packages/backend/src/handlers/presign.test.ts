@@ -12,7 +12,7 @@ vi.mock('sst', () => ({
   },
 }));
 
-const presignerContext = {
+const s3ClientContext = {
   endpointUrl: 'https://s3.example.com',
   region: 'auto',
   credentials: { accessKeyId: 'ak', secretAccessKey: 'sk' },
@@ -20,13 +20,13 @@ const presignerContext = {
 };
 
 const mockIsTenantReady = vi.fn();
-const mockGetPresignerContext = vi.fn();
+const mockGetS3ClientContext = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
   region: 'eu-west-1',
   isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
-  getPresignerContext: (...args: unknown[]) => mockGetPresignerContext(...args),
+  getS3ClientContext: (...args: unknown[]) => mockGetS3ClientContext(...args),
 };
 
 const mockGetOrchestratorForRegion = vi.fn();
@@ -90,7 +90,7 @@ describe('presign baseHandler', () => {
     vi.stubEnv('FILONE_STAGE', 'staging');
     mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
     mockIsTenantReady.mockResolvedValue('aurora-t-1');
-    mockGetPresignerContext.mockResolvedValue(presignerContext);
+    mockGetS3ClientContext.mockResolvedValue(s3ClientContext);
   });
 
   // ── Validation ──────────────────────────────────────────────────────
@@ -231,7 +231,7 @@ describe('presign baseHandler', () => {
           expiresAt: expect.any(String),
         },
       ],
-      endpoint: presignerContext.endpointUrl,
+      endpoint: s3ClientContext.endpointUrl,
     });
   });
 
@@ -267,7 +267,7 @@ describe('presign baseHandler', () => {
           expiresAt: expect.any(String),
         },
       ],
-      endpoint: presignerContext.endpointUrl,
+      endpoint: s3ClientContext.endpointUrl,
     });
   });
 
@@ -297,7 +297,7 @@ describe('presign baseHandler', () => {
           expiresAt: expect.any(String),
         },
       ],
-      endpoint: presignerContext.endpointUrl,
+      endpoint: s3ClientContext.endpointUrl,
     });
     expect(mockGetPresignedPutObjectUrl).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -331,7 +331,7 @@ describe('presign baseHandler', () => {
           expiresAt: expect.any(String),
         },
       ],
-      endpoint: presignerContext.endpointUrl,
+      endpoint: s3ClientContext.endpointUrl,
     });
   });
 

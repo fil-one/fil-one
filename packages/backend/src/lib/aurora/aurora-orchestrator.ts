@@ -37,7 +37,7 @@ import type {
   CreateBucketArgs,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  PresignerContext,
+  S3ClientContext,
   ServiceOrchestrator,
 } from '../service-orchestrator.js';
 
@@ -200,7 +200,7 @@ export const auroraOrchestrator = {
     await deleteAuroraAccessKey({ tenantId, auroraKeyId: keyId });
   },
 
-  async getPresignerContext(tenantId: string): Promise<PresignerContext> {
+  async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
     const stage = getStage();
     const credentials = await getConsoleS3Credentials({
       orchestratorId: auroraOrchestrator.id,

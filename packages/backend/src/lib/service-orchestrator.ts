@@ -6,7 +6,7 @@ import type {
   S3Region,
 } from '@filone/shared';
 
-export interface PresignerContext {
+export interface S3ClientContext {
   endpointUrl: string;
   region: string;
   credentials: { accessKeyId: string; secretAccessKey: string };
@@ -129,5 +129,5 @@ export interface ServiceOrchestrator {
    */
   deleteAccessKey(tenantId: string, keyId: string): Promise<void>;
 
-  getPresignerContext(tenantId: string): Promise<PresignerContext>;
+  getS3ClientContext(tenantId: string): Promise<S3ClientContext>;
 }

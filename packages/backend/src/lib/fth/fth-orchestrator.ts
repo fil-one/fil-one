@@ -5,7 +5,7 @@
 //     call the FTH management REST API. ensureTenantReady delegates to
 //     fth-tenant-setup.ts; the other control-plane methods live here.
 //   - data-plane (createBucket, deleteBucket, listBuckets, getBucket,
-//     getPresignerContext) speak S3 directly against the FTH S3 endpoint
+//     getS3ClientContext) speak S3 directly against the FTH S3 endpoint
 //     using the service access key stashed in SSM during setup.
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
@@ -26,10 +26,11 @@ import type {
   CreateBucketArgs,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  PresignerContext,
+  S3ClientContext,
   ServiceOrchestrator,
 } from '../service-orchestrator.js';
 
+import { createS3Client } from '../s3-client.js';
 import {
   createBucket as s3CreateBucket,
   listBuckets as s3ListBuckets,
@@ -37,7 +38,7 @@ import {
   putObjectLockConfiguration,
   getBucketVersioning,
   getBucketObjectLock,
-} from '../s3-presigner.js';
+} from '../s3-bucket-operations.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 import {
   createFthManagementClient,
@@ -81,7 +82,7 @@ export const fthOrchestrator = {
     return tenantId;
   },
 
-  async getPresignerContext(tenantId: string): Promise<PresignerContext> {
+  async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
     const stage = process.env.FILONE_STAGE!;
     const credentials = await getConsoleS3Credentials({
       orchestratorId: fthOrchestrator.id,
@@ -97,16 +98,17 @@ export const fthOrchestrator = {
   },
 
   async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {
-    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
-    await s3CreateBucket(ctx, {
+    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const s3 = createS3Client(ctx);
+    await s3CreateBucket(s3, {
       bucketName: args.bucketName,
       objectLockEnabled: args.lock === true,
     });
     if (args.versioning) {
-      await setBucketVersioning(ctx, args.bucketName, true);
+      await setBucketVersioning(s3, args.bucketName, true);
     }
     if (args.retention?.enabled) {
-      await putObjectLockConfiguration(ctx, {
+      await putObjectLockConfiguration(s3, {
         bucketName: args.bucketName,
         mode: args.retention.mode,
         duration: args.retention.duration,
@@ -120,29 +122,31 @@ export const fthOrchestrator = {
   },
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {
-    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
-    const { buckets } = await s3ListBuckets(ctx);
+    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const s3 = createS3Client(ctx);
+    const { buckets } = await s3ListBuckets(s3);
     return Promise.all(
       buckets.map(async (b) => ({
         bucketName: b.name,
         region: fthOrchestrator.region,
         createdAt: b.createdAt,
         isPublic: false,
-        versioning: await getBucketVersioning(ctx, b.name),
+        versioning: await getBucketVersioning(s3, b.name),
         encrypted: true,
       })),
     );
   },
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
-    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
-    const { buckets } = await s3ListBuckets(ctx);
+    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const s3 = createS3Client(ctx);
+    const { buckets } = await s3ListBuckets(s3);
     const match = buckets.find((b) => b.name === bucketName);
     if (!match) return null;
 
     const [versioning, lock] = await Promise.all([
-      getBucketVersioning(ctx, bucketName),
-      getBucketObjectLock(ctx, bucketName),
+      getBucketVersioning(s3, bucketName),
+      getBucketObjectLock(s3, bucketName),
     ]);
 
     return {
