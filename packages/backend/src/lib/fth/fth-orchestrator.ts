@@ -44,7 +44,11 @@ import { instrumentClient } from './fth-api-metrics.js';
 const FTH_CONSOLE_USER_CODE = 'filone-console';
 
 const dynamo = getDynamoClient();
-const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
+const STORAGE_USER_CACHE_TTL_MS = 15 * 60 * 1000;
+const consoleStorageUserCache = new QuickLRU<string, string>({
+  maxSize: 500,
+  maxAge: STORAGE_USER_CACHE_TTL_MS,
+});
 
 export const _resetFthOrchestratorCachesForTesting = () => {
   _resetS3CredentialsCacheForTesting();
