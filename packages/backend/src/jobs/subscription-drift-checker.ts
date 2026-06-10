@@ -144,14 +144,12 @@ async function resolveTenant(orgId: string): Promise<ResolvedTenant> {
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      // TODO(FIL-382): drop legacy `setupStatus` from ProjectionExpression.
-      ProjectionExpression: 'auroraTenantId, auroraSetupStatus, setupStatus',
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
     }),
   );
   return {
     auroraTenantId: result.Item?.auroraTenantId?.S,
-    // TODO(FIL-382): drop the setupStatus fallback.
-    auroraSetupStatus: result.Item?.auroraSetupStatus?.S ?? result.Item?.setupStatus?.S,
+    auroraSetupStatus: result.Item?.auroraSetupStatus?.S,
   };
 }
 

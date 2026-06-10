@@ -163,6 +163,14 @@ export function BillingPage() {
     }
   }
 
+  async function refreshSetupIntent(): Promise<string> {
+    const { clientSecret: cs } = await apiRequest<CreateSetupIntentResponse>(
+      '/billing/setup-intent',
+      { method: 'POST' },
+    );
+    return cs;
+  }
+
   async function handleSelectPayAsYouGo() {
     setPlanOpen(false);
 
@@ -659,6 +667,7 @@ export function BillingPage() {
         onClose={() => setPaymentOpen(false)}
         onBack={handlePaymentBack}
         onSuccess={handlePaymentSuccess}
+        onRefreshSetupIntent={refreshSetupIntent}
       />
 
       <ContactSalesDialog open={contactSalesOpen} onClose={() => setContactSalesOpen(false)} />

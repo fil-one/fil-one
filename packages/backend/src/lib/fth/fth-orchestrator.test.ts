@@ -21,13 +21,16 @@ vi.mock('./fth-tenant-setup.js', () => ({
 }));
 
 const mockGetClientMetricsTimeseries = vi.fn();
-const mockFthClient = {
+// Hoisted so it is initialized before the static import of fth-orchestrator.js,
+// whose module-level `createInstrumentedFthClient()` runs at import time and
+// reads this mock via the mocked createFthManagementClient.
+const mockFthClient = vi.hoisted(() => ({
   createAccessKey: vi.fn(),
   listAccessKeys: vi.fn(),
   deleteAccessKey: vi.fn(),
   listStorageUsers: vi.fn(),
   getClientMetricsTimeseries: (...args: unknown[]) => mockGetClientMetricsTimeseries(...args),
-};
+}));
 
 vi.mock('./fth-management-client.js', async () => {
   const actual = await vi.importActual<typeof import('./fth-management-client.js')>(
