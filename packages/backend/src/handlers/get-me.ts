@@ -55,5 +55,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
-  .use(authMiddleware())
+  // Opt out of the verified-email gate: the frontend relies on /me to detect
+  // the unverified state and drive the verify-email flow.
+  .use(authMiddleware({ requireVerifiedEmail: false }))
   .use(errorHandlerMiddleware());

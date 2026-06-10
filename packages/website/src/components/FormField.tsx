@@ -4,6 +4,7 @@ type FormFieldProps = {
   htmlFor?: string;
   description?: string;
   error?: string;
+  className?: string;
   children: React.ReactNode;
 };
 
@@ -13,10 +14,11 @@ export function FormField({
   htmlFor,
   description,
   error,
+  className,
   children,
 }: FormFieldProps) {
   return (
-    <div className="flex flex-col gap-2.5">
+    <div className={`flex flex-col gap-2.5${className ? ` ${className}` : ''}`}>
       <label htmlFor={htmlFor} className="text-xs font-medium text-zinc-900">
         {label}
         {optional && (
