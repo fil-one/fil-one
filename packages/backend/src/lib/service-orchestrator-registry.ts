@@ -14,6 +14,9 @@ export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator 
   }
 }
 
-export function getAvailableOrchestrators(stage: Stage | string): ServiceOrchestrator[] {
-  return getAvailableRegions(stage).map(getOrchestratorForRegion);
+export function getAvailableOrchestrators(
+  stage: Stage | string,
+  email?: string,
+): ServiceOrchestrator[] {
+  return getAvailableRegions(stage, email).map(getOrchestratorForRegion);
 }
