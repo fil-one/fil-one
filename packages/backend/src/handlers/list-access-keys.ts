@@ -4,7 +4,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { AccessKey, GranularPermission, ListAccessKeysResponse } from '@filone/shared';
-import { S3_REGION } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -55,7 +55,7 @@ export async function baseHandler(
         (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
       bucketScope: record.bucketScope as AccessKey['bucketScope'],
       buckets: record.buckets as string[] | undefined,
-      region: S3_REGION,
+      region: (record.region as AccessKey['region']) ?? S3Region.EuWest1,
       expiresAt: (record.expiresAt as string | undefined) ?? null,
     };
   });

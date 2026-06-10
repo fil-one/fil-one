@@ -508,7 +508,7 @@ export default $config({
       handler: 'list-buckets',
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        FTH_S3_URL: fthEnv.FTH_S3_URL,
+        ...fthEnv,
       },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
@@ -539,7 +539,7 @@ export default $config({
       handler: 'get-bucket',
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        FTH_S3_URL: fthEnv.FTH_S3_URL,
+        ...fthEnv,
       },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
@@ -551,6 +551,7 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
+      extraEnv: { ...fthEnv },
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
@@ -563,7 +564,10 @@ export default $config({
       method: 'POST',
       routePath: '/api/access-keys',
       handler: 'create-access-key',
-      extraEnv: auroraEnv,
+      extraEnv: {
+        ...auroraEnv,
+        ...fthEnv,
+      },
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
@@ -576,13 +580,22 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/access-keys/{keyId}',
       handler: 'delete-access-key',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        ...fthEnv,
+      },
+      permissions: [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [auroraApiKeySsmArn],
+        },
+      ],
     });
     addRoute({
       method: 'POST',
       routePath: '/api/presign',
       handler: 'presign',
+      extraEnv: { ...fthEnv },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
       ],
@@ -687,7 +700,7 @@ export default $config({
       method: 'GET',
       routePath: '/api/activity',
       handler: 'get-activity',
-      extraEnv: auroraEnv,
+      extraEnv: { ...auroraEnv, ...fthEnv },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
       ],
