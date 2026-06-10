@@ -35,12 +35,12 @@ export async function baseHandler(
 
   // The dashboard aggregates activity across every region the org is provisioned
   // in, so resolve the ready tenant on each available orchestrator.
-  const tenants = await getProvisionedRegions(orgId);
+  const regions = await getProvisionedRegions(orgId);
 
   const [bucketActivities, keyActivities, trends] = await Promise.all([
-    fetchBucketActivities(orgId, tenants),
+    fetchBucketActivities(orgId, regions),
     fetchAccessKeyActivities(orgId),
-    buildTimeSeries(tenants, period),
+    buildTimeSeries(regions, period),
   ]);
 
   // TODO: Re-add object activities once we have an event system with Aurora.
@@ -59,14 +59,14 @@ export async function baseHandler(
 
 async function fetchBucketActivities(
   orgId: string,
-  tenants: ProvisionedRegion[],
+  regions: ProvisionedRegion[],
 ): Promise<RecentActivity[]> {
-  const perTenant = await Promise.all(
-    tenants.map(({ orchestrator, tenantId }) =>
+  const perRegion = await Promise.all(
+    regions.map(({ orchestrator, tenantId }) =>
       listBucketActivities(orgId, orchestrator, tenantId),
     ),
   );
-  return perTenant.flat();
+  return perRegion.flat();
 }
 
 async function listBucketActivities(
@@ -129,7 +129,7 @@ async function fetchAccessKeyActivities(orgId: string): Promise<RecentActivity[]
 }
 
 async function buildTimeSeries(
-  tenants: ProvisionedRegion[],
+  regions: ProvisionedRegion[],
   period: number,
 ): Promise<ActivityResponse['trends']> {
   const now = new Date();
@@ -139,8 +139,8 @@ async function buildTimeSeries(
 
   // Fetch each region's storage series and index it by end-of-day, then sum
   // across regions per day for the org-wide trend.
-  const perTenantByDate = await Promise.all(
-    tenants.map(({ orchestrator, tenantId }) =>
+  const perRegionByDate = await Promise.all(
+    regions.map(({ orchestrator, tenantId }) =>
       fetchStorageByDate(orchestrator, tenantId, from, now),
     ),
   );
@@ -152,7 +152,7 @@ async function buildTimeSeries(
     const date = endOfDay(d).toISOString();
     let bytesUsed = 0;
     let objectCount = 0;
-    for (const byDate of perTenantByDate) {
+    for (const byDate of perRegionByDate) {
       const sample = byDate.get(date);
       bytesUsed += sample?.bytesUsed ?? 0;
       objectCount += sample?.objectCount ?? 0;

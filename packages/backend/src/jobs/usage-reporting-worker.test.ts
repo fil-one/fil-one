@@ -720,7 +720,10 @@ describe('usage-reporting-worker', () => {
 
       await handler(fthOnlyPayload);
 
-      // Trial lock enforcement is Aurora-only; getTenantInfo must NOT be called
+      // Trial lock enforcement is applid only to Aurora tenants for now
+      // so the getTenantInfo must NOT be called in this case.
+      // Once the PR https://github.com/fil-one/fil-one/pull/401 is merged
+      // usage-reporting worker will also enforce trial locks for FTH tenants
       expect(mockGetTenantInfo).not.toHaveBeenCalled();
 
       // Stripe meter must still be emitted
