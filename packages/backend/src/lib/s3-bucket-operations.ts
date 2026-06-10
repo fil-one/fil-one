@@ -51,8 +51,11 @@ export async function listBuckets(s3: S3Client): Promise<ListBucketsResult> {
 
 // Map between our domain RetentionMode and the S3 wire enum.
 const toS3RetentionMode = (m: RetentionMode) => (m === 'compliance' ? 'COMPLIANCE' : 'GOVERNANCE');
-const fromS3RetentionMode = (m: string): RetentionMode =>
-  m === 'COMPLIANCE' ? 'compliance' : 'governance';
+const fromS3RetentionMode = (m: string): RetentionMode => {
+  if (m === 'COMPLIANCE') return 'compliance';
+  if (m === 'GOVERNANCE') return 'governance';
+  throw new Error(`Unknown S3 retention mode: ${m}`);
+};
 
 export async function setBucketVersioning(
   s3: S3Client,
