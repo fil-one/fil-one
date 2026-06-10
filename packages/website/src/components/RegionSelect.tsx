@@ -1,7 +1,7 @@
 import type { S3Region } from '@filone/shared';
-import { formatRegion } from '@filone/shared';
+import { formatRegion, getAvailableRegions } from '@filone/shared';
 
-import { useAvailableRegions } from '../lib/use-available-regions.js';
+import { FILONE_STAGE } from '../env.js';
 import { Select } from './Select';
 
 type RegionSelectProps = {
@@ -12,7 +12,7 @@ type RegionSelectProps = {
 };
 
 export function RegionSelect({ id, value, onChange, disabled }: RegionSelectProps) {
-  const regions = useAvailableRegions();
+  const regions = getAvailableRegions(FILONE_STAGE);
   const onlyOne = regions.length === 1;
 
   return (

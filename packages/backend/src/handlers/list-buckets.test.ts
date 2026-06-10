@@ -31,10 +31,10 @@ const fth: MockOrchestrator = {
   listBuckets: vi.fn(),
 };
 
-const stageOrchestrators = vi.fn<(stage: string, email?: string) => MockOrchestrator[]>();
+const stageOrchestrators = vi.fn<(stage: string) => MockOrchestrator[]>();
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getAvailableOrchestrators: (stage: string, email?: string) => stageOrchestrators(stage, email),
+  getAvailableOrchestrators: (stage: string) => stageOrchestrators(stage),
 }));
 
 process.env.FILONE_STAGE = 'test';
@@ -147,35 +147,13 @@ describe('list-buckets baseHandler (single-region)', () => {
     expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
   });
 
-  it('selects orchestrators using the current FILONE_STAGE and no allowlist email by default', async () => {
+  it('selects orchestrators using the current FILONE_STAGE', async () => {
     aurora.listBuckets.mockResolvedValue([]);
 
     const event = buildEvent({ userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(stageOrchestrators).toHaveBeenCalledWith('test', undefined);
-  });
-
-  it('passes the verified email to the orchestrator registry for allowlist fan-out', async () => {
-    aurora.listBuckets.mockResolvedValue([]);
-
-    const event = buildEvent({
-      userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: true },
-    });
-    await baseHandler(event);
-
-    expect(stageOrchestrators).toHaveBeenCalledWith('test', 'dogfood@fil.org');
-  });
-
-  it('does not pass an unverified email to the orchestrator registry', async () => {
-    aurora.listBuckets.mockResolvedValue([]);
-
-    const event = buildEvent({
-      userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: false },
-    });
-    await baseHandler(event);
-
-    expect(stageOrchestrators).toHaveBeenCalledWith('test', undefined);
+    expect(stageOrchestrators).toHaveBeenCalledWith('test');
   });
 
   it('throws when the orchestrator returns an error', async () => {

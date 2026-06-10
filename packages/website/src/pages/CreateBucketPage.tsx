@@ -13,6 +13,7 @@ import {
   CreateBucketSchema,
   CreateAccessKeySchema,
   DOCS_URL,
+  getAvailableRegions,
   getRegionLabel,
 } from '@filone/shared';
 import type { CreateBucketResponse, RetentionMode, RetentionDurationType } from '@filone/shared';
@@ -28,7 +29,7 @@ import { FormField } from '../components/FormField';
 import { Overline } from '../components/Overline';
 import { Input } from '../components/Input';
 import { RegionSelect } from '../components/RegionSelect';
-import { useAvailableRegions } from '../lib/use-available-regions.js';
+import { FILONE_STAGE } from '../env.js';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
 import { SlowOperationIndicator } from '../components/SlowOperationIndicator';
@@ -44,7 +45,6 @@ export function CreateBucketPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const availableRegions = useAvailableRegions();
 
   // Bucket fields
   const [bucketName, setBucketName] = useState('');
@@ -270,7 +270,11 @@ export function CreateBucketPage() {
             <FormField
               htmlFor="bucket-region"
               label="Region"
-              description={availableRegions.length === 1 ? 'More regions coming soon.' : undefined}
+              description={
+                getAvailableRegions(FILONE_STAGE).length === 1
+                  ? 'More regions coming soon.'
+                  : undefined
+              }
             >
               <RegionSelect id="bucket-region" value={region} onChange={setRegion} />
             </FormField>

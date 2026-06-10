@@ -23,17 +23,6 @@ export function getUserInfo(event: AuthenticatedEvent): UserInfo {
 }
 
 /**
- * The user's email, but only when it has been verified — suitable for
- * allowlist checks (e.g. Foundation early-access regions). Returns `undefined`
- * for unverified or missing emails so callers can't grant access off an
- * unverified address.
- */
-export function getVerifiedEmail(event: AuthenticatedEvent): string | undefined {
-  const { email, emailVerified } = event.requestContext.userInfo;
-  return emailVerified ? email : undefined;
-}
-
-/**
  * Signal the auth middleware to force a token refresh after the handler completes.
  * Use this when a handler modifies Auth0 user data (name, email, etc.) so the
  * response includes fresh cookies with updated ID token claims.

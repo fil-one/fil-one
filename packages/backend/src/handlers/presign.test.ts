@@ -66,16 +66,12 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
 function buildPresignEvent(
   ops: unknown[],
-  overrides?: {
-    subscriptionStatus?: string;
-    region?: string | null;
-    userInfo?: { email?: string; emailVerified?: boolean };
-  },
+  overrides?: { subscriptionStatus?: string; region?: string | null },
 ) {
   const region = overrides?.region === undefined ? 'eu-west-1' : overrides.region;
   const event = buildEvent({
     body: JSON.stringify(ops),
-    userInfo: { ...USER_INFO, ...overrides?.userInfo },
+    userInfo: USER_INFO,
     ...(region !== null && { queryStringParameters: { region } }),
   });
   if (overrides?.subscriptionStatus) {
@@ -476,32 +472,6 @@ describe('presign baseHandler', () => {
       vi.stubEnv('FILONE_STAGE', 'production');
       const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
         region: 'us-east-1',
-      });
-      const result = await baseHandler(event);
-
-      expect(result.statusCode).toBe(400);
-      expect(result.body).toEqual(expect.stringContaining('us-east-1'));
-      expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
-    });
-
-    it('accepts us-east-1 in production for a verified Foundation email', async () => {
-      vi.stubEnv('FILONE_STAGE', 'production');
-      mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
-      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
-        region: 'us-east-1',
-        userInfo: { email: 'dogfood@fil.org', emailVerified: true },
-      });
-      const result = await baseHandler(event);
-
-      expect(result.statusCode).toBe(200);
-      expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
-    });
-
-    it('rejects us-east-1 in production for an unverified Foundation email', async () => {
-      vi.stubEnv('FILONE_STAGE', 'production');
-      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
-        region: 'us-east-1',
-        userInfo: { email: 'dogfood@fil.org', emailVerified: false },
       });
       const result = await baseHandler(event);
 

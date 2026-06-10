@@ -10,7 +10,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
+import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
@@ -24,12 +24,12 @@ export async function baseHandler(
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
   }
 
-  const { orgId } = getUserInfo(event);
-
   const region = event.queryStringParameters?.region ?? S3_REGION;
-  if (!isSupportedRegion(process.env.FILONE_STAGE!, region, getVerifiedEmail(event))) {
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
     return unsupportedRegionResponse(region);
   }
+
+  const { orgId } = getUserInfo(event);
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.isTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();

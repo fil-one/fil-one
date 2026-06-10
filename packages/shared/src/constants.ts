@@ -38,43 +38,22 @@ export function getRegionLabel(region: S3Region | string | null | undefined): st
   return REGION_LABELS[r as S3Region] ?? r;
 }
 
-/** Filecoin Foundation email domain, allowlisted for early-access regions. */
-export const FOUNDATION_EMAIL_DOMAIN = '@fil.org';
-
 /**
- * True when `email` is a Filecoin Foundation address.
- * The caller is responsible for ensuring the email is verified before
- * granting any allowlist-based access.
+ * Regions selectable in the given stage. Production currently exposes only
+ * `eu-west-1`; non-production stages also expose `us-east-1` for dogfooding.
  */
-export function isFoundationEmail(email: string | undefined): boolean {
-  return !!email && email.toLowerCase().endsWith(FOUNDATION_EMAIL_DOMAIN);
+export function getAvailableRegions(stage: Stage | string): S3Region[] {
+  if (stage === Stage.Production) return [S3Region.EuWest1];
+  return [S3Region.EuWest1, S3Region.UsEast1];
 }
 
 /**
- * Regions selectable in the given stage. Non-production stages expose
- * `us-east-1` for dogfooding; in production it is additionally exposed to
- * Filecoin Foundation users (verified `@fil.org` emails) for early access.
- * `email` should be passed only when verified — see {@link isFoundationEmail}.
- */
-export function getAvailableRegions(stage: Stage | string, email?: string): S3Region[] {
-  if (stage !== Stage.Production || isFoundationEmail(email)) {
-    return [S3Region.EuWest1, S3Region.UsEast1];
-  }
-  return [S3Region.EuWest1];
-}
-
-/**
- * Checks if the region is supported in the given stage (optionally for a
- * specific verified user email — see {@link getAvailableRegions}).
+ * Checks if the region is supported in the given stage.
  * Provides type-narrowing information to TypeScript, changing `region`
  * from `string` to `S3Region` when the function returns `true`.
  */
-export function isSupportedRegion(
-  stage: Stage | string,
-  region: string,
-  email?: string,
-): region is S3Region {
-  return getAvailableRegions(stage, email).includes(region as S3Region);
+export function isSupportedRegion(stage: Stage | string, region: string): region is S3Region {
+  return getAvailableRegions(stage).includes(region as S3Region);
 }
 
 /**
