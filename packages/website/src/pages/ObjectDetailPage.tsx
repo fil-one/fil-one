@@ -263,15 +263,18 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
             tooltipSide="bottom"
             onClick={() => void objectActions.downloadObject(objectKey, versionId)}
           />
-          {canShare && (
-            <IconButton
-              icon={LinkIcon}
-              aria-label="Share object"
-              tooltip="Share object"
-              tooltipSide="bottom"
-              onClick={() => setShareOpen(true)}
-            />
-          )}
+          <IconButton
+            icon={LinkIcon}
+            aria-label="Share object"
+            tooltip={
+              canShare
+                ? 'Share object'
+                : 'Sharing is not available during the trial period. Upgrade to a paid plan to share objects.'
+            }
+            tooltipSide="bottom"
+            disabled={!canShare}
+            onClick={() => setShareOpen(true)}
+          />
           <IconButton
             icon={TrashIcon}
             aria-label="Delete object"
