@@ -1,6 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
-import { DatabaseIcon, KeyIcon, GearIcon, CheckCircleIcon } from '@phosphor-icons/react/dist/ssr';
+import {
+  DatabaseIcon,
+  KeyIcon,
+  GearIcon,
+  CheckCircleIcon,
+  WarningCircleIcon,
+} from '@phosphor-icons/react/dist/ssr';
 
 import { Icon } from './Icon';
 
@@ -25,6 +31,13 @@ export const SuccessColor: Story = {
   },
 };
 
+export const ErrorColor: Story = {
+  args: {
+    component: WarningCircleIcon,
+    color: 'error',
+  },
+};
+
 export const SmallSize: Story = {
   args: {
     component: KeyIcon,
@@ -46,6 +59,7 @@ export const AllVariants: Story = {
       <Icon component={KeyIcon} size={16} />
       <Icon component={GearIcon} size={32} weight="bold" />
       <Icon component={CheckCircleIcon} color="success" size={32} />
+      <Icon component={WarningCircleIcon} color="error" size={32} />
     </div>
   ),
 };
