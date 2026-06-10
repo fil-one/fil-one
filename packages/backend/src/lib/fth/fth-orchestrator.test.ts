@@ -246,24 +246,28 @@ describe('fthOrchestrator.createBucket', () => {
   });
 
   it('wraps a PutBucketVersioning failure in BucketConfigurationError noting the bucket exists', async () => {
+    vi.useFakeTimers();
     s3Mock.on(CreateBucketCommand).resolves({});
     s3Mock.on(PutBucketVersioningCommand).rejects(new Error('AccessDenied'));
 
-    await expect(
-      fthOrchestrator.createBucket(fthClientId, { bucketName: 'my-bucket', versioning: true }),
-    ).rejects.toMatchObject({
-      name: 'BucketConfigurationError',
-      bucketName: 'my-bucket',
-    });
+    const promise = fthOrchestrator
+      .createBucket(fthClientId, { bucketName: 'my-bucket', versioning: true })
+      .catch((e) => e);
+    await vi.runAllTimersAsync();
+    const err = await promise;
+
+    expect(err).toMatchObject({ name: 'BucketConfigurationError', bucketName: 'my-bucket' });
+    vi.useRealTimers();
   });
 
   it('wraps a PutObjectLockConfiguration failure in BucketConfigurationError', async () => {
+    vi.useFakeTimers();
     s3Mock.on(CreateBucketCommand).resolves({});
     s3Mock.on(PutBucketVersioningCommand).resolves({});
     const cause = new Error('transient S3 error');
     s3Mock.on(PutObjectLockConfigurationCommand).rejects(cause);
 
-    const err = await fthOrchestrator
+    const promise = fthOrchestrator
       .createBucket(fthClientId, {
         bucketName: 'my-bucket',
         versioning: true,
@@ -271,9 +275,66 @@ describe('fthOrchestrator.createBucket', () => {
         retention: { enabled: true, mode: 'governance', duration: 7, durationType: 'd' },
       })
       .catch((e) => e);
+    await vi.runAllTimersAsync();
+    const err = await promise;
 
     expect(err).toBeInstanceOf(BucketConfigurationError);
     expect(err.cause).toBe(cause);
+    vi.useRealTimers();
+  });
+
+  it('retries PutBucketVersioning on a transient failure then succeeds', async () => {
+    vi.useFakeTimers();
+    s3Mock.on(CreateBucketCommand).resolves({});
+    s3Mock.on(PutBucketVersioningCommand).rejectsOnce(new Error('transient S3 error')).resolves({});
+
+    const promise = fthOrchestrator.createBucket(fthClientId, {
+      bucketName: 'my-bucket',
+      versioning: true,
+    });
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(s3Mock.commandCalls(PutBucketVersioningCommand)).toHaveLength(2);
+    vi.useRealTimers();
+  });
+
+  it('gives up on PutBucketVersioning after exhausting retries (1 initial + 3 retries)', async () => {
+    vi.useFakeTimers();
+    s3Mock.on(CreateBucketCommand).resolves({});
+    s3Mock.on(PutBucketVersioningCommand).rejects(new Error('persistent S3 error'));
+
+    const promise = fthOrchestrator
+      .createBucket(fthClientId, { bucketName: 'my-bucket', versioning: true })
+      .catch((e) => e);
+    await vi.runAllTimersAsync();
+    const err = await promise;
+
+    expect(err).toBeInstanceOf(BucketConfigurationError);
+    expect(s3Mock.commandCalls(PutBucketVersioningCommand)).toHaveLength(4);
+    vi.useRealTimers();
+  });
+
+  it('retries PutObjectLockConfiguration on a transient failure then succeeds', async () => {
+    vi.useFakeTimers();
+    s3Mock.on(CreateBucketCommand).resolves({});
+    s3Mock.on(PutBucketVersioningCommand).resolves({});
+    s3Mock
+      .on(PutObjectLockConfigurationCommand)
+      .rejectsOnce(new Error('transient S3 error'))
+      .resolves({});
+
+    const promise = fthOrchestrator.createBucket(fthClientId, {
+      bucketName: 'my-bucket',
+      versioning: true,
+      lock: true,
+      retention: { enabled: true, mode: 'governance', duration: 7, durationType: 'd' },
+    });
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(s3Mock.commandCalls(PutObjectLockConfigurationCommand)).toHaveLength(2);
+    vi.useRealTimers();
   });
 
   it('does not call PutBucketVersioning or PutObjectLockConfiguration for a plain bucket', async () => {

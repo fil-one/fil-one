@@ -9,6 +9,7 @@
 //     using the service access key stashed in SSM during setup.
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
+import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region } from '@filone/shared';
@@ -51,6 +52,11 @@ import type { FthManagementClient } from './fth-management-client.js';
 import { instrumentClient } from './fth-api-metrics.js';
 
 const FTH_CONSOLE_USER_CODE = 'filone-console';
+
+// Versioning / object-lock are applied as separate, idempotent S3 calls after the
+// bucket is created. Retry them so a transient S3 blip doesn't leave the bucket
+// partially configured (which would surface as a dead-end BucketConfigurationError).
+const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
 const dynamo = getDynamoClient();
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
@@ -108,15 +114,20 @@ export const fthOrchestrator = {
 
     try {
       if (args.versioning) {
-        await setBucketVersioning(s3, args.bucketName, true);
+        await pRetry(() => setBucketVersioning(s3, args.bucketName, true), BUCKET_CONFIG_RETRY);
       }
       if (args.retention?.enabled) {
-        await putObjectLockConfiguration(s3, {
-          bucketName: args.bucketName,
-          mode: args.retention.mode,
-          duration: args.retention.duration,
-          durationType: args.retention.durationType,
-        });
+        const retention = args.retention;
+        await pRetry(
+          () =>
+            putObjectLockConfiguration(s3, {
+              bucketName: args.bucketName,
+              mode: retention.mode,
+              duration: retention.duration,
+              durationType: retention.durationType,
+            }),
+          BUCKET_CONFIG_RETRY,
+        );
       }
     } catch (err) {
       throw new BucketConfigurationError(args.bucketName, { cause: err });
