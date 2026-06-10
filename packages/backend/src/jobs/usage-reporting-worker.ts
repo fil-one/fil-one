@@ -100,7 +100,8 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     return;
   }
 
-  // Trial lock enforcement is Aurora-only; identify its tenant id (if any).
+  // Trial lock enforcement is Aurora-only for now; identify its tenant id (if any).
+  // TODO: rework as part of #401
   const auroraTenantId = orgRegions.find(
     (r) => r.orchestrator.id === auroraOrchestrator.id,
   )?.tenantId;
