@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import type { TenantStatus } from '../lib/service-orchestrator.js';
 
 export interface FakeOrchestrator {
   id: string;
@@ -16,7 +17,7 @@ export interface FakeOrchestrator {
  */
 export function fakeOrchestrator(
   id: string,
-  opts: { ready?: boolean; status?: string } = {},
+  opts: { ready?: boolean; status?: TenantStatus } = {},
 ): FakeOrchestrator {
   const { ready = true, status = 'active' } = opts;
   return {

@@ -5,7 +5,7 @@ import type {
   RetentionMode,
   S3Region,
 } from '@filone/shared';
-import { S3ClientContext } from './s3-client.js';
+import type { S3ClientContext } from './s3-client.js';
 import type { OrgProfileItem } from './org-profile.js';
 
 export interface BucketSummary {
