@@ -18,25 +18,24 @@ export async function getProvisionedRegions(orgId: string): Promise<ProvisionedR
   return resolved.filter((t): t is ProvisionedRegion => t !== null);
 }
 
-// Pushes a tenant status change to every orchestrator the org has a tenant on,
-// so locking/unlocking an account takes effect everywhere it exists. Replaces
-// the duplicated single-call pattern at every billing-driven status-change site.
-export async function setTenantStatusInProvisionedRegions(
-  orgId: string,
-  status: TenantStatus,
-): Promise<void> {
-  const ready = await getProvisionedRegions(orgId);
-
-  await Promise.all(
-    ready.map(({ orchestrator, tenantId }) => orchestrator.updateTenantStatus(tenantId, status)),
-  );
-}
-
 export interface RegionSyncOutcome {
   orchestratorId: string;
   tenantId: string;
   outcome: 'updated' | 'in-sync' | 'skipped' | 'not-found' | 'error';
   cause?: unknown;
+}
+
+// Re-raises per-region sync failures as a single error. Callers that need a
+// failed sync to abort the surrounding operation (so it is retried as a whole)
+// pass the outcomes of syncTenantStatusInProvisionedRegions through this.
+export function assertRegionSyncSucceeded(outcomes: RegionSyncOutcome[]): void {
+  const failed = outcomes.filter((o) => o.outcome === 'error');
+  if (failed.length > 0) {
+    throw new Error(
+      `tenant status sync failed for: ${failed.map((o) => o.orchestratorId).join(', ')}`,
+      { cause: failed[0].cause },
+    );
+  }
 }
 
 const STATUS_PROBE_RETRY = { retries: 3 } as const;

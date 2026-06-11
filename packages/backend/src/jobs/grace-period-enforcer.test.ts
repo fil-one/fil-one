@@ -153,6 +153,74 @@ describe('grace-period-enforcer', () => {
     expect(fth.updateTenantStatus).toHaveBeenCalledWith(tenantFor('fth'), 'disabled');
   });
 
+  it('does not cancel the subscription when the disable fails in one region', async () => {
+    const fth = fakeOrchestrator('fth');
+    fth.updateTenantStatus.mockRejectedValue(new Error('FTH API error'));
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
+
+    await handler();
+
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'disabled');
+    expect(canceledUpdate()).toBeUndefined();
+  });
+
+  it('retries only the failed region on the next run, then cancels', async () => {
+    const fth = fakeOrchestrator('fth');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
+
+    // First run: FTH disable fails; the record stays in grace_period.
+    // Second run: Aurora probes as already disabled, FTH succeeds.
+    fth.updateTenantStatus
+      .mockRejectedValueOnce(new Error('FTH API error'))
+      .mockResolvedValue(undefined);
+    aurora.getTenantStatus
+      .mockResolvedValueOnce({ kind: 'ok', status: 'active' })
+      .mockResolvedValue({ kind: 'ok', status: 'disabled' });
+
+    await handler();
+    expect(canceledUpdate()).toBeUndefined();
+
+    await handler();
+
+    expect(aurora.updateTenantStatus).toHaveBeenCalledTimes(1);
+    expect(fth.updateTenantStatus).toHaveBeenCalledTimes(2);
+    expect(canceledUpdate()).toBeDefined();
+  });
+
+  it('cancels without a disable call when the tenant is already disabled', async () => {
+    aurora = fakeOrchestrator('aurora', { status: 'disabled' });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
+
+    await handler();
+
+    expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+    expect(canceledUpdate()).toBeDefined();
+  });
+
   it('cancels the subscription even when no region is provisioned', async () => {
     aurora = fakeOrchestrator('aurora', { ready: false });
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);

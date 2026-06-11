@@ -24,10 +24,17 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockSetTenantStatusInProvisionedRegions = vi.fn();
-vi.mock('../lib/region-helpers.js', () => ({
-  setTenantStatusInProvisionedRegions: (...args: unknown[]) =>
-    mockSetTenantStatusInProvisionedRegions(...args),
+// The orchestrator registry instantiates real clients at import time; mock it
+// so the otherwise-real region-helpers module can be loaded below.
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
+  getAvailableOrchestrators: () => [],
+}));
+
+const mockSyncTenantStatusInProvisionedRegions = vi.fn();
+vi.mock('../lib/region-helpers.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/region-helpers.js')>()),
+  syncTenantStatusInProvisionedRegions: (...args: unknown[]) =>
+    mockSyncTenantStatusInProvisionedRegions(...args),
 }));
 
 vi.mock('../lib/stripe-client.js', () => ({
@@ -117,12 +124,12 @@ describe('activate-subscription handler', () => {
     mockSubscriptionsCreate.mockReset();
     mockSubscriptionsUpdate.mockReset();
     mockPromotionCodesList.mockReset();
-    mockSetTenantStatusInProvisionedRegions.mockReset();
+    mockSyncTenantStatusInProvisionedRegions.mockReset();
 
     mockSetupIntentsList.mockResolvedValue({
       data: [{ status: 'succeeded', payment_method: 'pm_test_789' }],
     });
-    mockSetTenantStatusInProvisionedRegions.mockResolvedValue({});
+    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
   });
 
   it('updates existing trial subscription when subscriptionId exists', async () => {
@@ -172,7 +179,7 @@ describe('activate-subscription handler', () => {
     });
     await handler(event, {} as never);
 
-    expect(mockSetTenantStatusInProvisionedRegions).toHaveBeenCalledWith('org-1', 'active');
+    expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith('org-1', 'active');
   });
 
   it('attaches payment method before ending trial to prevent cancellation', async () => {
@@ -379,7 +386,7 @@ describe('activate-subscription handler', () => {
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
 
     // Aurora tenant should NOT have been unlocked
-    expect(mockSetTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
   });
 
   it('returns 402 when subscription status is unpaid after activation', async () => {
@@ -399,7 +406,7 @@ describe('activate-subscription handler', () => {
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    expect(mockSetTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
   });
 
   it('returns 500 when updateTenantStatus fails', async () => {
@@ -408,7 +415,14 @@ describe('activate-subscription handler', () => {
       .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
     ddbMock.on(UpdateItemCommand).resolves({});
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
-    mockSetTenantStatusInProvisionedRegions.mockRejectedValue(new Error('Aurora down'));
+    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([
+      {
+        orchestratorId: 'aurora',
+        tenantId: 'aurora-t-1',
+        outcome: 'error',
+        cause: new Error('Aurora down'),
+      },
+    ]);
 
     const event = buildEvent({
       userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
@@ -571,7 +585,7 @@ describe('activate-subscription handler', () => {
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    expect(mockSetTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
   });
 
   // ── promotion code ────────────────────────────────────────────────────

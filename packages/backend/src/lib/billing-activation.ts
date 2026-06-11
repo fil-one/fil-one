@@ -3,7 +3,10 @@ import type Stripe from 'stripe';
 import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
-import { setTenantStatusInProvisionedRegions } from './region-helpers.js';
+import {
+  assertRegionSyncSucceeded,
+  syncTenantStatusInProvisionedRegions,
+} from './region-helpers.js';
 
 const dynamo = getDynamoClient();
 
@@ -57,7 +60,7 @@ export async function saveBillingRecord(
 // has none there, so this is a no-op for orchestrators the org never used.
 export async function unlockAllProvisionedRegions(orgId: string): Promise<void> {
   try {
-    await setTenantStatusInProvisionedRegions(orgId, 'active');
+    assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'active'));
     console.log('[billing-activation] Tenant unlocked', { orgId });
   } catch (error) {
     console.error('[billing-activation] Failed to unlock tenant', {

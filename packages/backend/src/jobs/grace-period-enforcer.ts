@@ -4,7 +4,7 @@ import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import {
-  setTenantStatusInProvisionedRegions,
+  assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.js';
 
@@ -134,15 +134,20 @@ async function scanGracePeriodCandidates(
 }
 
 // Grace period expired — disable the tenant on every orchestrator it exists on
-// and cancel the subscription. The disable is best-effort per orchestrator
-// (orchestrators with no tenant are skipped); the billing record is canceled
-// unconditionally so a stuck/unprovisioned org still transitions out of grace.
+// and cancel the subscription. The disable is a probe-first sync: regions that
+// are already disabled are skipped, so a partially disabled tenant converges
+// on retry. A failed region throws before the cancel write, keeping the record
+// in grace_period so the next run retries only the out-of-sync regions. An org
+// with no provisioned regions still transitions out of grace (empty outcomes,
+// cancel proceeds).
 async function cancelSubscriptionAndDisableTenant(
   candidate: Candidate,
   billingTableName: string,
   now: Date,
 ): Promise<void> {
-  await setTenantStatusInProvisionedRegions(candidate.orgId, 'disabled');
+  assertRegionSyncSucceeded(
+    await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled'),
+  );
   // Transition DynamoDB status to canceled
   await dynamo.send(
     new UpdateItemCommand({
@@ -190,13 +195,7 @@ async function ensureTenantWriteLocked(candidate: Candidate): Promise<CandidateO
 
   // The sync helper never throws; re-raise per-region failures so the
   // candidate is counted as failed and retried on the next run.
-  const failed = outcomes.filter((o) => o.outcome === 'error');
-  if (failed.length > 0) {
-    throw new Error(
-      `tenant status sync failed for: ${failed.map((o) => o.orchestratorId).join(', ')}`,
-      { cause: failed[0].cause },
-    );
-  }
+  assertRegionSyncSucceeded(outcomes);
 
   return updated.length > 0 ? 'write_locked' : 'skipped';
 }

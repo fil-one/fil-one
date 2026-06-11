@@ -15,7 +15,10 @@ import {
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { setTenantStatusInProvisionedRegions } from '../lib/region-helpers.js';
+import {
+  assertRegionSyncSucceeded,
+  syncTenantStatusInProvisionedRegions,
+} from '../lib/region-helpers.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import {
   emitDunningEscalation,
@@ -237,11 +240,12 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
     );
   }
 
-  // Disable immediately — no grace period. Tenants first; a failure here throws so the
+  // Disable immediately — no grace period. Tenants first; a failed region throws so the
   // webhook returns 500 and Stripe retries (there is no cron fallback for canceled records).
+  // The sync is probe-first, so a retry skips regions that are already disabled.
   const orgId = await resolveOrgId(userId, tableName);
   if (orgId) {
-    await setTenantStatusInProvisionedRegions(orgId, 'disabled');
+    assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'disabled'));
     console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
       userId,
       orgId,
@@ -387,11 +391,12 @@ async function handleSubscriptionDeleted(
 
   // Best-effort: write-lock the tenant on every orchestrator during grace
   // period. If this fails, the daily grace-period-enforcer cron will also
-  // attempt WRITE_LOCK for active grace periods missing it.
+  // attempt WRITE_LOCK for active grace periods missing it. The sync never
+  // downgrades a tenant that is already disabled.
   try {
     const orgId = await resolveOrgId(userId, tableName);
     if (orgId) {
-      await setTenantStatusInProvisionedRegions(orgId, 'write-locked');
+      assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'write-locked'));
       console.log('[stripe-webhook] Tenant write-locked', { userId, orgId });
     }
   } catch (error) {
@@ -446,7 +451,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   try {
     const orgId = await resolveOrgId(userId, tableName);
     if (orgId) {
-      await setTenantStatusInProvisionedRegions(orgId, 'active');
+      assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'active'));
       console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
     }
   } catch (error) {

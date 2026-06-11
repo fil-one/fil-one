@@ -8,9 +8,10 @@ vi.mock('./service-orchestrator-registry.js', () => ({
 process.env.FILONE_STAGE = 'test';
 
 import {
+  assertRegionSyncSucceeded,
   getProvisionedRegions,
-  setTenantStatusInProvisionedRegions,
   syncTenantStatusInProvisionedRegions,
+  type RegionSyncOutcome,
 } from './region-helpers.js';
 
 function fakeOrchestrator(id: string, tenantId: string | null, status = 'active') {
@@ -21,59 +22,6 @@ function fakeOrchestrator(id: string, tenantId: string | null, status = 'active'
     getTenantStatus: vi.fn().mockResolvedValue({ kind: 'ok', status }),
   };
 }
-
-describe('setTenantStatusInProvisionedRegions', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('reads the available orchestrators for the current stage', async () => {
-    mockGetAvailableOrchestrators.mockReturnValue([]);
-
-    await setTenantStatusInProvisionedRegions('org-1', 'active');
-
-    expect(mockGetAvailableOrchestrators).toHaveBeenCalledWith('test');
-  });
-
-  it('updates the status in each provisioned region', async () => {
-    const aurora = fakeOrchestrator('aurora', 'aurora-t-1');
-    const fth = fakeOrchestrator('fth', 'fth-t-1');
-    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
-
-    await setTenantStatusInProvisionedRegions('org-1', 'write-locked');
-
-    expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora-t-1', 'write-locked');
-    expect(fth.updateTenantStatus).toHaveBeenCalledWith('fth-t-1', 'write-locked');
-  });
-
-  it('resolves the tenant per orchestrator via isTenantReady', async () => {
-    const aurora = fakeOrchestrator('aurora', 'aurora-t-1');
-    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
-
-    await setTenantStatusInProvisionedRegions('org-1', 'active');
-
-    expect(aurora.isTenantReady).toHaveBeenCalledWith('org-1');
-  });
-
-  it('skips regions whose tenant is not provisioned', async () => {
-    const fth = fakeOrchestrator('fth', null);
-    mockGetAvailableOrchestrators.mockReturnValue([fth]);
-
-    await setTenantStatusInProvisionedRegions('org-1', 'disabled');
-
-    expect(fth.updateTenantStatus).not.toHaveBeenCalled();
-  });
-
-  it('propagates errors from updateTenantStatus', async () => {
-    const aurora = fakeOrchestrator('aurora', 'aurora-t-1');
-    aurora.updateTenantStatus.mockRejectedValue(new Error('Aurora API error'));
-    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
-
-    await expect(setTenantStatusInProvisionedRegions('org-1', 'active')).rejects.toThrow(
-      'Aurora API error',
-    );
-  });
-});
 
 describe('syncTenantStatusInProvisionedRegions', () => {
   beforeEach(() => {
@@ -230,6 +178,47 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     expect(result).toEqual([
       { orchestratorId: 'fth', tenantId: 'fth-t-1', outcome: 'error', cause: updateError },
     ]);
+  });
+});
+
+describe('assertRegionSyncSucceeded', () => {
+  it('returns normally when no outcome is an error', () => {
+    const outcomes: RegionSyncOutcome[] = [
+      { orchestratorId: 'aurora', tenantId: 'aurora-t-1', outcome: 'updated' },
+      { orchestratorId: 'fth', tenantId: 'fth-t-1', outcome: 'in-sync' },
+    ];
+
+    expect(() => assertRegionSyncSucceeded(outcomes)).not.toThrow();
+  });
+
+  it('returns normally for an empty outcome list', () => {
+    expect(() => assertRegionSyncSucceeded([])).not.toThrow();
+  });
+
+  it('throws an error naming every failed orchestrator', () => {
+    const outcomes: RegionSyncOutcome[] = [
+      { orchestratorId: 'aurora', tenantId: 'aurora-t-1', outcome: 'error', cause: new Error('a') },
+      { orchestratorId: 'fth', tenantId: 'fth-t-1', outcome: 'error', cause: new Error('b') },
+    ];
+
+    expect(() => assertRegionSyncSucceeded(outcomes)).toThrow(
+      'tenant status sync failed for: aurora, fth',
+    );
+  });
+
+  it('sets the cause from the first failed outcome', () => {
+    const firstCause = new Error('Aurora API error');
+    const outcomes: RegionSyncOutcome[] = [
+      { orchestratorId: 'aurora', tenantId: 'aurora-t-1', outcome: 'error', cause: firstCause },
+    ];
+
+    let thrown: unknown;
+    try {
+      assertRegionSyncSucceeded(outcomes);
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as Error).cause).toBe(firstCause);
   });
 });
 
