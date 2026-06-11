@@ -1,7 +1,7 @@
 import pRetry from 'p-retry';
-import { getAvailableOrchestrators } from './service-orchestrator-registry';
-import { getOrgProfile } from './org-profile';
-import type { ServiceOrchestrator, TenantStatus } from './service-orchestrator';
+import { getAvailableOrchestrators } from './service-orchestrator-registry.js';
+import { getOrgProfile } from './org-profile.js';
+import type { ServiceOrchestrator, TenantStatus } from './service-orchestrator.js';
 
 export interface ProvisionedRegion {
   orchestrator: ServiceOrchestrator;
