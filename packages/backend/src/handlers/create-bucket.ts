@@ -4,7 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
 import { CreateBucketSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { BucketAlreadyExistsError } from '../lib/errors.js';
+import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
@@ -63,6 +63,15 @@ export async function baseHandler(
       return new ResponseBuilder()
         .status(409)
         .body<ErrorResponse>({ message: `Bucket "${bucketName}" already exists` })
+        .build();
+    }
+    // The bucket was created but couldn't be fully configured. Surface the
+    // actionable message so the caller can finish setup via the S3 API instead
+    // of getting the generic 500 from errorHandlerMiddleware.
+    if (err instanceof BucketConfigurationError) {
+      return new ResponseBuilder()
+        .status(500)
+        .body<ErrorResponse>({ message: err.message })
         .build();
     }
     throw err;

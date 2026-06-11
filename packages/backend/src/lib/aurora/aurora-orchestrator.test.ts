@@ -474,14 +474,14 @@ describe('auroraOrchestrator', () => {
     });
   });
 
-  describe('getPresignerContext', () => {
+  describe('getS3ClientContext', () => {
     it('returns endpoint + credentials with Aurora-specific knobs', async () => {
       mockSsmCredentials('aurora-t-1', {
         accessKeyId: 'AK',
         secretAccessKey: 'SK',
       });
 
-      const ctx = await auroraOrchestrator.getPresignerContext('aurora-t-1');
+      const ctx = await auroraOrchestrator.getS3ClientContext('aurora-t-1');
 
       expect(ctx).toEqual({
         endpointUrl: expect.stringContaining('aur.lu'),

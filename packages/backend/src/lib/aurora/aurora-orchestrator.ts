@@ -36,10 +36,10 @@ import type {
   GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  PresignerContext,
   ServiceOrchestrator,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import type { S3ClientContext } from '../s3-client.js';
 
 const dynamo = getDynamoClient();
 export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting();
@@ -199,7 +199,7 @@ export const auroraOrchestrator = {
     await deleteAuroraAccessKey({ tenantId, auroraKeyId: keyId });
   },
 
-  async getPresignerContext(tenantId: string): Promise<PresignerContext> {
+  async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
     const stage = getStage();
     const credentials = await getConsoleS3Credentials({
       orchestratorId: auroraOrchestrator.id,
