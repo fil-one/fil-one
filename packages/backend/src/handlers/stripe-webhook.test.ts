@@ -23,10 +23,10 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockSetTenantStatusAcrossOrchestrators = vi.fn();
-vi.mock('../lib/tenant-status.js', () => ({
-  setTenantStatusAcrossOrchestrators: (...args: unknown[]) =>
-    mockSetTenantStatusAcrossOrchestrators(...args),
+const mockSetTenantStatusInProvisionedRegions = vi.fn();
+vi.mock('../lib/region-helpers.js', () => ({
+  setTenantStatusInProvisionedRegions: (...args: unknown[]) =>
+    mockSetTenantStatusInProvisionedRegions(...args),
 }));
 
 const mockConstructEvent = vi.fn();
@@ -201,8 +201,8 @@ describe('stripe-webhook handler', () => {
     mockConstructEvent.mockReset();
     mockCustomersRetrieve.mockReset();
     mockPaymentMethodsRetrieve.mockReset();
-    mockSetTenantStatusAcrossOrchestrators.mockReset();
-    mockSetTenantStatusAcrossOrchestrators.mockResolvedValue(undefined);
+    mockSetTenantStatusInProvisionedRegions.mockReset();
+    mockSetTenantStatusInProvisionedRegions.mockResolvedValue(undefined);
     reportMetricMock.mockReset();
   });
 
@@ -831,7 +831,7 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(mockSetTenantStatusAcrossOrchestrators).toHaveBeenCalledWith(
+      expect(mockSetTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
         MOCK_ORG_ID,
         'write-locked',
       );
@@ -843,7 +843,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
       setupAuroraTenantResolution();
-      mockSetTenantStatusAcrossOrchestrators.mockRejectedValue(new Error('Aurora API error'));
+      mockSetTenantStatusInProvisionedRegions.mockRejectedValue(new Error('Aurora API error'));
 
       const result = await handler(buildWebhookEvent('{}'));
 
@@ -860,7 +860,7 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(mockSetTenantStatusAcrossOrchestrators).not.toHaveBeenCalled();
+      expect(mockSetTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
@@ -875,7 +875,7 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(mockSetTenantStatusAcrossOrchestrators).toHaveBeenCalledWith(MOCK_ORG_ID, 'disabled');
+      expect(mockSetTenantStatusInProvisionedRegions).toHaveBeenCalledWith(MOCK_ORG_ID, 'disabled');
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -922,7 +922,7 @@ describe('stripe-webhook handler', () => {
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
-      expect(mockSetTenantStatusAcrossOrchestrators).not.toHaveBeenCalled();
+      expect(mockSetTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
       expect(result).toEqual({
         statusCode: 500,
         body: JSON.stringify({ message: 'Processing error' }),
@@ -932,7 +932,7 @@ describe('stripe-webhook handler', () => {
     it('fails the webhook (500) and releases idempotency when Aurora DISABLE fails', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject());
       setupAuroraTenantResolution();
-      mockSetTenantStatusAcrossOrchestrators.mockRejectedValue(new Error('Aurora API error'));
+      mockSetTenantStatusInProvisionedRegions.mockRejectedValue(new Error('Aurora API error'));
 
       const result = await handler(buildWebhookEvent('{}'));
 
@@ -966,7 +966,7 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(mockSetTenantStatusAcrossOrchestrators).not.toHaveBeenCalled();
+      expect(mockSetTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -1072,7 +1072,7 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(mockSetTenantStatusAcrossOrchestrators).toHaveBeenCalledWith(MOCK_ORG_ID, 'active');
+      expect(mockSetTenantStatusInProvisionedRegions).toHaveBeenCalledWith(MOCK_ORG_ID, 'active');
 
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -1081,7 +1081,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
       setupAuroraTenantResolution();
-      mockSetTenantStatusAcrossOrchestrators.mockRejectedValue(new Error('Aurora API error'));
+      mockSetTenantStatusInProvisionedRegions.mockRejectedValue(new Error('Aurora API error'));
 
       const result = await handler(buildWebhookEvent('{}'));
 
@@ -1382,7 +1382,7 @@ describe('stripe-webhook handler', () => {
         attemptBucket: '4+',
       });
       // Aurora re-activation must still run
-      expect(mockSetTenantStatusAcrossOrchestrators).toHaveBeenCalledWith(MOCK_ORG_ID, 'active');
+      expect(mockSetTenantStatusInProvisionedRegions).toHaveBeenCalledWith(MOCK_ORG_ID, 'active');
     });
 
     it('does NOT emit recovered on normal renewal (prior status was active)', async () => {

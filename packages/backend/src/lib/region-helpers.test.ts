@@ -7,7 +7,7 @@ vi.mock('./service-orchestrator-registry.js', () => ({
 
 process.env.FILONE_STAGE = 'test';
 
-import { resolveReadyTenants, setTenantStatusAcrossOrchestrators } from './tenant-status.js';
+import { getProvisionedRegions, setTenantStatusInProvisionedRegions } from './region-helpers.js';
 
 function fakeOrchestrator(id: string, tenantId: string | null) {
   return {
@@ -17,7 +17,7 @@ function fakeOrchestrator(id: string, tenantId: string | null) {
   };
 }
 
-describe('setTenantStatusAcrossOrchestrators', () => {
+describe('setTenantStatusInProvisionedRegions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -25,17 +25,17 @@ describe('setTenantStatusAcrossOrchestrators', () => {
   it('reads the available orchestrators for the current stage', async () => {
     mockGetAvailableOrchestrators.mockReturnValue([]);
 
-    await setTenantStatusAcrossOrchestrators('org-1', 'active');
+    await setTenantStatusInProvisionedRegions('org-1', 'active');
 
     expect(mockGetAvailableOrchestrators).toHaveBeenCalledWith('test');
   });
 
-  it('updates the status on each orchestrator that has a tenant', async () => {
+  it('updates the status in each provisioned region', async () => {
     const aurora = fakeOrchestrator('aurora', 'aurora-t-1');
     const fth = fakeOrchestrator('fth', 'fth-t-1');
     mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
 
-    await setTenantStatusAcrossOrchestrators('org-1', 'write-locked');
+    await setTenantStatusInProvisionedRegions('org-1', 'write-locked');
 
     expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora-t-1', 'write-locked');
     expect(fth.updateTenantStatus).toHaveBeenCalledWith('fth-t-1', 'write-locked');
@@ -45,16 +45,16 @@ describe('setTenantStatusAcrossOrchestrators', () => {
     const aurora = fakeOrchestrator('aurora', 'aurora-t-1');
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
-    await setTenantStatusAcrossOrchestrators('org-1', 'active');
+    await setTenantStatusInProvisionedRegions('org-1', 'active');
 
     expect(aurora.isTenantReady).toHaveBeenCalledWith('org-1');
   });
 
-  it('skips orchestrators whose tenant is not ready', async () => {
+  it('skips regions whose tenant is not provisioned', async () => {
     const fth = fakeOrchestrator('fth', null);
     mockGetAvailableOrchestrators.mockReturnValue([fth]);
 
-    await setTenantStatusAcrossOrchestrators('org-1', 'disabled');
+    await setTenantStatusInProvisionedRegions('org-1', 'disabled');
 
     expect(fth.updateTenantStatus).not.toHaveBeenCalled();
   });
@@ -64,13 +64,13 @@ describe('setTenantStatusAcrossOrchestrators', () => {
     aurora.updateTenantStatus.mockRejectedValue(new Error('Aurora API error'));
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
-    await expect(setTenantStatusAcrossOrchestrators('org-1', 'active')).rejects.toThrow(
+    await expect(setTenantStatusInProvisionedRegions('org-1', 'active')).rejects.toThrow(
       'Aurora API error',
     );
   });
 });
 
-describe('resolveReadyTenants', () => {
+describe('getProvisionedRegions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -78,17 +78,17 @@ describe('resolveReadyTenants', () => {
   it('reads the available orchestrators for the current stage', async () => {
     mockGetAvailableOrchestrators.mockReturnValue([]);
 
-    await resolveReadyTenants('org-1');
+    await getProvisionedRegions('org-1');
 
     expect(mockGetAvailableOrchestrators).toHaveBeenCalledWith('test');
   });
 
-  it('returns each orchestrator paired with its resolved tenant', async () => {
+  it('returns each provisioned region as an orchestrator paired with its tenant', async () => {
     const aurora = fakeOrchestrator('aurora', 'aurora-t-1');
     const fth = fakeOrchestrator('fth', 'fth-t-1');
     mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
 
-    const result = await resolveReadyTenants('org-1');
+    const result = await getProvisionedRegions('org-1');
 
     expect(result).toEqual([
       { orchestrator: aurora, tenantId: 'aurora-t-1' },
@@ -96,21 +96,21 @@ describe('resolveReadyTenants', () => {
     ]);
   });
 
-  it('omits orchestrators whose tenant is not ready', async () => {
+  it('omits regions whose tenant is not provisioned', async () => {
     const aurora = fakeOrchestrator('aurora', 'aurora-t-1');
     const fth = fakeOrchestrator('fth', null);
     mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
 
-    const result = await resolveReadyTenants('org-1');
+    const result = await getProvisionedRegions('org-1');
 
     expect(result).toEqual([{ orchestrator: aurora, tenantId: 'aurora-t-1' }]);
   });
 
-  it('returns an empty array when no orchestrator has a ready tenant', async () => {
+  it('returns an empty array when no region is provisioned', async () => {
     const aurora = fakeOrchestrator('aurora', null);
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
-    const result = await resolveReadyTenants('org-1');
+    const result = await getProvisionedRegions('org-1');
 
     expect(result).toEqual([]);
   });

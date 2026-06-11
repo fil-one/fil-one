@@ -4,10 +4,10 @@ import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import {
-  resolveReadyTenants,
-  setTenantStatusAcrossOrchestrators,
-  type ReadyTenant,
-} from '../lib/tenant-status.js';
+  getProvisionedRegions,
+  setTenantStatusInProvisionedRegions,
+  type ProvisionedRegion,
+} from '../lib/region-helpers.js';
 
 const dynamo = getDynamoClient();
 
@@ -143,7 +143,7 @@ async function cancelSubscriptionAndDisableTenant(
   billingTableName: string,
   now: Date,
 ): Promise<void> {
-  await setTenantStatusAcrossOrchestrators(candidate.orgId, 'disabled');
+  await setTenantStatusInProvisionedRegions(candidate.orgId, 'disabled');
   // Transition DynamoDB status to canceled
   await dynamo.send(
     new UpdateItemCommand({
@@ -169,7 +169,7 @@ async function cancelSubscriptionAndDisableTenant(
 // redundant lock call and, critically, never downgrade a tenant that is already
 // `disabled` back to `write-locked`.
 async function ensureTenantWriteLocked(candidate: Candidate): Promise<CandidateOutcome> {
-  const ready = await resolveReadyTenants(candidate.orgId);
+  const ready = await getProvisionedRegions(candidate.orgId);
 
   if (ready.length === 0) {
     console.warn('[grace-period-enforcer] No ready tenant on any orchestrator, skipping', {
@@ -185,7 +185,7 @@ async function ensureTenantWriteLocked(candidate: Candidate): Promise<CandidateO
 
 async function writeLockTenant(
   candidate: Candidate,
-  { orchestrator, tenantId }: ReadyTenant,
+  { orchestrator, tenantId }: ProvisionedRegion,
 ): Promise<CandidateOutcome> {
   const probe = await orchestrator.getTenantStatus(tenantId);
 

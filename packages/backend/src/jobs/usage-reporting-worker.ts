@@ -7,7 +7,6 @@ import { getStripeClient, updateCustomerMetadata } from '../lib/stripe-client.js
 import { getTenantInfo, mapToModelsTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import type { ModelsTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import type { TenantStatus } from '../lib/service-orchestrator.js';
-import { setTenantStatusAcrossOrchestrators } from '../lib/tenant-status.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
 import {
   calculateAverageUsage,
@@ -16,7 +15,10 @@ import {
 } from '../lib/usage-calculator.js';
 import type { TenantUsageMetrics } from '../lib/service-orchestrator.js';
 import { auroraOrchestrator } from '../lib/aurora/aurora-orchestrator.js';
-import { getProvisionedRegions } from '../lib/region-helpers.js';
+import {
+  getProvisionedRegions,
+  setTenantStatusInProvisionedRegions,
+} from '../lib/region-helpers.js';
 
 const dynamo = getDynamoClient();
 
@@ -71,7 +73,7 @@ async function enforceTenantLocks({
       currentStorageBytes,
       totalEgressBytes,
     });
-    await setTenantStatusAcrossOrchestrators(orgId, desired);
+    await setTenantStatusInProvisionedRegions(orgId, desired);
   }
 
   return desiredModels;

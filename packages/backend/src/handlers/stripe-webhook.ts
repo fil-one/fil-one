@@ -15,7 +15,7 @@ import {
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { setTenantStatusAcrossOrchestrators } from '../lib/tenant-status.js';
+import { setTenantStatusInProvisionedRegions } from '../lib/region-helpers.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import {
   emitDunningEscalation,
@@ -241,7 +241,7 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
   // webhook returns 500 and Stripe retries (there is no cron fallback for canceled records).
   const orgId = await resolveOrgId(userId, tableName);
   if (orgId) {
-    await setTenantStatusAcrossOrchestrators(orgId, 'disabled');
+    await setTenantStatusInProvisionedRegions(orgId, 'disabled');
     console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
       userId,
       orgId,
@@ -391,7 +391,7 @@ async function handleSubscriptionDeleted(
   try {
     const orgId = await resolveOrgId(userId, tableName);
     if (orgId) {
-      await setTenantStatusAcrossOrchestrators(orgId, 'write-locked');
+      await setTenantStatusInProvisionedRegions(orgId, 'write-locked');
       console.log('[stripe-webhook] Tenant write-locked', { userId, orgId });
     }
   } catch (error) {
@@ -446,7 +446,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   try {
     const orgId = await resolveOrgId(userId, tableName);
     if (orgId) {
-      await setTenantStatusAcrossOrchestrators(orgId, 'active');
+      await setTenantStatusInProvisionedRegions(orgId, 'active');
       console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
     }
   } catch (error) {

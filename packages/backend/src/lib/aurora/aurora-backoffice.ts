@@ -490,9 +490,9 @@ export async function getTenantStatus({
 }
 
 // Maps the orchestrator-agnostic TenantStatus to Aurora's generated enum.
-// Homed here (not in tenant-status.ts) to avoid an import cycle: the registry
+// Homed here (not in region-helpers.ts) to avoid an import cycle: the registry
 // imports the orchestrator, so the orchestrator can't import back from
-// tenant-status.ts. aurora-backoffice.ts imports no registry/orchestrator.
+// region-helpers.ts. aurora-backoffice.ts imports no registry/orchestrator.
 const TENANT_STATUS_TO_MODELS: Record<TenantStatus, ModelsTenantStatus> = {
   active: 'ACTIVE',
   'write-locked': 'WRITE_LOCKED',

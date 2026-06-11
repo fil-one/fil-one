@@ -16,7 +16,7 @@ vi.mock('sst', () => ({
 }));
 
 // grace-period-enforcer probes/locks tenants through the orchestrator registry
-// (via lib/tenant-status.js, which is left real). Mocking getAvailableOrchestrators
+// (via lib/region-helpers.js, which is left real). Mocking getAvailableOrchestrators
 // lets us drive fake orchestrators end-to-end.
 const mockGetAvailableOrchestrators = vi.fn();
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
@@ -131,7 +131,7 @@ describe('grace-period-enforcer', () => {
     expect(canceledUpdate()).toBeDefined();
   });
 
-  it('disables the tenant on every orchestrator when grace expired', async () => {
+  it('disables the tenant in every provisioned region when grace expired', async () => {
     const fth = fakeOrchestrator('fth');
     mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
     ddbMock.on(ScanCommand).resolves({
@@ -149,7 +149,7 @@ describe('grace-period-enforcer', () => {
     expect(fth.updateTenantStatus).toHaveBeenCalledWith(tenantFor('fth'), 'disabled');
   });
 
-  it('cancels the subscription even when no orchestrator tenant is ready', async () => {
+  it('cancels the subscription even when no region is provisioned', async () => {
     aurora = fakeOrchestrator('aurora', { ready: false });
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
     ddbMock.on(ScanCommand).resolves({
@@ -269,7 +269,7 @@ describe('grace-period-enforcer', () => {
     expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
   });
 
-  it('write-locks only the orchestrators that are not already locked', async () => {
+  it('write-locks only the regions that are not already locked', async () => {
     aurora = fakeOrchestrator('aurora', { status: 'write-locked' });
     const fth = fakeOrchestrator('fth', { status: 'active' });
     mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
