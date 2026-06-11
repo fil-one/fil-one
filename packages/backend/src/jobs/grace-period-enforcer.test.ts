@@ -28,6 +28,11 @@ process.env.FILONE_STAGE = 'test';
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './grace-period-enforcer.js';
+import {
+  fakeOrchestrator,
+  tenantFor as fakeTenantFor,
+  type FakeOrchestrator,
+} from '../test/fake-orchestrator.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,29 +41,8 @@ import { handler } from './grace-period-enforcer.js';
 const MOCK_USER_ID = 'user-123';
 const MOCK_ORG_ID = 'org-456';
 
-interface FakeOrchestrator {
-  id: string;
-  isTenantReady: ReturnType<typeof vi.fn>;
-  getTenantStatus: ReturnType<typeof vi.fn>;
-  updateTenantStatus: ReturnType<typeof vi.fn>;
-}
-
-// Builds a fake orchestrator whose tenant id is derived from the orgId
-// (`${id}:${orgId}`) so per-org assertions stay unambiguous.
-function fakeOrchestrator(
-  id: string,
-  opts: { ready?: boolean; status?: string } = {},
-): FakeOrchestrator {
-  const { ready = true, status = 'active' } = opts;
-  return {
-    id,
-    isTenantReady: vi.fn(async (orgId: string) => (ready ? `${id}:${orgId}` : null)),
-    getTenantStatus: vi.fn(async () => ({ kind: 'ok', status })),
-    updateTenantStatus: vi.fn().mockResolvedValue(undefined),
-  };
-}
-
-const tenantFor = (orchestratorId: string, orgId = MOCK_ORG_ID) => `${orchestratorId}:${orgId}`;
+const tenantFor = (orchestratorId: string, orgId = MOCK_ORG_ID) =>
+  fakeTenantFor(orchestratorId, orgId);
 
 function pastDate(daysAgo: number): string {
   return new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();

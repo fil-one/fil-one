@@ -32,6 +32,7 @@ process.env.FILONE_STAGE = 'test';
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './subscription-drift-checker.js';
+import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,24 +40,6 @@ import { handler } from './subscription-drift-checker.js';
 
 const USER_ID = 'user-abc';
 const ORG_ID = 'org-xyz';
-
-interface FakeOrchestrator {
-  id: string;
-  isTenantReady: ReturnType<typeof vi.fn>;
-  getTenantStatus: ReturnType<typeof vi.fn>;
-}
-
-function fakeOrchestrator(
-  id: string,
-  opts: { ready?: boolean; status?: string } = {},
-): FakeOrchestrator {
-  const { ready = true, status = 'active' } = opts;
-  return {
-    id,
-    isTenantReady: vi.fn(async (orgId: string) => (ready ? `${id}:${orgId}` : null)),
-    getTenantStatus: vi.fn(async () => ({ kind: 'ok', status })),
-  };
-}
 
 function activeBillingItem(orgId = ORG_ID, userId = USER_ID) {
   return marshall({
