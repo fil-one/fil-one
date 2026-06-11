@@ -248,22 +248,13 @@ Radar prevents fraudulent payments. It does not verify identity. If identity ver
    |-- Open question: MEK deletion timing and grace period
 ```
 
-> **Tenant status propagation.** Locking (`write-locked`, `disabled`) and
-> unlocking (`active`) a tenant in response to billing changes propagates to
-> **every available Service Orchestrator** the org has a tenant on — not just
-> Aurora. The shared helper `syncTenantStatusInProvisionedRegions(orgId, desired)`
-> iterates `getAvailableOrchestrators(stage)`, fetches the org's PROFILE row
-> once via `getOrgProfile(orgId)` and resolves each tenant from it via
-> `isTenantReady(orgProfile)` (skipping orchestrators where the org has no
-> tenant), and reconciles each region: it probes the live status first and calls
-> `updateTenantStatus` only when it differs, so partial failures self-heal on
-> the next attempt and a `disabled` tenant is never downgraded to
-> `write-locked`. The helper never throws — it reports per-region outcomes;
-> callers that must abort on failure pass them through
-> `assertRegionSyncSucceeded`. All billing-driven status-change sites
-> (grace-period enforcer, usage-reporting worker, Stripe webhook, subscription
-> activation) go through this single helper, so an account is locked/unlocked
-> everywhere it exists.
+### Tenant status propagation
+
+Locking (`write-locked`, `disabled`) and unlocking (`active`) a tenant in response to billing
+changes propagates to **every region where the org has a provisioned tenant** — not just Aurora.
+All billing-driven status-change sites (grace-period enforcer, usage-reporting worker, Stripe
+webhook, subscription activation) go through the shared helper
+`syncTenantStatusInProvisionedRegions`, so an account is locked/unlocked everywhere it exists.
 
 ---
 
