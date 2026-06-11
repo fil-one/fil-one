@@ -31,10 +31,10 @@ const fth: MockOrchestrator = {
   listBuckets: vi.fn(),
 };
 
-const stageOrchestrators = vi.fn<(stage: string) => MockOrchestrator[]>();
+const stageOrchestrators = vi.fn<(stage: string, email?: string) => MockOrchestrator[]>();
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getAvailableOrchestrators: (stage: string) => stageOrchestrators(stage),
+  getAvailableOrchestrators: (stage: string, email?: string) => stageOrchestrators(stage, email),
 }));
 
 process.env.FILONE_STAGE = 'test';
@@ -132,8 +132,10 @@ describe('list-buckets baseHandler (single-region)', () => {
 
     expect(result.statusCode).toBe(200);
     const body = JSON.parse(result.body as string);
-    expect(body.buckets[0]).toMatchObject({ versioning: true, encrypted: true });
-    expect(body.buckets[1]).toMatchObject({ versioning: false, encrypted: false });
+    const byName = (name: string) =>
+      body.buckets.find((bucket: { bucketName: string }) => bucket.bucketName === name);
+    expect(byName('versioned-bucket')).toMatchObject({ versioning: true, encrypted: true });
+    expect(byName('unencrypted-bucket')).toMatchObject({ versioning: false, encrypted: false });
   });
 
   it('calls orchestrator.listBuckets with the tenant id', async () => {
@@ -145,13 +147,35 @@ describe('list-buckets baseHandler (single-region)', () => {
     expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
   });
 
-  it('selects orchestrators using the current FILONE_STAGE', async () => {
+  it('selects orchestrators using the current FILONE_STAGE and no allowlist email by default', async () => {
     aurora.listBuckets.mockResolvedValue([]);
 
     const event = buildEvent({ userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(stageOrchestrators).toHaveBeenCalledWith('test');
+    expect(stageOrchestrators).toHaveBeenCalledWith('test', undefined);
+  });
+
+  it('passes the verified email to the orchestrator registry for allowlist fan-out', async () => {
+    aurora.listBuckets.mockResolvedValue([]);
+
+    const event = buildEvent({
+      userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: true },
+    });
+    await baseHandler(event);
+
+    expect(stageOrchestrators).toHaveBeenCalledWith('test', 'dogfood@fil.org');
+  });
+
+  it('does not pass an unverified email to the orchestrator registry', async () => {
+    aurora.listBuckets.mockResolvedValue([]);
+
+    const event = buildEvent({
+      userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: false },
+    });
+    await baseHandler(event);
+
+    expect(stageOrchestrators).toHaveBeenCalledWith('test', undefined);
   });
 
   it('throws when the orchestrator returns an error', async () => {
@@ -247,6 +271,38 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     });
     expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
     expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9');
+  });
+
+  it('sorts buckets alphabetically by name across regions', async () => {
+    aurora.listBuckets.mockResolvedValue([
+      {
+        bucketName: 'zebra-bucket',
+        region: S3Region.EuWest1,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
+      },
+    ]);
+    fth.listBuckets.mockResolvedValue([
+      {
+        bucketName: 'alpha-bucket',
+        region: S3Region.UsEast1,
+        createdAt: '2026-02-01T00:00:00.000Z',
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
+      },
+    ]);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    const body = JSON.parse(result.body as string);
+    expect(body.buckets.map((bucket: { bucketName: string }) => bucket.bucketName)).toStrictEqual([
+      'alpha-bucket',
+      'zebra-bucket',
+    ]);
   });
 
   it('skips orchestrators whose tenant is not ready', async () => {

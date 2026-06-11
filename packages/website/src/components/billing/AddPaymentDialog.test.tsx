@@ -1,104 +1,175 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const mockConfirmCardSetup = vi.fn();
-const mockGetElement = vi.fn();
-const mockActivateSubscription = vi.fn();
+const mockStripe = {
+  confirmCardSetup: vi.fn(),
+};
+const mockElements = {
+  getElement: vi.fn(() => ({})),
+};
 
 vi.mock('@stripe/react-stripe-js', () => ({
   Elements: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  CardNumberElement: () => <div data-testid="card-number" />,
+  CardNumberElement: ({
+    onChange,
+  }: {
+    onChange?: (e: {
+      brand: string;
+      empty: boolean;
+      complete: boolean;
+      error?: { message: string };
+    }) => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="card-clear"
+      onClick={() => onChange?.({ brand: 'unknown', empty: true, complete: false })}
+    >
+      card-clear
+    </button>
+  ),
   CardExpiryElement: () => <div data-testid="card-expiry" />,
   CardCvcElement: () => <div data-testid="card-cvc" />,
-  useStripe: () => ({ confirmCardSetup: mockConfirmCardSetup }),
-  useElements: () => ({ getElement: mockGetElement }),
+  useStripe: () => mockStripe,
+  useElements: () => mockElements,
 }));
 
 vi.mock('../../lib/stripe.js', () => ({
-  getStripe: () => Promise.resolve({}),
+  getStripe: vi.fn(() => Promise.resolve(mockStripe)),
 }));
+
+const activateSubscription = vi.fn();
 
 vi.mock('../../lib/api.js', () => ({
-  activateSubscription: (...args: unknown[]) => mockActivateSubscription(...args),
+  activateSubscription: (...args: unknown[]) => activateSubscription(...args),
 }));
 
-import { AddPaymentDialog } from './AddPaymentDialog';
+// Import after mocks are registered.
+const { AddPaymentDialog } = await import('./AddPaymentDialog.js');
 
-async function renderDialog() {
-  const onSuccess = vi.fn();
-  const onClose = vi.fn();
-  const onBack = vi.fn();
-  render(
-    <AddPaymentDialog
-      open={true}
-      clientSecret="seti_test_secret"
-      stripePublishableKey="pk_test_123"
-      onClose={onClose}
-      onBack={onBack}
-      onSuccess={onSuccess}
-    />,
-  );
-  // getStripe resolves asynchronously, then the form renders.
-  await screen.findByText('Add payment method');
-  return { onSuccess, onClose, onBack };
+function renderDialog(
+  overrides: Partial<Parameters<typeof AddPaymentDialog>[0]> = {},
+  refreshImpl: () => Promise<string> = () => Promise.resolve('cs_refreshed'),
+) {
+  const refresh = vi.fn(refreshImpl);
+  const props = {
+    open: true,
+    clientSecret: 'cs_A',
+    stripePublishableKey: 'pk_test',
+    onClose: vi.fn(),
+    onBack: vi.fn(),
+    onSuccess: vi.fn(),
+    onRefreshSetupIntent: refresh,
+    ...overrides,
+  };
+  return { ...render(<AddPaymentDialog {...props} />), props, refresh };
 }
 
-function submit() {
-  fireEvent.click(screen.getByRole('button', { name: /start subscription/i }));
-}
+beforeEach(() => {
+  activateSubscription.mockReset();
+  mockStripe.confirmCardSetup.mockReset();
+  mockElements.getElement.mockReset();
+  mockElements.getElement.mockReturnValue({});
+});
 
-function typePromo(value: string) {
-  fireEvent.change(screen.getByLabelText(/Promo code/), { target: { value } });
-}
+describe('AddPaymentDialog', () => {
+  it('happy path: confirms card with the provided client secret and activates subscription', async () => {
+    mockStripe.confirmCardSetup.mockResolvedValueOnce({ setupIntent: { status: 'succeeded' } });
+    activateSubscription.mockResolvedValueOnce({});
 
-describe('AddPaymentDialog — promotion code submission', () => {
-  beforeEach(() => {
-    mockConfirmCardSetup.mockReset();
-    mockGetElement.mockReset();
-    mockActivateSubscription.mockReset();
-    mockGetElement.mockReturnValue({});
-    mockConfirmCardSetup.mockResolvedValue({});
-    mockActivateSubscription.mockResolvedValue(undefined);
+    const { props, refresh } = renderDialog();
+
+    const submitButton = await screen.findByRole('button', { name: /start subscription/i });
+    fireEvent.click(submitButton);
+
+    await waitFor(() => expect(props.onSuccess).toHaveBeenCalledTimes(1));
+    expect(refresh).not.toHaveBeenCalled();
+    expect(mockStripe.confirmCardSetup).toHaveBeenCalledTimes(1);
+    expect(mockStripe.confirmCardSetup).toHaveBeenCalledWith('cs_A', expect.any(Object));
+    expect(activateSubscription).toHaveBeenCalledTimes(1);
+    expect(activateSubscription).toHaveBeenCalledWith({ useSavedPaymentMethod: false });
   });
 
-  it('omits promotionCode when the input is empty', async () => {
-    const { onSuccess } = await renderDialog();
-    submit();
-    await waitFor(() => expect(mockActivateSubscription).toHaveBeenCalled());
+  it('same-card retry after bad promo: skips second confirm, retries activate', async () => {
+    mockStripe.confirmCardSetup.mockResolvedValueOnce({ setupIntent: { status: 'succeeded' } });
+    activateSubscription
+      .mockRejectedValueOnce(new Error('Invalid or expired promo code.'))
+      .mockResolvedValueOnce({});
 
-    const arg = mockActivateSubscription.mock.calls[0][0];
-    expect(arg).not.toHaveProperty('promotionCode');
-    await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+    const { props, refresh } = renderDialog();
+
+    const promoInput = await screen.findByPlaceholderText(/add promo code/i);
+    fireEvent.change(promoInput, { target: { value: 'NOPENOPE' } });
+
+    const submitButton = await screen.findByRole('button', { name: /start subscription/i });
+    fireEvent.click(submitButton);
+
+    await waitFor(() => expect(activateSubscription).toHaveBeenCalledTimes(1));
+    await screen.findByText(/invalid or expired promo code/i);
+
+    fireEvent.change(promoInput, { target: { value: '' } });
+    fireEvent.click(submitButton);
+
+    await waitFor(() => expect(props.onSuccess).toHaveBeenCalledTimes(1));
+    expect(refresh).not.toHaveBeenCalled();
+    expect(mockStripe.confirmCardSetup).toHaveBeenCalledTimes(1);
+    expect(activateSubscription).toHaveBeenCalledTimes(2);
   });
 
-  it('omits promotionCode when the input contains only whitespace', async () => {
-    await renderDialog();
-    typePromo('   ');
-    submit();
-    await waitFor(() => expect(mockActivateSubscription).toHaveBeenCalled());
+  it('different-card retry: clearing the card field refreshes the SetupIntent', async () => {
+    mockStripe.confirmCardSetup
+      .mockResolvedValueOnce({ setupIntent: { status: 'succeeded' } })
+      .mockResolvedValueOnce({ setupIntent: { status: 'succeeded' } });
+    activateSubscription
+      .mockRejectedValueOnce(new Error('Invalid or expired promo code.'))
+      .mockResolvedValueOnce({});
 
-    const arg = mockActivateSubscription.mock.calls[0][0];
-    expect(arg).not.toHaveProperty('promotionCode');
+    const { props, refresh } = renderDialog({}, () => Promise.resolve('cs_B'));
+
+    const promoInput = await screen.findByPlaceholderText(/add promo code/i);
+    fireEvent.change(promoInput, { target: { value: 'NOPENOPE' } });
+
+    const submitButton = await screen.findByRole('button', { name: /start subscription/i });
+    fireEvent.click(submitButton);
+
+    await waitFor(() => expect(activateSubscription).toHaveBeenCalledTimes(1));
+
+    // User clears the card field to enter a different card. Stripe fires
+    // onChange with empty: true.
+    fireEvent.click(screen.getByTestId('card-clear'));
+
+    fireEvent.change(promoInput, { target: { value: '' } });
+    fireEvent.click(submitButton);
+
+    await waitFor(() => expect(props.onSuccess).toHaveBeenCalledTimes(1));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(mockStripe.confirmCardSetup).toHaveBeenCalledTimes(2);
+    expect(mockStripe.confirmCardSetup.mock.calls[0][0]).toBe('cs_A');
+    expect(mockStripe.confirmCardSetup.mock.calls[1][0]).toBe('cs_B');
+    expect(activateSubscription).toHaveBeenCalledTimes(2);
   });
 
-  it('sends a trimmed promotionCode when the input is a valid code', async () => {
-    await renderDialog();
-    typePromo('  PROMO-50  ');
-    submit();
-    await waitFor(() => expect(mockActivateSubscription).toHaveBeenCalled());
+  it('card confirm error on first try: no refresh, error shown, retry uses same secret', async () => {
+    mockStripe.confirmCardSetup
+      .mockResolvedValueOnce({ error: { message: 'Your card was declined.' } })
+      .mockResolvedValueOnce({ setupIntent: { status: 'succeeded' } });
+    activateSubscription.mockResolvedValueOnce({});
 
-    expect(mockActivateSubscription).toHaveBeenCalledWith(
-      expect.objectContaining({ promotionCode: 'PROMO-50' }),
-    );
-  });
+    const { props, refresh } = renderDialog();
 
-  it('shows a validation error and does not call activateSubscription for a malformed code', async () => {
-    await renderDialog();
-    typePromo('AB'); // too short — schema requires 3–40 chars
-    submit();
+    const submitButton = await screen.findByRole('button', { name: /start subscription/i });
+    fireEvent.click(submitButton);
 
-    await screen.findByText(/Promo code must be/i);
-    expect(mockActivateSubscription).not.toHaveBeenCalled();
-    expect(mockConfirmCardSetup).not.toHaveBeenCalled();
+    await screen.findByText(/your card was declined/i);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(activateSubscription).not.toHaveBeenCalled();
+
+    fireEvent.click(submitButton);
+
+    await waitFor(() => expect(props.onSuccess).toHaveBeenCalledTimes(1));
+    expect(refresh).not.toHaveBeenCalled();
+    expect(mockStripe.confirmCardSetup).toHaveBeenCalledTimes(2);
+    expect(mockStripe.confirmCardSetup.mock.calls[0][0]).toBe('cs_A');
+    expect(mockStripe.confirmCardSetup.mock.calls[1][0]).toBe('cs_A');
   });
 });

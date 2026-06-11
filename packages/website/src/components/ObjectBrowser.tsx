@@ -16,6 +16,7 @@ import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
+import { EmptyStateCard } from './EmptyStateCard';
 import { Spinner } from './Spinner';
 import { Table } from './Table/Table';
 import { VersionRowBadge, truncateVersionId } from './VersionHistoryCard';
@@ -277,6 +278,49 @@ function LatestVersionRow({
 }
 
 // ---------------------------------------------------------------------------
+// Prefix breadcrumb
+// ---------------------------------------------------------------------------
+
+function PrefixBreadcrumb({
+  currentPrefix,
+  onPrefixChange,
+}: {
+  currentPrefix: string;
+  onPrefixChange: (prefix: string) => void;
+}) {
+  return (
+    <div className="mb-2 flex items-center gap-1 text-sm">
+      <button
+        type="button"
+        onClick={() => onPrefixChange('')}
+        className={`hover:text-brand-600 ${currentPrefix === '' ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
+      >
+        /
+      </button>
+      {currentPrefix
+        .split('/')
+        .filter(Boolean)
+        .map((segment, idx, arr) => {
+          const segmentPrefix = arr.slice(0, idx + 1).join('/') + '/';
+          const isLast = idx === arr.length - 1;
+          return (
+            <span key={segmentPrefix} className="flex items-center gap-1">
+              <span className="text-zinc-400">/</span>
+              <button
+                type="button"
+                onClick={() => onPrefixChange(segmentPrefix)}
+                className={`hover:text-brand-600 ${isLast ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
+              >
+                {segment}
+              </button>
+            </span>
+          );
+        })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -325,23 +369,26 @@ export function ObjectBrowser({
 
   if (versions.length === 0) {
     return (
-      <div className="mt-4 flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
-        <CloudArrowUpIcon size={48} className="mb-4 text-zinc-300" aria-hidden="true" />
-        <p className="mb-1 text-base font-medium text-zinc-700">No objects yet</p>
-        <p className="mb-6 text-sm text-zinc-500">Upload your first object to this bucket</p>
-        <Button
-          variant="primary"
-          icon={ArrowUpIcon}
-          onClick={() =>
-            void navigate({
-              to: '/buckets/$bucketName/upload',
-              params: { bucketName },
-              search: { region },
-            })
-          }
+      <div className="mt-4">
+        <EmptyStateCard
+          icon={CloudArrowUpIcon}
+          title="No objects yet"
+          description="Upload your first object to this bucket"
         >
-          Upload object
-        </Button>
+          <Button
+            variant="primary"
+            icon={ArrowUpIcon}
+            onClick={() =>
+              void navigate({
+                to: '/buckets/$bucketName/upload',
+                params: { bucketName },
+                search: { region },
+              })
+            }
+          >
+            Upload object
+          </Button>
+        </EmptyStateCard>
       </div>
     );
   }
@@ -359,35 +406,7 @@ export function ObjectBrowser({
 
   return (
     <div className="mt-4">
-      {/* Prefix breadcrumb */}
-      <div className="mb-2 flex items-center gap-1 text-sm">
-        <button
-          type="button"
-          onClick={() => onPrefixChange('')}
-          className={`hover:text-brand-600 ${currentPrefix === '' ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
-        >
-          /
-        </button>
-        {currentPrefix
-          .split('/')
-          .filter(Boolean)
-          .map((segment, idx, arr) => {
-            const segmentPrefix = arr.slice(0, idx + 1).join('/') + '/';
-            const isLast = idx === arr.length - 1;
-            return (
-              <span key={segmentPrefix} className="flex items-center gap-1">
-                <span className="text-zinc-400">/</span>
-                <button
-                  type="button"
-                  onClick={() => onPrefixChange(segmentPrefix)}
-                  className={`hover:text-brand-600 ${isLast ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
-                >
-                  {segment}
-                </button>
-              </span>
-            );
-          })}
-      </div>
+      <PrefixBreadcrumb currentPrefix={currentPrefix} onPrefixChange={onPrefixChange} />
 
       {entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">

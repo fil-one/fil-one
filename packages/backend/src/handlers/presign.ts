@@ -14,7 +14,7 @@ import type {
   PresignResponseItem,
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import type { PresignerContext } from '../lib/service-orchestrator.js';
+import type { S3ClientContext } from '../lib/s3-client.js';
 import {
   getPresignedDeleteObjectUrl,
   getPresignedGetObjectRetentionUrl,
@@ -30,7 +30,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
@@ -42,7 +42,7 @@ const WRITE_OPS = new Set<string>(['putObject', 'deleteObject']);
 
 async function presignGetObject(
   op: Extract<PresignOp, { op: 'getObject' }>,
-  ctx: PresignerContext,
+  ctx: S3ClientContext,
 ): Promise<PresignResponseItem> {
   const expiresIn = Math.min(op.expiresIn ?? PRESIGN_EXPIRY_SECONDS, MAX_GET_OBJECT_EXPIRY_SECONDS);
   const url = await getPresignedGetObjectUrl({
@@ -59,7 +59,7 @@ async function presignGetObject(
   };
 }
 
-async function presignOp(op: PresignOp, ctx: PresignerContext): Promise<PresignResponseItem> {
+async function presignOp(op: PresignOp, ctx: S3ClientContext): Promise<PresignResponseItem> {
   const expiresAt = new Date(Date.now() + PRESIGN_EXPIRY_SECONDS * 1000).toISOString();
 
   switch (op.op) {
@@ -158,7 +158,7 @@ export async function baseHandler(
       .body<ErrorResponse>({ message: 'region query parameter is required' })
       .build();
   }
-  if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region, getVerifiedEmail(event))) {
     return unsupportedRegionResponse(region);
   }
 
@@ -206,7 +206,7 @@ export async function baseHandler(
   const tenantId = await orchestrator.isTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
-  const ctx = await orchestrator.getPresignerContext(tenantId);
+  const ctx = await orchestrator.getS3ClientContext(tenantId);
 
   const items = await Promise.all(ops.map((op) => presignOp(op, ctx)));
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 import { UserIcon, BellIcon, ShieldCheckIcon } from '@phosphor-icons/react/dist/ssr';
@@ -95,7 +96,9 @@ function applyProfileUpdate(result: {
     return {
       ...old,
       ...(result.name !== undefined ? { name: result.name } : {}),
-      ...(result.email !== undefined ? { email: result.email } : {}),
+      // An email change always resets verification — reflect it immediately so
+      // the verify-email gate in _app.tsx re-triggers without a /me round-trip.
+      ...(result.email !== undefined ? { email: result.email, emailVerified: false } : {}),
       ...(result.orgName !== undefined ? { orgName: result.orgName } : {}),
     };
   };
@@ -104,6 +107,7 @@ function applyProfileUpdate(result: {
 function useProfileForm(me: MeResponse) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const social = isSocialConnection(me.connectionType);
 
   const [name, setName] = useState('');
@@ -136,11 +140,13 @@ function useProfileForm(me: MeResponse) {
       queryClient.setQueryData<MeResponse>(queryKeys.me, update);
       queryClient.setQueryData<MeResponse>(queryKeys.meWithMfa, update);
 
-      toast.success(
-        result.email
-          ? 'Profile updated. Check your inbox to verify your new email.'
-          : 'Profile updated',
-      );
+      if (result.email !== undefined) {
+        // The cache update above means the verify-email page renders the
+        // unverified state immediately, without a /me round-trip.
+        void navigate({ to: '/verify-email' });
+      } else {
+        toast.success('Profile updated');
+      }
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to update profile');
@@ -266,7 +272,12 @@ function NotificationsSection() {
       title="Notifications"
       description="Manage your notification preferences"
     >
-      <Alert variant="grey" description="Notification preferences coming soon." showIcon={false} />
+      <Alert
+        variant="grey"
+        description="Notification preferences coming soon"
+        showIcon={false}
+        centered
+      />
     </SectionCard>
   );
 }
@@ -300,6 +311,7 @@ function SecuritySection({ me }: { me: MeResponse }) {
             action={
               <Button
                 variant="ghost"
+                size="sm"
                 onClick={() => changePasswordMutation.mutate()}
                 disabled={changePasswordMutation.isPending}
               >
@@ -374,7 +386,7 @@ export function SettingsPage() {
         </Heading>
       </div>
 
-      <div className="mt-6 flex max-w-[672px] flex-col gap-6">
+      <div className="mt-6 flex max-w-2xl flex-col gap-6">
         <ProfileSection me={me} />
         <NotificationsSection />
         <SecuritySection me={me} />

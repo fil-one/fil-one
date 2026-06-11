@@ -34,6 +34,7 @@ function ddbItem(overrides: {
   bucketScope?: string;
   buckets?: string[];
   expiresAt?: string;
+  region?: string;
 }) {
   const item: Record<string, AttributeValue> = {
     pk: { S: `ORG#${USER_INFO.orgId}` },
@@ -47,6 +48,7 @@ function ddbItem(overrides: {
   if (overrides.bucketScope) item.bucketScope = { S: overrides.bucketScope };
   if (overrides.buckets) item.buckets = { L: overrides.buckets.map((b) => ({ S: b })) };
   if (overrides.expiresAt) item.expiresAt = { S: overrides.expiresAt };
+  if (overrides.region) item.region = { S: overrides.region };
   return item;
 }
 
@@ -119,6 +121,50 @@ describe('list-access-keys baseHandler', () => {
       bucketScope: 'specific',
       buckets: ['bucket-a', 'bucket-b'],
     });
+  });
+
+  it('returns the persisted region from the row', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        ddbItem({
+          id: 'key-1',
+          keyName: 'FTH Key',
+          accessKeyId: 'AKIAFTH',
+          createdAt: '2026-01-01T00:00:00Z',
+          permissions: ['read'],
+          bucketScope: 'all',
+          region: 'us-east-1',
+        }),
+      ],
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    const body = JSON.parse(result.body!);
+    expect(body.keys[0].region).toBe('us-east-1');
+  });
+
+  it('falls back to S3_REGION (eu-west-1) for legacy rows without region', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        ddbItem({
+          id: 'key-legacy',
+          keyName: 'Legacy Key',
+          accessKeyId: 'AKIALEGACY',
+          createdAt: '2026-01-01T00:00:00Z',
+          permissions: ['read'],
+          bucketScope: 'all',
+          // region attribute deliberately omitted
+        }),
+      ],
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    const body = JSON.parse(result.body!);
+    expect(body.keys[0].region).toBe('eu-west-1');
   });
 
   it('returns expiresAt when set', async () => {
