@@ -151,6 +151,33 @@ describe('fthOrchestrator.updateTenantStatus', () => {
       expect(mockUpdateClientStatus).toHaveBeenCalledWith(fthClientId, { status });
     });
   }
+
+  it('retries updateClientStatus on a transient failure then succeeds', async () => {
+    vi.useFakeTimers();
+    mockUpdateClientStatus
+      .mockRejectedValueOnce(new Error('transient FTH error'))
+      .mockResolvedValue(undefined);
+
+    const promise = fthOrchestrator.updateTenantStatus(fthClientId, 'write-locked');
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(mockUpdateClientStatus).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('gives up on updateClientStatus after exhausting retries (1 initial + 3 retries)', async () => {
+    vi.useFakeTimers();
+    mockUpdateClientStatus.mockRejectedValue(new Error('persistent FTH error'));
+
+    const promise = fthOrchestrator.updateTenantStatus(fthClientId, 'write-locked').catch((e) => e);
+    await vi.runAllTimersAsync();
+    const err = await promise;
+
+    expect(err).toBeInstanceOf(Error);
+    expect(mockUpdateClientStatus).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
+  });
 });
 
 describe('fthOrchestrator.getTenantStatus', () => {

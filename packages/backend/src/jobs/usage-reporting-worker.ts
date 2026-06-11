@@ -4,8 +4,6 @@ import { getDynamoClient } from '../lib/ddb-client.js';
 import { Resource } from 'sst';
 import { GB_BYTES, TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT, formatBytes } from '@filone/shared';
 import { getStripeClient, updateCustomerMetadata } from '../lib/stripe-client.js';
-import { getTenantInfo, mapToModelsTenantStatus } from '../lib/aurora/aurora-backoffice.js';
-import type { ModelsTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import type { TenantStatus } from '../lib/service-orchestrator.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
 import {
@@ -14,10 +12,9 @@ import {
   sortStorageSamplesByTimestamp,
 } from '../lib/usage-calculator.js';
 import type { TenantUsageMetrics } from '../lib/service-orchestrator.js';
-import { auroraOrchestrator } from '../lib/aurora/aurora-orchestrator.js';
 import {
   getProvisionedRegions,
-  setTenantStatusInProvisionedRegions,
+  syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.js';
 
 const dynamo = getDynamoClient();
@@ -40,21 +37,15 @@ interface AggregateUsage {
 }
 
 async function enforceTenantLocks({
-  tenantId,
   orgId,
-  currentStatus,
   currentStorageBytes,
   totalEgressBytes,
 }: {
-  tenantId: string;
   orgId: string;
-  currentStatus: ModelsTenantStatus | undefined;
   currentStorageBytes: number;
   totalEgressBytes: number;
-}): Promise<ModelsTenantStatus> {
-  // Determine desired status (disabled > write-locked > active). The lowercase
-  // TenantStatus is the source of truth; the uppercase ModelsTenantStatus is
-  // derived from it for the change-guard and the returned audit value.
+}): Promise<string> {
+  // Determine desired status (disabled > write-locked > active).
   let desired: TenantStatus;
   if (totalEgressBytes >= TRIAL_EGRESS_LIMIT) {
     desired = 'disabled';
@@ -63,20 +54,28 @@ async function enforceTenantLocks({
   } else {
     desired = 'active';
   }
-  const desiredModels = mapToModelsTenantStatus(desired);
 
-  if (desiredModels !== currentStatus) {
-    console.log('[usage-worker] Updating tenant status', {
-      tenantId,
-      from: currentStatus,
-      to: desiredModels,
+  const outcomes = await syncTenantStatusInProvisionedRegions(orgId, desired);
+
+  const updated = outcomes.filter((o) => o.outcome === 'updated');
+  if (updated.length > 0) {
+    console.log('[usage-worker] Updated tenant status', {
+      orgId,
+      to: desired,
+      regions: updated.map((o) => o.orchestratorId),
       currentStorageBytes,
       totalEgressBytes,
     });
-    await setTenantStatusInProvisionedRegions(orgId, desired);
   }
 
-  return desiredModels;
+  const failed = outcomes.filter((o) => o.outcome === 'error');
+  if (failed.length > 0) {
+    // Per-region details were already logged by the sync helper. A failed
+    // region still differs from the desired status, so the next run retries it.
+    return `error:sync-failed:${failed.map((o) => o.orchestratorId).join(',')}`;
+  }
+
+  return desired;
 }
 
 export async function handler(event: UsageReportingWorkerPayload): Promise<void> {
@@ -109,27 +108,17 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     return;
   }
 
-  // Trial lock enforcement is Aurora-only for now; identify its tenant id (if any).
-  // TODO: rework as part of #401
-  const auroraTenantId = orgRegions.find(
-    (r) => r.orchestrator.id === auroraOrchestrator.id,
-  )?.tenantId;
-
   let usageMetrics: TenantUsageMetrics[];
-  let auroraTenantInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
   try {
-    [usageMetrics, auroraTenantInfo] = await Promise.all([
-      Promise.all(
-        orgRegions.map((t) =>
-          t.orchestrator.getTenantUsageMetrics(t.tenantId, {
-            from: currentPeriodStart,
-            to: now,
-            interval: '1d',
-          }),
-        ),
+    usageMetrics = await Promise.all(
+      orgRegions.map((t) =>
+        t.orchestrator.getTenantUsageMetrics(t.tenantId, {
+          from: currentPeriodStart,
+          to: now,
+          interval: '1d',
+        }),
       ),
-      isTrial && auroraTenantId ? getTenantInfo({ tenantId: auroraTenantId }) : null,
-    ]);
+    );
   } catch (error) {
     const e = error as Error & { cause?: unknown };
     console.error('[usage-worker] Usage metrics fetch failed', {
@@ -162,9 +151,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
 
   const lockAction = await resolveLockAction({
     isTrial,
-    auroraTenantId,
     orgId,
-    currentStatus: auroraTenantInfo?.status,
     currentStorageBytes: aggregate.currentStorageBytes,
     totalEgressBytes: aggregate.totalEgressBytes,
   });
@@ -213,27 +200,19 @@ function aggregateUsageMetrics(usageMetrics: TenantUsageMetrics[]): AggregateUsa
 }
 
 /**
- * Trial lock enforcement requires the Aurora control plane (status read +
- * write). Other regions have no equivalent lock mechanism wired yet, so they
- * are reported but not enforced.
+ * Trial lock enforcement applies to every provisioned region. Each region's
+ * live status is probed via its own orchestrator and reconciled with the
+ * desired status (syncTenantStatusInProvisionedRegions), so partial failures
+ * self-heal on the next run.
  */
 async function resolveLockAction(params: {
   isTrial: boolean;
-  auroraTenantId: string | undefined;
   orgId: string;
-  currentStatus: ModelsTenantStatus | undefined;
   currentStorageBytes: number;
   totalEgressBytes: number;
 }): Promise<string> {
   if (!params.isTrial) return 'skipped:paid';
-  if (!params.auroraTenantId) return 'skipped:region-unsupported';
-  return safeEnforceTrialLocks({
-    tenantId: params.auroraTenantId,
-    orgId: params.orgId,
-    currentStatus: params.currentStatus,
-    currentStorageBytes: params.currentStorageBytes,
-    totalEgressBytes: params.totalEgressBytes,
-  });
+  return safeEnforceTrialLocks(params);
 }
 
 // Stripe SDK errors expose `code` on the error object; matches StripeInvalidRequestError 404s.
@@ -281,9 +260,7 @@ async function reportStorageToStripe(params: {
 }
 
 async function safeEnforceTrialLocks(params: {
-  tenantId: string;
   orgId: string;
-  currentStatus: ModelsTenantStatus | undefined;
   currentStorageBytes: number;
   totalEgressBytes: number;
 }): Promise<string> {

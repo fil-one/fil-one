@@ -7,13 +7,18 @@ vi.mock('./service-orchestrator-registry.js', () => ({
 
 process.env.FILONE_STAGE = 'test';
 
-import { getProvisionedRegions, setTenantStatusInProvisionedRegions } from './region-helpers.js';
+import {
+  getProvisionedRegions,
+  setTenantStatusInProvisionedRegions,
+  syncTenantStatusInProvisionedRegions,
+} from './region-helpers.js';
 
-function fakeOrchestrator(id: string, tenantId: string | null) {
+function fakeOrchestrator(id: string, tenantId: string | null, status = 'active') {
   return {
     id,
     isTenantReady: vi.fn().mockResolvedValue(tenantId),
     updateTenantStatus: vi.fn().mockResolvedValue(undefined),
+    getTenantStatus: vi.fn().mockResolvedValue({ kind: 'ok', status }),
   };
 }
 
@@ -67,6 +72,125 @@ describe('setTenantStatusInProvisionedRegions', () => {
     await expect(setTenantStatusInProvisionedRegions('org-1', 'active')).rejects.toThrow(
       'Aurora API error',
     );
+  });
+});
+
+describe('syncTenantStatusInProvisionedRegions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('updates a region whose status differs from the desired status', async () => {
+    const aurora = fakeOrchestrator('aurora', 'aurora-t-1', 'active');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    await syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
+
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora-t-1', 'write-locked');
+  });
+
+  it('skips the update when the region status already matches', async () => {
+    const aurora = fakeOrchestrator('aurora', 'aurora-t-1', 'write-locked');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    await syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
+
+    expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+  });
+
+  it('returns per-region outcomes distinguishing in-sync from updated regions', async () => {
+    const aurora = fakeOrchestrator('aurora', 'aurora-t-1', 'write-locked');
+    const fth = fakeOrchestrator('fth', 'fth-t-1', 'active');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+    const result = await syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
+
+    expect(result).toEqual([
+      { orchestratorId: 'aurora', tenantId: 'aurora-t-1', outcome: 'in-sync' },
+      { orchestratorId: 'fth', tenantId: 'fth-t-1', outcome: 'updated' },
+    ]);
+  });
+
+  it('reports a not-found tenant without updating it', async () => {
+    const fth = fakeOrchestrator('fth', 'fth-t-1');
+    fth.getTenantStatus.mockResolvedValue({ kind: 'not_found' });
+    mockGetAvailableOrchestrators.mockReturnValue([fth]);
+
+    const result = await syncTenantStatusInProvisionedRegions('org-1', 'disabled');
+
+    expect(result).toEqual([{ orchestratorId: 'fth', tenantId: 'fth-t-1', outcome: 'not-found' }]);
+  });
+
+  it('does not call updateTenantStatus for a not-found tenant', async () => {
+    const fth = fakeOrchestrator('fth', 'fth-t-1');
+    fth.getTenantStatus.mockResolvedValue({ kind: 'not_found' });
+    mockGetAvailableOrchestrators.mockReturnValue([fth]);
+
+    await syncTenantStatusInProvisionedRegions('org-1', 'disabled');
+
+    expect(fth.updateTenantStatus).not.toHaveBeenCalled();
+  });
+
+  it('retries a transient probe error and syncs the region', async () => {
+    vi.useFakeTimers();
+    const aurora = fakeOrchestrator('aurora', 'aurora-t-1');
+    aurora.getTenantStatus
+      .mockResolvedValueOnce({ kind: 'error', cause: new Error('transient outage') })
+      .mockResolvedValueOnce({ kind: 'error', cause: new Error('transient outage') })
+      .mockResolvedValue({ kind: 'ok', status: 'active' });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    const promise = syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora-t-1', 'write-locked');
+    vi.useRealTimers();
+  });
+
+  it('returns an error outcome when the probe keeps failing past all retries (1 initial + 3 retries)', async () => {
+    vi.useFakeTimers();
+    const aurora = fakeOrchestrator('aurora', 'aurora-t-1');
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('outage') });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    const promise = syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
+    await vi.runAllTimersAsync();
+    const result = await promise;
+
+    expect(result).toMatchObject([
+      { orchestratorId: 'aurora', tenantId: 'aurora-t-1', outcome: 'error' },
+    ]);
+    expect(aurora.getTenantStatus).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
+  });
+
+  it('still syncs the other region when one probe keeps failing', async () => {
+    vi.useFakeTimers();
+    const aurora = fakeOrchestrator('aurora', 'aurora-t-1');
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('outage') });
+    const fth = fakeOrchestrator('fth', 'fth-t-1', 'active');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+    const promise = syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(fth.updateTenantStatus).toHaveBeenCalledWith('fth-t-1', 'write-locked');
+    vi.useRealTimers();
+  });
+
+  it('returns an error outcome with the cause when updateTenantStatus rejects', async () => {
+    const updateError = new Error('FTH API error');
+    const fth = fakeOrchestrator('fth', 'fth-t-1', 'active');
+    fth.updateTenantStatus.mockRejectedValue(updateError);
+    mockGetAvailableOrchestrators.mockReturnValue([fth]);
+
+    const result = await syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
+
+    expect(result).toEqual([
+      { orchestratorId: 'fth', tenantId: 'fth-t-1', outcome: 'error', cause: updateError },
+    ]);
   });
 });
 

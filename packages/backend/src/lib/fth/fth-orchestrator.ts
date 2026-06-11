@@ -63,6 +63,9 @@ const FTH_CONSOLE_USER_CODE = 'filone-console';
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
+// Mirrors the retry policy of Aurora's updateTenantStatus (aurora-backoffice.ts).
+const STATUS_UPDATE_RETRY = { retries: 3 } as const;
+
 const dynamo = getDynamoClient();
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
 const client = createInstrumentedFthClient();
@@ -96,8 +99,9 @@ export const fthOrchestrator = {
 
   async updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void> {
     // FTH uses the same lowercase-dashed status values, so no mapping is needed.
-    // A status PATCH is naturally idempotent, so no idempotency key is sent.
-    await client.updateClientStatus(tenantId, { status });
+    // A status PATCH is naturally idempotent, so no idempotency key is sent and
+    // transient failures are safe to retry.
+    await pRetry(() => client.updateClientStatus(tenantId, { status }), STATUS_UPDATE_RETRY);
   },
 
   async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
