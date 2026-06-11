@@ -27,6 +27,10 @@ vi.mock('../lib/metrics.js', () => ({
   reportMetric: (...args: unknown[]) => mockReportMetric(...args),
 }));
 
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+}));
+
 process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);

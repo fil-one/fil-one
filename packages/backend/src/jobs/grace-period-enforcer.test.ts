@@ -23,6 +23,10 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+}));
+
 process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);

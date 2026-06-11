@@ -4,8 +4,6 @@
 //
 // PROFILE-row attributes used: `auroraTenantId` and `auroraSetupStatus`.
 
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { Resource } from 'sst';
 import { S3Region, getS3Endpoint } from '@filone/shared';
 import type {
   AccessKeyPermission,
@@ -32,8 +30,8 @@ import {
   mapToModelsTenantStatus,
   updateTenantStatus as updateAuroraTenantStatusApi,
 } from '../aurora/aurora-backoffice.js';
-import { getDynamoClient } from '../ddb-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
+import type { OrgProfileItem } from '../org-profile.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 import { NotImplementedError } from '../errors.js';
 import type {
@@ -50,7 +48,6 @@ import type {
 } from '../service-orchestrator.js';
 import type { S3ClientContext } from '../s3-client.js';
 
-const dynamo = getDynamoClient();
 export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting();
 
 function getStage(): string {
@@ -79,17 +76,10 @@ export const auroraOrchestrator = {
     return null;
   },
 
-  async isTenantReady(orgId): Promise<string | null> {
-    const { Item } = await dynamo.send(
-      new GetItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-        ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
-      }),
-    );
-    const tenantId = Item?.auroraTenantId?.S;
+  isTenantReady(orgProfile: OrgProfileItem | undefined): string | null {
+    const tenantId = orgProfile?.auroraTenantId?.S;
     if (!tenantId) return null;
-    if (!isOrgSetupComplete(Item?.auroraSetupStatus?.S)) return null;
+    if (!isOrgSetupComplete(orgProfile?.auroraSetupStatus?.S)) return null;
     return tenantId;
   },
 

@@ -1,5 +1,6 @@
 import pRetry from 'p-retry';
 import { getAvailableOrchestrators } from './service-orchestrator-registry';
+import { getOrgProfile } from './org-profile';
 import type { ServiceOrchestrator, TenantStatus } from './service-orchestrator';
 
 export interface ProvisionedRegion {
@@ -9,13 +10,14 @@ export interface ProvisionedRegion {
 
 export async function getProvisionedRegions(orgId: string): Promise<ProvisionedRegion[]> {
   const orchestrators = getAvailableOrchestrators(process.env.FILONE_STAGE!);
-  const resolved = await Promise.all(
-    orchestrators.map(async (orchestrator) => {
-      const tenantId = await orchestrator.isTenantReady(orgId);
+  if (orchestrators.length === 0) return [];
+  const orgProfile = await getOrgProfile(orgId);
+  return orchestrators
+    .map((orchestrator) => {
+      const tenantId = orchestrator.isTenantReady(orgProfile);
       return tenantId ? { orchestrator, tenantId } : null;
-    }),
-  );
-  return resolved.filter((t): t is ProvisionedRegion => t !== null);
+    })
+    .filter((t): t is ProvisionedRegion => t !== null);
 }
 
 export interface RegionSyncOutcome {

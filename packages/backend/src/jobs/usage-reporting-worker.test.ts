@@ -77,6 +77,9 @@ vi.mock('../lib/fth/fth-orchestrator.js', () => ({ fthOrchestrator }));
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: () => [auroraOrchestrator, fthOrchestrator],
 }));
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+}));
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -111,8 +114,8 @@ describe('usage-reporting-worker', () => {
     ddbMock.on(PutItemCommand).resolves({});
     mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
     // Default: org provisioned in Aurora only (mirrors the previous Aurora-only basePayload).
-    mockAuroraIsTenantReady.mockResolvedValue('aurora-tenant-123');
-    mockFthIsTenantReady.mockResolvedValue(null);
+    mockAuroraIsTenantReady.mockReturnValue('aurora-tenant-123');
+    mockFthIsTenantReady.mockReturnValue(null);
     mockAuroraGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'active' });
     mockFthGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'active' });
     mockAuroraUpdateTenantStatus.mockResolvedValue(undefined);
@@ -710,8 +713,8 @@ describe('usage-reporting-worker', () => {
         ...basePayload,
         subscriptionStatus: 'trialing',
       };
-      mockAuroraIsTenantReady.mockResolvedValue(null);
-      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
+      mockAuroraIsTenantReady.mockReturnValue(null);
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
       mockGetTenantUsageMetrics.mockResolvedValue({
         storage: [{ timestamp: t, bytesUsed: 500_000_000_000 }],
         egress: [{ timestamp: t, bytesUsed: 100_000_000_000 }],
@@ -737,8 +740,8 @@ describe('usage-reporting-worker', () => {
         ...basePayload,
         subscriptionStatus: 'trialing',
       };
-      mockAuroraIsTenantReady.mockResolvedValue(null);
-      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
+      mockAuroraIsTenantReady.mockReturnValue(null);
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
       mockGetTenantUsageMetrics.mockResolvedValue({
         storage: [{ timestamp: t, bytesUsed: 1_500_000_000_000 }], // 1.5 TB
         egress: [],
@@ -756,7 +759,7 @@ describe('usage-reporting-worker', () => {
         ...basePayload,
         subscriptionStatus: 'trialing',
       };
-      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
       mockGetTenantUsageMetrics.mockResolvedValue({
         storage: [{ timestamp: t, bytesUsed: 1_500_000_000_000 }], // over limit per region sum
         egress: [],
@@ -778,7 +781,7 @@ describe('usage-reporting-worker', () => {
         ...basePayload,
         subscriptionStatus: 'trialing',
       };
-      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
       mockGetTenantUsageMetrics.mockResolvedValue({
         storage: [{ timestamp: t, bytesUsed: 1_500_000_000_000 }],
         egress: [],
@@ -804,7 +807,7 @@ describe('usage-reporting-worker', () => {
         ...basePayload,
         subscriptionStatus: 'trialing',
       };
-      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
       mockGetTenantUsageMetrics.mockResolvedValue({
         storage: [{ timestamp: t, bytesUsed: 1_500_000_000_000 }],
         egress: [],
@@ -826,7 +829,7 @@ describe('usage-reporting-worker', () => {
         ...basePayload,
         subscriptionStatus: 'active',
       };
-      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
 
       mockGetTenantUsageMetrics.mockImplementation((tenantId: string) => {
         if (tenantId === 'aurora-tenant-123') {
@@ -876,7 +879,7 @@ describe('usage-reporting-worker', () => {
         ...basePayload,
         subscriptionStatus: 'active',
       };
-      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
 
       const t0 = '2024-01-01T00:00:00Z';
       const t1 = '2024-01-01T01:00:00Z';
@@ -909,8 +912,8 @@ describe('usage-reporting-worker', () => {
     });
 
     it('no ready tenant in any region: returns without reporting or writing an audit', async () => {
-      mockAuroraIsTenantReady.mockResolvedValue(null);
-      mockFthIsTenantReady.mockResolvedValue(null);
+      mockAuroraIsTenantReady.mockReturnValue(null);
+      mockFthIsTenantReady.mockReturnValue(null);
 
       await expect(handler(basePayload)).resolves.toBeUndefined();
 

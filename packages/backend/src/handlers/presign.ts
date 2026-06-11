@@ -14,6 +14,7 @@ import type {
   PresignResponseItem,
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { getOrgProfile } from '../lib/org-profile.js';
 import type { S3ClientContext } from '../lib/s3-client.js';
 import {
   getPresignedDeleteObjectUrl,
@@ -203,7 +204,7 @@ export async function baseHandler(
   }
 
   const orchestrator = getOrchestratorForRegion(region);
-  const tenantId = await orchestrator.isTenantReady(orgId);
+  const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
   const ctx = await orchestrator.getS3ClientContext(tenantId);

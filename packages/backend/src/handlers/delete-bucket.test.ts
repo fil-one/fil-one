@@ -25,6 +25,10 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: () => mockOrchestrator,
 }));
 
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+}));
+
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './delete-bucket.js';
@@ -43,7 +47,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 describe('delete-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockIsTenantReady.mockResolvedValue('aurora-t-1');
+    mockIsTenantReady.mockReturnValue('aurora-t-1');
   });
 
   it('returns 400 when bucket name is missing from path', async () => {
@@ -54,7 +58,7 @@ describe('delete-bucket baseHandler', () => {
   });
 
   it('returns 503 when tenant is not ready', async () => {
-    mockIsTenantReady.mockResolvedValue(null);
+    mockIsTenantReady.mockReturnValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     event.pathParameters = { name: 'my-bucket' };

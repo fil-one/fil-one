@@ -5,6 +5,11 @@ vi.mock('./service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
+const mockGetOrgProfile = vi.fn(async (orgId: string) => fakeOrgProfile(orgId));
+vi.mock('./org-profile.js', () => ({
+  getOrgProfile: (...args: unknown[]) => mockGetOrgProfile(...(args as [string])),
+}));
+
 process.env.FILONE_STAGE = 'test';
 
 import {
@@ -13,7 +18,7 @@ import {
   syncTenantStatusInProvisionedRegions,
   type RegionSyncOutcome,
 } from './region-helpers.js';
-import { fakeOrchestrator } from '../test/fake-orchestrator.js';
+import { fakeOrchestrator, fakeOrgProfile } from '../test/fake-orchestrator.js';
 
 describe('syncTenantStatusInProvisionedRegions', () => {
   beforeEach(() => {
@@ -259,5 +264,23 @@ describe('getProvisionedRegions', () => {
     const result = await getProvisionedRegions('org-1');
 
     expect(result).toEqual([]);
+  });
+
+  it('fetches the PROFILE row once for all orchestrators', async () => {
+    const aurora = fakeOrchestrator('aurora');
+    const fth = fakeOrchestrator('fth');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+    await getProvisionedRegions('org-1');
+
+    expect(mockGetOrgProfile.mock.calls).toEqual([['org-1']]);
+  });
+
+  it('does not fetch the PROFILE row when no orchestrator is available', async () => {
+    mockGetAvailableOrchestrators.mockReturnValue([]);
+
+    await getProvisionedRegions('org-1');
+
+    expect(mockGetOrgProfile).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,7 @@ import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { reportMetric } from '../lib/metrics.js';
+import { getOrgProfile, type OrgProfileItem } from '../lib/org-profile.js';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
 import type { ServiceOrchestrator } from '../lib/service-orchestrator.js';
 
@@ -41,8 +42,27 @@ export async function handler(): Promise<void> {
   );
 
   for (const candidate of uniqueCandidates) {
+    // A failed PROFILE read counts as probeFailed on every orchestrator so a
+    // transient DDB error skips just this candidate, not the whole run.
+    let orgProfile;
+    try {
+      orgProfile = await getOrgProfile(candidate.orgId);
+    } catch (error) {
+      console.error('[subscription-drift-checker] PROFILE read failed', {
+        orgId: candidate.orgId,
+        userId: candidate.userId,
+        error,
+      });
+      for (const orchestrator of orchestrators) {
+        const orchestratorStats = stats.get(orchestrator.id)!;
+        orchestratorStats.total += 1;
+        orchestratorStats.probeFailed += 1;
+      }
+      continue;
+    }
+
     for (const orchestrator of orchestrators) {
-      await evaluateCandidate(candidate, orchestrator, stats.get(orchestrator.id)!);
+      await evaluateCandidate(candidate, orchestrator, orgProfile, stats.get(orchestrator.id)!);
     }
   }
 
@@ -103,16 +123,18 @@ async function scanActiveSubscriptions(billingTableName: string): Promise<Active
 
 // Probes a single org against a single orchestrator. An active subscription is
 // expected to map to an `active` tenant; anything else (locked/disabled/missing)
-// is drift. Each orchestrator resolves its own tenant via isTenantReady, so an
-// org legitimately absent from an orchestrator counts as missingTenant there.
+// is drift. Each orchestrator resolves its own tenant from the pre-fetched
+// PROFILE row via isTenantReady, so an org legitimately absent from an
+// orchestrator counts as missingTenant there.
 async function evaluateCandidate(
   candidate: ActiveCandidate,
   orchestrator: ServiceOrchestrator,
+  orgProfile: OrgProfileItem | undefined,
   stats: OrchestratorStats,
 ): Promise<void> {
   stats.total += 1;
   try {
-    const tenantId = await orchestrator.isTenantReady(candidate.orgId);
+    const tenantId = orchestrator.isTenantReady(orgProfile);
     if (!tenantId) {
       stats.missingTenant += 1;
       return;

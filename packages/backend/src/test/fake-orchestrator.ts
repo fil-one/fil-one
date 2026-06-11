@@ -10,8 +10,9 @@ export interface FakeOrchestrator {
 /**
  * Builds a fake ServiceOrchestrator covering the methods exercised by the
  * tenant status-sync code paths. The tenant id is derived from the orgId
- * (see {@link tenantFor}) so per-org assertions stay unambiguous; pass
- * `ready: false` to simulate a region where the tenant is not provisioned.
+ * carried in the {@link fakeOrgProfile} item (see {@link tenantFor}) so
+ * per-org assertions stay unambiguous; pass `ready: false` to simulate a
+ * region where the tenant is not provisioned.
  */
 export function fakeOrchestrator(
   id: string,
@@ -20,10 +21,18 @@ export function fakeOrchestrator(
   const { ready = true, status = 'active' } = opts;
   return {
     id,
-    isTenantReady: vi.fn(async (orgId: string) => (ready ? tenantFor(id, orgId) : null)),
+    isTenantReady: vi.fn((orgProfile?: { pk?: { S?: string } }) => {
+      const orgId = orgProfile?.pk?.S?.replace('ORG#', '');
+      return ready && orgId ? tenantFor(id, orgId) : null;
+    }),
     getTenantStatus: vi.fn(async () => ({ kind: 'ok', status })),
     updateTenantStatus: vi.fn().mockResolvedValue(undefined),
   };
+}
+
+/** The PROFILE item a mocked `getOrgProfile` should resolve for the given org. */
+export function fakeOrgProfile(orgId: string) {
+  return { pk: { S: `ORG#${orgId}` } };
 }
 
 /** The tenant id a {@link fakeOrchestrator} resolves for the given org. */

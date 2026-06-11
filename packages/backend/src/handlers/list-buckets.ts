@@ -3,6 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ListBucketsResponse } from '@filone/shared';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
+import { getOrgProfile } from '../lib/org-profile.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
@@ -19,9 +20,10 @@ export async function baseHandler(
     process.env.FILONE_STAGE!,
     getVerifiedEmail(event),
   );
+  const orgProfile = await getOrgProfile(orgId);
   const results = await Promise.all(
     orchestrators.map(async (orchestrator) => {
-      const tenantId = await orchestrator.isTenantReady(orgId);
+      const tenantId = orchestrator.isTenantReady(orgProfile);
       if (!tenantId) return [];
       return orchestrator.listBuckets(tenantId);
     }),

@@ -30,6 +30,10 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+}));
+
 // Builds a fully self-contained fake orchestrator for multi-region tests.
 function createMockedOrchestrator(opts: {
   id: string;
@@ -41,7 +45,7 @@ function createMockedOrchestrator(opts: {
   return {
     id: opts.id,
     region: opts.region,
-    isTenantReady: vi.fn().mockResolvedValue(opts.tenantId),
+    isTenantReady: vi.fn().mockReturnValue(opts.tenantId),
     listBuckets: vi.fn().mockResolvedValue(opts.buckets ?? []),
     getTenantUsageMetrics: vi.fn().mockResolvedValue({ storage: opts.storage ?? [], egress: [] }),
   };
@@ -85,11 +89,7 @@ function flatTrend(length: number, value: number) {
 }
 
 function setTenant(tenantId?: string) {
-  if (tenantId) {
-    mockIsTenantReady.mockResolvedValue(tenantId);
-  } else {
-    mockIsTenantReady.mockResolvedValue(null);
-  }
+  mockIsTenantReady.mockReturnValue(tenantId ?? null);
 }
 
 // ---------------------------------------------------------------------------

@@ -8,13 +8,11 @@
 //     getS3ClientContext) speak S3 directly against the FTH S3 endpoint
 //     using the service access key stashed in SSM during setup.
 
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region } from '@filone/shared';
 import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
-import { getDynamoClient } from '../ddb-client.js';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
 import {
   AccessKeyAlreadyExistsError,
@@ -34,6 +32,7 @@ import type {
   TenantStatusProbe,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import type { OrgProfileItem } from '../org-profile.js';
 
 import type { S3ClientContext } from '../s3-client.js';
 
@@ -66,7 +65,6 @@ const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 // Mirrors the retry policy of Aurora's updateTenantStatus (aurora-backoffice.ts).
 const STATUS_UPDATE_RETRY = { retries: 3 } as const;
 
-const dynamo = getDynamoClient();
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
 const client = createInstrumentedFthClient();
 
@@ -83,15 +81,8 @@ export const fthOrchestrator = {
     return ensureFthTenantReady(client, orgId);
   },
 
-  async isTenantReady(orgId: string): Promise<string | null> {
-    const { Item } = await dynamo.send(
-      new GetItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-        ConsistentRead: true,
-      }),
-    );
-    const tenantId = Item?.fthTenantId?.S;
+  isTenantReady(orgProfile: OrgProfileItem | undefined): string | null {
+    const tenantId = orgProfile?.fthTenantId?.S;
     if (!tenantId) return null;
     // TODO: check fthTenantSetupStatus
     return tenantId;

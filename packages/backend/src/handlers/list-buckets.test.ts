@@ -37,6 +37,10 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: (stage: string, email?: string) => stageOrchestrators(stage, email),
 }));
 
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+}));
+
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './list-buckets.js';
@@ -57,7 +61,7 @@ describe('list-buckets baseHandler (single-region)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     stageOrchestrators.mockReturnValue([aurora]);
-    aurora.isTenantReady.mockResolvedValue('aurora-t-1');
+    aurora.isTenantReady.mockReturnValue('aurora-t-1');
   });
 
   it('returns 200 with buckets from the orchestrator', async () => {
@@ -191,7 +195,7 @@ describe('list-buckets baseHandler (single-region)', () => {
   });
 
   it('returns 200 with empty array when tenant is not ready', async () => {
-    aurora.isTenantReady.mockResolvedValue(null);
+    aurora.isTenantReady.mockReturnValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);
@@ -218,8 +222,8 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     stageOrchestrators.mockReturnValue([aurora, fth]);
-    aurora.isTenantReady.mockResolvedValue('aurora-t-1');
-    fth.isTenantReady.mockResolvedValue('fth-t-9');
+    aurora.isTenantReady.mockReturnValue('aurora-t-1');
+    fth.isTenantReady.mockReturnValue('fth-t-9');
   });
 
   it('concatenates buckets from every ready orchestrator in registry order', async () => {
@@ -306,7 +310,7 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
   });
 
   it('skips orchestrators whose tenant is not ready', async () => {
-    aurora.isTenantReady.mockResolvedValue(null);
+    aurora.isTenantReady.mockReturnValue(null);
     fth.listBuckets.mockResolvedValue([
       {
         bucketName: 'fth-bucket',
@@ -337,8 +341,8 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
   });
 
   it('returns empty array when no orchestrator has a ready tenant', async () => {
-    aurora.isTenantReady.mockResolvedValue(null);
-    fth.isTenantReady.mockResolvedValue(null);
+    aurora.isTenantReady.mockReturnValue(null);
+    fth.isTenantReady.mockReturnValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import {
   S3Client,
@@ -19,7 +18,6 @@ vi.mock('sst', () => ({
   },
 }));
 
-const ddbMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
 const s3Mock = mockClient(S3Client);
 
@@ -80,7 +78,6 @@ function profileItem(attrs: Record<string, string>) {
 }
 
 beforeEach(() => {
-  ddbMock.reset();
   ssmMock.reset();
   s3Mock.reset();
   vi.clearAllMocks();
@@ -130,12 +127,8 @@ describe('fthOrchestrator.isTenantReady', () => {
   };
 
   for (const [desc, { item, expected }] of Object.entries(cases)) {
-    it(`returns ${expected === null ? 'null' : 'tenantId'} when ${desc}`, async () => {
-      ddbMock.on(GetItemCommand).resolves({
-        Item: item ? profileItem(item) : undefined,
-      });
-
-      const result = await fthOrchestrator.isTenantReady(orgId);
+    it(`returns ${expected === null ? 'null' : 'tenantId'} when ${desc}`, () => {
+      const result = fthOrchestrator.isTenantReady(item ? profileItem(item) : undefined);
       expect(result).toBe(expected);
     });
   }

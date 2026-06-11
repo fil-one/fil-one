@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 
 // ---------------------------------------------------------------------------
@@ -13,7 +12,6 @@ vi.mock('sst', () => ({
   },
 }));
 
-const ddbMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
 
 const mockEnsureAuroraTenantReady = vi.fn();
@@ -65,6 +63,7 @@ process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu/api';
 
 import { S3Region } from '@filone/shared';
 import { auroraOrchestrator, _resetSsmCacheForTesting } from './aurora-orchestrator.js';
+import type { OrgProfileItem } from '../org-profile.js';
 import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../org-setup-status.js';
 import {
   AccessKeyAlreadyExistsError,
@@ -124,58 +123,31 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('isTenantReady', () => {
-    beforeEach(() => {
-      ddbMock.reset();
-    });
-
-    it('returns the tenantId when the Aurora tenant setup is complete', async () => {
-      ddbMock.on(GetItemCommand).resolves({
-        Item: {
-          auroraTenantId: { S: 'aurora-t-1' },
-          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
-        },
+    it('returns the tenantId when the Aurora tenant setup is complete', () => {
+      const result = auroraOrchestrator.isTenantReady({
+        auroraTenantId: { S: 'aurora-t-1' },
+        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
       });
-
-      const result = await auroraOrchestrator.isTenantReady('org-1');
 
       expect(result).toEqual('aurora-t-1');
-      expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
-      expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toMatchObject({
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+    });
+
+    const notReadyCases: Record<string, OrgProfileItem | undefined> = {
+      'the Aurora setup status was not completed yet': {
+        auroraTenantId: { S: 'aurora-t-1' },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+      },
+      'the PROFILE row is missing the tenantId': {
+        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
+      },
+      'no PROFILE row exists': undefined,
+    };
+
+    for (const [desc, orgProfile] of Object.entries(notReadyCases)) {
+      it(`returns null when ${desc}`, () => {
+        expect(auroraOrchestrator.isTenantReady(orgProfile)).toBeNull();
       });
-    });
-
-    it('returns null when the Aurora setup status was not completed yet ', async () => {
-      ddbMock.on(GetItemCommand).resolves({
-        Item: {
-          auroraTenantId: { S: 'aurora-t-1' },
-          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
-        },
-      });
-
-      const result = await auroraOrchestrator.isTenantReady('org-1');
-
-      expect(result).toBeNull();
-    });
-
-    it('returns null when the PROFILE row is missing the tenantId', async () => {
-      ddbMock.on(GetItemCommand).resolves({
-        Item: { auroraSetupStatus: { S: FINAL_SETUP_STATUS } },
-      });
-
-      const result = await auroraOrchestrator.isTenantReady('org-1');
-
-      expect(result).toBeNull();
-    });
-
-    it('returns null when no PROFILE row exists', async () => {
-      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-
-      const result = await auroraOrchestrator.isTenantReady('org-1');
-
-      expect(result).toBeNull();
-    });
+    }
   });
 
   describe('createBucket', () => {

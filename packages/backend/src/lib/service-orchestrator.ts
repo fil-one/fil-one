@@ -6,6 +6,7 @@ import type {
   S3Region,
 } from '@filone/shared';
 import { S3ClientContext } from './s3-client';
+import type { OrgProfileItem } from './org-profile';
 
 export interface BucketSummary {
   bucketName: string;
@@ -119,11 +120,13 @@ export type TenantStatusProbe =
  *   It maps 1:1 to `(orgId, orchestratorId)` and is stored on the
  *   `ORG#{orgId}/PROFILE` DDB row.
  *
- * `ensureTenantReady` / `isTenantReady` take `orgId` because they own the
- * setup state machine (status, failure counts, transitions) which lives on
- * the org row. Every other method takes `tenantId` directly — those are
- * stateless calls, and callers are expected to have resolved org → tenant
- * via ensure/isReady first.
+ * `ensureTenantReady` takes `orgId` because it owns the setup state machine
+ * (status, failure counts, transitions) which lives on the org row.
+ * `isTenantReady` takes the pre-fetched `ORG#{orgId}/PROFILE` item (see
+ * `getOrgProfile`) so callers consulting several orchestrators read the row
+ * once. Every other method takes `tenantId` directly — those are stateless
+ * calls, and callers are expected to have resolved org → tenant via
+ * ensure/isReady first.
  */
 export interface ServiceOrchestrator {
   readonly id: string;
@@ -136,7 +139,7 @@ export interface ServiceOrchestrator {
    * This call has side effects: it may issue API calls towards service orchestrators,
    * write to DDB, increment failure counters, and transition status between setup states.
    * Only call from write paths (POST/PUT/DELETE handlers, background jobs);
-   * GET handlers should use {@link isTenantReady}.
+   * GET handlers should use `getOrgProfile` + {@link isTenantReady}.
    *
    * @param orgId - Internal org UUID from `event.requestContext.userInfo.orgId`.
    * @returns The resolved `tenantId` once the tenant is fully provisioned,
@@ -145,19 +148,22 @@ export interface ServiceOrchestrator {
   ensureTenantReady(orgId: string): Promise<string | null>;
 
   /**
-   * Side-effect-free readiness check. Reads the current state from DDB and
-   * returns the `tenantId` only if the tenant is already fully set up.
+   * Side-effect-free readiness check: extracts this orchestrator's `tenantId`
+   * from a pre-fetched `ORG#{orgId}/PROFILE` item (see `getOrgProfile`),
+   * returning it only if the tenant is already fully set up. Pure and
+   * synchronous — callers that consult several orchestrators read the row
+   * once instead of once per orchestrator.
    *
    * Unlike {@link ensureTenantReady}, this never advances the setup state
-   * machine, issues Portal/Backoffice API calls, or writes to DDB — safe to
-   * call from GET handlers and other read paths where triggering provisioning
-   * would be inappropriate.
+   * machine, issues Portal/Backoffice API calls, or performs any I/O — safe
+   * to call from GET handlers and other read paths where triggering
+   * provisioning would be inappropriate.
    *
-   * @param orgId - Internal org UUID.
+   * @param orgProfile - The PROFILE item, or `undefined` when the row is missing.
    * @returns The `tenantId` if ready, otherwise `null` (not yet provisioned,
    *          in progress, or failed).
    */
-  isTenantReady(orgId: string): Promise<string | null>;
+  isTenantReady(orgProfile: OrgProfileItem | undefined): string | null;
 
   createBucket(tenantId: string, args: CreateBucketArgs): Promise<void>;
   deleteBucket(tenantId: string, bucketName: string): Promise<void>;
