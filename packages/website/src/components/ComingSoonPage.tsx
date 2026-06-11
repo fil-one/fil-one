@@ -1,3 +1,4 @@
+// oxlint-disable max-lines
 import { useId, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CaretDownIcon, CheckIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
@@ -10,6 +11,7 @@ import { Alert } from './Alert.js';
 import { Badge } from './Badge.js';
 import { Button } from './Button.js';
 import { Card } from './Card.js';
+import { Checkbox } from './Checkbox.js';
 import { FormField } from './FormField.js';
 import { Heading } from './Heading/Heading.js';
 import { Modal, ModalHeader } from './Modal/index.js';
@@ -50,14 +52,39 @@ export type ComingSoonPageProps = {
   };
   hubspotFormGuid: string;
   interestForm: {
-    workloadLabel: string;
-    workloadTypes: string[];
+    /** Use-case question. Omit workloadTypes to hide the field entirely. */
+    workloadLabel?: string;
+    workloadTypes?: string[];
     timelines: string[];
     providersLabel: string;
     providers: string[];
+    /** When true, the providers field is a multi-select checkbox group instead of a single dropdown. */
+    providersMultiple?: boolean;
+    /** Whether to show the "Amount of storage" question. Defaults to true. */
+    showStorageAmount?: boolean;
     notesPlaceholder: string;
   };
+  /**
+   * Overrides how the waitlist form is submitted. Defaults to the Bucket Intelligence
+   * (RAG) HubSpot mapping; pages with different fields (e.g. the AI Agent Toolkit) pass
+   * their own handler.
+   */
+  onWaitlistSubmit?: (values: WaitlistSubmitValues) => Promise<void>;
   faqs: ComingSoonFaq[];
+};
+
+export type WaitlistSubmitValues = {
+  formId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  workload: string;
+  providers: string[];
+  otherProvider: string;
+  timeline: string;
+  teamSize: string;
+  storageAmount: string;
+  notes: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -244,14 +271,78 @@ function WaitlistSuccess({ title, onClose }: { title: string; onClose: () => voi
   );
 }
 
+function ProvidersMultiSelect({
+  label,
+  providers,
+  selected,
+  onToggle,
+  otherValue,
+  onOtherChange,
+}: {
+  label: string;
+  providers: string[];
+  selected: string[];
+  onToggle: (value: string) => void;
+  otherValue: string;
+  onOtherChange: (value: string) => void;
+}) {
+  return (
+    <div className="mt-5">
+      <p className="mb-2 text-xs font-medium text-zinc-900">{label}</p>
+      <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
+        {providers.map((p) => {
+          const checked = selected.includes(p);
+
+          if (p === 'Other') {
+            return (
+              <div
+                key={p}
+                className="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-50 sm:col-span-2"
+              >
+                <label className="flex flex-shrink-0 cursor-pointer items-center gap-3">
+                  <Checkbox aria-label={p} checked={checked} onChange={() => onToggle(p)} />
+                  <span className="text-sm text-zinc-700">{p}</span>
+                </label>
+                {checked && (
+                  <input
+                    type="text"
+                    autoFocus
+                    aria-label="Which other tool?"
+                    placeholder="Which one?"
+                    value={otherValue}
+                    onChange={(e) => onOtherChange(e.target.value)}
+                    className="min-w-0 flex-1 rounded-md border border-(--input-border-color) bg-white px-2.5 py-1.5 text-sm text-zinc-900 transition-colors placeholder:text-(--input-placeholder-color) focus-visible:brand-outline"
+                  />
+                )}
+              </div>
+            );
+          }
+
+          return (
+            <label
+              key={p}
+              className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-50"
+            >
+              <Checkbox aria-label={p} checked={checked} onChange={() => onToggle(p)} />
+              <span className="text-sm text-zinc-700">{p}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function InterestForm({
   config,
   formGuid,
+  onSubmit,
   onSubmitted,
   onCancel,
 }: {
   config: ComingSoonPageProps['interestForm'];
   formGuid: string;
+  onSubmit?: ComingSoonPageProps['onWaitlistSubmit'];
   onSubmitted: () => void;
   onCancel: () => void;
 }) {
@@ -264,7 +355,8 @@ function InterestForm({
 
   const [workload, setWorkload] = useState('');
   const [timeline, setTimeline] = useState('');
-  const [provider, setProvider] = useState('');
+  const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
+  const [otherProvider, setOtherProvider] = useState('');
   const [teamSize, setTeamSize] = useState('');
   const [storageAmount, setStorageAmount] = useState('');
   const [notes, setNotes] = useState('');
@@ -272,6 +364,12 @@ function InterestForm({
   const [submitError, setSubmitError] = useState(false);
 
   const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
+
+  function toggleProvider(value: string) {
+    setSelectedProviders((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
+    );
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -283,19 +381,38 @@ function InterestForm({
     const firstName = spaceIndex !== -1 ? fullName.slice(0, spaceIndex) : fullName;
     const lastName = spaceIndex !== -1 ? fullName.slice(spaceIndex + 1) : '';
 
+    const values: WaitlistSubmitValues = {
+      formId: formGuid,
+      firstName,
+      lastName,
+      email: me?.email ?? '',
+      workload,
+      providers: selectedProviders,
+      otherProvider,
+      timeline,
+      teamSize,
+      storageAmount,
+      notes,
+    };
+
+    const submit =
+      onSubmit ??
+      ((v: WaitlistSubmitValues) =>
+        submitWaitlistForm({
+          formId: v.formId,
+          firstName: v.firstName,
+          lastName: v.lastName,
+          email: v.email,
+          primaryUseCase: v.workload,
+          ragProvider: v.providers[0] ?? '',
+          timeline: v.timeline,
+          teamSize: v.teamSize,
+          storageAmount: v.storageAmount,
+          notes: v.notes,
+        }));
+
     try {
-      await submitWaitlistForm({
-        formId: formGuid,
-        firstName,
-        lastName,
-        email: me?.email ?? '',
-        primaryUseCase: workload,
-        ragProvider: provider,
-        timeline,
-        teamSize,
-        storageAmount,
-        notes,
-      });
+      await submit(values);
       onSubmitted();
     } catch {
       setSubmitError(true);
@@ -307,27 +424,35 @@ function InterestForm({
   return (
     <form onSubmit={handleSubmit} className="px-6 py-6">
       <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
-        <FormField label={config.workloadLabel} htmlFor={workloadId}>
-          <Select id={workloadId} value={workload} onChange={setWorkload}>
-            <option value="">Select…</option>
-            {config.workloadTypes.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </Select>
-        </FormField>
+        {config.workloadTypes && config.workloadTypes.length > 0 && (
+          <FormField label={config.workloadLabel ?? 'Primary use case'} htmlFor={workloadId}>
+            <Select id={workloadId} value={workload} onChange={setWorkload}>
+              <option value="">Select…</option>
+              {config.workloadTypes.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        )}
 
-        <FormField label={config.providersLabel} htmlFor={providerId}>
-          <Select id={providerId} value={provider} onChange={setProvider}>
-            <option value="">Select…</option>
-            {config.providers.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </Select>
-        </FormField>
+        {!config.providersMultiple && (
+          <FormField label={config.providersLabel} htmlFor={providerId}>
+            <Select
+              id={providerId}
+              value={selectedProviders[0] ?? ''}
+              onChange={(v) => setSelectedProviders(v ? [v] : [])}
+            >
+              <option value="">Select…</option>
+              {config.providers.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        )}
 
         <FormField label="Timeline" htmlFor={timelineId}>
           <Select id={timelineId} value={timeline} onChange={setTimeline}>
@@ -350,20 +475,33 @@ function InterestForm({
           </Select>
         </FormField>
 
-        <FormField label="Amount of storage" htmlFor={storageAmountId} className="sm:col-span-2">
-          <Select id={storageAmountId} value={storageAmount} onChange={setStorageAmount}>
-            <option value="">Select…</option>
-            <option value="Less than 25 TB">Less than 25 TB</option>
-            <option value="25 - 50 TB">25 - 50 TB</option>
-            <option value="50 - 100 TB">50 - 100 TB</option>
-            <option value="100 - 150 TB">100 - 150 TB</option>
-            <option value="150 - 250 TB">150 - 250 TB</option>
-            <option value="250 - 500 TB">250 - 500 TB</option>
-            <option value="500 - 1 PB">500 TB - 1 PB</option>
-            <option value="More than 1 PB">More than 1 PB</option>
-          </Select>
-        </FormField>
+        {config.showStorageAmount !== false && (
+          <FormField label="Amount of storage" htmlFor={storageAmountId} className="sm:col-span-2">
+            <Select id={storageAmountId} value={storageAmount} onChange={setStorageAmount}>
+              <option value="">Select…</option>
+              <option value="Less than 25 TB">Less than 25 TB</option>
+              <option value="25 - 50 TB">25 - 50 TB</option>
+              <option value="50 - 100 TB">50 - 100 TB</option>
+              <option value="100 - 150 TB">100 - 150 TB</option>
+              <option value="150 - 250 TB">150 - 250 TB</option>
+              <option value="250 - 500 TB">250 - 500 TB</option>
+              <option value="500 - 1 PB">500 TB - 1 PB</option>
+              <option value="More than 1 PB">More than 1 PB</option>
+            </Select>
+          </FormField>
+        )}
       </div>
+
+      {config.providersMultiple && (
+        <ProvidersMultiSelect
+          label={config.providersLabel}
+          providers={config.providers}
+          selected={selectedProviders}
+          onToggle={toggleProvider}
+          otherValue={otherProvider}
+          onOtherChange={setOtherProvider}
+        />
+      )}
 
       <div className="mt-5">
         <FormField label="Notes" optional htmlFor={notesId}>
@@ -413,6 +551,7 @@ export function ComingSoonPage({
   pricing,
   hubspotFormGuid,
   interestForm,
+  onWaitlistSubmit,
   faqs,
 }: ComingSoonPageProps) {
   const [modalOpen, setModalOpen] = useState(false);
@@ -502,6 +641,7 @@ export function ComingSoonPage({
             <InterestForm
               config={interestForm}
               formGuid={hubspotFormGuid}
+              onSubmit={onWaitlistSubmit}
               onSubmitted={() => {
                 track('Waitlist submitted', { props: { page: title } });
                 setSubmitted(true);

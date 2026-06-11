@@ -87,29 +87,24 @@ export type WaitlistFields = {
   notes: string;
 };
 
-export async function submitWaitlistForm(fields: WaitlistFields): Promise<void> {
+// Shared submit for waitlist forms. Forwards the HubSpot tracking cookie when present
+// so submissions link to an existing visitor's analytics session.
+async function submitWaitlistToHubSpot(
+  formId: string,
+  fields: { name: string; value: string }[],
+): Promise<void> {
   const hutk = document.cookie
     .split('; ')
     .find((row) => row.startsWith('hubspotutk='))
     ?.split('=')[1];
 
   const res = await fetch(
-    `https://api.hsforms.com/submissions/v3/integration/submit/${HUBSPOT_PORTAL_ID}/${fields.formId}`,
+    `https://api.hsforms.com/submissions/v3/integration/submit/${HUBSPOT_PORTAL_ID}/${formId}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        fields: [
-          { name: 'firstname', value: fields.firstName },
-          { name: 'lastname', value: fields.lastName },
-          { name: 'email', value: fields.email },
-          { name: 'primary_use_case', value: fields.primaryUseCase },
-          { name: 'how_are_you_handling_rag_today', value: fields.ragProvider },
-          { name: 'timeline', value: fields.timeline },
-          { name: 'team_size', value: fields.teamSize },
-          { name: 'amount_of_storage_rag', value: fields.storageAmount },
-          { name: 'notes', value: fields.notes },
-        ],
+        fields,
         context: {
           pageUri: window.location.href,
           ...(hutk ? { hutk } : {}),
@@ -119,4 +114,52 @@ export async function submitWaitlistForm(fields: WaitlistFields): Promise<void> 
   );
 
   if (!res.ok) throw new Error('Waitlist submission failed');
+}
+
+export async function submitWaitlistForm(fields: WaitlistFields): Promise<void> {
+  return submitWaitlistToHubSpot(fields.formId, [
+    { name: 'firstname', value: fields.firstName },
+    { name: 'lastname', value: fields.lastName },
+    { name: 'email', value: fields.email },
+    { name: 'primary_use_case', value: fields.primaryUseCase },
+    { name: 'how_are_you_handling_rag_today', value: fields.ragProvider },
+    { name: 'timeline', value: fields.timeline },
+    { name: 'team_size', value: fields.teamSize },
+    { name: 'amount_of_storage_rag', value: fields.storageAmount },
+    { name: 'notes', value: fields.notes },
+  ]);
+}
+
+export type AgentToolkitWaitlistFields = {
+  formId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  tools: string[];
+  otherTool: string;
+  timeline: string;
+  teamSize: string;
+  notes: string;
+};
+
+export async function submitAgentToolkitWaitlistForm(
+  fields: AgentToolkitWaitlistFields,
+): Promise<void> {
+  const hubspotFields = [
+    { name: 'firstname', value: fields.firstName },
+    { name: 'lastname', value: fields.lastName },
+    { name: 'email', value: fields.email },
+    { name: 'ai_tools', value: fields.tools.join(';') },
+    { name: 'ai_toolkit_timeline', value: fields.timeline },
+    { name: 'team_size', value: fields.teamSize },
+    { name: 'ai_toolkit_notes', value: fields.notes },
+  ];
+
+  // Free-text tool name goes to its own property; the checkbox field keeps the literal "Other".
+  const otherTool = fields.otherTool.trim();
+  if (otherTool) {
+    hubspotFields.push({ name: 'other_tool', value: otherTool });
+  }
+
+  return submitWaitlistToHubSpot(fields.formId, hubspotFields);
 }
