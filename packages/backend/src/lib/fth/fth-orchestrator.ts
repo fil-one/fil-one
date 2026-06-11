@@ -5,10 +5,11 @@
 //     call the FTH management REST API. ensureTenantReady delegates to
 //     fth-tenant-setup.ts; the other control-plane methods live here.
 //   - data-plane (createBucket, deleteBucket, listBuckets, getBucket,
-//     getPresignerContext) speak S3 directly against the FTH S3 endpoint
+//     getS3ClientContext) speak S3 directly against the FTH S3 endpoint
 //     using the service access key stashed in SSM during setup.
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
+import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region } from '@filone/shared';
@@ -18,6 +19,7 @@ import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
+  BucketConfigurationError,
   NotImplementedError,
 } from '../errors.js';
 import type {
@@ -26,11 +28,19 @@ import type {
   CreateBucketArgs,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  PresignerContext,
   ServiceOrchestrator,
 } from '../service-orchestrator.js';
+import type { S3ClientContext } from '../s3-client.js';
 
-import { createBucket as s3CreateBucket, listBuckets as s3ListBuckets } from '../s3-presigner.js';
+import { createS3Client } from '../s3-client.js';
+import {
+  createBucket as s3CreateBucket,
+  listBuckets as s3ListBuckets,
+  setBucketVersioning,
+  putObjectLockConfiguration,
+  getBucketVersioning,
+  getBucketObjectLock,
+} from '../s3-bucket-operations.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 import {
   createFthManagementClient,
@@ -42,6 +52,11 @@ import type { FthManagementClient } from './fth-management-client.js';
 import { instrumentClient } from './fth-api-metrics.js';
 
 const FTH_CONSOLE_USER_CODE = 'filone-console';
+
+// Versioning / object-lock are applied as separate, idempotent S3 calls after the
+// bucket is created. Retry them so a transient S3 blip doesn't leave the bucket
+// partially configured (which would surface as a dead-end BucketConfigurationError).
+const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
 const dynamo = getDynamoClient();
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
@@ -74,7 +89,7 @@ export const fthOrchestrator = {
     return tenantId;
   },
 
-  async getPresignerContext(tenantId: string): Promise<PresignerContext> {
+  async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
     const stage = process.env.FILONE_STAGE!;
     const credentials = await getConsoleS3Credentials({
       orchestratorId: fthOrchestrator.id,
@@ -90,24 +105,33 @@ export const fthOrchestrator = {
   },
 
   async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {
-    if (args.lock) {
-      throw new NotImplementedError(
-        'Object lock on bucket creation is not supported in this region yet',
-      );
-    }
-    if (args.retention?.enabled) {
-      throw new NotImplementedError(
-        'Retention policy on bucket creation is not supported in this region yet',
-      );
-    }
-    if (args.versioning) {
-      throw new NotImplementedError(
-        'Versioning on bucket creation is not supported in this region yet',
-      );
-    }
+    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const s3 = createS3Client(ctx);
+    await s3CreateBucket(s3, {
+      bucketName: args.bucketName,
+      objectLockEnabled: args.lock === true,
+    });
 
-    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
-    await s3CreateBucket(ctx, { bucketName: args.bucketName });
+    try {
+      if (args.versioning) {
+        await pRetry(() => setBucketVersioning(s3, args.bucketName, true), BUCKET_CONFIG_RETRY);
+      }
+      if (args.retention?.enabled) {
+        const retention = args.retention;
+        await pRetry(
+          () =>
+            putObjectLockConfiguration(s3, {
+              bucketName: args.bucketName,
+              mode: retention.mode,
+              duration: retention.duration,
+              durationType: retention.durationType,
+            }),
+          BUCKET_CONFIG_RETRY,
+        );
+      }
+    } catch (err) {
+      throw new BucketConfigurationError(args.bucketName, { cause: err });
+    }
   },
 
   async deleteBucket(_tenantId: string, _bucketName: string): Promise<void> {
@@ -115,31 +139,44 @@ export const fthOrchestrator = {
   },
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {
-    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
-    const { buckets } = await s3ListBuckets(ctx);
-    return buckets.map((b) => ({
-      bucketName: b.name,
-      region: fthOrchestrator.region,
-      createdAt: b.createdAt,
-      isPublic: false,
-      versioning: false,
-      encrypted: true,
-    }));
+    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const s3 = createS3Client(ctx);
+    const { buckets } = await s3ListBuckets(s3);
+    return Promise.all(
+      buckets.map(async (b) => ({
+        bucketName: b.name,
+        region: fthOrchestrator.region,
+        createdAt: b.createdAt,
+        isPublic: false,
+        versioning: await getBucketVersioning(s3, b.name),
+        encrypted: true,
+      })),
+    );
   },
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
-    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
-    const { buckets } = await s3ListBuckets(ctx);
+    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const s3 = createS3Client(ctx);
+    const { buckets } = await s3ListBuckets(s3);
     const match = buckets.find((b) => b.name === bucketName);
     if (!match) return null;
+
+    const [versioning, lock] = await Promise.all([
+      getBucketVersioning(s3, bucketName),
+      getBucketObjectLock(s3, bucketName),
+    ]);
 
     return {
       bucketName,
       region: fthOrchestrator.region,
       createdAt: match.createdAt,
       isPublic: false,
-      versioning: false,
+      versioning,
       encrypted: true,
+      objectLockEnabled: lock?.objectLockEnabled ?? false,
+      ...(lock?.defaultRetention && { defaultRetention: lock.defaultRetention }),
+      ...(lock?.retentionDuration != null && { retentionDuration: lock.retentionDuration }),
+      ...(lock?.retentionDurationType && { retentionDurationType: lock.retentionDurationType }),
     };
   },
 

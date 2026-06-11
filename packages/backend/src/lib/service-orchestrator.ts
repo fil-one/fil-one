@@ -5,13 +5,7 @@ import type {
   RetentionMode,
   S3Region,
 } from '@filone/shared';
-
-export interface PresignerContext {
-  endpointUrl: string;
-  region: string;
-  credentials: { accessKeyId: string; secretAccessKey: string };
-  forcePathStyle: boolean;
-}
+import { S3ClientContext } from './s3-client';
 
 export interface BucketSummary {
   bucketName: string;
@@ -129,5 +123,5 @@ export interface ServiceOrchestrator {
    */
   deleteAccessKey(tenantId: string, keyId: string): Promise<void>;
 
-  getPresignerContext(tenantId: string): Promise<PresignerContext>;
+  getS3ClientContext(tenantId: string): Promise<S3ClientContext>;
 }
