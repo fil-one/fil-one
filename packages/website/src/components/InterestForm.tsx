@@ -61,6 +61,10 @@ export function InterestForm({
 
   const [workload, setWorkload] = useState('');
   const [timeline, setTimeline] = useState('');
+  // Providers are always stored as an array so single-select and multi-select share one
+  // state shape. In single-select mode the array holds at most one value (see the Select
+  // below, which reads selectedProviders[0]); the default submit maps that first value to
+  // the RAG `ragProvider` field.
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
   const [otherProvider, setOtherProvider] = useState('');
   const [teamSize, setTeamSize] = useState('');
