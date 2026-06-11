@@ -26,7 +26,66 @@ import { Label } from '../components/Label';
 import { ProgressBar } from '../components/ProgressBar';
 import { Spinner } from '../components/Spinner';
 import { useFileUpload } from '../lib/use-file-upload.js';
-import type { FileEntry, FileUploadStatus } from '../lib/use-file-upload.js';
+import type { FileEntry, FileInput, FileUploadStatus } from '../lib/use-file-upload.js';
+
+// ---------------------------------------------------------------------------
+// Folder drag-and-drop helpers
+// ---------------------------------------------------------------------------
+
+function readEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+  return new Promise((resolve, reject) => {
+    const entries: FileSystemEntry[] = [];
+    function read() {
+      reader.readEntries((batch) => {
+        if (batch.length === 0) resolve(entries);
+        else {
+          entries.push(...batch);
+          read();
+        }
+      }, reject);
+    }
+    read();
+  });
+}
+
+function fileFromEntry(entry: FileSystemFileEntry): Promise<File> {
+  return new Promise((resolve, reject) => entry.file(resolve, reject));
+}
+
+async function collectEntryFiles(
+  entry: FileSystemEntry,
+  dirPath: string,
+): Promise<Array<{ file: File; dirPath: string }>> {
+  if (entry.isFile) {
+    const file = await fileFromEntry(entry as FileSystemFileEntry);
+    return [{ file, dirPath }];
+  }
+  if (entry.isDirectory) {
+    const childPath = dirPath ? `${dirPath}/${entry.name}` : entry.name;
+    const children = await readEntries((entry as FileSystemDirectoryEntry).createReader());
+    const nested = await Promise.all(children.map((c) => collectEntryFiles(c, childPath)));
+    return nested.flat();
+  }
+  return [];
+}
+
+async function resolveDropItems(dataTransfer: DataTransfer): Promise<FileInput[]> {
+  const items = Array.from(dataTransfer.items);
+  if (!items[0]?.webkitGetAsEntry) {
+    return Array.from(dataTransfer.files);
+  }
+  const results = await Promise.all(
+    items.map(async (item) => {
+      const entry = item.webkitGetAsEntry();
+      if (!entry) return [] as Array<{ file: File; dirPath: string }>;
+      return collectEntryFiles(entry, '');
+    }),
+  );
+  return results.flat().map(({ file, dirPath }) => {
+    if (!dirPath) return file;
+    return { file, relativePath: `${dirPath}/${file.name}` };
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -38,10 +97,7 @@ type FolderGroup = {
   entries: FileEntry[];
 };
 
-type FlatFile = {
-  type: 'file';
-  entry: FileEntry;
-};
+type FlatFile = { type: 'file'; entry: FileEntry };
 
 type ListItem = FolderGroup | FlatFile;
 
@@ -50,9 +106,8 @@ function groupEntries(files: FileEntry[]): ListItem[] {
   const flat: FileEntry[] = [];
 
   for (const entry of files) {
-    const rel = (entry.file as File & { webkitRelativePath?: string }).webkitRelativePath;
-    if (rel) {
-      const root = rel.split('/')[0];
+    if (entry.relativePath) {
+      const root = entry.relativePath.split('/')[0];
       const group = folders.get(root) ?? [];
       group.push(entry);
       folders.set(root, group);
@@ -165,17 +220,170 @@ function FolderRow({
             icon={XIcon}
             size="sm"
             aria-label={`Remove folder ${group.root}`}
-            onClick={() => onRemove(group.root)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove(group.root);
+            }}
           />
         )}
       </div>
       {expanded &&
         group.entries.map((entry) => {
-          const rel = (entry.file as File & { webkitRelativePath?: string }).webkitRelativePath;
-          const name = rel ? rel.split('/').slice(1).join('/') : entry.file.name;
+          const name = entry.relativePath
+            ? entry.relativePath.split('/').slice(1).join('/')
+            : entry.file.name;
           return <FileRow key={entry.id} entry={entry} nameOverride={name} />;
         })}
     </>
+  );
+}
+
+type DropzoneAreaProps = {
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  folderInputRef: React.RefObject<HTMLInputElement | null>;
+  onDrop: (e: React.DragEvent<HTMLDivElement>) => void;
+};
+
+function DropzoneArea({ fileInputRef, folderInputRef, onDrop }: DropzoneAreaProps) {
+  return (
+    <div
+      className="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-(--state-card-border-color) px-6 py-10 text-center"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={onDrop}
+    >
+      <div className="flex flex-col items-center gap-3">
+        <IconBox icon={CloudArrowUpIcon} color="blue" size="md" rounded="full" />
+        <div className="flex flex-col items-center gap-0.5">
+          <p className="text-sm font-medium text-zinc-700">Drag and drop files or folders here</p>
+          <p className="text-xs text-zinc-500">Any file type up to 5 GB</p>
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={FileIcon}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          Select files
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={FolderIcon}
+          onClick={() => folderInputRef.current?.click()}
+        >
+          Select folder
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+type FileListSectionProps = {
+  listItems: ListItem[];
+  expandedFolders: Set<string>;
+  onToggleFolder: (root: string) => void;
+  onRemoveFile?: (id: string) => void;
+  onRemoveFolder?: (root: string) => void;
+  fileCount: number;
+  uploading: boolean;
+  onClear: () => void;
+};
+
+function FileListSection({
+  listItems,
+  expandedFolders,
+  onToggleFolder,
+  onRemoveFile,
+  onRemoveFolder,
+  fileCount,
+  uploading,
+  onClear,
+}: FileListSectionProps) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <Label>
+          {fileCount} file{fileCount > 1 ? 's' : ''} selected
+        </Label>
+        {!uploading && (
+          <Button variant="tertiary" size="sm" onClick={onClear}>
+            Clear all
+          </Button>
+        )}
+      </div>
+      <div className="overflow-hidden rounded-lg border border-zinc-200 divide-y divide-zinc-100">
+        {listItems.map((item) =>
+          item.type === 'folder' ? (
+            <FolderRow
+              key={item.root}
+              group={item}
+              expanded={expandedFolders.has(item.root)}
+              onToggle={() => onToggleFolder(item.root)}
+              onRemove={onRemoveFolder}
+            />
+          ) : (
+            <FileRow key={item.entry.id} entry={item.entry} onRemove={onRemoveFile} />
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
+type UploadActionsProps = {
+  failedCount: number;
+  pendingCount: number;
+  canUpload: boolean;
+  onRetry: () => void;
+  onUpload: () => void;
+};
+
+function UploadActions({
+  failedCount,
+  pendingCount,
+  canUpload,
+  onRetry,
+  onUpload,
+}: UploadActionsProps) {
+  const uploadLabel =
+    pendingCount > 0 ? `Upload ${pendingCount} file${pendingCount > 1 ? 's' : ''}` : 'Upload';
+  return (
+    <div className="flex gap-2">
+      {failedCount > 0 && (
+        <Button variant="tertiary" icon={ArrowCounterClockwiseIcon} onClick={onRetry}>
+          Retry {failedCount} failed
+        </Button>
+      )}
+      <Button variant="primary" className="flex-1" disabled={!canUpload} onClick={onUpload}>
+        {uploadLabel}
+      </Button>
+    </div>
+  );
+}
+
+type UploadDoneCardProps = {
+  bucketName: string;
+  doneCount: number;
+  onBack: () => void;
+};
+
+function UploadDoneCard({ bucketName, doneCount, onBack }: UploadDoneCardProps) {
+  return (
+    <Card>
+      <div className="flex flex-col items-center gap-3 py-6">
+        <Icon component={CheckCircleIcon} size={40} color="success" />
+        <p className="text-sm font-medium text-zinc-900">Upload complete.</p>
+        <p className="text-xs text-zinc-500">
+          {doneCount} file{doneCount > 1 ? 's' : ''} uploaded to{' '}
+          <span className="font-medium text-zinc-700">{bucketName}</span>.
+        </p>
+        <Button variant="primary" onClick={onBack}>
+          Back to bucket
+        </Button>
+      </div>
+    </Card>
   );
 }
 
@@ -188,7 +396,6 @@ export type UploadObjectPageProps = {
   region: S3Region;
 };
 
-// eslint-disable-next-line max-lines-per-function, complexity/complexity
 export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) {
   const navigate = useNavigate();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -201,43 +408,56 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
     },
   });
 
+  const goToBucket = () =>
+    void navigate({ to: '/buckets/$bucketName', params: { bucketName }, search: { region } });
+
   const toggleFolder = (root: string) => {
     setExpandedFolders((prev) => {
       const next = new Set(prev);
-      if (next.has(root)) {
-        next.delete(root);
-      } else {
-        next.add(root);
-      }
+      if (next.has(root)) next.delete(root);
+      else next.add(root);
       return next;
     });
   };
 
+  const handleClearAll = () => {
+    upload.reset();
+    setExpandedFolders(new Set());
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    void resolveDropItems(e.dataTransfer).then((items) => {
+      if (items.length > 0) upload.addFiles(items, upload.prefix);
+    });
+  };
+
   const listItems = groupEntries(upload.files);
-  const failedFiles = upload.files.filter((e) => e.status === 'error');
-  const pendingFiles = upload.files.filter((e) => e.status === 'pending');
-  const hasIndividualFiles = upload.files.some(
-    (e) => !(e.file as File & { webkitRelativePath?: string }).webkitRelativePath,
-  );
+  const isUploading = upload.uploadStep === 'uploading';
+  const removeFile = isUploading ? undefined : upload.removeFile;
+  const removeFolderFiles = isUploading ? undefined : upload.removeFolderFiles;
+
+  const breadcrumb = [
+    { label: 'Buckets', href: '/buckets' },
+    { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
+    { label: 'Upload' },
+  ];
+
+  if (upload.uploadStep === 'done') {
+    return (
+      <div className="mx-auto max-w-2xl px-10 pt-10">
+        <Breadcrumb items={breadcrumb} />
+        <UploadDoneCard bucketName={bucketName} doneCount={upload.doneCount} onBack={goToBucket} />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl px-10 pt-10">
-      <Breadcrumb
-        items={[
-          { label: 'Buckets', href: '/buckets' },
-          { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
-          { label: 'Upload' },
-        ]}
-      />
+      <Breadcrumb items={breadcrumb} />
 
       <div className="mt-6 mb-6 flex items-center gap-4">
-        <IconButton
-          icon={ArrowLeftIcon}
-          aria-label="Back to bucket"
-          onClick={() =>
-            navigate({ to: '/buckets/$bucketName', params: { bucketName }, search: { region } })
-          }
-        />
+        <IconButton icon={ArrowLeftIcon} aria-label="Back to bucket" onClick={goToBucket} />
         <div>
           <Heading tag="h1">Upload</Heading>
           <p className="text-[13px] text-zinc-500">
@@ -246,194 +466,93 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
         </div>
       </div>
 
-      {upload.uploadStep !== 'done' && (
-        <Card>
-          <div className="flex flex-col gap-5">
-            {/* Aggregate progress — shown during upload */}
-            {upload.uploadStep === 'uploading' && (
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-zinc-700">Uploading files…</span>
-                  <span className="text-sm tabular-nums text-zinc-500">
-                    {upload.doneCount} / {upload.files.length}
-                  </span>
-                </div>
-                <ProgressBar
-                  value={
-                    upload.files.length > 0
-                      ? Math.round((upload.doneCount / upload.files.length) * 100)
-                      : 0
-                  }
-                  label="Overall upload progress"
-                />
+      <Card>
+        <div className="flex flex-col gap-5">
+          {isUploading && (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-zinc-700">Uploading files…</span>
+                <span className="text-sm tabular-nums text-zinc-500">
+                  {upload.doneCount} / {upload.files.length}
+                </span>
               </div>
-            )}
-
-            {/* Dropzone — hidden during upload */}
-            <div
-              className={`flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-(--state-card-border-color) px-6 py-10 text-center${upload.uploadStep === 'uploading' ? ' hidden' : ''}`}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const dropped = Array.from(e.dataTransfer.files);
-                if (dropped.length > 0) upload.addFiles(dropped, upload.prefix);
-              }}
-            >
-              <div className="flex flex-col items-center gap-3">
-                <IconBox icon={CloudArrowUpIcon} color="blue" size="md" rounded="full" />
-                <div className="flex flex-col items-center gap-0.5">
-                  <p className="text-sm font-medium text-zinc-700">
-                    Drag and drop files or folders here
-                  </p>
-                  <p className="text-xs text-zinc-500">Any file type up to 5 GB</p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={FileIcon}
-                  onClick={() => upload.fileInputRef.current?.click()}
-                >
-                  Select files
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={FolderIcon}
-                  onClick={() => upload.folderInputRef.current?.click()}
-                >
-                  Select folder
-                </Button>
-              </div>
+              <ProgressBar
+                value={
+                  upload.files.length > 0
+                    ? Math.round((upload.doneCount / upload.files.length) * 100)
+                    : 0
+                }
+                label="Overall upload progress"
+              />
             </div>
+          )}
 
-            {/* Hidden inputs */}
-            <input
-              ref={upload.fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={upload.handleFilesSelect}
+          {!isUploading && (
+            <DropzoneArea
+              fileInputRef={upload.fileInputRef}
+              folderInputRef={upload.folderInputRef}
+              onDrop={handleDrop}
             />
-            <input
-              ref={upload.folderInputRef}
-              type="file"
-              // @ts-expect-error — webkitdirectory is not in React's types
-              webkitdirectory=""
-              className="hidden"
-              onChange={upload.handleFolderSelect}
-            />
+          )}
 
-            {/* Optional prefix for individual file uploads */}
-            {upload.files.length > 0 && hasIndividualFiles && (
-              <FormField
-                label="Prefix"
-                optional
-                htmlFor="object-prefix"
-                description="Optional folder path prepended to all file names, e.g. images/"
-              >
-                <Input
-                  id="object-prefix"
-                  value={upload.prefix}
-                  onChange={upload.setPrefix}
-                  placeholder="images/"
-                  autoComplete="off"
-                  disabled={upload.uploadStep === 'uploading'}
-                />
-              </FormField>
-            )}
+          <input
+            ref={upload.fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={upload.handleFilesSelect}
+          />
+          <input
+            ref={upload.folderInputRef}
+            type="file"
+            // @ts-expect-error — webkitdirectory is not in React's types
+            webkitdirectory=""
+            className="hidden"
+            onChange={upload.handleFolderSelect}
+          />
 
-            {/* File / folder list */}
-            {upload.files.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <Label>
-                    {upload.files.length} file{upload.files.length > 1 ? 's' : ''} selected
-                  </Label>
-                  {upload.uploadStep === 'idle' && (
-                    <Button variant="tertiary" size="sm" onClick={upload.reset}>
-                      Clear all
-                    </Button>
-                  )}
-                </div>
-                <div className="overflow-hidden rounded-lg border border-zinc-200 divide-y divide-zinc-100">
-                  {listItems.map((item) =>
-                    item.type === 'folder' ? (
-                      <FolderRow
-                        key={item.root}
-                        group={item}
-                        expanded={expandedFolders.has(item.root)}
-                        onToggle={() => toggleFolder(item.root)}
-                        onRemove={
-                          upload.uploadStep === 'idle' ? upload.removeFolderFiles : undefined
-                        }
-                      />
-                    ) : (
-                      <FileRow
-                        key={item.entry.id}
-                        entry={item.entry}
-                        onRemove={upload.uploadStep === 'idle' ? upload.removeFile : undefined}
-                      />
-                    ),
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Actions — hidden during upload */}
-            {upload.uploadStep !== 'uploading' && (
-              <div className="flex gap-2">
-                {failedFiles.length > 0 && upload.uploadStep === 'idle' && (
-                  <Button
-                    variant="tertiary"
-                    icon={ArrowCounterClockwiseIcon}
-                    onClick={() => void upload.handleRetry()}
-                  >
-                    Retry {failedFiles.length} failed
-                  </Button>
-                )}
-                <Button
-                  variant="primary"
-                  className="flex-1"
-                  disabled={!upload.canUpload}
-                  onClick={() => void upload.handleUpload()}
-                >
-                  {pendingFiles.length > 0
-                    ? `Upload ${pendingFiles.length} file${pendingFiles.length > 1 ? 's' : ''}`
-                    : 'Upload'}
-                </Button>
-              </div>
-            )}
-          </div>
-        </Card>
-      )}
-
-      {/* Done state */}
-      {upload.uploadStep === 'done' && (
-        <Card>
-          <div className="flex flex-col items-center gap-3 py-6">
-            <Icon component={CheckCircleIcon} size={40} color="success" />
-            <p className="text-sm font-medium text-zinc-900">Upload complete.</p>
-            <p className="text-xs text-zinc-500">
-              {upload.doneCount} file{upload.doneCount > 1 ? 's' : ''} uploaded to{' '}
-              <span className="font-medium text-zinc-700">{bucketName}</span>.
-            </p>
-            <Button
-              variant="primary"
-              onClick={() =>
-                void navigate({
-                  to: '/buckets/$bucketName',
-                  params: { bucketName },
-                  search: { region },
-                })
-              }
+          {upload.files.length > 0 && upload.hasIndividualFiles && (
+            <FormField
+              label="Prefix"
+              optional
+              htmlFor="object-prefix"
+              description="Optional folder path prepended to all file names, e.g. images/"
             >
-              Back to bucket
-            </Button>
-          </div>
-        </Card>
-      )}
+              <Input
+                id="object-prefix"
+                value={upload.prefix}
+                onChange={upload.setPrefix}
+                placeholder="images/"
+                autoComplete="off"
+                disabled={isUploading}
+              />
+            </FormField>
+          )}
+
+          {upload.files.length > 0 && (
+            <FileListSection
+              listItems={listItems}
+              expandedFolders={expandedFolders}
+              onToggleFolder={toggleFolder}
+              onRemoveFile={removeFile}
+              onRemoveFolder={removeFolderFiles}
+              fileCount={upload.files.length}
+              uploading={isUploading}
+              onClear={handleClearAll}
+            />
+          )}
+
+          {!isUploading && (
+            <UploadActions
+              failedCount={upload.failedCount}
+              pendingCount={upload.pendingCount}
+              canUpload={upload.canUpload}
+              onRetry={() => void upload.handleRetry()}
+              onUpload={() => void upload.handleUpload()}
+            />
+          )}
+        </div>
+      </Card>
     </div>
   );
 }
