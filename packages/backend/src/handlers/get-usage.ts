@@ -1,10 +1,8 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { UsageResponse } from '@filone/shared';
-import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
+import { getOrgProfile } from '../lib/org-profile.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -17,20 +15,11 @@ import {
   getTenantInfo,
 } from '../lib/aurora/aurora-backoffice.js';
 
-const dynamo = getDynamoClient();
-
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId } = getUserInfo(event);
-  const userInfoTableName = Resource.UserInfoTable.name;
 
   // 1. Look up org profile for Aurora S3 credentials
-  const { Item: orgProfile } = await dynamo.send(
-    new GetItemCommand({
-      TableName: userInfoTableName,
-      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
-    }),
-  );
+  const orgProfile = await getOrgProfile(orgId);
 
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
   const auroraSetupStatus = orgProfile?.auroraSetupStatus?.S;

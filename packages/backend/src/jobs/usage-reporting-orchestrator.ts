@@ -1,6 +1,7 @@
-import { ScanCommand, GetItemCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
+import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { getOrgProfile } from '../lib/org-profile.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { Resource } from 'sst';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
@@ -135,19 +136,8 @@ async function scanActiveSubscriptionRecords(
 
 /** Best-effort org name for Stripe metadata sync; `undefined` if the org has no profile/name. */
 async function resolveOrgName(orgId: string): Promise<string | undefined> {
-  const profileResult = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: {
-        pk: { S: `ORG#${orgId}` },
-        sk: { S: 'PROFILE' },
-      },
-      ProjectionExpression: '#n',
-      ExpressionAttributeNames: { '#n': 'name' },
-    }),
-  );
-
-  return profileResult.Item?.name?.S;
+  const orgProfile = await getOrgProfile(orgId);
+  return orgProfile?.name?.S;
 }
 
 async function invokeUsageWorker(
