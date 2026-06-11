@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, ScanCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -99,6 +99,10 @@ describe('grace-period-enforcer', () => {
     vi.clearAllMocks();
     aurora = fakeOrchestrator('aurora');
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // -----------------------------------------------------------------------
@@ -254,6 +258,8 @@ describe('grace-period-enforcer', () => {
   });
 
   it('does not write-lock when the live status probe errors', async () => {
+    // Fake timers skip over the probe-retry backoff delays.
+    vi.useFakeTimers();
     aurora.getTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('boom') });
     ddbMock.on(ScanCommand).resolves({
       Items: [
@@ -264,7 +270,9 @@ describe('grace-period-enforcer', () => {
       ],
     });
 
-    await handler();
+    const promise = handler();
+    await vi.runAllTimersAsync();
+    await promise;
 
     expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
   });

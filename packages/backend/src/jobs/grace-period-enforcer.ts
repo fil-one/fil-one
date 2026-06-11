@@ -4,9 +4,8 @@ import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import {
-  getProvisionedRegions,
   setTenantStatusInProvisionedRegions,
-  type ProvisionedRegion,
+  syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.js';
 
 const dynamo = getDynamoClient();
@@ -165,13 +164,13 @@ async function cancelSubscriptionAndDisableTenant(
 }
 
 // Non-expired grace period — ensure every orchestrator tenant is write-locked.
-// Probe each orchestrator's live status (its own source of truth) so we skip a
-// redundant lock call and, critically, never downgrade a tenant that is already
-// `disabled` back to `write-locked`.
+// The sync helper probes each orchestrator's live status first, so redundant
+// lock calls are skipped and a tenant that is already `disabled` is never
+// downgraded back to `write-locked`.
 async function ensureTenantWriteLocked(candidate: Candidate): Promise<CandidateOutcome> {
-  const ready = await getProvisionedRegions(candidate.orgId);
+  const outcomes = await syncTenantStatusInProvisionedRegions(candidate.orgId, 'write-locked');
 
-  if (ready.length === 0) {
+  if (outcomes.length === 0) {
     console.warn('[grace-period-enforcer] No ready tenant on any orchestrator, skipping', {
       userId: candidate.userId,
       orgId: candidate.orgId,
@@ -179,44 +178,25 @@ async function ensureTenantWriteLocked(candidate: Candidate): Promise<CandidateO
     return 'skipped';
   }
 
-  const outcomes = await Promise.all(ready.map((entry) => writeLockTenant(candidate, entry)));
-  return outcomes.includes('write_locked') ? 'write_locked' : 'skipped';
-}
-
-async function writeLockTenant(
-  candidate: Candidate,
-  { orchestrator, tenantId }: ProvisionedRegion,
-): Promise<CandidateOutcome> {
-  const probe = await orchestrator.getTenantStatus(tenantId);
-
-  // Can't read live status → do NOT risk re-locking a tenant that may already
-  // be disabled. Surface as a failure so it retries on the next run.
-  if (probe.kind === 'error') {
-    throw new Error(`${orchestrator.id} status probe failed for tenant ${tenantId}`, {
-      cause: probe.cause,
-    });
-  }
-
-  if (probe.kind === 'not_found') {
-    console.warn('[grace-period-enforcer] tenant not found, skipping', {
+  const updated = outcomes.filter((o) => o.outcome === 'updated');
+  for (const o of updated) {
+    console.log('[grace-period-enforcer] Tenant write-locked', {
       userId: candidate.userId,
       orgId: candidate.orgId,
-      orchestrator: orchestrator.id,
-      tenantId,
+      orchestrator: o.orchestratorId,
+      tenantId: o.tenantId,
     });
-    return 'skipped';
   }
 
-  if (probe.status === 'write-locked' || probe.status === 'disabled') {
-    return 'skipped';
+  // The sync helper never throws; re-raise per-region failures so the
+  // candidate is counted as failed and retried on the next run.
+  const failed = outcomes.filter((o) => o.outcome === 'error');
+  if (failed.length > 0) {
+    throw new Error(
+      `tenant status sync failed for: ${failed.map((o) => o.orchestratorId).join(', ')}`,
+      { cause: failed[0].cause },
+    );
   }
 
-  await orchestrator.updateTenantStatus(tenantId, 'write-locked');
-  console.log('[grace-period-enforcer] WRITE_LOCKED (retry)', {
-    userId: candidate.userId,
-    orgId: candidate.orgId,
-    orchestrator: orchestrator.id,
-    tenantId,
-  });
-  return 'write_locked';
+  return updated.length > 0 ? 'write_locked' : 'skipped';
 }

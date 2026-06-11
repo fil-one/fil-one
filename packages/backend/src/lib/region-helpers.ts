@@ -35,7 +35,7 @@ export async function setTenantStatusInProvisionedRegions(
 export interface RegionSyncOutcome {
   orchestratorId: string;
   tenantId: string;
-  outcome: 'updated' | 'in-sync' | 'not-found' | 'error';
+  outcome: 'updated' | 'in-sync' | 'skipped' | 'not-found' | 'error';
   cause?: unknown;
 }
 
@@ -95,6 +95,13 @@ async function syncRegionTenantStatus({
 
     if (probe.status === desired) {
       return { ...base, outcome: 'in-sync' };
+    }
+
+    // Never downgrade a disabled tenant to write-locked. `disabled` is the
+    // stronger lock; it must only be lifted by an explicit re-activation
+    // (desired = 'active').
+    if (probe.status === 'disabled' && desired === 'write-locked') {
+      return { ...base, outcome: 'skipped' };
     }
 
     await orchestrator.updateTenantStatus(tenantId, desired);
