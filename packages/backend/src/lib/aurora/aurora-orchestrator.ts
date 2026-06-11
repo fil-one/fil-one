@@ -24,6 +24,7 @@ import {
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
 } from '../aurora/aurora-portal.js';
+import { getStorageSamples, getOperationsSamples } from './aurora-backoffice.js';
 import { getDynamoClient } from '../ddb-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
@@ -32,9 +33,11 @@ import type {
   BucketDetails,
   BucketSummary,
   CreateBucketArgs,
+  GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
   ServiceOrchestrator,
+  TenantUsageMetrics,
 } from '../service-orchestrator.js';
 import type { S3ClientContext } from '../s3-client.js';
 
@@ -209,5 +212,35 @@ export const auroraOrchestrator = {
       credentials,
       forcePathStyle: true,
     };
+  },
+
+  async getTenantUsageMetrics(
+    tenantId: string,
+    opts: GetTenantUsageMetricsOptions,
+  ): Promise<TenantUsageMetrics> {
+    const window = opts.interval ?? '1d';
+    const { from, to } = opts;
+
+    const [storageSamples, operationsSamples] = await Promise.all([
+      getStorageSamples({ tenantId, from, to, window }),
+      getOperationsSamples({ tenantId, from, to, window }),
+    ]);
+
+    const storage = storageSamples
+      .filter((s): s is typeof s & { timestamp: string } => s.timestamp !== undefined)
+      .map((s) => ({
+        timestamp: new Date(s.timestamp).toISOString(),
+        bytesUsed: s.bytesUsed ?? 0,
+        objectCount: s.objectCount ?? 0,
+      }));
+
+    const egress = operationsSamples
+      .filter((s): s is typeof s & { timestamp: string } => s.timestamp !== undefined)
+      .map((s) => ({
+        timestamp: new Date(s.timestamp).toISOString(),
+        bytesUsed: s.txBytes ?? 0,
+      }));
+
+    return { storage, egress };
   },
 } satisfies ServiceOrchestrator;

@@ -51,6 +51,39 @@ export interface IssuedAccessKey {
 }
 
 /**
+ * A single point in a tenant's storage-usage time series.
+ */
+export interface StorageUsageSample {
+  /** Canonical ISO-8601 UTC timestamp (e.g. `2026-01-01T10:00:00.000Z`). */
+  timestamp: string;
+  bytesUsed: number;
+  /** 0 when the orchestrator's source has no object-count series. */
+  objectCount: number;
+}
+
+/** A single point in a tenant's egress time series. `timestamp` is canonical ISO-8601 UTC (see {@link StorageUsageSample}). */
+export interface EgressUsageSample {
+  /** Canonical ISO-8601 UTC timestamp (e.g. `2026-01-01T10:00:00.000Z`). */
+  timestamp: string;
+  bytesUsed: number;
+}
+
+/** Normalized, orchestrator-agnostic usage/egress time series for a tenant. */
+export interface TenantUsageMetrics {
+  storage: StorageUsageSample[];
+  egress: EgressUsageSample[];
+}
+
+export interface GetTenantUsageMetricsOptions {
+  /** Inclusive start timestamp, RFC3339 UTC. */
+  from: string;
+  /** Exclusive end timestamp, RFC3339 UTC. */
+  to: string;
+  /** Sampling window applied to BOTH series. Defaults to '1d'. */
+  interval?: string;
+}
+
+/**
  * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.).
  * Each implementation handles tenant provisioning, bucket lifecycle,
  * access-key issuance, and presigning for a service orchestrator in a single region.
@@ -124,4 +157,14 @@ export interface ServiceOrchestrator {
   deleteAccessKey(tenantId: string, keyId: string): Promise<void>;
 
   getS3ClientContext(tenantId: string): Promise<S3ClientContext>;
+
+  /**
+   * Returns the tenant's storage and egress usage as normalized time series
+   * over `[from, to)`. Read-only — does not mutate tenant state. Backs both the
+   * usage-reporting worker and read-path handlers (e.g. get-activity).
+   */
+  getTenantUsageMetrics(
+    tenantId: string,
+    opts: GetTenantUsageMetricsOptions,
+  ): Promise<TenantUsageMetrics>;
 }

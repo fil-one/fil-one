@@ -700,7 +700,7 @@ export default $config({
       method: 'GET',
       routePath: '/api/activity',
       handler: 'get-activity',
-      extraEnv: { ...auroraEnv, ...fthEnv },
+      extraEnv: { ...auroraEnv, ...fthEnv, FILONE_STAGE: $app.stage },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
       ],
@@ -754,8 +754,20 @@ export default $config({
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
-      link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, auroraBackofficeToken],
-      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'gb_month_meter' },
+      link: [
+        billingTable,
+        userInfoTable,
+        stripeSecretKey,
+        stripePriceId,
+        auroraBackofficeToken,
+        fthManagementApiToken,
+      ],
+      environment: {
+        ...auroraEnv,
+        ...fthEnv,
+        FILONE_STAGE: $app.stage,
+        STRIPE_METER_EVENT_NAME: 'gb_month_meter',
+      },
       timeout: '60 seconds',
       memory: '256 MB',
     });

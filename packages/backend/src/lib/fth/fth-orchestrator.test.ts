@@ -28,6 +28,7 @@ vi.mock('./fth-tenant-setup.js', () => ({
   ensureTenantReady: (...args: unknown[]) => mockEnsureFthTenantReady(...args),
 }));
 
+const mockGetClientMetricsTimeseries = vi.fn();
 // Hoisted so it is initialized before the static import of fth-orchestrator.js,
 // whose module-level `createInstrumentedFthClient()` runs at import time and
 // reads this mock via the mocked createFthManagementClient.
@@ -36,6 +37,7 @@ const mockFthClient = vi.hoisted(() => ({
   listAccessKeys: vi.fn(),
   deleteAccessKey: vi.fn(),
   listStorageUsers: vi.fn(),
+  getClientMetricsTimeseries: (...args: unknown[]) => mockGetClientMetricsTimeseries(...args),
 }));
 
 vi.mock('./fth-management-client.js', async () => {
@@ -683,5 +685,127 @@ describe('fthOrchestrator.getBucket', () => {
     const result = await fthOrchestrator.getBucket(fthClientId, 'missing-bucket');
 
     expect(result).toBeNull();
+  });
+});
+
+describe('fthOrchestrator.getTenantUsageMetrics', () => {
+  const FROM = '2026-01-01T00:00:00Z';
+  const TO = '2026-01-31T00:00:00Z';
+
+  beforeEach(() => {
+    mockGetClientMetricsTimeseries.mockResolvedValue({ points: [] });
+  });
+
+  it('calls getClientMetricsTimeseries with tenantId as clientRef and defaults interval to "1d"', async () => {
+    await fthOrchestrator.getTenantUsageMetrics(fthClientId, { from: FROM, to: TO });
+
+    expect(mockGetClientMetricsTimeseries).toHaveBeenCalledWith(fthClientId, {
+      from: FROM,
+      to: TO,
+      interval: '1d',
+    });
+  });
+
+  it('forwards a custom interval when provided', async () => {
+    await fthOrchestrator.getTenantUsageMetrics(fthClientId, {
+      from: FROM,
+      to: TO,
+      interval: '24h',
+    });
+
+    expect(mockGetClientMetricsTimeseries).toHaveBeenCalledWith(
+      fthClientId,
+      expect.objectContaining({ interval: '24h' }),
+    );
+  });
+
+  it('maps points to normalized storage and egress shapes', async () => {
+    mockGetClientMetricsTimeseries.mockResolvedValue({
+      points: [
+        {
+          ts: '2026-01-01T01:00:00Z',
+          usage_avg_bytes: 2048,
+          object_count_avg: 10,
+          egress_bytes: 512,
+        },
+        {
+          ts: '2026-01-01T02:00:00Z',
+          usage_avg_bytes: 4096,
+          object_count_avg: 20,
+          egress_bytes: 1024,
+        },
+      ],
+    });
+
+    const result = await fthOrchestrator.getTenantUsageMetrics(fthClientId, {
+      from: FROM,
+      to: TO,
+    });
+
+    expect(result.storage).toEqual([
+      { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 2048, objectCount: 10 },
+      { timestamp: '2026-01-01T02:00:00.000Z', bytesUsed: 4096, objectCount: 20 },
+    ]);
+    expect(result.egress).toEqual([
+      { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 512 },
+      { timestamp: '2026-01-01T02:00:00.000Z', bytesUsed: 1024 },
+    ]);
+  });
+
+  it('applies ?? 0 defaults for missing usage_avg_bytes, object_count_avg, and egress_bytes', async () => {
+    mockGetClientMetricsTimeseries.mockResolvedValue({
+      points: [{ ts: '2026-01-01T01:00:00Z' }],
+    });
+
+    const result = await fthOrchestrator.getTenantUsageMetrics(fthClientId, {
+      from: FROM,
+      to: TO,
+    });
+
+    expect(result.storage).toEqual([
+      { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 0, objectCount: 0 },
+    ]);
+    expect(result.egress).toEqual([{ timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 0 }]);
+  });
+
+  it('drops points without ts', async () => {
+    mockGetClientMetricsTimeseries.mockResolvedValue({
+      points: [
+        { ts: '2026-01-01T01:00:00Z', usage_avg_bytes: 100, egress_bytes: 50 },
+        { usage_avg_bytes: 200, egress_bytes: 100 }, // no ts — should be dropped
+      ],
+    });
+
+    const result = await fthOrchestrator.getTenantUsageMetrics(fthClientId, {
+      from: FROM,
+      to: TO,
+    });
+
+    expect(result.storage).toHaveLength(1);
+    expect(result.egress).toHaveLength(1);
+    expect(result.storage[0]?.timestamp).toBe('2026-01-01T01:00:00.000Z');
+    expect(result.egress[0]?.timestamp).toBe('2026-01-01T01:00:00.000Z');
+  });
+
+  it('returns empty arrays when points is undefined', async () => {
+    mockGetClientMetricsTimeseries.mockResolvedValue({});
+
+    const result = await fthOrchestrator.getTenantUsageMetrics(fthClientId, {
+      from: FROM,
+      to: TO,
+    });
+
+    expect(result).toEqual({ storage: [], egress: [] });
+  });
+
+  it('returns empty arrays when points is an empty array', async () => {
+    mockGetClientMetricsTimeseries.mockResolvedValue({ points: [] });
+
+    const result = await fthOrchestrator.getTenantUsageMetrics(fthClientId, {
+      from: FROM,
+      to: TO,
+    });
+
+    expect(result).toEqual({ storage: [], egress: [] });
   });
 });
