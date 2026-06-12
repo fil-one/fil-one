@@ -40,8 +40,8 @@ const DESIRED_PASSKEY_OPTIONS: Required<PasskeyOptions> = {
   },
 };
 
-// Deep-equal against the desired shape so adding a field to DESIRED_PASSKEY_OPTIONS
-// automatically tightens the idempotency check — no risk of the two drifting apart.
+// Deep subset-match against the desired shape so adding a field to
+// DESIRED_PASSKEY_OPTIONS automatically tightens the idempotency check — no risk of the two drifting apart.
 function matchesDesired(existing: unknown, desired: unknown): boolean {
   if (desired === null || typeof desired !== 'object') return existing === desired;
   if (existing === null || typeof existing !== 'object') return false;
