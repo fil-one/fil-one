@@ -61,7 +61,7 @@ export function rateLimitMiddleware(config: Partial<RateLimitConfig> = {}) {
     try {
       const result = await dynamo.send(
         new UpdateItemCommand({
-          TableName: Resource.BillingTable.name,
+          TableName: Resource.UserInfoTable.name,
           Key: {
             pk: { S: `RATELIMIT#presign#${userId}` },
             sk: { S: `WINDOW#${windowKey}` },
