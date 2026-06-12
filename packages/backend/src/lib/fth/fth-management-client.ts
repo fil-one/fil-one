@@ -28,6 +28,11 @@ export interface FthManagementClient {
     opts?: { idempotencyKey?: string },
   ): Promise<void>;
 
+  getClientMetricsTimeseries(
+    clientRef: string,
+    query: { from: string; to: string; interval?: string },
+  ): Promise<FthMetricsTimeseriesResponse>;
+
   interceptors: {
     request: { use(fn: RequestInterceptor): number };
     response: { use(fn: ResponseInterceptor): number };
@@ -109,6 +114,32 @@ export interface FthAccessKey {
   createdAt: string;
 }
 
+export interface FthMetricsTimeseriesPoint {
+  ts?: string;
+  usage_avg_bytes?: number;
+  usage_peak_bytes?: number;
+  object_count_avg?: number;
+  object_count_peak?: number;
+  billable_byte_seconds?: number;
+  billable_object_seconds?: number;
+  egress_bytes?: number;
+  egress_requests?: number;
+}
+
+export interface FthMetricsTimeseriesResponse {
+  from?: string;
+  to?: string;
+  interval?: string;
+  clientId?: number;
+  clientCode?: string;
+  clientName?: string;
+  point_count?: number;
+  points?: FthMetricsTimeseriesPoint[];
+  watermark_at?: string | null;
+  is_partial?: boolean;
+  source_lag_seconds?: number | null;
+}
+
 export interface FthAccessKeyWithSecret extends FthAccessKey {
   secretAccessKey: string;
 }
@@ -178,7 +209,11 @@ function buildHttpRequest(
   ctx: RequestContext,
   method: string,
   path: string,
-  opts: { body?: unknown; idempotencyKey?: string },
+  opts: {
+    body?: unknown;
+    idempotencyKey?: string;
+    query?: URLSearchParams;
+  },
 ): Request {
   const headers = new Headers({
     Authorization: `Bearer ${ctx.token}`,
@@ -191,7 +226,14 @@ function buildHttpRequest(
     headers.set('Content-Type', 'application/json');
     init.body = JSON.stringify(opts.body);
   }
-  return new Request(`${ctx.baseUrl}${path}`, init);
+
+  let url = `${ctx.baseUrl}${path}`;
+  if (opts.query) {
+    const qs = opts.query.toString();
+    if (qs) url = `${url}?${qs}`;
+  }
+
+  return new Request(url, init);
 }
 
 async function runRequest<T>(
@@ -199,7 +241,11 @@ async function runRequest<T>(
   method: string,
   pathTemplate: string,
   pathParams: Record<string, string>,
-  opts: { body?: unknown; idempotencyKey?: string } = {},
+  opts: {
+    body?: unknown;
+    idempotencyKey?: string;
+    query?: URLSearchParams;
+  } = {},
 ): Promise<T> {
   const path = renderPath(pathTemplate, pathParams);
   let httpRequest = buildHttpRequest(ctx, method, path, opts);
@@ -252,7 +298,11 @@ type RequestFn = <T>(
   method: string,
   pathTemplate: string,
   pathParams: Record<string, string>,
-  opts?: { body?: unknown; idempotencyKey?: string },
+  opts?: {
+    body?: unknown;
+    idempotencyKey?: string;
+    query?: URLSearchParams;
+  },
 ) => Promise<T>;
 
 function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'interceptors'> {
@@ -335,6 +385,17 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
         { clientRef, accessKeyId },
         { idempotencyKey: opts?.idempotencyKey },
       ),
+
+    getClientMetricsTimeseries: (clientRef, query) => {
+      const params = new URLSearchParams({ from: query.from, to: query.to });
+      if (query.interval) params.set('interval', query.interval);
+      return request<FthMetricsTimeseriesResponse>(
+        'GET',
+        '/management/v1/clients/{clientRef}/metrics/timeseries',
+        { clientRef },
+        { query: params },
+      );
+    },
   };
 }
 

@@ -5,11 +5,11 @@
 //     call the FTH management REST API. ensureTenantReady delegates to
 //     fth-tenant-setup.ts; the other control-plane methods live here.
 //   - data-plane (createBucket, deleteBucket, listBuckets, getBucket,
-//     getPresignerContext) speak S3 directly against the FTH S3 endpoint
+//     getS3ClientContext) speak S3 directly against the FTH S3 endpoint
 //     using the service access key stashed in SSM during setup.
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region } from '@filone/shared';
@@ -19,19 +19,31 @@ import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
+  BucketConfigurationError,
   NotImplementedError,
 } from '../errors.js';
 import type {
   BucketDetails,
   BucketSummary,
   CreateBucketArgs,
+  GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  PresignerContext,
   ServiceOrchestrator,
+  TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import type { S3ClientContext } from '../s3-client.js';
 
-import { createBucket as s3CreateBucket, listBuckets as s3ListBuckets } from '../s3-presigner.js';
+import { createS3Client } from '../s3-client.js';
+import {
+  createBucket as s3CreateBucket,
+  listBuckets as s3ListBuckets,
+  setBucketVersioning,
+  putObjectLockConfiguration,
+  getBucketVersioning,
+  getBucketObjectLock,
+} from '../s3-bucket-operations.js';
+import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 import {
   createFthManagementClient,
   FthApiError,
@@ -41,20 +53,19 @@ import {
 import type { FthManagementClient } from './fth-management-client.js';
 import { instrumentClient } from './fth-api-metrics.js';
 
-interface FthS3Credentials {
-  accessKeyId: string;
-  secretAccessKey: string;
-}
-
 const FTH_CONSOLE_USER_CODE = 'filone-console';
 
+// Versioning / object-lock are applied as separate, idempotent S3 calls after the
+// bucket is created. Retry them so a transient S3 blip doesn't leave the bucket
+// partially configured (which would surface as a dead-end BucketConfigurationError).
+const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
+
 const dynamo = getDynamoClient();
-const ssm = new SSMClient({});
-const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
+const client = createInstrumentedFthClient();
 
 export const _resetFthOrchestratorCachesForTesting = () => {
-  ssmCache.clear();
+  _resetS3CredentialsCacheForTesting();
   consoleStorageUserCache.clear();
 };
 
@@ -63,7 +74,6 @@ export const fthOrchestrator = {
   region: S3Region.UsEast1,
 
   async ensureTenantReady(orgId: string): Promise<string | null> {
-    const client = createInstrumentedFthClient();
     return ensureFthTenantReady(client, orgId);
   },
 
@@ -81,9 +91,13 @@ export const fthOrchestrator = {
     return tenantId;
   },
 
-  async getPresignerContext(tenantId: string): Promise<PresignerContext> {
+  async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
     const stage = process.env.FILONE_STAGE!;
-    const credentials = await getFthS3Credentials(tenantId);
+    const credentials = await getConsoleS3Credentials({
+      orchestratorId: fthOrchestrator.id,
+      stage,
+      tenantId,
+    });
     return {
       endpointUrl: getS3Endpoint(fthOrchestrator.region, stage),
       region: 'us-east-1',
@@ -93,24 +107,33 @@ export const fthOrchestrator = {
   },
 
   async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {
-    if (args.lock) {
-      throw new NotImplementedError(
-        'Object lock on bucket creation is not supported in this region yet',
-      );
-    }
-    if (args.retention?.enabled) {
-      throw new NotImplementedError(
-        'Retention policy on bucket creation is not supported in this region yet',
-      );
-    }
-    if (args.versioning) {
-      throw new NotImplementedError(
-        'Versioning on bucket creation is not supported in this region yet',
-      );
-    }
+    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const s3 = createS3Client(ctx);
+    await s3CreateBucket(s3, {
+      bucketName: args.bucketName,
+      objectLockEnabled: args.lock === true,
+    });
 
-    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
-    await s3CreateBucket(ctx, { bucketName: args.bucketName });
+    try {
+      if (args.versioning) {
+        await pRetry(() => setBucketVersioning(s3, args.bucketName, true), BUCKET_CONFIG_RETRY);
+      }
+      if (args.retention?.enabled) {
+        const retention = args.retention;
+        await pRetry(
+          () =>
+            putObjectLockConfiguration(s3, {
+              bucketName: args.bucketName,
+              mode: retention.mode,
+              duration: retention.duration,
+              durationType: retention.durationType,
+            }),
+          BUCKET_CONFIG_RETRY,
+        );
+      }
+    } catch (err) {
+      throw new BucketConfigurationError(args.bucketName, { cause: err });
+    }
   },
 
   async deleteBucket(_tenantId: string, _bucketName: string): Promise<void> {
@@ -118,37 +141,49 @@ export const fthOrchestrator = {
   },
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {
-    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
-    const { buckets } = await s3ListBuckets(ctx);
-    return buckets.map((b) => ({
-      bucketName: b.name,
-      region: fthOrchestrator.region,
-      createdAt: b.createdAt,
-      isPublic: false,
-      versioning: false,
-      encrypted: true,
-    }));
+    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const s3 = createS3Client(ctx);
+    const { buckets } = await s3ListBuckets(s3);
+    return Promise.all(
+      buckets.map(async (b) => ({
+        bucketName: b.name,
+        region: fthOrchestrator.region,
+        createdAt: b.createdAt,
+        isPublic: false,
+        versioning: await getBucketVersioning(s3, b.name),
+        encrypted: true,
+      })),
+    );
   },
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
-    const ctx = await fthOrchestrator.getPresignerContext(tenantId);
-    const { buckets } = await s3ListBuckets(ctx);
+    const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
+    const s3 = createS3Client(ctx);
+    const { buckets } = await s3ListBuckets(s3);
     const match = buckets.find((b) => b.name === bucketName);
     if (!match) return null;
+
+    const [versioning, lock] = await Promise.all([
+      getBucketVersioning(s3, bucketName),
+      getBucketObjectLock(s3, bucketName),
+    ]);
 
     return {
       bucketName,
       region: fthOrchestrator.region,
       createdAt: match.createdAt,
       isPublic: false,
-      versioning: false,
+      versioning,
       encrypted: true,
+      objectLockEnabled: lock?.objectLockEnabled ?? false,
+      ...(lock?.defaultRetention && { defaultRetention: lock.defaultRetention }),
+      ...(lock?.retentionDuration != null && { retentionDuration: lock.retentionDuration }),
+      ...(lock?.retentionDurationType && { retentionDurationType: lock.retentionDurationType }),
     };
   },
 
   async issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey> {
     const storageUserId = await getFthConsoleStorageUserId(tenantId);
-    const client = createInstrumentedFthClient();
 
     try {
       const accessKey = await client.createAccessKey(tenantId, storageUserId, {
@@ -182,7 +217,6 @@ export const fthOrchestrator = {
   },
 
   async findAccessKeyByName(tenantId: string, keyName: string) {
-    const client = createInstrumentedFthClient();
     const keys = await client.listAccessKeys(tenantId);
     const match = keys.find((k) => k.name === keyName);
     if (!match) return undefined;
@@ -194,7 +228,6 @@ export const fthOrchestrator = {
   },
 
   async deleteAccessKey(tenantId: string, keyId: string): Promise<void> {
-    const client = createInstrumentedFthClient();
     try {
       await client.deleteAccessKey(tenantId, keyId, { idempotencyKey: `delete-${keyId}` });
     } catch (err) {
@@ -208,6 +241,33 @@ export const fthOrchestrator = {
         cause: err,
       });
     }
+  },
+
+  async getTenantUsageMetrics(
+    tenantId: string,
+    opts: GetTenantUsageMetricsOptions,
+  ): Promise<TenantUsageMetrics> {
+    const client = createInstrumentedFthClient();
+    const res = await client.getClientMetricsTimeseries(tenantId, {
+      from: opts.from,
+      to: opts.to,
+      interval: opts.interval ?? '1d',
+    });
+    const points = res.points ?? [];
+    const storage = points
+      .filter((p) => p.ts !== undefined)
+      .map((p) => ({
+        timestamp: new Date(p.ts!).toISOString(),
+        bytesUsed: p.usage_avg_bytes ?? 0,
+        objectCount: p.object_count_avg ?? 0,
+      }));
+    const egress = points
+      .filter((p) => p.ts !== undefined)
+      .map((p) => ({
+        timestamp: new Date(p.ts!).toISOString(),
+        bytesUsed: p.egress_bytes ?? 0,
+      }));
+    return { storage, egress };
   },
 } satisfies ServiceOrchestrator;
 
@@ -266,36 +326,6 @@ function extractFthMessage(err: FthApiError): string | undefined {
   return undefined;
 }
 
-async function getFthS3Credentials(tenantId: string): Promise<FthS3Credentials> {
-  const stage = process.env.FILONE_STAGE!;
-  const cacheKey = `${stage}/${tenantId}`;
-  const cached = ssmCache.get(cacheKey);
-  if (cached) return JSON.parse(cached) as FthS3Credentials;
-
-  let value: string | undefined;
-  try {
-    const { Parameter } = await ssm.send(
-      new GetParameterCommand({
-        Name: `/filone/${stage}/fth-s3/access-key/${tenantId}`,
-        WithDecryption: true,
-      }),
-    );
-    value = Parameter?.Value;
-  } catch (err) {
-    if ((err as { name?: string }).name === 'ParameterNotFound') {
-      throw new Error(`FTH S3 credentials not found in SSM for tenant ${tenantId}`, { cause: err });
-    }
-    throw err;
-  }
-
-  if (!value) {
-    throw new Error(`FTH S3 credentials not found in SSM for tenant ${tenantId}`);
-  }
-
-  ssmCache.set(cacheKey, value);
-  return JSON.parse(value) as FthS3Credentials;
-}
-
 // User-issued access keys hang off the same `filone-console` storage user that
 // fth-tenant-setup.ts provisions for the bootstrap console key. The storage
 // user id isn't persisted on the PROFILE row, so resolve it lazily via
@@ -304,7 +334,6 @@ async function getFthConsoleStorageUserId(tenantId: string): Promise<string> {
   const cached = consoleStorageUserCache.get(tenantId);
   if (cached) return cached;
 
-  const client = createInstrumentedFthClient();
   const users = await client.listStorageUsers(tenantId);
   const consoleUser = users.find((u) => u.userCode === FTH_CONSOLE_USER_CODE);
   if (!consoleUser) {

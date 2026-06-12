@@ -1,117 +1,24 @@
-// Provider-agnostic S3 presign/list/delete helpers. Each function accepts a
-// PresignerContext supplied by the active ServiceOrchestrator; the orchestrator
+// Provider-agnostic S3 presigned-URL generators. Each function accepts an
+// S3ClientContext supplied by the active ServiceOrchestrator; the orchestrator
 // alone knows how to look up credentials and which endpoint/region apply.
 
 import {
-  CreateBucketCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   GetObjectRetentionCommand,
   HeadObjectCommand,
-  ListBucketsCommand,
   ListObjectsV2Command,
   ListObjectVersionsCommand,
   PutObjectCommand,
-  S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import type { S3Object } from '@filone/shared';
-import { BucketAlreadyExistsError } from './errors.js';
-import type { PresignerContext } from './service-orchestrator.js';
-
-function createS3Client(ctx: PresignerContext): S3Client {
-  return new S3Client({
-    endpoint: ctx.endpointUrl,
-    region: ctx.region,
-    credentials: ctx.credentials,
-    forcePathStyle: ctx.forcePathStyle,
-  });
-}
-
-// ── Direct S3 operations (used by handlers that can't presign) ─────
-
-export interface CreateBucketOptions {
-  bucketName: string;
-}
-
-export async function createBucket(
-  ctx: PresignerContext,
-  options: CreateBucketOptions,
-): Promise<void> {
-  const s3 = createS3Client(ctx);
-  try {
-    await s3.send(new CreateBucketCommand({ Bucket: options.bucketName }));
-  } catch (err) {
-    const name = (err as { name?: string }).name;
-    if (name === 'BucketAlreadyOwnedByYou' || name === 'BucketAlreadyExists') {
-      throw new BucketAlreadyExistsError(options.bucketName, { cause: err as Error });
-    }
-    throw err;
-  }
-}
-
-export interface ListBucketsResult {
-  buckets: Array<{ name: string; createdAt: string }>;
-}
-
-export async function listBuckets(ctx: PresignerContext): Promise<ListBucketsResult> {
-  const s3 = createS3Client(ctx);
-  const result = await s3.send(new ListBucketsCommand({}));
-  return {
-    buckets: (result.Buckets ?? []).map((b) => ({
-      name: b.Name!,
-      createdAt: b.CreationDate?.toISOString() ?? new Date().toISOString(),
-    })),
-  };
-}
-
-export interface ListObjectsOptions {
-  ctx: PresignerContext;
-  bucket: string;
-  prefix?: string;
-  delimiter?: string;
-  maxKeys?: number;
-  continuationToken?: string;
-}
-
-export interface ListObjectsResult {
-  objects: S3Object[];
-  nextToken?: string;
-  isTruncated: boolean;
-}
-
-export async function listObjects(options: ListObjectsOptions): Promise<ListObjectsResult> {
-  const { ctx, bucket, prefix, delimiter, maxKeys, continuationToken } = options;
-  const s3 = createS3Client(ctx);
-
-  const result = await s3.send(
-    new ListObjectsV2Command({
-      Bucket: bucket,
-      ...(prefix && { Prefix: prefix }),
-      ...(delimiter && { Delimiter: delimiter }),
-      ...(maxKeys && { MaxKeys: maxKeys }),
-      ...(continuationToken && { ContinuationToken: continuationToken }),
-    }),
-  );
-
-  const objects: S3Object[] = (result.Contents ?? []).map((item) => ({
-    key: item.Key!,
-    sizeBytes: item.Size ?? 0,
-    lastModified: item.LastModified?.toISOString() ?? new Date().toISOString(),
-    ...(item.ETag && { etag: item.ETag }),
-  }));
-
-  return {
-    objects,
-    nextToken: result.NextContinuationToken,
-    isTruncated: result.IsTruncated ?? false,
-  };
-}
+import { createS3Client } from './s3-client.js';
+import type { S3ClientContext } from './s3-client.js';
 
 // ── Presigned URL generators ────────────────────────────────────────
 
 interface PresignBaseOptions {
-  ctx: PresignerContext;
+  ctx: S3ClientContext;
   bucket: string;
   expiresIn: number;
 }

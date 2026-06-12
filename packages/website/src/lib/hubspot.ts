@@ -73,3 +73,50 @@ export async function submitSupportForm(fields: SupportFields): Promise<void> {
 
   return submitToHubSpot(HUBSPOT_SUPPORT_FORM_ID, hubspotFields, 'Support');
 }
+
+export type WaitlistFields = {
+  formId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  primaryUseCase: string;
+  ragProvider: string;
+  timeline: string;
+  teamSize: string;
+  storageAmount: string;
+  notes: string;
+};
+
+export async function submitWaitlistForm(fields: WaitlistFields): Promise<void> {
+  const hutk = document.cookie
+    .split('; ')
+    .find((row) => row.startsWith('hubspotutk='))
+    ?.split('=')[1];
+
+  const res = await fetch(
+    `https://api.hsforms.com/submissions/v3/integration/submit/${HUBSPOT_PORTAL_ID}/${fields.formId}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: [
+          { name: 'firstname', value: fields.firstName },
+          { name: 'lastname', value: fields.lastName },
+          { name: 'email', value: fields.email },
+          { name: 'primary_use_case', value: fields.primaryUseCase },
+          { name: 'how_are_you_handling_rag_today', value: fields.ragProvider },
+          { name: 'timeline', value: fields.timeline },
+          { name: 'team_size', value: fields.teamSize },
+          { name: 'amount_of_storage_rag', value: fields.storageAmount },
+          { name: 'notes', value: fields.notes },
+        ],
+        context: {
+          pageUri: window.location.href,
+          ...(hutk ? { hutk } : {}),
+        },
+      }),
+    },
+  );
+
+  if (!res.ok) throw new Error('Waitlist submission failed');
+}

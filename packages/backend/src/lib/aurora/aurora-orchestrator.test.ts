@@ -45,6 +45,17 @@ vi.mock('@filone/aurora-portal-client', () => ({
   getBucketInfo: (...args: unknown[]) => mockPortalGetBucketInfo(...args),
 }));
 
+const mockGetStorageSamples = vi.fn();
+const mockGetOperationsSamples = vi.fn();
+vi.mock('./aurora-backoffice.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../aurora/aurora-backoffice.js')>();
+  return {
+    ...original,
+    getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
+    getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
+  };
+});
+
 process.env.FILONE_STAGE = 'test';
 process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu/api';
 
@@ -160,20 +171,6 @@ describe('auroraOrchestrator', () => {
       const result = await auroraOrchestrator.isTenantReady('org-1');
 
       expect(result).toBeNull();
-    });
-
-    // TODO(FIL-382): drop this once the legacy-row fallback is removed.
-    it('reads legacy setupStatus when auroraSetupStatus is absent (dual-name fallback)', async () => {
-      ddbMock.on(GetItemCommand).resolves({
-        Item: {
-          auroraTenantId: { S: 'aurora-t-legacy' },
-          setupStatus: { S: FINAL_SETUP_STATUS },
-        },
-      });
-
-      const result = await auroraOrchestrator.isTenantReady('org-1');
-
-      expect(result).toEqual('aurora-t-legacy');
     });
   });
 
@@ -477,14 +474,14 @@ describe('auroraOrchestrator', () => {
     });
   });
 
-  describe('getPresignerContext', () => {
+  describe('getS3ClientContext', () => {
     it('returns endpoint + credentials with Aurora-specific knobs', async () => {
       mockSsmCredentials('aurora-t-1', {
         accessKeyId: 'AK',
         secretAccessKey: 'SK',
       });
 
-      const ctx = await auroraOrchestrator.getPresignerContext('aurora-t-1');
+      const ctx = await auroraOrchestrator.getS3ClientContext('aurora-t-1');
 
       expect(ctx).toEqual({
         endpointUrl: expect.stringContaining('aur.lu'),
@@ -492,6 +489,121 @@ describe('auroraOrchestrator', () => {
         credentials: { accessKeyId: 'AK', secretAccessKey: 'SK' },
         forcePathStyle: true,
       });
+    });
+  });
+
+  describe('getTenantUsageMetrics', () => {
+    const FROM = '2026-01-01T00:00:00Z';
+    const TO = '2026-01-31T00:00:00Z';
+
+    beforeEach(() => {
+      mockGetStorageSamples.mockResolvedValue([]);
+      mockGetOperationsSamples.mockResolvedValue([]);
+    });
+
+    it('forwards tenantId, from, to and defaults window to "1d" when interval is omitted', async () => {
+      await auroraOrchestrator.getTenantUsageMetrics('aurora-t-1', { from: FROM, to: TO });
+
+      expect(mockGetStorageSamples).toHaveBeenCalledWith({
+        tenantId: 'aurora-t-1',
+        from: FROM,
+        to: TO,
+        window: '1d',
+      });
+      expect(mockGetOperationsSamples).toHaveBeenCalledWith({
+        tenantId: 'aurora-t-1',
+        from: FROM,
+        to: TO,
+        window: '1d',
+      });
+    });
+
+    it('forwards a custom interval as the window to both helpers', async () => {
+      await auroraOrchestrator.getTenantUsageMetrics('aurora-t-1', {
+        from: FROM,
+        to: TO,
+        interval: '24h',
+      });
+
+      expect(mockGetStorageSamples).toHaveBeenCalledWith(
+        expect.objectContaining({ window: '24h' }),
+      );
+      expect(mockGetOperationsSamples).toHaveBeenCalledWith(
+        expect.objectContaining({ window: '24h' }),
+      );
+    });
+
+    it('maps storage samples to the normalized shape, applying ?? 0 defaults', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2026-01-01T01:00:00Z', bytesUsed: 1024, objectCount: 5 },
+        { timestamp: '2026-01-01T02:00:00Z' }, // bytesUsed and objectCount missing
+      ]);
+
+      const result = await auroraOrchestrator.getTenantUsageMetrics('aurora-t-1', {
+        from: FROM,
+        to: TO,
+      });
+
+      expect(result.storage).toEqual([
+        { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 1024, objectCount: 5 },
+        { timestamp: '2026-01-01T02:00:00.000Z', bytesUsed: 0, objectCount: 0 },
+      ]);
+    });
+
+    it('maps operations samples to egress shape, using txBytes with ?? 0 default', async () => {
+      mockGetOperationsSamples.mockResolvedValue([
+        { timestamp: '2026-01-01T01:00:00Z', txBytes: 512 },
+        { timestamp: '2026-01-01T02:00:00Z' }, // txBytes missing
+      ]);
+
+      const result = await auroraOrchestrator.getTenantUsageMetrics('aurora-t-1', {
+        from: FROM,
+        to: TO,
+      });
+
+      expect(result.egress).toEqual([
+        { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 512 },
+        { timestamp: '2026-01-01T02:00:00.000Z', bytesUsed: 0 },
+      ]);
+    });
+
+    it('drops storage samples that are missing a timestamp', async () => {
+      mockGetStorageSamples.mockResolvedValue([
+        { timestamp: '2026-01-01T01:00:00Z', bytesUsed: 100, objectCount: 1 },
+        { bytesUsed: 200, objectCount: 2 }, // no timestamp — should be dropped
+      ]);
+
+      const result = await auroraOrchestrator.getTenantUsageMetrics('aurora-t-1', {
+        from: FROM,
+        to: TO,
+      });
+
+      expect(result.storage).toHaveLength(1);
+      expect(result.storage[0]?.timestamp).toBe('2026-01-01T01:00:00.000Z');
+    });
+
+    it('drops egress samples that are missing a timestamp', async () => {
+      mockGetOperationsSamples.mockResolvedValue([
+        { timestamp: '2026-01-01T01:00:00Z', txBytes: 256 },
+        { txBytes: 512 }, // no timestamp — should be dropped
+      ]);
+
+      const result = await auroraOrchestrator.getTenantUsageMetrics('aurora-t-1', {
+        from: FROM,
+        to: TO,
+      });
+
+      expect(result.egress).toHaveLength(1);
+      expect(result.egress[0]?.timestamp).toBe('2026-01-01T01:00:00.000Z');
+    });
+
+    it('returns empty arrays when both helpers return no samples', async () => {
+      const result = await auroraOrchestrator.getTenantUsageMetrics('aurora-t-1', {
+        from: FROM,
+        to: TO,
+      });
+
+      expect(result).toEqual({ storage: [], egress: [] });
     });
   });
 });

@@ -14,7 +14,7 @@ import type {
   PresignResponseItem,
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import type { PresignerContext } from '../lib/service-orchestrator.js';
+import type { S3ClientContext } from '../lib/s3-client.js';
 import {
   getPresignedDeleteObjectUrl,
   getPresignedGetObjectRetentionUrl,
@@ -30,7 +30,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { rateLimitMiddleware } from '../middleware/rate-limit.js';
@@ -43,7 +43,7 @@ const WRITE_OPS = new Set<string>(['putObject', 'deleteObject']);
 
 async function presignGetObject(
   op: Extract<PresignOp, { op: 'getObject' }>,
-  ctx: PresignerContext,
+  ctx: S3ClientContext,
 ): Promise<PresignResponseItem> {
   const expiresIn = Math.min(op.expiresIn ?? PRESIGN_EXPIRY_SECONDS, MAX_GET_OBJECT_EXPIRY_SECONDS);
   const url = await getPresignedGetObjectUrl({
@@ -60,7 +60,7 @@ async function presignGetObject(
   };
 }
 
-async function presignOp(op: PresignOp, ctx: PresignerContext): Promise<PresignResponseItem> {
+async function presignOp(op: PresignOp, ctx: S3ClientContext): Promise<PresignResponseItem> {
   const expiresAt = new Date(Date.now() + PRESIGN_EXPIRY_SECONDS * 1000).toISOString();
 
   switch (op.op) {
@@ -159,7 +159,7 @@ export async function baseHandler(
       .body<ErrorResponse>({ message: 'region query parameter is required' })
       .build();
   }
-  if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region, getVerifiedEmail(event))) {
     return unsupportedRegionResponse(region);
   }
 
@@ -184,30 +184,48 @@ export async function baseHandler(
   const ops = parsed.data;
   const { orgId } = getUserInfo(event);
 
+  // Trial accounts (and users with no billing record yet) cannot generate
+  // shareable presigned URLs (getObject with custom expiresIn). All other
+  // presign operations remain available so trial users can browse and interact
+  // with bucket contents normally.
+  const status = event.requestContext.subscriptionStatus;
+  const isTrial = !status || status === SubscriptionStatus.Trialing;
+  const hasShareableUrl = ops.some((op) => op.op === 'getObject' && op.expiresIn !== undefined);
+  if (isTrial && hasShareableUrl) {
+    return new ResponseBuilder()
+      .status(402)
+      .body<ErrorResponse>({
+        message:
+          'Generating shareable links is not available on trial accounts. Please upgrade to a paid plan.',
+        code: ApiErrorCode.TRIAL_PRESIGN_BLOCKED,
+      })
+      .build();
+  }
+
   // The subscription guard middleware uses Read access level so that listing
   // and viewing objects still works during a grace period. The middleware stores
   // the resolved subscription status on the event, so we can check it here
   // without a second DynamoDB query. If the batch contains write ops
   // (putObject, deleteObject), block during grace period.
-  if (ops.some((op) => WRITE_OPS.has(op.op))) {
-    const status = event.requestContext.subscriptionStatus;
-    if (status === SubscriptionStatus.GracePeriod || status === SubscriptionStatus.PastDue) {
-      return new ResponseBuilder()
-        .status(403)
-        .body<ErrorResponse>({
-          message:
-            'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
-          code: ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED,
-        })
-        .build();
-    }
+  const hasWriteOps = ops.some((op) => WRITE_OPS.has(op.op));
+  const isGraceOrPastDue =
+    status === SubscriptionStatus.GracePeriod || status === SubscriptionStatus.PastDue;
+  if (hasWriteOps && isGraceOrPastDue) {
+    return new ResponseBuilder()
+      .status(403)
+      .body<ErrorResponse>({
+        message:
+          'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
+        code: ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED,
+      })
+      .build();
   }
 
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.isTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
-  const ctx = await orchestrator.getPresignerContext(tenantId);
+  const ctx = await orchestrator.getS3ClientContext(tenantId);
 
   const items = await Promise.all(ops.map((op) => presignOp(op, ctx)));
 

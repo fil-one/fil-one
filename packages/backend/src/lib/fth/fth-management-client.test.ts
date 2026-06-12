@@ -6,6 +6,7 @@ import {
   FthNotFoundError,
   FthUnauthorizedError,
   type FthManagementClient,
+  type FthMetricsTimeseriesResponse,
 } from './fth-management-client.js';
 
 function mockFetch(status: number, body: unknown = {}): typeof fetch {
@@ -368,5 +369,99 @@ describe('FthClient endpoint coverage', () => {
     expect(req.url).toBe(
       'https://api.fortilyx.com/management/v1/clients/client-1/access-keys/AKIA-1',
     );
+  });
+});
+
+describe('FthClient query-param building', () => {
+  it('appends query params to the URL when all values are provided', async () => {
+    const fetchMock = mockFetch(200, {});
+    const client = buildClient({ fetch: fetchMock });
+
+    await client.getClientMetricsTimeseries('client-1', {
+      from: '2024-01-01T00:00:00Z',
+      to: '2024-01-31T23:59:59Z',
+      interval: '1h',
+    });
+
+    const req = lastRequest(fetchMock);
+    const url = new URL(req.url);
+    expect(url.searchParams.get('from')).toBe('2024-01-01T00:00:00Z');
+    expect(url.searchParams.get('to')).toBe('2024-01-31T23:59:59Z');
+    expect(url.searchParams.get('interval')).toBe('1h');
+  });
+
+  it('omits query params whose value is undefined', async () => {
+    const fetchMock = mockFetch(200, {});
+    const client = buildClient({ fetch: fetchMock });
+
+    await client.getClientMetricsTimeseries('client-1', {
+      from: '2024-01-01T00:00:00Z',
+      to: '2024-01-31T23:59:59Z',
+      // interval intentionally omitted → undefined
+    });
+
+    const req = lastRequest(fetchMock);
+    const url = new URL(req.url);
+    expect(url.searchParams.has('interval')).toBe(false);
+    expect(url.searchParams.get('from')).toBe('2024-01-01T00:00:00Z');
+    expect(url.searchParams.get('to')).toBe('2024-01-31T23:59:59Z');
+  });
+});
+
+describe('FthClient getClientMetricsTimeseries', () => {
+  it('issues GET to the timeseries path with all query params', async () => {
+    const responseBody: FthMetricsTimeseriesResponse = {
+      interval: '1h',
+      point_count: 1,
+      points: [{ ts: '2024-01-01T00:00:00Z', usage_avg_bytes: 1024, egress_bytes: 512 }],
+    };
+    const fetchMock = mockFetch(200, responseBody);
+    const client = buildClient({ fetch: fetchMock });
+
+    const result = await client.getClientMetricsTimeseries('ref-abc', {
+      from: '2024-01-01T00:00:00Z',
+      to: '2024-01-02T00:00:00Z',
+      interval: '1h',
+    });
+
+    const req = lastRequest(fetchMock);
+    expect(req.method).toBe('GET');
+
+    const url = new URL(req.url);
+    expect(url.origin + url.pathname).toBe(
+      'https://api.fortilyx.com/management/v1/clients/ref-abc/metrics/timeseries',
+    );
+    expect(url.searchParams.get('from')).toBe('2024-01-01T00:00:00Z');
+    expect(url.searchParams.get('to')).toBe('2024-01-02T00:00:00Z');
+    expect(url.searchParams.get('interval')).toBe('1h');
+
+    expect(result).toEqual(responseBody);
+  });
+
+  it('parses and returns the JSON response body', async () => {
+    const responseBody: FthMetricsTimeseriesResponse = {
+      interval: '1d',
+      point_count: 2,
+      points: [
+        { ts: '2024-01-01T00:00:00Z', usage_avg_bytes: 2048, egress_bytes: 256 },
+        { ts: '2024-01-02T00:00:00Z', usage_avg_bytes: 4096, egress_bytes: 512 },
+      ],
+    };
+    const fetchMock = mockFetch(200, responseBody);
+    const client = buildClient({ fetch: fetchMock });
+
+    const result = await client.getClientMetricsTimeseries('ref-xyz', {
+      from: '2024-01-01T00:00:00Z',
+      to: '2024-01-03T00:00:00Z',
+    });
+
+    expect(result).toMatchObject({
+      interval: '1d',
+      point_count: 2,
+      points: [
+        { ts: '2024-01-01T00:00:00Z', usage_avg_bytes: 2048, egress_bytes: 256 },
+        { ts: '2024-01-02T00:00:00Z', usage_avg_bytes: 4096, egress_bytes: 512 },
+      ],
+    });
   });
 });

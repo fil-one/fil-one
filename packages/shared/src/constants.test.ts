@@ -9,6 +9,7 @@ import {
   getAuth0Domain,
   getStageFromHostname,
   getAvailableRegions,
+  isFoundationEmail,
   formatRegion,
   getRegionLabel,
   REGION_LABELS,
@@ -132,6 +133,41 @@ describe('getAvailableRegions', () => {
       expect(getAvailableRegions(stage)).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
     });
   }
+
+  it('returns only eu-west-1 in production for a Foundation email', () => {
+    expect(getAvailableRegions(Stage.Production, 'someone@fil.org')).toEqual([S3Region.EuWest1]);
+  });
+
+  it('returns only eu-west-1 in production for a non-Foundation email', () => {
+    expect(getAvailableRegions(Stage.Production, 'someone@example.com')).toEqual([
+      S3Region.EuWest1,
+    ]);
+  });
+
+  it('returns only eu-west-1 in production when no email is provided', () => {
+    expect(getAvailableRegions(Stage.Production, undefined)).toEqual([S3Region.EuWest1]);
+  });
+});
+
+describe('isFoundationEmail', () => {
+  it('matches @fil.org addresses', () => {
+    expect(isFoundationEmail('alice@fil.org')).toBe(true);
+  });
+
+  it('matches case-insensitively', () => {
+    expect(isFoundationEmail('Alice@FIL.ORG')).toBe(true);
+  });
+
+  it('rejects other domains', () => {
+    expect(isFoundationEmail('alice@fil.one')).toBe(false);
+    expect(isFoundationEmail('alice@notfil.org')).toBe(false);
+    expect(isFoundationEmail('fil.org@example.com')).toBe(false);
+  });
+
+  it('rejects undefined and empty', () => {
+    expect(isFoundationEmail(undefined)).toBe(false);
+    expect(isFoundationEmail('')).toBe(false);
+  });
 });
 
 describe('formatRegion', () => {

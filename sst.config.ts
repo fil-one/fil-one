@@ -508,7 +508,7 @@ export default $config({
       handler: 'list-buckets',
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        FTH_S3_URL: fthEnv.FTH_S3_URL,
+        ...fthEnv,
       },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
@@ -539,7 +539,7 @@ export default $config({
       handler: 'get-bucket',
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        FTH_S3_URL: fthEnv.FTH_S3_URL,
+        ...fthEnv,
       },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
@@ -551,6 +551,7 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
+      extraEnv: { ...fthEnv },
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
@@ -594,6 +595,7 @@ export default $config({
       method: 'POST',
       routePath: '/api/presign',
       handler: 'presign',
+      extraEnv: { ...fthEnv },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
       ],
@@ -698,7 +700,7 @@ export default $config({
       method: 'GET',
       routePath: '/api/activity',
       handler: 'get-activity',
-      extraEnv: auroraEnv,
+      extraEnv: { ...auroraEnv, ...fthEnv, FILONE_STAGE: $app.stage },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
       ],
@@ -752,8 +754,20 @@ export default $config({
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
-      link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, auroraBackofficeToken],
-      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'gb_month_meter' },
+      link: [
+        billingTable,
+        userInfoTable,
+        stripeSecretKey,
+        stripePriceId,
+        auroraBackofficeToken,
+        fthManagementApiToken,
+      ],
+      environment: {
+        ...auroraEnv,
+        ...fthEnv,
+        FILONE_STAGE: $app.stage,
+        STRIPE_METER_EVENT_NAME: 'gb_month_meter',
+      },
       timeout: '60 seconds',
       memory: '256 MB',
     });
