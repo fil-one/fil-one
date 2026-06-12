@@ -34,7 +34,7 @@ function parseOpCount(body: string | undefined): number {
   if (!body) return 1;
   try {
     const parsed: unknown = JSON.parse(body);
-    return Array.isArray(parsed) ? Math.min(parsed.length, 10) : 1;
+    return Array.isArray(parsed) ? Math.max(1, Math.min(parsed.length, 10)) : 1;
   } catch {
     return 1;
   }
