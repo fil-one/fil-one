@@ -12,7 +12,7 @@ vi.mock('sst', () => ({
   },
 }));
 
-const presignerContext = {
+const s3ClientContext = {
   endpointUrl: 'https://s3.example.com',
   region: 'auto',
   credentials: { accessKeyId: 'ak', secretAccessKey: 'sk' },
@@ -20,13 +20,13 @@ const presignerContext = {
 };
 
 const mockIsTenantReady = vi.fn();
-const mockGetPresignerContext = vi.fn();
+const mockGetS3ClientContext = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
   region: 'eu-west-1',
   isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
-  getPresignerContext: (...args: unknown[]) => mockGetPresignerContext(...args),
+  getS3ClientContext: (...args: unknown[]) => mockGetS3ClientContext(...args),
 };
 
 const mockGetOrchestratorForRegion = vi.fn();
@@ -66,12 +66,16 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
 function buildPresignEvent(
   ops: unknown[],
-  overrides?: { subscriptionStatus?: string | null; region?: string | null },
+  overrides?: {
+    subscriptionStatus?: string | null;
+    region?: string | null;
+    userInfo?: { email?: string; emailVerified?: boolean };
+  },
 ) {
   const region = overrides?.region === undefined ? 'eu-west-1' : overrides.region;
   const event = buildEvent({
     body: JSON.stringify(ops),
-    userInfo: USER_INFO,
+    userInfo: { ...USER_INFO, ...overrides?.userInfo },
     ...(region !== null && { queryStringParameters: { region } }),
   });
   // Default to Active so existing tests pass the trial gate.
@@ -96,7 +100,7 @@ describe('presign baseHandler', () => {
     vi.stubEnv('FILONE_STAGE', 'staging');
     mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
     mockIsTenantReady.mockResolvedValue('aurora-t-1');
-    mockGetPresignerContext.mockResolvedValue(presignerContext);
+    mockGetS3ClientContext.mockResolvedValue(s3ClientContext);
   });
 
   // ── Validation ──────────────────────────────────────────────────────
@@ -302,7 +306,7 @@ describe('presign baseHandler', () => {
           expiresAt: expect.any(String),
         },
       ],
-      endpoint: presignerContext.endpointUrl,
+      endpoint: s3ClientContext.endpointUrl,
     });
   });
 
@@ -338,7 +342,7 @@ describe('presign baseHandler', () => {
           expiresAt: expect.any(String),
         },
       ],
-      endpoint: presignerContext.endpointUrl,
+      endpoint: s3ClientContext.endpointUrl,
     });
   });
 
@@ -368,7 +372,7 @@ describe('presign baseHandler', () => {
           expiresAt: expect.any(String),
         },
       ],
-      endpoint: presignerContext.endpointUrl,
+      endpoint: s3ClientContext.endpointUrl,
     });
     expect(mockGetPresignedPutObjectUrl).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -402,7 +406,7 @@ describe('presign baseHandler', () => {
           expiresAt: expect.any(String),
         },
       ],
-      endpoint: presignerContext.endpointUrl,
+      endpoint: s3ClientContext.endpointUrl,
     });
   });
 
@@ -543,6 +547,32 @@ describe('presign baseHandler', () => {
       vi.stubEnv('FILONE_STAGE', 'production');
       const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
         region: 'us-east-1',
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(400);
+      expect(result.body).toEqual(expect.stringContaining('us-east-1'));
+      expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
+    });
+
+    it.skip('accepts us-east-1 in production for a verified Foundation email', async () => {
+      vi.stubEnv('FILONE_STAGE', 'production');
+      mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
+      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
+        region: 'us-east-1',
+        userInfo: { email: 'dogfood@fil.org', emailVerified: true },
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(200);
+      expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
+    });
+
+    it('rejects us-east-1 in production for an unverified Foundation email', async () => {
+      vi.stubEnv('FILONE_STAGE', 'production');
+      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
+        region: 'us-east-1',
+        userInfo: { email: 'dogfood@fil.org', emailVerified: false },
       });
       const result = await baseHandler(event);
 

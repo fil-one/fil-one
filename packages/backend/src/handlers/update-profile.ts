@@ -148,6 +148,10 @@ async function applyOrgNameUpdate(
 
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
-  .use(authMiddleware())
+  // Opt out of the verified-email gate: users must be able to correct a
+  // mistyped email address while unverified. Email changes always reset
+  // email_verified to false and re-trigger verification, so this cannot be
+  // used to bypass the gate.
+  .use(authMiddleware({ requireVerifiedEmail: false }))
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());

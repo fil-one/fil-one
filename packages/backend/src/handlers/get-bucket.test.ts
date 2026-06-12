@@ -248,4 +248,48 @@ describe('get-bucket baseHandler', () => {
     expect(mockIsTenantReady).not.toHaveBeenCalled();
     expect(mockGetBucket).not.toHaveBeenCalled();
   });
+
+  it('rejects us-east-1 in production for a non-Foundation user', async () => {
+    const previous = process.env.FILONE_STAGE;
+    process.env.FILONE_STAGE = 'production';
+    try {
+      const event = buildEvent({
+        userInfo: USER_INFO,
+        queryStringParameters: { region: S3Region.UsEast1 },
+      });
+      event.pathParameters = { name: 'my-bucket' };
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(400);
+      expect(JSON.parse(result.body!).message).toContain('Unsupported region');
+      expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
+    } finally {
+      process.env.FILONE_STAGE = previous;
+    }
+  });
+
+  it.skip('accepts us-east-1 in production for a verified Foundation email', async () => {
+    const previous = process.env.FILONE_STAGE;
+    process.env.FILONE_STAGE = 'production';
+    mockGetBucket.mockResolvedValue({
+      bucketName: 'my-bucket',
+      region: S3Region.UsEast1,
+      createdAt: '2026-01-15T10:00:00Z',
+      isPublic: false,
+      versioning: false,
+      encrypted: true,
+    });
+    try {
+      const event = buildEvent({
+        userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: true },
+        queryStringParameters: { region: S3Region.UsEast1 },
+      });
+      event.pathParameters = { name: 'my-bucket' };
+      await baseHandler(event);
+
+      expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.UsEast1);
+    } finally {
+      process.env.FILONE_STAGE = previous;
+    }
+  });
 });

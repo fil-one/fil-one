@@ -10,6 +10,8 @@ export enum ApiErrorCode {
   INVALID_PROMOTION_CODE = 'INVALID_PROMOTION_CODE',
   /** Trial accounts cannot generate presigned URLs — upgrade required. */
   TRIAL_PRESIGN_BLOCKED = 'TRIAL_PRESIGN_BLOCKED',
+  /** The authenticated user's email address has not been verified. */
+  EMAIL_NOT_VERIFIED = 'EMAIL_NOT_VERIFIED',
 }
 
 export interface ErrorResponse {

@@ -195,9 +195,8 @@ async function resolveAuroraTenantId(
     }),
   );
   const auroraTenantId = orgResult.Item?.auroraTenantId?.S;
-  // TODO(FIL-382): drop the setupStatus fallback.
-  const setupStatus = orgResult.Item?.auroraSetupStatus?.S ?? orgResult.Item?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
+  const auroraSetupStatus = orgResult.Item?.auroraSetupStatus?.S;
+  if (!auroraTenantId || !isOrgSetupComplete(auroraSetupStatus)) {
     console.warn('[stripe-webhook] Aurora tenant not ready for org:', orgId);
     return null;
   }

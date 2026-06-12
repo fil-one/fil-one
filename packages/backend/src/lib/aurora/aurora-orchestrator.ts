@@ -2,10 +2,7 @@
 // (aurora-tenant-setup for the lazy setup state machine, aurora-portal for
 // bucket and access-key ops) and looks up SSM-cached S3 credentials directly.
 //
-// PROFILE-row attributes used: `auroraTenantId`, `auroraSetupStatus`,
-// `auroraSetupFailureCount`. Reads of `auroraSetupStatus` fall back to the
-// legacy `setupStatus` attribute so rows written before the rename keep
-// working until the backfill runs.
+// PROFILE-row attributes used: `auroraTenantId` and `auroraSetupStatus`.
 
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
@@ -27,6 +24,7 @@ import {
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
 } from '../aurora/aurora-portal.js';
+import { getStorageSamples, getOperationsSamples } from './aurora-backoffice.js';
 import { getDynamoClient } from '../ddb-client.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
@@ -35,11 +33,13 @@ import type {
   BucketDetails,
   BucketSummary,
   CreateBucketArgs,
+  GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  PresignerContext,
   ServiceOrchestrator,
+  TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import type { S3ClientContext } from '../s3-client.js';
 
 const dynamo = getDynamoClient();
 export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting();
@@ -75,13 +75,12 @@ export const auroraOrchestrator = {
       new GetItemCommand({
         TableName: Resource.UserInfoTable.name,
         Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+        ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
       }),
     );
     const tenantId = Item?.auroraTenantId?.S;
     if (!tenantId) return null;
-    // TODO(FIL-382): drop the setupStatus fallback.
-    const setupStatus = Item?.auroraSetupStatus?.S ?? Item?.setupStatus?.S;
-    if (!isOrgSetupComplete(setupStatus)) return null;
+    if (!isOrgSetupComplete(Item?.auroraSetupStatus?.S)) return null;
     return tenantId;
   },
 
@@ -200,7 +199,7 @@ export const auroraOrchestrator = {
     await deleteAuroraAccessKey({ tenantId, auroraKeyId: keyId });
   },
 
-  async getPresignerContext(tenantId: string): Promise<PresignerContext> {
+  async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
     const stage = getStage();
     const credentials = await getConsoleS3Credentials({
       orchestratorId: auroraOrchestrator.id,
@@ -213,5 +212,35 @@ export const auroraOrchestrator = {
       credentials,
       forcePathStyle: true,
     };
+  },
+
+  async getTenantUsageMetrics(
+    tenantId: string,
+    opts: GetTenantUsageMetricsOptions,
+  ): Promise<TenantUsageMetrics> {
+    const window = opts.interval ?? '1d';
+    const { from, to } = opts;
+
+    const [storageSamples, operationsSamples] = await Promise.all([
+      getStorageSamples({ tenantId, from, to, window }),
+      getOperationsSamples({ tenantId, from, to, window }),
+    ]);
+
+    const storage = storageSamples
+      .filter((s): s is typeof s & { timestamp: string } => s.timestamp !== undefined)
+      .map((s) => ({
+        timestamp: new Date(s.timestamp).toISOString(),
+        bytesUsed: s.bytesUsed ?? 0,
+        objectCount: s.objectCount ?? 0,
+      }));
+
+    const egress = operationsSamples
+      .filter((s): s is typeof s & { timestamp: string } => s.timestamp !== undefined)
+      .map((s) => ({
+        timestamp: new Date(s.timestamp).toISOString(),
+        bytesUsed: s.txBytes ?? 0,
+      }));
+
+    return { storage, egress };
   },
 } satisfies ServiceOrchestrator;
