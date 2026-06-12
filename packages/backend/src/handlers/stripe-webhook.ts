@@ -14,9 +14,8 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import { updateTenantStatus } from '../lib/aurora/aurora-backoffice.js';
+import { updateTenantStatus as updateAuroraTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import {
@@ -124,6 +123,11 @@ async function processStripeEvent(tableName: string, stripeEvent: Stripe.Event):
       await handleCustomerUpdated(tableName, customer);
       return;
     }
+    case 'customer.deleted': {
+      const customer = stripeEvent.data.object as Stripe.Customer;
+      await handleCustomerDeleted(tableName, customer);
+      return;
+    }
     case 'customer.subscription.trial_will_end': {
       const subscription = stripeEvent.data.object as Stripe.Subscription;
       console.log('[stripe-webhook] Trial ending soon for customer:', subscription.customer);
@@ -186,12 +190,13 @@ async function resolveAuroraTenantId(
         pk: { S: `ORG#${orgId}` },
         sk: { S: 'PROFILE' },
       },
-      ProjectionExpression: 'auroraTenantId, setupStatus',
+      // TODO(FIL-382): drop legacy `setupStatus` from ProjectionExpression.
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus, setupStatus',
     }),
   );
   const auroraTenantId = orgResult.Item?.auroraTenantId?.S;
-  const setupStatus = orgResult.Item?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
+  const auroraSetupStatus = orgResult.Item?.auroraSetupStatus?.S;
+  if (!auroraTenantId || !isOrgSetupComplete(auroraSetupStatus)) {
     console.warn('[stripe-webhook] Aurora tenant not ready for org:', orgId);
     return null;
   }
@@ -245,6 +250,53 @@ async function updatePaymentMethod(
       ConditionExpression: 'attribute_exists(pk)',
     }),
   );
+}
+
+async function handleCustomerDeleted(tableName: string, customer: Stripe.Customer): Promise<void> {
+  // The customer.deleted payload carries the full pre-deletion Customer, including metadata.
+  // We do NOT retrieve from Stripe — the customer no longer exists there.
+  const userId = customer.metadata?.userId;
+  if (!userId) {
+    throw new Error(
+      `[stripe-webhook] customer.deleted missing metadata.userId; cannot disable customer ${customer.id}`,
+    );
+  }
+
+  // Disable immediately — no grace period. Aurora first; a failure here throws so the
+  // webhook returns 500 and Stripe retries (there is no cron fallback for canceled records).
+  const resolved = await resolveAuroraTenantId(userId, tableName);
+  if (resolved) {
+    await updateAuroraTenantStatus({ tenantId: resolved.auroraTenantId, status: 'DISABLED' });
+    console.log('[stripe-webhook] Aurora tenant DISABLED (customer.deleted)', {
+      userId,
+      orgId: resolved.orgId,
+      auroraTenantId: resolved.auroraTenantId,
+    });
+  } else {
+    console.warn('[stripe-webhook] customer.deleted: no Aurora tenant to disable', {
+      userId,
+      customerId: customer.id,
+    });
+  }
+
+  const now = new Date();
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: tableName,
+      Key: {
+        pk: { S: `CUSTOMER#${userId}` },
+        sk: { S: 'SUBSCRIPTION' },
+      },
+      UpdateExpression:
+        'SET subscriptionStatus = :status, canceledAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt',
+      ExpressionAttributeValues: {
+        ':status': { S: SubscriptionStatus.Canceled },
+        ':now': { S: now.toISOString() },
+      },
+    }),
+  );
+
+  emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
 
 async function handleSubscriptionUpdate(
@@ -365,8 +417,7 @@ async function handleSubscriptionDeleted(
   try {
     const resolved = await resolveAuroraTenantId(userId, tableName);
     if (resolved) {
-      await updateTenantStatus({ tenantId: resolved.auroraTenantId, status: 'WRITE_LOCKED' });
-      await setOrgAuroraTenantStatus(resolved.orgId, 'WRITE_LOCKED');
+      await updateAuroraTenantStatus({ tenantId: resolved.auroraTenantId, status: 'WRITE_LOCKED' });
       console.log('[stripe-webhook] Aurora tenant WRITE_LOCKED', {
         userId,
         orgId: resolved.orgId,
@@ -424,8 +475,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   try {
     const resolved = await resolveAuroraTenantId(userId, tableName);
     if (resolved) {
-      await updateTenantStatus({ tenantId: resolved.auroraTenantId, status: 'ACTIVE' });
-      await setOrgAuroraTenantStatus(resolved.orgId, 'ACTIVE');
+      await updateAuroraTenantStatus({ tenantId: resolved.auroraTenantId, status: 'ACTIVE' });
       console.log('[stripe-webhook] Aurora tenant re-activated', {
         userId,
         orgId: resolved.orgId,

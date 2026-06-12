@@ -29,7 +29,7 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
 }));
 
 import { baseHandler } from './create-bucket.js';
-import { BucketAlreadyExistsError } from '../lib/service-orchestrator.js';
+import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 import { S3_REGION, S3Region } from '@filone/shared';
 
@@ -40,7 +40,7 @@ import { S3_REGION, S3Region } from '@filone/shared';
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
 function validBody() {
-  return JSON.stringify({ name: 'my-bucket', region: S3_REGION });
+  return JSON.stringify({ bucketName: 'my-bucket', region: S3_REGION });
 }
 
 // ---------------------------------------------------------------------------
@@ -106,12 +106,26 @@ describe('create-bucket baseHandler', () => {
     expect(result.statusCode).toBe(409);
   });
 
+  it('surfaces the actionable message when configuration fails after create', async () => {
+    const err = new BucketConfigurationError('my-bucket');
+    mockCreateBucket.mockRejectedValue(err);
+
+    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(500);
+    const body = JSON.parse(result.body as string);
+    // Not the generic errorHandlerMiddleware message — the caller gets remediation guidance.
+    expect(body.message).toBe(err.message);
+    expect(body.message).toContain('apply the remaining settings manually with the S3 API');
+  });
+
   it('passes versioning, lock, and retention to orchestrator.createBucket', async () => {
     mockCreateBucket.mockResolvedValue(undefined);
 
     const event = buildEvent({
       body: JSON.stringify({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: S3_REGION,
         versioning: true,
         lock: true,
@@ -147,7 +161,7 @@ describe('create-bucket baseHandler', () => {
 
   it('returns 400 when lock is true but versioning is false', async () => {
     const event = buildEvent({
-      body: JSON.stringify({ name: 'my-bucket', region: S3_REGION, lock: true }),
+      body: JSON.stringify({ bucketName: 'my-bucket', region: S3_REGION, lock: true }),
       userInfo: USER_INFO,
     });
     const result = await baseHandler(event);
@@ -161,7 +175,7 @@ describe('create-bucket baseHandler', () => {
   it('returns 400 when retention is provided without lock', async () => {
     const event = buildEvent({
       body: JSON.stringify({
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: S3_REGION,
         versioning: true,
         retention: { enabled: true, mode: 'governance', duration: 30, durationType: 'd' },
@@ -180,7 +194,7 @@ describe('create-bucket baseHandler', () => {
     mockCreateBucket.mockResolvedValue(undefined);
 
     const event = buildEvent({
-      body: JSON.stringify({ name: 'my-bucket', region: S3Region.UsEast1 }),
+      body: JSON.stringify({ bucketName: 'my-bucket', region: S3Region.UsEast1 }),
       userInfo: USER_INFO,
     });
     await baseHandler(event);
@@ -190,7 +204,7 @@ describe('create-bucket baseHandler', () => {
 
   it('returns 400 when region is unsupported', async () => {
     const event = buildEvent({
-      body: JSON.stringify({ name: 'my-bucket', region: 'us-west-2' }),
+      body: JSON.stringify({ bucketName: 'my-bucket', region: 'us-west-2' }),
       userInfo: USER_INFO,
     });
     const result = await baseHandler(event);
@@ -199,5 +213,40 @@ describe('create-bucket baseHandler', () => {
     const body = JSON.parse(result.body as string);
     expect(body.message).toContain('Unsupported region');
     expect(mockCreateBucket).not.toHaveBeenCalled();
+  });
+
+  it('rejects us-east-1 in production for a non-Foundation user', async () => {
+    const previous = process.env.FILONE_STAGE;
+    process.env.FILONE_STAGE = 'production';
+    try {
+      const event = buildEvent({
+        body: JSON.stringify({ bucketName: 'my-bucket', region: S3Region.UsEast1 }),
+        userInfo: USER_INFO,
+      });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(400);
+      expect(JSON.parse(result.body as string).message).toContain('Unsupported region');
+      expect(mockCreateBucket).not.toHaveBeenCalled();
+    } finally {
+      process.env.FILONE_STAGE = previous;
+    }
+  });
+
+  it.skip('accepts us-east-1 in production for a verified Foundation email', async () => {
+    const previous = process.env.FILONE_STAGE;
+    process.env.FILONE_STAGE = 'production';
+    mockCreateBucket.mockResolvedValue(undefined);
+    try {
+      const event = buildEvent({
+        body: JSON.stringify({ bucketName: 'my-bucket', region: S3Region.UsEast1 }),
+        userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: true },
+      });
+      await baseHandler(event);
+
+      expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.UsEast1);
+    } finally {
+      process.env.FILONE_STAGE = previous;
+    }
   });
 });

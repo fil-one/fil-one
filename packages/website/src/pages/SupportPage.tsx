@@ -2,8 +2,11 @@ import { useState } from 'react';
 
 import { Heading } from '../components/Heading/Heading';
 import { Button } from '../components/Button';
+import { Card } from '../components/Card';
+import { FormField } from '../components/FormField';
 import { Input } from '../components/Input';
-import { TextArea } from '../components/TextArea';
+import { RadioOption } from '../components/RadioOption';
+import { Textarea } from '../components/TextArea';
 import { useToast } from '../components/Toast';
 import { submitSupportForm } from '../lib/hubspot.js';
 
@@ -30,21 +33,15 @@ export function SupportPage() {
   const [formLastName, setFormLastName] = useState('');
   const [formCompany, setFormCompany] = useState('');
   const [formEmail, setFormEmail] = useState('');
-  const [formCategories, setFormCategories] = useState<string[]>([]);
+  const [formCategory, setFormCategory] = useState('');
   const [formMessage, setFormMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  function toggleCategory(value: string) {
-    setFormCategories((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
-    );
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
-    if (formCategories.length === 0) {
-      toast.error('Please select at least one category.');
+    if (!formCategory) {
+      toast.error('Please select a category.');
       return;
     }
     setSubmitting(true);
@@ -54,14 +51,14 @@ export function SupportPage() {
         lastName: formLastName.trim(),
         company: formCompany.trim(),
         email: formEmail.trim(),
-        categories: formCategories,
+        categories: [formCategory],
         message: formMessage.trim(),
       });
       setFormFirstName('');
       setFormLastName('');
       setFormCompany('');
       setFormEmail('');
-      setFormCategories([]);
+      setFormCategory('');
       setFormMessage('');
       toast.success("Message sent! We'll get back to you within 1 business day.");
     } catch {
@@ -73,47 +70,43 @@ export function SupportPage() {
 
   return (
     <div className="px-10 pt-10">
-      <Heading tag="h1" size="xl" description="We typically respond within 1 business day.">
-        Talk to an Expert
+      <Heading tag="h1" size="xl" description="We typically respond within 1 business day">
+        Talk to an expert
       </Heading>
 
-      <div className="max-w-xl">
-        <div className="rounded-lg border border-zinc-200 bg-white p-6">
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <div className="max-w-xl mt-8">
+        <Card padding="none">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-6">
             <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-zinc-700">First name</label>
+              <FormField label="First name">
                 <Input
                   value={formFirstName}
                   onChange={setFormFirstName}
                   placeholder="Jane"
                   required
                 />
-              </div>
+              </FormField>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-zinc-700">Last name</label>
+              <FormField label="Last name">
                 <Input
                   value={formLastName}
                   onChange={setFormLastName}
                   placeholder="Smith"
                   required
                 />
-              </div>
+              </FormField>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-zinc-700">Company name</label>
+            <FormField label="Company name">
               <Input
                 value={formCompany}
                 onChange={setFormCompany}
                 placeholder="Acme Inc."
                 required
               />
-            </div>
+            </FormField>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-zinc-700">Email</label>
+            <FormField label="Email">
               <Input
                 type="email"
                 value={formEmail}
@@ -121,40 +114,33 @@ export function SupportPage() {
                 placeholder="you@example.com"
                 required
               />
-            </div>
+            </FormField>
 
-            {/* Category multi-select */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-zinc-700">Category</label>
-              <div className="flex flex-wrap gap-2">
+            <FormField label="Category">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {CATEGORY_OPTIONS.map((option) => (
-                  <button
+                  <RadioOption
                     key={option.value}
-                    type="button"
-                    onClick={() => toggleCategory(option.value)}
-                    className={`px-3 py-1.5 text-sm rounded-full border transition-colors ${
-                      formCategories.includes(option.value)
-                        ? 'bg-brand-600 text-white border-brand-600'
-                        : 'bg-white text-zinc-700 border-zinc-300 hover:border-zinc-400'
-                    }`}
+                    name="category"
+                    value={option.value}
+                    checked={formCategory === option.value}
+                    onChange={() => setFormCategory(option.value)}
                   >
                     {option.label}
-                  </button>
+                  </RadioOption>
                 ))}
               </div>
-            </div>
+            </FormField>
 
-            {/* Message */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-zinc-700">Message</label>
-              <TextArea
+            <FormField label="Message">
+              <Textarea
                 value={formMessage}
                 onChange={setFormMessage}
                 placeholder="How can we help?"
                 required
                 rows={4}
               />
-            </div>
+            </FormField>
 
             <div className="flex justify-end">
               <Button variant="primary" type="submit" disabled={submitting}>
@@ -162,7 +148,7 @@ export function SupportPage() {
               </Button>
             </div>
           </form>
-        </div>
+        </Card>
       </div>
     </div>
   );

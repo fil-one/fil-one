@@ -12,11 +12,13 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 
 import { formatBytes } from '@filone/shared';
-import type { S3ObjectVersion } from '@filone/shared';
+import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
+import { EmptyStateCard } from './EmptyStateCard';
 import { Spinner } from './Spinner';
+import { Table } from './Table/Table';
 import { VersionRowBadge, truncateVersionId } from './VersionHistoryCard';
 import { formatDate } from '../lib/time.js';
 
@@ -142,8 +144,8 @@ function VersionSubRow({
   onNavigate: (key: string, versionId: string) => void;
 }) {
   return (
-    <tr
-      className="cursor-pointer border-b border-zinc-100 bg-zinc-50/50 last:border-0 hover:bg-zinc-100/50"
+    <Table.Row
+      className="cursor-pointer bg-zinc-50/50 hover:bg-zinc-100/50"
       role="button"
       tabIndex={0}
       onClick={() => onNavigate(groupKey, version.versionId)}
@@ -151,23 +153,23 @@ function VersionSubRow({
         if (e.key === 'Enter' || e.key === ' ') onNavigate(groupKey, version.versionId);
       }}
     >
-      <td className="py-3 pr-4 pl-10">
+      <Table.Cell className="py-3 pr-4 pl-10">
         <div className="flex items-center gap-2 text-zinc-500">
           <FileIcon size={14} className="shrink-0 text-zinc-300" aria-hidden="true" />
           {displayName}
         </div>
-      </td>
-      <td className="px-4 py-3 font-mono text-xs text-zinc-500" title={version.versionId}>
+      </Table.Cell>
+      <Table.Cell className="font-mono text-xs text-zinc-500" title={version.versionId}>
         {truncateVersionId(version.versionId)}
-      </td>
-      <td className="px-4 py-3">
+      </Table.Cell>
+      <Table.Cell>
         <VersionRowBadge version={version} />
-      </td>
-      <td className="px-4 py-3 text-zinc-500">
+      </Table.Cell>
+      <Table.Cell className="text-zinc-500">
         {version.isDeleteMarker ? '\u2014' : formatBytes(version.sizeBytes)}
-      </td>
-      <td className="px-4 py-3 text-zinc-500">{formatDate(version.lastModified)}</td>
-      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+      </Table.Cell>
+      <Table.Cell className="text-zinc-500">{formatDate(version.lastModified)}</Table.Cell>
+      <Table.Cell onClick={(e) => e.stopPropagation()}>
         <VersionActions
           version={version}
           groupKey={groupKey}
@@ -176,8 +178,8 @@ function VersionSubRow({
           onRequestDelete={onRequestDelete}
           label={`version ${version.versionId}`}
         />
-      </td>
-    </tr>
+      </Table.Cell>
+    </Table.Row>
   );
 }
 
@@ -209,8 +211,8 @@ function LatestVersionRow({
   const hasMultipleVersions = versioningEnabled && group.versionCount > 1;
 
   return (
-    <tr
-      className="cursor-pointer border-b border-zinc-100 last:border-0 hover:bg-zinc-50"
+    <Table.Row
+      className="cursor-pointer"
       role="button"
       tabIndex={0}
       onClick={() => onNavigate(group.key, group.latest.versionId)}
@@ -218,7 +220,7 @@ function LatestVersionRow({
         if (e.key === 'Enter' || e.key === ' ') onNavigate(group.key, group.latest.versionId);
       }}
     >
-      <td className="px-4 py-3">
+      <Table.Cell>
         <div className="flex items-center gap-2 font-medium text-zinc-900" title={group.key}>
           {hasMultipleVersions ? (
             <button
@@ -246,22 +248,22 @@ function LatestVersionRow({
             </span>
           )}
         </div>
-      </td>
+      </Table.Cell>
       {versioningEnabled && (
         <>
-          <td className="px-4 py-3 font-mono text-xs text-zinc-500" title={group.latest.versionId}>
+          <Table.Cell className="font-mono text-xs text-zinc-500" title={group.latest.versionId}>
             {truncateVersionId(group.latest.versionId)}
-          </td>
-          <td className="px-4 py-3">
+          </Table.Cell>
+          <Table.Cell>
             <VersionRowBadge version={{ ...group.latest, isLatest: true }} />
-          </td>
+          </Table.Cell>
         </>
       )}
-      <td className="px-4 py-3 text-zinc-600">
+      <Table.Cell className="text-zinc-600">
         {group.latest.isDeleteMarker ? '\u2014' : formatBytes(group.latest.sizeBytes)}
-      </td>
-      <td className="px-4 py-3 text-zinc-600">{formatDate(group.latest.lastModified)}</td>
-      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+      </Table.Cell>
+      <Table.Cell className="text-zinc-600">{formatDate(group.latest.lastModified)}</Table.Cell>
+      <Table.Cell onClick={(e) => e.stopPropagation()}>
         <VersionActions
           version={group.latest}
           groupKey={group.key}
@@ -270,8 +272,51 @@ function LatestVersionRow({
           onRequestDelete={onRequestDelete}
           label={entry.name}
         />
-      </td>
-    </tr>
+      </Table.Cell>
+    </Table.Row>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Prefix breadcrumb
+// ---------------------------------------------------------------------------
+
+function PrefixBreadcrumb({
+  currentPrefix,
+  onPrefixChange,
+}: {
+  currentPrefix: string;
+  onPrefixChange: (prefix: string) => void;
+}) {
+  return (
+    <div className="mb-2 flex items-center gap-1 text-sm">
+      <button
+        type="button"
+        onClick={() => onPrefixChange('')}
+        className={`hover:text-brand-600 ${currentPrefix === '' ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
+      >
+        /
+      </button>
+      {currentPrefix
+        .split('/')
+        .filter(Boolean)
+        .map((segment, idx, arr) => {
+          const segmentPrefix = arr.slice(0, idx + 1).join('/') + '/';
+          const isLast = idx === arr.length - 1;
+          return (
+            <span key={segmentPrefix} className="flex items-center gap-1">
+              <span className="text-zinc-400">/</span>
+              <button
+                type="button"
+                onClick={() => onPrefixChange(segmentPrefix)}
+                className={`hover:text-brand-600 ${isLast ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
+              >
+                {segment}
+              </button>
+            </span>
+          );
+        })}
+    </div>
   );
 }
 
@@ -281,6 +326,7 @@ function LatestVersionRow({
 
 export type ObjectBrowserProps = {
   bucketName: string;
+  region: S3Region;
   versions: S3ObjectVersion[];
   versioningEnabled: boolean;
   currentPrefix: string;
@@ -292,6 +338,7 @@ export type ObjectBrowserProps = {
 
 export function ObjectBrowser({
   bucketName,
+  region,
   versions,
   versioningEnabled,
   currentPrefix,
@@ -322,19 +369,26 @@ export function ObjectBrowser({
 
   if (versions.length === 0) {
     return (
-      <div className="mt-4 flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
-        <CloudArrowUpIcon size={48} className="mb-4 text-zinc-300" aria-hidden="true" />
-        <p className="mb-1 text-base font-medium text-zinc-700">No objects yet</p>
-        <p className="mb-6 text-sm text-zinc-500">Upload your first object to this bucket</p>
-        <Button
-          variant="primary"
-          icon={ArrowUpIcon}
-          onClick={() =>
-            void navigate({ to: '/buckets/$bucketName/upload', params: { bucketName } })
-          }
+      <div className="mt-4">
+        <EmptyStateCard
+          icon={CloudArrowUpIcon}
+          title="No objects yet"
+          description="Upload your first object to this bucket"
         >
-          Upload object
-        </Button>
+          <Button
+            variant="primary"
+            icon={ArrowUpIcon}
+            onClick={() =>
+              void navigate({
+                to: '/buckets/$bucketName/upload',
+                params: { bucketName },
+                search: { region },
+              })
+            }
+          >
+            Upload object
+          </Button>
+        </EmptyStateCard>
       </div>
     );
   }
@@ -346,142 +400,102 @@ export function ObjectBrowser({
     void navigate({
       to: '/buckets/$bucketName/objects',
       params: { bucketName },
-      search: { key, versionId },
+      search: { key, region, versionId },
     });
   }
 
   return (
     <div className="mt-4">
-      {/* Prefix breadcrumb */}
-      <div className="mb-2 flex items-center gap-1 text-sm">
-        <button
-          type="button"
-          onClick={() => onPrefixChange('')}
-          className={`hover:text-brand-600 ${currentPrefix === '' ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
-        >
-          /
-        </button>
-        {currentPrefix
-          .split('/')
-          .filter(Boolean)
-          .map((segment, idx, arr) => {
-            const segmentPrefix = arr.slice(0, idx + 1).join('/') + '/';
-            const isLast = idx === arr.length - 1;
-            return (
-              <span key={segmentPrefix} className="flex items-center gap-1">
-                <span className="text-zinc-400">/</span>
-                <button
-                  type="button"
-                  onClick={() => onPrefixChange(segmentPrefix)}
-                  className={`hover:text-brand-600 ${isLast ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
-                >
-                  {segment}
-                </button>
-              </span>
-            );
-          })}
-      </div>
+      <PrefixBreadcrumb currentPrefix={currentPrefix} onPrefixChange={onPrefixChange} />
 
       {entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
           <p className="text-sm text-zinc-500">No objects at this path</p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="border-b border-zinc-200 bg-zinc-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Name
-                </th>
-                {versioningEnabled && (
-                  <>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                      Version
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                      Status
-                    </th>
-                  </>
-                )}
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Size
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Last Modified
-                </th>
-                <th className="px-4 py-3" aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry) => {
-                if (entry.kind === 'folder') {
-                  return (
-                    <tr
-                      key={`folder:${entry.prefix}`}
-                      className="cursor-pointer border-b border-zinc-100 last:border-0 hover:bg-zinc-50"
-                      onClick={() => onPrefixChange(entry.prefix)}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2 font-medium text-zinc-900">
-                          <FolderIcon
-                            size={16}
-                            className="shrink-0 text-zinc-400"
-                            aria-hidden="true"
-                          />
-                          {entry.name}/
-                        </div>
-                      </td>
-                      {versioningEnabled && (
-                        <>
-                          <td className="px-4 py-3 text-zinc-400">&mdash;</td>
-                          <td className="px-4 py-3 text-zinc-400">&mdash;</td>
-                        </>
-                      )}
-                      <td className="px-4 py-3 text-zinc-400">&mdash;</td>
-                      <td className="px-4 py-3 text-zinc-400">&mdash;</td>
-                      <td className="px-4 py-3" />
-                    </tr>
-                  );
-                }
-
-                const { group } = entry;
-                const isExpanded = expandedKeys.has(group.key);
-
+        <Table>
+          <Table.Header>
+            <Table.Row>
+              <Table.Head>Name</Table.Head>
+              {versioningEnabled && (
+                <>
+                  <Table.Head>Version</Table.Head>
+                  <Table.Head>Status</Table.Head>
+                </>
+              )}
+              <Table.Head>Size</Table.Head>
+              <Table.Head>Last Modified</Table.Head>
+              <Table.Head aria-label="Actions" />
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {entries.map((entry) => {
+              if (entry.kind === 'folder') {
                 return (
-                  <Fragment key={`object:${group.key}`}>
-                    <LatestVersionRow
-                      entry={entry}
-                      group={group}
-                      isExpanded={isExpanded}
-                      versioningEnabled={versioningEnabled}
-                      onToggleExpand={toggleExpand}
-                      downloading={downloading}
-                      onDownload={onDownload}
-                      onRequestDelete={requestDelete}
-                      onNavigate={navigateToObject}
-                    />
-                    {isExpanded &&
-                      group.versions
-                        .filter((v) => v !== group.latest)
-                        .map((version) => (
-                          <VersionSubRow
-                            key={`version:${group.key}:${version.versionId}`}
-                            version={version}
-                            groupKey={group.key}
-                            displayName={entry.name}
-                            downloading={downloading}
-                            onDownload={onDownload}
-                            onRequestDelete={requestDelete}
-                            onNavigate={navigateToObject}
-                          />
-                        ))}
-                  </Fragment>
+                  <Table.Row
+                    key={`folder:${entry.prefix}`}
+                    className="cursor-pointer"
+                    onClick={() => onPrefixChange(entry.prefix)}
+                  >
+                    <Table.Cell>
+                      <div className="flex items-center gap-2 font-medium text-zinc-900">
+                        <FolderIcon
+                          size={16}
+                          className="shrink-0 text-zinc-400"
+                          aria-hidden="true"
+                        />
+                        {entry.name}/
+                      </div>
+                    </Table.Cell>
+                    {versioningEnabled && (
+                      <>
+                        <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
+                        <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
+                      </>
+                    )}
+                    <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
+                    <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
+                    <Table.Cell />
+                  </Table.Row>
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
+              }
+
+              const { group } = entry;
+              const isExpanded = expandedKeys.has(group.key);
+
+              return (
+                <Fragment key={`object:${group.key}`}>
+                  <LatestVersionRow
+                    entry={entry}
+                    group={group}
+                    isExpanded={isExpanded}
+                    versioningEnabled={versioningEnabled}
+                    onToggleExpand={toggleExpand}
+                    downloading={downloading}
+                    onDownload={onDownload}
+                    onRequestDelete={requestDelete}
+                    onNavigate={navigateToObject}
+                  />
+                  {isExpanded &&
+                    group.versions
+                      .filter((v) => v !== group.latest)
+                      .map((version) => (
+                        <VersionSubRow
+                          key={`version:${group.key}:${version.versionId}`}
+                          version={version}
+                          groupKey={group.key}
+                          displayName={entry.name}
+                          downloading={downloading}
+                          onDownload={onDownload}
+                          onRequestDelete={requestDelete}
+                          onNavigate={navigateToObject}
+                        />
+                      ))}
+                </Fragment>
+              );
+            })}
+          </Table.Body>
+        </Table>
       )}
 
       <ConfirmDialog

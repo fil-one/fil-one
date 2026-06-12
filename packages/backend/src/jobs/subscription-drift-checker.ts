@@ -16,7 +16,7 @@ interface ActiveCandidate {
 
 interface ResolvedTenant {
   auroraTenantId: string | undefined;
-  setupStatus: string | undefined;
+  auroraSetupStatus: string | undefined;
 }
 
 interface RunStats {
@@ -100,7 +100,7 @@ async function scanActiveSubscriptions(billingTableName: string): Promise<Active
 async function evaluateCandidate(candidate: ActiveCandidate, stats: RunStats): Promise<void> {
   try {
     const tenant = await resolveTenant(candidate.orgId);
-    if (!tenant.auroraTenantId || !isOrgSetupComplete(tenant.setupStatus)) {
+    if (!tenant.auroraTenantId || !isOrgSetupComplete(tenant.auroraSetupStatus)) {
       stats.missingTenant += 1;
       return;
     }
@@ -144,12 +144,12 @@ async function resolveTenant(orgId: string): Promise<ResolvedTenant> {
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      ProjectionExpression: 'auroraTenantId, setupStatus',
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
     }),
   );
   return {
     auroraTenantId: result.Item?.auroraTenantId?.S,
-    setupStatus: result.Item?.setupStatus?.S,
+    auroraSetupStatus: result.Item?.auroraSetupStatus?.S,
   };
 }
 

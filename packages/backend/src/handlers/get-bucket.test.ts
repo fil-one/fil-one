@@ -12,6 +12,7 @@ vi.mock('sst', () => ({
 
 const mockIsTenantReady = vi.fn();
 const mockGetBucket = vi.fn();
+const mockGetOrchestratorForRegion = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
@@ -21,14 +22,14 @@ const mockOrchestrator = {
 };
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: () => mockOrchestrator,
+  getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './get-bucket.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
-import { S3_REGION } from '@filone/shared';
+import { S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,11 +45,12 @@ describe('get-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsTenantReady.mockResolvedValue('aurora-t-1');
+    mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
   });
 
   it('returns 200 with bucket data from the orchestrator', async () => {
     mockGetBucket.mockResolvedValue({
-      name: 'my-bucket',
+      bucketName: 'my-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
       isPublic: false,
@@ -65,7 +67,7 @@ describe('get-bucket baseHandler', () => {
     const body = JSON.parse(result.body!);
     expect(body).toStrictEqual({
       bucket: {
-        name: 'my-bucket',
+        bucketName: 'my-bucket',
         region: S3_REGION,
         createdAt: '2026-01-15T10:00:00Z',
         isPublic: false,
@@ -78,7 +80,7 @@ describe('get-bucket baseHandler', () => {
 
   it('returns objectLockEnabled true when the orchestrator reports it', async () => {
     mockGetBucket.mockResolvedValue({
-      name: 'locked-bucket',
+      bucketName: 'locked-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
       isPublic: false,
@@ -98,7 +100,7 @@ describe('get-bucket baseHandler', () => {
 
   it('passes through versioning, encryption, and retention fields', async () => {
     mockGetBucket.mockResolvedValue({
-      name: 'full-bucket',
+      bucketName: 'full-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
       isPublic: false,
@@ -118,7 +120,7 @@ describe('get-bucket baseHandler', () => {
     const body = JSON.parse(result.body!);
     expect(body).toStrictEqual({
       bucket: {
-        name: 'full-bucket',
+        bucketName: 'full-bucket',
         region: S3_REGION,
         createdAt: '2026-01-15T10:00:00Z',
         isPublic: false,
@@ -134,7 +136,7 @@ describe('get-bucket baseHandler', () => {
 
   it('calls orchestrator.getBucket with tenantId and bucketName', async () => {
     mockGetBucket.mockResolvedValue({
-      name: 'my-bucket',
+      bucketName: 'my-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
       isPublic: false,
@@ -192,5 +194,102 @@ describe('get-bucket baseHandler', () => {
 
     expect(result.statusCode).toBe(503);
     expect(mockGetBucket).not.toHaveBeenCalled();
+  });
+
+  it('uses S3_REGION when region query param is omitted', async () => {
+    mockGetBucket.mockResolvedValue({
+      bucketName: 'my-bucket',
+      region: S3_REGION,
+      createdAt: '2026-01-15T10:00:00Z',
+      isPublic: false,
+      versioning: false,
+      encrypted: true,
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'my-bucket' };
+    await baseHandler(event);
+
+    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3_REGION);
+  });
+
+  it('selects the orchestrator using the region from the query string', async () => {
+    mockGetBucket.mockResolvedValue({
+      bucketName: 'my-bucket',
+      region: S3Region.UsEast1,
+      createdAt: '2026-01-15T10:00:00Z',
+      isPublic: false,
+      versioning: false,
+      encrypted: true,
+    });
+
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { region: S3Region.UsEast1 },
+    });
+    event.pathParameters = { name: 'my-bucket' };
+    await baseHandler(event);
+
+    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.UsEast1);
+  });
+
+  it('returns 400 when region is unsupported', async () => {
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { region: 'us-west-2' },
+    });
+    event.pathParameters = { name: 'my-bucket' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(400);
+    const body = JSON.parse(result.body!);
+    expect(body.message).toContain('Unsupported region');
+    expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
+    expect(mockIsTenantReady).not.toHaveBeenCalled();
+    expect(mockGetBucket).not.toHaveBeenCalled();
+  });
+
+  it('rejects us-east-1 in production for a non-Foundation user', async () => {
+    const previous = process.env.FILONE_STAGE;
+    process.env.FILONE_STAGE = 'production';
+    try {
+      const event = buildEvent({
+        userInfo: USER_INFO,
+        queryStringParameters: { region: S3Region.UsEast1 },
+      });
+      event.pathParameters = { name: 'my-bucket' };
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(400);
+      expect(JSON.parse(result.body!).message).toContain('Unsupported region');
+      expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
+    } finally {
+      process.env.FILONE_STAGE = previous;
+    }
+  });
+
+  it.skip('accepts us-east-1 in production for a verified Foundation email', async () => {
+    const previous = process.env.FILONE_STAGE;
+    process.env.FILONE_STAGE = 'production';
+    mockGetBucket.mockResolvedValue({
+      bucketName: 'my-bucket',
+      region: S3Region.UsEast1,
+      createdAt: '2026-01-15T10:00:00Z',
+      isPublic: false,
+      versioning: false,
+      encrypted: true,
+    });
+    try {
+      const event = buildEvent({
+        userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: true },
+        queryStringParameters: { region: S3Region.UsEast1 },
+      });
+      event.pathParameters = { name: 'my-bucket' };
+      await baseHandler(event);
+
+      expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.UsEast1);
+    } finally {
+      process.env.FILONE_STAGE = previous;
+    }
   });
 });

@@ -11,6 +11,7 @@ import {
   ChatCircleIcon,
   SignOutIcon,
   QuestionIcon,
+  ChatTeardropDotsIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useMatchRoute } from '@tanstack/react-router';
@@ -36,12 +37,28 @@ type NavItem = {
   label: string;
 };
 
-const navItems: NavItem[] = [
-  { path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard' },
-  { path: '/buckets', icon: DatabaseIcon, label: 'Buckets' },
-  { path: '/api-keys', icon: KeyIcon, label: 'API Keys' },
-  { path: '/billing', icon: CreditCardIcon, label: 'Billing' },
-  { path: '/settings', icon: GearIcon, label: 'Settings' },
+type NavGroup = {
+  label?: string;
+  items: NavItem[];
+};
+
+const navGroups: NavGroup[] = [
+  {
+    items: [{ path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard' }],
+  },
+  {
+    label: 'Storage',
+    items: [
+      { path: '/buckets', icon: DatabaseIcon, label: 'Buckets' },
+      { path: '/api-keys', icon: KeyIcon, label: 'API Keys' },
+    ],
+  },
+  {
+    label: 'AI Tools',
+    items: [
+      { path: '/bucket-intelligence', icon: ChatTeardropDotsIcon, label: 'Bucket Intelligence' },
+    ],
+  },
 ];
 
 type NavLinksProps = {
@@ -51,9 +68,60 @@ type NavLinksProps = {
 
 function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
   return (
-    <div className="flex flex-col gap-0.5 p-2">
-      {navItems.map(({ path, icon: Icon, label }) => {
-        const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
+    <div className="flex flex-col p-2">
+      {navGroups.map((group, gi) => (
+        <div key={gi} className={gi > 0 ? 'mt-2' : ''}>
+          {!collapsed && group.label && (
+            <p className="mb-1 px-3 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+              {group.label}
+            </p>
+          )}
+          <div className="flex flex-col gap-0.5">
+            {group.items.map(({ path, icon: Icon, label }) => {
+              const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
+              const link = (
+                <Link
+                  key={path}
+                  to={path}
+                  aria-label={label}
+                  className={[
+                    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                    collapsed ? 'justify-center' : '',
+                    isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                >
+                  <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
+                  {!collapsed && <span className="flex-1">{label}</span>}
+                </Link>
+              );
+              if (collapsed) {
+                return (
+                  <Tooltip key={path} content={label} side="right">
+                    {link}
+                  </Tooltip>
+                );
+              }
+              return <div key={path}>{link}</div>;
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const utilityNavItems: NavItem[] = [
+  { path: '/billing', icon: CreditCardIcon, label: 'Billing' },
+  { path: '/settings', icon: GearIcon, label: 'Settings' },
+];
+
+function UtilityNavLinks({ collapsed, matchRoute }: NavLinksProps) {
+  return (
+    <div className="p-2 flex flex-col gap-0.5">
+      {utilityNavItems.map(({ path, icon: Icon, label }) => {
+        const isActive = Boolean(matchRoute({ to: path }));
         const link = (
           <Link
             key={path}
@@ -66,7 +134,6 @@ function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
             ]
               .filter(Boolean)
               .join(' ')}
-            activeProps={{ className: 'bg-brand-50 text-brand-700' }}
           >
             <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
             {!collapsed && <span>{label}</span>}
@@ -79,7 +146,7 @@ function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
             </Tooltip>
           );
         }
-        return link;
+        return <div key={path}>{link}</div>;
       })}
     </div>
   );
@@ -186,7 +253,7 @@ export function HelpMenu({
             type="button"
             onClick={onToggle}
             aria-label="Help"
-            className="flex w-full items-center justify-center rounded-lg px-3 py-2 text-zinc-600 transition-colors hover:bg-zinc-100"
+            className="flex w-full items-center justify-center rounded-lg py-2 text-zinc-600 transition-colors hover:bg-zinc-100"
           >
             <QuestionIcon size={18} className="text-zinc-400" />
           </button>
@@ -324,11 +391,9 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
             data-testid="user-profile"
             onClick={() => setUserMenuOpen((o) => !o)}
             className={[
-              'flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-zinc-100',
-              collapsed ? 'w-full justify-center' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
+              'flex items-center rounded-lg hover:bg-zinc-100',
+              collapsed ? 'w-full justify-center py-1.5' : 'gap-2.5 px-2 py-1.5',
+            ].join(' ')}
           >
             <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">
               {initial}
@@ -385,6 +450,9 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
 
         {/* Spacer */}
         <div className="flex-1" />
+
+        {/* Bottom utility nav */}
+        <UtilityNavLinks collapsed={collapsed} matchRoute={matchRoute} />
 
         {/* Status banners */}
         <StatusBanners

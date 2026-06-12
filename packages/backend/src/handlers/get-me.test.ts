@@ -110,7 +110,7 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          setupStatus: { S: FINAL_SETUP_STATUS },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 
@@ -122,6 +122,39 @@ describe('GET /api/me handler', () => {
         orgId: MOCK_ORG_ID,
         orgName: 'Example Corp',
         emailVerified: true,
+        email: MOCK_EMAIL,
+        mfaEnrollments: [],
+        connectionType: 'auth0',
+      }),
+    });
+  });
+
+  it('returns 200 with emailVerified false for unverified users (verified-email gate opt-out)', async () => {
+    mockJwtVerify.mockResolvedValue({
+      payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+    });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
+        },
+      });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({
+        orgId: MOCK_ORG_ID,
+        orgName: 'Example Corp',
+        emailVerified: false,
         email: MOCK_EMAIL,
         mfaEnrollments: [],
         connectionType: 'auth0',
@@ -164,7 +197,7 @@ describe('GET /api/me handler', () => {
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
           orgConfirmed: { BOOL: true },
-          setupStatus: { S: FINAL_SETUP_STATUS },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 
@@ -199,7 +232,7 @@ describe('GET /api/me handler', () => {
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
           orgConfirmed: { BOOL: true },
-          setupStatus: { S: FINAL_SETUP_STATUS },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 

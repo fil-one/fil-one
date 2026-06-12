@@ -4,7 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { S3_REGION } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { NotImplementedError } from '../lib/service-orchestrator.js';
+import { NotImplementedError } from '../lib/errors.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';

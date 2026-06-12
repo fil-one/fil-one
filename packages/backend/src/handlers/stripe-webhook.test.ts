@@ -28,10 +28,6 @@ vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
   updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
 }));
 
-vi.mock('../lib/org-setup-status.js', () => ({
-  isOrgSetupComplete: (status: string | undefined) => status === 'AURORA_S3_ACCESS_KEY_CREATED',
-}));
-
 const mockConstructEvent = vi.fn();
 const mockCustomersRetrieve = vi.fn();
 const mockPaymentMethodsRetrieve = vi.fn();
@@ -54,6 +50,7 @@ const reportMetricMock = vi.mocked(reportMetric);
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './stripe-webhook.js';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -178,7 +175,7 @@ function setupAuroraTenantResolution() {
         pk: `ORG#${MOCK_ORG_ID}`,
         sk: 'PROFILE',
         auroraTenantId: MOCK_AURORA_TENANT_ID,
-        setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
+        auroraSetupStatus: FINAL_SETUP_STATUS,
       }),
     });
 }
@@ -826,7 +823,7 @@ describe('stripe-webhook handler', () => {
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
-    it('calls updateTenantStatus WRITE_LOCKED and writes auroraTenantStatus to org profile', async () => {
+    it('calls updateTenantStatus WRITE_LOCKED on subscription deletion', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
       setupAuroraTenantResolution();
@@ -836,20 +833,6 @@ describe('stripe-webhook handler', () => {
       expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
         tenantId: MOCK_AURORA_TENANT_ID,
         status: 'WRITE_LOCKED',
-      });
-
-      // Verify org profile update with auroraTenantStatus
-      const orgProfileUpdate = ddbMock
-        .commandCalls(UpdateItemCommand)
-        .find(
-          (c) =>
-            c.args[0].input.TableName === 'UserInfoTable' &&
-            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'WRITE_LOCKED',
-        );
-      expect(orgProfileUpdate).toBeDefined();
-      expect(orgProfileUpdate!.args[0].input.Key).toEqual({
-        pk: { S: `ORG#${MOCK_ORG_ID}` },
-        sk: { S: 'PROFILE' },
       });
 
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
@@ -863,17 +846,8 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      // DynamoDB update should still have happened
+      // DynamoDB subscription update should still have happened
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
-      // Org profile auroraTenantStatus must NOT be updated when updateTenantStatus fails
-      const orgProfileUpdate = ddbMock
-        .commandCalls(UpdateItemCommand)
-        .find(
-          (c) =>
-            c.args[0].input.TableName === 'UserInfoTable' &&
-            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'WRITE_LOCKED',
-        );
-      expect(orgProfileUpdate).toBeUndefined();
       // Webhook should still return 200
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -886,6 +860,122 @@ describe('stripe-webhook handler', () => {
       const result = await handler(buildWebhookEvent('{}'));
 
       expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 5b. customer.deleted
+  // -----------------------------------------------------------------------
+  describe('customer.deleted', () => {
+    it('disables the customer immediately by setting Canceled status and DISABLING Aurora tenant', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      setupAuroraTenantResolution();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
+        tenantId: MOCK_AURORA_TENANT_ID,
+        status: 'DISABLED',
+      });
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+
+      const input = updateCalls[0].args[0].input;
+      expect(input.Key).toEqual({
+        pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
+        sk: { S: 'SUBSCRIPTION' },
+      });
+      expect(input.ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.Canceled,
+      });
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('does not write a grace period', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      setupAuroraTenantResolution();
+
+      await handler(buildWebhookEvent('{}'));
+
+      const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+      expect(input.UpdateExpression).not.toContain('gracePeriodEndsAt = ');
+      expect(input.UpdateExpression).toContain('REMOVE gracePeriodEndsAt');
+      expect(input.ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.Canceled,
+      });
+    });
+
+    it('reads userId from the event payload and never calls Stripe customers.retrieve', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      setupAuroraTenantResolution();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockCustomersRetrieve).not.toHaveBeenCalled();
+    });
+
+    it('fails the webhook (500) when customer.deleted has no userId in metadata', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject({ metadata: {} }));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
+      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
+    });
+
+    it('fails the webhook (500) and releases idempotency when Aurora DISABLE fails', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      setupAuroraTenantResolution();
+      mockUpdateTenantStatus.mockRejectedValue(new Error('Aurora API error'));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0); // Aurora throws before the DDB write
+    });
+
+    it('emits a DunningEscalation metric with reason customer_deleted', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      setupAuroraTenantResolution();
+
+      await handler(buildWebhookEvent('{}'));
+
+      const emissions = dunningEmissions();
+      expect(
+        emissions.some(
+          (e) =>
+            (e as { stage?: string }).stage === 'canceled' &&
+            (e as { reason?: string }).reason === 'customer_deleted',
+        ),
+      ).toBe(true);
+    });
+
+    it('still cancels in DynamoDB when there is no Aurora tenant (no orgId)', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      // do NOT call setupAuroraTenantResolution, so GetItemCommand default returns no orgId
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      expect(updateCalls[0].args[0].input.ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.Canceled,
+      });
+
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
@@ -977,7 +1067,7 @@ describe('stripe-webhook handler', () => {
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
-    it('calls updateTenantStatus ACTIVE and writes auroraTenantStatus to org profile', async () => {
+    it('calls updateTenantStatus ACTIVE on payment success', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
       setupAuroraTenantResolution();
@@ -988,16 +1078,6 @@ describe('stripe-webhook handler', () => {
         tenantId: MOCK_AURORA_TENANT_ID,
         status: 'ACTIVE',
       });
-
-      // Verify org profile update with auroraTenantStatus
-      const orgProfileUpdate = ddbMock
-        .commandCalls(UpdateItemCommand)
-        .find(
-          (c) =>
-            c.args[0].input.TableName === 'UserInfoTable' &&
-            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'ACTIVE',
-        );
-      expect(orgProfileUpdate).toBeDefined();
 
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -1011,15 +1091,6 @@ describe('stripe-webhook handler', () => {
       const result = await handler(buildWebhookEvent('{}'));
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
-      // Org profile auroraTenantStatus must NOT be updated when updateTenantStatus fails
-      const orgProfileUpdate = ddbMock
-        .commandCalls(UpdateItemCommand)
-        .find(
-          (c) =>
-            c.args[0].input.TableName === 'UserInfoTable' &&
-            c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'ACTIVE',
-        );
-      expect(orgProfileUpdate).toBeUndefined();
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });

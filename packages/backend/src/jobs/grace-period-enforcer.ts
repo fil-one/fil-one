@@ -7,9 +7,8 @@ import {
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
-import { updateTenantStatus } from '../lib/aurora/aurora-backoffice.js';
+import { getTenantStatus, updateTenantStatus } from '../lib/aurora/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 
 const dynamo = getDynamoClient();
@@ -26,8 +25,7 @@ interface Candidate {
 
 interface TenantRecord {
   auroraTenantId: string | undefined;
-  setupStatus: string | undefined;
-  currentAuroraStatus: string | undefined;
+  auroraSetupStatus: string | undefined;
 }
 
 type CandidateOutcome = 'canceled' | 'write_locked' | 'skipped';
@@ -84,14 +82,14 @@ async function processCandidate(
 ): Promise<CandidateOutcome> {
   // Resolve Aurora tenant for all actions
   const tenant = await resolveTenantForEnforcement(candidate.orgId);
-  const tenantReady = tenant.auroraTenantId && isOrgSetupComplete(tenant.setupStatus);
+  const tenantReady = tenant.auroraTenantId && isOrgSetupComplete(tenant.auroraSetupStatus);
 
   if (!tenantReady) {
     console.warn('[grace-period-enforcer] Tenant not ready, skipping', {
       userId: candidate.userId,
       orgId: candidate.orgId,
       auroraTenantId: tenant.auroraTenantId,
-      setupStatus: tenant.setupStatus,
+      auroraSetupStatus: tenant.auroraSetupStatus,
     });
     return 'skipped';
   }
@@ -103,7 +101,7 @@ async function processCandidate(
     return 'canceled';
   }
 
-  return ensureTenantWriteLocked(candidate, auroraTenantId, tenant.currentAuroraStatus);
+  return ensureTenantWriteLocked(candidate, auroraTenantId);
 }
 
 // Scan for grace_period records
@@ -167,14 +165,14 @@ async function resolveTenantForEnforcement(orgId: string): Promise<TenantRecord>
         pk: { S: `ORG#${orgId}` },
         sk: { S: 'PROFILE' },
       },
-      ProjectionExpression: 'auroraTenantId, setupStatus, auroraTenantStatus',
+      // TODO(FIL-382): drop legacy `setupStatus` from ProjectionExpression.
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus, setupStatus',
     }),
   );
 
   return {
     auroraTenantId: orgResult.Item?.auroraTenantId?.S,
-    setupStatus: orgResult.Item?.setupStatus?.S,
-    currentAuroraStatus: orgResult.Item?.auroraTenantStatus?.S,
+    auroraSetupStatus: orgResult.Item?.auroraSetupStatus?.S,
   };
 }
 
@@ -185,7 +183,6 @@ async function cancelSubscriptionAndDisableTenant(
   now: Date,
 ): Promise<void> {
   await updateTenantStatus({ tenantId: auroraTenantId, status: 'DISABLED' });
-  await setOrgAuroraTenantStatus(candidate.orgId, 'DISABLED');
   // Transition DynamoDB status to canceled
   await dynamo.send(
     new UpdateItemCommand({
@@ -206,18 +203,37 @@ async function cancelSubscriptionAndDisableTenant(
   });
 }
 
-// Non-expired grace period — ensure Aurora is WRITE_LOCKED
+// Non-expired grace period — ensure Aurora is WRITE_LOCKED. Probe the live
+// Aurora status (the source of truth) so we skip a redundant lock call and,
+// critically, never re-lock a tenant that is already DISABLED.
 async function ensureTenantWriteLocked(
   candidate: Candidate,
   auroraTenantId: string,
-  currentAuroraStatus: string | undefined,
 ): Promise<CandidateOutcome> {
-  if (currentAuroraStatus === 'WRITE_LOCKED' || currentAuroraStatus === 'DISABLED') {
+  const probe = await getTenantStatus({ tenantId: auroraTenantId });
+
+  // Can't read live status → do NOT risk re-locking a tenant that may already
+  // be DISABLED. Surface as a failure so it retries on the next run.
+  if (probe.kind === 'error') {
+    throw new Error(`Aurora status probe failed for tenant ${auroraTenantId}`, {
+      cause: probe.cause,
+    });
+  }
+
+  if (probe.kind === 'not_found') {
+    console.warn('[grace-period-enforcer] tenant not found, skipping', {
+      userId: candidate.userId,
+      orgId: candidate.orgId,
+      auroraTenantId,
+    });
+    return 'skipped';
+  }
+
+  if (probe.status === 'WRITE_LOCKED' || probe.status === 'DISABLED') {
     return 'skipped';
   }
 
   await updateTenantStatus({ tenantId: auroraTenantId, status: 'WRITE_LOCKED' });
-  await setOrgAuroraTenantStatus(candidate.orgId, 'WRITE_LOCKED');
   console.log('[grace-period-enforcer] WRITE_LOCKED (retry)', {
     userId: candidate.userId,
     orgId: candidate.orgId,

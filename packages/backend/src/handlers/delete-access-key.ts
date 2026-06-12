@@ -3,12 +3,11 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { ErrorResponse } from '@filone/shared';
+import { ErrorResponse, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
-import { deleteAuroraAccessKey } from '../lib/aurora/aurora-portal.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -18,7 +17,7 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 
 const dynamo = getDynamoClient();
 
-async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
+export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const keyId = event.pathParameters?.keyId;
   if (!keyId) {
     return new ResponseBuilder()
@@ -44,21 +43,15 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  // Look up org profile to get auroraTenantId
-  const { Item: orgProfile } = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-    }),
-  );
+  // Legacy rows written before multi-region routing don't carry a `region`
+  // attribute — those predate FTH, so they belong to Aurora (eu-west-1).
+  const region: S3Region = (Item.region?.S as S3Region | undefined) ?? S3Region.EuWest1;
+  const orchestrator = getOrchestratorForRegion(region);
 
-  const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    return tenantNotReadyResponse();
-  }
+  const tenantId = await orchestrator.isTenantReady(orgId);
+  if (!tenantId) return tenantNotReadyResponse();
 
-  await deleteAuroraAccessKey({ tenantId: auroraTenantId, auroraKeyId: keyId });
+  await orchestrator.deleteAccessKey(tenantId, keyId);
 
   await dynamo.send(
     new DeleteItemCommand({

@@ -50,6 +50,7 @@ interface Auth0Trigger {
 
 const WEBHOOK_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
   'customer.updated',
+  'customer.deleted',
   'customer.subscription.created',
   'customer.subscription.updated',
   'customer.subscription.deleted',

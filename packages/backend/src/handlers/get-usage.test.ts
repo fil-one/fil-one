@@ -63,7 +63,7 @@ const AURORA_TENANT_ID = 'aurora-tenant-1';
 
 function authenticatedEvent() {
   return buildEvent({
-    cookies: ['hs_access_token=valid-token'],
+    cookies: ['hs_access_token=valid-token', 'hs_id_token=id-token'],
     userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, email: MOCK_EMAIL },
   });
 }
@@ -95,7 +95,7 @@ function mockAuthIdentity() {
         sk: { S: 'PROFILE' },
         name: { S: 'Test Org' },
         auroraTenantId: { S: AURORA_TENANT_ID },
-        setupStatus: { S: FINAL_SETUP_STATUS },
+        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
       },
     });
 }
@@ -139,7 +139,7 @@ describe('GET /api/usage handler', () => {
     vi.clearAllMocks();
     ddbMock.reset();
     mockJwtVerify.mockResolvedValue({
-      payload: { sub: MOCK_SUB, email: MOCK_EMAIL },
+      payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
     });
     mockAuthIdentity();
     mockGetStorageSamples.mockResolvedValue([]);

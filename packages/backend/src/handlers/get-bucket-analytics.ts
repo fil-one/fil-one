@@ -32,13 +32,18 @@ export async function baseHandler(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
     }),
   );
 
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    console.error('Aurora tenant setup is not complete', { orgId, auroraTenantId, setupStatus });
+  const auroraSetupStatus = orgProfile?.auroraSetupStatus?.S;
+  if (!auroraTenantId || !isOrgSetupComplete(auroraSetupStatus)) {
+    console.error('Aurora tenant setup is not complete', {
+      orgId,
+      auroraTenantId,
+      auroraSetupStatus,
+    });
     return new ResponseBuilder()
       .status(503)
       .body<ErrorResponse>({

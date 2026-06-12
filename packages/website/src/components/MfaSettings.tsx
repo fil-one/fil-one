@@ -47,12 +47,10 @@ function EnrollmentRow({
   onRequestRemove: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-md border border-[#e1e4ea] bg-zinc-50 px-3 py-2">
+    <div className="flex items-center justify-between rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
       <div>
-        <p className="text-[13px] font-medium text-zinc-900">
-          {formatEnrollmentType(enrollment.type)}
-        </p>
-        <p className="text-[11px] text-zinc-500">
+        <p className="text-sm font-medium text-zinc-900">{formatEnrollmentType(enrollment.type)}</p>
+        <p className="text-xs text-zinc-500">
           {enrollment.name ? `${enrollment.name} — ` : ''}
           {enrollment.createdAt
             ? `Added ${new Date(enrollment.createdAt).toLocaleDateString()}`
@@ -244,7 +242,7 @@ function EnrolledView({ me }: { me: MeResponse }) {
           />
         ))}
         <button
-          className="text-[11px] text-red-500 hover:text-red-700 self-start"
+          className="text-xs text-red-500 hover:text-red-700 self-start"
           onClick={() => setConfirmDisable(true)}
           disabled={disable.isPending}
         >

@@ -4,7 +4,6 @@ import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
 import { updateTenantStatus } from './aurora/aurora-backoffice.js';
-import { setOrgAuroraTenantStatus } from './org-profile.js';
 import { isOrgSetupComplete } from './org-setup-status.js';
 
 const dynamo = getDynamoClient();
@@ -62,16 +61,15 @@ export async function unlockAuroraTenant(orgId: string): Promise<void> {
         pk: { S: `ORG#${orgId}` },
         sk: { S: 'PROFILE' },
       },
+      ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
     }),
   );
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
+  if (!auroraTenantId || !isOrgSetupComplete(orgProfile?.auroraSetupStatus?.S)) {
     throw new Error(`Aurora tenant setup is not complete for org ${orgId}`);
   }
   try {
     await updateTenantStatus({ tenantId: auroraTenantId, status: 'ACTIVE' });
-    await setOrgAuroraTenantStatus(orgId, 'ACTIVE');
     console.log('[billing-activation] Aurora tenant unlocked', { orgId, auroraTenantId });
   } catch (error) {
     console.error('[billing-activation] Failed to unlock Aurora tenant', {

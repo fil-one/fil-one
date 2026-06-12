@@ -9,7 +9,7 @@ import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynam
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
-import { OrgRole } from '@filone/shared';
+import { ApiErrorCode, OrgRole } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import {
   COOKIE_NAMES,
@@ -90,6 +90,16 @@ import { CSRF_COOKIE_NAME } from '@filone/shared';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
+}
+
+function emailNotVerifiedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(403)
+    .body<ErrorResponse>({
+      message: 'Email verification required',
+      code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+    })
+    .build();
 }
 
 /**
@@ -347,7 +357,7 @@ async function createNewUserAndOrg({
               pk: { S: `ORG#${orgId}` },
               sk: { S: 'PROFILE' },
               name: { S: orgName },
-              setupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+              auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: userId },
               createdAt: { S: now },
             },
@@ -412,8 +422,34 @@ async function tryValidateAccessToken({
   }
 }
 
+export interface AuthMiddlewareOptions {
+  /**
+   * Require the user's email to be verified (`email_verified` ID token claim).
+   * Defaults to true so new endpoints are protected unless they explicitly
+   * opt out — only endpoints serving the verification flow itself (e.g.
+   * `get-me`, `resend-verification`) should set this to false.
+   */
+  requireVerifiedEmail?: boolean;
+}
+
+/**
+ * Enforce the verified-email gate after authentication succeeds, before the
+ * handler runs. Reads the claims stashed by the auth path that just
+ * succeeded; the empty-claims default (emailVerified: false) fails closed.
+ */
+function verifiedEmailGate(
+  requireVerifiedEmail: boolean,
+  request: AuthMiddlewareRequest,
+): APIGatewayProxyStructuredResultV2 | undefined {
+  if (!requireVerifiedEmail) return undefined;
+  const claims = request.internal.idTokenClaims ?? EMPTY_ID_CLAIMS;
+  return claims.emailVerified ? undefined : emailNotVerifiedResponse();
+}
+
 // eslint-disable-next-line max-lines-per-function
-export function authMiddleware() {
+export function authMiddleware(options: AuthMiddlewareOptions = {}) {
+  const { requireVerifiedEmail = true } = options;
+
   const before = async (
     request: AuthMiddlewareRequest,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
@@ -452,7 +488,7 @@ export function authMiddleware() {
         accessToken,
         failureLabel: '[auth] Access token verification failed',
       });
-      if (ok) return;
+      if (ok) return verifiedEmailGate(requireVerifiedEmail, request);
     }
 
     // Step 2: Attempt token refresh (always runs when forceRefresh=1)
@@ -478,7 +514,7 @@ export function authMiddleware() {
           name: refreshedClaims.name,
           picture: refreshedClaims.picture,
         });
-        return; // Continue to handler
+        return verifiedEmailGate(requireVerifiedEmail, request);
       }
       if (forceRefresh) {
         console.error(
@@ -500,7 +536,7 @@ export function authMiddleware() {
         accessToken,
         failureLabel: '[auth] Fallback access token validation failed',
       });
-      if (ok) return;
+      if (ok) return verifiedEmailGate(requireVerifiedEmail, request);
     }
 
     console.warn('[auth] Returning 401 — no valid tokens');
