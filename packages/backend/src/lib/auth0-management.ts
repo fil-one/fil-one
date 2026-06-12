@@ -207,7 +207,7 @@ function authMethodToEnrollment(m: Auth0AuthenticationMethod): GuardianEnrollmen
  * endpoint to call (the two endpoints use different ids for the same factor).
  */
 export async function getMfaEnrollments(sub: string): Promise<GuardianEnrollment[]> {
-  const domain = getDomain();
+  const domain = getMgmtDomain();
   const token = await getManagementToken();
   const headers = { Authorization: `Bearer ${token}` };
   const userPath = `/api/v2/users/${encodeURIComponent(sub)}`;
@@ -258,7 +258,7 @@ export interface PasskeyAuthenticator {
  * remain semantically distinct.
  */
 export async function getPasskeyAuthenticators(sub: string): Promise<PasskeyAuthenticator[]> {
-  const domain = getDomain();
+  const domain = getMgmtDomain();
   const token = await getManagementToken();
   const resp = await fetch(
     `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/authentication-methods`,
@@ -276,7 +276,7 @@ export async function getPasskeyAuthenticators(sub: string): Promise<PasskeyAuth
  * Delete a single Guardian enrollment by ID.
  */
 export async function deleteGuardianEnrollment(enrollmentId: string): Promise<void> {
-  const domain = getDomain();
+  const domain = getMgmtDomain();
   const token = await getManagementToken();
   const resp = await fetch(
     `https://${domain}/api/v2/guardian/enrollments/${encodeURIComponent(enrollmentId)}`,
@@ -294,7 +294,7 @@ export async function deleteGuardianEnrollment(enrollmentId: string): Promise<vo
  * factors enrolled via Universal Login, which land in /authentication-methods.
  */
 export async function deleteAuthenticationMethod(sub: string, methodId: string): Promise<void> {
-  const domain = getDomain();
+  const domain = getMgmtDomain();
   const token = await getManagementToken();
   const resp = await fetch(
     `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/authentication-methods/${encodeURIComponent(methodId)}`,
@@ -319,7 +319,7 @@ export async function deleteAuthenticationMethod(sub: string, methodId: string):
  * No-op when no recovery code is present.
  */
 export async function deleteRecoveryCode(sub: string): Promise<void> {
-  const domain = getDomain();
+  const domain = getMgmtDomain();
   const token = await getManagementToken();
   const resp = await fetch(
     `https://${domain}/api/v2/users/${encodeURIComponent(sub)}/authentication-methods`,
