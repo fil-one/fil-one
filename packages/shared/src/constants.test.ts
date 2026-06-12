@@ -134,11 +134,8 @@ describe('getAvailableRegions', () => {
     });
   }
 
-  it('returns both regions in production for a Foundation email', () => {
-    expect(getAvailableRegions(Stage.Production, 'someone@fil.org')).toEqual([
-      S3Region.EuWest1,
-      S3Region.UsEast1,
-    ]);
+  it('returns only eu-west-1 in production for a Foundation email', () => {
+    expect(getAvailableRegions(Stage.Production, 'someone@fil.org')).toEqual([S3Region.EuWest1]);
   });
 
   it('returns only eu-west-1 in production for a non-Foundation email', () => {
