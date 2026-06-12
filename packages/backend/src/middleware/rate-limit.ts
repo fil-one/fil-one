@@ -87,7 +87,7 @@ export function rateLimitMiddleware(config: Partial<RateLimitConfig> = {}) {
       const response = new ResponseBuilder()
         .status(429)
         .body<ErrorResponse>({
-          message: `Rate limit exceeded. You can make up to ${effectiveLimit} presign operations per minute.`,
+          message: `Rate limit exceeded. You can make up to ${effectiveLimit} presign operations per ${windowSeconds} seconds.`, 
           code: ApiErrorCode.RATE_LIMIT_EXCEEDED,
         })
         .build();
