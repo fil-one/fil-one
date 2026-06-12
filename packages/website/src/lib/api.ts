@@ -164,7 +164,7 @@ export function deleteMfaEnrollment(enrollmentId: string): Promise<{ message: st
 
 /**
  * Delete a passkey authenticator. Gated by `requireMfa` on the backend; if the
- * current session has no `amr: ["mfa"]` claim, this catches the
+ * current session has no `amr: ["mfa"]` or `amr: ["phr"]` claim, this catches the
  * StepUpRequiredError and redirects through Auth0 with
  * `acr_values=...:multi-factor`. The redirect navigates the page away — the
  * returned promise never resolves on the step-up path.

@@ -107,7 +107,7 @@ pnpx sst secret set GrafanaLokiAuth '<instanceId>:<apiKey>' [--stage <stage>]
 
 Omit `--stage` to set for your personal dev stage (defaults to OS username).
 
-There are two Auth0 M2M credentials with different scopes — see [`Auth0OneTimeSetup.md`](./Auth0OneTimeSetup.md). The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below. The `GrafanaLokiAuth` secret is from Grafana Cloud — see the [Observability](#observability) section below.
+There are two Auth0 M2M credentials with different scopes — see [`docs/Auth0OneTimeSetup.md`](./docs/Auth0OneTimeSetup.md). The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below. The `GrafanaLokiAuth` secret is from Grafana Cloud — see the [Observability](#observability) section below.
 
 ## Commands
 
@@ -297,7 +297,7 @@ Custom domains require an ACM certificate in **us-east-1** (CloudFront requireme
 
 Auth0 powers authentication: Universal Login, two M2M applications per tenant (deploy-time and runtime), MFA, and passkeys as primary authentication. Most of this is automated by the deploy-time setup Lambda — but a handful of dashboard toggles must be configured manually once per tenant before the first deploy.
 
-The full operator runbook (tenant settings, application settings, MFA, passkeys, and both M2M apps) is in [`Auth0OneTimeSetup.md`](./Auth0OneTimeSetup.md). For the design rationale, see the ADRs under `docs/architectural-decisions/`:
+The full operator runbook (tenant settings, application settings, MFA, passkeys, and both M2M apps) is in [`docs/Auth0OneTimeSetup.md`](./docs/Auth0OneTimeSetup.md). For the design rationale, see the ADRs under `docs/architectural-decisions/`:
 
 - `2026-03-mfa-enrollment.md` — MFA factor selection + Post-Login Action
 - `2026-05-passkey-primary-authentication.md` — passkeys as primary authentication
