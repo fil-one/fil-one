@@ -197,6 +197,7 @@ export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOp
     [addFiles],
   );
 
+  // Re-derive keys for individual files (not folder uploads) when prefix changes
   useEffect(() => {
     setFiles((prev) =>
       prev.map((entry) => {
@@ -245,11 +246,13 @@ export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOp
     const failed = files.filter((e) => e.status === 'error');
     if (failed.length === 0) return;
 
+    // Reset failed entries to pending before retrying
     for (const e of failed) {
       updateEntry(e.id, { status: 'pending', progress: 0, error: undefined });
     }
     setUploadStep('uploading');
 
+    // Re-read from state after update — use the failed list directly
     const toRetry = failed.map((e) => ({ ...e, status: 'pending' as FileUploadStatus }));
     const { failedCount } = await uploadEntries(toRetry, bucketName, region, updateEntry);
 

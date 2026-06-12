@@ -13,15 +13,22 @@ import { S3Region } from '@filone/shared';
 import { UploadObjectPage } from './UploadObjectPage';
 
 function withRouter(Story: () => React.JSX.Element) {
-  const rootRoute = createRootRoute({ component: Story });
-  const indexRoute = createRoute({
+  const rootRoute = createRootRoute();
+  const uploadRoute = createRoute({
     getParentRoute: () => rootRoute,
-    path: '/',
+    path: '/buckets/$bucketName/upload',
     component: Story,
   });
+  const bucketRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/buckets/$bucketName',
+    component: () => null,
+  });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([indexRoute]),
-    history: createMemoryHistory({ initialEntries: ['/'] }),
+    routeTree: rootRoute.addChildren([uploadRoute, bucketRoute]),
+    history: createMemoryHistory({
+      initialEntries: ['/buckets/my-bucket/upload?region=us-east-1'],
+    }),
   });
   return <RouterProvider router={router} />;
 }
