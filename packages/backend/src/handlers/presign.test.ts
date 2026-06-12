@@ -67,7 +67,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 function buildPresignEvent(
   ops: unknown[],
   overrides?: {
-    subscriptionStatus?: string;
+    subscriptionStatus?: string | null;
     region?: string | null;
     userInfo?: { email?: string; emailVerified?: boolean };
   },
@@ -78,8 +78,14 @@ function buildPresignEvent(
     userInfo: { ...USER_INFO, ...overrides?.userInfo },
     ...(region !== null && { queryStringParameters: { region } }),
   });
-  if (overrides?.subscriptionStatus) {
-    event.requestContext.subscriptionStatus = overrides.subscriptionStatus;
+  // Default to Active so existing tests pass the trial gate.
+  // Pass null explicitly to simulate a user with no billing record.
+  const status =
+    overrides?.subscriptionStatus === undefined
+      ? SubscriptionStatus.Active
+      : overrides.subscriptionStatus;
+  if (status) {
+    event.requestContext.subscriptionStatus = status;
   }
   return event;
 }
@@ -138,6 +144,71 @@ describe('presign baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(400);
+  });
+
+  // ── Trial account shareable link blocking ───────────────────────────
+
+  it('returns 402 for trial user generating shareable getObject URL', async () => {
+    const event = buildPresignEvent(
+      [{ op: 'getObject', bucket: 'b', key: 'k', expiresIn: 86400 }],
+      { subscriptionStatus: SubscriptionStatus.Trialing },
+    );
+    const result = await baseHandler(event);
+
+    expect(result).toMatchObject({
+      statusCode: 402,
+      body: expect.stringContaining(ApiErrorCode.TRIAL_PRESIGN_BLOCKED),
+    });
+  });
+
+  it('returns 402 for new user (no billing record) generating shareable URL', async () => {
+    const event = buildPresignEvent([{ op: 'getObject', bucket: 'b', key: 'k', expiresIn: 3600 }], {
+      subscriptionStatus: null,
+    });
+    const result = await baseHandler(event);
+
+    expect(result).toMatchObject({
+      statusCode: 402,
+      body: expect.stringContaining(ApiErrorCode.TRIAL_PRESIGN_BLOCKED),
+    });
+  });
+
+  it('allows trial user to download (getObject without expiresIn)', async () => {
+    mockGetPresignedGetObjectUrl.mockResolvedValue('https://s3.example.com/get?signed');
+
+    const event = buildPresignEvent([{ op: 'getObject', bucket: 'b', key: 'k' }], {
+      subscriptionStatus: SubscriptionStatus.Trialing,
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+  });
+
+  it('allows trial user to list objects', async () => {
+    mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
+
+    const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
+      subscriptionStatus: SubscriptionStatus.Trialing,
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+  });
+
+  it('blocks trial user when batch contains a shareable URL among other ops', async () => {
+    const event = buildPresignEvent(
+      [
+        { op: 'listObjects', bucket: 'b' },
+        { op: 'getObject', bucket: 'b', key: 'k', expiresIn: 604800 },
+      ],
+      { subscriptionStatus: SubscriptionStatus.Trialing },
+    );
+    const result = await baseHandler(event);
+
+    expect(result).toMatchObject({
+      statusCode: 402,
+      body: expect.stringContaining(ApiErrorCode.TRIAL_PRESIGN_BLOCKED),
+    });
   });
 
   // ── Grace period / past due write blocking ──────────────────────────
