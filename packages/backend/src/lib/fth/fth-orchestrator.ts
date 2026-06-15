@@ -8,13 +8,11 @@
 //     getS3ClientContext) speak S3 directly against the FTH S3 endpoint
 //     using the service access key stashed in SSM during setup.
 
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region } from '@filone/shared';
 import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
-import { getDynamoClient } from '../ddb-client.js';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
 import {
   AccessKeyAlreadyExistsError,
@@ -30,8 +28,12 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   ServiceOrchestrator,
+  TenantStatus,
+  TenantStatusProbe,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import type { OrgProfileItem } from '../org-profile.js';
+
 import type { S3ClientContext } from '../s3-client.js';
 
 import { createS3Client } from '../s3-client.js';
@@ -60,7 +62,9 @@ const FTH_CONSOLE_USER_CODE = 'filone-console';
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
-const dynamo = getDynamoClient();
+// Mirrors the retry policy of Aurora's updateTenantStatus (aurora-backoffice.ts).
+const STATUS_UPDATE_RETRY = { retries: 3 } as const;
+
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
 const client = createInstrumentedFthClient();
 
@@ -77,18 +81,28 @@ export const fthOrchestrator = {
     return ensureFthTenantReady(client, orgId);
   },
 
-  async isTenantReady(orgId: string): Promise<string | null> {
-    const { Item } = await dynamo.send(
-      new GetItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-        ConsistentRead: true,
-      }),
-    );
-    const tenantId = Item?.fthTenantId?.S;
+  isTenantReady(orgProfile: OrgProfileItem | undefined): string | null {
+    const tenantId = orgProfile?.fthTenantId?.S;
     if (!tenantId) return null;
     // TODO: check fthTenantSetupStatus
     return tenantId;
+  },
+
+  async updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void> {
+    // FTH uses the same lowercase-dashed status values, so no mapping is needed.
+    // A status PATCH is naturally idempotent, so no idempotency key is sent and
+    // transient failures are safe to retry.
+    await pRetry(() => client.updateClientStatus(tenantId, { status }), STATUS_UPDATE_RETRY);
+  },
+
+  async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
+    try {
+      const record = await client.getClient(tenantId);
+      return { kind: 'ok', status: normalizeFthStatus(record.status) };
+    } catch (cause) {
+      if (cause instanceof FthNotFoundError) return { kind: 'not_found' };
+      return { kind: 'error', cause };
+    }
   },
 
   async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
@@ -270,6 +284,12 @@ export const fthOrchestrator = {
     return { storage, egress };
   },
 } satisfies ServiceOrchestrator;
+
+const FTH_TENANT_STATUSES: readonly TenantStatus[] = ['active', 'write-locked', 'disabled'];
+
+function normalizeFthStatus(status: string | undefined): TenantStatus | undefined {
+  return FTH_TENANT_STATUSES.find((s) => s === status);
+}
 
 function createInstrumentedFthClient(): FthManagementClient {
   const client = createFthManagementClient({

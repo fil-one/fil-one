@@ -14,7 +14,7 @@ import type { ActivateSubscriptionResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
-import { saveBillingRecord, unlockAuroraTenant } from '../lib/billing-activation.js';
+import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -127,9 +127,9 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  // 6. Persist billing record and unlock Aurora tenant
+  // 6. Persist billing record and unlock the tenant on every orchestrator
   await saveBillingRecord(userId, subscription, paymentMethodId, mappedStatus);
-  await unlockAuroraTenant(orgId);
+  await unlockAllProvisionedRegions(orgId);
 
   const response: ActivateSubscriptionResponse = {
     subscription: {

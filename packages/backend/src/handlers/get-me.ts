@@ -1,10 +1,8 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { MeResponse } from '@filone/shared';
-import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
+import { getOrgProfile } from '../lib/org-profile.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import {
   getConnectionType,
@@ -22,21 +20,13 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const includeMfa = event.queryStringParameters?.include === 'mfa';
   const connectionType = getConnectionType(sub);
 
-  const [{ Item }, enrollments, passkeys] = await Promise.all([
-    getDynamoClient().send(
-      new GetItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: {
-          pk: { S: `ORG#${orgId}` },
-          sk: { S: 'PROFILE' },
-        },
-      }),
-    ),
+  const [orgProfile, enrollments, passkeys] = await Promise.all([
+    getOrgProfile(orgId),
     includeMfa ? getMfaEnrollments(sub) : Promise.resolve([]),
     includeMfa && connectionType === 'auth0' ? getPasskeyAuthenticators(sub) : Promise.resolve([]),
   ]);
 
-  const orgName = Item?.name?.S ?? '';
+  const orgName = orgProfile?.name?.S ?? '';
 
   const body: MeResponse = {
     orgId,

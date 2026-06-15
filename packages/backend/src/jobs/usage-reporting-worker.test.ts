@@ -32,27 +32,43 @@ const {
   mockGetTenantUsageMetrics,
   mockAuroraIsTenantReady,
   mockFthIsTenantReady,
+  mockAuroraGetTenantStatus,
+  mockFthGetTenantStatus,
+  mockAuroraUpdateTenantStatus,
+  mockFthUpdateTenantStatus,
   auroraOrchestrator,
   fthOrchestrator,
 } = vi.hoisted(() => {
   const mockGetTenantUsageMetrics = vi.fn();
   const mockAuroraIsTenantReady = vi.fn();
   const mockFthIsTenantReady = vi.fn();
+  const mockAuroraGetTenantStatus = vi.fn();
+  const mockFthGetTenantStatus = vi.fn();
+  const mockAuroraUpdateTenantStatus = vi.fn();
+  const mockFthUpdateTenantStatus = vi.fn();
   return {
     mockGetTenantUsageMetrics,
     mockAuroraIsTenantReady,
     mockFthIsTenantReady,
+    mockAuroraGetTenantStatus,
+    mockFthGetTenantStatus,
+    mockAuroraUpdateTenantStatus,
+    mockFthUpdateTenantStatus,
     auroraOrchestrator: {
       id: 'aurora',
       region: 'eu-west-1',
       isTenantReady: mockAuroraIsTenantReady,
       getTenantUsageMetrics: mockGetTenantUsageMetrics,
+      getTenantStatus: mockAuroraGetTenantStatus,
+      updateTenantStatus: mockAuroraUpdateTenantStatus,
     },
     fthOrchestrator: {
       id: 'fth',
       region: 'us-east-1',
       isTenantReady: mockFthIsTenantReady,
       getTenantUsageMetrics: mockGetTenantUsageMetrics,
+      getTenantStatus: mockFthGetTenantStatus,
+      updateTenantStatus: mockFthUpdateTenantStatus,
     },
   };
 });
@@ -61,13 +77,8 @@ vi.mock('../lib/fth/fth-orchestrator.js', () => ({ fthOrchestrator }));
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: () => [auroraOrchestrator, fthOrchestrator],
 }));
-
-// aurora-backoffice now only supplies trial-lock status read + write.
-const mockGetTenantInfo = vi.fn().mockResolvedValue({ status: 'ACTIVE' });
-const mockUpdateTenantStatus = vi.fn().mockResolvedValue(undefined);
-vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
-  getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...args),
-  updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -103,8 +114,12 @@ describe('usage-reporting-worker', () => {
     ddbMock.on(PutItemCommand).resolves({});
     mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
     // Default: org provisioned in Aurora only (mirrors the previous Aurora-only basePayload).
-    mockAuroraIsTenantReady.mockResolvedValue('aurora-tenant-123');
-    mockFthIsTenantReady.mockResolvedValue(null);
+    mockAuroraIsTenantReady.mockReturnValue('aurora-tenant-123');
+    mockFthIsTenantReady.mockReturnValue(null);
+    mockAuroraGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'active' });
+    mockFthGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'active' });
+    mockAuroraUpdateTenantStatus.mockResolvedValue(undefined);
+    mockFthUpdateTenantStatus.mockResolvedValue(undefined);
   });
 
   it('calls getTenantUsageMetrics with auroraTenantId, not orgId', async () => {
@@ -201,8 +216,8 @@ describe('usage-reporting-worker', () => {
 
     await handler(basePayload);
 
-    expect(mockGetTenantInfo).not.toHaveBeenCalled();
-    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+    expect(mockAuroraGetTenantStatus).not.toHaveBeenCalled();
+    expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
     const putCalls = ddbMock.commandCalls(PutItemCommand);
     const item = putCalls[0].args[0].input.Item!;
     expect(item.lockAction).toEqual({ S: 'skipped:paid' });
@@ -219,65 +234,55 @@ describe('usage-reporting-worker', () => {
         storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500_000_000_000 }], // 500 GB
         egress: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }], // 1 TB
       });
-      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
       await handler(trialPayload);
 
-      expect(mockGetTenantInfo).toHaveBeenCalledOnce();
-      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(mockAuroraGetTenantStatus).toHaveBeenCalledOnce();
+      expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-      expect(item.lockAction).toEqual({ S: 'ACTIVE' });
+      expect(item.lockAction).toEqual({ S: 'active' });
     });
 
-    it('trial storage exceeded — WRITE_LOCKED', async () => {
+    it('trial storage exceeded — write-locked', async () => {
       mockGetTenantUsageMetrics.mockResolvedValue({
         storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }], // 1.5 TB
         egress: [],
       });
-      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
       await handler(trialPayload);
 
-      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-        tenantId: 'aurora-tenant-123',
-        status: 'WRITE_LOCKED',
-      });
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith(
+        'aurora-tenant-123',
+        'write-locked',
+      );
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-      expect(item.lockAction).toEqual({ S: 'WRITE_LOCKED' });
+      expect(item.lockAction).toEqual({ S: 'write-locked' });
     });
 
-    it('trial egress exceeded — DISABLED', async () => {
+    it('trial egress exceeded — disabled', async () => {
       mockGetTenantUsageMetrics.mockResolvedValue({
         storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 0 }],
         egress: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 2_500_000_000_000 }], // 2.5 TB
       });
-      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
       await handler(trialPayload);
 
-      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-        tenantId: 'aurora-tenant-123',
-        status: 'DISABLED',
-      });
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-      expect(item.lockAction).toEqual({ S: 'DISABLED' });
+      expect(item.lockAction).toEqual({ S: 'disabled' });
     });
 
-    it('trial both exceeded — DISABLED takes priority over WRITE_LOCKED', async () => {
+    it('trial both exceeded — disabled takes priority over write-locked', async () => {
       mockGetTenantUsageMetrics.mockResolvedValue({
         storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }], // 1.5 TB
         egress: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 2_500_000_000_000 }], // 2.5 TB
       });
-      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
       await handler(trialPayload);
 
-      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-        tenantId: 'aurora-tenant-123',
-        status: 'DISABLED',
-      });
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-      expect(item.lockAction).toEqual({ S: 'DISABLED' });
+      expect(item.lockAction).toEqual({ S: 'disabled' });
     });
 
     it('audit record includes totalEgressBytes', async () => {
@@ -285,7 +290,6 @@ describe('usage-reporting-worker', () => {
         storage: [],
         egress: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 500_000_000_000 }], // 500 GB
       });
-      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
 
       await handler(trialPayload);
 
@@ -293,18 +297,17 @@ describe('usage-reporting-worker', () => {
       expect(item.totalEgressBytes).toEqual({ N: '500000000000' });
     });
 
-    it('records error in lockAction when enforcement fails', async () => {
+    it('records error in lockAction when the status update fails', async () => {
       mockGetTenantUsageMetrics.mockResolvedValue({
         storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }],
         egress: [],
       });
-      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
-      mockUpdateTenantStatus.mockRejectedValueOnce(new Error('Aurora down'));
+      mockAuroraUpdateTenantStatus.mockRejectedValueOnce(new Error('Aurora down'));
 
       await handler(trialPayload);
 
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-      expect(item.lockAction).toEqual({ S: 'error:Aurora down' });
+      expect(item.lockAction).toEqual({ S: 'error:sync-failed:aurora' });
     });
   });
 
@@ -420,17 +423,16 @@ describe('usage-reporting-worker', () => {
         storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }],
         egress: [],
       });
-      mockGetTenantInfo.mockResolvedValue({ status: 'ACTIVE' });
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
 
       await handler(trialPayload);
 
-      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-        tenantId: 'aurora-tenant-123',
-        status: 'WRITE_LOCKED',
-      });
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith(
+        'aurora-tenant-123',
+        'write-locked',
+      );
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-      expect(item.lockAction).toEqual({ S: 'WRITE_LOCKED' });
+      expect(item.lockAction).toEqual({ S: 'write-locked' });
       expect(item.reportedToStripe).toEqual({ BOOL: false });
     });
 
@@ -516,20 +518,20 @@ describe('usage-reporting-worker', () => {
         }, // exceeds trial limit
       );
 
-      // First run: tenant is ACTIVE → should update to WRITE_LOCKED
-      mockGetTenantInfo.mockResolvedValueOnce({ status: 'ACTIVE' });
+      // First run: tenant is active → should update to write-locked
+      mockAuroraGetTenantStatus.mockResolvedValueOnce({ kind: 'ok', status: 'active' });
       await handler(trialPayload);
 
-      // Second run: tenant is now WRITE_LOCKED (set by first run) → skip update
-      mockGetTenantInfo.mockResolvedValueOnce({ status: 'WRITE_LOCKED' });
+      // Second run: tenant is now write-locked (set by first run) → skip update
+      mockAuroraGetTenantStatus.mockResolvedValueOnce({ kind: 'ok', status: 'write-locked' });
       await handler(trialPayload);
 
-      expect(mockUpdateTenantStatus).toHaveBeenCalledTimes(1);
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledTimes(1);
       // Both audit records still written
       const putCalls = ddbMock.commandCalls(PutItemCommand);
       expect(putCalls).toHaveLength(2);
-      expect(putCalls[0].args[0].input.Item!.lockAction).toEqual({ S: 'WRITE_LOCKED' });
-      expect(putCalls[1].args[0].input.Item!.lockAction).toEqual({ S: 'WRITE_LOCKED' });
+      expect(putCalls[0].args[0].input.Item!.lockAction).toEqual({ S: 'write-locked' });
+      expect(putCalls[1].args[0].input.Item!.lockAction).toEqual({ S: 'write-locked' });
     });
 
     it('paid user — no tenant enforcement on either run', async () => {
@@ -541,8 +543,8 @@ describe('usage-reporting-worker', () => {
       await handler(basePayload);
       await handler(basePayload);
 
-      expect(mockGetTenantInfo).not.toHaveBeenCalled();
-      expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(mockAuroraGetTenantStatus).not.toHaveBeenCalled();
+      expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
       const putCalls = ddbMock.commandCalls(PutItemCommand);
       expect(putCalls).toHaveLength(2);
       for (const call of putCalls) {
@@ -706,13 +708,13 @@ describe('usage-reporting-worker', () => {
   describe('multi-region', () => {
     const t = '2024-01-01T00:00:00Z';
 
-    it('FTH-only org: skips trial lock, sets lockAction skipped:region-unsupported, writes audit with one region entry', async () => {
+    it('FTH-only trial org under limits: probes FTH, no status change, lockAction active', async () => {
       const fthOnlyPayload: UsageReportingWorkerPayload = {
         ...basePayload,
         subscriptionStatus: 'trialing',
       };
-      mockAuroraIsTenantReady.mockResolvedValue(null);
-      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
+      mockAuroraIsTenantReady.mockReturnValue(null);
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
       mockGetTenantUsageMetrics.mockResolvedValue({
         storage: [{ timestamp: t, bytesUsed: 500_000_000_000 }],
         egress: [{ timestamp: t, bytesUsed: 100_000_000_000 }],
@@ -720,11 +722,8 @@ describe('usage-reporting-worker', () => {
 
       await handler(fthOnlyPayload);
 
-      // Trial lock enforcement is applid only to Aurora tenants for now
-      // so the getTenantInfo must NOT be called in this case.
-      // Once the PR https://github.com/fil-one/fil-one/pull/401 is merged
-      // usage-reporting worker will also enforce trial locks for FTH tenants
-      expect(mockGetTenantInfo).not.toHaveBeenCalled();
+      expect(mockFthGetTenantStatus).toHaveBeenCalledWith('fth-client-9');
+      expect(mockFthUpdateTenantStatus).not.toHaveBeenCalled();
 
       // Stripe meter must still be emitted
       expect(mockMeterEventsCreate).toHaveBeenCalledOnce();
@@ -733,7 +732,96 @@ describe('usage-reporting-worker', () => {
       const putCalls = ddbMock.commandCalls(PutItemCommand);
       expect(putCalls).toHaveLength(1);
       const item = putCalls[0].args[0].input.Item!;
-      expect(item.lockAction).toEqual({ S: 'skipped:region-unsupported' });
+      expect(item.lockAction).toEqual({ S: 'active' });
+    });
+
+    it('FTH-only trial org over the storage limit gets write-locked via the FTH orchestrator', async () => {
+      const fthOnlyPayload: UsageReportingWorkerPayload = {
+        ...basePayload,
+        subscriptionStatus: 'trialing',
+      };
+      mockAuroraIsTenantReady.mockReturnValue(null);
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: t, bytesUsed: 1_500_000_000_000 }], // 1.5 TB
+        egress: [],
+      });
+
+      await handler(fthOnlyPayload);
+
+      expect(mockFthUpdateTenantStatus).toHaveBeenCalledWith('fth-client-9', 'write-locked');
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.lockAction).toEqual({ S: 'write-locked' });
+    });
+
+    it('trial org in both regions: only the out-of-sync region is updated', async () => {
+      const trialPayload: UsageReportingWorkerPayload = {
+        ...basePayload,
+        subscriptionStatus: 'trialing',
+      };
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: t, bytesUsed: 1_500_000_000_000 }], // over limit per region sum
+        egress: [],
+      });
+      // Aurora was already locked by a previous run; FTH still active.
+      mockAuroraGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'write-locked' });
+      mockFthGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'active' });
+
+      await handler(trialPayload);
+
+      expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(mockFthUpdateTenantStatus).toHaveBeenCalledWith('fth-client-9', 'write-locked');
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.lockAction).toEqual({ S: 'write-locked' });
+    });
+
+    it('partial failure: Aurora locks but FTH update fails — lockAction error:sync-failed:fth, report still completes', async () => {
+      const trialPayload: UsageReportingWorkerPayload = {
+        ...basePayload,
+        subscriptionStatus: 'trialing',
+      };
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: t, bytesUsed: 1_500_000_000_000 }],
+        egress: [],
+      });
+      mockFthUpdateTenantStatus.mockRejectedValue(new Error('FTH API down'));
+
+      await handler(trialPayload);
+
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith(
+        'aurora-tenant-123',
+        'write-locked',
+      );
+      expect(mockMeterEventsCreate).toHaveBeenCalledOnce();
+      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      expect(putCalls).toHaveLength(1);
+      const item = putCalls[0].args[0].input.Item!;
+      expect(item.lockAction).toEqual({ S: 'error:sync-failed:fth' });
+    });
+
+    it('persistent probe error in one region: the other region is still synced', async () => {
+      vi.useFakeTimers();
+      const trialPayload: UsageReportingWorkerPayload = {
+        ...basePayload,
+        subscriptionStatus: 'trialing',
+      };
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: t, bytesUsed: 1_500_000_000_000 }],
+        egress: [],
+      });
+      mockAuroraGetTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('outage') });
+
+      const promise = handler(trialPayload);
+      await vi.runAllTimersAsync();
+      await promise;
+
+      expect(mockFthUpdateTenantStatus).toHaveBeenCalledWith('fth-client-9', 'write-locked');
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.lockAction).toEqual({ S: 'error:sync-failed:aurora' });
+      vi.useRealTimers();
     });
 
     it('both regions: getTenantUsageMetrics called twice, Stripe value is sum in GB', async () => {
@@ -741,7 +829,7 @@ describe('usage-reporting-worker', () => {
         ...basePayload,
         subscriptionStatus: 'active',
       };
-      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
 
       mockGetTenantUsageMetrics.mockImplementation((tenantId: string) => {
         if (tenantId === 'aurora-tenant-123') {
@@ -791,7 +879,7 @@ describe('usage-reporting-worker', () => {
         ...basePayload,
         subscriptionStatus: 'active',
       };
-      mockFthIsTenantReady.mockResolvedValue('fth-client-9');
+      mockFthIsTenantReady.mockReturnValue('fth-client-9');
 
       const t0 = '2024-01-01T00:00:00Z';
       const t1 = '2024-01-01T01:00:00Z';
@@ -824,8 +912,8 @@ describe('usage-reporting-worker', () => {
     });
 
     it('no ready tenant in any region: returns without reporting or writing an audit', async () => {
-      mockAuroraIsTenantReady.mockResolvedValue(null);
-      mockFthIsTenantReady.mockResolvedValue(null);
+      mockAuroraIsTenantReady.mockReturnValue(null);
+      mockFthIsTenantReady.mockReturnValue(null);
 
       await expect(handler(basePayload)).resolves.toBeUndefined();
 

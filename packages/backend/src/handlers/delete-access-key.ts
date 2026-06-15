@@ -8,6 +8,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder, tenantNotReadyResponse } from '../lib/response-builder.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { getOrgProfile } from '../lib/org-profile.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -48,7 +49,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const region: S3Region = (Item.region?.S as S3Region | undefined) ?? S3Region.EuWest1;
   const orchestrator = getOrchestratorForRegion(region);
 
-  const tenantId = await orchestrator.isTenantReady(orgId);
+  const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
   await orchestrator.deleteAccessKey(tenantId, keyId);
