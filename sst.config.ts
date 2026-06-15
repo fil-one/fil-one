@@ -724,7 +724,7 @@ export default $config({
       method: 'POST',
       routePath: '/api/billing/activate',
       handler: 'activate-subscription',
-      extraEnv: auroraEnv,
+      extraEnv: { ...auroraEnv, ...fthEnv },
     });
     addRoute({ method: 'GET', routePath: '/api/billing/invoices', handler: 'list-invoices' });
     addRoute({
@@ -739,6 +739,7 @@ export default $config({
       handler: 'stripe-webhook',
       extraEnv: {
         ...auroraEnv,
+        ...fthEnv,
         STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
       },
       permissions: [
@@ -798,8 +799,8 @@ export default $config({
     // ── Grace period enforcement ────────────────────────────────────
     const gracePeriodEnforcer = createFn('GracePeriodEnforcer', {
       handler: 'packages/backend/src/jobs/grace-period-enforcer.handler',
-      link: [billingTable, userInfoTable, auroraBackofficeToken],
-      environment: auroraEnv,
+      link: [billingTable, userInfoTable, auroraBackofficeToken, fthManagementApiToken],
+      environment: { ...auroraEnv, ...fthEnv, FILONE_STAGE: $app.stage },
       timeout: '300 seconds',
       memory: '256 MB',
     });
@@ -813,8 +814,8 @@ export default $config({
     // ── Subscription drift checker (cron-based, observe-only) ───────
     const subscriptionDriftChecker = createFn('SubscriptionDriftChecker', {
       handler: 'packages/backend/src/jobs/subscription-drift-checker.handler',
-      link: [billingTable, userInfoTable, auroraBackofficeToken],
-      environment: auroraEnv,
+      link: [billingTable, userInfoTable, auroraBackofficeToken, fthManagementApiToken],
+      environment: { ...auroraEnv, ...fthEnv, FILONE_STAGE: $app.stage },
       timeout: '300 seconds',
       memory: '256 MB',
     });

@@ -542,20 +542,20 @@ describe('auroraOrchestrator', () => {
       mockGetOperationsSamples.mockResolvedValue([]);
     });
 
-    it('forwards tenantId, from, to and defaults window to "1d" when interval is omitted', async () => {
+    it('forwards tenantId, from, to and defaults window to "24h" when interval is omitted', async () => {
       await auroraOrchestrator.getTenantUsageMetrics('aurora-t-1', { from: FROM, to: TO });
 
       expect(mockGetStorageSamples).toHaveBeenCalledWith({
         tenantId: 'aurora-t-1',
         from: FROM,
         to: TO,
-        window: '1d',
+        window: '24h',
       });
       expect(mockGetOperationsSamples).toHaveBeenCalledWith({
         tenantId: 'aurora-t-1',
         from: FROM,
         to: TO,
-        window: '1d',
+        window: '24h',
       });
     });
 
@@ -564,6 +564,23 @@ describe('auroraOrchestrator', () => {
         from: FROM,
         to: TO,
         interval: '24h',
+      });
+
+      expect(mockGetStorageSamples).toHaveBeenCalledWith(
+        expect.objectContaining({ window: '24h' }),
+      );
+      expect(mockGetOperationsSamples).toHaveBeenCalledWith(
+        expect.objectContaining({ window: '24h' }),
+      );
+    });
+
+    // Aurora's API only accepts m/h units, so the orchestrator-agnostic '1d'
+    // interval must be translated before it hits the wire.
+    it('translates interval "1d" to window "24h" for Aurora', async () => {
+      await auroraOrchestrator.getTenantUsageMetrics('aurora-t-1', {
+        from: FROM,
+        to: TO,
+        interval: '1d',
       });
 
       expect(mockGetStorageSamples).toHaveBeenCalledWith(
