@@ -24,7 +24,6 @@ export const AURORA_TEST_TENANT_ID = '1ab311c9-b6ad-4d4d-b707-c07d8404eaa2';
 
 export async function invokeWorker(payload: {
   orgId: string;
-  auroraTenantId: string;
   orgName?: string;
   subscriptionId: string;
   stripeCustomerId: string;
@@ -78,6 +77,10 @@ export async function seedUserProfile(orgId: string, auroraTenantId: string): Pr
         pk: { S: `ORG#${orgId}` },
         sk: { S: 'PROFILE' },
         auroraTenantId: { S: auroraTenantId },
+        // The worker resolves provisioned regions via isTenantReady, which
+        // requires a completed Aurora setup status to consider the tenant ready.
+        // Mirrors OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED (backend-internal enum).
+        auroraSetupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
         updatedAt: { S: new Date().toISOString() },
       },
     }),
