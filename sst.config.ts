@@ -608,8 +608,10 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}/analytics',
       handler: 'get-bucket-analytics',
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
-      extraEnv: auroraEnv,
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
+      ],
+      extraEnv: orchestratorEnv,
     });
 
     // ── Auth routes ──────────────────────────────────────────────────
@@ -695,7 +697,7 @@ export default $config({
       method: 'GET',
       routePath: '/api/usage',
       handler: 'get-usage',
-      extraEnv: auroraEnv,
+      extraEnv: orchestratorEnv,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
