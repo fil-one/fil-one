@@ -40,7 +40,17 @@ export function assertRegionSyncSucceeded(outcomes: RegionSyncOutcome[]): void {
   }
 }
 
-const STATUS_PROBE_RETRY = { retries: 3 } as const;
+// Stripe webhooks await this sync synchronously. Per Stripe's guidance the
+// handler should return 2xx quickly, so the sync is a fast best-effort: one
+// retry with a short backoff. syncRegionTenantStatus probes then updates each
+// region (two sequential pRetry calls); with ~200-300ms round-trips the worst
+// case (probe succeeds on its retry, then update exhausts its retry) is
+// ≈ 2 × (2×300ms + 200ms) ≈ 1.6s — comfortably under ~2s. A momentary blip is
+// ridden out; a genuine outage is left to the subscription-drift-checker cron.
+const STATUS_SYNC_RETRY = {
+  retries: 1,
+  minTimeout: 200,
+} as const;
 
 // Reconciles every provisioned region with the desired tenant status. Each
 // region's live status is its own source of truth: probe first, update only
@@ -83,7 +93,7 @@ async function syncRegionTenantStatus({
         });
       }
       return result;
-    }, STATUS_PROBE_RETRY);
+    }, STATUS_SYNC_RETRY);
 
     if (probe.kind === 'not_found') {
       console.warn('[region-helpers] tenant not found, skipping status sync', {
@@ -105,7 +115,11 @@ async function syncRegionTenantStatus({
       return { ...base, outcome: 'skipped' };
     }
 
-    await orchestrator.updateTenantStatus(tenantId, desired);
+    // A status update sets an absolute value (idempotent), so transient
+    // failures are safe to retry here rather than inside each orchestrator.
+    // Retrying at this level keeps the whole status-sync retry budget
+    // (probe + update) in one place.
+    await pRetry(() => orchestrator.updateTenantStatus(tenantId, desired), STATUS_SYNC_RETRY);
     return { ...base, outcome: 'updated' };
   } catch (cause) {
     console.error('[region-helpers] tenant status sync failed', {

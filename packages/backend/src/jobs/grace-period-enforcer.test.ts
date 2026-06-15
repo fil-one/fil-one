@@ -172,9 +172,11 @@ describe('grace-period-enforcer', () => {
       ],
     });
 
-    // First run: FTH disable fails; the record stays in grace_period.
+    // First run: FTH disable fails every retry (2 attempts: 1 initial + 1
+    // bounded retry); the record stays in grace_period.
     // Second run: Aurora probes as already disabled, FTH succeeds.
     fth.updateTenantStatus
+      .mockRejectedValueOnce(new Error('FTH API error'))
       .mockRejectedValueOnce(new Error('FTH API error'))
       .mockResolvedValue(undefined);
     aurora.getTenantStatus
@@ -187,7 +189,8 @@ describe('grace-period-enforcer', () => {
     await handler();
 
     expect(aurora.updateTenantStatus).toHaveBeenCalledTimes(1);
-    expect(fth.updateTenantStatus).toHaveBeenCalledTimes(2);
+    // First run: 2 failed attempts; second run: 1 successful attempt.
+    expect(fth.updateTenantStatus).toHaveBeenCalledTimes(3);
     expect(canceledUpdate()).toBeDefined();
   });
 

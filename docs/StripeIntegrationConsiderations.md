@@ -256,6 +256,19 @@ All billing-driven status-change sites (grace-period enforcer, usage-reporting w
 webhook, subscription activation) go through the shared helper
 `syncTenantStatusInProvisionedRegions`, so an account is locked/unlocked everywhere it exists.
 
+Because the Stripe webhook awaits this sync synchronously and should return a 2xx quickly, the
+helper retries each region's probe and status update with a small best-effort budget
+(`STATUS_SYNC_RETRY` in `region-helpers.ts`): a single retry with a ~200ms backoff. A brief
+transient blip is ridden out; a genuine outage is left for the daily `subscription-drift-checker`
+cron (and the `grace-period-enforcer`) to reconcile, so the webhook never blocks on a region that is
+down.
+
+Longer term, the most robust fix per Stripe's guidance ("return a 2xx before any complex logic that
+might cause a timeout") is to acknowledge the webhook immediately and run this tenant-status sync
+out-of-band (e.g. via an event/queue), making the response time independent of orchestrator latency
+entirely. See
+[FIL-498](https://linear.app/filecoin-foundation/issue/FIL-498/stripe-webhook-must-return-quickly).
+
 ---
 
 ## Webhook Events to Handle

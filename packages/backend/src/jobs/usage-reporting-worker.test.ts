@@ -302,7 +302,9 @@ describe('usage-reporting-worker', () => {
         storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }],
         egress: [],
       });
-      mockAuroraUpdateTenantStatus.mockRejectedValueOnce(new Error('Aurora down'));
+      // Fail every retry so the bounded status-sync retry is exhausted and the
+      // failure is recorded (a single transient failure would be retried away).
+      mockAuroraUpdateTenantStatus.mockRejectedValue(new Error('Aurora down'));
 
       await handler(trialPayload);
 
