@@ -1,12 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import type {
-  ModelStorageMetricsSample,
-  ModelOperationMetricsSample,
-  ModelsTenantWithMetricsBackofficeResponse,
-} from '../lib/aurora/aurora-backoffice.js';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import type { TenantInfo } from '../lib/service-orchestrator.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -18,227 +13,262 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockGetStorageSamples = vi.fn<() => Promise<ModelStorageMetricsSample[]>>();
-const mockGetOperationsSamples = vi.fn<() => Promise<ModelOperationMetricsSample[]>>();
-const mockGetTenantInfo = vi.fn<() => Promise<ModelsTenantWithMetricsBackofficeResponse | null>>();
-
-vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
-  getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...(args as [])),
-  getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...(args as [])),
-  getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...(args as [])),
+const mockGetAvailableOrchestrators = vi.fn();
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
+  getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
-vi.mock('../lib/auth-secrets.js', () => ({
-  getAuthSecrets: () => ({
-    AUTH0_CLIENT_ID: 'test-client-id',
-    AUTH0_CLIENT_SECRET: 'test-client-secret',
-  }),
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
-const mockJwtVerify = vi.fn();
-vi.mock('jose', () => ({
-  jwtVerify: (token: unknown, jwks: unknown, opts: unknown) => mockJwtVerify(token, jwks, opts),
-  decodeJwt: vi.fn(),
-  createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
-}));
+interface StorageSample {
+  timestamp: string;
+  bytesUsed: number;
+  objectCount: number;
+}
+interface EgressSample {
+  timestamp: string;
+  bytesUsed: number;
+}
 
-process.env.AUTH0_DOMAIN = 'test.auth0.com';
-process.env.AUTH0_AUDIENCE = 'https://api.test.com';
+// Builds a fully self-contained fake orchestrator for multi-region tests.
+function createMockedOrchestrator(opts: {
+  id: string;
+  region: string;
+  tenantId: string | null;
+  storage?: StorageSample[];
+  egress?: EgressSample[];
+  info?: Partial<TenantInfo>;
+  failUsage?: boolean;
+}) {
+  const info: TenantInfo = {
+    bucketCount: opts.info?.bucketCount ?? 0,
+    bucketLimit: opts.info?.bucketLimit ?? 100,
+    keyCount: opts.info?.keyCount ?? 0,
+    accessKeyLimit: opts.info?.accessKeyLimit ?? 300,
+    status: opts.info?.status,
+  };
+  return {
+    id: opts.id,
+    region: opts.region,
+    isTenantReady: vi.fn().mockReturnValue(opts.tenantId),
+    getTenantUsageMetrics: opts.failUsage
+      ? vi.fn().mockRejectedValue(new Error('region down'))
+      : vi.fn().mockResolvedValue({ storage: opts.storage ?? [], egress: opts.egress ?? [] }),
+    getTenantInfo: opts.failUsage
+      ? vi.fn().mockRejectedValue(new Error('region down'))
+      : vi.fn().mockResolvedValue(info),
+  };
+}
+
 process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { handler } from './get-usage.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { baseHandler } from './get-usage.js';
+import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const MOCK_SUB = 'auth0|abc123';
-const MOCK_ORG_ID = 'org-1';
-const MOCK_USER_ID = 'user-1';
-const MOCK_EMAIL = 'user@example.com';
+const USER_INFO = { userId: 'user-1', orgId: 'org-1', email: 'user@example.com' };
 const AURORA_TENANT_ID = 'aurora-tenant-1';
+const FTH_TENANT_ID = 'fth-tenant-1';
 
 function authenticatedEvent() {
-  return buildEvent({
-    cookies: ['hs_access_token=valid-token', 'hs_id_token=id-token'],
-    userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, email: MOCK_EMAIL },
-  });
+  return buildEvent({ userInfo: USER_INFO });
 }
 
-function mockAuthIdentity() {
-  ddbMock
-    .on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
-    })
-    .resolves({
-      Item: {
-        pk: { S: `SUB#${MOCK_SUB}` },
-        sk: { S: 'IDENTITY' },
-        userId: { S: MOCK_USER_ID },
-        orgId: { S: MOCK_ORG_ID },
-        email: { S: MOCK_EMAIL },
-      },
-    });
-
-  ddbMock
-    .on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-    })
-    .resolves({
-      Item: {
-        pk: { S: `ORG#${MOCK_ORG_ID}` },
-        sk: { S: 'PROFILE' },
-        name: { S: 'Test Org' },
-        auroraTenantId: { S: AURORA_TENANT_ID },
-        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
-      },
-    });
-}
-
-function mockAuthIdentityWithoutTenant() {
-  ddbMock
-    .on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
-    })
-    .resolves({
-      Item: {
-        pk: { S: `SUB#${MOCK_SUB}` },
-        sk: { S: 'IDENTITY' },
-        userId: { S: MOCK_USER_ID },
-        orgId: { S: MOCK_ORG_ID },
-        email: { S: MOCK_EMAIL },
-      },
-    });
-
-  ddbMock
-    .on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-    })
-    .resolves({
-      Item: {
-        pk: { S: `ORG#${MOCK_ORG_ID}` },
-        sk: { S: 'PROFILE' },
-        name: { S: 'Test Org' },
-      },
-    });
+async function run() {
+  const result = await baseHandler(authenticatedEvent());
+  return JSON.parse(String((result as { body: string }).body));
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('GET /api/usage handler', () => {
+describe('get-usage baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    mockJwtVerify.mockResolvedValue({
-      payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
-    });
-    mockAuthIdentity();
-    mockGetStorageSamples.mockResolvedValue([]);
-    mockGetOperationsSamples.mockResolvedValue([]);
-    mockGetTenantInfo.mockResolvedValue(null);
   });
 
-  it('returns usage data from Aurora APIs', async () => {
-    mockAuthIdentity();
-    mockGetStorageSamples.mockResolvedValue([
-      { timestamp: '2026-01-01T00:00:00Z', bytesUsed: 4000, objectCount: 3 },
-    ]);
-    mockGetOperationsSamples.mockResolvedValue([
-      { timestamp: '2026-01-01T00:00:00Z', txBytes: 1500 },
-    ]);
-    mockGetTenantInfo.mockResolvedValue({
-      bucketCount: 2,
-      bucketQuantityLimit: 50,
-      keyCount: 3,
-      accessKeyQuantityLimit: 200,
+  it('returns usage data from a single Aurora region', async () => {
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      storage: [{ timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 4000, objectCount: 3 }],
+      egress: [{ timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 1500 }],
+      info: { bucketCount: 2, bucketLimit: 50, keyCount: 3, accessKeyLimit: 200 },
     });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
-    const result = await handler(authenticatedEvent(), buildContext());
+    const body = await run();
 
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({
-        storage: { usedBytes: 4000 },
-        egress: { usedBytes: 1500 },
-        buckets: { count: 2, limit: 50 },
-        objects: { count: 3 },
-        accessKeys: { count: 2, limit: 199 },
-      }),
+    expect(body).toStrictEqual({
+      storage: { usedBytes: 4000 },
+      egress: { usedBytes: 1500 },
+      buckets: { count: 2, limit: 50 },
+      objects: { count: 3 },
+      accessKeys: { count: 2, limit: 199 },
     });
   });
 
   it('hides the system filone-console key from access key counts', async () => {
-    mockAuthIdentity();
-    mockGetTenantInfo.mockResolvedValue({
-      bucketCount: 0,
-      bucketQuantityLimit: 100,
-      keyCount: 1,
-      accessKeyQuantityLimit: 300,
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      info: { bucketCount: 0, bucketLimit: 100, keyCount: 1, accessKeyLimit: 300 },
     });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
-    const result = await handler(authenticatedEvent(), buildContext());
-    const body = JSON.parse(String((result as { body: string }).body));
+    const body = await run();
 
     expect(body.accessKeys).toEqual({ count: 0, limit: 299 });
   });
 
-  it('returns zeros when auroraTenantId is missing', async () => {
-    mockAuthIdentityWithoutTenant();
-
-    const result = await handler(authenticatedEvent(), buildContext());
-
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({
-        storage: { usedBytes: 0 },
-        egress: { usedBytes: 0 },
-        buckets: { count: 0, limit: 100 },
-        objects: { count: 0 },
-        accessKeys: { count: 0, limit: 299 },
-      }),
+  it('returns defaults when no region is provisioned', async () => {
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: null,
     });
-    expect(mockGetStorageSamples).not.toHaveBeenCalled();
-    expect(mockGetOperationsSamples).not.toHaveBeenCalled();
-    expect(mockGetTenantInfo).not.toHaveBeenCalled();
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    const body = await run();
+
+    expect(body).toStrictEqual({
+      storage: { usedBytes: 0 },
+      egress: { usedBytes: 0 },
+      buckets: { count: 0, limit: 100 },
+      objects: { count: 0 },
+      accessKeys: { count: 0, limit: 299 },
+    });
+    expect(aurora.getTenantUsageMetrics).not.toHaveBeenCalled();
+    expect(aurora.getTenantInfo).not.toHaveBeenCalled();
   });
 
-  it('returns zeros when Aurora returns empty samples', async () => {
-    mockAuthIdentity();
+  it('returns zeros (with the provisioned tenant defaults) when samples are empty', async () => {
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      info: { bucketCount: 0, bucketLimit: 100, keyCount: 0, accessKeyLimit: 300 },
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
-    const result = await handler(authenticatedEvent(), buildContext());
+    const body = await run();
 
-    expect(result).toMatchObject({
-      statusCode: 200,
-      body: JSON.stringify({
-        storage: { usedBytes: 0 },
-        egress: { usedBytes: 0 },
-        buckets: { count: 0, limit: 100 },
-        objects: { count: 0 },
-        accessKeys: { count: 0, limit: 299 },
-      }),
+    expect(body).toStrictEqual({
+      storage: { usedBytes: 0 },
+      egress: { usedBytes: 0 },
+      buckets: { count: 0, limit: 100 },
+      objects: { count: 0 },
+      accessKeys: { count: 0, limit: 299 },
     });
   });
 
-  it('uses the last storage sample for aggregate values', async () => {
-    mockAuthIdentity();
-    mockGetStorageSamples.mockResolvedValue([
-      { timestamp: '2026-01-01T00:00:00Z', bytesUsed: 1000, objectCount: 2 },
-      { timestamp: '2026-01-15T00:00:00Z', bytesUsed: 5000, objectCount: 8 },
-    ]);
+  it('uses the latest storage sample and sums the egress series', async () => {
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      storage: [
+        { timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 1000, objectCount: 2 },
+        { timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 5000, objectCount: 8 },
+      ],
+      egress: [
+        { timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 100 },
+        { timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 250 },
+      ],
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
-    const result = await handler(authenticatedEvent(), buildContext());
-    const body = JSON.parse(String((result as { body: string }).body));
+    const body = await run();
 
     expect(body.storage.usedBytes).toBe(5000);
     expect(body.objects.count).toBe(8);
+    expect(body.egress.usedBytes).toBe(350);
+  });
+
+  it('sums usage, counts and limits across all provisioned regions', async () => {
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      storage: [{ timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 1000, objectCount: 5 }],
+      egress: [{ timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 200 }],
+      info: { bucketCount: 2, bucketLimit: 100, keyCount: 4, accessKeyLimit: 300 },
+    });
+    const fth = createMockedOrchestrator({
+      id: 'fth',
+      region: 'us-east-1',
+      tenantId: FTH_TENANT_ID,
+      storage: [{ timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 500, objectCount: 1 }],
+      egress: [{ timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 50 }],
+      info: { bucketCount: 1, bucketLimit: 100, keyCount: 2, accessKeyLimit: 300 },
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+    const body = await run();
+
+    expect(body.storage.usedBytes).toBe(1500);
+    expect(body.objects.count).toBe(6);
+    expect(body.egress.usedBytes).toBe(250);
+    expect(body.buckets).toEqual({ count: 3, limit: 200 });
+    // keys: (4 + 2) − 2 console keys = 4; limit: (300 + 300) − 2 = 598.
+    expect(body.accessKeys).toEqual({ count: 4, limit: 598 });
+
+    expect(aurora.getTenantUsageMetrics).toHaveBeenCalledWith(AURORA_TENANT_ID, expect.any(Object));
+    expect(fth.getTenantInfo).toHaveBeenCalledWith(FTH_TENANT_ID);
+  });
+
+  it('surfaces the most-restrictive tenant status across regions', async () => {
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      info: { status: 'active' },
+    });
+    const fth = createMockedOrchestrator({
+      id: 'fth',
+      region: 'us-east-1',
+      tenantId: FTH_TENANT_ID,
+      info: { status: 'write-locked' },
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+    const body = await run();
+
+    expect(body.tenantStatus).toBe('write-locked');
+  });
+
+  it('still renders other regions when one orchestrator fails', async () => {
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      storage: [{ timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 1000, objectCount: 5 }],
+      info: { bucketCount: 2, bucketLimit: 100, keyCount: 3, accessKeyLimit: 300 },
+    });
+    const fth = createMockedOrchestrator({
+      id: 'fth',
+      region: 'us-east-1',
+      tenantId: FTH_TENANT_ID,
+      failUsage: true,
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+    const body = await run();
+
+    expect(body.storage.usedBytes).toBe(1000);
+    expect(body.buckets).toEqual({ count: 2, limit: 100 });
+    // Only the surviving region reserves a console key: 3 − 1 = 2; 300 − 1 = 299.
+    expect(body.accessKeys).toEqual({ count: 2, limit: 299 });
   });
 });

@@ -29,6 +29,8 @@ import {
   mapFromModelsTenantStatus,
   mapToModelsTenantStatus,
   updateTenantStatus as updateAuroraTenantStatusApi,
+  getBucketStorageSamples,
+  getTenantInfo,
 } from '../aurora/aurora-backoffice.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import type { OrgProfileItem } from '../org-profile.js';
@@ -44,6 +46,8 @@ import type {
   ServiceOrchestrator,
   TenantStatus,
   TenantStatusProbe,
+  StorageUsageSample,
+  TenantInfo,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
 import type { S3ClientContext } from '../s3-client.js';
@@ -254,5 +258,37 @@ export const auroraOrchestrator = {
       }));
 
     return { storage, egress };
+  },
+
+  async getTenantInfo(tenantId: string): Promise<TenantInfo> {
+    const info = await getTenantInfo({ tenantId });
+    return {
+      bucketCount: info.bucketCount ?? 0,
+      bucketLimit: info.bucketQuantityLimit ?? 100,
+      keyCount: info.keyCount ?? 0,
+      accessKeyLimit: info.accessKeyQuantityLimit ?? 300,
+      status: mapFromModelsTenantStatus(info.status),
+    };
+  },
+
+  async getBucketUsageMetrics(
+    _tenantId: string,
+    bucketName: string,
+    opts: GetTenantUsageMetricsOptions,
+  ): Promise<StorageUsageSample[]> {
+    const samples = await getBucketStorageSamples({
+      bucketName,
+      from: opts.from,
+      to: opts.to,
+      window: opts.interval,
+    });
+
+    return samples
+      .filter((s): s is typeof s & { timestamp: string } => s.timestamp !== undefined)
+      .map((s) => ({
+        timestamp: new Date(s.timestamp).toISOString(),
+        bytesUsed: s.bytesUsed ?? 0,
+        objectCount: s.objectCount ?? 0,
+      }));
   },
 } satisfies ServiceOrchestrator;

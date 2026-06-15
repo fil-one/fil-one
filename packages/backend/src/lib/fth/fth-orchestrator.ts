@@ -30,6 +30,8 @@ import type {
   ServiceOrchestrator,
   TenantStatus,
   TenantStatusProbe,
+  StorageUsageSample,
+  TenantInfo,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
 import type { OrgProfileItem } from '../org-profile.js';
@@ -282,6 +284,37 @@ export const fthOrchestrator = {
         bytesUsed: p.egress_bytes ?? 0,
       }));
     return { storage, egress };
+  },
+
+  async getTenantInfo(tenantId: string): Promise<TenantInfo> {
+    const c = await client.getClient(tenantId);
+    return {
+      bucketCount: c.bucketCount ?? 0,
+      bucketLimit: c.bucketLimit ?? 0,
+      keyCount: c.accessKeyCount ?? 0,
+      accessKeyLimit: c.accessKeyLimit ?? 0,
+      status: normalizeFthStatus(c.status),
+    };
+  },
+
+  async getBucketUsageMetrics(
+    tenantId: string,
+    bucketName: string,
+    _opts: GetTenantUsageMetricsOptions,
+  ): Promise<StorageUsageSample[]> {
+    // FTH has no per-bucket time series; the current-snapshot `by_bucket`
+    // breakdown is the finest per-bucket reading available. A bucket can appear
+    // once per storage tier, so fold all matching rows into one sample.
+    const snapshot = await client.getClientMetricsCurrent(tenantId);
+    const rows = (snapshot.usage?.by_bucket ?? []).filter((b) => b.bucket === bucketName);
+    if (rows.length === 0) return [];
+
+    const bytesUsed = rows.reduce((sum, b) => sum + (b.size ?? 0), 0);
+    const objectCount = rows.reduce((sum, b) => sum + (b.count ?? 0), 0);
+    const timestamp = snapshot.as_of
+      ? new Date(snapshot.as_of).toISOString()
+      : new Date().toISOString();
+    return [{ timestamp, bytesUsed, objectCount }];
   },
 } satisfies ServiceOrchestrator;
 

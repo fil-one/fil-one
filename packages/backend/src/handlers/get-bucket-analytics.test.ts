@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import type { ModelStorageMetricsSample } from '../lib/aurora/aurora-backoffice.js';
-import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -14,41 +12,42 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockGetBucketStorageSamples = vi.fn<() => Promise<ModelStorageMetricsSample[]>>();
-
-vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
-  getBucketStorageSamples: (...args: unknown[]) => mockGetBucketStorageSamples(...(args as [])),
+const mockGetAvailableOrchestrators = vi.fn();
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
+  getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
-const mockGetAuroraPortalApiKey = vi.fn();
-vi.mock('../lib/aurora/aurora-portal.js', () => ({
-  getAuroraPortalApiKey: (...args: unknown[]) => mockGetAuroraPortalApiKey(...args),
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
-const mockGetBucketInfo = vi.fn();
-vi.mock('@filone/aurora-portal-client', () => ({
-  createClient: () => 'mock-client',
-  getBucketInfo: (...args: unknown[]) => mockGetBucketInfo(...args),
-}));
+interface StorageSample {
+  timestamp: string;
+  bytesUsed: number;
+  objectCount: number;
+}
 
-vi.mock('../lib/auth-secrets.js', () => ({
-  getAuthSecrets: () => ({
-    AUTH0_CLIENT_ID: 'test-client-id',
-    AUTH0_CLIENT_SECRET: 'test-client-secret',
-  }),
-}));
+// Builds a fully self-contained fake orchestrator. `ownsBucket` controls whether
+// getBucket resolves a record (i.e. the bucket lives in this region).
+function createMockedOrchestrator(opts: {
+  id: string;
+  region: string;
+  tenantId: string | null;
+  ownsBucket?: boolean;
+  samples?: StorageSample[];
+}) {
+  return {
+    id: opts.id,
+    region: opts.region,
+    isTenantReady: vi.fn().mockReturnValue(opts.tenantId),
+    getBucket: vi
+      .fn()
+      .mockResolvedValue(opts.ownsBucket ? { bucketName: 'my-bucket', region: opts.region } : null),
+    getBucketUsageMetrics: vi.fn().mockResolvedValue(opts.samples ?? []),
+  };
+}
 
-const mockJwtVerify = vi.fn();
-vi.mock('jose', () => ({
-  jwtVerify: (token: unknown, jwks: unknown, opts: unknown) => mockJwtVerify(token, jwks, opts),
-  decodeJwt: vi.fn(),
-  createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
-}));
-
-process.env.AUTH0_DOMAIN = 'test.auth0.com';
-process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 process.env.FILONE_STAGE = 'test';
-process.env.AURORA_PORTAL_URL = 'https://api-portal.dev.aur.lu/api';
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -61,22 +60,10 @@ import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', email: 'user@example.com' };
 const AURORA_TENANT_ID = 'aurora-tenant-1';
-
-function orgProfileWithTenant(tenantId: string) {
-  return {
-    Item: {
-      pk: { S: `ORG#${USER_INFO.orgId}` },
-      sk: { S: 'PROFILE' },
-      auroraTenantId: { S: tenantId },
-      auroraSetupStatus: { S: FINAL_SETUP_STATUS },
-    },
-  };
-}
+const FTH_TENANT_ID = 'fth-tenant-1';
 
 function authenticatedEvent(bucketName?: string) {
-  const event = buildEvent({
-    userInfo: USER_INFO,
-  });
+  const event = buildEvent({ userInfo: USER_INFO });
   if (bucketName) {
     event.pathParameters = { name: bucketName };
   }
@@ -87,137 +74,134 @@ function authenticatedEvent(bucketName?: string) {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('GET /api/buckets/{bucketName}/analytics handler', () => {
+describe('get-bucket-analytics baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    mockGetBucketStorageSamples.mockResolvedValue([]);
-    mockGetAuroraPortalApiKey.mockResolvedValue('test-api-key');
-    mockGetBucketInfo.mockResolvedValue({
-      data: { name: 'my-bucket', createdAt: '2026-01-15T10:00:00Z' },
-      error: undefined,
-      response: { status: 200 },
+  });
+
+  it('returns analytics from the owning orchestrator', async () => {
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      ownsBucket: true,
+      samples: [{ timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 4000, objectCount: 3 }],
     });
-  });
-
-  it('returns analytics from Aurora', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant(AURORA_TENANT_ID));
-    mockGetBucketStorageSamples.mockResolvedValue([
-      { timestamp: '2026-01-01T00:00:00Z', bytesUsed: 4000, objectCount: 3 },
-    ]);
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
     const result = await baseHandler(authenticatedEvent('my-bucket'));
 
     expect(result.statusCode).toBe(200);
-    const body = JSON.parse(result.body!);
-    expect(body).toStrictEqual({ objectCount: 3, bytesUsed: 4000 });
+    expect(JSON.parse(result.body!)).toStrictEqual({ objectCount: 3, bytesUsed: 4000 });
+    expect(aurora.getBucketUsageMetrics).toHaveBeenCalledWith(
+      AURORA_TENANT_ID,
+      'my-bucket',
+      expect.any(Object),
+    );
   });
 
-  it('returns zeros when Aurora returns empty samples', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant(AURORA_TENANT_ID));
-    mockGetBucketStorageSamples.mockResolvedValue([]);
+  it('returns zeros when the owning orchestrator has no samples', async () => {
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      ownsBucket: true,
+      samples: [],
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
     const result = await baseHandler(authenticatedEvent('my-bucket'));
 
     expect(result.statusCode).toBe(200);
-    const body = JSON.parse(result.body!);
-    expect(body).toStrictEqual({ objectCount: 0, bytesUsed: 0 });
+    expect(JSON.parse(result.body!)).toStrictEqual({ objectCount: 0, bytesUsed: 0 });
   });
 
   it('uses the last sample for values', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant(AURORA_TENANT_ID));
-    mockGetBucketStorageSamples.mockResolvedValue([
-      { timestamp: '2026-01-01T00:00:00Z', bytesUsed: 1000, objectCount: 2 },
-      { timestamp: '2026-01-15T00:00:00Z', bytesUsed: 5000, objectCount: 8 },
-    ]);
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      ownsBucket: true,
+      samples: [
+        { timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 1000, objectCount: 2 },
+        { timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 5000, objectCount: 8 },
+      ],
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
     const result = await baseHandler(authenticatedEvent('my-bucket'));
 
-    const body = JSON.parse(result.body!);
-    expect(body).toStrictEqual({ objectCount: 8, bytesUsed: 5000 });
+    expect(JSON.parse(result.body!)).toStrictEqual({ objectCount: 8, bytesUsed: 5000 });
+  });
+
+  it('resolves a bucket owned by the FTH region', async () => {
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      ownsBucket: false,
+    });
+    const fth = createMockedOrchestrator({
+      id: 'fth',
+      region: 'us-east-1',
+      tenantId: FTH_TENANT_ID,
+      ownsBucket: true,
+      samples: [{ timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 700, objectCount: 4 }],
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+    const result = await baseHandler(authenticatedEvent('my-bucket'));
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body!)).toStrictEqual({ objectCount: 4, bytesUsed: 700 });
+    // Ownership is probed on every region; only the owner fetches metrics.
+    expect(aurora.getBucket).toHaveBeenCalled();
+    expect(fth.getBucket).toHaveBeenCalled();
+    expect(aurora.getBucketUsageMetrics).not.toHaveBeenCalled();
+    expect(fth.getBucketUsageMetrics).toHaveBeenCalledWith(
+      FTH_TENANT_ID,
+      'my-bucket',
+      expect.any(Object),
+    );
   });
 
   it('returns 400 when bucket name is missing', async () => {
+    mockGetAvailableOrchestrators.mockReturnValue([]);
+
     const result = await baseHandler(authenticatedEvent());
 
     expect(result.statusCode).toBe(400);
-    const body = JSON.parse(result.body!);
-    expect(body).toStrictEqual({ message: 'Bucket name is required' });
+    expect(JSON.parse(result.body!)).toStrictEqual({ message: 'Bucket name is required' });
   });
 
-  it('returns 503 when auroraTenantId is missing', async () => {
-    ddbMock.on(GetItemCommand).resolves({
-      Item: {
-        pk: { S: `ORG#${USER_INFO.orgId}` },
-        sk: { S: 'PROFILE' },
-      },
+  it('returns 503 when no region is provisioned', async () => {
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: null,
     });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
     const result = await baseHandler(authenticatedEvent('my-bucket'));
 
     expect(result.statusCode).toBe(503);
-    expect(mockGetBucketStorageSamples).not.toHaveBeenCalled();
+    expect(aurora.getBucketUsageMetrics).not.toHaveBeenCalled();
   });
 
-  it('returns 503 when org setup is not complete', async () => {
-    ddbMock.on(GetItemCommand).resolves({
-      Item: {
-        pk: { S: `ORG#${USER_INFO.orgId}` },
-        sk: { S: 'PROFILE' },
-        auroraTenantId: { S: AURORA_TENANT_ID },
-        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
-      },
+  it('returns 404 when no region owns the bucket', async () => {
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      ownsBucket: false,
     });
-
-    const result = await baseHandler(authenticatedEvent('my-bucket'));
-
-    expect(result.statusCode).toBe(503);
-    expect(mockGetBucketStorageSamples).not.toHaveBeenCalled();
-  });
-
-  it('returns 404 when bucket is not owned by the org', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant(AURORA_TENANT_ID));
-    mockGetBucketInfo.mockResolvedValue({
-      data: undefined,
-      error: { message: 'Not found' },
-      response: { status: 404 },
-    });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
     const result = await baseHandler(authenticatedEvent('other-orgs-bucket'));
 
     expect(result.statusCode).toBe(404);
-    const body = JSON.parse(result.body!);
-    expect(body).toStrictEqual({ message: 'Bucket not found' });
-    expect(mockGetBucketStorageSamples).not.toHaveBeenCalled();
-  });
-
-  it('throws when portal returns a non-404 error', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant(AURORA_TENANT_ID));
-    mockGetBucketInfo.mockResolvedValue({
-      data: undefined,
-      error: { message: 'Internal error' },
-      response: { status: 500 },
-    });
-
-    await expect(baseHandler(authenticatedEvent('my-bucket'))).rejects.toThrow(
-      `Failed to verify bucket "my-bucket" ownership for tenant ${AURORA_TENANT_ID}`,
-    );
-    expect(mockGetBucketStorageSamples).not.toHaveBeenCalled();
-  });
-
-  it('verifies bucket ownership with correct tenant ID', async () => {
-    ddbMock.on(GetItemCommand).resolves(orgProfileWithTenant(AURORA_TENANT_ID));
-    mockGetBucketStorageSamples.mockResolvedValue([
-      { timestamp: '2026-01-01T00:00:00Z', bytesUsed: 1000, objectCount: 1 },
-    ]);
-
-    await baseHandler(authenticatedEvent('my-bucket'));
-
-    expect(mockGetAuroraPortalApiKey).toHaveBeenCalledWith('test', AURORA_TENANT_ID);
-    expect(mockGetBucketInfo).toHaveBeenCalledWith({
-      client: 'mock-client',
-      path: { tenantId: AURORA_TENANT_ID, bucketName: 'my-bucket' },
-      throwOnError: false,
-    });
+    expect(JSON.parse(result.body!)).toStrictEqual({ message: 'Bucket not found' });
+    expect(aurora.getBucketUsageMetrics).not.toHaveBeenCalled();
   });
 });

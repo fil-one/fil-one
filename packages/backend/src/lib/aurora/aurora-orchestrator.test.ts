@@ -39,6 +39,8 @@ const mockUpdateAuroraTenantStatusApi = vi.fn();
 const mockGetAuroraTenantStatusApi = vi.fn();
 const mockGetStorageSamples = vi.fn();
 const mockGetOperationsSamples = vi.fn();
+const mockGetBucketStorageSamples = vi.fn();
+const mockGetTenantInfo = vi.fn();
 vi.mock('./aurora-backoffice.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../aurora/aurora-backoffice.js')>();
   return {
@@ -47,6 +49,8 @@ vi.mock('./aurora-backoffice.js', async (importOriginal) => {
     getTenantStatus: (...args: unknown[]) => mockGetAuroraTenantStatusApi(...args),
     getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
     getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
+    getBucketStorageSamples: (...args: unknown[]) => mockGetBucketStorageSamples(...args),
+    getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...args),
   };
 });
 
@@ -645,6 +649,83 @@ describe('auroraOrchestrator', () => {
       });
 
       expect(result).toEqual({ storage: [], egress: [] });
+    });
+  });
+
+  describe('getTenantInfo', () => {
+    it('maps backoffice tenant info, applying defaults for missing fields', async () => {
+      mockGetTenantInfo.mockResolvedValue({
+        bucketCount: 2,
+        bucketQuantityLimit: 50,
+        keyCount: 3,
+        accessKeyQuantityLimit: 200,
+        status: 'ACTIVE',
+      });
+
+      const result = await auroraOrchestrator.getTenantInfo('aurora-t-1');
+
+      expect(result).toEqual({
+        bucketCount: 2,
+        bucketLimit: 50,
+        keyCount: 3,
+        accessKeyLimit: 200,
+        status: 'active',
+      });
+      expect(mockGetTenantInfo).toHaveBeenCalledWith({ tenantId: 'aurora-t-1' });
+    });
+
+    it('falls back to 100 / 300 limits when the backoffice omits them', async () => {
+      mockGetTenantInfo.mockResolvedValue({});
+
+      const result = await auroraOrchestrator.getTenantInfo('aurora-t-1');
+
+      expect(result).toEqual({
+        bucketCount: 0,
+        bucketLimit: 100,
+        keyCount: 0,
+        accessKeyLimit: 300,
+        status: undefined,
+      });
+    });
+  });
+
+  describe('getBucketUsageMetrics', () => {
+    const FROM = '2026-01-01T00:00:00Z';
+    const TO = '2026-01-31T00:00:00Z';
+
+    it('forwards bucketName/from/to/window and maps samples with ?? 0 defaults', async () => {
+      mockGetBucketStorageSamples.mockResolvedValue([
+        { timestamp: '2026-01-01T01:00:00Z', bytesUsed: 1024, objectCount: 5 },
+        { timestamp: '2026-01-01T02:00:00Z' },
+      ]);
+
+      const result = await auroraOrchestrator.getBucketUsageMetrics('aurora-t-1', 'my-bucket', {
+        from: FROM,
+        to: TO,
+        interval: '1d',
+      });
+
+      expect(mockGetBucketStorageSamples).toHaveBeenCalledWith({
+        bucketName: 'my-bucket',
+        from: FROM,
+        to: TO,
+        window: '1d',
+      });
+      expect(result).toEqual([
+        { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 1024, objectCount: 5 },
+        { timestamp: '2026-01-01T02:00:00.000Z', bytesUsed: 0, objectCount: 0 },
+      ]);
+    });
+
+    it('returns an empty array when the bucket has no samples', async () => {
+      mockGetBucketStorageSamples.mockResolvedValue([]);
+
+      const result = await auroraOrchestrator.getBucketUsageMetrics('aurora-t-1', 'my-bucket', {
+        from: FROM,
+        to: TO,
+      });
+
+      expect(result).toEqual([]);
     });
   });
 });

@@ -29,6 +29,7 @@ vi.mock('./fth-tenant-setup.js', () => ({
 }));
 
 const mockGetClientMetricsTimeseries = vi.fn();
+const mockGetClientMetricsCurrent = vi.fn();
 // Hoisted so it is initialized before the static import of fth-orchestrator.js,
 // whose module-level `createInstrumentedFthClient()` runs at import time and
 // reads this mock via the mocked createFthManagementClient.
@@ -37,9 +38,10 @@ const mockFthClient = vi.hoisted(() => ({
   listAccessKeys: vi.fn(),
   deleteAccessKey: vi.fn(),
   listStorageUsers: vi.fn(),
+  getClient: (...args: unknown[]) => mockGetClient(...args),
   getClientMetricsTimeseries: (...args: unknown[]) => mockGetClientMetricsTimeseries(...args),
   updateClientStatus: (...args: unknown[]) => mockUpdateClientStatus(...args),
-  getClient: (...args: unknown[]) => mockGetClient(...args),
+  getClientMetricsCurrent: (...args: unknown[]) => mockGetClientMetricsCurrent(...args),
 }));
 
 vi.mock('./fth-management-client.js', async () => {
@@ -889,5 +891,115 @@ describe('fthOrchestrator.getTenantUsageMetrics', () => {
     });
 
     expect(result).toEqual({ storage: [], egress: [] });
+  });
+});
+
+describe('fthOrchestrator.getTenantInfo', () => {
+  it('maps the client record and normalizes the status', async () => {
+    mockGetClient.mockResolvedValue({
+      id: fthClientId,
+      externalId: 'org-1',
+      displayName: 'Org 1',
+      status: 'write-locked',
+      bucketCount: 4,
+      bucketLimit: 100,
+      accessKeyCount: 6,
+      accessKeyLimit: 300,
+      createdAt: '2026-01-01T00:00:00Z',
+    });
+
+    const result = await fthOrchestrator.getTenantInfo(fthClientId);
+
+    expect(result).toEqual({
+      bucketCount: 4,
+      bucketLimit: 100,
+      keyCount: 6,
+      accessKeyLimit: 300,
+      status: 'write-locked',
+    });
+    expect(mockGetClient).toHaveBeenCalledWith(fthClientId);
+  });
+
+  it.each([
+    ['active', 'active'],
+    ['write-locked', 'write-locked'],
+    ['disabled', 'disabled'],
+    [undefined, undefined],
+    ['unknown', undefined],
+  ])('maps status %s -> %s', async (status, expected) => {
+    mockGetClient.mockResolvedValue({
+      id: fthClientId,
+      externalId: 'org-1',
+      displayName: 'Org 1',
+      status,
+      createdAt: '2026-01-01T00:00:00Z',
+    });
+
+    const result = await fthOrchestrator.getTenantInfo(fthClientId);
+
+    expect(result.status).toBe(expected);
+  });
+
+  it('applies ?? 0 defaults for missing count/limit fields', async () => {
+    mockGetClient.mockResolvedValue({
+      id: fthClientId,
+      externalId: 'org-1',
+      displayName: 'Org 1',
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00Z',
+    });
+
+    const result = await fthOrchestrator.getTenantInfo(fthClientId);
+
+    expect(result).toEqual({
+      bucketCount: 0,
+      bucketLimit: 0,
+      keyCount: 0,
+      accessKeyLimit: 0,
+      status: 'active',
+    });
+  });
+});
+
+describe('fthOrchestrator.getBucketUsageMetrics', () => {
+  const OPTS = { from: '2026-01-01T00:00:00Z', to: '2026-01-31T00:00:00Z', interval: '1d' };
+
+  it('folds the matching by_bucket rows across tiers into one sample', async () => {
+    mockGetClientMetricsCurrent.mockResolvedValue({
+      as_of: '2026-01-15T00:00:00Z',
+      usage: {
+        by_bucket: [
+          { bucket: 'my-bucket', tier: 'L1', size: 1000, count: 3 },
+          { bucket: 'my-bucket', tier: 'L2', size: 500, count: 2 },
+          { bucket: 'other', tier: 'L1', size: 9999, count: 99 },
+        ],
+      },
+    });
+
+    const result = await fthOrchestrator.getBucketUsageMetrics(fthClientId, 'my-bucket', OPTS);
+
+    expect(result).toEqual([
+      { timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 1500, objectCount: 5 },
+    ]);
+    expect(mockGetClientMetricsCurrent).toHaveBeenCalledWith(fthClientId);
+  });
+
+  it('returns an empty array when the bucket is absent from the snapshot', async () => {
+    mockGetClientMetricsCurrent.mockResolvedValue({
+      as_of: '2026-01-15T00:00:00Z',
+      usage: { by_bucket: [{ bucket: 'other', size: 1, count: 1 }] },
+    });
+
+    const result = await fthOrchestrator.getBucketUsageMetrics(fthClientId, 'my-bucket', OPTS);
+
+    expect(result).toEqual([]);
+  });
+
+  it('returns an empty array when the snapshot has no by_bucket data', async () => {
+    mockGetClientMetricsCurrent.mockResolvedValue({ as_of: '2026-01-15T00:00:00Z', usage: {} });
+
+    const result = await fthOrchestrator.getBucketUsageMetrics(fthClientId, 'my-bucket', OPTS);
+
+    expect(result).toEqual([]);
   });
 });

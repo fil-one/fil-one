@@ -2,17 +2,13 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketAnalyticsResponse, ErrorResponse } from '@filone/shared';
-import { createClient, getBucketInfo } from '@filone/aurora-portal-client';
-import { getOrgProfile } from '../lib/org-profile.js';
-import { getAuroraPortalApiKey } from '../lib/aurora/aurora-portal.js';
-import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
+import { getProvisionedRegions } from '../lib/region-helpers.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
-import { getBucketStorageSamples } from '../lib/aurora/aurora-backoffice.js';
 
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -24,59 +20,41 @@ export async function baseHandler(
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
   }
 
-  const orgProfile = await getOrgProfile(orgId);
-
-  const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const auroraSetupStatus = orgProfile?.auroraSetupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(auroraSetupStatus)) {
-    console.error('Aurora tenant setup is not complete', {
-      orgId,
-      auroraTenantId,
-      auroraSetupStatus,
-    });
+  // A bucket lives in exactly one region; resolve every provisioned region and
+  // find the orchestrator that owns it.
+  const regions = await getProvisionedRegions(orgId);
+  if (regions.length === 0) {
+    console.error('No provisioned regions for org', { orgId });
     return new ResponseBuilder()
       .status(503)
       .body<ErrorResponse>({
-        message: 'Aurora tenant setup is not complete, please try again later',
+        message: 'Tenant setup is not complete, please try again later',
       })
       .build();
   }
 
-  // Verify bucket belongs to this tenant before fetching partner-level metrics
-  const baseUrl = process.env.AURORA_PORTAL_URL!;
-  const stage = process.env.FILONE_STAGE!;
-  const apiKey = await getAuroraPortalApiKey(stage, auroraTenantId);
+  // getBucket doubles as the ownership check: only the owning tenant's
+  // orchestrator returns a non-null bucket.
+  const owners = await Promise.all(
+    regions.map(async ({ orchestrator, tenantId }) => {
+      const bucket = await orchestrator.getBucket(tenantId, bucketName);
+      return bucket ? { orchestrator, tenantId } : null;
+    }),
+  );
+  const owner = owners.find((o) => o !== null);
 
-  const portalClient = createClient({
-    baseUrl,
-    headers: { 'X-Api-Key': apiKey },
-  });
-
-  const { error: bucketError, response: bucketResponse } = await getBucketInfo({
-    client: portalClient,
-    path: { tenantId: auroraTenantId, bucketName },
-    throwOnError: false,
-  });
-
-  if (bucketError) {
-    if (bucketResponse?.status === 404) {
-      return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
-    }
-    throw new Error(
-      `Failed to verify bucket "${bucketName}" ownership for tenant ${auroraTenantId}`,
-      { cause: bucketError },
-    );
+  if (!owner) {
+    return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
   }
 
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime());
   thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
-  const samples = await getBucketStorageSamples({
-    bucketName,
+  const samples = await owner.orchestrator.getBucketUsageMetrics(owner.tenantId, bucketName, {
     from: thirtyDaysAgo.toISOString(),
     to: now.toISOString(),
-    window: '720h',
+    interval: '1d',
   });
 
   const latest = samples.at(-1);

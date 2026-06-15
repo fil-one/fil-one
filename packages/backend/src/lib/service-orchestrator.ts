@@ -106,6 +106,21 @@ export type TenantStatusProbe =
   | { kind: 'error'; cause: unknown };
 
 /**
+ * Normalized, orchestrator-agnostic tenant quota and status snapshot.
+ *
+ * `keyCount` / `accessKeyLimit` are raw values that include the per-tenant
+ * `filone-console` system key (and its reserved slot). Callers that surface
+ * user-managed keys should subtract one per tenant.
+ */
+export interface TenantInfo {
+  bucketCount: number;
+  bucketLimit: number;
+  keyCount: number;
+  accessKeyLimit: number;
+  status?: TenantStatus;
+}
+
+/**
  * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.).
  * Each implementation handles tenant provisioning, bucket lifecycle,
  * access-key issuance, and presigning for a service orchestrator in a single region.
@@ -211,4 +226,21 @@ export interface ServiceOrchestrator {
     tenantId: string,
     opts: GetTenantUsageMetricsOptions,
   ): Promise<TenantUsageMetrics>;
+
+  /**
+   * Returns the tenant's quota and status snapshot (bucket/key counts and
+   * limits, lifecycle status). Read-only. Backs the usage dashboard.
+   */
+  getTenantInfo(tenantId: string): Promise<TenantInfo>;
+
+  /**
+   * Returns a single bucket's storage usage as a normalized time series over
+   * `[from, to)`. Read-only. Backs per-bucket analytics. Returns an empty array
+   * when the orchestrator has no storage series for the bucket.
+   */
+  getBucketUsageMetrics(
+    tenantId: string,
+    bucketName: string,
+    opts: GetTenantUsageMetricsOptions,
+  ): Promise<StorageUsageSample[]>;
 }
