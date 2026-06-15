@@ -281,12 +281,13 @@ export const auroraOrchestrator = {
     // Portal client resolves the bucket (404 -> null otherwise).
     const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName);
     if (!bucket) throw new BucketNotFoundError(bucketName);
+    const auroraInterval = mapIntervalToAuroraWindow(opts.interval ?? '1d');
 
     const samples = await getBucketStorageSamples({
       bucketName,
       from: opts.from,
       to: opts.to,
-      window: opts.interval,
+      window: auroraInterval,
     });
 
     return samples

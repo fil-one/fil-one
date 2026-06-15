@@ -769,7 +769,7 @@ describe('auroraOrchestrator', () => {
         bucketName: 'my-bucket',
         from: FROM,
         to: TO,
-        window: '1d',
+        window: '24h',
       });
       expect(result).toEqual([
         { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 1024, objectCount: 5 },
