@@ -12,6 +12,7 @@ import {
   SignOutIcon,
   QuestionIcon,
   ChatTeardropDotsIcon,
+  XIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useMatchRoute } from '@tanstack/react-router';
@@ -29,6 +30,7 @@ import { Tooltip } from './Tooltip.js';
 type SidebarNavProps = {
   collapsed: boolean;
   onToggle: () => void;
+  onClose?: () => void;
 };
 
 type NavItem = {
@@ -64,9 +66,10 @@ const navGroups: NavGroup[] = [
 type NavLinksProps = {
   collapsed: boolean;
   matchRoute: ReturnType<typeof useMatchRoute>;
+  onClose?: () => void;
 };
 
-function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
+function NavLinks({ collapsed, matchRoute, onClose }: NavLinksProps) {
   return (
     <div className="flex flex-col p-2">
       {navGroups.map((group, gi) => (
@@ -84,6 +87,7 @@ function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
                   key={path}
                   to={path}
                   aria-label={label}
+                  onClick={onClose}
                   className={[
                     'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
                     collapsed ? 'justify-center' : '',
@@ -117,7 +121,7 @@ const utilityNavItems: NavItem[] = [
   { path: '/settings', icon: GearIcon, label: 'Settings' },
 ];
 
-function UtilityNavLinks({ collapsed, matchRoute }: NavLinksProps) {
+function UtilityNavLinks({ collapsed, matchRoute, onClose }: NavLinksProps) {
   return (
     <div className="p-2 flex flex-col gap-0.5">
       {utilityNavItems.map(({ path, icon: Icon, label }) => {
@@ -127,6 +131,7 @@ function UtilityNavLinks({ collapsed, matchRoute }: NavLinksProps) {
             key={path}
             to={path}
             aria-label={label}
+            onClick={onClose}
             className={[
               'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
               collapsed ? 'justify-center' : '',
@@ -235,6 +240,7 @@ export type HelpMenuProps = {
   helpMenuRef: React.RefObject<HTMLDivElement | null>;
   helpButtonRef: React.RefObject<HTMLButtonElement | null>;
   onToggle: () => void;
+  onClose?: () => void;
 };
 
 export function HelpMenu({
@@ -243,6 +249,7 @@ export function HelpMenu({
   helpMenuRef,
   helpButtonRef,
   onToggle,
+  onClose,
 }: HelpMenuProps) {
   return (
     <div className="relative">
@@ -285,6 +292,9 @@ export function HelpMenu({
           </a>
           <Link
             to="/support"
+            onClick={() => {
+              onClose?.();
+            }}
             className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
           >
             <ChatCircleIcon size={18} className="flex-shrink-0 text-zinc-400" />
@@ -296,7 +306,7 @@ export function HelpMenu({
   );
 }
 
-export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
+export function SidebarNav({ collapsed, onToggle, onClose }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -367,9 +377,9 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   return (
     <div className="h-full">
       <nav className="relative flex h-full flex-col border-r border-zinc-200 bg-white">
-        {/* Expand toggle (collapsed) — centered on the sidebar's right border */}
+        {/* Expand toggle (collapsed) — centered on the sidebar's right border, desktop only */}
         {collapsed && (
-          <div className="absolute -right-3 top-7 z-10 -translate-y-1/2">
+          <div className="absolute -right-3 top-7 z-10 hidden -translate-y-1/2 lg:block">
             <Tooltip content="Expand sidebar" side="right">
               <button
                 type="button"
@@ -410,7 +420,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
             )}
           </button>
 
-          {/* Spacer + collapse toggle (expanded only) */}
+          {/* Spacer + collapse toggle (expanded, desktop only) */}
           {!collapsed && (
             <>
               <div className="flex-1" />
@@ -419,11 +429,20 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
                   type="button"
                   onClick={onToggle}
                   aria-label="Collapse sidebar"
-                  className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+                  className="hidden h-6 w-6 flex-shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 lg:flex"
                 >
                   <CaretLeftIcon size={16} />
                 </button>
               </Tooltip>
+              {/* Close button (mobile only) */}
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close navigation menu"
+                className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 lg:hidden"
+              >
+                <XIcon size={16} />
+              </button>
             </>
           )}
 
@@ -446,13 +465,13 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
         </div>
 
         {/* Primary nav items */}
-        <NavLinks collapsed={collapsed} matchRoute={matchRoute} />
+        <NavLinks collapsed={collapsed} matchRoute={matchRoute} onClose={onClose} />
 
         {/* Spacer */}
         <div className="flex-1" />
 
         {/* Bottom utility nav */}
-        <UtilityNavLinks collapsed={collapsed} matchRoute={matchRoute} />
+        <UtilityNavLinks collapsed={collapsed} matchRoute={matchRoute} onClose={onClose} />
 
         {/* Status banners */}
         <StatusBanners
@@ -477,6 +496,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
             helpMenuRef={helpMenuRef}
             helpButtonRef={helpButtonRef}
             onToggle={() => setHelpMenuOpen((o) => !o)}
+            onClose={onClose}
           />
           <StatusIndicator collapsed={collapsed} />
         </div>
