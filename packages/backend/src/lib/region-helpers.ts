@@ -1,4 +1,4 @@
-import pRetry, { type Options as PRetryOptions } from 'p-retry';
+import pRetry, { type Options as RetryOptions } from 'p-retry';
 import { getAvailableOrchestrators } from './service-orchestrator-registry.js';
 import { getOrgProfile } from './org-profile.js';
 import type { ServiceOrchestrator, TenantStatus } from './service-orchestrator.js';
@@ -44,7 +44,7 @@ export function assertRegionSyncSucceeded(outcomes: RegionSyncOutcome[]): void {
 // worker crons (60s timeouts, re-run on schedule) and the activate-subscription
 // API. They have generous time budgets, so they ride out transient outages with
 // several retries (p-retry's default 1s/2s/4s backoff).
-const STATUS_SYNC_RETRY: PRetryOptions = { retries: 3 };
+const STATUS_SYNC_RETRY: RetryOptions = { retries: 3 };
 
 // Override for the Stripe webhook, which awaits this sync synchronously and
 // should return 2xx quickly (Stripe's ~2s window). syncRegionTenantStatus probes
@@ -55,7 +55,7 @@ const STATUS_SYNC_RETRY: PRetryOptions = { retries: 3 };
 // sync until a later billing event re-runs this probe-first sync or the
 // grace-period-enforcer cron re-attempts the lock. (The subscription-drift-checker
 // only observes drift via telemetry; it does not reconcile.)
-export const WEBHOOK_STATUS_SYNC_RETRY: PRetryOptions = { retries: 1, minTimeout: 200 };
+export const WEBHOOK_STATUS_SYNC_RETRY: RetryOptions = { retries: 1, minTimeout: 200 };
 
 // Reconciles every provisioned region with the desired tenant status. Each
 // region's live status is its own source of truth: probe first, update only
@@ -65,7 +65,7 @@ export const WEBHOOK_STATUS_SYNC_RETRY: PRetryOptions = { retries: 1, minTimeout
 export async function syncTenantStatusInProvisionedRegions(
   orgId: string,
   desired: TenantStatus,
-  retry: PRetryOptions = STATUS_SYNC_RETRY,
+  retry: RetryOptions = STATUS_SYNC_RETRY,
 ): Promise<RegionSyncOutcome[]> {
   const ready = await getProvisionedRegions(orgId);
 
@@ -87,7 +87,7 @@ async function syncRegionTenantStatus({
   orchestrator: ServiceOrchestrator;
   tenantId: string;
   desired: TenantStatus;
-  retry: PRetryOptions;
+  retry: RetryOptions;
 }): Promise<RegionSyncOutcome> {
   const base = { orchestratorId: orchestrator.id, tenantId };
   try {
