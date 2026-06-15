@@ -248,6 +248,14 @@ Radar prevents fraudulent payments. It does not verify identity. If identity ver
    |-- Open question: MEK deletion timing and grace period
 ```
 
+### Tenant status propagation
+
+Locking (`write-locked`, `disabled`) and unlocking (`active`) a tenant in response to billing
+changes propagates to **every region where the org has a provisioned tenant** — not just Aurora.
+All billing-driven status-change sites (grace-period enforcer, usage-reporting worker, Stripe
+webhook, subscription activation) go through the shared helper
+`syncTenantStatusInProvisionedRegions`, so an account is locked/unlocked everywhere it exists.
+
 ---
 
 ## Webhook Events to Handle

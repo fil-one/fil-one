@@ -35,6 +35,10 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+}));
+
 const mockGetPresignedListObjectsUrl = vi.fn();
 const mockGetPresignedListObjectVersionsUrl = vi.fn();
 const mockGetPresignedHeadObjectUrl = vi.fn();
@@ -99,7 +103,7 @@ describe('presign baseHandler', () => {
     vi.clearAllMocks();
     vi.stubEnv('FILONE_STAGE', 'staging');
     mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
-    mockIsTenantReady.mockResolvedValue('aurora-t-1');
+    mockIsTenantReady.mockReturnValue('aurora-t-1');
     mockGetS3ClientContext.mockResolvedValue(s3ClientContext);
   });
 
@@ -268,7 +272,7 @@ describe('presign baseHandler', () => {
   // ── Tenant readiness ────────────────────────────────────────────────
 
   it('returns 503 when the orchestrator tenant is not ready', async () => {
-    mockIsTenantReady.mockResolvedValue(null);
+    mockIsTenantReady.mockReturnValue(null);
 
     const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }]);
     const result = await baseHandler(event);

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 
 // ---------------------------------------------------------------------------
@@ -13,7 +12,6 @@ vi.mock('sst', () => ({
   },
 }));
 
-const ddbMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
 
 const mockEnsureAuroraTenantReady = vi.fn();
@@ -37,6 +35,21 @@ vi.mock('./aurora-portal.js', async (importOriginal) => {
   };
 });
 
+const mockUpdateAuroraTenantStatusApi = vi.fn();
+const mockGetAuroraTenantStatusApi = vi.fn();
+const mockGetStorageSamples = vi.fn();
+const mockGetOperationsSamples = vi.fn();
+vi.mock('./aurora-backoffice.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../aurora/aurora-backoffice.js')>();
+  return {
+    ...original,
+    updateTenantStatus: (...args: unknown[]) => mockUpdateAuroraTenantStatusApi(...args),
+    getTenantStatus: (...args: unknown[]) => mockGetAuroraTenantStatusApi(...args),
+    getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
+    getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
+  };
+});
+
 const mockPortalListBuckets = vi.fn();
 const mockPortalGetBucketInfo = vi.fn();
 vi.mock('@filone/aurora-portal-client', () => ({
@@ -45,22 +58,12 @@ vi.mock('@filone/aurora-portal-client', () => ({
   getBucketInfo: (...args: unknown[]) => mockPortalGetBucketInfo(...args),
 }));
 
-const mockGetStorageSamples = vi.fn();
-const mockGetOperationsSamples = vi.fn();
-vi.mock('./aurora-backoffice.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../aurora/aurora-backoffice.js')>();
-  return {
-    ...original,
-    getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
-    getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
-  };
-});
-
 process.env.FILONE_STAGE = 'test';
 process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu/api';
 
 import { S3Region } from '@filone/shared';
 import { auroraOrchestrator, _resetSsmCacheForTesting } from './aurora-orchestrator.js';
+import type { OrgProfileItem } from '../org-profile.js';
 import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../org-setup-status.js';
 import {
   AccessKeyAlreadyExistsError,
@@ -120,58 +123,31 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('isTenantReady', () => {
-    beforeEach(() => {
-      ddbMock.reset();
-    });
-
-    it('returns the tenantId when the Aurora tenant setup is complete', async () => {
-      ddbMock.on(GetItemCommand).resolves({
-        Item: {
-          auroraTenantId: { S: 'aurora-t-1' },
-          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
-        },
+    it('returns the tenantId when the Aurora tenant setup is complete', () => {
+      const result = auroraOrchestrator.isTenantReady({
+        auroraTenantId: { S: 'aurora-t-1' },
+        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
       });
-
-      const result = await auroraOrchestrator.isTenantReady('org-1');
 
       expect(result).toEqual('aurora-t-1');
-      expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
-      expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toMatchObject({
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+    });
+
+    const notReadyCases: Record<string, OrgProfileItem | undefined> = {
+      'the Aurora setup status was not completed yet': {
+        auroraTenantId: { S: 'aurora-t-1' },
+        auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
+      },
+      'the PROFILE row is missing the tenantId': {
+        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
+      },
+      'no PROFILE row exists': undefined,
+    };
+
+    for (const [desc, orgProfile] of Object.entries(notReadyCases)) {
+      it(`returns null when ${desc}`, () => {
+        expect(auroraOrchestrator.isTenantReady(orgProfile)).toBeNull();
       });
-    });
-
-    it('returns null when the Aurora setup status was not completed yet ', async () => {
-      ddbMock.on(GetItemCommand).resolves({
-        Item: {
-          auroraTenantId: { S: 'aurora-t-1' },
-          auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_API_KEY_CREATED },
-        },
-      });
-
-      const result = await auroraOrchestrator.isTenantReady('org-1');
-
-      expect(result).toBeNull();
-    });
-
-    it('returns null when the PROFILE row is missing the tenantId', async () => {
-      ddbMock.on(GetItemCommand).resolves({
-        Item: { auroraSetupStatus: { S: FINAL_SETUP_STATUS } },
-      });
-
-      const result = await auroraOrchestrator.isTenantReady('org-1');
-
-      expect(result).toBeNull();
-    });
-
-    it('returns null when no PROFILE row exists', async () => {
-      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-
-      const result = await auroraOrchestrator.isTenantReady('org-1');
-
-      expect(result).toBeNull();
-    });
+    }
   });
 
   describe('createBucket', () => {
@@ -474,6 +450,71 @@ describe('auroraOrchestrator', () => {
     });
   });
 
+  describe('updateTenantStatus', () => {
+    const statusCases: Record<string, 'ACTIVE' | 'WRITE_LOCKED' | 'DISABLED'> = {
+      active: 'ACTIVE',
+      'write-locked': 'WRITE_LOCKED',
+      disabled: 'DISABLED',
+    };
+
+    for (const [status, modelsStatus] of Object.entries(statusCases)) {
+      it(`maps "${status}" to ${modelsStatus} and calls the aurora-backoffice helper`, async () => {
+        mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+
+        await auroraOrchestrator.updateTenantStatus('aurora-t-1', status as never);
+
+        expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledWith({
+          tenantId: 'aurora-t-1',
+          status: modelsStatus,
+        });
+      });
+    }
+  });
+
+  describe('getTenantStatus', () => {
+    const okCases: Record<string, string | undefined> = {
+      ACTIVE: 'active',
+      WRITE_LOCKED: 'write-locked',
+      DISABLED: 'disabled',
+      LOCKED: undefined,
+    };
+
+    for (const [modelsStatus, expected] of Object.entries(okCases)) {
+      it(`maps ${modelsStatus} to ${expected ?? 'undefined'}`, async () => {
+        mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: modelsStatus });
+
+        const result = await auroraOrchestrator.getTenantStatus('aurora-t-1');
+
+        expect(result).toEqual({ kind: 'ok', status: expected });
+      });
+    }
+
+    it('maps an ok result with no status to undefined', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: undefined });
+
+      const result = await auroraOrchestrator.getTenantStatus('aurora-t-1');
+
+      expect(result).toEqual({ kind: 'ok', status: undefined });
+    });
+
+    it('passes a not_found result through unchanged', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'not_found' });
+
+      const result = await auroraOrchestrator.getTenantStatus('aurora-t-1');
+
+      expect(result).toEqual({ kind: 'not_found' });
+    });
+
+    it('passes an error result through unchanged', async () => {
+      const cause = new Error('boom');
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'error', cause });
+
+      const result = await auroraOrchestrator.getTenantStatus('aurora-t-1');
+
+      expect(result).toEqual({ kind: 'error', cause });
+    });
+  });
+
   describe('getS3ClientContext', () => {
     it('returns endpoint + credentials with Aurora-specific knobs', async () => {
       mockSsmCredentials('aurora-t-1', {
@@ -501,20 +542,20 @@ describe('auroraOrchestrator', () => {
       mockGetOperationsSamples.mockResolvedValue([]);
     });
 
-    it('forwards tenantId, from, to and defaults window to "1d" when interval is omitted', async () => {
+    it('forwards tenantId, from, to and defaults window to "24h" when interval is omitted', async () => {
       await auroraOrchestrator.getTenantUsageMetrics('aurora-t-1', { from: FROM, to: TO });
 
       expect(mockGetStorageSamples).toHaveBeenCalledWith({
         tenantId: 'aurora-t-1',
         from: FROM,
         to: TO,
-        window: '1d',
+        window: '24h',
       });
       expect(mockGetOperationsSamples).toHaveBeenCalledWith({
         tenantId: 'aurora-t-1',
         from: FROM,
         to: TO,
-        window: '1d',
+        window: '24h',
       });
     });
 
@@ -523,6 +564,23 @@ describe('auroraOrchestrator', () => {
         from: FROM,
         to: TO,
         interval: '24h',
+      });
+
+      expect(mockGetStorageSamples).toHaveBeenCalledWith(
+        expect.objectContaining({ window: '24h' }),
+      );
+      expect(mockGetOperationsSamples).toHaveBeenCalledWith(
+        expect.objectContaining({ window: '24h' }),
+      );
+    });
+
+    // Aurora's API only accepts m/h units, so the orchestrator-agnostic '1d'
+    // interval must be translated before it hits the wire.
+    it('translates interval "1d" to window "24h" for Aurora', async () => {
+      await auroraOrchestrator.getTenantUsageMetrics('aurora-t-1', {
+        from: FROM,
+        to: TO,
+        interval: '1d',
       });
 
       expect(mockGetStorageSamples).toHaveBeenCalledWith(

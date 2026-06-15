@@ -18,6 +18,7 @@ import {
 import pRetry from 'p-retry';
 import { instrumentClient } from './aurora-api-metrics.js';
 import { getAuroraBackofficeSecrets } from '../auth-secrets.js';
+import type { TenantStatus } from '../service-orchestrator.js';
 
 export type {
   ModelOperationMetricsSample,
@@ -486,6 +487,37 @@ export async function getTenantStatus({
   } catch (cause) {
     return { kind: 'error', cause };
   }
+}
+
+// Maps the orchestrator-agnostic TenantStatus to Aurora's generated enum.
+// Homed here (not in region-helpers.ts) to avoid an import cycle: the registry
+// imports the orchestrator, so the orchestrator can't import back from
+// region-helpers.ts. aurora-backoffice.ts imports no registry/orchestrator.
+const TENANT_STATUS_TO_MODELS: Record<TenantStatus, ModelsTenantStatus> = {
+  active: 'ACTIVE',
+  'write-locked': 'WRITE_LOCKED',
+  disabled: 'DISABLED',
+};
+
+export function mapToModelsTenantStatus(status: TenantStatus): ModelsTenantStatus {
+  const modelsStatus = TENANT_STATUS_TO_MODELS[status];
+  if (!modelsStatus) {
+    throw new Error(`Unknown tenant status: ${String(status)}`);
+  }
+  return modelsStatus;
+}
+
+// Reverse of TENANT_STATUS_TO_MODELS. Returns undefined for Aurora's never-used
+// `LOCKED` value, which has no orchestrator-agnostic equivalent we model.
+const MODELS_TO_TENANT_STATUS: Record<ModelsTenantStatus, TenantStatus | undefined> = {
+  ACTIVE: 'active',
+  WRITE_LOCKED: 'write-locked',
+  DISABLED: 'disabled',
+  LOCKED: undefined,
+};
+
+export function mapFromModelsTenantStatus(status: ModelsTenantStatus): TenantStatus | undefined {
+  return MODELS_TO_TENANT_STATUS[status];
 }
 
 export async function updateTenantStatus({

@@ -7,9 +7,17 @@ import { createApiError } from './fth-api-errors.js';
 
 export * from './fth-api-errors.js';
 
+// Local status union — keeps the low-level client independent of
+// service-orchestrator.ts. Matches FTH's TenantStatus enum.
+export type FthClientStatus = 'active' | 'write-locked' | 'disabled';
+
 export interface FthManagementClient {
   createClient(args: CreateClientArgs): Promise<FthClientRecord>;
   getClient(clientRef: string): Promise<FthClientRecord>;
+  updateClientStatus(
+    clientRef: string,
+    args: { status: FthClientStatus; displayName?: string; idempotencyKey?: string },
+  ): Promise<void>;
 
   createStorageUser(clientRef: string, args: CreateStorageUserArgs): Promise<FthStorageUser>;
   listStorageUsers(clientRef: string): Promise<FthStorageUser[]>;
@@ -319,6 +327,19 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
       ),
     getClient: (clientRef) =>
       request<FthClientRecord>('GET', '/management/v1/clients/{clientRef}', { clientRef }),
+    updateClientStatus: (clientRef, args) =>
+      request<void>(
+        'PATCH',
+        '/management/v1/clients/{clientRef}',
+        { clientRef },
+        {
+          body: {
+            status: args.status,
+            ...(args.displayName !== undefined && { displayName: args.displayName }),
+          },
+          idempotencyKey: args.idempotencyKey,
+        },
+      ),
 
     createStorageUser: (clientRef, args) =>
       request<FthStorageUser>(
@@ -350,6 +371,28 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
         userRef,
       }),
 
+    ...buildAccessKeyMethods(request),
+
+    getClientMetricsTimeseries: (clientRef, query) => {
+      const params = new URLSearchParams({ from: query.from, to: query.to });
+      if (query.interval) params.set('interval', query.interval);
+      return request<FthMetricsTimeseriesResponse>(
+        'GET',
+        '/management/v1/clients/{clientRef}/metrics/timeseries',
+        { clientRef },
+        { query: params },
+      );
+    },
+  };
+}
+
+function buildAccessKeyMethods(
+  request: RequestFn,
+): Pick<
+  FthManagementClient,
+  'createAccessKey' | 'listAccessKeys' | 'getAccessKey' | 'deleteAccessKey'
+> {
+  return {
     createAccessKey: (clientRef, userRef, args) =>
       request<FthAccessKeyWithSecret>(
         'POST',
@@ -385,17 +428,6 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
         { clientRef, accessKeyId },
         { idempotencyKey: opts?.idempotencyKey },
       ),
-
-    getClientMetricsTimeseries: (clientRef, query) => {
-      const params = new URLSearchParams({ from: query.from, to: query.to });
-      if (query.interval) params.set('interval', query.interval);
-      return request<FthMetricsTimeseriesResponse>(
-        'GET',
-        '/management/v1/clients/{clientRef}/metrics/timeseries',
-        { clientRef },
-        { query: params },
-      );
-    },
   };
 }
 

@@ -370,6 +370,37 @@ describe('FthClient endpoint coverage', () => {
       'https://api.fortilyx.com/management/v1/clients/client-1/access-keys/AKIA-1',
     );
   });
+
+  it('updateClientStatus PATCHes the client with the status body', async () => {
+    fetchMock = mockFetch(204);
+    client = buildClient({ fetch: fetchMock });
+
+    await client.updateClientStatus('client-1', { status: 'write-locked' });
+
+    const req = lastRequest(fetchMock);
+    expect(req.method).toBe('PATCH');
+    expect(req.url).toBe('https://api.fortilyx.com/management/v1/clients/client-1');
+    expect(await req.json()).toEqual({ status: 'write-locked' });
+  });
+
+  it('updateClientStatus includes displayName when provided', async () => {
+    fetchMock = mockFetch(204);
+    client = buildClient({ fetch: fetchMock });
+
+    await client.updateClientStatus('client-1', { status: 'active', displayName: 'Acme' });
+
+    const req = lastRequest(fetchMock);
+    expect(await req.json()).toEqual({ status: 'active', displayName: 'Acme' });
+  });
+
+  it('updateClientStatus returns void on 204', async () => {
+    fetchMock = mockFetch(204);
+    client = buildClient({ fetch: fetchMock });
+
+    const result = await client.updateClientStatus('client-1', { status: 'disabled' });
+
+    expect(result).toBeUndefined();
+  });
 });
 
 describe('FthClient query-param building', () => {

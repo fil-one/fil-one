@@ -35,6 +35,10 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   },
 }));
 
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './delete-access-key.js';
@@ -92,7 +96,7 @@ describe('delete-access-key baseHandler', () => {
   it('routes Aurora rows (region=eu-west-1) to the Aurora orchestrator', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1') });
     ddbMock.on(DeleteItemCommand).resolves({});
-    auroraIsTenantReady.mockResolvedValue('aurora-t-1');
+    auroraIsTenantReady.mockReturnValue('aurora-t-1');
     auroraDeleteAccessKey.mockResolvedValue(undefined);
 
     const result = (await baseHandler(eventWithKey(KEY_ID))) as { statusCode: number };
@@ -107,7 +111,7 @@ describe('delete-access-key baseHandler', () => {
   it('routes FTH rows (region=us-east-1) to the FTH orchestrator', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('us-east-1') });
     ddbMock.on(DeleteItemCommand).resolves({});
-    fthIsTenantReady.mockResolvedValue('fth-t-1');
+    fthIsTenantReady.mockReturnValue('fth-t-1');
     fthDeleteAccessKey.mockResolvedValue(undefined);
 
     const result = (await baseHandler(eventWithKey(KEY_ID))) as { statusCode: number };
@@ -121,7 +125,7 @@ describe('delete-access-key baseHandler', () => {
   it('falls back to Aurora for legacy rows without a region attribute', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem() });
     ddbMock.on(DeleteItemCommand).resolves({});
-    auroraIsTenantReady.mockResolvedValue('aurora-t-1');
+    auroraIsTenantReady.mockReturnValue('aurora-t-1');
     auroraDeleteAccessKey.mockResolvedValue(undefined);
 
     const result = (await baseHandler(eventWithKey(KEY_ID))) as { statusCode: number };
@@ -133,7 +137,7 @@ describe('delete-access-key baseHandler', () => {
 
   it('returns 503 and does not delete the row when tenant is not ready', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1') });
-    auroraIsTenantReady.mockResolvedValue(null);
+    auroraIsTenantReady.mockReturnValue(null);
 
     const result = (await baseHandler(eventWithKey(KEY_ID))) as { statusCode: number };
 
@@ -144,7 +148,7 @@ describe('delete-access-key baseHandler', () => {
 
   it('does not delete the DDB row when the orchestrator throws', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: accessKeyItem('eu-west-1') });
-    auroraIsTenantReady.mockResolvedValue('aurora-t-1');
+    auroraIsTenantReady.mockReturnValue('aurora-t-1');
     auroraDeleteAccessKey.mockRejectedValue(new Error('Aurora API error'));
 
     await expect(baseHandler(eventWithKey(KEY_ID))).rejects.toThrow('Aurora API error');
