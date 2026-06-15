@@ -178,7 +178,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
             })
           }
         >
-          Upload
+          Upload object
         </Button>
       </div>
 
