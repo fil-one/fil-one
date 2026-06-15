@@ -4,7 +4,7 @@ import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { UsageResponse } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { getProvisionedRegions } from '../lib/region-helpers.js';
-import type { ServiceOrchestrator, TenantInfo } from '../lib/service-orchestrator.js';
+import type { ServiceOrchestrator, TenantInfo, TenantStatus } from '../lib/service-orchestrator.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -15,12 +15,10 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 const DEFAULT_BUCKET_LIMIT = 100;
 const DEFAULT_ACCESS_KEY_LIMIT = 299;
 
-// Most-restrictive wins when combining tenant statuses across regions.
-const STATUS_SEVERITY: Record<NonNullable<TenantInfo['status']>, number> = {
-  disabled: 2,
-  'write-locked': 1,
-  active: 0,
-};
+// A tenant is provisioned on the first bucket creation in a region, which also
+// creates one system `filone-console` key; reserve a slot per provisioned
+// region so users see only the keys they manage.
+const RESERVED_KEYS_PER_REGION = 1;
 
 interface RegionUsage {
   /** Most-recent storage reading for the region (point-in-time). */
@@ -53,7 +51,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const thirtyDaysAgo = new Date(now.getTime());
   thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
-  const perRegion = (
+  const regionUsages = (
     await Promise.all(
       regions.map(({ orchestrator, tenantId }) =>
         fetchRegionUsage(orgId, orchestrator, tenantId, thirtyDaysAgo, now),
@@ -61,6 +59,18 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     )
   ).filter((r): r is RegionUsage => r !== null);
 
+  const response = aggregateRegionUsages(regionUsages);
+
+  return new ResponseBuilder().status(200).body(response).build();
+}
+
+// Folds the per-region usages into the dashboard totals. Counts and limits are
+// summed; storage/egress are pre-reduced per region (see `fetchRegionUsage`);
+// status collapses to the most-restrictive across regions. The system
+// `filone-console` key (one per provisioned region, created with the tenant on
+// the region's first bucket creation) is subtracted from access key counts and
+// limits so users see only the keys they manage.
+function aggregateRegionUsages(regionUsages: RegionUsage[]): UsageResponse {
   let storageUsedBytes = 0;
   let objectCount = 0;
   let egressUsedBytes = 0;
@@ -68,9 +78,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   let bucketLimit = 0;
   let rawKeyCount = 0;
   let rawKeyLimit = 0;
-  let status: TenantInfo['status'];
+  let statuses: TenantStatus[] = [];
 
-  for (const r of perRegion) {
+  for (const r of regionUsages) {
     storageUsedBytes += r.storageBytes;
     objectCount += r.objectCount;
     egressUsedBytes += r.egressBytes;
@@ -78,25 +88,22 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     bucketLimit += r.info.bucketLimit;
     rawKeyCount += r.info.keyCount;
     rawKeyLimit += r.info.accessKeyLimit;
-    status = mostRestrictive(status, r.info.status);
+    if (r.info.status) statuses.push(r.info.status);
   }
 
-  // Reserve one slot per tenant for the system `filone-console` key created
-  // during onboarding, so users see counts/limits relative to keys they manage.
-  const reserved = perRegion.length;
-  const accessKeyCount = Math.max(0, rawKeyCount - reserved);
-  const accessKeyLimit = Math.max(0, rawKeyLimit - reserved);
+  const reserved = regionUsages.length * RESERVED_KEYS_PER_REGION;
 
-  const response: UsageResponse = {
+  return {
     storage: { usedBytes: storageUsedBytes },
     egress: { usedBytes: egressUsedBytes },
     buckets: { count: bucketCount, limit: bucketLimit },
     objects: { count: objectCount },
-    accessKeys: { count: accessKeyCount, limit: accessKeyLimit },
-    tenantStatus: status,
+    accessKeys: {
+      count: Math.max(0, rawKeyCount - reserved),
+      limit: Math.max(0, rawKeyLimit - reserved),
+    },
+    tenantStatus: pickMostRestrictiveStatus(statuses),
   };
-
-  return new ResponseBuilder().status(200).body(response).build();
 }
 
 // Swallow per-orchestrator errors so one region's outage still renders the rest.
@@ -142,10 +149,14 @@ async function fetchRegionUsage(
   }
 }
 
-function mostRestrictive(a: TenantInfo['status'], b: TenantInfo['status']): TenantInfo['status'] {
-  if (a === undefined) return b;
-  if (b === undefined) return a;
-  return STATUS_SEVERITY[a] >= STATUS_SEVERITY[b] ? a : b;
+// Returns the most-restrictive status present, or `undefined` when none of the
+// regions report a status we model.
+function pickMostRestrictiveStatus(
+  statuses: (TenantStatus | undefined)[],
+): TenantStatus | undefined {
+  // Tenant statuses ordered most- to least-restrictive: when regions disagree,
+  // the dashboard reflects the most restrictive status in effect anywhere.
+  return (['disabled', 'write-locked', 'active'] as const).find((s) => statuses.includes(s));
 }
 
 export const handler = middy(baseHandler)

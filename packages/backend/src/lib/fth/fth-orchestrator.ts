@@ -18,6 +18,7 @@ import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketConfigurationError,
+  BucketNotFoundError,
   NotImplementedError,
 } from '../errors.js';
 import type {
@@ -302,6 +303,13 @@ export const fthOrchestrator = {
     bucketName: string,
     _opts: GetTenantUsageMetricsOptions,
   ): Promise<StorageUsageSample[]> {
+    // Ownership check (tenant-scoped): only the owning tenant's S3 client lists
+    // the bucket. A snapshot miss alone can't distinguish "not owned" from
+    // "owned but absent from the current breakdown" (e.g. an empty bucket), so
+    // confirm existence before reading metrics.
+    const bucket = await fthOrchestrator.getBucket(tenantId, bucketName);
+    if (!bucket) throw new BucketNotFoundError(bucketName);
+
     // FTH has no per-bucket time series; the current-snapshot `by_bucket`
     // breakdown is the finest per-bucket reading available. A bucket can appear
     // once per storage tier, so fold all matching rows into one sample.

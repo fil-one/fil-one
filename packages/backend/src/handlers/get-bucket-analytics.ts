@@ -1,11 +1,18 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { BucketAnalyticsResponse, ErrorResponse } from '@filone/shared';
-import { ResponseBuilder } from '../lib/response-builder.js';
-import { getProvisionedRegions } from '../lib/region-helpers.js';
+import type { BucketAnalyticsResponse } from '@filone/shared';
+import { S3Region, isSupportedRegion } from '@filone/shared';
+import { BucketNotFoundError } from '../lib/errors.js';
+import { getOrgProfile } from '../lib/org-profile.js';
+import {
+  ResponseBuilder,
+  tenantNotReadyResponse,
+  unsupportedRegionResponse,
+} from '../lib/response-builder.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
@@ -13,49 +20,41 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { orgId } = getUserInfo(event);
   const bucketName = event.pathParameters?.name;
 
   if (!bucketName) {
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
   }
 
-  // A bucket lives in exactly one region; resolve every provisioned region and
-  // find the orchestrator that owns it.
-  const regions = await getProvisionedRegions(orgId);
-  if (regions.length === 0) {
-    console.error('No provisioned regions for org', { orgId });
-    return new ResponseBuilder()
-      .status(503)
-      .body<ErrorResponse>({
-        message: 'Tenant setup is not complete, please try again later',
-      })
-      .build();
-  }
+  const { orgId } = getUserInfo(event);
 
-  // getBucket doubles as the ownership check: only the owning tenant's
-  // orchestrator returns a non-null bucket.
-  const owners = await Promise.all(
-    regions.map(async ({ orchestrator, tenantId }) => {
-      const bucket = await orchestrator.getBucket(tenantId, bucketName);
-      return bucket ? { orchestrator, tenantId } : null;
-    }),
-  );
-  const owner = owners.find((o) => o !== null);
-
-  if (!owner) {
-    return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
+  const region = event.queryStringParameters?.region ?? S3Region.EuWest1;
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region, getVerifiedEmail(event))) {
+    return unsupportedRegionResponse(region);
   }
+  const orchestrator = getOrchestratorForRegion(region);
+  const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
+  if (!tenantId) return tenantNotReadyResponse();
 
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime());
   thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
-  const samples = await owner.orchestrator.getBucketUsageMetrics(owner.tenantId, bucketName, {
-    from: thirtyDaysAgo.toISOString(),
-    to: now.toISOString(),
-    interval: '1d',
-  });
+  // getBucketUsageMetrics performs the tenant-scoped ownership check and throws
+  // BucketNotFoundError when the bucket isn't owned by this tenant.
+  let samples;
+  try {
+    samples = await orchestrator.getBucketUsageMetrics(tenantId, bucketName, {
+      from: thirtyDaysAgo.toISOString(),
+      to: now.toISOString(),
+      interval: '1d',
+    });
+  } catch (err) {
+    if (err instanceof BucketNotFoundError) {
+      return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
+    }
+    throw err;
+  }
 
   const latest = samples.at(-1);
 

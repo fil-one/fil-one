@@ -35,7 +35,7 @@ import {
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
-import { NotImplementedError } from '../errors.js';
+import { BucketNotFoundError, NotImplementedError } from '../errors.js';
 import type {
   BucketDetails,
   BucketSummary,
@@ -272,10 +272,16 @@ export const auroraOrchestrator = {
   },
 
   async getBucketUsageMetrics(
-    _tenantId: string,
+    tenantId: string,
     bucketName: string,
     opts: GetTenantUsageMetricsOptions,
   ): Promise<StorageUsageSample[]> {
+    // getBucketStorageSamples queries Aurora metrics globally by bucket name, so
+    // gate it behind a tenant-scoped ownership check: only the owning tenant's
+    // Portal client resolves the bucket (404 -> null otherwise).
+    const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName);
+    if (!bucket) throw new BucketNotFoundError(bucketName);
+
     const samples = await getBucketStorageSamples({
       bucketName,
       from: opts.from,

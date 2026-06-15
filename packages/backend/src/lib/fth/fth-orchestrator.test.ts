@@ -67,6 +67,7 @@ import {
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   BucketConfigurationError,
+  BucketNotFoundError,
 } from '../errors.js';
 import { FthApiError, FthConflictError, FthNotFoundError } from './fth-management-client.js';
 
@@ -176,16 +177,14 @@ describe('fthOrchestrator.updateTenantStatus', () => {
 });
 
 describe('fthOrchestrator.getTenantStatus', () => {
-  for (const status of ['active', 'write-locked', 'disabled'] as const) {
-    it(`returns the normalized "${status}" status from getClient`, async () => {
-      mockGetClient.mockResolvedValue({ id: fthClientId, status });
+  it('returns the status straight through from getClient', async () => {
+    mockGetClient.mockResolvedValue({ id: fthClientId, status: 'write-locked' });
 
-      const result = await fthOrchestrator.getTenantStatus(fthClientId);
+    const result = await fthOrchestrator.getTenantStatus(fthClientId);
 
-      expect(result).toEqual({ kind: 'ok', status });
-      expect(mockGetClient).toHaveBeenCalledWith(fthClientId);
-    });
-  }
+    expect(result).toEqual({ kind: 'ok', status: 'write-locked' });
+    expect(mockGetClient).toHaveBeenCalledWith(fthClientId);
+  });
 
   it('returns status undefined when FTH reports an unmodeled status', async () => {
     mockGetClient.mockResolvedValue({ id: fthClientId, status: 'provisioning' });
@@ -921,12 +920,9 @@ describe('fthOrchestrator.getTenantInfo', () => {
   });
 
   it.each([
-    ['active', 'active'],
-    ['write-locked', 'write-locked'],
-    ['disabled', 'disabled'],
     [undefined, undefined],
     ['unknown', undefined],
-  ])('maps status %s -> %s', async (status, expected) => {
+  ])('filters unmodeled status %s -> %s', async (status, expected) => {
     mockGetClient.mockResolvedValue({
       id: fthClientId,
       externalId: 'org-1',
@@ -963,6 +959,32 @@ describe('fthOrchestrator.getTenantInfo', () => {
 
 describe('fthOrchestrator.getBucketUsageMetrics', () => {
   const OPTS = { from: '2026-01-01T00:00:00Z', to: '2026-01-31T00:00:00Z', interval: '1d' };
+
+  // getBucketUsageMetrics gates the snapshot read behind a tenant-scoped getBucket
+  // ownership check, so by default stub credentials + a ListBuckets that owns it.
+  beforeEach(() => {
+    ssmMock.on(GetParameterCommand).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
+    });
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'my-bucket', CreationDate: new Date('2026-02-15T10:00:00Z') }],
+    });
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Suspended' });
+    const notFound = new Error('not configured');
+    (notFound as Error & { name: string }).name = 'ObjectLockConfigurationNotFoundError';
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(notFound);
+  });
+
+  it('throws BucketNotFoundError when the bucket is not owned by the tenant', async () => {
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'other', CreationDate: new Date('2026-02-15T10:00:00Z') }],
+    });
+
+    await expect(
+      fthOrchestrator.getBucketUsageMetrics(fthClientId, 'my-bucket', OPTS),
+    ).rejects.toThrow(BucketNotFoundError);
+    expect(mockGetClientMetricsCurrent).not.toHaveBeenCalled();
+  });
 
   it('folds the matching by_bucket rows across tiers into one sample', async () => {
     mockGetClientMetricsCurrent.mockResolvedValue({

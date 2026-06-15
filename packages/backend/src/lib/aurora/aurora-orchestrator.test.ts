@@ -73,6 +73,7 @@ import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
+  BucketNotFoundError,
   NotImplementedError,
 } from '../errors.js';
 
@@ -687,11 +688,53 @@ describe('auroraOrchestrator', () => {
         status: undefined,
       });
     });
+
+    it.each([
+      ['ACTIVE', 'active'],
+      ['WRITE_LOCKED', 'write-locked'],
+      ['DISABLED', 'disabled'],
+      ['LOCKED', undefined],
+      [undefined, undefined],
+      ['unknown', undefined],
+    ])('normalizes backoffice status %s -> %s', async (status, expected) => {
+      mockGetTenantInfo.mockResolvedValue({ status });
+
+      const result = await auroraOrchestrator.getTenantInfo('aurora-t-1');
+
+      expect(result.status).toBe(expected);
+    });
   });
 
   describe('getBucketUsageMetrics', () => {
     const FROM = '2026-01-01T00:00:00Z';
     const TO = '2026-01-31T00:00:00Z';
+
+    // getBucketUsageMetrics gates the (globally-scoped) storage query behind a
+    // tenant-scoped getBucket ownership check, so by default resolve the bucket.
+    beforeEach(() => {
+      mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
+      mockPortalGetBucketInfo.mockResolvedValue({
+        data: { name: 'my-bucket', createdAt: '2026-01-01T00:00:00Z' },
+        error: undefined,
+        response: { status: 200 },
+      });
+    });
+
+    it('throws BucketNotFoundError when the bucket is not owned by the tenant', async () => {
+      mockPortalGetBucketInfo.mockResolvedValue({
+        data: undefined,
+        error: { message: 'not found' },
+        response: { status: 404 },
+      });
+
+      await expect(
+        auroraOrchestrator.getBucketUsageMetrics('aurora-t-1', 'other-orgs-bucket', {
+          from: FROM,
+          to: TO,
+        }),
+      ).rejects.toThrow(BucketNotFoundError);
+      expect(mockGetBucketStorageSamples).not.toHaveBeenCalled();
+    });
 
     it('forwards bucketName/from/to/window and maps samples with ?? 0 defaults', async () => {
       mockGetBucketStorageSamples.mockResolvedValue([

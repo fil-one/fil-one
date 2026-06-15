@@ -235,8 +235,10 @@ export interface ServiceOrchestrator {
 
   /**
    * Returns a single bucket's storage usage as a normalized time series over
-   * `[from, to)`. Read-only. Backs per-bucket analytics. Returns an empty array
-   * when the orchestrator has no storage series for the bucket.
+   * `[from, to)`. Read-only. Backs per-bucket analytics. The ownership check is
+   * performed here (tenant-scoped): throws {@link BucketNotFoundError} when the
+   * bucket is not found or not owned by the tenant. Returns an empty array when
+   * the bucket is owned but has no storage series yet.
    */
   getBucketUsageMetrics(
     tenantId: string,
