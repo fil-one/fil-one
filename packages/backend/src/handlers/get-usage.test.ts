@@ -109,12 +109,13 @@ describe('get-usage baseHandler', () => {
 
     const body = await run();
 
+    // Limits are global constants, not the per-region values reported above.
     expect(body).toStrictEqual({
       storage: { usedBytes: 4000 },
       egress: { usedBytes: 1500 },
-      buckets: { count: 2, limit: 50 },
+      buckets: { count: 2, limit: 100 },
       objects: { count: 3 },
-      accessKeys: { count: 2, limit: 199 },
+      accessKeys: { count: 2, limit: 298 },
     });
   });
 
@@ -129,7 +130,7 @@ describe('get-usage baseHandler', () => {
 
     const body = await run();
 
-    expect(body.accessKeys).toEqual({ count: 0, limit: 299 });
+    expect(body.accessKeys).toEqual({ count: 0, limit: 298 });
   });
 
   it('returns defaults when no region is provisioned', async () => {
@@ -147,7 +148,7 @@ describe('get-usage baseHandler', () => {
       egress: { usedBytes: 0 },
       buckets: { count: 0, limit: 100 },
       objects: { count: 0 },
-      accessKeys: { count: 0, limit: 299 },
+      accessKeys: { count: 0, limit: 298 },
     });
     expect(aurora.getTenantUsageMetrics).not.toHaveBeenCalled();
     expect(aurora.getTenantInfo).not.toHaveBeenCalled();
@@ -169,7 +170,7 @@ describe('get-usage baseHandler', () => {
       egress: { usedBytes: 0 },
       buckets: { count: 0, limit: 100 },
       objects: { count: 0 },
-      accessKeys: { count: 0, limit: 299 },
+      accessKeys: { count: 0, limit: 298 },
     });
   });
 
@@ -196,7 +197,7 @@ describe('get-usage baseHandler', () => {
     expect(body.egress.usedBytes).toBe(350);
   });
 
-  it('sums usage, counts and limits across all provisioned regions', async () => {
+  it('sums usage and counts across all provisioned regions; limits stay constant', async () => {
     const aurora = createMockedOrchestrator({
       id: 'aurora',
       region: 'eu-west-1',
@@ -220,9 +221,10 @@ describe('get-usage baseHandler', () => {
     expect(body.storage.usedBytes).toBe(1500);
     expect(body.objects.count).toBe(6);
     expect(body.egress.usedBytes).toBe(250);
-    expect(body.buckets).toEqual({ count: 3, limit: 200 });
-    // keys: (4 + 2) − 2 console keys = 4; limit: (300 + 300) − 2 = 598.
-    expect(body.accessKeys).toEqual({ count: 4, limit: 598 });
+    expect(body.buckets).toEqual({ count: 3, limit: 100 });
+    // keys: (4 + 2) − 2 console keys (one per region) = 4; limit is the
+    // constant global ceiling: 300 − 2 = 298.
+    expect(body.accessKeys).toEqual({ count: 4, limit: 298 });
 
     expect(aurora.getTenantUsageMetrics).toHaveBeenCalledWith(AURORA_TENANT_ID, expect.any(Object));
     expect(fth.getTenantInfo).toHaveBeenCalledWith(FTH_TENANT_ID);
@@ -268,7 +270,45 @@ describe('get-usage baseHandler', () => {
 
     expect(body.storage.usedBytes).toBe(1000);
     expect(body.buckets).toEqual({ count: 2, limit: 100 });
-    // Only the surviving region reserves a console key: 3 − 1 = 2; 300 − 1 = 299.
-    expect(body.accessKeys).toEqual({ count: 2, limit: 299 });
+    // Only the surviving region's console key is hidden from the count: 3 − 1 = 2.
+    // The limit is the constant global ceiling: 300 − 2 = 298.
+    expect(body.accessKeys).toEqual({ count: 2, limit: 298 });
+  });
+
+  it('returns defaults when every provisioned region fails to fetch usage', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const aurora = createMockedOrchestrator({
+      id: 'aurora',
+      region: 'eu-west-1',
+      tenantId: AURORA_TENANT_ID,
+      failUsage: true,
+    });
+    const fth = createMockedOrchestrator({
+      id: 'fth',
+      region: 'us-east-1',
+      tenantId: FTH_TENANT_ID,
+      failUsage: true,
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+    const result = await baseHandler(authenticatedEvent());
+    const body = JSON.parse(String((result as { body: string }).body));
+
+    // No region survives, so the response falls back to the global defaults
+    // rather than erroring out: a console key is reserved per region (300 − 2 = 298).
+    expect((result as { statusCode: number }).statusCode).toBe(200);
+    expect(body).toStrictEqual({
+      storage: { usedBytes: 0 },
+      egress: { usedBytes: 0 },
+      buckets: { count: 0, limit: 100 },
+      objects: { count: 0 },
+      accessKeys: { count: 0, limit: 298 },
+    });
+    // tenantStatus is omitted entirely when no region reports one.
+    expect(body).not.toHaveProperty('tenantStatus');
+    // Each failed region's error is logged (swallowed, not thrown).
+    expect(errorSpy).toHaveBeenCalledTimes(2);
+
+    errorSpy.mockRestore();
   });
 });

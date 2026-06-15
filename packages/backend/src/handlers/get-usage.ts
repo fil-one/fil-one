@@ -10,15 +10,12 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
-// Defaults shown before any tenant is provisioned. `299` mirrors the
-// `300 − 1` console-key reservation applied once a tenant exists.
-const DEFAULT_BUCKET_LIMIT = 100;
-const DEFAULT_ACCESS_KEY_LIMIT = 299;
-
-// A tenant is provisioned on the first bucket creation in a region, which also
-// creates one system `filone-console` key; reserve a slot per provisioned
-// region so users see only the keys they manage.
-const RESERVED_KEYS_PER_REGION = 1;
+// Account-wide quotas. These are GLOBAL and CONSTANT — the displayed limit is
+// the same regardless of how many regions an org is provisioned in, and is not
+// summed per region. The displayed access-key limit reserves one system
+// `filone-console` key for each of the two regions: 300 − 2 = 298.
+const GLOBAL_BUCKET_LIMIT = 100;
+const GLOBAL_ACCESS_KEY_LIMIT = 300;
 
 interface RegionUsage {
   /** Most-recent storage reading for the region (point-in-time). */
@@ -40,9 +37,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     const response: UsageResponse = {
       storage: { usedBytes: 0 },
       egress: { usedBytes: 0 },
-      buckets: { count: 0, limit: DEFAULT_BUCKET_LIMIT },
+      buckets: { count: 0, limit: GLOBAL_BUCKET_LIMIT },
       objects: { count: 0 },
-      accessKeys: { count: 0, limit: DEFAULT_ACCESS_KEY_LIMIT },
+      accessKeys: { count: 0, limit: GLOBAL_ACCESS_KEY_LIMIT - 2 },
     };
     return new ResponseBuilder().status(200).body(response).build();
   }
@@ -59,25 +56,35 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     )
   ).filter((r): r is RegionUsage => r !== null);
 
+  if (regionUsages.length === 0) {
+    const response: UsageResponse = {
+      storage: { usedBytes: 0 },
+      egress: { usedBytes: 0 },
+      buckets: { count: 0, limit: GLOBAL_BUCKET_LIMIT },
+      objects: { count: 0 },
+      accessKeys: { count: 0, limit: GLOBAL_ACCESS_KEY_LIMIT - 2 },
+    };
+    return new ResponseBuilder().status(200).body(response).build();
+  }
+
   const response = aggregateRegionUsages(regionUsages);
 
   return new ResponseBuilder().status(200).body(response).build();
 }
 
-// Folds the per-region usages into the dashboard totals. Counts and limits are
-// summed; storage/egress are pre-reduced per region (see `fetchRegionUsage`);
-// status collapses to the most-restrictive across regions. The system
-// `filone-console` key (one per provisioned region, created with the tenant on
-// the region's first bucket creation) is subtracted from access key counts and
-// limits so users see only the keys they manage.
+// Folds the per-region usages into the dashboard totals. Counts (storage,
+// egress, objects, buckets, keys) are summed; storage/egress are pre-reduced
+// per region (see `fetchRegionUsage`); status collapses to the most-restrictive
+// across regions. The limit is global and constant (always `300 − 2`, never
+// summed or adjusted by provisioned-region count). The system `filone-console`
+// key present in each provisioned region is subtracted from the key *count*
+// only, so users see just the keys they manage.
 function aggregateRegionUsages(regionUsages: RegionUsage[]): UsageResponse {
   let storageUsedBytes = 0;
   let objectCount = 0;
   let egressUsedBytes = 0;
   let bucketCount = 0;
-  let bucketLimit = 0;
   let rawKeyCount = 0;
-  let rawKeyLimit = 0;
   let statuses: TenantStatus[] = [];
 
   for (const r of regionUsages) {
@@ -85,22 +92,18 @@ function aggregateRegionUsages(regionUsages: RegionUsage[]): UsageResponse {
     objectCount += r.objectCount;
     egressUsedBytes += r.egressBytes;
     bucketCount += r.info.bucketCount;
-    bucketLimit += r.info.bucketLimit;
     rawKeyCount += r.info.keyCount;
-    rawKeyLimit += r.info.accessKeyLimit;
     if (r.info.status) statuses.push(r.info.status);
   }
-
-  const reserved = regionUsages.length * RESERVED_KEYS_PER_REGION;
 
   return {
     storage: { usedBytes: storageUsedBytes },
     egress: { usedBytes: egressUsedBytes },
-    buckets: { count: bucketCount, limit: bucketLimit },
+    buckets: { count: bucketCount, limit: GLOBAL_BUCKET_LIMIT },
     objects: { count: objectCount },
     accessKeys: {
-      count: Math.max(0, rawKeyCount - reserved),
-      limit: Math.max(0, rawKeyLimit - reserved),
+      count: Math.max(0, rawKeyCount - regionUsages.length),
+      limit: GLOBAL_ACCESS_KEY_LIMIT - 2,
     },
     tenantStatus: pickMostRestrictiveStatus(statuses),
   };
