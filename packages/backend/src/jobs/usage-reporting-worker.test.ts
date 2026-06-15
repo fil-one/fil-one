@@ -122,6 +122,10 @@ describe('usage-reporting-worker', () => {
     mockFthUpdateTenantStatus.mockResolvedValue(undefined);
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('calls getTenantUsageMetrics with auroraTenantId, not orgId', async () => {
     mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
 
@@ -298,15 +302,18 @@ describe('usage-reporting-worker', () => {
     });
 
     it('records error in lockAction when the status update fails', async () => {
+      vi.useFakeTimers();
       mockGetTenantUsageMetrics.mockResolvedValue({
         storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }],
         egress: [],
       });
-      // Fail every retry so the bounded status-sync retry is exhausted and the
-      // failure is recorded (a single transient failure would be retried away).
+      // Fail every retry so the status-sync retry is exhausted and the failure
+      // is recorded (a single transient failure would be retried away).
       mockAuroraUpdateTenantStatus.mockRejectedValue(new Error('Aurora down'));
 
-      await handler(trialPayload);
+      const run = handler(trialPayload);
+      await vi.runAllTimersAsync();
+      await run;
 
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.lockAction).toEqual({ S: 'error:sync-failed:aurora' });
@@ -779,6 +786,7 @@ describe('usage-reporting-worker', () => {
     });
 
     it('partial failure: Aurora locks but FTH update fails — lockAction error:sync-failed:fth, report still completes', async () => {
+      vi.useFakeTimers();
       const trialPayload: UsageReportingWorkerPayload = {
         ...basePayload,
         subscriptionStatus: 'trialing',
@@ -790,7 +798,9 @@ describe('usage-reporting-worker', () => {
       });
       mockFthUpdateTenantStatus.mockRejectedValue(new Error('FTH API down'));
 
-      await handler(trialPayload);
+      const run = handler(trialPayload);
+      await vi.runAllTimersAsync();
+      await run;
 
       expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith(
         'aurora-tenant-123',

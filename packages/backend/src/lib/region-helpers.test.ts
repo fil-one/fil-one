@@ -16,6 +16,7 @@ import {
   assertRegionSyncSucceeded,
   getProvisionedRegions,
   syncTenantStatusInProvisionedRegions,
+  WEBHOOK_STATUS_SYNC_RETRY,
   type RegionSyncOutcome,
 } from './region-helpers.js';
 import { fakeOrchestrator, fakeOrgProfile } from '../test/fake-orchestrator.js';
@@ -135,7 +136,7 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     expect(aurora.updateTenantStatus).toHaveBeenCalledWith('aurora:org-1', 'write-locked');
   });
 
-  it('returns an error outcome when the probe keeps failing past all retries (1 initial + 1 retry)', async () => {
+  it('returns an error outcome when the probe keeps failing past all retries (1 initial + 3 retries)', async () => {
     vi.useFakeTimers();
     const aurora = fakeOrchestrator('aurora');
     aurora.getTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('outage') });
@@ -148,7 +149,7 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     expect(result).toMatchObject([
       { orchestratorId: 'aurora', tenantId: 'aurora:org-1', outcome: 'error' },
     ]);
-    expect(aurora.getTenantStatus).toHaveBeenCalledTimes(2);
+    expect(aurora.getTenantStatus).toHaveBeenCalledTimes(4);
   });
 
   it('still syncs the other region when one probe keeps failing', async () => {
@@ -165,7 +166,7 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     expect(fth.updateTenantStatus).toHaveBeenCalledWith('fth:org-1', 'write-locked');
   });
 
-  it('returns an error outcome with the cause when updateTenantStatus keeps failing past all retries (1 initial + 1 retry)', async () => {
+  it('returns an error outcome with the cause when updateTenantStatus keeps failing past all retries (1 initial + 3 retries)', async () => {
     vi.useFakeTimers();
     const updateError = new Error('FTH API error');
     const fth = fakeOrchestrator('fth', { status: 'active' });
@@ -179,7 +180,7 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     expect(result).toEqual([
       { orchestratorId: 'fth', tenantId: 'fth:org-1', outcome: 'error', cause: updateError },
     ]);
-    expect(fth.updateTenantStatus).toHaveBeenCalledTimes(2);
+    expect(fth.updateTenantStatus).toHaveBeenCalledTimes(4);
   });
 
   it('retries a transient update failure and syncs the region', async () => {
@@ -195,6 +196,23 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     const result = await promise;
 
     expect(result).toEqual([{ orchestratorId: 'fth', tenantId: 'fth:org-1', outcome: 'updated' }]);
+  });
+
+  it('honors a tighter retry override (1 initial + 1 retry)', async () => {
+    vi.useFakeTimers();
+    const aurora = fakeOrchestrator('aurora');
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('outage') });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    const promise = syncTenantStatusInProvisionedRegions(
+      'org-1',
+      'write-locked',
+      WEBHOOK_STATUS_SYNC_RETRY,
+    );
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(aurora.getTenantStatus).toHaveBeenCalledTimes(2);
   });
 });
 
