@@ -234,7 +234,7 @@ export const auroraOrchestrator = {
     tenantId: string,
     opts: GetTenantUsageMetricsOptions,
   ): Promise<TenantUsageMetrics> {
-    const window = opts.interval ?? '1d';
+    const window = mapIntervalToAuroraWindow(opts.interval ?? '1d');
     const { from, to } = opts;
 
     const [storageSamples, operationsSamples] = await Promise.all([
@@ -298,3 +298,10 @@ export const auroraOrchestrator = {
       }));
   },
 } satisfies ServiceOrchestrator;
+
+// Aurora's metrics API only accepts windows in m/h units, so the
+// orchestrator-agnostic '1d' value is translated before it hits the wire.
+function mapIntervalToAuroraWindow(interval: string): string {
+  if (interval === '1d') return '24h';
+  return interval;
+}
