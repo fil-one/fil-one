@@ -1,6 +1,6 @@
 # ADR: Passkeys as Primary Authentication
 
-**Status:** Proposed
+**Status:** Accepted
 **Created:** 2026-05-19
 **Last updated:** 2026-06-16
 
