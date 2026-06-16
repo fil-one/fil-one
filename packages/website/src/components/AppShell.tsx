@@ -104,11 +104,14 @@ export function AppShell({ children }: AppShellProps) {
     if (mobileOpen) closeButtonRef.current?.focus();
   }, [mobileOpen]);
 
-  // Lock body scroll when drawer is open
+  // Lock body scroll when drawer is open; compensate for scrollbar width to prevent layout shift
   useEffect(() => {
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
     document.body.style.overflow = mobileOpen ? 'hidden' : '';
+    document.body.style.paddingRight = mobileOpen ? `${scrollbarWidth}px` : '';
     return () => {
       document.body.style.overflow = '';
+      document.body.style.paddingRight = '';
     };
   }, [mobileOpen]);
 
@@ -148,7 +151,7 @@ export function AppShell({ children }: AppShellProps) {
         <div
           aria-hidden="true"
           onClick={closeDrawer}
-          className={`fixed inset-0 z-30 bg-black/40 transition-opacity duration-200 lg:hidden ${
+          className={`fixed inset-0 z-30 bg-black/40 transition-opacity duration-200 motion-reduce:duration-0 lg:hidden ${
             mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
           }`}
         />
@@ -159,7 +162,7 @@ export function AppShell({ children }: AppShellProps) {
           role="dialog"
           aria-modal="true"
           aria-label="Navigation menu"
-          className={`fixed inset-y-0 right-0 z-40 flex w-72 flex-col bg-white shadow-xl transition-transform duration-200 lg:hidden ${
+          className={`fixed inset-y-0 right-0 z-40 flex w-72 flex-col bg-white shadow-xl transition-transform duration-200 motion-reduce:duration-0 lg:hidden ${
             mobileOpen ? 'translate-x-0' : 'translate-x-full'
           }`}
           // Hide from assistive technology when closed
