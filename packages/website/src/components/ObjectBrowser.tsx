@@ -398,11 +398,11 @@ export function ObjectBrowser({
   const groups = groupVersionsByKey(versions);
   const entries = getEntriesAtPrefix(groups, currentPrefix);
 
-  function navigateToObject(key: string, versionId: string) {
+  function navigateToObject(key: string, versionId?: string) {
     void navigate({
       to: '/buckets/$bucketName/objects',
       params: { bucketName },
-      search: { key, region, versionId },
+      search: { key, region, ...(versionId && { versionId }) },
     });
   }
 
