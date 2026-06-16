@@ -165,6 +165,23 @@ pnpm test:e2e --project=chromium
 
 Your local AWS credentials (e.g. via `aws sso login`) must have write access to the staging stage's `BillingTable`.
 
+#### Seeding a fresh dev stage
+
+`auth.setup.ts` re-seeds **mutable** subscription state (status, dates) on top of an existing row — it does not create the row. A freshly deployed dev/preview stage therefore fails with `E2E test user <id> (role=…) has no BillingTable record` until the rows have been provisioned once.
+
+The complication: `E2E_*_USER_ID` is the `BillingTable` PK — a stage-local UUID minted by `resolveUserAndOrg` in [packages/backend/src/middleware/auth.ts](packages/backend/src/middleware/auth.ts) the first time a `sub` logs into a stage. So letting the user log in to the dev stage naturally would mint a *different* UUID than the staging value the env vars point at, and the reset would still fail.
+
+[`bin/seed-e2e-billing-from-staging.ts`](bin/seed-e2e-billing-from-staging.ts) sidesteps that by mirroring the identity-mapping rows from `staging` into the current stage so the staging UUIDs are reused:
+
+```bash
+E2E_PAID_USER_ID=...  E2E_UNPAID_USER_ID=...  E2E_TRIAL_USER_ID=... \
+node bin/seed-e2e-billing-from-staging.ts
+```
+
+Per user it copies four `UserInfoTable` rows (`SUB#<sub>`, `USER#<userId>`, `ORG#<orgId>` PROFILE, `ORG#<orgId>/MEMBER#<userId>`) and the `CUSTOMER#<userId>` row in `BillingTable`. The `ORG#` PROFILE row is rewritten before insert: `auroraTenantId`, `fthTenantId`, `auroraSetupFailureCount`, and the legacy `setupStatus` field are stripped, and `auroraSetupStatus` is reset to `FILONE_ORG_CREATED` — so the dev stage runs its own Aurora and FTH tenant setup against its own backends on first resource creation.
+
+The script self-execs under `sst shell` for the target stage and shells out to `sst shell --stage <source>` (default `staging`) to discover the source table names and region. Dev and staging may sit in different AWS regions; the script uses one DynamoDB client per region. Your AWS credentials must permit `dynamodb:GetItem` on the source `UserInfoTable` and `BillingTable` plus `dynamodb:PutItem` on the target tables. The script refuses to run when the target stage is `staging` or `production`. Override the source with `SOURCE_STAGE=...`. Run it once per stage; subsequent test runs reuse the seeded rows.
+
 After a run, an HTML report is generated at `playwright-report/`. To view it:
 
 ```bash
