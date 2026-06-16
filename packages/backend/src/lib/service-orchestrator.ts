@@ -4,6 +4,7 @@ import type {
   RetentionDurationType,
   RetentionMode,
   S3Region,
+  TenantStatus,
 } from '@filone/shared';
 import type { S3ClientContext } from './s3-client.js';
 import type { OrgProfileItem } from './org-profile.js';
@@ -83,13 +84,6 @@ export interface GetTenantUsageMetricsOptions {
   /** Sampling window applied to BOTH series. Defaults to '1d'. */
   interval?: string;
 }
-
-/**
- * Orchestrator-agnostic tenant status. These are the three lowercase-dashed
- * values shared by every orchestrator. Aurora's generated `ModelsTenantStatus`
- * additionally has a never-used `LOCKED` value we intentionally don't model.
- */
-export type TenantStatus = 'active' | 'write-locked' | 'disabled';
 
 /**
  * Result of a live tenant-status probe against an orchestrator's API.

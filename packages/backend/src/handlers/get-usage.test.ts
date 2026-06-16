@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import type { TenantInfo } from '../lib/service-orchestrator.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -19,48 +18,8 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
 }));
 
 vi.mock('../lib/org-profile.js', () => ({
-  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+  getOrgProfile: vi.fn(async (orgId: string) => fakeOrgProfile(orgId)),
 }));
-
-interface StorageSample {
-  timestamp: string;
-  bytesUsed: number;
-  objectCount: number;
-}
-interface EgressSample {
-  timestamp: string;
-  bytesUsed: number;
-}
-
-// Builds a fully self-contained fake orchestrator for multi-region tests.
-function createMockedOrchestrator(opts: {
-  id: string;
-  region: string;
-  tenantId: string | null;
-  storage?: StorageSample[];
-  egress?: EgressSample[];
-  info?: Partial<TenantInfo>;
-  failUsage?: boolean;
-}) {
-  const info: TenantInfo = {
-    bucketCount: opts.info?.bucketCount ?? 0,
-    bucketLimit: opts.info?.bucketLimit ?? 100,
-    keyCount: opts.info?.keyCount ?? 0,
-    accessKeyLimit: opts.info?.accessKeyLimit ?? 300,
-    status: opts.info?.status,
-  };
-  return {
-    id: opts.id,
-    region: opts.region,
-    isTenantReady: vi.fn().mockReturnValue(opts.tenantId),
-    getTenantUsageMetrics: opts.failUsage
-      ? vi.fn().mockRejectedValue(new Error('region down'))
-      : vi.fn().mockResolvedValue({ storage: opts.storage ?? [], egress: opts.egress ?? [] }),
-    getTenantInfo: opts.failUsage
-      ? vi.fn().mockRejectedValue(new Error('region down'))
-      : vi.fn().mockResolvedValue(info),
-  };
-}
 
 process.env.FILONE_STAGE = 'test';
 
@@ -68,14 +27,17 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './get-usage.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
+import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.js';
+import { S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', email: 'user@example.com' };
-const AURORA_TENANT_ID = 'aurora-tenant-1';
-const FTH_TENANT_ID = 'fth-tenant-1';
+// fakeOrchestrator derives the tenant id from the orgId in the PROFILE item.
+const AURORA_TENANT_ID = tenantFor('aurora', USER_INFO.orgId);
+const FTH_TENANT_ID = tenantFor('fth', USER_INFO.orgId);
 
 function authenticatedEvent() {
   return buildEvent({ userInfo: USER_INFO });
@@ -97,10 +59,8 @@ describe('get-usage baseHandler', () => {
   });
 
   it('returns usage data from a single Aurora region', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
       storage: [{ timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 4000, objectCount: 3 }],
       egress: [{ timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 1500 }],
       info: { bucketCount: 2, bucketLimit: 50, keyCount: 3, accessKeyLimit: 200 },
@@ -120,10 +80,8 @@ describe('get-usage baseHandler', () => {
   });
 
   it('hides the system filone-console key from access key counts', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
       info: { bucketCount: 0, bucketLimit: 100, keyCount: 1, accessKeyLimit: 300 },
     });
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
@@ -134,11 +92,7 @@ describe('get-usage baseHandler', () => {
   });
 
   it('returns defaults when no region is provisioned', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: null,
-    });
+    const aurora = fakeOrchestrator('aurora', { region: S3Region.EuWest1, ready: false });
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
     const body = await run();
@@ -155,10 +109,8 @@ describe('get-usage baseHandler', () => {
   });
 
   it('returns zeros (with the provisioned tenant defaults) when samples are empty', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
       info: { bucketCount: 0, bucketLimit: 100, keyCount: 0, accessKeyLimit: 300 },
     });
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
@@ -175,10 +127,8 @@ describe('get-usage baseHandler', () => {
   });
 
   it('uses the latest storage sample and sums the egress series', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
       storage: [
         { timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 1000, objectCount: 2 },
         { timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 5000, objectCount: 8 },
@@ -198,18 +148,14 @@ describe('get-usage baseHandler', () => {
   });
 
   it('sums usage and counts across all provisioned regions; limits stay constant', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
       storage: [{ timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 1000, objectCount: 5 }],
       egress: [{ timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 200 }],
       info: { bucketCount: 2, bucketLimit: 100, keyCount: 4, accessKeyLimit: 300 },
     });
-    const fth = createMockedOrchestrator({
-      id: 'fth',
-      region: 'us-east-1',
-      tenantId: FTH_TENANT_ID,
+    const fth = fakeOrchestrator('fth', {
+      region: S3Region.UsEast1,
       storage: [{ timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 500, objectCount: 1 }],
       egress: [{ timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 50 }],
       info: { bucketCount: 1, bucketLimit: 100, keyCount: 2, accessKeyLimit: 300 },
@@ -231,16 +177,12 @@ describe('get-usage baseHandler', () => {
   });
 
   it('surfaces the most-restrictive tenant status across regions', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
       info: { status: 'active' },
     });
-    const fth = createMockedOrchestrator({
-      id: 'fth',
-      region: 'us-east-1',
-      tenantId: FTH_TENANT_ID,
+    const fth = fakeOrchestrator('fth', {
+      region: S3Region.UsEast1,
       info: { status: 'write-locked' },
     });
     mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
@@ -251,19 +193,12 @@ describe('get-usage baseHandler', () => {
   });
 
   it('still renders other regions when one orchestrator fails', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
       storage: [{ timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 1000, objectCount: 5 }],
       info: { bucketCount: 2, bucketLimit: 100, keyCount: 3, accessKeyLimit: 300 },
     });
-    const fth = createMockedOrchestrator({
-      id: 'fth',
-      region: 'us-east-1',
-      tenantId: FTH_TENANT_ID,
-      failUsage: true,
-    });
+    const fth = fakeOrchestrator('fth', { region: S3Region.UsEast1, failUsage: true });
     mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
 
     const body = await run();
@@ -277,18 +212,8 @@ describe('get-usage baseHandler', () => {
 
   it('returns defaults when every provisioned region fails to fetch usage', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
-      failUsage: true,
-    });
-    const fth = createMockedOrchestrator({
-      id: 'fth',
-      region: 'us-east-1',
-      tenantId: FTH_TENANT_ID,
-      failUsage: true,
-    });
+    const aurora = fakeOrchestrator('aurora', { region: S3Region.EuWest1, failUsage: true });
+    const fth = fakeOrchestrator('fth', { region: S3Region.UsEast1, failUsage: true });
     mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
 
     const result = await baseHandler(authenticatedEvent());

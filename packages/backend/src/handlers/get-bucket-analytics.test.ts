@@ -19,33 +19,8 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
 }));
 
 vi.mock('../lib/org-profile.js', () => ({
-  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+  getOrgProfile: vi.fn(async (orgId: string) => fakeOrgProfile(orgId)),
 }));
-
-interface StorageSample {
-  timestamp: string;
-  bytesUsed: number;
-  objectCount: number;
-}
-
-// Builds a fully self-contained fake orchestrator. `tenantId` controls
-// isTenantReady; `usageMetrics` is the value getBucketUsageMetrics resolves to
-// (or an Error instance to reject with).
-function createMockedOrchestrator(opts: {
-  id: string;
-  region: string;
-  tenantId: string | null;
-  usageMetrics?: StorageSample[] | Error;
-}) {
-  const usage = opts.usageMetrics ?? [];
-  return {
-    id: opts.id,
-    region: opts.region,
-    isTenantReady: vi.fn().mockReturnValue(opts.tenantId),
-    getBucketUsageMetrics:
-      usage instanceof Error ? vi.fn().mockRejectedValue(usage) : vi.fn().mockResolvedValue(usage),
-  };
-}
 
 process.env.FILONE_STAGE = 'test';
 
@@ -53,13 +28,16 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './get-bucket-analytics.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
+import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.js';
+import { S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', email: 'user@example.com' };
-const AURORA_TENANT_ID = 'aurora-tenant-1';
+// fakeOrchestrator derives the tenant id from the orgId in the PROFILE item.
+const AURORA_TENANT_ID = tenantFor('aurora', USER_INFO.orgId);
 
 function authenticatedEvent(bucketName?: string, region?: string) {
   const event = buildEvent({ userInfo: USER_INFO });
@@ -83,15 +61,13 @@ describe('get-bucket-analytics baseHandler', () => {
   });
 
   it('returns analytics from the resolved region', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
-      usageMetrics: [{ timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 4000, objectCount: 3 }],
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
+      bucketMetrics: [{ timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 4000, objectCount: 3 }],
     });
     mockGetOrchestratorForRegion.mockReturnValue(aurora);
 
-    const result = await baseHandler(authenticatedEvent('my-bucket', 'eu-west-1'));
+    const result = await baseHandler(authenticatedEvent('my-bucket', S3Region.EuWest1));
 
     expect(result.statusCode).toBe(200);
     expect(JSON.parse(result.body!)).toStrictEqual({ objectCount: 3, bytesUsed: 4000 });
@@ -103,54 +79,48 @@ describe('get-bucket-analytics baseHandler', () => {
   });
 
   it('defaults to eu-west-1 when no region query param is provided', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
-      usageMetrics: [{ timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 4000, objectCount: 3 }],
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
+      bucketMetrics: [{ timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 4000, objectCount: 3 }],
     });
     mockGetOrchestratorForRegion.mockReturnValue(aurora);
 
     const result = await baseHandler(authenticatedEvent('my-bucket'));
 
     expect(result.statusCode).toBe(200);
-    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('eu-west-1');
+    expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.EuWest1);
   });
 
   it('returns zeros when the orchestrator has no samples', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
-      usageMetrics: [],
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
+      bucketMetrics: [],
     });
     mockGetOrchestratorForRegion.mockReturnValue(aurora);
 
-    const result = await baseHandler(authenticatedEvent('my-bucket', 'eu-west-1'));
+    const result = await baseHandler(authenticatedEvent('my-bucket', S3Region.EuWest1));
 
     expect(result.statusCode).toBe(200);
     expect(JSON.parse(result.body!)).toStrictEqual({ objectCount: 0, bytesUsed: 0 });
   });
 
   it('uses the last sample for values', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
-      usageMetrics: [
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
+      bucketMetrics: [
         { timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 1000, objectCount: 2 },
         { timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 5000, objectCount: 8 },
       ],
     });
     mockGetOrchestratorForRegion.mockReturnValue(aurora);
 
-    const result = await baseHandler(authenticatedEvent('my-bucket', 'eu-west-1'));
+    const result = await baseHandler(authenticatedEvent('my-bucket', S3Region.EuWest1));
 
     expect(JSON.parse(result.body!)).toStrictEqual({ objectCount: 8, bytesUsed: 5000 });
   });
 
   it('returns 400 when bucket name is missing', async () => {
-    const result = await baseHandler(authenticatedEvent(undefined, 'eu-west-1'));
+    const result = await baseHandler(authenticatedEvent(undefined, S3Region.EuWest1));
 
     expect(result.statusCode).toBe(400);
     expect(JSON.parse(result.body!)).toStrictEqual({ message: 'Bucket name is required' });
@@ -164,44 +134,36 @@ describe('get-bucket-analytics baseHandler', () => {
   });
 
   it('returns 503 when the tenant is not ready in the region', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: null,
-    });
+    const aurora = fakeOrchestrator('aurora', { region: S3Region.EuWest1, ready: false });
     mockGetOrchestratorForRegion.mockReturnValue(aurora);
 
-    const result = await baseHandler(authenticatedEvent('my-bucket', 'eu-west-1'));
+    const result = await baseHandler(authenticatedEvent('my-bucket', S3Region.EuWest1));
 
     expect(result.statusCode).toBe(503);
     expect(aurora.getBucketUsageMetrics).not.toHaveBeenCalled();
   });
 
   it('returns 404 when getBucketUsageMetrics reports the bucket is not found', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
-      usageMetrics: new BucketNotFoundError('other-orgs-bucket'),
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
+      bucketMetrics: new BucketNotFoundError('other-orgs-bucket'),
     });
     mockGetOrchestratorForRegion.mockReturnValue(aurora);
 
-    const result = await baseHandler(authenticatedEvent('other-orgs-bucket', 'eu-west-1'));
+    const result = await baseHandler(authenticatedEvent('other-orgs-bucket', S3Region.EuWest1));
 
     expect(result.statusCode).toBe(404);
     expect(JSON.parse(result.body!)).toStrictEqual({ message: 'Bucket not found' });
   });
 
   it('propagates non-not-found errors (becomes a 500 via the middleware)', async () => {
-    const aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: AURORA_TENANT_ID,
-      usageMetrics: new Error('upstream metrics failure'),
+    const aurora = fakeOrchestrator('aurora', {
+      region: S3Region.EuWest1,
+      bucketMetrics: new Error('upstream metrics failure'),
     });
     mockGetOrchestratorForRegion.mockReturnValue(aurora);
 
-    await expect(baseHandler(authenticatedEvent('my-bucket', 'eu-west-1'))).rejects.toThrow(
+    await expect(baseHandler(authenticatedEvent('my-bucket', S3Region.EuWest1))).rejects.toThrow(
       'upstream metrics failure',
     );
   });

@@ -1,10 +1,10 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { UsageResponse } from '@filone/shared';
+import type { UsageResponse, TenantStatus } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import { getProvisionedRegions } from '../lib/region-helpers.js';
-import type { ServiceOrchestrator, TenantInfo, TenantStatus } from '../lib/service-orchestrator.js';
+import type { ServiceOrchestrator, TenantInfo } from '../lib/service-orchestrator.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';

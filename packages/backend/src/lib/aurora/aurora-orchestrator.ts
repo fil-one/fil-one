@@ -4,7 +4,7 @@
 //
 // PROFILE-row attributes used: `auroraTenantId` and `auroraSetupStatus`.
 
-import { S3Region, getS3Endpoint } from '@filone/shared';
+import { S3Region, getS3Endpoint, TenantStatus } from '@filone/shared';
 import type {
   AccessKeyPermission,
   Bucket,
@@ -44,7 +44,6 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   ServiceOrchestrator,
-  TenantStatus,
   TenantStatusProbe,
   StorageUsageSample,
   TenantInfo,

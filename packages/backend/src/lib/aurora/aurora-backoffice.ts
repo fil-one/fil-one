@@ -18,7 +18,7 @@ import {
 import pRetry from 'p-retry';
 import { instrumentClient } from './aurora-api-metrics.js';
 import { getAuroraBackofficeSecrets } from '../auth-secrets.js';
-import type { TenantStatus } from '../service-orchestrator.js';
+import type { TenantStatus } from '@filone/shared';
 
 export type {
   ModelOperationMetricsSample,

@@ -1,3 +1,5 @@
+import { TenantStatus } from './tenants.ts';
+
 export interface UsageResponse {
   storage: {
     usedBytes: number;
@@ -16,5 +18,5 @@ export interface UsageResponse {
     count: number;
     limit: number;
   };
-  tenantStatus?: 'disabled' | 'write-locked' | 'active';
+  tenantStatus?: TenantStatus;
 }

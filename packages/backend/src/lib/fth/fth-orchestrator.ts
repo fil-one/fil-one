@@ -11,7 +11,7 @@
 import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
-import { getS3Endpoint, S3Region } from '@filone/shared';
+import { getS3Endpoint, S3Region, TenantStatus } from '@filone/shared';
 import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
 import {
@@ -29,7 +29,6 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   ServiceOrchestrator,
-  TenantStatus,
   TenantStatusProbe,
   StorageUsageSample,
   TenantInfo,
