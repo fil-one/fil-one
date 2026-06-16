@@ -48,13 +48,28 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const thirtyDaysAgo = new Date(now.getTime());
   thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
-  const regionUsages = (
-    await Promise.all(
-      regions.map(({ orchestrator, tenantId }) =>
-        fetchRegionUsage(orgId, orchestrator, tenantId, thirtyDaysAgo, now),
-      ),
-    )
-  ).filter((r): r is RegionUsage => r !== null);
+  // Swallow per-orchestrator errors so one region's outage still renders the
+  // rest: settle every fetch, log the failures, and keep the successes.
+  const settled = await Promise.allSettled(
+    regions.map(({ orchestrator, tenantId }) =>
+      fetchRegionUsage(orchestrator, tenantId, thirtyDaysAgo, now),
+    ),
+  );
+
+  const regionUsages: RegionUsage[] = [];
+  settled.forEach((result, i) => {
+    if (result.status === 'fulfilled') {
+      regionUsages.push(result.value);
+      return;
+    }
+    const { orchestrator, tenantId } = regions[i];
+    console.error('[get-usage] Failed to fetch usage', {
+      orgId,
+      tenantId,
+      region: orchestrator.region,
+      err: result.reason,
+    });
+  });
 
   if (regionUsages.length === 0) {
     const response: UsageResponse = {
@@ -109,47 +124,35 @@ function aggregateRegionUsages(regionUsages: RegionUsage[]): UsageResponse {
   };
 }
 
-// Swallow per-orchestrator errors so one region's outage still renders the rest.
 async function fetchRegionUsage(
-  orgId: string,
   orchestrator: ServiceOrchestrator,
   tenantId: string,
   from: Date,
   to: Date,
-): Promise<RegionUsage | null> {
-  try {
-    const [metrics, info] = await Promise.all([
-      orchestrator.getTenantUsageMetrics(tenantId, {
-        from: from.toISOString(),
-        to: to.toISOString(),
-        interval: '1d',
-      }),
-      orchestrator.getTenantInfo(tenantId),
-    ]);
+): Promise<RegionUsage> {
+  const [metrics, info] = await Promise.all([
+    orchestrator.getTenantUsageMetrics(tenantId, {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      interval: '1d',
+    }),
+    orchestrator.getTenantInfo(tenantId),
+  ]);
 
-    // Storage is point-in-time: take the most recent reading. Egress is
-    // cumulative: sum the whole series for the window total.
-    const latestStorage = metrics.storage.reduce<(typeof metrics.storage)[number] | undefined>(
-      (latest, s) => (!latest || s.timestamp > latest.timestamp ? s : latest),
-      undefined,
-    );
-    const egressBytes = metrics.egress.reduce((sum, e) => sum + e.bytesUsed, 0);
+  // Storage is point-in-time: take the most recent reading. Egress is
+  // cumulative: sum the whole series for the window total.
+  const latestStorage = metrics.storage.reduce<(typeof metrics.storage)[number] | undefined>(
+    (latest, s) => (!latest || s.timestamp > latest.timestamp ? s : latest),
+    undefined,
+  );
+  const egressBytes = metrics.egress.reduce((sum, e) => sum + e.bytesUsed, 0);
 
-    return {
-      storageBytes: latestStorage?.bytesUsed ?? 0,
-      objectCount: latestStorage?.objectCount ?? 0,
-      egressBytes,
-      info,
-    };
-  } catch (err) {
-    console.error('[get-usage] Failed to fetch usage', {
-      orgId,
-      tenantId,
-      region: orchestrator.region,
-      err,
-    });
-    return null;
-  }
+  return {
+    storageBytes: latestStorage?.bytesUsed ?? 0,
+    objectCount: latestStorage?.objectCount ?? 0,
+    egressBytes,
+    info,
+  };
 }
 
 // Returns the most-restrictive status present, or `undefined` when none of the
