@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { PlusIcon, DatabaseIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { Heading } from '../components/Heading/Heading';
+import { PageLayout } from '../components/PageLayout.js';
 import { Alert } from '../components/Alert';
 import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
@@ -62,19 +62,17 @@ export function BucketsPage() {
 
   if (isError) {
     return (
-      <div className="px-10 pt-10">
+      <PageLayout title="Buckets" description="Organize and manage your storage containers">
         <Alert variant="red" description={error?.message ?? 'Failed to load buckets'} />
-      </div>
+      </PageLayout>
     );
   }
 
   return (
-    <div className="px-10 pt-10">
-      {/* Page header */}
-      <div className="mb-6 flex items-start justify-between">
-        <Heading tag="h1" size="xl" description="Organize and manage your storage containers">
-          Buckets
-        </Heading>
+    <PageLayout
+      title="Buckets"
+      description="Organize and manage your storage containers"
+      action={
         <Button
           variant="ghost"
           size="sm"
@@ -83,8 +81,8 @@ export function BucketsPage() {
         >
           Create bucket
         </Button>
-      </div>
-
+      }
+    >
       {/* Content: empty state or table */}
       {buckets.length === 0 ? (
         <EmptyStateCard
@@ -179,6 +177,6 @@ export function BucketsPage() {
           </Table.Body>
         </Table>
       )}
-    </div>
+    </PageLayout>
   );
 }

@@ -394,7 +394,7 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
 
   if (upload.uploadStep === 'done') {
     return (
-      <div className="mx-auto max-w-2xl px-10 pt-10">
+      <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
         <Breadcrumb items={breadcrumb} />
         <UploadDoneCard bucketName={bucketName} doneCount={upload.doneCount} onBack={goToBucket} />
       </div>
@@ -402,7 +402,7 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-10 pt-10">
+    <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
       <Breadcrumb items={breadcrumb} />
 
       <div className="mt-6 mb-6 flex items-center gap-4">

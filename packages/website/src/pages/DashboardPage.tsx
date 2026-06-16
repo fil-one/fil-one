@@ -13,7 +13,7 @@ import { Link as AppLink } from '../components/Link';
 
 const UsageTrends = lazy(() => import('./UsageTrends'));
 
-import { Heading } from '../components/Heading/Heading';
+import { PageLayout } from '../components/PageLayout.js';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { Badge, type BadgeColor } from '../components/Badge';
@@ -174,17 +174,14 @@ export function DashboardPage() {
   const quickSetupTotal = quickSetupTasks.length;
 
   return (
-    <div className="px-10 pt-10">
-      {/* 1. Page header */}
-      <div className="mb-5 flex items-center justify-between">
-        <Heading tag="h1" size="xl">
-          Dashboard
-        </Heading>
+    <PageLayout
+      title="Dashboard"
+      action={
         <Button variant="ghost" size="sm" icon={PlusIcon} href="/buckets">
           New bucket
         </Button>
-      </div>
-
+      }
+    >
       {/* 2. Trial banner */}
       {isTrialing && trialBannerVisible && (
         <div className="mb-5 flex items-center justify-between rounded-xl bg-brand-50/60 px-5 py-3.5 shadow-[0px_0px_0px_1px_theme(colors.brand.100)]">
@@ -435,6 +432,6 @@ export function DashboardPage() {
           </div>
         )}
       </Card>
-    </div>
+    </PageLayout>
   );
 }

@@ -14,7 +14,7 @@ import {
 import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { IconBox } from '../components/IconBox';
-import { Heading } from '../components/Heading/Heading';
+import { PageLayout } from '../components/PageLayout.js';
 import { ProgressBar } from '../components/ProgressBar';
 import { useToast } from '../components/Toast';
 import { formatBytes } from '@filone/shared';
@@ -222,12 +222,7 @@ export function BillingPage() {
 
   if (loading && !billing) {
     return (
-      <div className="px-10 pt-10">
-        <div className="mb-6">
-          <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
-            Billing
-          </Heading>
-        </div>
+      <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
         <div className="flex gap-6">
           <div className="flex-1 flex flex-col gap-4">
             <SkeletonCard height="h-40" />
@@ -238,35 +233,24 @@ export function BillingPage() {
             <SkeletonCard height="h-80" />
           </div>
         </div>
-      </div>
+      </PageLayout>
     );
   }
 
   if (error && !billing) {
     return (
-      <div className="px-10 pt-10">
-        <div className="mb-6">
-          <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
-            Billing
-          </Heading>
-        </div>
+      <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
         <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
           Failed to load billing information: {error}
         </div>
-      </div>
+      </PageLayout>
     );
   }
 
   // ── Render ───────────────────────────────────────────────────────
 
   return (
-    <div className="px-10 pt-10">
-      <div className="mb-6">
-        <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
-          Billing
-        </Heading>
-      </div>
-
+    <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
       {/* Past due warning banner */}
       {isPastDue && (
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
@@ -671,6 +655,6 @@ export function BillingPage() {
       />
 
       <ContactSalesDialog open={contactSalesOpen} onClose={() => setContactSalesOpen(false)} />
-    </div>
+    </PageLayout>
   );
 }

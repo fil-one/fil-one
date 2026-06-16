@@ -225,7 +225,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
   --endpoint-url ${s3Endpoint}`;
 
   return (
-    <div className="mx-auto max-w-2xl px-10 pt-10">
+    <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
       {/* Breadcrumb */}
       <Breadcrumb
         items={[
