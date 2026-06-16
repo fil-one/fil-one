@@ -64,7 +64,8 @@ export async function onExecutePostLogin(event: PostLoginEvent, api: PostLoginAp
   // tenant-log field, not exposed to the Action runtime — only `name` and
   // `timestamp` are.) Auth0 has used other strings historically for MFA
   // WebAuthn (`webauthn`, etc.), but primary-passkey-on-connection logins
-  // come through as `'passkey'`.
+  // come through as `'passkey'`. The request-time counterpart is the ID
+  // token's `amr` claim (`phr`), read by require-mfa.ts — the two must agree.
   const usedPasskey = authMethods.some((m) => m.name === 'passkey');
 
   // Recovery-code redemption means the user just lost their device. Force

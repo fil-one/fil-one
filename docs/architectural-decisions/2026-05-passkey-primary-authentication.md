@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Created:** 2026-05-19
-**Last updated:** 2026-05-22
+**Last updated:** 2026-06-16
 
 ## Context
 
@@ -59,7 +59,15 @@ if (usedPasskey && !mfaEnrolling) return;
 
 The exception (`!mfaEnrolling`) covers the case where a passkey user clicked "Add MFA factor" or just redeemed a recovery code — in both cases the Action must fall through to the enrollment branch, otherwise the enroll button silently no-ops for passkey users.
 
-The OIDC `amr` claim that the rest of the system uses (`require-mfa` middleware) is a different surface: it lives on the issued ID token and _does_ carry `phr` for passkey logins. That signal is the right one for request-time gating; it is **not** available on `event.authentication.methods[]` inside the Action runtime. `performed_amr` exists in tenant logs (`details.authentication.methods[].performed_amr`) and as the `amr` claim on the ID token, but not on the Action event object — so matching on `name === 'passkey'` is what the Action runtime exposes today.
+The same "this login was phishing-resistant" signal shows up on three different surfaces, under three different names, and only one is reachable from inside the Action:
+
+- **Action runtime** — `event.authentication.methods[]` exposes only `name` and `timestamp`. We match `name === 'passkey'`.
+- **ID token** — the OIDC `amr` claim carries the _value_ `'phr'` for passkey logins. This is what request-time gating (`require-mfa` middleware) reads — `amr.includes('phr')`.
+- **Tenant logs** — the per-method field is literally named `performed_amr` (value `phr`), under `details.authentication.methods[]`.
+
+`phr` / `performed_amr` is the conceptually cleaner signal — it names the security property rather than the factor — but it is **not** on the Action event object, and the ID token isn't issued until after the Action runs. So the Action has no choice but to key off the factor name.
+
+**Tradeoff:** matching `name === 'passkey'` is brittle. Auth0 owns that string and has used other values for WebAuthn factors historically (`webauthn`, etc.); a rename would silently break the MFA skip and double-challenge passkey users. `phr` would be immune to that, but it isn't available where the decision is made. We accept the brittleness and pin the expected value with a test (`mfa-action.test.ts`). The request-time gate and the Action must agree on what counts as phishing-resistant — otherwise a passkey user would skip the MFA challenge at login but get blocked from step-up-gated actions immediately after.
 
 ### Settings UI
 
