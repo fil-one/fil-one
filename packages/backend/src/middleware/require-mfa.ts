@@ -21,8 +21,9 @@ import { getVerifiedIdTokenClaims } from './auth.js';
  * passkey login was performed: passkey-primary users would otherwise be
  * blocked from step-up-gated actions immediately after a passkey login.
  *
- * Refresh-token grants strip `amr`, so the gate naturally invalidates once
- * the access token expires (~1 hour) and forces a fresh sign-in.
+ * Refresh-token grants strip `amr` from newly issued ID token claims, so the
+ * gate naturally invalidates once the client refreshes the ID token and
+ * forces a fresh sign-in to regain strong-auth state.
  *
  * 401 step_up_required signals the frontend wrapper to redirect through
  * `/login?acr_values=...:multi-factor`.
