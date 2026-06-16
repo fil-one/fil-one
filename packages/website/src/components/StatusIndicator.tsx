@@ -57,6 +57,7 @@ export function StatusIndicator({ collapsed }: StatusIndicatorProps) {
           href={INSTATUS_PAGE_URL}
           target="_blank"
           rel="noopener noreferrer"
+          data-testid="system-status"
           aria-label={`System status: ${display.label}`}
           className="flex w-full items-center justify-center rounded-lg px-3 py-2 hover:bg-zinc-100"
         >
@@ -71,6 +72,7 @@ export function StatusIndicator({ collapsed }: StatusIndicatorProps) {
       href={INSTATUS_PAGE_URL}
       target="_blank"
       rel="noopener noreferrer"
+      data-testid="system-status"
       className={clsx(
         'flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-zinc-100',
         textColorStyles[display.color],

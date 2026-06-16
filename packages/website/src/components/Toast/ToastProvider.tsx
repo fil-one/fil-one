@@ -46,7 +46,11 @@ function ToastEntry({ item, onDismiss }: { item: ToastItem; onDismiss: (id: stri
   }, [item.id, item.duration, onDismiss]);
 
   return (
-    <div className={`toast-item ${variantBorderClass[item.variant]}`}>
+    <div
+      data-testid="toast"
+      data-toast-variant={item.variant}
+      className={`toast-item ${variantBorderClass[item.variant]}`}
+    >
       <p className="toast-message">{item.message}</p>
       <button
         type="button"
@@ -91,7 +95,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={contextValue}>
       {children}
-      <div className="toast-container" aria-live="polite" aria-atomic="false">
+      <div
+        data-testid="toast-container"
+        className="toast-container"
+        aria-live="polite"
+        aria-atomic="false"
+      >
         {toasts.map((item) => (
           <ToastEntry key={item.id} item={item} onDismiss={dismiss} />
         ))}

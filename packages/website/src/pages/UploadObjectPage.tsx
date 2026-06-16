@@ -91,7 +91,12 @@ function FileRow({
 }) {
   return (
     <>
-      <div className="group flex items-center gap-3 px-3 py-2 hover:bg-zinc-50">
+      <div
+        data-testid="upload-item"
+        data-file-key={entry.key}
+        data-upload-status={entry.status}
+        className="group flex items-center gap-3 px-3 py-2 hover:bg-zinc-50"
+      >
         <span className="text-zinc-400">
           <FileIcon size={13} aria-hidden="true" />
         </span>
@@ -295,11 +300,22 @@ function UploadActions({
   return (
     <div className="flex gap-2">
       {failedCount > 0 && (
-        <Button variant="tertiary" icon={ArrowCounterClockwiseIcon} onClick={onRetry}>
+        <Button
+          id="upload-retry-button"
+          variant="tertiary"
+          icon={ArrowCounterClockwiseIcon}
+          onClick={onRetry}
+        >
           Retry {failedCount} failed
         </Button>
       )}
-      <Button variant="primary" className="flex-1" disabled={!canUpload} onClick={onUpload}>
+      <Button
+        id="upload-submit-button"
+        variant="primary"
+        className="flex-1"
+        disabled={!canUpload}
+        onClick={onUpload}
+      >
         {uploadLabel}
       </Button>
     </div>
@@ -446,6 +462,7 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
 
           <input
             ref={upload.fileInputRef}
+            id="upload-file-input"
             type="file"
             multiple
             className="hidden"
@@ -453,6 +470,7 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
           />
           <input
             ref={upload.folderInputRef}
+            id="upload-folder-input"
             type="file"
             // @ts-expect-error — webkitdirectory is not in React's types
             webkitdirectory=""

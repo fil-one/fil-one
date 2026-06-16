@@ -70,7 +70,12 @@ export function SupportPage() {
 
   return (
     <div className="px-10 pt-10">
-      <Heading tag="h1" size="xl" description="We typically respond within 1 business day">
+      <Heading
+        id="support-heading"
+        tag="h1"
+        size="xl"
+        description="We typically respond within 1 business day"
+      >
         Talk to an expert
       </Heading>
 
@@ -143,7 +148,12 @@ export function SupportPage() {
             </FormField>
 
             <div className="flex justify-end">
-              <Button variant="primary" type="submit" disabled={submitting}>
+              <Button
+                id="support-submit-button"
+                variant="primary"
+                type="submit"
+                disabled={submitting}
+              >
                 {submitting ? 'Sending...' : 'Send message'}
               </Button>
             </div>
