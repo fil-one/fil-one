@@ -142,6 +142,7 @@ describe('grace-period-enforcer', () => {
   });
 
   it('does not cancel the subscription when the disable fails in one region', async () => {
+    vi.useFakeTimers();
     const fth = fakeOrchestrator('fth');
     fth.updateTenantStatus.mockRejectedValue(new Error('FTH API error'));
     mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
@@ -154,13 +155,16 @@ describe('grace-period-enforcer', () => {
       ],
     });
 
-    await handler();
+    const run = handler();
+    await vi.runAllTimersAsync();
+    await run;
 
     expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'disabled');
     expect(canceledUpdate()).toBeUndefined();
   });
 
   it('retries only the failed region on the next run, then cancels', async () => {
+    vi.useFakeTimers();
     const fth = fakeOrchestrator('fth');
     mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
     ddbMock.on(ScanCommand).resolves({
@@ -172,22 +176,29 @@ describe('grace-period-enforcer', () => {
       ],
     });
 
-    // First run: FTH disable fails; the record stays in grace_period.
+    // First run: FTH disable fails every retry (4 attempts: 1 initial + 3
+    // background retries); the record stays in grace_period.
     // Second run: Aurora probes as already disabled, FTH succeeds.
     fth.updateTenantStatus
+      .mockRejectedValueOnce(new Error('FTH API error'))
+      .mockRejectedValueOnce(new Error('FTH API error'))
+      .mockRejectedValueOnce(new Error('FTH API error'))
       .mockRejectedValueOnce(new Error('FTH API error'))
       .mockResolvedValue(undefined);
     aurora.getTenantStatus
       .mockResolvedValueOnce({ kind: 'ok', status: 'active' })
       .mockResolvedValue({ kind: 'ok', status: 'disabled' });
 
-    await handler();
+    const firstRun = handler();
+    await vi.runAllTimersAsync();
+    await firstRun;
     expect(canceledUpdate()).toBeUndefined();
 
     await handler();
 
     expect(aurora.updateTenantStatus).toHaveBeenCalledTimes(1);
-    expect(fth.updateTenantStatus).toHaveBeenCalledTimes(2);
+    // First run: 4 failed attempts; second run: 1 successful attempt.
+    expect(fth.updateTenantStatus).toHaveBeenCalledTimes(5);
     expect(canceledUpdate()).toBeDefined();
   });
 

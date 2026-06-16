@@ -18,6 +18,7 @@ import { getDynamoClient } from '../lib/ddb-client.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
+  WEBHOOK_STATUS_SYNC_RETRY,
 } from '../lib/region-helpers.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import {
@@ -245,7 +246,9 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
   // The sync is probe-first, so a retry skips regions that are already disabled.
   const orgId = await resolveOrgId(userId, tableName);
   if (orgId) {
-    assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'disabled'));
+    assertRegionSyncSucceeded(
+      await syncTenantStatusInProvisionedRegions(orgId, 'disabled', WEBHOOK_STATUS_SYNC_RETRY),
+    );
     console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
       userId,
       orgId,
@@ -396,7 +399,13 @@ async function handleSubscriptionDeleted(
   try {
     const orgId = await resolveOrgId(userId, tableName);
     if (orgId) {
-      assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'write-locked'));
+      assertRegionSyncSucceeded(
+        await syncTenantStatusInProvisionedRegions(
+          orgId,
+          'write-locked',
+          WEBHOOK_STATUS_SYNC_RETRY,
+        ),
+      );
       console.log('[stripe-webhook] Tenant write-locked', { userId, orgId });
     }
   } catch (error) {
@@ -451,7 +460,9 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   try {
     const orgId = await resolveOrgId(userId, tableName);
     if (orgId) {
-      assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'active'));
+      assertRegionSyncSucceeded(
+        await syncTenantStatusInProvisionedRegions(orgId, 'active', WEBHOOK_STATUS_SYNC_RETRY),
+      );
       console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
     }
   } catch (error) {

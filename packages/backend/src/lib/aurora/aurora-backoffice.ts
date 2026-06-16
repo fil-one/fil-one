@@ -15,7 +15,6 @@ import {
   type ModelsTenantStatus,
   type ModelsTenantWithMetricsBackofficeResponse,
 } from '@filone/aurora-backoffice-client';
-import pRetry from 'p-retry';
 import { instrumentClient } from './aurora-api-metrics.js';
 import { getAuroraBackofficeSecrets } from '../auth-secrets.js';
 import type { TenantStatus } from '../service-orchestrator.js';
@@ -530,21 +529,16 @@ export async function updateTenantStatus({
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  await pRetry(
-    async () => {
-      const { error } = await setTenantStatus({
-        client,
-        path: { partnerId, tenantId },
-        body: { status },
-        throwOnError: false,
-      });
+  const { error } = await setTenantStatus({
+    client,
+    path: { partnerId, tenantId },
+    body: { status },
+    throwOnError: false,
+  });
 
-      if (error) {
-        throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
-          cause: error,
-        });
-      }
-    },
-    { retries: 3 },
-  );
+  if (error) {
+    throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
+      cause: error,
+    });
+  }
 }

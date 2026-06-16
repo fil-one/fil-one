@@ -666,33 +666,21 @@ describe('updateTenantStatus', () => {
     });
   });
 
-  it('retries on transient failure then succeeds', async () => {
-    vi.useFakeTimers();
-    mockSetTenantStatus
-      .mockResolvedValueOnce({ error: { message: 'Service unavailable' } })
-      .mockResolvedValueOnce({ error: undefined });
-
-    const promise = updateTenantStatus({ tenantId: 'tenant-1', status: 'WRITE_LOCKED' });
-    await vi.runAllTimersAsync();
-    await promise;
-
-    expect(mockSetTenantStatus).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
-  });
-
-  it('throws after exhausting all retries', async () => {
-    vi.useFakeTimers();
+  // Retrying transient failures is the caller's responsibility (region-helpers
+  // wraps the orchestrator call in pRetry), so this function does not retry.
+  it('throws when the API returns an error', async () => {
     mockSetTenantStatus.mockResolvedValue({ error: { message: 'Service unavailable' } });
 
-    const promise = updateTenantStatus({ tenantId: 'tenant-1', status: 'DISABLED' });
-    const expectation = expect(promise).rejects.toThrow(
+    await expect(updateTenantStatus({ tenantId: 'tenant-1', status: 'DISABLED' })).rejects.toThrow(
       'Aurora status update failed for tenant tenant-1',
     );
-    await vi.runAllTimersAsync();
-    await expectation;
+  });
 
-    // 1 initial + 3 retries
-    expect(mockSetTenantStatus).toHaveBeenCalledTimes(4);
-    vi.useRealTimers();
+  it('does not retry when the API returns an error', async () => {
+    mockSetTenantStatus.mockResolvedValue({ error: { message: 'Service unavailable' } });
+
+    await updateTenantStatus({ tenantId: 'tenant-1', status: 'DISABLED' }).catch(() => {});
+
+    expect(mockSetTenantStatus).toHaveBeenCalledTimes(1);
   });
 });

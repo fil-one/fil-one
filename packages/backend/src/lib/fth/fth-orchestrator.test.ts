@@ -145,31 +145,22 @@ describe('fthOrchestrator.updateTenantStatus', () => {
     });
   }
 
-  it('retries updateClientStatus on a transient failure then succeeds', async () => {
-    vi.useFakeTimers();
-    mockUpdateClientStatus
-      .mockRejectedValueOnce(new Error('transient FTH error'))
-      .mockResolvedValue(undefined);
+  // Retrying transient failures is the caller's responsibility (region-helpers
+  // wraps the orchestrator call in pRetry), so this method does not retry.
+  it('does not retry when updateClientStatus fails', async () => {
+    mockUpdateClientStatus.mockRejectedValue(new Error('FTH error'));
 
-    const promise = fthOrchestrator.updateTenantStatus(fthClientId, 'write-locked');
-    await vi.runAllTimersAsync();
-    await promise;
+    await fthOrchestrator.updateTenantStatus(fthClientId, 'write-locked').catch(() => {});
 
-    expect(mockUpdateClientStatus).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
+    expect(mockUpdateClientStatus).toHaveBeenCalledTimes(1);
   });
 
-  it('gives up on updateClientStatus after exhausting retries (1 initial + 3 retries)', async () => {
-    vi.useFakeTimers();
-    mockUpdateClientStatus.mockRejectedValue(new Error('persistent FTH error'));
+  it('propagates the error when updateClientStatus fails', async () => {
+    mockUpdateClientStatus.mockRejectedValue(new Error('FTH error'));
 
-    const promise = fthOrchestrator.updateTenantStatus(fthClientId, 'write-locked').catch((e) => e);
-    await vi.runAllTimersAsync();
-    const err = await promise;
-
-    expect(err).toBeInstanceOf(Error);
-    expect(mockUpdateClientStatus).toHaveBeenCalledTimes(4);
-    vi.useRealTimers();
+    await expect(fthOrchestrator.updateTenantStatus(fthClientId, 'write-locked')).rejects.toThrow(
+      'FTH error',
+    );
   });
 });
 
