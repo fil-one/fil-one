@@ -69,8 +69,7 @@ async function submitUpload(page: Page, bucketName: string, objectName: string):
   // files directly on the input is the most reliable way to trigger React's
   // onChange handler, which auto-fills the object name from the file name.
   await page
-    .locator('input[type="file"]')
-    .first()
+    .locator('input[type="file"][multiple]')
     .setInputFiles({ ...UPLOAD_FILE, name: objectName });
 
   // Submit button on the upload page (different button than the header one
