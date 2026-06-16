@@ -20,13 +20,12 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  const { orgId } = getUserInfo(event);
   const bucketName = event.pathParameters?.name;
 
   if (!bucketName) {
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
   }
-
-  const { orgId } = getUserInfo(event);
 
   const region = event.queryStringParameters?.region ?? S3Region.EuWest1;
   if (!isSupportedRegion(process.env.FILONE_STAGE!, region, getVerifiedEmail(event))) {
