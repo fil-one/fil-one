@@ -1,11 +1,9 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketAnalyticsResponse, ErrorResponse } from '@filone/shared';
-import { Resource } from 'sst';
 import { createClient, getBucketInfo } from '@filone/aurora-portal-client';
-import { getDynamoClient } from '../lib/ddb-client.js';
+import { getOrgProfile } from '../lib/org-profile.js';
 import { getAuroraPortalApiKey } from '../lib/aurora/aurora-portal.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -15,8 +13,6 @@ import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 import { getBucketStorageSamples } from '../lib/aurora/aurora-backoffice.js';
-
-const dynamo = getDynamoClient();
 
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -28,13 +24,7 @@ export async function baseHandler(
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
   }
 
-  const { Item: orgProfile } = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
-    }),
-  );
+  const orgProfile = await getOrgProfile(orgId);
 
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
   const auroraSetupStatus = orgProfile?.auroraSetupStatus?.S;

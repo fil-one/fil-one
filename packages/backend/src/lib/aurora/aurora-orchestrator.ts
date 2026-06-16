@@ -4,8 +4,6 @@
 //
 // PROFILE-row attributes used: `auroraTenantId` and `auroraSetupStatus`.
 
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { Resource } from 'sst';
 import { S3Region, getS3Endpoint } from '@filone/shared';
 import type {
   AccessKeyPermission,
@@ -24,21 +22,32 @@ import {
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
 } from '../aurora/aurora-portal.js';
-import { getDynamoClient } from '../ddb-client.js';
+import {
+  getOperationsSamples,
+  getStorageSamples,
+  getTenantStatus as getAuroraTenantStatusApi,
+  mapFromModelsTenantStatus,
+  mapToModelsTenantStatus,
+  updateTenantStatus as updateAuroraTenantStatusApi,
+} from '../aurora/aurora-backoffice.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
+import type { OrgProfileItem } from '../org-profile.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
 import { NotImplementedError } from '../errors.js';
 import type {
   BucketDetails,
   BucketSummary,
   CreateBucketArgs,
+  GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  PresignerContext,
   ServiceOrchestrator,
+  TenantStatus,
+  TenantStatusProbe,
+  TenantUsageMetrics,
 } from '../service-orchestrator.js';
+import type { S3ClientContext } from '../s3-client.js';
 
-const dynamo = getDynamoClient();
 export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting();
 
 function getStage(): string {
@@ -67,18 +76,24 @@ export const auroraOrchestrator = {
     return null;
   },
 
-  async isTenantReady(orgId): Promise<string | null> {
-    const { Item } = await dynamo.send(
-      new GetItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-        ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
-      }),
-    );
-    const tenantId = Item?.auroraTenantId?.S;
+  isTenantReady(orgProfile: OrgProfileItem | undefined): string | null {
+    const tenantId = orgProfile?.auroraTenantId?.S;
     if (!tenantId) return null;
-    if (!isOrgSetupComplete(Item?.auroraSetupStatus?.S)) return null;
+    if (!isOrgSetupComplete(orgProfile?.auroraSetupStatus?.S)) return null;
     return tenantId;
+  },
+
+  async updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void> {
+    await updateAuroraTenantStatusApi({ tenantId, status: mapToModelsTenantStatus(status) });
+  },
+
+  async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
+    const result = await getAuroraTenantStatusApi({ tenantId });
+    if (result.kind !== 'ok') return result;
+    return {
+      kind: 'ok',
+      status: result.status ? mapFromModelsTenantStatus(result.status) : undefined,
+    };
   },
 
   async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {
@@ -196,7 +211,7 @@ export const auroraOrchestrator = {
     await deleteAuroraAccessKey({ tenantId, auroraKeyId: keyId });
   },
 
-  async getPresignerContext(tenantId: string): Promise<PresignerContext> {
+  async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
     const stage = getStage();
     const credentials = await getConsoleS3Credentials({
       orchestratorId: auroraOrchestrator.id,
@@ -210,4 +225,41 @@ export const auroraOrchestrator = {
       forcePathStyle: true,
     };
   },
+
+  async getTenantUsageMetrics(
+    tenantId: string,
+    opts: GetTenantUsageMetricsOptions,
+  ): Promise<TenantUsageMetrics> {
+    const window = mapIntervalToAuroraWindow(opts.interval ?? '1d');
+    const { from, to } = opts;
+
+    const [storageSamples, operationsSamples] = await Promise.all([
+      getStorageSamples({ tenantId, from, to, window }),
+      getOperationsSamples({ tenantId, from, to, window }),
+    ]);
+
+    const storage = storageSamples
+      .filter((s): s is typeof s & { timestamp: string } => s.timestamp !== undefined)
+      .map((s) => ({
+        timestamp: new Date(s.timestamp).toISOString(),
+        bytesUsed: s.bytesUsed ?? 0,
+        objectCount: s.objectCount ?? 0,
+      }));
+
+    const egress = operationsSamples
+      .filter((s): s is typeof s & { timestamp: string } => s.timestamp !== undefined)
+      .map((s) => ({
+        timestamp: new Date(s.timestamp).toISOString(),
+        bytesUsed: s.txBytes ?? 0,
+      }));
+
+    return { storage, egress };
+  },
 } satisfies ServiceOrchestrator;
+
+// Aurora's metrics API only accepts windows in m/h units, so the
+// orchestrator-agnostic '1d' value is translated before it hits the wire.
+function mapIntervalToAuroraWindow(interval: string): string {
+  if (interval === '1d') return '24h';
+  return interval;
+}

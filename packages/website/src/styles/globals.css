@@ -24,6 +24,7 @@
   --color-brand-950: oklch(0.21 0.078 264);
 
   --color-icon-success: var(--color-green-500);
+  --color-icon-error: var(--color-red-500);
   --color-brand-error: var(--color-red-500);
   --color-brand-error-dark: var(--color-red-300);
 
