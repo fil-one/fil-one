@@ -420,6 +420,12 @@ export default $config({
         resources: [auroraS3KeySsmArn],
       },
     ];
+    const orchestratorGatewayPermissions: sst.aws.FunctionPermissionArgs[] = [
+      {
+        actions: ['ssm:GetParameter'],
+        resources: [auroraS3KeySsmArn, fthS3KeySsmArn],
+      },
+    ];
 
     const { firehose, cwToFirehoseRole } = setupFirehoseLogPipeline(grafanaLokiAuth);
 
@@ -598,9 +604,7 @@ export default $config({
       routePath: '/api/presign',
       handler: 'presign',
       extraEnv: { ...fthEnv },
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: orchestratorGatewayPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '512 MB',
     });
@@ -698,6 +702,7 @@ export default $config({
       routePath: '/api/usage',
       handler: 'get-usage',
       extraEnv: orchestratorEnv,
+      permissions: orchestratorGatewayPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
@@ -705,9 +710,7 @@ export default $config({
       routePath: '/api/activity',
       handler: 'get-activity',
       extraEnv: orchestratorEnv,
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: orchestratorGatewayPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
