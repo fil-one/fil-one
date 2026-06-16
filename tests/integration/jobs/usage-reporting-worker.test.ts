@@ -94,7 +94,7 @@ describe('Usage Reporting Worker (direct Lambda invoke)', () => {
         totalEgressBytes: { N: expect.any(String) },
         sampleCount: { N: expect.any(String) },
         reportedToStripe: { BOOL: expect.any(Boolean) },
-        lockAction: { S: 'ACTIVE' },
+        lockAction: { S: 'active' },
         orgSyncAction: { S: expect.any(String) },
         createdAt: { S: expect.any(String) },
         ttl: { N: expect.any(String) },

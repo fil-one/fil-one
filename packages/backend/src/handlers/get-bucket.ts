@@ -4,6 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { GetBucketResponse } from '@filone/shared';
 import { S3_REGION, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { getOrgProfile } from '../lib/org-profile.js';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
@@ -31,7 +32,7 @@ export async function baseHandler(
     return unsupportedRegionResponse(region);
   }
   const orchestrator = getOrchestratorForRegion(region);
-  const tenantId = await orchestrator.isTenantReady(orgId);
+  const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
   const bucket = await orchestrator.getBucket(tenantId, bucketName);

@@ -1,11 +1,12 @@
-import { GetItemCommand, ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
+import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
-import { getTenantStatus, type TenantStatusResult } from '../lib/aurora/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { reportMetric } from '../lib/metrics.js';
-import { isOrgSetupComplete } from '../lib/org-setup-status.js';
+import { getOrgProfile, type OrgProfileItem } from '../lib/org-profile.js';
+import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
+import type { ServiceOrchestrator } from '../lib/service-orchestrator.js';
 
 const dynamo = getDynamoClient();
 
@@ -14,41 +15,64 @@ interface ActiveCandidate {
   orgId: string;
 }
 
-interface ResolvedTenant {
-  auroraTenantId: string | undefined;
-  auroraSetupStatus: string | undefined;
-}
-
-interface RunStats {
-  notInSync: number;
-  missingTenant: number;
-  probeFailed: number;
+interface OrchestratorStats {
   total: number;
+  missingTenant: number;
+  checked: number;
+  notInSync: number;
+  probeFailed: number;
 }
 
 export async function handler(): Promise<void> {
   console.log('[subscription-drift-checker] start');
 
+  const orchestrators = getAvailableOrchestrators(process.env.FILONE_STAGE!);
   const candidates = await scanActiveSubscriptions(Resource.BillingTable.name);
   const uniqueCandidates = dedupeByOrgId(candidates);
-  const stats: RunStats = {
-    notInSync: 0,
-    missingTenant: 0,
-    probeFailed: 0,
-    total: uniqueCandidates.length,
-  };
+
+  // Counters are tracked per orchestrator and emitted with an `orchestrator`
+  // CloudWatch dimension, so Aurora vs FTH drift is separable. Every active-sub
+  // org is evaluated against every available orchestrator, so `total` is the
+  // unique-org count repeated per dimension (read one series for the global total).
+  const stats = new Map<string, OrchestratorStats>(
+    orchestrators.map((o) => [
+      o.id,
+      { total: 0, missingTenant: 0, checked: 0, notInSync: 0, probeFailed: 0 },
+    ]),
+  );
 
   for (const candidate of uniqueCandidates) {
-    await evaluateCandidate(candidate, stats);
+    // A failed PROFILE read counts as probeFailed on every orchestrator so a
+    // transient DDB error skips just this candidate, not the whole run.
+    let orgProfile;
+    try {
+      orgProfile = await getOrgProfile(candidate.orgId);
+    } catch (error) {
+      console.error('[subscription-drift-checker] PROFILE read failed', {
+        orgId: candidate.orgId,
+        userId: candidate.userId,
+        error,
+      });
+      for (const orchestrator of orchestrators) {
+        const orchestratorStats = stats.get(orchestrator.id)!;
+        orchestratorStats.total += 1;
+        orchestratorStats.probeFailed += 1;
+      }
+      continue;
+    }
+
+    for (const orchestrator of orchestrators) {
+      await evaluateCandidate(candidate, orchestrator, orgProfile, stats.get(orchestrator.id)!);
+    }
   }
 
   emitRunSummary(stats);
-  console.log('[subscription-drift-checker] complete', stats);
+  console.log('[subscription-drift-checker] complete', Object.fromEntries(stats));
 }
 
 // Multiple SUBSCRIPTION records can exist per orgId (e.g. user re-subscribed
-// after cancellation). We probe Aurora once per org so drift counts are not
-// inflated; the first userId encountered becomes the log representative.
+// after cancellation). We probe each orchestrator once per org so drift counts
+// are not inflated; the first userId encountered becomes the log representative.
 function dedupeByOrgId(candidates: ActiveCandidate[]): ActiveCandidate[] {
   const seen = new Map<string, ActiveCandidate>();
   for (const candidate of candidates) {
@@ -97,86 +121,85 @@ async function scanActiveSubscriptions(billingTableName: string): Promise<Active
   return out;
 }
 
-async function evaluateCandidate(candidate: ActiveCandidate, stats: RunStats): Promise<void> {
+// Probes a single org against a single orchestrator. An active subscription is
+// expected to map to an `active` tenant; anything else (locked/disabled/missing)
+// is drift. Each orchestrator resolves its own tenant from the pre-fetched
+// PROFILE row via isTenantReady, so an org legitimately absent from an
+// orchestrator counts as missingTenant there.
+async function evaluateCandidate(
+  candidate: ActiveCandidate,
+  orchestrator: ServiceOrchestrator,
+  orgProfile: OrgProfileItem | undefined,
+  stats: OrchestratorStats,
+): Promise<void> {
+  stats.total += 1;
   try {
-    const tenant = await resolveTenant(candidate.orgId);
-    if (!tenant.auroraTenantId || !isOrgSetupComplete(tenant.auroraSetupStatus)) {
+    const tenantId = orchestrator.isTenantReady(orgProfile);
+    if (!tenantId) {
       stats.missingTenant += 1;
       return;
     }
 
-    const tenantStatus = await getTenantStatus({ tenantId: tenant.auroraTenantId });
-    if (tenantStatus.kind === 'error') {
+    stats.checked += 1;
+    const probe = await orchestrator.getTenantStatus(tenantId);
+    if (probe.kind === 'error') {
       stats.probeFailed += 1;
       console.error('[subscription-drift-checker] probe failed', {
         orgId: candidate.orgId,
         userId: candidate.userId,
-        auroraTenantId: tenant.auroraTenantId,
-        cause: tenantStatus.cause,
+        orchestrator: orchestrator.id,
+        tenantId,
+        cause: probe.cause,
       });
       return;
     }
 
-    if (isInSync(tenantStatus)) return;
+    if (probe.kind === 'ok' && probe.status === 'active') return;
 
     stats.notInSync += 1;
     console.log('[subscription-drift-checker] out_of_sync', {
       orgId: candidate.orgId,
       userId: candidate.userId,
-      auroraTenantId: tenant.auroraTenantId,
-      auroraStatus: tenantStatus.kind === 'not_found' ? 'not_found' : tenantStatus.status,
+      orchestrator: orchestrator.id,
+      tenantId,
+      status: probe.kind === 'not_found' ? 'not_found' : (probe.status ?? 'unknown'),
     });
   } catch (error) {
     stats.probeFailed += 1;
     console.error('[subscription-drift-checker] candidate failed', {
       orgId: candidate.orgId,
       userId: candidate.userId,
+      orchestrator: orchestrator.id,
       error,
     });
   }
 }
 
-// One GetItem per org (1+N relative to the scan above). Acceptable at current
-// scale on a 12h cadence; a BatchGetItem rewrite is deferred to a follow-up
-// tech-debt ticket.
-async function resolveTenant(orgId: string): Promise<ResolvedTenant> {
-  const result = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      ProjectionExpression: 'auroraTenantId, auroraSetupStatus',
-    }),
-  );
-  return {
-    auroraTenantId: result.Item?.auroraTenantId?.S,
-    auroraSetupStatus: result.Item?.auroraSetupStatus?.S,
-  };
-}
-
-function isInSync(tenantStatus: TenantStatusResult): boolean {
-  return tenantStatus.kind === 'ok' && tenantStatus.status === 'ACTIVE';
-}
-
-function emitRunSummary(stats: RunStats): void {
-  reportMetric({
-    _aws: {
-      Timestamp: Date.now(),
-      CloudWatchMetrics: [
-        {
-          Namespace: 'FilOne',
-          Dimensions: [[]],
-          Metrics: [
-            { Name: 'SubscriptionsNotInSync', Unit: 'Count' },
-            { Name: 'SubscriptionsMissingTenant', Unit: 'Count' },
-            { Name: 'SubscriptionsProbeFailed', Unit: 'Count' },
-            { Name: 'SubscriptionsTotal', Unit: 'Count' },
-          ],
-        },
-      ],
-    },
-    SubscriptionsNotInSync: stats.notInSync,
-    SubscriptionsMissingTenant: stats.missingTenant,
-    SubscriptionsProbeFailed: stats.probeFailed,
-    SubscriptionsTotal: stats.total,
-  });
+function emitRunSummary(stats: Map<string, OrchestratorStats>): void {
+  for (const [orchestratorId, s] of stats) {
+    reportMetric({
+      _aws: {
+        Timestamp: Date.now(),
+        CloudWatchMetrics: [
+          {
+            Namespace: 'FilOne',
+            Dimensions: [['orchestrator']],
+            Metrics: [
+              { Name: 'SubscriptionsTotal', Unit: 'Count' },
+              { Name: 'SubscriptionsMissingTenant', Unit: 'Count' },
+              { Name: 'SubscriptionsTenantsChecked', Unit: 'Count' },
+              { Name: 'SubscriptionsNotInSync', Unit: 'Count' },
+              { Name: 'SubscriptionsProbeFailed', Unit: 'Count' },
+            ],
+          },
+        ],
+      },
+      orchestrator: orchestratorId,
+      SubscriptionsTotal: s.total,
+      SubscriptionsMissingTenant: s.missingTenant,
+      SubscriptionsTenantsChecked: s.checked,
+      SubscriptionsNotInSync: s.notInSync,
+      SubscriptionsProbeFailed: s.probeFailed,
+    });
+  }
 }
