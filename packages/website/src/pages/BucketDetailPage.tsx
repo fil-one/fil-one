@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
+import { PlusIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Heading } from '../components/Heading/Heading';
@@ -171,8 +171,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         </Heading>
         <Button
           variant="primary"
-          size="md"
-          icon={ArrowUpIcon}
+          size="sm"
+          icon={PlusIcon}
+          iconPosition="right"
           onClick={() =>
             void navigate({
               to: '/buckets/$bucketName/upload',
@@ -181,7 +182,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
             })
           }
         >
-          Upload object
+          Upload
         </Button>
       </div>
 

@@ -191,7 +191,7 @@ export function ObjectDetailPage({
         <Breadcrumb
           items={[
             { label: 'Buckets', href: '/buckets' },
-            { label: bucketName, href: `/buckets/${bucketName}` },
+            { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
             { label: objectKey },
           ]}
         />
@@ -230,7 +230,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
       <Breadcrumb
         items={[
           { label: 'Buckets', href: '/buckets' },
-          { label: bucketName, href: `/buckets/${bucketName}` },
+          { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
           { label: objectKey },
         ]}
       />
