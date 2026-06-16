@@ -388,7 +388,7 @@ export function ObjectBrowser({
               })
             }
           >
-            Upload
+            Upload object
           </Button>
         </EmptyStateCard>
       </div>
