@@ -66,8 +66,9 @@ async function runSubscriptionGuard(
   const record = unmarshall(result.Item);
   let status = record.subscriptionStatus as string | undefined;
 
-  // No subscription status yet → allow
-  if (!status) return;
+  // No subscription status → no entitlement
+  // A record can exist without a status
+  if (!status) return buildInactiveResponse();
 
   // Store the resolved status on the event so handlers can read it
   // without a second DynamoDB query (may be updated below by lazy transitions).
