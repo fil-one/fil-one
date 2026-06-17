@@ -20,6 +20,7 @@
     "@filone/shared": "workspace:*",
     "@middy/core": "^7.2.2",
     "@middy/http-header-normalizer": "^7.2.2",
+    "disposable-email-domains": "^1.0.62",
     "jose": "^6.2.2",
     "p-retry": "^8.0.0",
     "psl": "^1.15.0",

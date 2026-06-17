@@ -95,7 +95,7 @@ export function ShareObjectModal({
   }
 
   return (
-    <Modal open={open} onClose={onClose} size="sm">
+    <Modal open={open} onClose={onClose} size="sm" testId="share-object-modal">
       <ModalHeader description={description} onClose={onClose}>
         Share object
       </ModalHeader>
@@ -104,10 +104,16 @@ export function ShareObjectModal({
         <ExpirySelector selected={selected} onSelect={setSelected} disabled={generatingUrl} />
       </ModalBody>
       <ModalFooter fullWidth>
-        <Button variant="ghost" onClick={onClose} disabled={generatingUrl}>
+        <Button
+          id="share-object-cancel-button"
+          variant="ghost"
+          onClick={onClose}
+          disabled={generatingUrl}
+        >
           Cancel
         </Button>
         <Button
+          id="share-object-generate-button"
           variant="primary"
           icon={LinkIcon}
           onClick={() => void handleGenerate(selected)}

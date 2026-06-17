@@ -45,3 +45,14 @@ export class NotImplementedError extends Error {
     this.name = 'NotImplementedError';
   }
 }
+
+// Thrown when ensuring a trial entitlement fails for a transient/infrastructure
+// reason (DynamoDB or Stripe unavailable) rather than because the user is not
+// entitled. Callers should let this propagate so the error-handler returns a 5xx
+// (retryable) instead of masking it as a 403 "subscription inactive".
+export class TrialEntitlementError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'TrialEntitlementError';
+  }
+}

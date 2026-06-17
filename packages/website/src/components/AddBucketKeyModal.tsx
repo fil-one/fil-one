@@ -61,7 +61,7 @@ export function AddBucketKeyModal({
   }
 
   return (
-    <Modal open={open} onClose={handleClose} size="lg">
+    <Modal open={open} onClose={handleClose} size="lg" testId="add-bucket-key-modal">
       <ModalHeader onClose={handleClose}>Create API key for {bucketName}</ModalHeader>
       <ModalBody>
         <div className="flex gap-6">
@@ -108,10 +108,15 @@ export function AddBucketKeyModal({
       <ModalFooter>
         <div className="flex flex-col gap-3">
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={handleClose}>
+            <Button id="add-bucket-key-cancel-button" variant="ghost" onClick={handleClose}>
               Cancel
             </Button>
-            <Button variant="primary" disabled={!form.canSubmit} onClick={form.handleSubmit}>
+            <Button
+              id="add-bucket-key-submit-button"
+              variant="primary"
+              disabled={!form.canSubmit}
+              onClick={form.handleSubmit}
+            >
               {form.creating ? 'Creating...' : 'Create API key'}
             </Button>
           </div>

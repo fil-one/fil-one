@@ -65,6 +65,8 @@ function VersionRow({
 
   return (
     <tr
+      data-testid="version-row"
+      data-version-id={version.versionId}
       className={`border-b border-zinc-100 last:border-0 ${
         isCurrent ? 'bg-brand-50/40' : 'cursor-pointer hover:bg-zinc-50'
       }`}
