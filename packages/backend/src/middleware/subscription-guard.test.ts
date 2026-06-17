@@ -21,17 +21,17 @@ vi.mock('../lib/user-context.js', () => ({
   getUserInfo: (event: AuthenticatedEvent) => event.requestContext.userInfo,
 }));
 
-vi.mock('../lib/create-billing-trial.js', () => ({
-  createBillingTrial: vi.fn(),
+vi.mock('../lib/trial-entitlement.js', () => ({
+  ensureTrialEntitlement: vi.fn(),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
 
 import { subscriptionGuardMiddleware, AccessLevel } from './subscription-guard.js';
-import { createBillingTrial } from '../lib/create-billing-trial.js';
+import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
 import { SubscriptionStatus } from '@filone/shared';
 
-const mockCreateBillingTrial = vi.mocked(createBillingTrial);
+const mockEnsureTrialEntitlement = vi.mocked(ensureTrialEntitlement);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,77 +53,78 @@ describe('subscriptionGuardMiddleware', () => {
     vi.restoreAllMocks();
   });
 
-  it('allows when no billing record exists and fires createBillingTrial', async () => {
+  it('allows when no billing record exists and the user is entitled to a trial', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-    mockCreateBillingTrial.mockResolvedValue(undefined);
+    mockEnsureTrialEntitlement.mockResolvedValue(true);
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
     const request = buildMiddyRequest(
       buildEvent({
-        userInfo: { userId: USER_ID, orgId: 'test-org-uuid', email: 'test@example.com' },
+        userInfo: {
+          sub: 'auth0|sub-1',
+          userId: USER_ID,
+          orgId: 'test-org-uuid',
+          email: 'test@example.com',
+          emailVerified: true,
+        },
       }),
     );
     const result = await before(request);
 
     expect(result).toBeUndefined();
-    expect(mockCreateBillingTrial).toHaveBeenCalledWith({
+    expect(mockEnsureTrialEntitlement).toHaveBeenCalledWith({
+      sub: 'auth0|sub-1',
       userId: USER_ID,
       orgId: 'test-org-uuid',
       email: 'test@example.com',
+      emailVerified: true,
     });
-    expect(request.internal.billingTrialPromise).toBeDefined();
   });
 
-  it('logs error but allows access when trial creation fails in fallback', async () => {
+  it('blocks (inactive) when no billing record exists and the user is not entitled', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-    const trialError = new Error('Stripe unavailable');
-    mockCreateBillingTrial.mockRejectedValue(trialError);
+    mockEnsureTrialEntitlement.mockResolvedValue(false);
 
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+    const result = await before(
+      buildMiddyRequest(
+        buildEvent({
+          userInfo: {
+            sub: 'auth0|sub-1',
+            userId: USER_ID,
+            orgId: 'test-org-uuid',
+            email: 'test@example.com',
+            emailVerified: false,
+          },
+        }),
+      ),
+    );
 
-    const { before, after } = subscriptionGuardMiddleware(AccessLevel.Write);
+    expectErrorResponse(result, 403, {
+      message:
+        'Your subscription is not active. Please contact support or update your payment method.',
+      code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+    });
+  });
+
+  it('propagates a transient entitlement error (retryable 5xx) instead of masking it as 403', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+    mockEnsureTrialEntitlement.mockRejectedValue(new Error('DynamoDB unavailable'));
+
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
     const request = buildMiddyRequest(
       buildEvent({
-        userInfo: { userId: USER_ID, orgId: 'test-org-uuid', email: 'test@example.com' },
+        userInfo: {
+          sub: 'auth0|sub-1',
+          userId: USER_ID,
+          orgId: 'test-org-uuid',
+          email: 'test@example.com',
+          emailVerified: true,
+        },
       }),
     );
 
-    const beforeResult = await before(request);
-    expect(beforeResult).toBeUndefined();
-
-    await after!(request);
-
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      '[subscription-guard] Failed to create billing trial in subscription guard fallback:',
-      trialError,
-    );
-  });
-
-  it('after hook awaits the billing trial promise', async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-    let resolved = false;
-    mockCreateBillingTrial.mockImplementation(
-      () =>
-        new Promise<void>((resolve) =>
-          setTimeout(() => {
-            resolved = true;
-            resolve();
-          }, 10),
-        ),
-    );
-
-    const { before, after } = subscriptionGuardMiddleware(AccessLevel.Write);
-    const request = buildMiddyRequest(
-      buildEvent({
-        userInfo: { userId: USER_ID, orgId: 'test-org-uuid', email: 'test@example.com' },
-      }),
-    );
-
-    await before(request);
-    expect(resolved).toBe(false);
-
-    await after!(request);
-    expect(resolved).toBe(true);
+    await expect(before(request)).rejects.toThrow('DynamoDB unavailable');
   });
 
   it('allows when subscription status is active', async () => {
