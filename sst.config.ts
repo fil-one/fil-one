@@ -414,13 +414,7 @@ export default $config({
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
-    const auroraS3GatewayPermissions: sst.aws.FunctionPermissionArgs[] = [
-      {
-        actions: ['ssm:GetParameter'],
-        resources: [auroraS3KeySsmArn],
-      },
-    ];
-    const orchestratorGatewayPermissions: sst.aws.FunctionPermissionArgs[] = [
+    const consoleS3KeysPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
         resources: [auroraS3KeySsmArn, fthS3KeySsmArn],
@@ -563,7 +557,7 @@ export default $config({
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
       extraEnv: { ...fthEnv },
-      permissions: auroraS3GatewayPermissions,
+      permissions: consoleS3KeysPermissions,
     });
     addRoute({
       method: 'GET',
@@ -604,7 +598,7 @@ export default $config({
       routePath: '/api/presign',
       handler: 'presign',
       extraEnv: { ...fthEnv },
-      permissions: orchestratorGatewayPermissions,
+      permissions: consoleS3KeysPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '512 MB',
     });
@@ -612,9 +606,7 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}/analytics',
       handler: 'get-bucket-analytics',
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: consoleS3KeysPermissions,
       extraEnv: orchestratorEnv,
     });
 
@@ -702,7 +694,7 @@ export default $config({
       routePath: '/api/usage',
       handler: 'get-usage',
       extraEnv: orchestratorEnv,
-      permissions: orchestratorGatewayPermissions,
+      permissions: consoleS3KeysPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
@@ -710,7 +702,7 @@ export default $config({
       routePath: '/api/activity',
       handler: 'get-activity',
       extraEnv: orchestratorEnv,
-      permissions: orchestratorGatewayPermissions,
+      permissions: consoleS3KeysPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
