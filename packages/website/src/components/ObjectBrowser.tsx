@@ -282,20 +282,22 @@ function LatestVersionRow({
 // ---------------------------------------------------------------------------
 
 function PrefixBreadcrumb({
+  bucketName,
   currentPrefix,
   onPrefixChange,
 }: {
+  bucketName: string;
   currentPrefix: string;
   onPrefixChange: (prefix: string) => void;
 }) {
   return (
-    <div className="mb-2 flex items-center gap-1 text-sm">
+    <div className="mb-4 flex items-center gap-2 text-sm">
       <button
         type="button"
         onClick={() => onPrefixChange('')}
-        className={`hover:text-brand-600 ${currentPrefix === '' ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
+        className="text-zinc-500 hover:text-zinc-700"
       >
-        /
+        {bucketName}
       </button>
       {currentPrefix
         .split('/')
@@ -304,12 +306,12 @@ function PrefixBreadcrumb({
           const segmentPrefix = arr.slice(0, idx + 1).join('/') + '/';
           const isLast = idx === arr.length - 1;
           return (
-            <span key={segmentPrefix} className="flex items-center gap-1">
-              <span className="text-zinc-400">/</span>
+            <span key={segmentPrefix} className="flex items-center gap-2">
+              <span className="text-zinc-300">/</span>
               <button
                 type="button"
                 onClick={() => onPrefixChange(segmentPrefix)}
-                className={`hover:text-brand-600 ${isLast ? 'font-medium text-zinc-900' : 'text-brand-600'}`}
+                className={`hover:text-brand-600 ${isLast ? 'font-medium text-zinc-700' : 'text-brand-600'}`}
               >
                 {segment}
               </button>
@@ -396,17 +398,23 @@ export function ObjectBrowser({
   const groups = groupVersionsByKey(versions);
   const entries = getEntriesAtPrefix(groups, currentPrefix);
 
-  function navigateToObject(key: string, versionId: string) {
+  function navigateToObject(key: string, versionId?: string) {
     void navigate({
       to: '/buckets/$bucketName/objects',
       params: { bucketName },
-      search: { key, region, versionId },
+      search: { key, region, ...(versionId && { versionId }) },
     });
   }
 
   return (
     <div className="mt-4">
-      <PrefixBreadcrumb currentPrefix={currentPrefix} onPrefixChange={onPrefixChange} />
+      {currentPrefix && (
+        <PrefixBreadcrumb
+          bucketName={bucketName}
+          currentPrefix={currentPrefix}
+          onPrefixChange={onPrefixChange}
+        />
+      )}
 
       {entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
@@ -444,7 +452,7 @@ export function ObjectBrowser({
                           className="shrink-0 text-zinc-400"
                           aria-hidden="true"
                         />
-                        {entry.name}/
+                        {entry.name}
                       </div>
                     </Table.Cell>
                     {versioningEnabled && (

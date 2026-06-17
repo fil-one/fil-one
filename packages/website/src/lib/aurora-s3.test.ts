@@ -257,6 +257,33 @@ describe('parseListObjectVersionsResponse', () => {
     expect(result.versions[0].key).toBe('valid.txt');
   });
 
+  it('normalizes a "null" VersionId to an empty string', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+      <ListVersionsResult>
+        <IsTruncated>false</IsTruncated>
+        <Version>
+          <Key>unversioned.txt</Key>
+          <VersionId>null</VersionId>
+          <IsLatest>true</IsLatest>
+          <Size>300</Size>
+          <LastModified>2026-03-01T00:00:00.000Z</LastModified>
+        </Version>
+      </ListVersionsResult>`;
+
+    const result = parseListObjectVersionsResponse(xml);
+
+    expect(result.versions).toEqual([
+      {
+        key: 'unversioned.txt',
+        versionId: '',
+        isLatest: true,
+        isDeleteMarker: false,
+        sizeBytes: 300,
+        lastModified: '2026-03-01T00:00:00.000Z',
+      },
+    ]);
+  });
+
   it('throws on malformed XML', () => {
     expect(() => parseListObjectVersionsResponse('not xml at all <>')).toThrow(
       /Failed to parse S3 ListObjectVersions response/,

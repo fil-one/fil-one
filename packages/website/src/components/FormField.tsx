@@ -1,3 +1,5 @@
+import { Label } from './Label';
+
 type FormFieldProps = {
   label: string;
   optional?: boolean;
@@ -19,14 +21,14 @@ export function FormField({
 }: FormFieldProps) {
   return (
     <div className={`flex flex-col gap-2.5${className ? ` ${className}` : ''}`}>
-      <label htmlFor={htmlFor} className="text-xs font-medium text-zinc-900">
+      <Label htmlFor={htmlFor}>
         {label}
         {optional && (
           <span className="ml-1 text-xs font-normal text-(--color-paragraph-text-subtle)">
             (optional)
           </span>
         )}
-      </label>
+      </Label>
       {children}
       {error ? (
         <p className="text-xs text-red-600">{error}</p>

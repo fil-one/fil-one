@@ -12,7 +12,7 @@ export type IconProps = {
 const colorStyles = {
   inherit: 'inherit',
   success: 'text-(--color-icon-success)',
-  // error: 'text-(--color-icon-error)',
+  error: 'text-(--color-icon-error)',
 };
 
 export function Icon({
