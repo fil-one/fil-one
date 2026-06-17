@@ -253,7 +253,12 @@ function ProfileSaveBar({ form }: { form: ReturnType<typeof useProfileForm> }) {
 
   return (
     <div className="flex items-center gap-3">
-      <Button variant="primary" onClick={form.save} disabled={form.isSaving || !form.hasChanges}>
+      <Button
+        id="settings-save-button"
+        variant="primary"
+        onClick={form.save}
+        disabled={form.isSaving || !form.hasChanges}
+      >
         {form.isSaving ? 'Saving...' : 'Save changes'}
       </Button>
       {form.hasChanges && <p className="text-xs text-zinc-500">Saving: {changedLabels}</p>}
@@ -381,7 +386,12 @@ export function SettingsPage() {
   return (
     <div className="px-10 pt-10">
       <div className="mb-1">
-        <Heading tag="h1" size="xl" description="Manage your profile and preferences">
+        <Heading
+          id="settings-heading"
+          tag="h1"
+          size="xl"
+          description="Manage your profile and preferences"
+        >
           Settings
         </Heading>
       </div>
