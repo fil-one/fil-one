@@ -177,10 +177,16 @@ export function DashboardPage() {
     <div className="px-10 pt-10">
       {/* 1. Page header */}
       <div className="mb-5 flex items-center justify-between">
-        <Heading tag="h1" size="xl">
+        <Heading id="dashboard-heading" tag="h1" size="xl">
           Dashboard
         </Heading>
-        <Button variant="ghost" size="sm" icon={PlusIcon} href="/buckets">
+        <Button
+          id="dashboard-new-bucket-button"
+          variant="ghost"
+          size="sm"
+          icon={PlusIcon}
+          href="/buckets"
+        >
           New bucket
         </Button>
       </div>
@@ -260,16 +266,18 @@ export function DashboardPage() {
               <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
                 PLAN
               </span>
-              {isTrialing && trialDaysLeft !== null && (
-                <Badge color="blue" size="sm" description={trialEndsLabel}>
-                  {trialDaysLeft} days left
-                </Badge>
-              )}
-              {!isTrialing && (
-                <Badge color={badge.color} size="sm">
-                  {badge.label}
-                </Badge>
-              )}
+              <span data-testid="subscription-status" data-status={billing.subscription.status}>
+                {isTrialing && trialDaysLeft !== null && (
+                  <Badge color="blue" size="sm" description={trialEndsLabel}>
+                    {trialDaysLeft} days left
+                  </Badge>
+                )}
+                {!isTrialing && (
+                  <Badge color={badge.color} size="sm">
+                    {badge.label}
+                  </Badge>
+                )}
+              </span>
             </div>
             <span className="text-xl font-medium text-zinc-900">
               {planDisplayName(billing.subscription.planId)}
@@ -406,7 +414,12 @@ export function DashboardPage() {
             <p className="mb-4 max-w-xs text-sm text-zinc-500">
               Create a bucket to start storing objects
             </p>
-            <Button variant="primary" icon={PlusIcon} href="/buckets">
+            <Button
+              id="dashboard-create-bucket-button"
+              variant="primary"
+              icon={PlusIcon}
+              href="/buckets"
+            >
               Create bucket
             </Button>
           </div>

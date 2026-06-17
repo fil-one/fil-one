@@ -6,9 +6,11 @@ type RadioProps = {
   checked: boolean;
   onChange: () => void;
   className?: string;
+  id?: string;
+  'data-testid'?: string;
 };
 
-export function Radio({ name, value, checked, onChange, className }: RadioProps) {
+export function Radio({ name, value, checked, onChange, className, ...rest }: RadioProps) {
   return (
     <span
       className={clsx(
@@ -17,6 +19,7 @@ export function Radio({ name, value, checked, onChange, className }: RadioProps)
       )}
     >
       <input
+        {...rest}
         type="radio"
         name={name}
         value={value}

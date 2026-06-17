@@ -284,7 +284,10 @@ describe('subscriptionGuardMiddleware', () => {
     });
   });
 
-  it('allows when billing record exists but has no subscriptionStatus', async () => {
+  it('blocks when billing record exists but has no subscriptionStatus (fail closed)', async () => {
+    // A customer-mapping-only record (e.g. written by create-setup-intent) has
+    // no status and must NOT grant access — entitlement comes only from
+    // ensureTrialEntitlement.
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
         pk: `CUSTOMER#${USER_ID}`,
@@ -298,7 +301,11 @@ describe('subscriptionGuardMiddleware', () => {
       buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })),
     );
 
-    expect(result).toBeUndefined();
+    expectErrorResponse(result, 403, {
+      message:
+        'Your subscription is not active. Please contact support or update your payment method.',
+      code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+    });
   });
 
   it.each(['incomplete', 'incomplete_expired', 'unpaid', 'paused', 'some_future_status'])(

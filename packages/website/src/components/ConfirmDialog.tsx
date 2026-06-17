@@ -38,7 +38,7 @@ export function ConfirmDialog({
   }
 
   return (
-    <Modal open={open} onClose={loading ? () => {} : onClose} size="sm">
+    <Modal open={open} onClose={loading ? () => {} : onClose} size="sm" testId="confirm-dialog">
       <ModalBody>
         <div className="flex flex-col items-center gap-3 px-2 pt-6 pb-0 text-center">
           <IconBox icon={WarningCircleIcon} color="red" size="lg" />
@@ -52,10 +52,17 @@ export function ConfirmDialog({
       </ModalBody>
       <ModalFooter>
         <div className="flex w-full gap-3">
-          <Button variant="ghost" className="flex-1" onClick={onClose} disabled={loading}>
+          <Button
+            id="confirm-dialog-cancel-button"
+            variant="ghost"
+            className="flex-1"
+            onClick={onClose}
+            disabled={loading}
+          >
             {cancelLabel}
           </Button>
           <Button
+            id="confirm-dialog-confirm-button"
             variant="destructive"
             className="flex-1"
             disabled={loading}

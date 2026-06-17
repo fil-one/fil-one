@@ -11,7 +11,7 @@ export type RecoveryCodeModalProps = {
 
 export function RecoveryCodeModal({ open, onDone, code }: RecoveryCodeModalProps) {
   return (
-    <Modal open={open} onClose={() => {}} size="md">
+    <Modal open={open} onClose={() => {}} size="md" testId="recovery-code-modal">
       <ModalHeader>Save your recovery code</ModalHeader>
       <ModalBody>
         <div className="mb-4">
@@ -32,7 +32,7 @@ export function RecoveryCodeModal({ open, onDone, code }: RecoveryCodeModalProps
         </div>
       </ModalBody>
       <ModalFooter fullWidth>
-        <Button variant="primary" onClick={onDone}>
+        <Button id="recovery-code-done-button" variant="primary" onClick={onDone}>
           I&apos;ve saved this code
         </Button>
       </ModalFooter>
