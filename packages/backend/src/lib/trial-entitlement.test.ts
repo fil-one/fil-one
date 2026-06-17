@@ -21,6 +21,7 @@ vi.mock('./create-billing-trial.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { ensureTrialEntitlement } from './trial-entitlement.js';
+import { TrialEntitlementError } from './errors.js';
 
 const BASE = {
   sub: 'auth0|sub-1',
@@ -115,23 +116,19 @@ describe('ensureTrialEntitlement', () => {
     expect(mockCreateBillingTrial).toHaveBeenCalledOnce();
   });
 
-  it('returns false and does not set the flag on a transient claim error', async () => {
+  it('throws and does not set the flag on a transient claim error', async () => {
     ddbMock.on(PutItemCommand).rejects(new Error('Service unavailable'));
 
-    const result = await ensureTrialEntitlement(BASE);
-
-    expect(result).toBe(false);
+    await expect(ensureTrialEntitlement(BASE)).rejects.toThrow(TrialEntitlementError);
     expect(mockCreateBillingTrial).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
-  it('returns false and does not set the flag when trial creation fails', async () => {
+  it('throws and does not set the flag when trial creation fails', async () => {
     ddbMock.on(PutItemCommand).resolves({});
     mockCreateBillingTrial.mockRejectedValue(new Error('Stripe down'));
 
-    const result = await ensureTrialEntitlement(BASE);
-
-    expect(result).toBe(false);
+    await expect(ensureTrialEntitlement(BASE)).rejects.toThrow(TrialEntitlementError);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 });

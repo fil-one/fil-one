@@ -7,6 +7,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 import { createBillingTrial } from './create-billing-trial.js';
 import { normalizeEmailForEntitlement } from './email-normalization.js';
+import { TrialEntitlementError } from './errors.js';
 
 export interface EnsureTrialEntitlementParams {
   sub: string;
@@ -59,7 +60,12 @@ export async function ensureTrialEntitlement({
         userId,
         orgId,
       });
-      return false; // transient — leave flag unset so the next request retries
+      // Transient infra failure (not a "not entitled" outcome). Throw so the
+      // caller surfaces a retryable 5xx; the flag stays unset so a later request
+      // still retries the claim.
+      throw new TrialEntitlementError('Failed to claim trial entitlement key', {
+        cause: err,
+      });
     }
   }
 
@@ -74,7 +80,11 @@ export async function ensureTrialEntitlement({
         userId,
         orgId,
       });
-      return false; // idempotent on retry
+      // Transient billing failure (e.g. Stripe down). Throw for a retryable 5xx;
+      // createBillingTrial is idempotent on retry and the flag stays unset.
+      throw new TrialEntitlementError('Failed to create billing trial', {
+        cause: error,
+      });
     }
   } else {
     console.info('[trial-entitlement] Normalized email already claimed — no trial granted', {

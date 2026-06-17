@@ -284,8 +284,11 @@ async function resolveUserAndOrg(
     }
     // Lazy backfill: claim the entitlement and create the trial on the first
     // verified login (covers signup-while-unverified and post-email-change).
+    // Best-effort: a transient failure here must not block authentication —
+    // the flag stays unset so the next login (or the subscription guard)
+    // retries. Only swallow it on this login-side path.
     if (result.Item.emailEntitlementClaimed?.BOOL !== true) {
-      await ensureTrialEntitlement({ sub, userId, orgId, email, emailVerified });
+      await ensureTrialEntitlementBestEffort({ sub, userId, orgId, email, emailVerified });
     }
     return { userId, orgId, email };
   }
@@ -300,10 +303,31 @@ async function resolveUserAndOrg(
   // Tenant setup is deferred until the user creates their first bucket or access
   // key — see docs/architectural-decisions/2026-05-13-synchronous-tenant-setup-on-first-resource.md.
   // The trial is claimed+created here (verified emails only) so billing is ready
-  // before any metered operation; ensureTrialEntitlement is idempotent.
-  await ensureTrialEntitlement({ sub, userId, orgId, email, emailVerified });
+  // before any metered operation; ensureTrialEntitlement is idempotent. Best-effort:
+  // a transient failure must not block login — the subscription guard retries later.
+  await ensureTrialEntitlementBestEffort({ sub, userId, orgId, email, emailVerified });
 
   return { userId, orgId, email };
+}
+
+/**
+ * Login-side wrapper around {@link ensureTrialEntitlement}: claiming the trial is
+ * a non-critical backfill, so a transient failure (DynamoDB/Stripe) is logged and
+ * swallowed rather than failing authentication. The subscription guard calls
+ * ensureTrialEntitlement directly and lets transient errors surface as a 5xx.
+ */
+async function ensureTrialEntitlementBestEffort(
+  params: Parameters<typeof ensureTrialEntitlement>[0],
+): Promise<void> {
+  try {
+    await ensureTrialEntitlement(params);
+  } catch (err) {
+    console.error('[auth] Trial entitlement backfill failed (continuing login)', {
+      error: err,
+      userId: params.userId,
+      orgId: params.orgId,
+    });
+  }
 }
 
 async function createNewUserAndOrg({

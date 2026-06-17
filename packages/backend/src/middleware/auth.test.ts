@@ -497,6 +497,34 @@ describe('authMiddleware', () => {
       });
     });
 
+    it('does not block login when the trial entitlement backfill fails transiently', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, name: 'Alice Johnson' } });
+
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+      // Entitlement backfill throws (e.g. Stripe/DynamoDB down) — login must still succeed.
+      mockEnsureTrialEntitlement.mockRejectedValueOnce(new Error('Stripe down'));
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        rawPath: '/api/me',
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toMatchObject({
+        sub: MOCK_SUB,
+        userId: MOCK_USER_ID,
+        orgId: MOCK_ORG_ID,
+      });
+      expect(mockEnsureTrialEntitlement).toHaveBeenCalledOnce();
+    });
+
     it('falls back to email-derived org name when no JWT name claim is present', async () => {
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })

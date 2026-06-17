@@ -107,6 +107,26 @@ describe('subscriptionGuardMiddleware', () => {
     });
   });
 
+  it('propagates a transient entitlement error (retryable 5xx) instead of masking it as 403', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+    mockEnsureTrialEntitlement.mockRejectedValue(new Error('DynamoDB unavailable'));
+
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+    const request = buildMiddyRequest(
+      buildEvent({
+        userInfo: {
+          sub: 'auth0|sub-1',
+          userId: USER_ID,
+          orgId: 'test-org-uuid',
+          email: 'test@example.com',
+          emailVerified: true,
+        },
+      }),
+    );
+
+    await expect(before(request)).rejects.toThrow('DynamoDB unavailable');
+  });
+
   it('allows when subscription status is active', async () => {
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
