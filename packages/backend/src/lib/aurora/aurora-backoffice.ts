@@ -15,9 +15,9 @@ import {
   type ModelsTenantStatus,
   type ModelsTenantWithMetricsBackofficeResponse,
 } from '@filone/aurora-backoffice-client';
-import pRetry from 'p-retry';
 import { instrumentClient } from './aurora-api-metrics.js';
 import { getAuroraBackofficeSecrets } from '../auth-secrets.js';
+import type { TenantStatus } from '../service-orchestrator.js';
 
 export type {
   ModelOperationMetricsSample,
@@ -488,6 +488,37 @@ export async function getTenantStatus({
   }
 }
 
+// Maps the orchestrator-agnostic TenantStatus to Aurora's generated enum.
+// Homed here (not in region-helpers.ts) to avoid an import cycle: the registry
+// imports the orchestrator, so the orchestrator can't import back from
+// region-helpers.ts. aurora-backoffice.ts imports no registry/orchestrator.
+const TENANT_STATUS_TO_MODELS: Record<TenantStatus, ModelsTenantStatus> = {
+  active: 'ACTIVE',
+  'write-locked': 'WRITE_LOCKED',
+  disabled: 'DISABLED',
+};
+
+export function mapToModelsTenantStatus(status: TenantStatus): ModelsTenantStatus {
+  const modelsStatus = TENANT_STATUS_TO_MODELS[status];
+  if (!modelsStatus) {
+    throw new Error(`Unknown tenant status: ${String(status)}`);
+  }
+  return modelsStatus;
+}
+
+// Reverse of TENANT_STATUS_TO_MODELS. Returns undefined for Aurora's never-used
+// `LOCKED` value, which has no orchestrator-agnostic equivalent we model.
+const MODELS_TO_TENANT_STATUS: Record<ModelsTenantStatus, TenantStatus | undefined> = {
+  ACTIVE: 'active',
+  WRITE_LOCKED: 'write-locked',
+  DISABLED: 'disabled',
+  LOCKED: undefined,
+};
+
+export function mapFromModelsTenantStatus(status: ModelsTenantStatus): TenantStatus | undefined {
+  return MODELS_TO_TENANT_STATUS[status];
+}
+
 export async function updateTenantStatus({
   tenantId,
   status,
@@ -498,21 +529,16 @@ export async function updateTenantStatus({
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  await pRetry(
-    async () => {
-      const { error } = await setTenantStatus({
-        client,
-        path: { partnerId, tenantId },
-        body: { status },
-        throwOnError: false,
-      });
+  const { error } = await setTenantStatus({
+    client,
+    path: { partnerId, tenantId },
+    body: { status },
+    throwOnError: false,
+  });
 
-      if (error) {
-        throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
-          cause: error,
-        });
-      }
-    },
-    { retries: 3 },
-  );
+  if (error) {
+    throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
+      cause: error,
+    });
+  }
 }

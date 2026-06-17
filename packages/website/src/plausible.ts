@@ -1,8 +1,10 @@
-import { init, track } from '@plausible-analytics/tracker';
+import { init, track as plausibleTrack } from '@plausible-analytics/tracker';
 import { Stage } from '@filone/shared';
 import { FILONE_STAGE } from './env.js';
 
-if (FILONE_STAGE === Stage.Production) {
+const enabled = FILONE_STAGE === Stage.Production;
+
+if (enabled) {
   init({
     domain: 'fil.one',
     captureOnLocalhost: false,
@@ -10,4 +12,16 @@ if (FILONE_STAGE === Stage.Production) {
   });
 }
 
-export { track };
+/**
+ * Safe wrapper around Plausible's `track`. No-ops outside production (where
+ * `init` never ran) and never throws, so callers can fire events inline
+ * without guarding or risking breaking the surrounding UI.
+ */
+export const track: typeof plausibleTrack = (...args) => {
+  if (!enabled) return;
+  try {
+    plausibleTrack(...args);
+  } catch (err) {
+    console.error('Unexpected Plausible error:', err);
+  }
+};

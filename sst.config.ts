@@ -403,6 +403,14 @@ export default $config({
       FTH_S3_URL: 'https://us-east-1.fortilyx.com',
     };
 
+    // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
+    // drives region/orchestrator selection, and instantiating the orchestrator
+    // registry eagerly loads both the Aurora and FTH clients, so each backend's
+    // endpoint config must be present. FILONE_STAGE is intentionally also in
+    // sharedEnv (the partial-bundle route handlers read it); it's repeated here
+    // so cron jobs, which bypass sharedEnv, receive it too.
+    const orchestratorEnv = { FILONE_STAGE: $app.stage, ...auroraEnv, ...fthEnv };
+
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
@@ -508,7 +516,7 @@ export default $config({
       handler: 'list-buckets',
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        FTH_S3_URL: fthEnv.FTH_S3_URL,
+        ...fthEnv,
       },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
@@ -520,10 +528,7 @@ export default $config({
       method: 'POST',
       routePath: '/api/buckets',
       handler: 'create-bucket',
-      extraEnv: {
-        ...auroraEnv,
-        ...fthEnv,
-      },
+      extraEnv: orchestratorEnv,
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
@@ -539,7 +544,7 @@ export default $config({
       handler: 'get-bucket',
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        FTH_S3_URL: fthEnv.FTH_S3_URL,
+        ...fthEnv,
       },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
@@ -551,6 +556,7 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
+      extraEnv: { ...fthEnv },
       permissions: auroraS3GatewayPermissions,
     });
     addRoute({
@@ -563,10 +569,7 @@ export default $config({
       method: 'POST',
       routePath: '/api/access-keys',
       handler: 'create-access-key',
-      extraEnv: {
-        ...auroraEnv,
-        ...fthEnv,
-      },
+      extraEnv: orchestratorEnv,
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
@@ -594,6 +597,7 @@ export default $config({
       method: 'POST',
       routePath: '/api/presign',
       handler: 'presign',
+      extraEnv: { ...fthEnv },
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
       ],
@@ -698,7 +702,7 @@ export default $config({
       method: 'GET',
       routePath: '/api/activity',
       handler: 'get-activity',
-      extraEnv: auroraEnv,
+      extraEnv: orchestratorEnv,
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
       ],
@@ -722,7 +726,7 @@ export default $config({
       method: 'POST',
       routePath: '/api/billing/activate',
       handler: 'activate-subscription',
-      extraEnv: auroraEnv,
+      extraEnv: orchestratorEnv,
     });
     addRoute({ method: 'GET', routePath: '/api/billing/invoices', handler: 'list-invoices' });
     addRoute({
@@ -736,7 +740,7 @@ export default $config({
       routePath: '/api/stripe/webhook',
       handler: 'stripe-webhook',
       extraEnv: {
-        ...auroraEnv,
+        ...orchestratorEnv,
         STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
       },
       permissions: [
@@ -752,8 +756,18 @@ export default $config({
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
-      link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, auroraBackofficeToken],
-      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'gb_month_meter' },
+      link: [
+        billingTable,
+        userInfoTable,
+        stripeSecretKey,
+        stripePriceId,
+        auroraBackofficeToken,
+        fthManagementApiToken,
+      ],
+      environment: {
+        ...orchestratorEnv,
+        STRIPE_METER_EVENT_NAME: 'gb_month_meter',
+      },
       timeout: '60 seconds',
       memory: '256 MB',
     });
@@ -784,8 +798,8 @@ export default $config({
     // ── Grace period enforcement ────────────────────────────────────
     const gracePeriodEnforcer = createFn('GracePeriodEnforcer', {
       handler: 'packages/backend/src/jobs/grace-period-enforcer.handler',
-      link: [billingTable, userInfoTable, auroraBackofficeToken],
-      environment: auroraEnv,
+      link: [billingTable, userInfoTable, auroraBackofficeToken, fthManagementApiToken],
+      environment: orchestratorEnv,
       timeout: '300 seconds',
       memory: '256 MB',
     });
@@ -799,8 +813,8 @@ export default $config({
     // ── Subscription drift checker (cron-based, observe-only) ───────
     const subscriptionDriftChecker = createFn('SubscriptionDriftChecker', {
       handler: 'packages/backend/src/jobs/subscription-drift-checker.handler',
-      link: [billingTable, userInfoTable, auroraBackofficeToken],
-      environment: auroraEnv,
+      link: [billingTable, userInfoTable, auroraBackofficeToken, fthManagementApiToken],
+      environment: orchestratorEnv,
       timeout: '300 seconds',
       memory: '256 MB',
     });

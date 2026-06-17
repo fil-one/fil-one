@@ -70,6 +70,18 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     throw Object.assign(new Error('Session expired. Redirecting to login...'), { status: 401 });
   }
 
+  if (response.status === 402) {
+    const body = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
+    if (body.code === ApiErrorCode.TRIAL_PRESIGN_BLOCKED) {
+      throw Object.assign(
+        new Error(
+          'Generating shareable links is not available on trial accounts. Please upgrade to a paid plan.',
+        ),
+        { status: 402, code: ApiErrorCode.TRIAL_PRESIGN_BLOCKED },
+      );
+    }
+  }
+
   if (response.status === 403) {
     const body = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
     if (body.code === ApiErrorCode.EMAIL_NOT_VERIFIED) {

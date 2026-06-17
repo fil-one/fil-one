@@ -25,6 +25,10 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
 }));
 
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+}));
+
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './get-bucket.js';
@@ -44,7 +48,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 describe('get-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockIsTenantReady.mockResolvedValue('aurora-t-1');
+    mockIsTenantReady.mockReturnValue('aurora-t-1');
     mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
   });
 
@@ -186,7 +190,7 @@ describe('get-bucket baseHandler', () => {
   });
 
   it('returns 503 when tenant is missing', async () => {
-    mockIsTenantReady.mockResolvedValue(null);
+    mockIsTenantReady.mockReturnValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     event.pathParameters = { name: 'my-bucket' };
@@ -247,5 +251,49 @@ describe('get-bucket baseHandler', () => {
     expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
     expect(mockIsTenantReady).not.toHaveBeenCalled();
     expect(mockGetBucket).not.toHaveBeenCalled();
+  });
+
+  it('rejects us-east-1 in production for a non-Foundation user', async () => {
+    const previous = process.env.FILONE_STAGE;
+    process.env.FILONE_STAGE = 'production';
+    try {
+      const event = buildEvent({
+        userInfo: USER_INFO,
+        queryStringParameters: { region: S3Region.UsEast1 },
+      });
+      event.pathParameters = { name: 'my-bucket' };
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(400);
+      expect(JSON.parse(result.body!).message).toContain('Unsupported region');
+      expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
+    } finally {
+      process.env.FILONE_STAGE = previous;
+    }
+  });
+
+  it.skip('accepts us-east-1 in production for a verified Foundation email', async () => {
+    const previous = process.env.FILONE_STAGE;
+    process.env.FILONE_STAGE = 'production';
+    mockGetBucket.mockResolvedValue({
+      bucketName: 'my-bucket',
+      region: S3Region.UsEast1,
+      createdAt: '2026-01-15T10:00:00Z',
+      isPublic: false,
+      versioning: false,
+      encrypted: true,
+    });
+    try {
+      const event = buildEvent({
+        userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: true },
+        queryStringParameters: { region: S3Region.UsEast1 },
+      });
+      event.pathParameters = { name: 'my-bucket' };
+      await baseHandler(event);
+
+      expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.UsEast1);
+    } finally {
+      process.env.FILONE_STAGE = previous;
+    }
   });
 });

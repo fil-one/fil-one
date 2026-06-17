@@ -1,10 +1,8 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { UsageResponse } from '@filone/shared';
-import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.js';
+import { getOrgProfile } from '../lib/org-profile.js';
 import { isOrgSetupComplete } from '../lib/org-setup-status.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -17,30 +15,21 @@ import {
   getTenantInfo,
 } from '../lib/aurora/aurora-backoffice.js';
 
-const dynamo = getDynamoClient();
-
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId } = getUserInfo(event);
-  const userInfoTableName = Resource.UserInfoTable.name;
 
   // 1. Look up org profile for Aurora S3 credentials
-  const { Item: orgProfile } = await dynamo.send(
-    new GetItemCommand({
-      TableName: userInfoTableName,
-      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-    }),
-  );
+  const orgProfile = await getOrgProfile(orgId);
 
   const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  // TODO(FIL-382): drop the setupStatus fallback.
-  const setupStatus = orgProfile?.auroraSetupStatus?.S ?? orgProfile?.setupStatus?.S;
+  const auroraSetupStatus = orgProfile?.auroraSetupStatus?.S;
 
   // 2. Fetch usage data from Aurora in parallel
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime());
   thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
-  const shouldFetchData = auroraTenantId && isOrgSetupComplete(setupStatus);
+  const shouldFetchData = auroraTenantId && isOrgSetupComplete(auroraSetupStatus);
 
   const [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
     shouldFetchData

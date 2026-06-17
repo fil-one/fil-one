@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, ScanCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, ScanCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 
@@ -15,9 +15,11 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockGetTenantStatus = vi.fn();
-vi.mock('../lib/aurora/aurora-backoffice.js', () => ({
-  getTenantStatus: (...args: unknown[]) => mockGetTenantStatus(...args),
+// The drift-checker probes every available orchestrator through the registry.
+// Mocking getAvailableOrchestrators lets us drive fake orchestrators end-to-end.
+const mockGetAvailableOrchestrators = vi.fn();
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
+  getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
 const mockReportMetric = vi.fn();
@@ -25,10 +27,16 @@ vi.mock('../lib/metrics.js', () => ({
   reportMetric: (...args: unknown[]) => mockReportMetric(...args),
 }));
 
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+}));
+
+process.env.FILONE_STAGE = 'test';
+
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './subscription-drift-checker.js';
-import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
+import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,7 +44,6 @@ import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 
 const USER_ID = 'user-abc';
 const ORG_ID = 'org-xyz';
-const TENANT_ID = 'tenant-123';
 
 function activeBillingItem(orgId = ORG_ID, userId = USER_ID) {
   return marshall({
@@ -47,24 +54,10 @@ function activeBillingItem(orgId = ORG_ID, userId = USER_ID) {
   });
 }
 
-function seedReadyOrg(orgId = ORG_ID, tenantId = TENANT_ID) {
-  ddbMock
-    .on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-    })
-    .resolves({
-      Item: marshall({
-        auroraTenantId: tenantId,
-        auroraSetupStatus: FINAL_SETUP_STATUS,
-      }),
-    });
-}
-
-function summaryEmission() {
+function emissionFor(orchestratorId: string) {
   return mockReportMetric.mock.calls
     .map((c) => c[0] as Record<string, unknown>)
-    .find((e) => 'SubscriptionsNotInSync' in e);
+    .find((e) => e.orchestrator === orchestratorId);
 }
 
 function outOfSyncLogs(spy: ReturnType<typeof vi.spyOn>) {
@@ -79,12 +72,13 @@ function outOfSyncLogs(spy: ReturnType<typeof vi.spyOn>) {
 describe('subscription-drift-checker', () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
+  let aurora: FakeOrchestrator;
 
   beforeEach(() => {
     ddbMock.reset();
-    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-    mockGetTenantStatus.mockReset();
-    mockReportMetric.mockReset();
+    vi.clearAllMocks();
+    aurora = fakeOrchestrator('aurora');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
@@ -99,42 +93,42 @@ describe('subscription-drift-checker', () => {
 
     await handler();
 
-    expect(summaryEmission()).toMatchObject({
+    expect(emissionFor('aurora')).toMatchObject({
+      SubscriptionsTotal: 0,
       SubscriptionsNotInSync: 0,
       SubscriptionsMissingTenant: 0,
       SubscriptionsProbeFailed: 0,
     });
-    expect(mockGetTenantStatus).not.toHaveBeenCalled();
+    expect(aurora.getTenantStatus).not.toHaveBeenCalled();
     expect(outOfSyncLogs(logSpy)).toHaveLength(0);
   });
 
-  it('emits no out_of_sync log when Aurora reports ACTIVE', async () => {
+  it('emits no out_of_sync log when the tenant is active', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
-    seedReadyOrg();
-    mockGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'ok', status: 'active' });
 
     await handler();
 
     expect(outOfSyncLogs(logSpy)).toHaveLength(0);
-    expect(summaryEmission()).toMatchObject({
+    expect(emissionFor('aurora')).toMatchObject({
+      SubscriptionsTotal: 1,
+      SubscriptionsTenantsChecked: 1,
       SubscriptionsNotInSync: 0,
       SubscriptionsMissingTenant: 0,
       SubscriptionsProbeFailed: 0,
-      SubscriptionsTotal: 1,
     });
   });
 
   it.each([
-    ['WRITE_LOCKED', { kind: 'ok', status: 'WRITE_LOCKED' }, 'WRITE_LOCKED'],
-    ['LOCKED', { kind: 'ok', status: 'LOCKED' }, 'LOCKED'],
-    ['DISABLED', { kind: 'ok', status: 'DISABLED' }, 'DISABLED'],
+    ['write-locked', { kind: 'ok', status: 'write-locked' }, 'write-locked'],
+    ['disabled', { kind: 'ok', status: 'disabled' }, 'disabled'],
+    ['unmodeled status', { kind: 'ok', status: undefined }, 'unknown'],
     ['not_found', { kind: 'not_found' }, 'not_found'],
   ])(
-    'logs out_of_sync and increments counter when Aurora reports %s',
-    async (_label, tenantStatus, expectedAuroraStatus) => {
+    'logs out_of_sync and increments counter when the tenant is %s',
+    async (_label, probe, expectedStatus) => {
       ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
-      seedReadyOrg();
-      mockGetTenantStatus.mockResolvedValue(tenantStatus);
+      aurora.getTenantStatus.mockResolvedValue(probe);
 
       await handler();
 
@@ -143,10 +137,11 @@ describe('subscription-drift-checker', () => {
       expect(logs[0][1]).toMatchObject({
         orgId: ORG_ID,
         userId: USER_ID,
-        auroraTenantId: TENANT_ID,
-        auroraStatus: expectedAuroraStatus,
+        orchestrator: 'aurora',
+        tenantId: `aurora:${ORG_ID}`,
+        status: expectedStatus,
       });
-      expect(summaryEmission()).toMatchObject({
+      expect(emissionFor('aurora')).toMatchObject({
         SubscriptionsNotInSync: 1,
         SubscriptionsMissingTenant: 0,
         SubscriptionsProbeFailed: 0,
@@ -154,85 +149,59 @@ describe('subscription-drift-checker', () => {
     },
   );
 
-  it('counts probe failures when Aurora returns transport errors', async () => {
+  it('counts probe failures when the orchestrator returns an error result', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
-    seedReadyOrg();
-    mockGetTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('boom') });
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('boom') });
 
     await handler();
 
     expect(outOfSyncLogs(logSpy)).toHaveLength(0);
-    expect(summaryEmission()).toMatchObject({
+    expect(emissionFor('aurora')).toMatchObject({
       SubscriptionsNotInSync: 0,
       SubscriptionsMissingTenant: 0,
       SubscriptionsProbeFailed: 1,
     });
   });
 
-  it('counts org as missing tenant when auroraTenantId missing or setup incomplete', async () => {
+  it('counts the org as missing a tenant when the orchestrator has none', async () => {
+    aurora = fakeOrchestrator('aurora', { ready: false });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
     ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: marshall({
-          auroraTenantId: TENANT_ID,
-          auroraSetupStatus: OrgSetupStatus.AURORA_TENANT_CREATED, // not final
-        }),
-      });
 
     await handler();
 
-    expect(mockGetTenantStatus).not.toHaveBeenCalled();
+    expect(aurora.getTenantStatus).not.toHaveBeenCalled();
     expect(outOfSyncLogs(logSpy)).toHaveLength(0);
-    expect(summaryEmission()).toMatchObject({
-      SubscriptionsNotInSync: 0,
-      SubscriptionsMissingTenant: 1,
-      SubscriptionsProbeFailed: 0,
+    expect(emissionFor('aurora')).toMatchObject({
       SubscriptionsTotal: 1,
+      SubscriptionsMissingTenant: 1,
+      SubscriptionsTenantsChecked: 0,
+      SubscriptionsNotInSync: 0,
+      SubscriptionsProbeFailed: 0,
     });
   });
 
   it('counts probe failure when getTenantStatus throws and continues processing', async () => {
     const orgId2 = 'org-second';
-    const tenantId2 = 'tenant-second';
-
     ddbMock.on(ScanCommand).resolves({
       Items: [activeBillingItem(), activeBillingItem(orgId2, 'user-second')],
     });
-    seedReadyOrg();
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${orgId2}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: marshall({
-          auroraTenantId: tenantId2,
-          auroraSetupStatus: FINAL_SETUP_STATUS,
-        }),
-      });
-
-    mockGetTenantStatus
-      .mockImplementationOnce(() => {
-        throw new Error('transient');
-      })
-      .mockResolvedValueOnce({ kind: 'ok', status: 'ACTIVE' });
+    aurora.getTenantStatus
+      .mockRejectedValueOnce(new Error('transient'))
+      .mockResolvedValueOnce({ kind: 'ok', status: 'active' });
 
     await handler();
 
     expect(outOfSyncLogs(logSpy)).toHaveLength(0);
-    expect(summaryEmission()).toMatchObject({
+    expect(emissionFor('aurora')).toMatchObject({
+      SubscriptionsTotal: 2,
       SubscriptionsNotInSync: 0,
       SubscriptionsMissingTenant: 0,
       SubscriptionsProbeFailed: 1,
-      SubscriptionsTotal: 2,
     });
   });
 
-  it('dedupes multiple billing records for the same orgId and probes Aurora once', async () => {
+  it('dedupes multiple billing records for the same orgId and probes once', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
         activeBillingItem(ORG_ID, 'user-first'),
@@ -240,31 +209,27 @@ describe('subscription-drift-checker', () => {
         activeBillingItem(ORG_ID, 'user-third'),
       ],
     });
-    seedReadyOrg();
-    mockGetTenantStatus.mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'ok', status: 'disabled' });
 
     await handler();
 
-    expect(mockGetTenantStatus).toHaveBeenCalledTimes(1);
+    expect(aurora.getTenantStatus).toHaveBeenCalledTimes(1);
     const logs = outOfSyncLogs(logSpy);
     expect(logs).toHaveLength(1);
     expect(logs[0][1]).toMatchObject({
       orgId: ORG_ID,
       userId: 'user-first', // first-seen userId becomes the representative
-      auroraStatus: 'DISABLED',
+      orchestrator: 'aurora',
+      status: 'disabled',
     });
-    expect(summaryEmission()).toMatchObject({
-      SubscriptionsNotInSync: 1,
-      SubscriptionsMissingTenant: 0,
-      SubscriptionsProbeFailed: 0,
+    expect(emissionFor('aurora')).toMatchObject({
       SubscriptionsTotal: 1,
+      SubscriptionsNotInSync: 1,
     });
   });
 
   it('handles paginated scan results', async () => {
     const orgIdPage2 = 'org-page2';
-    const tenantIdPage2 = 'tenant-page2';
-
     ddbMock
       .on(ScanCommand)
       .resolvesOnce({
@@ -272,22 +237,10 @@ describe('subscription-drift-checker', () => {
         LastEvaluatedKey: { pk: { S: 'cursor' }, sk: { S: 'val' } },
       })
       .resolvesOnce({ Items: [activeBillingItem(orgIdPage2, 'user-page2')] });
-    seedReadyOrg();
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${orgIdPage2}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: marshall({
-          auroraTenantId: tenantIdPage2,
-          auroraSetupStatus: FINAL_SETUP_STATUS,
-        }),
-      });
 
-    mockGetTenantStatus
-      .mockResolvedValueOnce({ kind: 'ok', status: 'ACTIVE' })
-      .mockResolvedValueOnce({ kind: 'ok', status: 'WRITE_LOCKED' });
+    aurora.getTenantStatus
+      .mockResolvedValueOnce({ kind: 'ok', status: 'active' })
+      .mockResolvedValueOnce({ kind: 'ok', status: 'write-locked' });
 
     await handler();
 
@@ -295,15 +248,13 @@ describe('subscription-drift-checker', () => {
     const logs = outOfSyncLogs(logSpy);
     expect(logs).toHaveLength(1);
     expect(logs[0][1]).toMatchObject({ orgId: orgIdPage2 });
-    expect(summaryEmission()).toMatchObject({
-      SubscriptionsNotInSync: 1,
-      SubscriptionsMissingTenant: 0,
-      SubscriptionsProbeFailed: 0,
+    expect(emissionFor('aurora')).toMatchObject({
       SubscriptionsTotal: 2,
+      SubscriptionsNotInSync: 1,
     });
   });
 
-  it('logs an warn and skips records without orgId', async () => {
+  it('logs a warn and skips records without orgId', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
         marshall({
@@ -316,16 +267,51 @@ describe('subscription-drift-checker', () => {
 
     await handler();
 
-    expect(mockGetTenantStatus).not.toHaveBeenCalled();
+    expect(aurora.getTenantStatus).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(
       '[subscription-drift-checker] missing orgId',
       expect.objectContaining({ pk: `CUSTOMER#${USER_ID}` }),
     );
-    expect(summaryEmission()).toMatchObject({
-      SubscriptionsNotInSync: 0,
+    expect(emissionFor('aurora')).toMatchObject({ SubscriptionsTotal: 0 });
+  });
+
+  // -----------------------------------------------------------------------
+  // Multi-orchestrator
+  // -----------------------------------------------------------------------
+  it('reports a per-orchestrator missing tenant (Aurora ready, no FTH tenant)', async () => {
+    const fth = fakeOrchestrator('fth', { ready: false });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+    ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'ok', status: 'active' });
+
+    await handler();
+
+    expect(emissionFor('aurora')).toMatchObject({
+      SubscriptionsTotal: 1,
+      SubscriptionsTenantsChecked: 1,
       SubscriptionsMissingTenant: 0,
-      SubscriptionsProbeFailed: 0,
-      SubscriptionsTotal: 0,
+      SubscriptionsNotInSync: 0,
     });
+    expect(emissionFor('fth')).toMatchObject({
+      SubscriptionsTotal: 1,
+      SubscriptionsTenantsChecked: 0,
+      SubscriptionsMissingTenant: 1,
+      SubscriptionsNotInSync: 0,
+    });
+  });
+
+  it('detects drift on FTH while Aurora is in sync', async () => {
+    const fth = fakeOrchestrator('fth', { status: 'write-locked' });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+    ddbMock.on(ScanCommand).resolves({ Items: [activeBillingItem()] });
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'ok', status: 'active' });
+
+    await handler();
+
+    expect(emissionFor('aurora')).toMatchObject({ SubscriptionsNotInSync: 0 });
+    expect(emissionFor('fth')).toMatchObject({ SubscriptionsNotInSync: 1 });
+    const logs = outOfSyncLogs(logSpy);
+    expect(logs).toHaveLength(1);
+    expect(logs[0][1]).toMatchObject({ orchestrator: 'fth', status: 'write-locked' });
   });
 });

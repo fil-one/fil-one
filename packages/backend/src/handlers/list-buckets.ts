@@ -3,9 +3,10 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ListBucketsResponse } from '@filone/shared';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
+import { getOrgProfile } from '../lib/org-profile.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
@@ -15,10 +16,14 @@ export async function baseHandler(
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const { orgId } = getUserInfo(event);
 
-  const orchestrators = getAvailableOrchestrators(process.env.FILONE_STAGE!);
+  const orchestrators = getAvailableOrchestrators(
+    process.env.FILONE_STAGE!,
+    getVerifiedEmail(event),
+  );
+  const orgProfile = await getOrgProfile(orgId);
   const results = await Promise.all(
     orchestrators.map(async (orchestrator) => {
-      const tenantId = await orchestrator.isTenantReady(orgId);
+      const tenantId = orchestrator.isTenantReady(orgProfile);
       if (!tenantId) return [];
       return orchestrator.listBuckets(tenantId);
     }),

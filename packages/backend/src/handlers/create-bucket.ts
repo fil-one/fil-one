@@ -4,14 +4,14 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
 import { CreateBucketSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
-import { BucketAlreadyExistsError } from '../lib/errors.js';
+import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
 } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -41,11 +41,11 @@ export async function baseHandler(
 
   const { bucketName, region, versioning, lock, retention } = parsed.data;
 
-  if (!isSupportedRegion(process.env.FILONE_STAGE!, region)) {
+  const { orgId } = getUserInfo(event);
+
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region, getVerifiedEmail(event))) {
     return unsupportedRegionResponse(region);
   }
-
-  const { orgId } = getUserInfo(event);
 
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
@@ -63,6 +63,15 @@ export async function baseHandler(
       return new ResponseBuilder()
         .status(409)
         .body<ErrorResponse>({ message: `Bucket "${bucketName}" already exists` })
+        .build();
+    }
+    // The bucket was created but couldn't be fully configured. Surface the
+    // actionable message so the caller can finish setup via the S3 API instead
+    // of getting the generic 500 from errorHandlerMiddleware.
+    if (err instanceof BucketConfigurationError) {
+      return new ResponseBuilder()
+        .status(500)
+        .body<ErrorResponse>({ message: err.message })
         .build();
     }
     throw err;
