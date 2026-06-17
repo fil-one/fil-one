@@ -144,6 +144,9 @@ importers:
       '@middy/http-header-normalizer':
         specifier: ^7.2.2
         version: 7.2.2
+      disposable-email-domains:
+        specifier: ^1.0.62
+        version: 1.0.62
       jose:
         specifier: ^6.2.2
         version: 6.2.2
@@ -3271,6 +3274,9 @@ packages:
   diff@5.2.2:
     resolution: {integrity: sha512-vtcDfH3TOjP8UekytvnHH1o1P4FcUdt4eQ1Y+Abap1tk/OB2MWQvcwS2ClCd1zuIhc3JKOx6p3kod8Vfys3E+A==}
     engines: {node: '>=0.3.1'}
+
+  disposable-email-domains@1.0.62:
+    resolution: {integrity: sha512-LBQvhRw7mznQTPoyZbsmYeNOZt1pN5aCsx4BAU/3siVFuiM9f2oyKzUaB8v1jbxFjE3aYqYiMo63kAL4pHgfWQ==}
 
   doctrine@3.0.0:
     resolution: {integrity: sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w==}
@@ -8510,6 +8516,8 @@ snapshots:
   detect-libc@2.1.2: {}
 
   diff@5.2.2: {}
+
+  disposable-email-domains@1.0.62: {}
 
   doctrine@3.0.0:
     dependencies:
