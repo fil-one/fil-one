@@ -65,15 +65,20 @@ async function submitUpload(page: Page, bucketName: string, objectName: string):
   await page.getByRole('button', { name: 'Upload object' }).first().click();
   await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}/upload`);
 
-  // The dropzone forwards clicks to a hidden <input type="file">. Setting
-  // files directly on the input is the most reliable way to trigger React's
-  // onChange handler, which auto-fills the object name from the file name.
-  await page.locator('input[type="file"]').setInputFiles({ ...UPLOAD_FILE, name: objectName });
+  // The upload page has two hidden file inputs (a files picker and a folder
+  // picker); the files picker is rendered first. Setting files directly on it
+  // triggers React's onChange handler, which derives the object key from the
+  // file name (empty prefix → key is the file name verbatim).
+  await page
+    .locator('input[type="file"]')
+    .first()
+    .setInputFiles({ ...UPLOAD_FILE, name: objectName });
 
-  // Submit button on the upload page (different button than the header one
-  // we clicked above — this is the form submit).
+  // Submit button on the upload page (different button than the header one we
+  // clicked above). It reads "Upload N files"; with a single selected file the
+  // label is "Upload 1 file".
   // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await page.getByRole('button', { name: 'Upload object' }).click();
+  await page.getByRole('button', { name: 'Upload 1 file', exact: true }).click();
 }
 
 test.describe('paid user', () => {
@@ -169,11 +174,12 @@ test.describe('unpaid user', () => {
     await submitUpload(page, bucketName, uniqueObjectName());
 
     // Presign endpoint returns 403 (GRACE_PERIOD_WRITE_BLOCKED) for past_due
-    // accounts; the upload hook catches the error, resets to the idle state,
-    // and stays on the upload page. Wait for the dropzone to reappear, which
-    // signals that the failure has been processed.
+    // accounts; the upload hook catches the error, marks the file as failed,
+    // and resets to the idle state on the upload page. The "Retry N failed"
+    // button only renders once a failure has been processed, so it is the
+    // stable signal that the upload was rejected.
     // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-    await expect(page.getByRole('button', { name: /Drop files here or click to/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Retry \d+ failed/ })).toBeVisible();
     await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}/upload`);
   });
 });
