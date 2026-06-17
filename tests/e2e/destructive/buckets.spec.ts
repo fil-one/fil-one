@@ -133,8 +133,19 @@ test.describe('unpaid user', () => {
     // No navigation on failure — still on the create page.
     await expect(page).toHaveURL(/\/buckets\/create$/);
 
-    // Returning to /buckets should not show a row for this bucket name.
+    // Returning to /buckets should not show a row for this bucket name. The
+    // page renders the cached list immediately and refetches in the background
+    // with no visible spinner, so toHaveCount(0) could pass against a stale
+    // list before the fresh server response lands. Wait for that refetch to
+    // complete before asserting the row is absent.
+    const listResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname.endsWith('/api/buckets') &&
+        response.request().method() === 'GET' &&
+        response.ok(),
+    );
     await page.getByTestId('nav-buckets').click();
+    await listResponse;
     await expect(
       page.locator(`[data-testid="bucket-row"][data-bucket-name="${bucketName}"]`),
     ).toHaveCount(0);
