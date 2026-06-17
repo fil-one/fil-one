@@ -3,7 +3,9 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { UpdateProfileResponse, ErrorResponse } from '@filone/shared';
-import { UpdateProfileSchema, isSocialConnection } from '@filone/shared';
+import { UpdateProfileSchema, isSocialConnection, ApiErrorCode } from '@filone/shared';
+import disposableDomainsList from 'disposable-email-domains';
+import * as psl from 'psl';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -18,6 +20,17 @@ import { getUserInfo, requestTokenRefresh } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+
+const DISPOSABLE_DOMAINS = new Set(disposableDomainsList as string[]);
+
+function isDisposableDomain(domain: string): boolean {
+  if (DISPOSABLE_DOMAINS.has(domain)) return true;
+  // The blocklist holds registrable domains, so an exact match misses
+  // subdomain addresses (e.g. user@foo.mailinator.com). Check the
+  // registrable domain (eTLD+1) as well.
+  const registrable = psl.get(domain);
+  return registrable !== null && registrable !== domain && DISPOSABLE_DOMAINS.has(registrable);
+}
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId, sub } = getUserInfo(event);
@@ -95,6 +108,17 @@ async function applyEmailUpdate(
       .status(400)
       .body<ErrorResponse>({
         message: 'Email cannot be changed for social login accounts. Update it at your provider.',
+      })
+      .build();
+  }
+
+  const domain = email.split('@')[1]?.toLowerCase();
+  if (domain && isDisposableDomain(domain)) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({
+        message: 'Disposable email addresses are not allowed.',
+        code: ApiErrorCode.DISPOSABLE_EMAIL_BLOCKED,
       })
       .build();
   }

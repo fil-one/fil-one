@@ -1,10 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { ApiErrorCode } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
+
+// Fixed blocklist so tests don't depend on the upstream dataset's contents.
+vi.mock('disposable-email-domains', () => ({
+  default: ['mailinator.com'],
+}));
 
 const mockUpdateAuth0User = vi.fn();
 const mockSendVerificationEmail = vi.fn();
@@ -160,6 +166,32 @@ describe('PATCH /api/me/profile handler', () => {
     expect(updateCalls[0].args[0].input).toMatchObject({
       Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
       UpdateExpression: 'REMOVE emailEntitlementClaimed',
+    });
+  });
+
+  it.each([
+    ['exact match', 'throwaway@mailinator.com'],
+    ['subdomain of a blocked domain', 'throwaway@foo.mailinator.com'],
+    ['mixed case', 'throwaway@MailiNator.COM'],
+  ])('rejects email change to a disposable domain (%s)', async (_label, email) => {
+    const result = await handler(profileEvent({ email }), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 400,
+      body: expect.stringContaining(ApiErrorCode.DISPOSABLE_EMAIL_BLOCKED),
+    });
+    // Rejected before any external mutation: no Auth0 update, no claim-flag clear.
+    expect(mockUpdateAuth0User).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('allows email change to a domain not on the blocklist', async () => {
+    const result = await handler(profileEvent({ email: 'new@notblocked.com' }), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(mockUpdateAuth0User).toHaveBeenCalledWith(MOCK_SUB, {
+      email: 'new@notblocked.com',
+      email_verified: false,
     });
   });
 
