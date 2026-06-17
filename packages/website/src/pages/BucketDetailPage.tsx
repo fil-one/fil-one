@@ -170,6 +170,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
           {bucketName}
         </Heading>
         <Button
+          id="upload-object-button"
           variant="primary"
           size="sm"
           icon={PlusIcon}
@@ -206,8 +207,10 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
       <Tabs>
         <TabList>
-          <Tab>Objects ({versions.length.toLocaleString()})</Tab>
-          <Tab>API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}</Tab>
+          <Tab testId="bucket-objects-tab">Objects ({versions.length.toLocaleString()})</Tab>
+          <Tab testId="bucket-keys-tab">
+            API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}
+          </Tab>
         </TabList>
 
         <TabPanels>

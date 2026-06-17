@@ -298,6 +298,7 @@ export function CreateBucketPage() {
               {/* Clickable toggle header */}
               <button
                 type="button"
+                id="create-bucket-toggle-key"
                 onClick={() => setCreateKeyToggled(!createKeyToggled)}
                 className="flex w-full items-center justify-between rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-left hover:bg-zinc-100"
               >
@@ -338,7 +339,13 @@ export function CreateBucketPage() {
             </div>
 
             {/* Submit button */}
-            <Button variant="primary" size="lg" disabled={!canSubmit} onClick={handleSubmit}>
+            <Button
+              id="create-bucket-submit-button"
+              variant="primary"
+              size="lg"
+              disabled={!canSubmit}
+              onClick={handleSubmit}
+            >
               {creating
                 ? 'Creating...'
                 : createKeyToggled

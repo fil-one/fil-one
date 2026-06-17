@@ -1,9 +1,13 @@
-import { GetItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  GetItemCommand,
+  PutItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import { SubscriptionStatus } from '@filone/shared';
 import type { CreateSetupIntentResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
@@ -14,11 +18,11 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.js';
 
 const dynamo = getDynamoClient();
 
-async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
+// Exported for unit testing (without the auth/csrf middleware chain).
+export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { userId, email, orgId } = getUserInfo(event);
   const tableName = Resource.BillingTable.name;
   const stripe = getStripeClient();
@@ -64,30 +68,32 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       );
     }
   } else {
-    // First time — create Stripe customer and billing record
+    // First time — create the Stripe customer and persist only the customer
+    // mapping. Trial entitlement is granted only by ensureTrialEntitlement.
     const customer = await stripe.customers.create({
       email: email ?? undefined,
       metadata: { userId },
     });
     stripeCustomerId = customer.id;
 
-    await dynamo.send(
-      new PutItemCommand({
-        TableName: tableName,
-        Item: marshall({
-          pk: `CUSTOMER#${userId}`,
-          sk: 'SUBSCRIPTION',
-          stripeCustomerId,
-          orgId,
-          subscriptionStatus: SubscriptionStatus.Trialing,
-          trialStartedAt: new Date().toISOString(),
-          trialEndsAt: new Date(
-            Date.now() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000,
-          ).toISOString(),
-          updatedAt: new Date().toISOString(),
+    try {
+      await dynamo.send(
+        new PutItemCommand({
+          TableName: tableName,
+          Item: marshall({
+            pk: `CUSTOMER#${userId}`,
+            sk: 'SUBSCRIPTION',
+            stripeCustomerId,
+            orgId,
+            updatedAt: new Date().toISOString(),
+          }),
+          ConditionExpression: 'attribute_not_exists(pk)',
         }),
-      }),
-    );
+      );
+    } catch (err) {
+      // A record already exists
+      if (!(err instanceof ConditionalCheckFailedException)) throw err;
+    }
   }
 
   // 2. Create SetupIntent
