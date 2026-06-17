@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
-import { S3_REGION, S3Region } from '@filone/shared';
+import { DEFAULT_GRANULAR_PERMISSIONS, S3_REGION, S3Region } from '@filone/shared';
 import { ToastProvider } from '../components/Toast';
 import { useAccessKeyForm } from './use-access-key-form.js';
 
@@ -74,11 +74,16 @@ describe('useAccessKeyForm — canSubmit', () => {
     expect(result.current.canSubmit).toBe(false);
   });
 
+  it('initializes granularPermissions to DEFAULT_GRANULAR_PERMISSIONS', () => {
+    const { result } = renderForm();
+    expect(result.current.granularPermissions).toEqual(DEFAULT_GRANULAR_PERMISSIONS);
+  });
+
   it('is false when no permissions are selected', () => {
     const { result } = renderForm();
     act(() => {
       result.current.setKeyName('valid-key');
-      result.current.setPermissions([]);
+      result.current.setGranularPermissions([]);
     });
     expect(result.current.canSubmit).toBe(false);
   });

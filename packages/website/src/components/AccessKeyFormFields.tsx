@@ -28,8 +28,6 @@ export function AccessKeyFormFields({
   const {
     keyName,
     setKeyName,
-    permissions,
-    setPermissions,
     granularPermissions,
     setGranularPermissions,
     bucketScope,
@@ -83,14 +81,9 @@ export function AccessKeyFormFields({
       {/* Permissions */}
       <FormField
         label="What can this key do?"
-        error={permissions.length === 0 ? 'Select at least one permission.' : undefined}
+        error={granularPermissions.length === 0 ? 'Select at least one permission.' : undefined}
       >
-        <AccessKeyPermissionsFields
-          value={permissions}
-          onChange={setPermissions}
-          granularPermissions={granularPermissions}
-          onGranularPermissionsChange={setGranularPermissions}
-        />
+        <AccessKeyPermissionsFields value={granularPermissions} onChange={setGranularPermissions} />
       </FormField>
 
       {/* Bucket scope */}

@@ -6,7 +6,6 @@
 
 import { S3Region, getS3Endpoint } from '@filone/shared';
 import type {
-  AccessKeyPermission,
   Bucket,
   GranularPermission,
   RetentionDurationType,
@@ -190,8 +189,7 @@ export const auroraOrchestrator = {
     const key = await createAuroraAccessKey({
       tenantId,
       keyName: opts.keyName,
-      permissions: opts.permissions as AccessKeyPermission[],
-      granularPermissions: opts.granularPermissions as GranularPermission[] | undefined,
+      granularPermissions: opts.granularPermissions as GranularPermission[],
       buckets: opts.buckets,
       expiresAt: opts.expiresAt,
     });

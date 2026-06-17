@@ -1,5 +1,4 @@
 import type {
-  AccessKeyPermission,
   GranularPermission,
   RetentionDurationType,
   RetentionMode,
@@ -38,8 +37,7 @@ export interface CreateBucketArgs {
 
 export interface IssueAccessKeyOpts {
   keyName: string;
-  permissions: AccessKeyPermission[];
-  granularPermissions?: GranularPermission[];
+  granularPermissions: GranularPermission[];
   buckets?: string[];
   expiresAt?: string | null;
 }

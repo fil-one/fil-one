@@ -50,9 +50,7 @@ export async function baseHandler(
       accessKeyId: record.accessKeyId as string,
       createdAt: record.createdAt as string,
       status: record.status as AccessKey['status'],
-      permissions: record.permissions as AccessKey['permissions'],
-      granularPermissions:
-        (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
+      granularPermissions: (record.granularPermissions as GranularPermission[] | undefined) ?? [],
       bucketScope: record.bucketScope as AccessKey['bucketScope'],
       buckets: record.buckets as string[] | undefined,
       region: (record.region as AccessKey['region']) ?? S3Region.EuWest1,

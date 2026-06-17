@@ -9,12 +9,7 @@ import {
   getS3AccessKey,
   listS3AccessKeys,
 } from '@filone/aurora-portal-client';
-import type {
-  AccessKeyPermission,
-  GranularPermission,
-  RetentionDurationType,
-  RetentionMode,
-} from '@filone/shared';
+import type { GranularPermission, RetentionDurationType, RetentionMode } from '@filone/shared';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -105,28 +100,14 @@ const AURORA_ACCESS_ALWAYS: string[] = [
   'GetBucketObjectLockConfiguration',
 ];
 
-// Maps basic permissions to their base Aurora access type.
-const AURORA_BASE_ACTION: Record<AccessKeyPermission, string> = {
-  read: 'Read',
-  write: 'Write',
-  list: 'List',
-  delete: 'Delete',
-};
-
-export function buildAuroraAccessArray(
-  permissions: AccessKeyPermission[],
-  granularPermissions?: GranularPermission[],
-): string[] {
-  const base = permissions.map((p) => AURORA_BASE_ACTION[p]);
-  const granular = granularPermissions ?? [];
-  return [...AURORA_ACCESS_ALWAYS, ...base, ...granular];
+export function buildAuroraAccessArray(granularPermissions: GranularPermission[]): string[] {
+  return [...AURORA_ACCESS_ALWAYS, ...granularPermissions];
 }
 
 export interface CreateAuroraAccessKeyOptions {
   tenantId: string;
   keyName: string;
-  permissions: AccessKeyPermission[];
-  granularPermissions?: GranularPermission[];
+  granularPermissions: GranularPermission[];
   buckets?: string[];
   expiresAt?: string | null;
 }
@@ -140,7 +121,6 @@ export interface CreateAuroraAccessKeyResult {
 export async function createAuroraAccessKey({
   tenantId,
   keyName,
-  permissions,
   granularPermissions,
   buckets,
   expiresAt,
@@ -152,7 +132,7 @@ export async function createAuroraAccessKey({
     path: { tenantId },
     body: {
       name: keyName,
-      access: buildAuroraAccessArray(permissions, granularPermissions),
+      access: buildAuroraAccessArray(granularPermissions),
       ...(buckets && buckets.length > 0 ? { buckets } : {}),
       ...(expiresAt ? { expiration: expiresAt } : {}),
     },

@@ -12,7 +12,7 @@ import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region } from '@filone/shared';
-import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
+import type { GranularPermission } from '@filone/shared';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
 import {
   AccessKeyAlreadyExistsError,
@@ -199,7 +199,7 @@ export const fthOrchestrator = {
     try {
       const accessKey = await client.createAccessKey(tenantId, storageUserId, {
         name: opts.keyName,
-        permissions: buildFthPermissions(opts.permissions, opts.granularPermissions),
+        permissions: buildFthPermissions(opts.granularPermissions),
         buckets: opts.buckets ?? [],
         expiresAt: opts.expiresAt ?? null,
         idempotencyKey: `issue-key-${opts.keyName}`,
@@ -303,14 +303,14 @@ const FTH_ALWAYS_PERMISSIONS: readonly string[] = [
   's3:GetBucketObjectLockConfiguration',
 ];
 
-const FTH_BASE_PERMISSIONS: Record<AccessKeyPermission, readonly string[]> = {
-  read: ['s3:GetObject', 's3:ListBucket'],
-  write: ['s3:PutObject'],
-  list: ['s3:ListBucket'],
-  delete: ['s3:DeleteObject'],
-};
-
 const FTH_GRANULAR_PERMISSIONS: Record<GranularPermission, string> = {
+  GetObject: 's3:GetObject',
+  ListMultipartUploadParts: 's3:ListMultipartUploadParts',
+  PutObject: 's3:PutObject',
+  AbortMultipartUpload: 's3:AbortMultipartUpload',
+  DeleteObject: 's3:DeleteObject',
+  ListBucket: 's3:ListBucket',
+  ListBucketMultipartUploads: 's3:ListBucketMultipartUploads',
   GetObjectVersion: 's3:GetObjectVersion',
   GetObjectRetention: 's3:GetObjectRetention',
   GetObjectLegalHold: 's3:GetObjectLegalHold',
@@ -320,15 +320,9 @@ const FTH_GRANULAR_PERMISSIONS: Record<GranularPermission, string> = {
   DeleteObjectVersion: 's3:DeleteObjectVersion',
 };
 
-function buildFthPermissions(
-  permissions: AccessKeyPermission[],
-  granularPermissions?: GranularPermission[],
-): string[] {
+function buildFthPermissions(granularPermissions: GranularPermission[]): string[] {
   const out = new Set<string>(FTH_ALWAYS_PERMISSIONS);
-  for (const p of permissions) {
-    for (const action of FTH_BASE_PERMISSIONS[p]) out.add(action);
-  }
-  for (const g of granularPermissions ?? []) {
+  for (const g of granularPermissions) {
     out.add(FTH_GRANULAR_PERMISSIONS[g]);
   }
   return [...out];

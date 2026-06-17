@@ -49,7 +49,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 function validBody({ keyName, region = 'eu-west-1' }: { keyName?: string; region?: string }) {
   return JSON.stringify({
     keyName,
-    permissions: ['read', 'write', 'list', 'delete'],
+    granularPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
     bucketScope: 'all',
     region,
   });
@@ -102,8 +102,7 @@ describe('create-access-key baseHandler', () => {
 
     expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
       keyName: 'My Key',
-      permissions: ['read', 'write', 'list', 'delete'],
-      granularPermissions: undefined,
+      granularPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
       buckets: undefined,
       expiresAt: null,
     });
@@ -175,8 +174,7 @@ describe('create-access-key baseHandler', () => {
     expect(result.statusCode).toBe(201);
     expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
       keyName: 'My Key',
-      permissions: ['read', 'write', 'list', 'delete'],
-      granularPermissions: undefined,
+      granularPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
       buckets: undefined,
       expiresAt: null,
     });
@@ -191,7 +189,7 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({
       body: JSON.stringify({
         keyName: 'My Key',
-        permissions: ['read'],
+        granularPermissions: ['GetObject'],
         bucketScope: 'all',
         expiresAt: '2026-06-01',
         region: 'eu-west-1',
@@ -213,7 +211,7 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({
       body: JSON.stringify({
         keyName: 'My Key',
-        permissions: ['read'],
+        granularPermissions: ['GetObject'],
         bucketScope: 'all',
         expiresAt: '2026-06-01',
         region: 'eu-west-1',
@@ -230,7 +228,7 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({
       body: JSON.stringify({
         keyName: 'My Key',
-        permissions: ['read'],
+        granularPermissions: ['GetObject'],
         bucketScope: 'all',
         expiresAt: '2026-04-16T12:34:56.789Z',
         region: 'eu-west-1',
@@ -253,7 +251,7 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({
       body: JSON.stringify({
         keyName: 'joes 30 day key with all',
-        permissions: ['read', 'write', 'list', 'delete'],
+        granularPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
         bucketScope: 'all',
         expiresAt: isoTimestamp,
         region: 'eu-west-1',
@@ -452,7 +450,7 @@ describe('create-access-key baseHandler', () => {
       const event = buildEvent({
         body: JSON.stringify({
           keyName: 'My Key',
-          permissions: ['read'],
+          granularPermissions: ['GetObject'],
           bucketScope: 'all',
         }),
         userInfo: USER_INFO,
