@@ -93,7 +93,7 @@ function FileRow({
     <>
       <div
         data-testid="upload-item"
-        data-file-key={entry.key}
+        data-object-key={entry.key}
         data-upload-status={entry.status}
         className="group flex items-center gap-3 px-3 py-2 hover:bg-zinc-50"
       >
