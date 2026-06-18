@@ -4,7 +4,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { UpdateProfileResponse, ErrorResponse } from '@filone/shared';
 import { UpdateProfileSchema, isSocialConnection, ApiErrorCode } from '@filone/shared';
-import disposableDomainsList from 'disposable-email-domains';
+import disposableDomainsList from 'disposable-domains';
 import * as psl from 'psl';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
