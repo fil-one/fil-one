@@ -315,7 +315,7 @@ async function createAndStoreS3AccessKey(
     const result = await createAuroraAccessKey({
       tenantId: auroraTenantId,
       keyName: 'filone-console',
-      accessKeyPermissions: [...ACCESS_KEY_PERMISSIONS],
+      permissions: [...ACCESS_KEY_PERMISSIONS],
     });
     accessKeyId = result.accessKeyId;
     accessKeySecret = result.accessKeySecret;

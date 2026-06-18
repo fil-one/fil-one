@@ -100,14 +100,14 @@ const AURORA_ACCESS_ALWAYS: string[] = [
   'GetBucketObjectLockConfiguration',
 ];
 
-export function buildAuroraAccessArray(accessKeyPermissions: AccessKeyPermission[]): string[] {
-  return [...AURORA_ACCESS_ALWAYS, ...accessKeyPermissions];
+export function buildAuroraAccessArray(permissions: AccessKeyPermission[]): string[] {
+  return [...AURORA_ACCESS_ALWAYS, ...permissions];
 }
 
 export interface CreateAuroraAccessKeyOptions {
   tenantId: string;
   keyName: string;
-  accessKeyPermissions: AccessKeyPermission[];
+  permissions: AccessKeyPermission[];
   buckets?: string[];
   expiresAt?: string | null;
 }
@@ -121,7 +121,7 @@ export interface CreateAuroraAccessKeyResult {
 export async function createAuroraAccessKey({
   tenantId,
   keyName,
-  accessKeyPermissions,
+  permissions,
   buckets,
   expiresAt,
 }: CreateAuroraAccessKeyOptions): Promise<CreateAuroraAccessKeyResult> {
@@ -132,7 +132,7 @@ export async function createAuroraAccessKey({
     path: { tenantId },
     body: {
       name: keyName,
-      access: buildAuroraAccessArray(accessKeyPermissions),
+      access: buildAuroraAccessArray(permissions),
       ...(buckets && buckets.length > 0 ? { buckets } : {}),
       ...(expiresAt ? { expiration: expiresAt } : {}),
     },

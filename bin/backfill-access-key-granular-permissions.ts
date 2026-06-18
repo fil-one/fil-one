@@ -2,25 +2,22 @@
 
 // Usage: ./bin/backfill-access-key-granular-permissions.ts [--dry-run]
 //
-// Backfills the access-key permission set on existing access key records in
-// DynamoDB and migrates it onto the `accessKeyPermissions` attribute (the
-// attribute was formerly named `granularPermissions`). Access keys moved from a
-// two-level model (basic read/write/list/delete `permissions` plus a partial
-// permission set covering only data-protection perms) to a single flat model.
-// Legacy records store basic `permissions` and may carry a PARTIAL permission
-// set under the old `granularPermissions` attribute. This script writes the
-// equivalent permission set under `accessKeyPermissions` (removing the old
-// attribute) so the read path and the UI display correctly.
+// Migrates existing access key records onto a single flat `permissions` attribute
+// holding the S3-action permission set, and removes the legacy `granularPermissions`
+// attribute. Access keys moved from a two-level model (basic read/write/list/delete
+// tokens in `permissions` plus a PARTIAL S3-action set under `granularPermissions`,
+// covering only data-protection perms) to a single flat model where `permissions`
+// holds the full S3-action list.
 //
 // For each record the new value is the UNION of:
-//   - expand(record.permissions)              // Aurora's basic->S3 action mapping
-//   - record.accessKeyPermissions ??          // preserve already-chosen perms,
-//       record.granularPermissions ?? []      //   tolerating either attribute name
-// deduped in canonical order. Expansion grants ONLY the actions Aurora documents
-// for each basic permission — version/retention/legal-hold perms are never added
-// for a legacy key that didn't already have them. The write is unconditional and
-// idempotent: records previously backfilled with the partial set are recomputed
-// and overwritten, and the legacy `granularPermissions` attribute is removed.
+//   - expand(basic tokens in record.permissions)  // Aurora's basic->S3 action mapping
+//   - S3 actions already in record.permissions     // so re-runs are idempotent
+//   - record.granularPermissions ?? []             // preserve already-chosen perms
+// deduped in canonical order, written back to `permissions`. Expansion grants ONLY
+// the actions Aurora documents for each basic permission — version/retention/legal-hold
+// perms are never added for a legacy key that didn't already have them. The write is
+// idempotent: an already-migrated row (whose `permissions` holds S3 actions) recomputes
+// to the same set, and the legacy `granularPermissions` attribute is removed.
 //
 // Run against the stage recorded in .sst/stage (e.g. your personal dev stack):
 //   ./bin/backfill-access-key-granular-permissions.ts --dry-run
@@ -108,13 +105,18 @@ const ACCESS_KEY_PERMISSION_ORDER: AccessKeyPermission[] = [
   'DeleteObjectVersion',
 ];
 
+// Membership sets used to classify whatever currently sits in `permissions`:
+// legacy rows hold basic tokens, already-migrated rows hold S3 actions.
+const BASIC_PERMISSIONS = new Set<string>(Object.keys(ACCESS_KEY_PERMISSION_MAP));
+const S3_ACTIONS = new Set<string>(ACCESS_KEY_PERMISSION_ORDER);
+
 const dryRun = process.argv.includes('--dry-run');
 const tableName = Resource.UserInfoTable.name;
 const stage = readFileSync('.sst/stage', 'utf8').trim();
 const dynamo = new DynamoDBClient({});
 
 console.log(
-  `${dryRun ? 'DRY-RUN — ' : ''}Backfilling accessKeyPermissions on ${tableName} (stage="${stage}")`,
+  `${dryRun ? 'DRY-RUN — ' : ''}Backfilling permissions on ${tableName} (stage="${stage}")`,
 );
 
 let scanned = 0;
@@ -137,33 +139,38 @@ do {
     scanned++;
     const record = unmarshall(item);
 
-    const permissions = record.permissions as BasicPermission[] | undefined;
-    if (!Array.isArray(permissions) || permissions.length === 0) {
-      console.warn(`  Skipping ${record.pk}/${record.sk}: permissions missing or empty`);
+    const rawPermissions = Array.isArray(record.permissions)
+      ? (record.permissions as string[])
+      : [];
+    const rawGranular = Array.isArray(record.granularPermissions)
+      ? (record.granularPermissions as string[])
+      : [];
+
+    // `permissions` may hold legacy basic tokens (expand them) or — on an
+    // already-migrated row — S3 actions (carry them through). Union with any
+    // perms preserved under the legacy `granularPermissions` attribute, deduped
+    // in canonical order for a stable, idempotent result.
+    const expandedBasic = rawPermissions
+      .filter((p) => BASIC_PERMISSIONS.has(p))
+      .flatMap((p) => ACCESS_KEY_PERMISSION_MAP[p as BasicPermission]);
+    const s3InPermissions = rawPermissions.filter((p) => S3_ACTIONS.has(p));
+    const s3InGranular = rawGranular.filter((p) => S3_ACTIONS.has(p));
+
+    const union = new Set<string>([...expandedBasic, ...s3InPermissions, ...s3InGranular]);
+    const permissions = ACCESS_KEY_PERMISSION_ORDER.filter((p) => union.has(p));
+
+    const keyName = record.keyName ?? '(no name)';
+
+    if (permissions.length === 0) {
+      console.warn(
+        `  Skipping ${record.pk}/${record.sk} keyName="${keyName}": no recognizable permissions`,
+      );
       skippedInvalid++;
       continue;
     }
 
-    // Preserve already-chosen perms, tolerating either attribute name on the
-    // record (new `accessKeyPermissions` or legacy `granularPermissions`).
-    const existingPermissions = Array.isArray(record.accessKeyPermissions)
-      ? (record.accessKeyPermissions as AccessKeyPermission[])
-      : Array.isArray(record.granularPermissions)
-        ? (record.granularPermissions as AccessKeyPermission[])
-        : [];
-
-    // Union of the full expansion of the basic perms with any perms already
-    // chosen (e.g. data-protection perms from the partial backfill), deduped in
-    // canonical order for a stable result.
-    const union = new Set<AccessKeyPermission>([
-      ...permissions.flatMap((p) => ACCESS_KEY_PERMISSION_MAP[p] ?? []),
-      ...existingPermissions,
-    ]);
-    const accessKeyPermissions = ACCESS_KEY_PERMISSION_ORDER.filter((p) => union.has(p));
-
-    const keyName = record.keyName ?? '(no name)';
     console.log(
-      `  ${dryRun ? '[dry-run] ' : ''}${record.pk} ${record.sk} keyName="${keyName}" perms=[${permissions.join(',')}] -> accessKeyPermissions=[${accessKeyPermissions.join(',')}]`,
+      `  ${dryRun ? '[dry-run] ' : ''}${record.pk} ${record.sk} keyName="${keyName}" from=[${rawPermissions.join(',')}] -> permissions=[${permissions.join(',')}]`,
     );
 
     if (dryRun) {
@@ -171,14 +178,16 @@ do {
       continue;
     }
 
-    // Unconditional, idempotent write: always set the computed full permission
-    // set under the new attribute and drop the legacy `granularPermissions` one.
+    // Idempotent write: set the computed S3-action set under `permissions` and
+    // drop the legacy `granularPermissions` attribute. `permissions` is a DynamoDB
+    // reserved word, so it is referenced via an expression-attribute-name alias.
     await dynamo.send(
       new UpdateItemCommand({
         TableName: tableName,
         Key: { pk: item.pk!, sk: item.sk! },
-        UpdateExpression: 'SET accessKeyPermissions = :g REMOVE granularPermissions',
-        ExpressionAttributeValues: marshall({ ':g': accessKeyPermissions }),
+        UpdateExpression: 'SET #permissions = :p REMOVE granularPermissions',
+        ExpressionAttributeNames: { '#permissions': 'permissions' },
+        ExpressionAttributeValues: marshall({ ':p': permissions }),
       }),
     );
     updated++;

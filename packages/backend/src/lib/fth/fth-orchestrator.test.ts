@@ -425,7 +425,7 @@ describe('fthOrchestrator.createBucket', () => {
 describe('fthOrchestrator.issueAccessKey', () => {
   const baseOpts = {
     keyName: 'My Key',
-    accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket'] as const,
+    permissions: ['GetObject', 'PutObject', 'ListBucket'] as const,
     bucketScope: 'all' as const,
   };
 
@@ -443,7 +443,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
 
     const result = await fthOrchestrator.issueAccessKey(fthClientId, {
       keyName: baseOpts.keyName,
-      accessKeyPermissions: [...baseOpts.accessKeyPermissions],
+      permissions: [...baseOpts.permissions],
     });
 
     expect(result).toEqual({
@@ -483,7 +483,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
     await expect(
       fthOrchestrator.issueAccessKey(fthClientId, {
         keyName: baseOpts.keyName,
-        accessKeyPermissions: [...baseOpts.accessKeyPermissions],
+        permissions: [...baseOpts.permissions],
       }),
     ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
   });
@@ -497,7 +497,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
     await expect(
       fthOrchestrator.issueAccessKey(fthClientId, {
         keyName: baseOpts.keyName,
-        accessKeyPermissions: [...baseOpts.accessKeyPermissions],
+        permissions: [...baseOpts.permissions],
       }),
     ).rejects.toBeInstanceOf(AccessKeyValidationError);
   });
@@ -508,7 +508,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
     await expect(
       fthOrchestrator.issueAccessKey(fthClientId, {
         keyName: baseOpts.keyName,
-        accessKeyPermissions: [...baseOpts.accessKeyPermissions],
+        permissions: [...baseOpts.permissions],
       }),
     ).rejects.toThrow(/filone-console/);
     expect(mockFthClient.createAccessKey).not.toHaveBeenCalled();
@@ -527,11 +527,11 @@ describe('fthOrchestrator.issueAccessKey', () => {
 
     await fthOrchestrator.issueAccessKey(fthClientId, {
       keyName: 'k1',
-      accessKeyPermissions: ['GetObject'],
+      permissions: ['GetObject'],
     });
     await fthOrchestrator.issueAccessKey(fthClientId, {
       keyName: 'k2',
-      accessKeyPermissions: ['GetObject'],
+      permissions: ['GetObject'],
     });
 
     expect(mockFthClient.listStorageUsers).toHaveBeenCalledTimes(1);

@@ -95,17 +95,13 @@ function ActionMenu({ onDelete }: { onDelete: () => void }) {
 
 const PERMISSIONS_PREVIEW_COUNT = 3;
 
-function PermissionsCell({
-  accessKeyPermissions,
-}: {
-  accessKeyPermissions: AccessKeyPermission[];
-}) {
-  if (accessKeyPermissions.length === 0) {
+function PermissionsCell({ permissions }: { permissions: AccessKeyPermission[] }) {
+  if (permissions.length === 0) {
     return <span className="text-xs text-zinc-400">None</span>;
   }
 
-  const preview = accessKeyPermissions.slice(0, PERMISSIONS_PREVIEW_COUNT);
-  const overflow = accessKeyPermissions.length - preview.length;
+  const preview = permissions.slice(0, PERMISSIONS_PREVIEW_COUNT);
+  const overflow = permissions.length - preview.length;
 
   return (
     <div className="flex flex-wrap gap-1">
@@ -120,7 +116,7 @@ function PermissionsCell({
           size="sm"
           description={
             <ul className="flex flex-col gap-0.5">
-              {accessKeyPermissions.map((g) => (
+              {permissions.map((g) => (
                 <li key={g} className="text-xs text-zinc-700">
                   {ACCESS_KEY_PERMISSION_LABELS[g].label}
                 </li>
@@ -227,7 +223,7 @@ export function AccessKeysTable({
             {/* Permissions */}
             {showPermissions && (
               <Table.Cell className="hidden md:table-cell">
-                <PermissionsCell accessKeyPermissions={key.accessKeyPermissions} />
+                <PermissionsCell permissions={key.permissions} />
               </Table.Cell>
             )}
 

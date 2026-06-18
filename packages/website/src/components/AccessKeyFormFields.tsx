@@ -28,8 +28,8 @@ export function AccessKeyFormFields({
   const {
     keyName,
     setKeyName,
-    accessKeyPermissions,
-    setAccessKeyPermissions,
+    permissions,
+    setPermissions,
     bucketScope,
     setBucketScope,
     selectedBuckets,
@@ -81,12 +81,9 @@ export function AccessKeyFormFields({
       {/* Permissions */}
       <FormField
         label="What can this key do?"
-        error={accessKeyPermissions.length === 0 ? 'Select at least one permission.' : undefined}
+        error={permissions.length === 0 ? 'Select at least one permission.' : undefined}
       >
-        <AccessKeyPermissionsFields
-          value={accessKeyPermissions}
-          onChange={setAccessKeyPermissions}
-        />
+        <AccessKeyPermissionsFields value={permissions} onChange={setPermissions} />
       </FormField>
 
       {/* Bucket scope */}

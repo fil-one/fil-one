@@ -32,7 +32,7 @@ export function useAccessKeyForm({
   const initialAccessKeyPermissions = defaultAccessKeyPermissions ?? DEFAULT_ACCESS_KEY_PERMISSIONS;
 
   const [keyName, setKeyName] = useState('');
-  const [accessKeyPermissions, setAccessKeyPermissions] = useState<AccessKeyPermission[]>(
+  const [permissions, setPermissions] = useState<AccessKeyPermission[]>(
     initialAccessKeyPermissions,
   );
   const [bucketScope, setBucketScope] = useState<AccessKeyBucketScope>(
@@ -54,7 +54,7 @@ export function useAccessKeyForm({
 
   const candidatePayload = {
     keyName: keyName.trim(),
-    accessKeyPermissions,
+    permissions,
     bucketScope,
     buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
     region,
@@ -62,12 +62,12 @@ export function useAccessKeyForm({
   };
   const canSubmit =
     !creating &&
-    accessKeyPermissions.length > 0 &&
+    permissions.length > 0 &&
     CreateAccessKeySchema.safeParse(candidatePayload).success;
 
   function reset() {
     setKeyName('');
-    setAccessKeyPermissions(initialAccessKeyPermissions);
+    setPermissions(initialAccessKeyPermissions);
     setBucketScope(defaultBucket ? 'specific' : 'all');
     setSelectedBuckets(defaultBucket ? [defaultBucket] : []);
     setExpiration('never');
@@ -78,7 +78,7 @@ export function useAccessKeyForm({
   const createKeyMutation = useMutation({
     mutationFn: (body: {
       keyName: string;
-      accessKeyPermissions: AccessKeyPermission[];
+      permissions: AccessKeyPermission[];
       bucketScope: AccessKeyBucketScope;
       buckets?: string[];
       region: S3Region;
@@ -112,8 +112,8 @@ export function useAccessKeyForm({
   return {
     keyName,
     setKeyName,
-    accessKeyPermissions,
-    setAccessKeyPermissions,
+    permissions,
+    setPermissions,
     bucketScope,
     setBucketScope,
     selectedBuckets,

@@ -30,7 +30,7 @@ function ddbItem(overrides: {
   accessKeyId: string;
   createdAt: string;
   status?: string;
-  accessKeyPermissions?: string[];
+  permissions?: string[];
   bucketScope?: string;
   buckets?: string[];
   expiresAt?: string;
@@ -44,8 +44,7 @@ function ddbItem(overrides: {
     createdAt: { S: overrides.createdAt },
     status: { S: overrides.status ?? 'active' },
   };
-  if (overrides.accessKeyPermissions)
-    item.accessKeyPermissions = { L: overrides.accessKeyPermissions.map((p) => ({ S: p })) };
+  if (overrides.permissions) item.permissions = { L: overrides.permissions.map((p) => ({ S: p })) };
   if (overrides.bucketScope) item.bucketScope = { S: overrides.bucketScope };
   if (overrides.buckets) item.buckets = { L: overrides.buckets.map((b) => ({ S: b })) };
   if (overrides.expiresAt) item.expiresAt = { S: overrides.expiresAt };
@@ -71,7 +70,7 @@ describe('list-access-keys baseHandler', () => {
           keyName: 'Production',
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
-          accessKeyPermissions: ['GetObject', 'ListBucket'],
+          permissions: ['GetObject', 'ListBucket'],
           bucketScope: 'all',
         }),
       ],
@@ -90,13 +89,57 @@ describe('list-access-keys baseHandler', () => {
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
           status: 'active',
-          accessKeyPermissions: ['GetObject', 'ListBucket'],
+          permissions: ['GetObject', 'ListBucket'],
           bucketScope: 'all',
           region: 'eu-west-1',
           expiresAt: null,
         },
       ],
     });
+  });
+
+  it('filters out legacy basic tokens, returning [] until the row is backfilled', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        ddbItem({
+          id: 'key-legacy',
+          keyName: 'Legacy Basic Key',
+          accessKeyId: 'AKIA1111',
+          createdAt: '2026-01-01T00:00:00Z',
+          // Un-migrated legacy row: `permissions` holds basic tokens, not S3 actions.
+          permissions: ['read', 'write', 'list', 'delete'],
+          bucketScope: 'all',
+        }),
+      ],
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    const body = JSON.parse(result.body!);
+    expect(body.keys[0].permissions).toStrictEqual([]);
+  });
+
+  it('passes through S3-action permissions from a migrated row', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        ddbItem({
+          id: 'key-migrated',
+          keyName: 'Migrated Key',
+          accessKeyId: 'AKIA1111',
+          createdAt: '2026-01-01T00:00:00Z',
+          // `permissions` may include extra values; only known S3 actions survive.
+          permissions: ['GetObject', 'PutObject', 'read'],
+          bucketScope: 'all',
+        }),
+      ],
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    const body = JSON.parse(result.body!);
+    expect(body.keys[0].permissions).toStrictEqual(['GetObject', 'PutObject']);
   });
 
   it('returns bucket-scoped key with buckets list', async () => {
@@ -107,7 +150,7 @@ describe('list-access-keys baseHandler', () => {
           keyName: 'Scoped Key',
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
-          accessKeyPermissions: ['GetObject'],
+          permissions: ['GetObject'],
           bucketScope: 'specific',
           buckets: ['bucket-a', 'bucket-b'],
         }),
@@ -132,7 +175,7 @@ describe('list-access-keys baseHandler', () => {
           keyName: 'FTH Key',
           accessKeyId: 'AKIAFTH',
           createdAt: '2026-01-01T00:00:00Z',
-          accessKeyPermissions: ['GetObject'],
+          permissions: ['GetObject'],
           bucketScope: 'all',
           region: 'us-east-1',
         }),
@@ -154,7 +197,7 @@ describe('list-access-keys baseHandler', () => {
           keyName: 'Legacy Key',
           accessKeyId: 'AKIALEGACY',
           createdAt: '2026-01-01T00:00:00Z',
-          accessKeyPermissions: ['GetObject'],
+          permissions: ['GetObject'],
           bucketScope: 'all',
           // region attribute deliberately omitted
         }),
@@ -176,7 +219,7 @@ describe('list-access-keys baseHandler', () => {
           keyName: 'Expiring Key',
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
-          accessKeyPermissions: ['GetObject'],
+          permissions: ['GetObject'],
           bucketScope: 'all',
           expiresAt: '2026-06-01',
         }),
@@ -209,7 +252,7 @@ describe('list-access-keys baseHandler', () => {
           keyName: 'Production',
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
-          accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+          permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
           bucketScope: 'all',
         }),
         ddbItem({
@@ -217,7 +260,7 @@ describe('list-access-keys baseHandler', () => {
           keyName: 'Dev',
           accessKeyId: 'AKIA2222',
           createdAt: '2026-02-01T00:00:00Z',
-          accessKeyPermissions: ['GetObject'],
+          permissions: ['GetObject'],
           bucketScope: 'all',
         }),
       ],
@@ -299,7 +342,7 @@ describe('list-access-keys baseHandler', () => {
           keyName: 'All Access',
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
-          accessKeyPermissions: ['GetObject', 'PutObject'],
+          permissions: ['GetObject', 'PutObject'],
           bucketScope: 'all',
         }),
         ddbItem({
@@ -307,7 +350,7 @@ describe('list-access-keys baseHandler', () => {
           keyName: 'Scoped',
           accessKeyId: 'AKIA2222',
           createdAt: '2026-02-01T00:00:00Z',
-          accessKeyPermissions: ['GetObject'],
+          permissions: ['GetObject'],
           bucketScope: 'specific',
           buckets: ['target-bucket'],
         }),
@@ -330,7 +373,7 @@ describe('list-access-keys baseHandler', () => {
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
           status: 'active',
-          accessKeyPermissions: ['GetObject', 'PutObject'],
+          permissions: ['GetObject', 'PutObject'],
           bucketScope: 'all',
           region: 'eu-west-1',
           expiresAt: null,
@@ -341,7 +384,7 @@ describe('list-access-keys baseHandler', () => {
           accessKeyId: 'AKIA2222',
           createdAt: '2026-02-01T00:00:00Z',
           status: 'active',
-          accessKeyPermissions: ['GetObject'],
+          permissions: ['GetObject'],
           bucketScope: 'specific',
           buckets: ['target-bucket'],
           region: 'eu-west-1',

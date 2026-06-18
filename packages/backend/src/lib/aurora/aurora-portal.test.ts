@@ -382,7 +382,7 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+      permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
     });
 
     const ssmCalls = ssmMock.commandCalls(GetParameterCommand);
@@ -400,7 +400,7 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+      permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
     });
 
     expect(mockPostAccessKeys).toHaveBeenCalledWith({
@@ -421,7 +421,7 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      accessKeyPermissions: ['GetObject', 'GetObjectVersion', 'GetObjectRetention'],
+      permissions: ['GetObject', 'GetObjectVersion', 'GetObjectRetention'],
     });
 
     expect(mockPostAccessKeys).toHaveBeenCalledWith({
@@ -442,7 +442,7 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      accessKeyPermissions: ['GetObject'],
+      permissions: ['GetObject'],
       expiresAt: '2026-06-01',
     });
 
@@ -460,7 +460,7 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      accessKeyPermissions: ['GetObject'],
+      permissions: ['GetObject'],
       expiresAt: null,
     });
 
@@ -475,7 +475,7 @@ describe('createAuroraAccessKey', () => {
     const result = await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+      permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
     });
 
     expect(result).toStrictEqual({
@@ -498,7 +498,7 @@ describe('createAuroraAccessKey', () => {
       await createAuroraAccessKey({
         tenantId: 'tenant-1',
         keyName: 'my-key',
-        accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+        permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
       });
       expect.unreachable('Expected AccessKeyAlreadyExistsError to be thrown');
     } catch (err) {
@@ -521,7 +521,7 @@ describe('createAuroraAccessKey', () => {
       createAuroraAccessKey({
         tenantId: 'tenant-1',
         keyName: 'my-key',
-        accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+        permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
       }),
     ).rejects.toThrow('Failed to create Aurora access key "my-key" for tenant tenant-1');
   });
@@ -537,7 +537,7 @@ describe('createAuroraAccessKey', () => {
       createAuroraAccessKey({
         tenantId: 'tenant-1',
         keyName: 'my-key',
-        accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+        permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
       }),
     ).rejects.toThrow('Aurora API returned invalid access key for tenant tenant-1');
   });
@@ -560,7 +560,7 @@ describe('createAuroraAccessKey', () => {
         createAuroraAccessKey({
           tenantId: 'tenant-1',
           keyName: 'my-key',
-          accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+          permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
         }),
       ).rejects.toThrow(
         `Aurora Portal API returned empty access key "${field}" for tenant tenant-1`,

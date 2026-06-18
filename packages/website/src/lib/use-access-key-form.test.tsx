@@ -74,16 +74,16 @@ describe('useAccessKeyForm — canSubmit', () => {
     expect(result.current.canSubmit).toBe(false);
   });
 
-  it('initializes accessKeyPermissions to DEFAULT_ACCESS_KEY_PERMISSIONS', () => {
+  it('initializes permissions to DEFAULT_ACCESS_KEY_PERMISSIONS', () => {
     const { result } = renderForm();
-    expect(result.current.accessKeyPermissions).toEqual(DEFAULT_ACCESS_KEY_PERMISSIONS);
+    expect(result.current.permissions).toEqual(DEFAULT_ACCESS_KEY_PERMISSIONS);
   });
 
   it('is false when no permissions are selected', () => {
     const { result } = renderForm();
     act(() => {
       result.current.setKeyName('valid-key');
-      result.current.setAccessKeyPermissions([]);
+      result.current.setPermissions([]);
     });
     expect(result.current.canSubmit).toBe(false);
   });

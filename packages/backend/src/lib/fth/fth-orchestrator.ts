@@ -199,7 +199,7 @@ export const fthOrchestrator = {
     try {
       const accessKey = await client.createAccessKey(tenantId, storageUserId, {
         name: opts.keyName,
-        permissions: buildFthPermissions(opts.accessKeyPermissions),
+        permissions: buildFthPermissions(opts.permissions),
         buckets: opts.buckets ?? [],
         expiresAt: opts.expiresAt ?? null,
         idempotencyKey: `issue-key-${opts.keyName}`,
@@ -321,9 +321,9 @@ const FTH_ACCESS_KEY_PERMISSIONS: Record<AccessKeyPermission, string> = {
   DeleteObjectVersion: 's3:DeleteObjectVersion',
 };
 
-function buildFthPermissions(accessKeyPermissions: AccessKeyPermission[]): string[] {
+function buildFthPermissions(permissions: AccessKeyPermission[]): string[] {
   const out = new Set<string>(FTH_ALWAYS_PERMISSIONS);
-  for (const g of accessKeyPermissions) {
+  for (const g of permissions) {
     out.add(FTH_ACCESS_KEY_PERMISSIONS[g]);
   }
   return [...out];

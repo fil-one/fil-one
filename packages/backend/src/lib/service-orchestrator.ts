@@ -37,7 +37,7 @@ export interface CreateBucketArgs {
 
 export interface IssueAccessKeyOpts {
   keyName: string;
-  accessKeyPermissions: AccessKeyPermission[];
+  permissions: AccessKeyPermission[];
   buckets?: string[];
   expiresAt?: string | null;
 }

@@ -189,7 +189,7 @@ export const auroraOrchestrator = {
     const key = await createAuroraAccessKey({
       tenantId,
       keyName: opts.keyName,
-      accessKeyPermissions: opts.accessKeyPermissions as AccessKeyPermission[],
+      permissions: opts.permissions as AccessKeyPermission[],
       buckets: opts.buckets,
       expiresAt: opts.expiresAt,
     });

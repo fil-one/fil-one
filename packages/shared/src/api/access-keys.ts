@@ -126,7 +126,7 @@ export const CreateAccessKeySchema = z
         KEY_NAME_PATTERN,
         'Key name can only contain letters, numbers, spaces, hyphens, underscores, and periods',
       ),
-    accessKeyPermissions: z
+    permissions: z
       .array(z.enum(ACCESS_KEY_PERMISSIONS))
       .min(1, 'At least one permission is required'),
     bucketScope: z.enum(ACCESS_KEY_BUCKET_SCOPES).default('all'),
@@ -152,7 +152,7 @@ export interface AccessKey {
   createdAt: string;
   lastUsedAt?: string;
   status: AccessKeyStatus;
-  accessKeyPermissions: AccessKeyPermission[];
+  permissions: AccessKeyPermission[];
   bucketScope: AccessKeyBucketScope;
   buckets?: string[];
   region?: S3Region;
