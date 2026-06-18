@@ -22,6 +22,7 @@ export type TabItemProps = {
   children: React.ReactNode;
   disabled?: boolean;
   className?: string;
+  testId?: string;
 };
 
 export type TabPanelsProps = {
@@ -32,6 +33,7 @@ export type TabPanelsProps = {
 export type TabPanelProps = {
   children: React.ReactNode;
   className?: string;
+  testId?: string;
 };
 
 export function Tabs({ children, defaultIndex = 0, onChange }: TabsProps) {
@@ -46,9 +48,9 @@ export function TabList({ children, className }: TabListProps) {
   return <HeadlessTabList className={clsx('tabs-list', className)}>{children}</HeadlessTabList>;
 }
 
-export function TabItem({ children, disabled, className }: TabItemProps) {
+export function TabItem({ children, disabled, className, testId }: TabItemProps) {
   return (
-    <HeadlessTab disabled={disabled} className={clsx('tab-item', className)}>
+    <HeadlessTab disabled={disabled} data-testid={testId} className={clsx('tab-item', className)}>
       {children}
     </HeadlessTab>
   );
@@ -60,6 +62,10 @@ export function TabPanels({ children, className }: TabPanelsProps) {
   );
 }
 
-export function TabPanel({ children, className }: TabPanelProps) {
-  return <HeadlessTabPanel className={clsx('tab-panel', className)}>{children}</HeadlessTabPanel>;
+export function TabPanel({ children, className, testId }: TabPanelProps) {
+  return (
+    <HeadlessTabPanel data-testid={testId} className={clsx('tab-panel', className)}>
+      {children}
+    </HeadlessTabPanel>
+  );
 }

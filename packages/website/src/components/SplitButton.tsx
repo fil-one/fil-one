@@ -24,6 +24,7 @@ type SplitButtonProps = {
   variant?: SplitButtonVariant;
   size?: ButtonSize;
   disabled?: boolean;
+  id?: string;
 };
 
 const iconSizes: Record<ButtonSize, number> = {
@@ -40,6 +41,7 @@ export function SplitButton({
   variant = 'primary',
   size = 'md',
   disabled,
+  id,
 }: SplitButtonProps) {
   const iconSize = iconSizes[size];
 
@@ -54,6 +56,7 @@ export function SplitButton({
     >
       <button
         type="button"
+        id={id}
         className="split-button__main"
         onClick={onMainClick}
         disabled={disabled}
