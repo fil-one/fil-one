@@ -689,6 +689,13 @@ export default $config({
       extraLink: mgmtRuntimeResources,
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/mfa/passkeys/{methodId}',
+      handler: 'delete-passkey',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
 
     // ── Usage + Dashboard routes ─────────────────────────────────────
     addRoute({
