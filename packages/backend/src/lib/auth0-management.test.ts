@@ -706,6 +706,77 @@ describe('auth0-management domain resolution', () => {
       expect(urls).toHaveLength(1);
       expect(urls[0]).toBe(`https://${CUSTOM_DOMAIN}/dbconnections/change_password`);
     });
+
+    // These functions hit /api/v2/ endpoints, which custom domains do not serve —
+    // both the token request and the API calls must target AUTH0_MGMT_DOMAIN.
+    function stubFetchTokenAndArray() {
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url.includes('/oauth/token')) {
+          return new Response(JSON.stringify({ access_token: 'test-token', expires_in: 3600 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      });
+    }
+
+    it('getMfaEnrollments sends token request and /api/v2/ calls to AUTH0_MGMT_DOMAIN', async () => {
+      stubFetchTokenAndArray();
+      const { getMfaEnrollments } = await import('./auth0-management.js');
+      await getMfaEnrollments('auth0|123');
+
+      const urls = fetchCallUrls();
+      expect(urls[0]).toBe(`https://${CANONICAL_DOMAIN}/oauth/token`);
+      expect(urls).toContain(`https://${CANONICAL_DOMAIN}/api/v2/users/auth0%7C123/enrollments`);
+      expect(urls).toContain(
+        `https://${CANONICAL_DOMAIN}/api/v2/users/auth0%7C123/authentication-methods`,
+      );
+    });
+
+    it('getPasskeyAuthenticators sends /api/v2/ call to AUTH0_MGMT_DOMAIN', async () => {
+      stubFetchTokenAndArray();
+      const { getPasskeyAuthenticators } = await import('./auth0-management.js');
+      await getPasskeyAuthenticators('auth0|123');
+
+      const urls = fetchCallUrls();
+      expect(urls[0]).toBe(`https://${CANONICAL_DOMAIN}/oauth/token`);
+      expect(urls[1]).toBe(
+        `https://${CANONICAL_DOMAIN}/api/v2/users/auth0%7C123/authentication-methods`,
+      );
+    });
+
+    it('deleteGuardianEnrollment sends /api/v2/ call to AUTH0_MGMT_DOMAIN', async () => {
+      const { deleteGuardianEnrollment } = await import('./auth0-management.js');
+      await deleteGuardianEnrollment('otp|1');
+
+      const urls = fetchCallUrls();
+      expect(urls[0]).toBe(`https://${CANONICAL_DOMAIN}/oauth/token`);
+      expect(urls[1]).toBe(`https://${CANONICAL_DOMAIN}/api/v2/guardian/enrollments/otp%7C1`);
+    });
+
+    it('deleteAuthenticationMethod sends /api/v2/ call to AUTH0_MGMT_DOMAIN', async () => {
+      const { deleteAuthenticationMethod } = await import('./auth0-management.js');
+      await deleteAuthenticationMethod('auth0|123', 'webauthn|2');
+
+      const urls = fetchCallUrls();
+      expect(urls[0]).toBe(`https://${CANONICAL_DOMAIN}/oauth/token`);
+      expect(urls[1]).toBe(
+        `https://${CANONICAL_DOMAIN}/api/v2/users/auth0%7C123/authentication-methods/webauthn%7C2`,
+      );
+    });
+
+    it('deleteRecoveryCode sends /api/v2/ list call to AUTH0_MGMT_DOMAIN', async () => {
+      stubFetchTokenAndArray();
+      const { deleteRecoveryCode } = await import('./auth0-management.js');
+      await deleteRecoveryCode('auth0|123');
+
+      const urls = fetchCallUrls();
+      expect(urls[0]).toBe(`https://${CANONICAL_DOMAIN}/oauth/token`);
+      expect(urls[1]).toBe(
+        `https://${CANONICAL_DOMAIN}/api/v2/users/auth0%7C123/authentication-methods`,
+      );
+    });
   });
 
   describe('when AUTH0_MGMT_DOMAIN is not set', () => {

@@ -7,9 +7,22 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { RecoveryCodeModal } from './RecoveryCodeModal';
 import { SettingRow } from './SettingRow';
 import { useToast } from './Toast';
-import { enrollMfa, disableMfa, deleteMfaEnrollment, regenerateRecoveryCode } from '../lib/api.js';
-import type { MeResponse, MfaEnrollment } from '@filone/shared';
+import {
+  enrollMfa,
+  disableMfa,
+  deleteMfaEnrollment,
+  deletePasskey,
+  regenerateRecoveryCode,
+} from '../lib/api.js';
+import {
+  isSocialConnection,
+  PASSKEY_PER_USER_LIMIT,
+  type MeResponse,
+  type MfaEnrollment,
+  type PasskeyEnrollment,
+} from '@filone/shared';
 import { queryKeys } from '../lib/query-client.js';
+import { formatDate } from '../lib/time.js';
 
 const REGENERATE_ACTION = 'regenerate-recovery-code';
 
@@ -282,9 +295,125 @@ function EnableView() {
   );
 }
 
+const DELETE_PASSKEY_ACTION = 'delete-passkey';
+
+function mostRecentPasskey(passkeys: PasskeyEnrollment[]): PasskeyEnrollment | undefined {
+  return passkeys
+    .filter((p) => p.createdAt)
+    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))[0];
+}
+
+function PasskeyRow({
+  passkey,
+  onRequestRemove,
+  disabled,
+}: {
+  passkey: PasskeyEnrollment;
+  onRequestRemove: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-md border border-[#e1e4ea] bg-zinc-50 px-3 py-2">
+      <div>
+        <p className="text-[13px] font-medium text-zinc-900">{passkey.name ?? 'Passkey'}</p>
+        <p className="text-[11px] text-zinc-500">
+          {passkey.createdAt ? `Added ${formatDate(passkey.createdAt)}` : 'Enrolled'}
+        </p>
+      </div>
+      <Button variant="ghost" size="sm" onClick={onRequestRemove} disabled={disabled}>
+        Remove
+      </Button>
+    </div>
+  );
+}
+
+function PasskeySettings({ passkeys }: { passkeys: PasskeyEnrollment[] }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const remove = useMutation({
+    mutationFn: (id: string) => deletePasskey(id, { stepUpAction: DELETE_PASSKEY_ACTION }),
+    onSuccess: (_, id) => {
+      queryClient.setQueryData<MeResponse>(queryKeys.meWithMfa, (old) =>
+        old ? { ...old, passkeys: (old.passkeys ?? []).filter((p) => p.id !== id) } : old,
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.meWithMfa });
+      toast.success('Passkey removed');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove passkey');
+    },
+  });
+
+  const passkeyBeingDeleted = passkeys.find((p) => p.id === confirmDeleteId);
+  const recent = mostRecentPasskey(passkeys);
+  const count = passkeys.length;
+  const description =
+    count === 0
+      ? "No passkeys yet — you'll be prompted to add one on your next sign-in"
+      : recent?.createdAt
+        ? `${count} of ${PASSKEY_PER_USER_LIMIT} enrolled — most recent added ${formatDate(recent.createdAt)}`
+        : `${count} of ${PASSKEY_PER_USER_LIMIT} enrolled`;
+
+  return (
+    <>
+      <SettingRow label="Passkeys" description={description} action={null} />
+      {count > 0 && (
+        <div className="flex flex-col gap-2 ml-0.5">
+          {passkeys.map((p) => (
+            <PasskeyRow
+              key={p.id}
+              passkey={p}
+              onRequestRemove={() => setConfirmDeleteId(p.id)}
+              disabled={remove.isPending}
+            />
+          ))}
+        </div>
+      )}
+      <ConfirmDialog
+        open={passkeyBeingDeleted !== undefined}
+        onClose={() => setConfirmDeleteId(null)}
+        onConfirm={async () => {
+          if (!passkeyBeingDeleted) return;
+          await remove.mutateAsync(passkeyBeingDeleted.id);
+        }}
+        title="Remove passkey"
+        description="This passkey will be removed from your account. You can add a new one on your next sign-in."
+        confirmLabel="Remove"
+      />
+    </>
+  );
+}
+
+// Resume after step-up redirect: when delete-passkey returns 401 step_up_required,
+// the page redirects through Universal Login. The app root reads sessionStorage
+// and bounces back here with ?action=delete-passkey. The deletion itself cannot
+// be replayed (id is gone from the URL), so we just clear the param.
+function useClearStepUpAction(action: string) {
+  const search = useSearch({ strict: false }) as { action?: string };
+  const navigate = useNavigate();
+  const cleared = useRef(false);
+  useEffect(() => {
+    if (cleared.current || search.action !== action) return;
+    cleared.current = true;
+    void navigate({ to: '/settings', replace: true });
+  }, [search.action, navigate, action]);
+}
+
 export function MfaSettings({ me }: { me: MeResponse }) {
-  if (me.mfaEnrollments.length > 0) {
-    return <EnrolledView me={me} />;
-  }
-  return <EnableView />;
+  useClearStepUpAction(DELETE_PASSKEY_ACTION);
+  const passkeys = me.passkeys ?? [];
+  const showPasskeys = me.passkeys !== undefined && !isSocialConnection(me.connectionType);
+  return (
+    <>
+      {me.mfaEnrollments.length > 0 ? <EnrolledView me={me} /> : <EnableView />}
+      {showPasskeys && (
+        <>
+          <div className="h-px bg-[#e1e4ea]" />
+          <PasskeySettings passkeys={passkeys} />
+        </>
+      )}
+    </>
+  );
 }

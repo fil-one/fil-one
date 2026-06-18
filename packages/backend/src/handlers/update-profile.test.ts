@@ -8,7 +8,7 @@ import { ApiErrorCode } from '@filone/shared';
 // ---------------------------------------------------------------------------
 
 // Fixed blocklist so tests don't depend on the upstream dataset's contents.
-vi.mock('disposable-email-domains', () => ({
+vi.mock('disposable-domains', () => ({
   default: ['mailinator.com'],
 }));
 

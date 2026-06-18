@@ -158,6 +158,62 @@ describe('onExecutePostLogin', () => {
     expect(api.authentication.enrollWithAny).not.toHaveBeenCalled();
   });
 
+  it('skips the MFA challenge entirely when the user logged in with a passkey', async () => {
+    // Passkey logins satisfy MFA on their own (phishing-resistant + user-
+    // verifying). Auth0 emits the login method as `name: 'passkey'` on
+    // event.authentication.methods. Even a user with MFA factors enrolled
+    // must not be double-challenged when they used a passkey to sign in.
+    await onExecutePostLogin(
+      buildEvent({
+        enrolledFactors: [{ type: 'otp' }, { type: 'webauthn-platform' }],
+        authMethods: [{ name: 'passkey', timestamp: '2026-05-20T15:12:13.000Z' }],
+      }),
+      api,
+    );
+
+    expect(api.authentication.challengeWithAny).not.toHaveBeenCalled();
+    expect(api.authentication.enrollWithAny).not.toHaveBeenCalled();
+    expect(api.user.setAppMetadata).not.toHaveBeenCalled();
+  });
+
+  it('still enrolls a fresh factor when a passkey user is in the enrollment flow', async () => {
+    // Passkey-primary user with no MFA enrolled clicks "Add MFA factor" —
+    // backend sets mfa_enrolling=true. The passkey short-circuit must NOT
+    // skip the enrollment branch, otherwise the user lands back on the app
+    // homepage with no factor added.
+    await onExecutePostLogin(
+      buildEvent({
+        enrolledFactors: [],
+        mfaEnrolling: true,
+        authMethods: [{ name: 'passkey', timestamp: '2026-05-20T15:12:13.000Z' }],
+      }),
+      api,
+    );
+
+    expect(api.user.setAppMetadata).toHaveBeenCalledWith('mfa_enrolling', false);
+    expect(api.authentication.enrollWithAny).toHaveBeenCalledWith(ENROLLABLE_FACTORS);
+    expect(api.authentication.challengeWithAny).not.toHaveBeenCalled();
+  });
+
+  it('challenges existing MFA then enrolls when a passkey user with prior MFA is enrolling another', async () => {
+    // Passkey login + already-enrolled MFA + mfaEnrolling=true.
+    // Auth0 still requires challengeWithAny before enrollWithAny when prior
+    // MFA exists (it's an API-ordering requirement, not a re-prove-the-user
+    // step). Confirms passkey login doesn't bypass that requirement.
+    await onExecutePostLogin(
+      buildEvent({
+        enrolledFactors: [{ type: 'otp' }],
+        mfaEnrolling: true,
+        authMethods: [{ name: 'passkey', timestamp: '2026-05-20T15:12:13.000Z' }],
+      }),
+      api,
+    );
+
+    expect(api.user.setAppMetadata).toHaveBeenCalledWith('mfa_enrolling', false);
+    expect(api.authentication.challengeWithAny).toHaveBeenCalledWith(CHALLENGE_FACTORS);
+    expect(api.authentication.enrollWithAny).toHaveBeenCalledWith(ENROLLABLE_FACTORS);
+  });
+
   it('forces re-enrollment after a recovery-code redemption without challenging the lost factor', async () => {
     // The user just used their recovery code to log in — their original device
     // is gone. Don't challenge it (it can't respond); just enroll a fresh
