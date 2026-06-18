@@ -3,7 +3,7 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { AccessKey, GranularPermission, ListAccessKeysResponse } from '@filone/shared';
+import type { AccessKey, AccessKeyPermission, ListAccessKeysResponse } from '@filone/shared';
 import { S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
@@ -50,7 +50,11 @@ export async function baseHandler(
       accessKeyId: record.accessKeyId as string,
       createdAt: record.createdAt as string,
       status: record.status as AccessKey['status'],
-      granularPermissions: (record.granularPermissions as GranularPermission[] | undefined) ?? [],
+      // Read the new attribute, falling back to the legacy `granularPermissions`
+      // attribute for rows written before the field rename / backfill.
+      accessKeyPermissions: (record.accessKeyPermissions ??
+        record.granularPermissions ??
+        []) as AccessKeyPermission[],
       bucketScope: record.bucketScope as AccessKey['bucketScope'],
       buckets: record.buckets as string[] | undefined,
       region: (record.region as AccessKey['region']) ?? S3Region.EuWest1,

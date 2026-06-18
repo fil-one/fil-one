@@ -425,7 +425,7 @@ describe('fthOrchestrator.createBucket', () => {
 describe('fthOrchestrator.issueAccessKey', () => {
   const baseOpts = {
     keyName: 'My Key',
-    granularPermissions: ['GetObject', 'PutObject', 'ListBucket'] as const,
+    accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket'] as const,
     bucketScope: 'all' as const,
   };
 
@@ -443,7 +443,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
 
     const result = await fthOrchestrator.issueAccessKey(fthClientId, {
       keyName: baseOpts.keyName,
-      granularPermissions: [...baseOpts.granularPermissions],
+      accessKeyPermissions: [...baseOpts.accessKeyPermissions],
     });
 
     expect(result).toEqual({
@@ -458,9 +458,10 @@ describe('fthOrchestrator.issueAccessKey', () => {
       '7',
       expect.objectContaining({
         name: baseOpts.keyName,
-        // FTH_ALWAYS_PERMISSIONS + mapped granular actions.
+        // FTH_ALWAYS_PERMISSIONS + mapped access-key permission actions.
         permissions: expect.arrayContaining([
           's3:ListAllMyBuckets',
+          's3:GetBucketLocation',
           's3:GetBucketVersioning',
           's3:GetBucketObjectLockConfiguration',
           's3:GetObject',
@@ -482,7 +483,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
     await expect(
       fthOrchestrator.issueAccessKey(fthClientId, {
         keyName: baseOpts.keyName,
-        granularPermissions: [...baseOpts.granularPermissions],
+        accessKeyPermissions: [...baseOpts.accessKeyPermissions],
       }),
     ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
   });
@@ -496,7 +497,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
     await expect(
       fthOrchestrator.issueAccessKey(fthClientId, {
         keyName: baseOpts.keyName,
-        granularPermissions: [...baseOpts.granularPermissions],
+        accessKeyPermissions: [...baseOpts.accessKeyPermissions],
       }),
     ).rejects.toBeInstanceOf(AccessKeyValidationError);
   });
@@ -507,7 +508,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
     await expect(
       fthOrchestrator.issueAccessKey(fthClientId, {
         keyName: baseOpts.keyName,
-        granularPermissions: [...baseOpts.granularPermissions],
+        accessKeyPermissions: [...baseOpts.accessKeyPermissions],
       }),
     ).rejects.toThrow(/filone-console/);
     expect(mockFthClient.createAccessKey).not.toHaveBeenCalled();
@@ -526,11 +527,11 @@ describe('fthOrchestrator.issueAccessKey', () => {
 
     await fthOrchestrator.issueAccessKey(fthClientId, {
       keyName: 'k1',
-      granularPermissions: ['GetObject'],
+      accessKeyPermissions: ['GetObject'],
     });
     await fthOrchestrator.issueAccessKey(fthClientId, {
       keyName: 'k2',
-      granularPermissions: ['GetObject'],
+      accessKeyPermissions: ['GetObject'],
     });
 
     expect(mockFthClient.listStorageUsers).toHaveBeenCalledTimes(1);

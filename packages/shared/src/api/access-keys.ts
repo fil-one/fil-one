@@ -3,7 +3,7 @@ import { S3Region } from '../constants.js';
 
 export type AccessKeyStatus = 'active' | 'inactive';
 
-export const GRANULAR_PERMISSIONS = [
+export const ACCESS_KEY_PERMISSIONS = [
   'GetObject',
   'ListMultipartUploadParts',
   'GetObjectVersion',
@@ -19,9 +19,9 @@ export const GRANULAR_PERMISSIONS = [
   'DeleteObject',
   'DeleteObjectVersion',
 ] as const;
-export type GranularPermission = (typeof GRANULAR_PERMISSIONS)[number];
+export type AccessKeyPermission = (typeof ACCESS_KEY_PERMISSIONS)[number];
 
-export const DEFAULT_GRANULAR_PERMISSIONS: GranularPermission[] = [
+export const DEFAULT_ACCESS_KEY_PERMISSIONS: AccessKeyPermission[] = [
   'GetObject',
   'ListMultipartUploadParts',
   'PutObject',
@@ -30,12 +30,12 @@ export const DEFAULT_GRANULAR_PERMISSIONS: GranularPermission[] = [
   'ListBucketMultipartUploads',
 ];
 
-export const GRANULAR_PERMISSION_GROUP_ORDER = ['Read', 'Write', 'List', 'Delete'] as const;
-export type GranularPermissionGroup = (typeof GRANULAR_PERMISSION_GROUP_ORDER)[number];
+export const ACCESS_KEY_PERMISSION_GROUP_ORDER = ['Read', 'Write', 'List', 'Delete'] as const;
+export type AccessKeyPermissionGroup = (typeof ACCESS_KEY_PERMISSION_GROUP_ORDER)[number];
 
-export const GRANULAR_PERMISSION_LABELS: Record<
-  GranularPermission,
-  { label: string; description: string; group: GranularPermissionGroup }
+export const ACCESS_KEY_PERMISSION_LABELS: Record<
+  AccessKeyPermission,
+  { label: string; description: string; group: AccessKeyPermissionGroup }
 > = {
   GetObject: {
     label: 'Get object',
@@ -126,8 +126,8 @@ export const CreateAccessKeySchema = z
         KEY_NAME_PATTERN,
         'Key name can only contain letters, numbers, spaces, hyphens, underscores, and periods',
       ),
-    granularPermissions: z
-      .array(z.enum(GRANULAR_PERMISSIONS))
+    accessKeyPermissions: z
+      .array(z.enum(ACCESS_KEY_PERMISSIONS))
       .min(1, 'At least one permission is required'),
     bucketScope: z.enum(ACCESS_KEY_BUCKET_SCOPES).default('all'),
     buckets: z.array(z.string()).optional(),
@@ -152,7 +152,7 @@ export interface AccessKey {
   createdAt: string;
   lastUsedAt?: string;
   status: AccessKeyStatus;
-  granularPermissions: GranularPermission[];
+  accessKeyPermissions: AccessKeyPermission[];
   bucketScope: AccessKeyBucketScope;
   buckets?: string[];
   region?: S3Region;

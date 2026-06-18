@@ -2,8 +2,8 @@ import { useState } from 'react';
 
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
-import type { GranularPermission } from '@filone/shared';
-import { DEFAULT_GRANULAR_PERMISSIONS, GRANULAR_PERMISSIONS } from '@filone/shared';
+import type { AccessKeyPermission } from '@filone/shared';
+import { DEFAULT_ACCESS_KEY_PERMISSIONS, ACCESS_KEY_PERMISSIONS } from '@filone/shared';
 
 import { AccessKeyPermissionsFields } from './AccessKeyPermissionsFields';
 
@@ -28,19 +28,19 @@ export const NoneSelected: Story = {
 
 export const DefaultSelected: Story = {
   args: {
-    value: DEFAULT_GRANULAR_PERMISSIONS,
+    value: DEFAULT_ACCESS_KEY_PERMISSIONS,
   },
 };
 
 export const AllSelected: Story = {
   args: {
-    value: [...GRANULAR_PERMISSIONS],
+    value: [...ACCESS_KEY_PERMISSIONS],
   },
 };
 
 export const Interactive: Story = {
   render: () => {
-    const [value, setValue] = useState<GranularPermission[]>(DEFAULT_GRANULAR_PERMISSIONS);
+    const [value, setValue] = useState<AccessKeyPermission[]>(DEFAULT_ACCESS_KEY_PERMISSIONS);
     return <AccessKeyPermissionsFields value={value} onChange={setValue} />;
   },
 };

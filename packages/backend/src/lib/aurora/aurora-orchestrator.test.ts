@@ -364,7 +364,7 @@ describe('auroraOrchestrator', () => {
 
       const result = await auroraOrchestrator.issueAccessKey('aurora-t-1', {
         keyName: 'console',
-        granularPermissions: ['GetObject', 'PutObject', 'ListBucketVersions'],
+        accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucketVersions'],
         buckets: ['b1'],
         expiresAt: '2026-12-31',
       });
@@ -378,7 +378,7 @@ describe('auroraOrchestrator', () => {
       expect(mockCreateAuroraAccessKey).toHaveBeenCalledWith({
         tenantId: 'aurora-t-1',
         keyName: 'console',
-        granularPermissions: ['GetObject', 'PutObject', 'ListBucketVersions'],
+        accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucketVersions'],
         buckets: ['b1'],
         expiresAt: '2026-12-31',
       });
@@ -390,7 +390,7 @@ describe('auroraOrchestrator', () => {
       await expect(
         auroraOrchestrator.issueAccessKey('aurora-t-1', {
           keyName: 'k',
-          granularPermissions: ['GetObject'],
+          accessKeyPermissions: ['GetObject'],
         }),
       ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
     });
@@ -400,7 +400,7 @@ describe('auroraOrchestrator', () => {
 
       const promise = auroraOrchestrator.issueAccessKey('aurora-t-1', {
         keyName: 'k',
-        granularPermissions: ['GetObject'],
+        accessKeyPermissions: ['GetObject'],
       });
       await expect(promise).rejects.toBeInstanceOf(AccessKeyValidationError);
       await expect(promise).rejects.toThrow('bad name');
@@ -412,7 +412,7 @@ describe('auroraOrchestrator', () => {
       await expect(
         auroraOrchestrator.issueAccessKey('aurora-t-1', {
           keyName: 'k',
-          granularPermissions: ['GetObject'],
+          accessKeyPermissions: ['GetObject'],
         }),
       ).rejects.toThrow('upstream 500');
     });

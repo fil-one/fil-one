@@ -9,7 +9,7 @@ import {
   getS3AccessKey,
   listS3AccessKeys,
 } from '@filone/aurora-portal-client';
-import type { GranularPermission, RetentionDurationType, RetentionMode } from '@filone/shared';
+import type { AccessKeyPermission, RetentionDurationType, RetentionMode } from '@filone/shared';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -100,14 +100,14 @@ const AURORA_ACCESS_ALWAYS: string[] = [
   'GetBucketObjectLockConfiguration',
 ];
 
-export function buildAuroraAccessArray(granularPermissions: GranularPermission[]): string[] {
-  return [...AURORA_ACCESS_ALWAYS, ...granularPermissions];
+export function buildAuroraAccessArray(accessKeyPermissions: AccessKeyPermission[]): string[] {
+  return [...AURORA_ACCESS_ALWAYS, ...accessKeyPermissions];
 }
 
 export interface CreateAuroraAccessKeyOptions {
   tenantId: string;
   keyName: string;
-  granularPermissions: GranularPermission[];
+  accessKeyPermissions: AccessKeyPermission[];
   buckets?: string[];
   expiresAt?: string | null;
 }
@@ -121,7 +121,7 @@ export interface CreateAuroraAccessKeyResult {
 export async function createAuroraAccessKey({
   tenantId,
   keyName,
-  granularPermissions,
+  accessKeyPermissions,
   buckets,
   expiresAt,
 }: CreateAuroraAccessKeyOptions): Promise<CreateAuroraAccessKeyResult> {
@@ -132,7 +132,7 @@ export async function createAuroraAccessKey({
     path: { tenantId },
     body: {
       name: keyName,
-      access: buildAuroraAccessArray(granularPermissions),
+      access: buildAuroraAccessArray(accessKeyPermissions),
       ...(buckets && buckets.length > 0 ? { buckets } : {}),
       ...(expiresAt ? { expiration: expiresAt } : {}),
     },

@@ -4,8 +4,8 @@ import { DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon } from '@phosphor-icons/rea
 
 import { IconBox } from './IconBox';
 
-import type { AccessKey, GranularPermission } from '@filone/shared';
-import { GRANULAR_PERMISSION_LABELS } from '@filone/shared';
+import type { AccessKey, AccessKeyPermission } from '@filone/shared';
+import { ACCESS_KEY_PERMISSION_LABELS } from '@filone/shared';
 
 import { Badge } from './Badge';
 import { Button } from './Button';
@@ -95,19 +95,23 @@ function ActionMenu({ onDelete }: { onDelete: () => void }) {
 
 const PERMISSIONS_PREVIEW_COUNT = 3;
 
-function PermissionsCell({ granularPermissions }: { granularPermissions: GranularPermission[] }) {
-  if (granularPermissions.length === 0) {
+function PermissionsCell({
+  accessKeyPermissions,
+}: {
+  accessKeyPermissions: AccessKeyPermission[];
+}) {
+  if (accessKeyPermissions.length === 0) {
     return <span className="text-xs text-zinc-400">None</span>;
   }
 
-  const preview = granularPermissions.slice(0, PERMISSIONS_PREVIEW_COUNT);
-  const overflow = granularPermissions.length - preview.length;
+  const preview = accessKeyPermissions.slice(0, PERMISSIONS_PREVIEW_COUNT);
+  const overflow = accessKeyPermissions.length - preview.length;
 
   return (
     <div className="flex flex-wrap gap-1">
       {preview.map((g) => (
         <Badge key={g} color="blue" size="sm">
-          {GRANULAR_PERMISSION_LABELS[g].label}
+          {ACCESS_KEY_PERMISSION_LABELS[g].label}
         </Badge>
       ))}
       {overflow > 0 && (
@@ -116,9 +120,9 @@ function PermissionsCell({ granularPermissions }: { granularPermissions: Granula
           size="sm"
           description={
             <ul className="flex flex-col gap-0.5">
-              {granularPermissions.map((g) => (
+              {accessKeyPermissions.map((g) => (
                 <li key={g} className="text-xs text-zinc-700">
-                  {GRANULAR_PERMISSION_LABELS[g].label}
+                  {ACCESS_KEY_PERMISSION_LABELS[g].label}
                 </li>
               ))}
             </ul>
@@ -223,7 +227,7 @@ export function AccessKeysTable({
             {/* Permissions */}
             {showPermissions && (
               <Table.Cell className="hidden md:table-cell">
-                <PermissionsCell granularPermissions={key.granularPermissions} />
+                <PermissionsCell accessKeyPermissions={key.accessKeyPermissions} />
               </Table.Cell>
             )}
 

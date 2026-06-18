@@ -312,18 +312,18 @@ const AURORA_ACCESS_ALWAYS = ['Default', 'GetBucketVersioning', 'GetBucketObject
 // ---------------------------------------------------------------------------
 
 describe('buildAuroraAccessArray', () => {
-  it('returns the always-included tokens for an empty granular permission list', () => {
+  it('returns the always-included tokens for an empty access-key permission list', () => {
     expect(buildAuroraAccessArray([])).toStrictEqual(AURORA_ACCESS_ALWAYS);
   });
 
-  it('appends a single granular permission after the always-included tokens', () => {
+  it('appends a single access-key permission after the always-included tokens', () => {
     expect(buildAuroraAccessArray(['GetObject'])).toStrictEqual([
       ...AURORA_ACCESS_ALWAYS,
       'GetObject',
     ]);
   });
 
-  it('appends the default granular permissions in order', () => {
+  it('appends the default access-key permissions in order', () => {
     expect(
       buildAuroraAccessArray([
         'GetObject',
@@ -344,7 +344,7 @@ describe('buildAuroraAccessArray', () => {
     ]);
   });
 
-  it('appends data-protection granular permissions', () => {
+  it('appends data-protection access-key permissions', () => {
     expect(buildAuroraAccessArray(['GetObjectVersion', 'GetObjectRetention'])).toStrictEqual([
       ...AURORA_ACCESS_ALWAYS,
       'GetObjectVersion',
@@ -382,7 +382,7 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      granularPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+      accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
     });
 
     const ssmCalls = ssmMock.commandCalls(GetParameterCommand);
@@ -400,7 +400,7 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      granularPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+      accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
     });
 
     expect(mockPostAccessKeys).toHaveBeenCalledWith({
@@ -414,14 +414,14 @@ describe('createAuroraAccessKey', () => {
     });
   });
 
-  it('includes data-protection granular permissions in the Aurora access array', async () => {
+  it('includes data-protection access-key permissions in the Aurora access array', async () => {
     setupSsmMock();
     mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
 
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      granularPermissions: ['GetObject', 'GetObjectVersion', 'GetObjectRetention'],
+      accessKeyPermissions: ['GetObject', 'GetObjectVersion', 'GetObjectRetention'],
     });
 
     expect(mockPostAccessKeys).toHaveBeenCalledWith({
@@ -442,7 +442,7 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      granularPermissions: ['GetObject'],
+      accessKeyPermissions: ['GetObject'],
       expiresAt: '2026-06-01',
     });
 
@@ -460,7 +460,7 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      granularPermissions: ['GetObject'],
+      accessKeyPermissions: ['GetObject'],
       expiresAt: null,
     });
 
@@ -475,7 +475,7 @@ describe('createAuroraAccessKey', () => {
     const result = await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      granularPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+      accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
     });
 
     expect(result).toStrictEqual({
@@ -498,7 +498,7 @@ describe('createAuroraAccessKey', () => {
       await createAuroraAccessKey({
         tenantId: 'tenant-1',
         keyName: 'my-key',
-        granularPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+        accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
       });
       expect.unreachable('Expected AccessKeyAlreadyExistsError to be thrown');
     } catch (err) {
@@ -521,7 +521,7 @@ describe('createAuroraAccessKey', () => {
       createAuroraAccessKey({
         tenantId: 'tenant-1',
         keyName: 'my-key',
-        granularPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+        accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
       }),
     ).rejects.toThrow('Failed to create Aurora access key "my-key" for tenant tenant-1');
   });
@@ -537,7 +537,7 @@ describe('createAuroraAccessKey', () => {
       createAuroraAccessKey({
         tenantId: 'tenant-1',
         keyName: 'my-key',
-        granularPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+        accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
       }),
     ).rejects.toThrow('Aurora API returned invalid access key for tenant tenant-1');
   });
@@ -560,7 +560,7 @@ describe('createAuroraAccessKey', () => {
         createAuroraAccessKey({
           tenantId: 'tenant-1',
           keyName: 'my-key',
-          granularPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+          accessKeyPermissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
         }),
       ).rejects.toThrow(
         `Aurora Portal API returned empty access key "${field}" for tenant tenant-1`,

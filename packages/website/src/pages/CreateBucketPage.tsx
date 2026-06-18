@@ -108,7 +108,7 @@ export function CreateBucketPage() {
 
   // eslint-disable-next-line complexity/complexity
   async function handleSubmit() {
-    if (createKeyToggled && form.granularPermissions.length === 0) return;
+    if (createKeyToggled && form.accessKeyPermissions.length === 0) return;
 
     const bucketBody = {
       bucketName: bucketName.trim(),
@@ -161,7 +161,7 @@ export function CreateBucketPage() {
     if (createKeyToggled) {
       const keyBody = {
         keyName: form.keyName.trim(),
-        granularPermissions: form.granularPermissions,
+        accessKeyPermissions: form.accessKeyPermissions,
         bucketScope: form.bucketScope,
         buckets: form.bucketScope === 'specific' ? form.selectedBuckets : undefined,
         region,
@@ -218,7 +218,7 @@ export function CreateBucketPage() {
   const accessKeyFormValid =
     !createKeyToggled ||
     (accessKeyNameValid &&
-      form.granularPermissions.length > 0 &&
+      form.accessKeyPermissions.length > 0 &&
       (form.bucketScope !== 'specific' || form.selectedBuckets.length > 0));
 
   const canSubmit =

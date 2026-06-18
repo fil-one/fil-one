@@ -14,7 +14,7 @@ import {
   DuplicateTokenNameError,
   setupAuroraTenant,
 } from './aurora-backoffice.js';
-import { GRANULAR_PERMISSIONS, ErrorResponse } from '@filone/shared';
+import { ACCESS_KEY_PERMISSIONS, ErrorResponse } from '@filone/shared';
 import { createAuroraAccessKey } from './aurora-portal.js';
 import { reportMetric } from '../metrics.js';
 import { OrgSetupStatus, isOrgSetupComplete } from '../org-setup-status.js';
@@ -315,7 +315,7 @@ async function createAndStoreS3AccessKey(
     const result = await createAuroraAccessKey({
       tenantId: auroraTenantId,
       keyName: 'filone-console',
-      granularPermissions: [...GRANULAR_PERMISSIONS],
+      accessKeyPermissions: [...ACCESS_KEY_PERMISSIONS],
     });
     accessKeyId = result.accessKeyId;
     accessKeySecret = result.accessKeySecret;

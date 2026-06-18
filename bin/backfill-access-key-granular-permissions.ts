@@ -2,20 +2,25 @@
 
 // Usage: ./bin/backfill-access-key-granular-permissions.ts [--dry-run]
 //
-// Backfills the FULL `granularPermissions` set on existing access key records
-// in DynamoDB. Access keys are moving from a two-level model (basic
-// read/write/list/delete `permissions` plus a partial `granularPermissions`
-// set covering only data-protection perms) to a single granular-only model.
-// Legacy records store basic `permissions` and may carry a PARTIAL
-// `granularPermissions` set. This script writes the full granular set so the
-// granular-only read path and the UI display correctly.
+// Backfills the access-key permission set on existing access key records in
+// DynamoDB and migrates it onto the `accessKeyPermissions` attribute (the
+// attribute was formerly named `granularPermissions`). Access keys moved from a
+// two-level model (basic read/write/list/delete `permissions` plus a partial
+// permission set covering only data-protection perms) to a single flat model.
+// Legacy records store basic `permissions` and may carry a PARTIAL permission
+// set under the old `granularPermissions` attribute. This script writes the
+// equivalent permission set under `accessKeyPermissions` (removing the old
+// attribute) so the read path and the UI display correctly.
 //
 // For each record the new value is the UNION of:
-//   - expand(record.permissions)        // full granular per basic perm held
-//   - record.granularPermissions ?? []  // preserve already-chosen data-protection perms
-// deduped in the canonical 14-permission order. The write is unconditional and
+//   - expand(record.permissions)              // Aurora's basic->S3 action mapping
+//   - record.accessKeyPermissions ??          // preserve already-chosen perms,
+//       record.granularPermissions ?? []      //   tolerating either attribute name
+// deduped in canonical order. Expansion grants ONLY the actions Aurora documents
+// for each basic permission — version/retention/legal-hold perms are never added
+// for a legacy key that didn't already have them. The write is unconditional and
 // idempotent: records previously backfilled with the partial set are recomputed
-// and overwritten.
+// and overwritten, and the legacy `granularPermissions` attribute is removed.
 //
 // Run against the stage recorded in .sst/stage (e.g. your personal dev stack):
 //   ./bin/backfill-access-key-granular-permissions.ts --dry-run
@@ -52,11 +57,17 @@ import { DynamoDBClient, ScanCommand, UpdateItemCommand } from '@aws-sdk/client-
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 
 // Inlined to keep this script self-contained — it must NOT import from
-// @filone/shared. This is the inverse of the new backend translators: the
-// FULL base->granular expansion (14 granular permissions across 4 basic ones).
-// Keep in sync with packages/shared/src/api/access-keys.ts if that map changes.
-type AccessKeyPermission = 'read' | 'write' | 'list' | 'delete';
-type GranularPermission =
+// @filone/shared. Each legacy basic permission expands to exactly the S3 actions
+// Aurora documents for it (see AccesskeysAccessKeyRequest in
+// packages/aurora-portal-client/src/generated/types.gen.ts):
+//   Read   -> [GetObject, ListMultipartUploadParts]
+//   Write  -> [PutObject, AbortMultipartUpload]
+//   Delete -> [DeleteObject]
+//   List   -> [ListBucket, ListBucketMultipartUploads]
+// The version/retention/legal-hold permissions are separate, individually-opted
+// permissions — they are NOT part of the basic expansion and are never added here.
+type BasicPermission = 'read' | 'write' | 'list' | 'delete';
+type AccessKeyPermission =
   | 'GetObject'
   | 'ListMultipartUploadParts'
   | 'GetObjectVersion'
@@ -72,21 +83,15 @@ type GranularPermission =
   | 'DeleteObject'
   | 'DeleteObjectVersion';
 
-const GRANULAR_PERMISSION_MAP: Record<AccessKeyPermission, GranularPermission[]> = {
-  read: [
-    'GetObject',
-    'ListMultipartUploadParts',
-    'GetObjectVersion',
-    'GetObjectRetention',
-    'GetObjectLegalHold',
-  ],
-  write: ['PutObject', 'AbortMultipartUpload', 'PutObjectRetention', 'PutObjectLegalHold'],
-  list: ['ListBucket', 'ListBucketMultipartUploads', 'ListBucketVersions'],
-  delete: ['DeleteObject', 'DeleteObjectVersion'],
+const ACCESS_KEY_PERMISSION_MAP: Record<BasicPermission, AccessKeyPermission[]> = {
+  read: ['GetObject', 'ListMultipartUploadParts'],
+  write: ['PutObject', 'AbortMultipartUpload'],
+  list: ['ListBucket', 'ListBucketMultipartUploads'],
+  delete: ['DeleteObject'],
 };
 
 // Canonical ordering used to produce a stable, deduped union.
-const GRANULAR_PERMISSION_ORDER: GranularPermission[] = [
+const ACCESS_KEY_PERMISSION_ORDER: AccessKeyPermission[] = [
   'GetObject',
   'ListMultipartUploadParts',
   'GetObjectVersion',
@@ -109,7 +114,7 @@ const stage = readFileSync('.sst/stage', 'utf8').trim();
 const dynamo = new DynamoDBClient({});
 
 console.log(
-  `${dryRun ? 'DRY-RUN — ' : ''}Backfilling granularPermissions on ${tableName} (stage="${stage}")`,
+  `${dryRun ? 'DRY-RUN — ' : ''}Backfilling accessKeyPermissions on ${tableName} (stage="${stage}")`,
 );
 
 let scanned = 0;
@@ -132,29 +137,33 @@ do {
     scanned++;
     const record = unmarshall(item);
 
-    const permissions = record.permissions as AccessKeyPermission[] | undefined;
+    const permissions = record.permissions as BasicPermission[] | undefined;
     if (!Array.isArray(permissions) || permissions.length === 0) {
       console.warn(`  Skipping ${record.pk}/${record.sk}: permissions missing or empty`);
       skippedInvalid++;
       continue;
     }
 
-    const existingGranular = Array.isArray(record.granularPermissions)
-      ? (record.granularPermissions as GranularPermission[])
-      : [];
+    // Preserve already-chosen perms, tolerating either attribute name on the
+    // record (new `accessKeyPermissions` or legacy `granularPermissions`).
+    const existingPermissions = Array.isArray(record.accessKeyPermissions)
+      ? (record.accessKeyPermissions as AccessKeyPermission[])
+      : Array.isArray(record.granularPermissions)
+        ? (record.granularPermissions as AccessKeyPermission[])
+        : [];
 
-    // Union of the full expansion of the basic perms with any granular perms
-    // already chosen (e.g. data-protection perms from the partial backfill),
-    // deduped in canonical order for a stable result.
-    const union = new Set<GranularPermission>([
-      ...permissions.flatMap((p) => GRANULAR_PERMISSION_MAP[p] ?? []),
-      ...existingGranular,
+    // Union of the full expansion of the basic perms with any perms already
+    // chosen (e.g. data-protection perms from the partial backfill), deduped in
+    // canonical order for a stable result.
+    const union = new Set<AccessKeyPermission>([
+      ...permissions.flatMap((p) => ACCESS_KEY_PERMISSION_MAP[p] ?? []),
+      ...existingPermissions,
     ]);
-    const granular = GRANULAR_PERMISSION_ORDER.filter((p) => union.has(p));
+    const accessKeyPermissions = ACCESS_KEY_PERMISSION_ORDER.filter((p) => union.has(p));
 
     const keyName = record.keyName ?? '(no name)';
     console.log(
-      `  ${dryRun ? '[dry-run] ' : ''}${record.pk} ${record.sk} keyName="${keyName}" perms=[${permissions.join(',')}] -> granular=[${granular.join(',')}]`,
+      `  ${dryRun ? '[dry-run] ' : ''}${record.pk} ${record.sk} keyName="${keyName}" perms=[${permissions.join(',')}] -> accessKeyPermissions=[${accessKeyPermissions.join(',')}]`,
     );
 
     if (dryRun) {
@@ -162,14 +171,14 @@ do {
       continue;
     }
 
-    // Unconditional, idempotent write: always set the computed full granular
-    // set so records previously backfilled with the partial set are recomputed.
+    // Unconditional, idempotent write: always set the computed full permission
+    // set under the new attribute and drop the legacy `granularPermissions` one.
     await dynamo.send(
       new UpdateItemCommand({
         TableName: tableName,
         Key: { pk: item.pk!, sk: item.sk! },
-        UpdateExpression: 'SET granularPermissions = :g',
-        ExpressionAttributeValues: marshall({ ':g': granular }),
+        UpdateExpression: 'SET accessKeyPermissions = :g REMOVE granularPermissions',
+        ExpressionAttributeValues: marshall({ ':g': accessKeyPermissions }),
       }),
     );
     updated++;
