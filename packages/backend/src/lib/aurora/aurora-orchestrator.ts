@@ -4,7 +4,7 @@
 //
 // PROFILE-row attributes used: `auroraTenantId` and `auroraSetupStatus`.
 
-import { S3Region, getS3Endpoint } from '@filone/shared';
+import { S3Region, getS3Endpoint, TenantStatus } from '@filone/shared';
 import type {
   AccessKeyPermission,
   Bucket,
@@ -29,11 +29,13 @@ import {
   mapFromModelsTenantStatus,
   mapToModelsTenantStatus,
   updateTenantStatus as updateAuroraTenantStatusApi,
+  getBucketStorageSamples,
+  getTenantInfo,
 } from '../aurora/aurora-backoffice.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
-import { NotImplementedError } from '../errors.js';
+import { BucketNotFoundError, NotImplementedError } from '../errors.js';
 import type {
   BucketDetails,
   BucketSummary,
@@ -42,8 +44,9 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   ServiceOrchestrator,
-  TenantStatus,
   TenantStatusProbe,
+  StorageUsageSample,
+  TenantInfo,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
 import type { S3ClientContext } from '../s3-client.js';
@@ -254,6 +257,45 @@ export const auroraOrchestrator = {
       }));
 
     return { storage, egress };
+  },
+
+  async getTenantInfo(tenantId: string): Promise<TenantInfo> {
+    const info = await getTenantInfo({ tenantId });
+    return {
+      bucketCount: info.bucketCount ?? 0,
+      bucketLimit: info.bucketQuantityLimit ?? 100,
+      keyCount: info.keyCount ?? 0,
+      accessKeyLimit: info.accessKeyQuantityLimit ?? 300,
+      status: mapFromModelsTenantStatus(info.status),
+    };
+  },
+
+  async getBucketUsageMetrics(
+    tenantId: string,
+    bucketName: string,
+    opts: GetTenantUsageMetricsOptions,
+  ): Promise<StorageUsageSample[]> {
+    // getBucketStorageSamples queries Aurora metrics globally by bucket name, so
+    // gate it behind a tenant-scoped ownership check: only the owning tenant's
+    // Portal client resolves the bucket (404 -> null otherwise).
+    const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName);
+    if (!bucket) throw new BucketNotFoundError(bucketName);
+    const auroraInterval = mapIntervalToAuroraWindow(opts.interval ?? '1d');
+
+    const samples = await getBucketStorageSamples({
+      bucketName,
+      from: opts.from,
+      to: opts.to,
+      window: auroraInterval,
+    });
+
+    return samples
+      .filter((s): s is typeof s & { timestamp: string } => s.timestamp !== undefined)
+      .map((s) => ({
+        timestamp: new Date(s.timestamp).toISOString(),
+        bytesUsed: s.bytesUsed ?? 0,
+        objectCount: s.objectCount ?? 0,
+      }));
   },
 } satisfies ServiceOrchestrator;
 

@@ -4,6 +4,7 @@ import type {
   RetentionDurationType,
   RetentionMode,
   S3Region,
+  TenantStatus,
 } from '@filone/shared';
 import type { S3ClientContext } from './s3-client.js';
 import type { OrgProfileItem } from './org-profile.js';
@@ -85,13 +86,6 @@ export interface GetTenantUsageMetricsOptions {
 }
 
 /**
- * Orchestrator-agnostic tenant status. These are the three lowercase-dashed
- * values shared by every orchestrator. Aurora's generated `ModelsTenantStatus`
- * additionally has a never-used `LOCKED` value we intentionally don't model.
- */
-export type TenantStatus = 'active' | 'write-locked' | 'disabled';
-
-/**
  * Result of a live tenant-status probe against an orchestrator's API.
  *
  * - `ok` carries the normalized {@link TenantStatus}, or `undefined` when the
@@ -104,6 +98,21 @@ export type TenantStatusProbe =
   | { kind: 'ok'; status: TenantStatus | undefined }
   | { kind: 'not_found' }
   | { kind: 'error'; cause: unknown };
+
+/**
+ * Normalized, orchestrator-agnostic tenant quota and status snapshot.
+ *
+ * `keyCount` / `accessKeyLimit` are raw values that include the per-tenant
+ * `filone-console` system key (and its reserved slot). Callers that surface
+ * user-managed keys should subtract one per tenant.
+ */
+export interface TenantInfo {
+  bucketCount: number;
+  bucketLimit: number;
+  keyCount: number;
+  accessKeyLimit: number;
+  status?: TenantStatus;
+}
 
 /**
  * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.).
@@ -211,4 +220,23 @@ export interface ServiceOrchestrator {
     tenantId: string,
     opts: GetTenantUsageMetricsOptions,
   ): Promise<TenantUsageMetrics>;
+
+  /**
+   * Returns the tenant's quota and status snapshot (bucket/key counts and
+   * limits, lifecycle status). Read-only. Backs the usage dashboard.
+   */
+  getTenantInfo(tenantId: string): Promise<TenantInfo>;
+
+  /**
+   * Returns a single bucket's storage usage as a normalized time series over
+   * `[from, to)`. Read-only. Backs per-bucket analytics. The ownership check is
+   * performed here (tenant-scoped): throws {@link BucketNotFoundError} when the
+   * bucket is not found or not owned by the tenant. Returns an empty array when
+   * the bucket is owned but has no storage series yet.
+   */
+  getBucketUsageMetrics(
+    tenantId: string,
+    bucketName: string,
+    opts: GetTenantUsageMetricsOptions,
+  ): Promise<StorageUsageSample[]>;
 }
