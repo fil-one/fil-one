@@ -4,6 +4,8 @@
 **Created:** 2026-04-29
 **Last updated:** 2026-04-30
 
+> **See also:** [2026-05-passkey-primary-authentication.md](./2026-05-passkey-primary-authentication.md) — passkey-as-primary login satisfies MFA when the Post-Login Action detects `event.authentication.methods[].name === 'passkey'`; the Action returns early in that case.
+
 ## Context
 
 The platform authenticates users via Auth0 with an authorization code flow, HTTP-only cookie sessions, and social login support (Google, GitHub) alongside native Auth0 username/password. Enterprise clients expect MFA as a security baseline, but the current Settings page shows a disabled "Enable" button with placeholder text. No MFA factors are configured in Auth0.

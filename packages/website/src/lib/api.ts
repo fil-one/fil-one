@@ -175,6 +175,30 @@ export function deleteMfaEnrollment(enrollmentId: string): Promise<{ message: st
 }
 
 /**
+ * Delete a passkey authenticator. Gated by `requireMfa` on the backend; if the
+ * current session has no `amr: ["mfa"]` or `amr: ["phr"]` claim, this catches the
+ * StepUpRequiredError and redirects through Auth0 with
+ * `acr_values=...:multi-factor`. The redirect navigates the page away — the
+ * returned promise never resolves on the step-up path.
+ */
+export async function deletePasskey(
+  methodId: string,
+  options: { stepUpAction?: string } = {},
+): Promise<{ message: string }> {
+  try {
+    return await apiRequest<{ message: string }>(`/mfa/passkeys/${encodeURIComponent(methodId)}`, {
+      method: 'DELETE',
+    });
+  } catch (err) {
+    if (err instanceof StepUpRequiredError) {
+      redirectToStepUp(options.stepUpAction ?? 'delete-passkey');
+      return new Promise<{ message: string }>(() => {});
+    }
+    throw err;
+  }
+}
+
+/**
  * Regenerate the user's MFA recovery code. The backend gates this on the
  * `amr: ["mfa"]` claim in the ID token. When missing, this catches the
  * StepUpRequiredError and redirects through Auth0 with `acr_values=...
