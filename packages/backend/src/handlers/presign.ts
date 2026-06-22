@@ -34,6 +34,7 @@ import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
+import { rateLimitMiddleware } from '../middleware/rate-limit.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
 const PRESIGN_EXPIRY_SECONDS = 300;
@@ -241,4 +242,5 @@ export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Read))
+  .use(rateLimitMiddleware())
   .use(errorHandlerMiddleware());
