@@ -12,6 +12,7 @@ import {
   SignOutIcon,
   QuestionIcon,
   ChatTeardropDotsIcon,
+  RobotIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useMatchRoute } from '@tanstack/react-router';
@@ -64,6 +65,12 @@ const navGroups: NavGroup[] = [
         icon: ChatTeardropDotsIcon,
         label: 'Bucket Intelligence',
         testId: 'nav-bucket-intelligence',
+      },
+      {
+        path: '/ai-agent-toolkit',
+        icon: RobotIcon,
+        label: 'AI Agent Toolkit',
+        testId: 'nav-ai-agent-toolkit',
       },
     ],
   },
