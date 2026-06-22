@@ -25,6 +25,19 @@ export class BucketConfigurationError extends Error {
   }
 }
 
+// Thrown by data-plane reads (e.g. getBucketUsageMetrics) when the bucket is not
+// found or is not owned by the tenant. The ownership check is tenant-scoped, so a
+// bucket belonging to another tenant surfaces as not-found rather than leaking its
+// existence. Handlers catch this to return a 404.
+export class BucketNotFoundError extends Error {
+  readonly bucketName: string;
+  constructor(bucketName: string, options?: ErrorOptions) {
+    super(`Bucket "${bucketName}" not found`, options);
+    this.name = 'BucketNotFoundError';
+    this.bucketName = bucketName;
+  }
+}
+
 export class AccessKeyAlreadyExistsError extends Error {
   constructor(options?: ErrorOptions) {
     super('An access key with this name already exists', options);

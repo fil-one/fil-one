@@ -11,13 +11,14 @@
 import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
-import { getS3Endpoint, S3Region } from '@filone/shared';
-import type { AccessKeyPermission } from '@filone/shared';
+import { getS3Endpoint, S3Region, TenantStatus } from '@filone/shared';
+import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketConfigurationError,
+  BucketNotFoundError,
   NotImplementedError,
 } from '../errors.js';
 import type {
@@ -28,8 +29,9 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   ServiceOrchestrator,
-  TenantStatus,
   TenantStatusProbe,
+  StorageUsageSample,
+  TenantInfo,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
 import type { OrgProfileItem } from '../org-profile.js';
@@ -279,6 +281,44 @@ export const fthOrchestrator = {
         bytesUsed: p.egress_bytes ?? 0,
       }));
     return { storage, egress };
+  },
+
+  async getTenantInfo(tenantId: string): Promise<TenantInfo> {
+    const c = await client.getClient(tenantId);
+    return {
+      bucketCount: c.bucketCount ?? 0,
+      bucketLimit: c.bucketLimit ?? 0,
+      keyCount: c.accessKeyCount ?? 0,
+      accessKeyLimit: c.accessKeyLimit ?? 0,
+      status: normalizeFthStatus(c.status),
+    };
+  },
+
+  async getBucketUsageMetrics(
+    tenantId: string,
+    bucketName: string,
+    _opts: GetTenantUsageMetricsOptions,
+  ): Promise<StorageUsageSample[]> {
+    // Ownership check (tenant-scoped): only the owning tenant's S3 client lists
+    // the bucket. A snapshot miss alone can't distinguish "not owned" from
+    // "owned but absent from the current breakdown" (e.g. an empty bucket), so
+    // confirm existence before reading metrics.
+    const bucket = await fthOrchestrator.getBucket(tenantId, bucketName);
+    if (!bucket) throw new BucketNotFoundError(bucketName);
+
+    // FTH has no per-bucket time series; the current-snapshot `by_bucket`
+    // breakdown is the finest per-bucket reading available. A bucket can appear
+    // once per storage tier, so fold all matching rows into one sample.
+    const snapshot = await client.getClientMetricsCurrent(tenantId);
+    const rows = (snapshot.usage?.by_bucket ?? []).filter((b) => b.bucket === bucketName);
+    if (rows.length === 0) return [];
+
+    const bytesUsed = rows.reduce((sum, b) => sum + (b.size ?? 0), 0);
+    const objectCount = rows.reduce((sum, b) => sum + (b.count ?? 0), 0);
+    const timestamp = snapshot.as_of
+      ? new Date(snapshot.as_of).toISOString()
+      : new Date().toISOString();
+    return [{ timestamp, bytesUsed, objectCount }];
   },
 } satisfies ServiceOrchestrator;
 

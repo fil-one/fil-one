@@ -95,9 +95,13 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
   // Bucket analytics (object count + storage)
   const { data: analyticsData } = useQuery({
-    queryKey: queryKeys.bucketAnalytics(bucketName),
-    queryFn: () =>
-      apiRequest<BucketAnalyticsResponse>(`/buckets/${encodeURIComponent(bucketName)}/analytics`),
+    queryKey: queryKeys.bucketAnalytics(bucketName, region),
+    queryFn: () => {
+      const params = new URLSearchParams({ region });
+      return apiRequest<BucketAnalyticsResponse>(
+        `/buckets/${encodeURIComponent(bucketName)}/analytics?${params.toString()}`,
+      );
+    },
   });
 
   // Access keys scoped to this bucket

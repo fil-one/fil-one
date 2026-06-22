@@ -12,5 +12,5 @@
       "psl": ["./node_modules/psl/types/index.d.ts"]
     }
   },
-  "include": ["src", "sst-env.d.ts"]
+  "include": ["src", "sst-env.d.ts", "../shared/src/api/tenants.ts"]
 }

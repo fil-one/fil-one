@@ -41,6 +41,8 @@ export interface FthManagementClient {
     query: { from: string; to: string; interval?: string },
   ): Promise<FthMetricsTimeseriesResponse>;
 
+  getClientMetricsCurrent(clientRef: string): Promise<FthMetricsCurrentResponse>;
+
   interceptors: {
     request: { use(fn: RequestInterceptor): number };
     response: { use(fn: ResponseInterceptor): number };
@@ -150,6 +152,27 @@ export interface FthMetricsTimeseriesResponse {
 
 export interface FthAccessKeyWithSecret extends FthAccessKey {
   secretAccessKey: string;
+}
+
+/** One bucket's storage breakdown within a current-snapshot (`by_bucket` entry). */
+export interface FthUsageBucketSummary {
+  bucket: string;
+  tier?: string;
+  size?: number;
+  count?: number;
+}
+
+export interface FthMetricsCurrentResponse {
+  as_of?: string;
+  clientId?: number;
+  clientCode?: string;
+  clientName?: string;
+  usage?: {
+    total_size?: number;
+    total_count?: number;
+    bucket_count?: number;
+    by_bucket?: FthUsageBucketSummary[];
+  };
 }
 
 interface FthListResponse<T> {
@@ -383,6 +406,12 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
         { query: params },
       );
     },
+    getClientMetricsCurrent: (clientRef) =>
+      request<FthMetricsCurrentResponse>(
+        'GET',
+        '/management/v1/clients/{clientRef}/metrics/current',
+        { clientRef },
+      ),
   };
 }
 

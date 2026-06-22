@@ -38,6 +38,7 @@ export const queryKeys = {
   // all bucket-scoped access key queries (prefix match).
   accessKeys: ['access-keys'] as const,
   bucketAccessKeys: (bucketName: string) => ['access-keys', bucketName] as const,
-  bucketAnalytics: (bucketName: string) => ['bucket-analytics', bucketName] as const,
+  bucketAnalytics: (bucketName: string, region: S3Region) =>
+    ['bucket-analytics', bucketName, region] as const,
   instatusSummary: ['instatus-summary'] as const,
 };

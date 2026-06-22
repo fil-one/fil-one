@@ -7,6 +7,7 @@ import {
   FthUnauthorizedError,
   type FthManagementClient,
   type FthMetricsTimeseriesResponse,
+  type FthMetricsCurrentResponse,
 } from './fth-management-client.js';
 
 function mockFetch(status: number, body: unknown = {}): typeof fetch {
@@ -494,5 +495,28 @@ describe('FthClient getClientMetricsTimeseries', () => {
         { ts: '2024-01-02T00:00:00Z', usage_avg_bytes: 4096, egress_bytes: 512 },
       ],
     });
+  });
+});
+
+describe('FthClient getClientMetricsCurrent', () => {
+  it('issues GET to the current-snapshot path and returns the parsed body', async () => {
+    const responseBody: FthMetricsCurrentResponse = {
+      as_of: '2024-01-01T00:00:00Z',
+      usage: {
+        total_size: 1500,
+        total_count: 5,
+        bucket_count: 1,
+        by_bucket: [{ bucket: 'my-bucket', tier: 'L1', size: 1500, count: 5 }],
+      },
+    };
+    const fetchMock = mockFetch(200, responseBody);
+    const client = buildClient({ fetch: fetchMock });
+
+    const result = await client.getClientMetricsCurrent('ref-abc');
+
+    const req = lastRequest(fetchMock);
+    expect(req.method).toBe('GET');
+    expect(req.url).toBe('https://api.fortilyx.com/management/v1/clients/ref-abc/metrics/current');
+    expect(result).toEqual(responseBody);
   });
 });

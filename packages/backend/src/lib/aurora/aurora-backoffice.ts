@@ -17,7 +17,7 @@ import {
 } from '@filone/aurora-backoffice-client';
 import { instrumentClient } from './aurora-api-metrics.js';
 import { getAuroraBackofficeSecrets } from '../auth-secrets.js';
-import type { TenantStatus } from '../service-orchestrator.js';
+import type { TenantStatus } from '@filone/shared';
 
 export type {
   ModelOperationMetricsSample,
@@ -515,8 +515,8 @@ const MODELS_TO_TENANT_STATUS: Record<ModelsTenantStatus, TenantStatus | undefin
   LOCKED: undefined,
 };
 
-export function mapFromModelsTenantStatus(status: ModelsTenantStatus): TenantStatus | undefined {
-  return MODELS_TO_TENANT_STATUS[status];
+export function mapFromModelsTenantStatus(status?: ModelsTenantStatus): TenantStatus | undefined {
+  return status ? MODELS_TO_TENANT_STATUS[status] : undefined;
 }
 
 export async function updateTenantStatus({

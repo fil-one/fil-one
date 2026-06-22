@@ -149,3 +149,4 @@ export type {
   Invoice,
   ListInvoicesResponse,
 } from './api/billing.js';
+export type { TenantStatus } from './api/tenants.js';
