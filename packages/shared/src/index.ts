@@ -10,6 +10,7 @@ export {
   formatRegion,
   getRegionLabel,
   getAvailableRegions,
+  isSupportedRegion,
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
@@ -29,12 +30,13 @@ export { formatBytes, formatBytesShort } from './formatBytes.js';
 export type {
   MeResponse,
   MfaEnrollment,
+  PasskeyEnrollment,
   UpdateProfileRequest,
   UpdateProfileResponse,
   RegenerateRecoveryCodeResponse,
   StepUpRequiredResponse,
 } from './api/me.js';
-export { UpdateProfileSchema } from './api/me.js';
+export { PASSKEY_PER_USER_LIMIT, UpdateProfileSchema } from './api/me.js';
 
 export { getProvider, isSocialConnection } from './connection-providers.js';
 export type { ConnectionProvider } from './connection-providers.js';
@@ -147,3 +149,4 @@ export type {
   Invoice,
   ListInvoicesResponse,
 } from './api/billing.js';
+export type { TenantStatus } from './api/tenants.js';

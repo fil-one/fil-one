@@ -20,13 +20,15 @@ import { apiRequest, createAccessKey } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 
 import { Heading } from '../components/Heading/Heading';
+import { Card } from '../components/Card';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { FormField } from '../components/FormField';
 import { Overline } from '../components/Overline';
 import { Input } from '../components/Input';
-import { Select } from '../components/Select';
+import { RegionSelect } from '../components/RegionSelect';
+import { useAvailableRegions } from '../lib/use-available-regions.js';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
 import { SlowOperationIndicator } from '../components/SlowOperationIndicator';
@@ -42,9 +44,10 @@ export function CreateBucketPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const availableRegions = useAvailableRegions();
 
   // Bucket fields
-  const [name, setName] = useState('');
+  const [bucketName, setBucketName] = useState('');
   const [region, setRegion] = useState(S3_REGION);
 
   // Object settings
@@ -59,7 +62,7 @@ export function CreateBucketPage() {
   const [createKeyToggled, setCreateKeyToggled] = useState(false);
 
   // Validation
-  const [nameError, setNameError] = useState<string | null>(null);
+  const [bucketNameError, setBucketNameError] = useState<string | null>(null);
 
   // Submit state
   const [creating, setCreating] = useState(false);
@@ -85,21 +88,21 @@ export function CreateBucketPage() {
   useEffect(() => {
     if (!createKeyToggled) return;
     const prev = prevBucketNameRef.current;
-    const next = name.trim();
+    const next = bucketName.trim();
     prevBucketNameRef.current = next;
     form.setSelectedBuckets((buckets) => {
       const withoutPrev = prev ? buckets.filter((b) => b !== prev) : buckets;
       return next ? [...withoutPrev, next] : withoutPrev;
     });
-  }, [name, createKeyToggled, region]); // form.setSelectedBuckets is a stable useState setter
+  }, [bucketName, createKeyToggled, region]); // form.setSelectedBuckets is a stable useState setter
 
-  function validateName(value: string) {
-    const result = CreateBucketSchema.shape.name.safeParse(value);
+  function validateBucketName(value: string) {
+    const result = CreateBucketSchema.shape.bucketName.safeParse(value);
     if (!result.success) {
-      setNameError(result.error.issues[0].message);
+      setBucketNameError(result.error.issues[0].message);
       return false;
     }
-    setNameError(null);
+    setBucketNameError(null);
     return true;
   }
 
@@ -108,7 +111,7 @@ export function CreateBucketPage() {
     if (createKeyToggled && form.permissions.length === 0) return;
 
     const bucketBody = {
-      name: name.trim(),
+      bucketName: bucketName.trim(),
       region,
       versioning,
       lock,
@@ -127,9 +130,9 @@ export function CreateBucketPage() {
     const parsed = CreateBucketSchema.safeParse(bucketBody);
     if (!parsed.success) {
       const msg = parsed.error.issues[0].message;
-      // Show name errors inline; everything else as a toast
-      if (parsed.error.issues[0].path[0] === 'name') {
-        setNameError(msg);
+      // Show bucketName errors inline; everything else as a toast
+      if (parsed.error.issues[0].path[0] === 'bucketName') {
+        setBucketNameError(msg);
       } else {
         toast.error(msg);
       }
@@ -139,13 +142,13 @@ export function CreateBucketPage() {
     setCreating(true);
 
     // Step 1: Create the bucket
-    let bucketName: string;
+    let createdBucketName: string;
     try {
       const { bucket } = await apiRequest<CreateBucketResponse>('/buckets', {
         method: 'POST',
         body: JSON.stringify(parsed.data),
       });
-      bucketName = bucket.name;
+      createdBucketName = bucket.bucketName;
       void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
     } catch (err) {
@@ -168,7 +171,11 @@ export function CreateBucketPage() {
       if (!parsed.success) {
         toast.error(parsed.error.issues[0].message);
         setCreating(false);
-        void navigate({ to: '/buckets/$bucketName', params: { bucketName } });
+        void navigate({
+          to: '/buckets/$bucketName',
+          params: { bucketName: createdBucketName },
+          search: { region },
+        });
         return;
       }
       try {
@@ -188,12 +195,20 @@ export function CreateBucketPage() {
     }
 
     setCreating(false);
-    void navigate({ to: '/buckets/$bucketName', params: { bucketName } });
+    void navigate({
+      to: '/buckets/$bucketName',
+      params: { bucketName: createdBucketName },
+      search: { region },
+    });
   }
 
   function handleCredentialsDone() {
     setCredentials(null);
-    void navigate({ to: '/buckets/$bucketName', params: { bucketName: name.trim() } });
+    void navigate({
+      to: '/buckets/$bucketName',
+      params: { bucketName: bucketName.trim() },
+      search: { region },
+    });
   }
 
   const accessKeyNameValid = createKeyToggled
@@ -206,7 +221,8 @@ export function CreateBucketPage() {
       form.permissions.length > 0 &&
       (form.bucketScope !== 'specific' || form.selectedBuckets.length > 0));
 
-  const canSubmit = name.trim().length > 0 && !nameError && !creating && accessKeyFormValid;
+  const canSubmit =
+    bucketName.trim().length > 0 && !bucketNameError && !creating && accessKeyFormValid;
 
   return (
     <div className="mx-auto flex max-w-[860px] flex-col gap-6 py-12">
@@ -225,25 +241,25 @@ export function CreateBucketPage() {
       {/* Two-column layout */}
       <div className="flex gap-10">
         {/* Left: White card with form */}
-        <div className="w-[520px] shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+        <Card className="w-[520px] shrink-0 overflow-hidden">
           <div className="flex flex-col gap-5">
             {/* Bucket name */}
             <FormField
               htmlFor="bucket-name"
               label="Bucket name"
               description="3-63 characters. Lowercase letters, numbers, and hyphens only. Must be globally unique."
-              error={nameError ?? undefined}
+              error={bucketNameError ?? undefined}
             >
               <Input
                 id="bucket-name"
-                value={name}
-                invalid={!!nameError}
+                value={bucketName}
+                invalid={!!bucketNameError}
                 onChange={(v) => {
-                  setName(v);
-                  if (nameError) validateName(v);
+                  setBucketName(v);
+                  if (bucketNameError) validateBucketName(v);
                 }}
                 onBlur={() => {
-                  if (name.trim()) validateName(name);
+                  if (bucketName.trim()) validateBucketName(bucketName);
                 }}
                 placeholder="my-storage-bucket"
                 autoComplete="off"
@@ -254,16 +270,9 @@ export function CreateBucketPage() {
             <FormField
               htmlFor="bucket-region"
               label="Region"
-              description="More regions coming soon."
+              description={availableRegions.length === 1 ? 'More regions coming soon.' : undefined}
             >
-              <Select
-                id="bucket-region"
-                value={region}
-                onChange={(v) => setRegion(v as typeof S3_REGION)}
-                disabled
-              >
-                <option value={S3_REGION}>Europe (eu-west-1)</option>
-              </Select>
+              <RegionSelect id="bucket-region" value={region} onChange={setRegion} />
             </FormField>
 
             {/* Object settings */}
@@ -289,6 +298,7 @@ export function CreateBucketPage() {
               {/* Clickable toggle header */}
               <button
                 type="button"
+                id="create-bucket-toggle-key"
                 onClick={() => setCreateKeyToggled(!createKeyToggled)}
                 className="flex w-full items-center justify-between rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-left hover:bg-zinc-100"
               >
@@ -321,7 +331,7 @@ export function CreateBucketPage() {
                   </p>
                   <AccessKeyFormFields
                     form={form}
-                    pinnedBucket={name.trim() || undefined}
+                    pinnedBucket={bucketName.trim() || undefined}
                     region={region}
                   />
                 </div>
@@ -329,7 +339,13 @@ export function CreateBucketPage() {
             </div>
 
             {/* Submit button */}
-            <Button variant="primary" size="lg" disabled={!canSubmit} onClick={handleSubmit}>
+            <Button
+              id="create-bucket-submit-button"
+              variant="primary"
+              size="lg"
+              disabled={!canSubmit}
+              onClick={handleSubmit}
+            >
               {creating
                 ? 'Creating...'
                 : createKeyToggled
@@ -338,7 +354,7 @@ export function CreateBucketPage() {
             </Button>
             <SlowOperationIndicator isLoading={creating} operation="Creating bucket" />
           </div>
-        </div>
+        </Card>
 
         {/* Right: Info sidebar */}
         <div className="sticky top-0 w-60 shrink-0 self-start pt-1">

@@ -70,8 +70,27 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     throw Object.assign(new Error('Session expired. Redirecting to login...'), { status: 401 });
   }
 
+  if (response.status === 402) {
+    const body = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
+    if (body.code === ApiErrorCode.TRIAL_PRESIGN_BLOCKED) {
+      throw Object.assign(
+        new Error(
+          'Generating shareable links is not available on trial accounts. Please upgrade to a paid plan.',
+        ),
+        { status: 402, code: ApiErrorCode.TRIAL_PRESIGN_BLOCKED },
+      );
+    }
+  }
+
   if (response.status === 403) {
     const body = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
+    if (body.code === ApiErrorCode.EMAIL_NOT_VERIFIED) {
+      if (!isRedirecting) {
+        isRedirecting = true;
+        window.location.href = '/verify-email';
+      }
+      throw Object.assign(new Error('Email verification required'), { status: 403 });
+    }
     if (body.code === ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED) {
       throw Object.assign(
         new Error(
@@ -153,6 +172,30 @@ export function deleteMfaEnrollment(enrollmentId: string): Promise<{ message: st
   return apiRequest<{ message: string }>(`/mfa/enrollments/${encodeURIComponent(enrollmentId)}`, {
     method: 'DELETE',
   });
+}
+
+/**
+ * Delete a passkey authenticator. Gated by `requireMfa` on the backend; if the
+ * current session has no `amr: ["mfa"]` or `amr: ["phr"]` claim, this catches the
+ * StepUpRequiredError and redirects through Auth0 with
+ * `acr_values=...:multi-factor`. The redirect navigates the page away — the
+ * returned promise never resolves on the step-up path.
+ */
+export async function deletePasskey(
+  methodId: string,
+  options: { stepUpAction?: string } = {},
+): Promise<{ message: string }> {
+  try {
+    return await apiRequest<{ message: string }>(`/mfa/passkeys/${encodeURIComponent(methodId)}`, {
+      method: 'DELETE',
+    });
+  } catch (err) {
+    if (err instanceof StepUpRequiredError) {
+      redirectToStepUp(options.stepUpAction ?? 'delete-passkey');
+      return new Promise<{ message: string }>(() => {});
+    }
+    throw err;
+  }
 }
 
 /**

@@ -46,6 +46,7 @@ process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './disable-mfa.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -73,10 +74,13 @@ function disableMfaEvent(sub: string = MOCK_SUB) {
   return event;
 }
 
-function setupAuthMocks(sub: string = MOCK_SUB) {
-  mockJwtVerify
-    .mockResolvedValueOnce({ payload: { sub } })
-    .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+function setupAuthMocks(
+  sub: string = MOCK_SUB,
+  idTokenPayload: Record<string, unknown> = { amr: ['mfa'] },
+) {
+  mockJwtVerify.mockResolvedValueOnce({ payload: { sub } }).mockResolvedValueOnce({
+    payload: { email: MOCK_EMAIL, email_verified: true, ...idTokenPayload },
+  });
 
   ddbMock
     .on(GetItemCommand, {
@@ -98,7 +102,7 @@ function setupAuthMocks(sub: string = MOCK_SUB) {
     .resolves({
       Item: {
         orgConfirmed: { BOOL: true },
-        setupStatus: { S: 'AURORA_S3_ACCESS_KEY_CREATED' },
+        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
       },
     });
 }
@@ -159,6 +163,22 @@ describe('POST /api/mfa/disable handler', () => {
       statusCode: 400,
       body: JSON.stringify({ message: 'MFA is not currently enabled.' }),
     });
+    expect(mockDeleteAllAuthenticators).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 step_up_required when the ID token has no amr: ["mfa"]', async () => {
+    setupAuthMocks(MOCK_SUB, { amr: ['pwd'] });
+    mockGetMfaEnrollments.mockResolvedValue([
+      { id: 'test', type: 'authenticator', status: 'confirmed' },
+    ]);
+
+    const result = await handler(disableMfaEvent(), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 401,
+      body: JSON.stringify({ error: 'step_up_required' }),
+    });
+    expect(mockGetMfaEnrollments).not.toHaveBeenCalled();
     expect(mockDeleteAllAuthenticators).not.toHaveBeenCalled();
   });
 });

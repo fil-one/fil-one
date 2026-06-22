@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { STORAGE_STATE } from './roles.ts';
+import { STORAGE_STATE } from './roles.util.ts';
 
 // Cookies set by packages/backend/src/lib/response-builder.ts and cleared by
 // packages/backend/src/handlers/auth-logout.ts.
@@ -12,12 +12,10 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
   const page = await context.newPage();
 
   await page.goto('/dashboard');
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await expect(page.getByText('Dashboard')).toBeVisible();
+  await expect(page.locator('#dashboard-heading')).toBeVisible();
 
   await page.getByTestId('user-profile').click();
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await page.getByRole('button', { name: 'Log out' }).click();
+  await page.locator('#user-menu-logout-button').click();
 
   // Wait for the full /logout -> Auth0 /v2/logout -> returnTo chain to settle.
   await page.waitForURL(/^https:\/\/fil\.one\/?$/, { timeout: 30_000 });
@@ -33,8 +31,7 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
 
   // Server-side: a protected route should bounce to sign-in.
   await page.goto('/dashboard');
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await expect(page.getByText('Sign in')).toBeVisible();
+  await expect(page).toHaveURL(/login/);
 
   await context.close();
 });

@@ -90,6 +90,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "DeletePasskey": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "DisableMfa": {
       "name": string
       "type": "sst.aws.Function"
@@ -97,6 +101,10 @@ declare module "sst" {
     "EnrollMfa": {
       "name": string
       "type": "sst.aws.Function"
+    }
+    "FthManagementApiToken": {
+      "type": "sst.sst.Secret"
+      "value": string
     }
     "GetActivity": {
       "name": string

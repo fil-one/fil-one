@@ -2,12 +2,16 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
-import { CreateBucketSchema, S3_REGION } from '@filone/shared';
-import { createAuroraBucket, BucketAlreadyExistsError } from '../lib/aurora-portal.js';
-import { ensureTenantReady } from '../lib/aurora-tenant-setup.js';
-import { ResponseBuilder } from '../lib/response-builder.js';
+import { CreateBucketSchema, isSupportedRegion } from '@filone/shared';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
+import {
+  ResponseBuilder,
+  tenantNotReadyResponse,
+  unsupportedRegionResponse,
+} from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo } from '../lib/user-context.js';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -35,25 +39,21 @@ export async function baseHandler(
       .build();
   }
 
-  const { name, region, versioning, lock, retention } = parsed.data;
-
-  if (region !== S3_REGION) {
-    return new ResponseBuilder()
-      .status(400)
-      .body<ErrorResponse>({ message: `Unsupported region. Supported: ${S3_REGION}` })
-      .build();
-  }
+  const { bucketName, region, versioning, lock, retention } = parsed.data;
 
   const { orgId } = getUserInfo(event);
 
-  const ready = await ensureTenantReady(orgId);
-  if (!ready.ok) return ready.errorResponse;
-  const auroraTenantId = ready.auroraTenantId;
+  if (!isSupportedRegion(process.env.FILONE_STAGE!, region, getVerifiedEmail(event))) {
+    return unsupportedRegionResponse(region);
+  }
+
+  const orchestrator = getOrchestratorForRegion(region);
+  const tenantId = await orchestrator.ensureTenantReady(orgId);
+  if (!tenantId) return tenantNotReadyResponse();
 
   try {
-    await createAuroraBucket({
-      tenantId: auroraTenantId,
-      bucketName: name,
+    await orchestrator.createBucket(tenantId, {
+      bucketName,
       versioning,
       lock,
       retention,
@@ -62,7 +62,16 @@ export async function baseHandler(
     if (err instanceof BucketAlreadyExistsError) {
       return new ResponseBuilder()
         .status(409)
-        .body<ErrorResponse>({ message: `Bucket "${name}" already exists` })
+        .body<ErrorResponse>({ message: `Bucket "${bucketName}" already exists` })
+        .build();
+    }
+    // The bucket was created but couldn't be fully configured. Surface the
+    // actionable message so the caller can finish setup via the S3 API instead
+    // of getting the generic 500 from errorHandlerMiddleware.
+    if (err instanceof BucketConfigurationError) {
+      return new ResponseBuilder()
+        .status(500)
+        .body<ErrorResponse>({ message: err.message })
         .build();
     }
     throw err;
@@ -74,7 +83,7 @@ export async function baseHandler(
     .status(201)
     .body<CreateBucketResponse>({
       bucket: {
-        name,
+        bucketName,
         region,
         createdAt: now,
         isPublic: false,

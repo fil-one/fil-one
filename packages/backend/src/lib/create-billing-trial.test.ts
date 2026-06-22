@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
+  GetItemCommand,
   PutItemCommand,
   ConditionalCheckFailedException,
 } from '@aws-sdk/client-dynamodb';
@@ -45,6 +46,9 @@ describe('createBillingTrial', () => {
   beforeEach(() => {
     ddbMock.reset();
     vi.clearAllMocks();
+
+    // Default: no existing billing record, so the guard falls through.
+    ddbMock.on(GetItemCommand).resolves({});
 
     mockCustomersCreate.mockResolvedValue({ id: 'cus_test_123' });
     mockSubscriptionsCreate.mockResolvedValue({
@@ -138,6 +142,28 @@ describe('createBillingTrial', () => {
     // Stripe calls should still have been made (idempotent on Stripe side)
     expect(mockCustomersCreate).toHaveBeenCalledOnce();
     expect(mockSubscriptionsCreate).toHaveBeenCalledOnce();
+  });
+
+  it('returns early without touching Stripe when a billing record already exists', async () => {
+    ddbMock.on(GetItemCommand).resolves({
+      Item: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } },
+    });
+
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
+
+    // Guarded before any Stripe side effects — this is what prevents duplicate
+    // customers/subscriptions on re-invocation past Stripe's idempotency window.
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+
+    const getCalls = ddbMock.commandCalls(GetItemCommand);
+    expect(getCalls).toHaveLength(1);
+    expect(getCalls[0].args[0].input).toMatchObject({
+      TableName: 'BillingTable',
+      Key: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } },
+      ConsistentRead: true,
+    });
   });
 
   it('propagates Stripe customer creation errors', async () => {

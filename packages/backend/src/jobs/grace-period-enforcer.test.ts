@@ -1,11 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import {
-  DynamoDBClient,
-  GetItemCommand,
-  ScanCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, ScanCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 
@@ -20,18 +15,28 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockUpdateTenantStatus = vi.fn();
-vi.mock('../lib/aurora-backoffice.js', () => ({
-  updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
+// grace-period-enforcer probes/locks tenants through the orchestrator registry
+// (via lib/region-helpers.js, which is left real). Mocking getAvailableOrchestrators
+// lets us drive fake orchestrators end-to-end.
+const mockGetAvailableOrchestrators = vi.fn();
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
+  getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
 
-vi.mock('../lib/org-setup-status.js', () => ({
-  isOrgSetupComplete: (status: string | undefined) => status === 'AURORA_S3_ACCESS_KEY_CREATED',
+vi.mock('../lib/org-profile.js', () => ({
+  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
+
+process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './grace-period-enforcer.js';
+import {
+  fakeOrchestrator,
+  tenantFor as fakeTenantFor,
+  type FakeOrchestrator,
+} from '../test/fake-orchestrator.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,7 +44,9 @@ import { handler } from './grace-period-enforcer.js';
 
 const MOCK_USER_ID = 'user-123';
 const MOCK_ORG_ID = 'org-456';
-const MOCK_AURORA_TENANT_ID = 'aurora-tenant-789';
+
+const tenantFor = (orchestratorId: string, orgId = MOCK_ORG_ID) =>
+  fakeTenantFor(orchestratorId, orgId);
 
 function pastDate(daysAgo: number): string {
   return new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
@@ -58,21 +65,13 @@ function buildBillingItem(overrides: Record<string, unknown>) {
   });
 }
 
-function setupOrgProfile(extra?: Record<string, string>) {
-  ddbMock
-    .on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-    })
-    .resolves({
-      Item: marshall({
-        pk: `ORG#${MOCK_ORG_ID}`,
-        sk: 'PROFILE',
-        auroraTenantId: MOCK_AURORA_TENANT_ID,
-        setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
-        ...extra,
-      }),
-    });
+function canceledUpdate() {
+  return ddbMock
+    .commandCalls(UpdateItemCommand)
+    .find(
+      (c) =>
+        c.args[0].input.ExpressionAttributeValues?.[':status']?.S === SubscriptionStatus.Canceled,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -80,12 +79,18 @@ function setupOrgProfile(extra?: Record<string, string>) {
 // ---------------------------------------------------------------------------
 
 describe('grace-period-enforcer', () => {
+  let aurora: FakeOrchestrator;
+
   beforeEach(() => {
     ddbMock.reset();
     ddbMock.on(UpdateItemCommand).resolves({});
-    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-    mockUpdateTenantStatus.mockReset();
-    mockUpdateTenantStatus.mockResolvedValue(undefined);
+    vi.clearAllMocks();
+    aurora = fakeOrchestrator('aurora');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // -----------------------------------------------------------------------
@@ -97,13 +102,13 @@ describe('grace-period-enforcer', () => {
     await handler();
 
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+    expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
   });
 
   // -----------------------------------------------------------------------
-  // Expired grace_period → canceled + DISABLED
+  // Expired grace_period → canceled + disabled
   // -----------------------------------------------------------------------
-  it('transitions expired grace_period to canceled and DISABLEs Aurora tenant', async () => {
+  it('transitions expired grace_period to canceled', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
         buildBillingItem({
@@ -112,37 +117,133 @@ describe('grace-period-enforcer', () => {
         }),
       ],
     });
-    setupOrgProfile();
 
     await handler();
 
-    // DynamoDB: status → canceled
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    const cancelCall = updateCalls.find(
-      (c) =>
-        c.args[0].input.ExpressionAttributeValues?.[':status']?.S === SubscriptionStatus.Canceled,
-    );
-    expect(cancelCall).toBeDefined();
+    expect(canceledUpdate()).toBeDefined();
+  });
 
-    // Aurora: DISABLED
-    expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-      tenantId: MOCK_AURORA_TENANT_ID,
-      status: 'DISABLED',
+  it('disables the tenant in every provisioned region when grace expired', async () => {
+    const fth = fakeOrchestrator('fth');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
     });
 
-    // Org profile: auroraTenantStatus = DISABLED
-    const orgProfileUpdate = updateCalls.find(
-      (c) =>
-        c.args[0].input.TableName === 'UserInfoTable' &&
-        c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'DISABLED',
-    );
-    expect(orgProfileUpdate).toBeDefined();
+    await handler();
+
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'disabled');
+    expect(fth.updateTenantStatus).toHaveBeenCalledWith(tenantFor('fth'), 'disabled');
+  });
+
+  it('does not cancel the subscription when the disable fails in one region', async () => {
+    vi.useFakeTimers();
+    const fth = fakeOrchestrator('fth');
+    fth.updateTenantStatus.mockRejectedValue(new Error('FTH API error'));
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
+
+    const run = handler();
+    await vi.runAllTimersAsync();
+    await run;
+
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'disabled');
+    expect(canceledUpdate()).toBeUndefined();
+  });
+
+  it('retries only the failed region on the next run, then cancels', async () => {
+    vi.useFakeTimers();
+    const fth = fakeOrchestrator('fth');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
+
+    // First run: FTH disable fails every retry (4 attempts: 1 initial + 3
+    // background retries); the record stays in grace_period.
+    // Second run: Aurora probes as already disabled, FTH succeeds.
+    fth.updateTenantStatus
+      .mockRejectedValueOnce(new Error('FTH API error'))
+      .mockRejectedValueOnce(new Error('FTH API error'))
+      .mockRejectedValueOnce(new Error('FTH API error'))
+      .mockRejectedValueOnce(new Error('FTH API error'))
+      .mockResolvedValue(undefined);
+    aurora.getTenantStatus
+      .mockResolvedValueOnce({ kind: 'ok', status: 'active' })
+      .mockResolvedValue({ kind: 'ok', status: 'disabled' });
+
+    const firstRun = handler();
+    await vi.runAllTimersAsync();
+    await firstRun;
+    expect(canceledUpdate()).toBeUndefined();
+
+    await handler();
+
+    expect(aurora.updateTenantStatus).toHaveBeenCalledTimes(1);
+    // First run: 4 failed attempts; second run: 1 successful attempt.
+    expect(fth.updateTenantStatus).toHaveBeenCalledTimes(5);
+    expect(canceledUpdate()).toBeDefined();
+  });
+
+  it('cancels without a disable call when the tenant is already disabled', async () => {
+    aurora = fakeOrchestrator('aurora', { status: 'disabled' });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
+
+    await handler();
+
+    expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+    expect(canceledUpdate()).toBeDefined();
+  });
+
+  it('cancels the subscription even when no region is provisioned', async () => {
+    aurora = fakeOrchestrator('aurora', { ready: false });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
+
+    await handler();
+
+    expect(canceledUpdate()).toBeDefined();
+    expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
   });
 
   // -----------------------------------------------------------------------
-  // Non-expired grace_period → WRITE_LOCK retry
+  // Non-expired grace_period → write-lock retry
   // -----------------------------------------------------------------------
-  it('retries WRITE_LOCK for non-expired grace_period when auroraTenantStatus is not set', async () => {
+  it('write-locks a non-expired grace_period tenant reported as active', async () => {
+    aurora = fakeOrchestrator('aurora', { status: 'active' });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
     ddbMock.on(ScanCommand).resolves({
       Items: [
         buildBillingItem({
@@ -151,27 +252,14 @@ describe('grace-period-enforcer', () => {
         }),
       ],
     });
-    setupOrgProfile(); // no auroraTenantStatus field
 
     await handler();
 
-    expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-      tenantId: MOCK_AURORA_TENANT_ID,
-      status: 'WRITE_LOCKED',
-    });
-
-    // Org profile: auroraTenantStatus = WRITE_LOCKED
-    const orgProfileUpdate = ddbMock
-      .commandCalls(UpdateItemCommand)
-      .find(
-        (c) =>
-          c.args[0].input.TableName === 'UserInfoTable' &&
-          c.args[0].input.ExpressionAttributeValues?.[':s']?.S === 'WRITE_LOCKED',
-      );
-    expect(orgProfileUpdate).toBeDefined();
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'write-locked');
   });
 
-  it('skips WRITE_LOCK when auroraTenantStatus is already WRITE_LOCKED', async () => {
+  it('write-locks when the orchestrator reports an unmodeled (undefined) status', async () => {
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'ok', status: undefined });
     ddbMock.on(ScanCommand).resolves({
       Items: [
         buildBillingItem({
@@ -180,13 +268,99 @@ describe('grace-period-enforcer', () => {
         }),
       ],
     });
-    setupOrgProfile({ auroraTenantStatus: 'WRITE_LOCKED' });
 
     await handler();
 
-    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
-    // No org profile update needed
-    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'write-locked');
+  });
+
+  it('skips write-lock when the tenant is already write-locked', async () => {
+    aurora = fakeOrchestrator('aurora', { status: 'write-locked' });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: futureDate(5),
+        }),
+      ],
+    });
+
+    await handler();
+
+    expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+  });
+
+  it('skips write-lock when the tenant is disabled (never downgrade)', async () => {
+    aurora = fakeOrchestrator('aurora', { status: 'disabled' });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: futureDate(5),
+        }),
+      ],
+    });
+
+    await handler();
+
+    expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+  });
+
+  it('skips write-lock when the orchestrator reports the tenant is not found', async () => {
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'not_found' });
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: futureDate(5),
+        }),
+      ],
+    });
+
+    await handler();
+
+    expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+  });
+
+  it('does not write-lock when the live status probe errors', async () => {
+    // Fake timers skip over the probe-retry backoff delays.
+    vi.useFakeTimers();
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('boom') });
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: futureDate(5),
+        }),
+      ],
+    });
+
+    const promise = handler();
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+  });
+
+  it('write-locks only the regions that are not already locked', async () => {
+    aurora = fakeOrchestrator('aurora', { status: 'write-locked' });
+    const fth = fakeOrchestrator('fth', { status: 'active' });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: futureDate(5),
+        }),
+      ],
+    });
+
+    await handler();
+
+    expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+    expect(fth.updateTenantStatus).toHaveBeenCalledWith(tenantFor('fth'), 'write-locked');
   });
 
   // -----------------------------------------------------------------------
@@ -195,7 +369,6 @@ describe('grace-period-enforcer', () => {
   it('continues processing other records when one fails', async () => {
     const userId2 = 'user-second';
     const orgId2 = 'org-second';
-    const tenantId2 = 'aurora-tenant-second';
 
     ddbMock.on(ScanCommand).resolves({
       Items: [
@@ -213,84 +386,33 @@ describe('grace-period-enforcer', () => {
       ],
     });
 
-    // First record: DynamoDB update fails
+    // First record: billing cancel write fails.
     ddbMock
       .on(UpdateItemCommand, {
         Key: { pk: { S: `CUSTOMER#${MOCK_USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
       })
       .rejects(new Error('DynamoDB error'));
-
-    // Second record: succeeds
+    // Second record: succeeds.
     ddbMock
       .on(UpdateItemCommand, {
         Key: { pk: { S: `CUSTOMER#${userId2}` }, sk: { S: 'SUBSCRIPTION' } },
       })
       .resolves({});
 
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${orgId2}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: marshall({
-          pk: `ORG#${orgId2}`,
-          sk: 'PROFILE',
-          auroraTenantId: tenantId2,
-          setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
-        }),
-      });
-
     await handler();
 
-    // Second record should still be processed
-    expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-      tenantId: tenantId2,
-      status: 'DISABLED',
-    });
+    // Second record still disabled + canceled.
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora', orgId2), 'disabled');
+    expect(
+      ddbMock
+        .commandCalls(UpdateItemCommand)
+        .some((c) => c.args[0].input.Key?.pk?.S === `CUSTOMER#${userId2}`),
+    ).toBe(true);
   });
 
   // -----------------------------------------------------------------------
   // Edge cases
   // -----------------------------------------------------------------------
-  it('skips Aurora calls when org setup is not complete', async () => {
-    ddbMock.on(ScanCommand).resolves({
-      Items: [
-        buildBillingItem({
-          subscriptionStatus: SubscriptionStatus.GracePeriod,
-          gracePeriodEndsAt: pastDate(1),
-        }),
-      ],
-    });
-
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-      })
-      .resolves({
-        Item: marshall({
-          pk: `ORG#${MOCK_ORG_ID}`,
-          sk: 'PROFILE',
-          auroraTenantId: MOCK_AURORA_TENANT_ID,
-          setupStatus: 'AURORA_TENANT_CREATED',
-        }),
-      });
-
-    await handler();
-
-    // DynamoDB cancel should still happen
-    const cancelCall = ddbMock
-      .commandCalls(UpdateItemCommand)
-      .find(
-        (c) =>
-          c.args[0].input.ExpressionAttributeValues?.[':status']?.S === SubscriptionStatus.Canceled,
-      );
-    expect(cancelCall).toBeUndefined();
-    // But Aurora should NOT be called
-    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
-  });
-
   it('skips records with missing orgId', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
@@ -306,7 +428,7 @@ describe('grace-period-enforcer', () => {
     await handler();
 
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+    expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
   });
 
   it('handles paginated scan results', async () => {
@@ -322,12 +444,11 @@ describe('grace-period-enforcer', () => {
         LastEvaluatedKey: { pk: { S: 'cursor' }, sk: { S: 'val' } },
       })
       .resolvesOnce({ Items: [] });
-    setupOrgProfile();
 
     await handler();
 
     expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(2);
-    expect(mockUpdateTenantStatus).toHaveBeenCalledTimes(1);
+    expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'disabled');
   });
 
   // -----------------------------------------------------------------------
@@ -335,8 +456,6 @@ describe('grace-period-enforcer', () => {
   // -----------------------------------------------------------------------
   describe('idempotency — running twice', () => {
     it('expired grace period — second run finds no candidates after first run canceled', async () => {
-      // First scan: record has grace_period status. Second scan: record is now
-      // 'canceled' (set by first run), so the FilterExpression excludes it.
       ddbMock
         .on(ScanCommand)
         .resolvesOnce({
@@ -348,24 +467,17 @@ describe('grace-period-enforcer', () => {
           ],
         })
         .resolvesOnce({ Items: [] });
-      setupOrgProfile();
 
       await handler();
       await handler();
 
-      // Aurora DISABLED called only on first run
-      expect(mockUpdateTenantStatus).toHaveBeenCalledTimes(1);
-      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-        tenantId: MOCK_AURORA_TENANT_ID,
-        status: 'DISABLED',
-      });
-
-      // UpdateItemCommands: 2 from first run (setOrgAuroraTenantStatus + subscription cancel), 0 from second
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(2);
+      // Disable called only on the first run.
+      expect(aurora.updateTenantStatus).toHaveBeenCalledTimes(1);
+      expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'disabled');
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
     });
 
-    it('non-expired grace period — second run skips write_lock when already WRITE_LOCKED', async () => {
-      // Both scans return the same grace_period item (write_lock doesn't change subscriptionStatus)
+    it('non-expired grace period — second run skips write_lock once already write-locked', async () => {
       ddbMock.on(ScanCommand).resolves({
         Items: [
           buildBillingItem({
@@ -375,39 +487,15 @@ describe('grace-period-enforcer', () => {
         ],
       });
 
-      // First run: profile has no auroraTenantStatus → triggers WRITE_LOCK
-      // Second run: profile shows WRITE_LOCKED (set by first run) → skipped
-      ddbMock
-        .on(GetItemCommand, {
-          TableName: 'UserInfoTable',
-          Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-        })
-        .resolvesOnce({
-          Item: marshall({
-            auroraTenantId: MOCK_AURORA_TENANT_ID,
-            setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
-          }),
-        })
-        .resolvesOnce({
-          Item: marshall({
-            auroraTenantId: MOCK_AURORA_TENANT_ID,
-            setupStatus: 'AURORA_S3_ACCESS_KEY_CREATED',
-            auroraTenantStatus: 'WRITE_LOCKED',
-          }),
-        });
+      // First run: active → triggers write-lock. Second run: already write-locked → skipped.
+      aurora.getTenantStatus
+        .mockResolvedValueOnce({ kind: 'ok', status: 'active' })
+        .mockResolvedValueOnce({ kind: 'ok', status: 'write-locked' });
 
       await handler();
       await handler();
 
-      // Aurora called only on first run
-      expect(mockUpdateTenantStatus).toHaveBeenCalledTimes(1);
-      expect(mockUpdateTenantStatus).toHaveBeenCalledWith({
-        tenantId: MOCK_AURORA_TENANT_ID,
-        status: 'WRITE_LOCKED',
-      });
-
-      // Only 1 UpdateItemCommand from first run's setOrgAuroraTenantStatus; second run skips entirely
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      expect(aurora.updateTenantStatus).toHaveBeenCalledTimes(1);
     });
   });
 });

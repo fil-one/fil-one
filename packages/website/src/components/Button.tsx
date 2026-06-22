@@ -54,6 +54,7 @@ export function Button({
   disabled,
   href,
   size = 'md',
+  id,
   ...rest
 }: ButtonProps) {
   const classes = clsx(
@@ -67,7 +68,7 @@ export function Button({
 
   if (typeof href === 'undefined' || disabled) {
     return (
-      <button className={classes} disabled={disabled} {...rest}>
+      <button id={id} className={classes} disabled={disabled} {...rest}>
         <ButtonInner icon={icon} iconPosition={iconPosition} size={size}>
           {children}
         </ButtonInner>
@@ -76,7 +77,7 @@ export function Button({
   }
 
   return (
-    <BaseLink className={classes} href={href}>
+    <BaseLink id={id} className={classes} href={href}>
       <ButtonInner
         isExternalLink={isExternalHref(href)}
         icon={icon}

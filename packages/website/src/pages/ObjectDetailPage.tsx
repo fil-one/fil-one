@@ -22,17 +22,19 @@ import { IconButton } from '../components/IconButton';
 import { ShareObjectModal } from '../components/ShareObjectModal';
 import { Spinner } from '../components/Spinner';
 import { VersionHistoryCard } from '../components/VersionHistoryCard';
-import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
+import { formatBytes, getS3Endpoint, S3_REGION, SubscriptionStatus } from '@filone/shared';
 
 import type {
   ObjectMetadataResponse,
   ObjectRetentionInfo,
   GetBucketResponse,
   ListObjectVersionsResponse,
+  S3Region,
 } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { queryKeys, queryClient } from '../lib/query-client.js';
+import { getBilling } from '../lib/api.js';
 import { batchPresign } from '../lib/use-presign.js';
 import {
   parseHeadObjectResponse,
@@ -71,6 +73,7 @@ function buildMetadataResponse(
 
 export type ObjectDetailPageProps = {
   bucketName: string;
+  region: S3Region;
   objectKey: string;
   versionId?: string;
 };
@@ -97,7 +100,12 @@ async function fetchObjectRetention(
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity/complexity
-export function ObjectDetailPage({ bucketName, objectKey, versionId }: ObjectDetailPageProps) {
+export function ObjectDetailPage({
+  bucketName,
+  region,
+  objectKey,
+  versionId,
+}: ObjectDetailPageProps) {
   const navigate = useNavigate();
 
   const {
@@ -109,7 +117,7 @@ export function ObjectDetailPage({ bucketName, objectKey, versionId }: ObjectDet
     queryKey: queryKeys.objectMetadata(bucketName, objectKey, versionId),
     queryFn: async (): Promise<ObjectMetadataResponse> => {
       const cachedBucket = queryClient.getQueryData<GetBucketResponse>(
-        queryKeys.bucket(bucketName),
+        queryKeys.bucket(bucketName, region),
       );
       const hasObjectLock = cachedBucket?.bucket.objectLockEnabled ?? false;
 
@@ -131,7 +139,7 @@ export function ObjectDetailPage({ bucketName, objectKey, versionId }: ObjectDet
             ]
           : []),
       ];
-      const { items } = await batchPresign(ops);
+      const { items } = await batchPresign(region, ops);
 
       const headResponse = await executePresignedUrl(items[0].url, items[0].method);
       const head = parseHeadObjectResponse(headResponse, objectKey);
@@ -151,15 +159,20 @@ export function ObjectDetailPage({ bucketName, objectKey, versionId }: ObjectDet
   );
   const objectVersions = (cachedVersions?.versions ?? []).filter((v) => v.key === objectKey);
 
+  const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
+  const canShare = billing?.subscription.status !== SubscriptionStatus.Trialing;
+
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
   const objectActions = useObjectActions({
     bucketName,
+    region,
     onDeleted: () => {
       void navigate({
         to: '/buckets/$bucketName',
         params: { bucketName },
+        search: { region },
       });
     },
   });
@@ -178,7 +191,7 @@ export function ObjectDetailPage({ bucketName, objectKey, versionId }: ObjectDet
         <Breadcrumb
           items={[
             { label: 'Buckets', href: '/buckets' },
-            { label: bucketName, href: `/buckets/${bucketName}` },
+            { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
             { label: objectKey },
           ]}
         />
@@ -217,7 +230,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
       <Breadcrumb
         items={[
           { label: 'Buckets', href: '/buckets' },
-          { label: bucketName, href: `/buckets/${bucketName}` },
+          { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
           { label: objectKey },
         ]}
       />
@@ -227,10 +240,16 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         <IconButton
           icon={ArrowLeftIcon}
           aria-label="Back to bucket"
-          onClick={() => void navigate({ to: '/buckets/$bucketName', params: { bucketName } })}
+          onClick={() =>
+            void navigate({
+              to: '/buckets/$bucketName',
+              params: { bucketName },
+              search: { region },
+            })
+          }
         />
         <div className="min-w-0 flex-1">
-          <Heading tag="h1" className="truncate">
+          <Heading id="object-detail-heading" tag="h1" className="truncate">
             {objectKey}
           </Heading>
           <p className="text-sm text-(--color-paragraph-text-subtle)">{bucketName}</p>
@@ -238,6 +257,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
 
         <div className="flex items-center gap-1">
           <IconButton
+            id="object-download-button"
             icon={DownloadSimpleIcon}
             aria-label="Download object"
             tooltip="Download"
@@ -245,13 +265,20 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
             onClick={() => void objectActions.downloadObject(objectKey, versionId)}
           />
           <IconButton
+            id="object-share-button"
             icon={LinkIcon}
             aria-label="Share object"
-            tooltip="Share object"
+            tooltip={
+              canShare
+                ? 'Share object'
+                : 'Sharing is not available during the trial period. Upgrade to a paid plan to share objects.'
+            }
             tooltipSide="bottom"
+            disabled={!canShare}
             onClick={() => setShareOpen(true)}
           />
           <IconButton
+            id="object-delete-button"
             icon={TrashIcon}
             aria-label="Delete object"
             tooltip="Delete"
@@ -329,6 +356,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         versions={objectVersions}
         currentVersionId={versionId}
         bucketName={bucketName}
+        region={region}
       />
 
       {/* API access example card */}
@@ -344,6 +372,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         bucketName={bucketName}
+        region={region}
         objectKey={objectKey}
         versionId={versionId}
       />

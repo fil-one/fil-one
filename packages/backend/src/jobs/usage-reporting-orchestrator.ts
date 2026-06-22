@@ -1,6 +1,7 @@
-import { ScanCommand, GetItemCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
+import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { getOrgProfile } from '../lib/org-profile.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { Resource } from 'sst';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
@@ -31,7 +32,6 @@ export async function handler(): Promise<void> {
 
   const orgSeen = new Map<string, { subscriptionId: string; stripeCustomerId: string }>();
   let skippedDuplicate = 0;
-  let skippedNoTenant = 0;
   let invoked = 0;
   let failed = 0;
 
@@ -47,19 +47,13 @@ export async function handler(): Promise<void> {
       stripeCustomerId: record.stripeCustomerId,
     });
 
-    const profile = await resolveOrgProfile(record.orgId);
-    if (!profile) {
-      skippedNoTenant++;
-      console.warn('[usage-orchestrator] Missing auroraTenantId, skipping', {
-        orgId: record.orgId,
-      });
-      continue;
-    }
+    // Tenant resolution lives in the worker; the orchestrator passes only the
+    // org id (plus billing fields and the org name for Stripe metadata sync).
+    const orgName = await resolveOrgName(record.orgId);
 
     const payload: UsageReportingWorkerPayload = {
       orgId: record.orgId,
-      auroraTenantId: profile.auroraTenantId,
-      orgName: profile.orgName,
+      orgName,
       subscriptionId: record.subscriptionId,
       stripeCustomerId: record.stripeCustomerId,
       currentPeriodStart: record.currentPeriodStart,
@@ -80,7 +74,6 @@ export async function handler(): Promise<void> {
     invoked,
     failed,
     skippedDuplicate,
-    skippedNoTenant,
   });
 }
 
@@ -141,24 +134,10 @@ async function scanActiveSubscriptionRecords(
   return records;
 }
 
-async function resolveOrgProfile(
-  orgId: string,
-): Promise<{ auroraTenantId: string; orgName: string | undefined } | undefined> {
-  const profileResult = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: {
-        pk: { S: `ORG#${orgId}` },
-        sk: { S: 'PROFILE' },
-      },
-      ProjectionExpression: 'auroraTenantId, #n',
-      ExpressionAttributeNames: { '#n': 'name' },
-    }),
-  );
-
-  const auroraTenantId = profileResult.Item?.auroraTenantId?.S;
-  if (!auroraTenantId) return undefined;
-  return { auroraTenantId, orgName: profileResult.Item?.name?.S };
+/** Best-effort org name for Stripe metadata sync; `undefined` if the org has no profile/name. */
+async function resolveOrgName(orgId: string): Promise<string | undefined> {
+  const orgProfile = await getOrgProfile(orgId);
+  return orgProfile?.name?.S;
 }
 
 async function invokeUsageWorker(

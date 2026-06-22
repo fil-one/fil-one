@@ -8,23 +8,22 @@ import {
   getTenantStorageMetrics,
   listTenants,
   setTenantStatus,
-  setupTenant,
-  type ModelsComponentsStatus,
+  setupS3Component,
   type ModelsSetupStep,
   type ModelOperationMetricsSample,
   type ModelStorageMetricsSample,
   type ModelsTenantStatus,
-  type ModelsTenantWithMetricsManagementResponse,
+  type ModelsTenantWithMetricsBackofficeResponse,
 } from '@filone/aurora-backoffice-client';
-import pRetry from 'p-retry';
 import { instrumentClient } from './aurora-api-metrics.js';
-import { getAuroraBackofficeSecrets } from './auth-secrets.js';
+import { getAuroraBackofficeSecrets } from '../auth-secrets.js';
+import type { TenantStatus } from '@filone/shared';
 
 export type {
   ModelOperationMetricsSample,
   ModelStorageMetricsSample,
   ModelsTenantStatus,
-  ModelsTenantWithMetricsManagementResponse,
+  ModelsTenantWithMetricsBackofficeResponse,
 };
 
 export class DuplicateTokenNameError extends Error {
@@ -139,7 +138,6 @@ export interface SetupAuroraTenantOptions {
 }
 
 export interface SetupAuroraTenantResult {
-  id: string;
   lastSetupStep: ModelsSetupStep;
 }
 
@@ -149,7 +147,7 @@ export async function setupAuroraTenant({
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  const { data, error } = await setupTenant({
+  const { data, error } = await setupS3Component({
     client,
     path: { partnerId, tenantId },
     throwOnError: false,
@@ -168,22 +166,17 @@ export async function setupAuroraTenant({
     throw new Error(`Aurora API did not return setup data for tenant ${tenantId}`);
   }
 
-  const lastSetupStep = deriveOverallSetupStep(data.components);
-  console.log(
-    `Aurora tenant ${tenantId} setup response:`,
-    JSON.stringify(data),
-    `=> overall lastSetupStep=${lastSetupStep}`,
-  );
-  return { id: data.id!, lastSetupStep };
-}
+  const { lastSetupStep } = data;
+  if (!lastSetupStep) {
+    throw new Error(`Aurora API did not return lastSetupStep for tenant ${tenantId}`);
+  }
 
-function deriveOverallSetupStep(components: ModelsComponentsStatus | undefined): ModelsSetupStep {
-  if (!components) return 'NOT_STARTED';
-  // Only check auth & s3 — compute is not set up yet
-  const steps = [components.auth?.lastSetupStep, components.s3?.lastSetupStep].filter(Boolean);
-  if (steps.length === 0) return 'NOT_STARTED';
-  const nonFinished = steps.find((s) => s !== 'FINISHED');
-  return nonFinished ?? 'FINISHED';
+  console.log(
+    `Aurora tenant ${tenantId} S3 setup response:`,
+    JSON.stringify(data),
+    `=> lastSetupStep=${lastSetupStep}`,
+  );
+  return { lastSetupStep };
 }
 
 export interface CreateAuroraTenantApiKeyOptions {
@@ -441,7 +434,7 @@ export async function getTenantInfo({
   tenantId,
 }: {
   tenantId: string;
-}): Promise<ModelsTenantWithMetricsManagementResponse> {
+}): Promise<ModelsTenantWithMetricsBackofficeResponse> {
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
@@ -495,6 +488,37 @@ export async function getTenantStatus({
   }
 }
 
+// Maps the orchestrator-agnostic TenantStatus to Aurora's generated enum.
+// Homed here (not in region-helpers.ts) to avoid an import cycle: the registry
+// imports the orchestrator, so the orchestrator can't import back from
+// region-helpers.ts. aurora-backoffice.ts imports no registry/orchestrator.
+const TENANT_STATUS_TO_MODELS: Record<TenantStatus, ModelsTenantStatus> = {
+  active: 'ACTIVE',
+  'write-locked': 'WRITE_LOCKED',
+  disabled: 'DISABLED',
+};
+
+export function mapToModelsTenantStatus(status: TenantStatus): ModelsTenantStatus {
+  const modelsStatus = TENANT_STATUS_TO_MODELS[status];
+  if (!modelsStatus) {
+    throw new Error(`Unknown tenant status: ${String(status)}`);
+  }
+  return modelsStatus;
+}
+
+// Reverse of TENANT_STATUS_TO_MODELS. Returns undefined for Aurora's never-used
+// `LOCKED` value, which has no orchestrator-agnostic equivalent we model.
+const MODELS_TO_TENANT_STATUS: Record<ModelsTenantStatus, TenantStatus | undefined> = {
+  ACTIVE: 'active',
+  WRITE_LOCKED: 'write-locked',
+  DISABLED: 'disabled',
+  LOCKED: undefined,
+};
+
+export function mapFromModelsTenantStatus(status?: ModelsTenantStatus): TenantStatus | undefined {
+  return status ? MODELS_TO_TENANT_STATUS[status] : undefined;
+}
+
 export async function updateTenantStatus({
   tenantId,
   status,
@@ -505,21 +529,16 @@ export async function updateTenantStatus({
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  await pRetry(
-    async () => {
-      const { error } = await setTenantStatus({
-        client,
-        path: { partnerId, tenantId },
-        body: { status },
-        throwOnError: false,
-      });
+  const { error } = await setTenantStatus({
+    client,
+    path: { partnerId, tenantId },
+    body: { status },
+    throwOnError: false,
+  });
 
-      if (error) {
-        throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
-          cause: error,
-        });
-      }
-    },
-    { retries: 3 },
-  );
+  if (error) {
+    throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
+      cause: error,
+    });
+  }
 }

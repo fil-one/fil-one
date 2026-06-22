@@ -12,8 +12,8 @@ import {
   GetItemCommand,
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
-import { OrgRole } from '@filone/shared';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
+import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { FINAL_SETUP_STATUS, OrgSetupStatus } from '../lib/org-setup-status.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.js';
 import { expectErrorResponse } from '../test/assert-helpers.js';
@@ -55,9 +55,9 @@ vi.mock('../lib/auth-secrets.js', () => ({
   }),
 }));
 
-const mockCreateBillingTrial = vi.fn().mockResolvedValue(undefined);
-vi.mock('../lib/create-billing-trial.js', () => ({
-  createBillingTrial: (args: unknown) => mockCreateBillingTrial(args),
+const mockEnsureTrialEntitlement = vi.fn().mockResolvedValue(true);
+vi.mock('../lib/trial-entitlement.js', () => ({
+  ensureTrialEntitlement: (args: unknown) => mockEnsureTrialEntitlement(args),
 }));
 
 const mockJwtVerify = vi.fn();
@@ -150,11 +150,11 @@ describe('authMiddleware', () => {
             pk: { S: `ORG#${existingOrgId}` },
             sk: { S: 'PROFILE' },
             name: { S: 'example.com' },
-            setupStatus: { S: FINAL_SETUP_STATUS },
+            auroraSetupStatus: { S: FINAL_SETUP_STATUS },
           },
         });
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [
           `hs_access_token=valid-token`,
@@ -220,7 +220,7 @@ describe('authMiddleware', () => {
             pk: { S: `ORG#${existingOrgId}` },
             sk: { S: 'PROFILE' },
             name: { S: 'example.com' },
-            setupStatus: { S: FINAL_SETUP_STATUS },
+            auroraSetupStatus: { S: FINAL_SETUP_STATUS },
           },
         });
 
@@ -291,7 +291,7 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
         });
 
@@ -344,11 +344,11 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
         });
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`, `hs_id_token=bad-id-token`],
       });
@@ -377,7 +377,7 @@ describe('authMiddleware', () => {
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`],
         rawPath: '/api/me',
@@ -408,7 +408,7 @@ describe('authMiddleware', () => {
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
         rawPath: '/api/me',
@@ -466,7 +466,7 @@ describe('authMiddleware', () => {
               pk: { S: `ORG#${MOCK_ORG_ID}` },
               sk: { S: 'PROFILE' },
               name: { S: 'Alice Org' },
-              setupStatus: { S: 'FILONE_ORG_CREATED' },
+              auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
               createdBy: { S: MOCK_USER_ID },
               createdAt: { S: expect.any(String) },
             },
@@ -486,11 +486,43 @@ describe('authMiddleware', () => {
         },
       ]);
 
-      expect(mockCreateBillingTrial).toHaveBeenCalledWith({
+      // Entitlement claim + trial are delegated to ensureTrialEntitlement
+      // (verified-email gated). Unit-tested separately in trial-entitlement.test.ts.
+      expect(mockEnsureTrialEntitlement).toHaveBeenCalledWith({
+        sub: MOCK_SUB,
         userId: MOCK_USER_ID,
         orgId: MOCK_ORG_ID,
         email: MOCK_EMAIL,
+        emailVerified: false,
       });
+    });
+
+    it('does not block login when the trial entitlement backfill fails transiently', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, name: 'Alice Johnson' } });
+
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+      // Entitlement backfill throws (e.g. Stripe/DynamoDB down) — login must still succeed.
+      mockEnsureTrialEntitlement.mockRejectedValueOnce(new Error('Stripe down'));
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        rawPath: '/api/me',
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toMatchObject({
+        sub: MOCK_SUB,
+        userId: MOCK_USER_ID,
+        orgId: MOCK_ORG_ID,
+      });
+      expect(mockEnsureTrialEntitlement).toHaveBeenCalledOnce();
     });
 
     it('falls back to email-derived org name when no JWT name claim is present', async () => {
@@ -501,7 +533,7 @@ describe('authMiddleware', () => {
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
         rawPath: '/api/me',
@@ -558,11 +590,11 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
         });
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=expired-token`, `hs_refresh_token=valid-refresh`],
       });
@@ -619,11 +651,11 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
         });
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`, `hs_refresh_token=bad-refresh`],
         queryStringParameters: { forceRefresh: '1' },
@@ -654,11 +686,11 @@ describe('authMiddleware', () => {
         .resolvesOnce({ Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } } })
         .resolvesOnce({
           Item: {
-            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
         });
 
-      const { before } = authMiddleware();
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
       const event = buildEvent({
         cookies: [`hs_access_token=valid-token`],
         queryStringParameters: { forceRefresh: '1' },
@@ -736,7 +768,7 @@ describe('authMiddleware', () => {
         })
         .resolves({
           Item: {
-            setupStatus: { S: 'AURORA_TENANT_SETUP_COMPLETE' },
+            auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_SETUP_COMPLETE },
           },
         });
 
@@ -753,6 +785,156 @@ describe('authMiddleware', () => {
         audience: process.env.AUTH0_AUDIENCE,
         issuer: `https://${process.env.AUTH0_DOMAIN}/`,
       });
+    });
+  });
+
+  describe('verified email gate', () => {
+    const existingUserId = 'gate-user-uuid';
+    const existingOrgId = 'gate-org-uuid';
+
+    function mockExistingUser() {
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            userId: { S: existingUserId },
+            orgId: { S: existingOrgId },
+          },
+        });
+    }
+
+    it('returns 403 EMAIL_NOT_VERIFIED by default when email is unverified', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expectErrorResponse(result, 403, {
+        message: 'Email verification required',
+        code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+      });
+    });
+
+    it('allows the request by default when email is verified', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+    });
+
+    it('returns 403 on the refresh path when refreshed claims are unverified', async () => {
+      mockJwtVerify
+        .mockRejectedValueOnce(new Error('token expired'))
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: 'new-access-token',
+          id_token: 'new-id-token',
+          refresh_token: 'new-refresh-token',
+        }),
+      });
+      mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=expired-token`, `hs_refresh_token=valid-refresh`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expectErrorResponse(result, 403, {
+        message: 'Email verification required',
+        code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+      });
+    });
+
+    it('fails closed when the ID token cookie is missing entirely', async () => {
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } });
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expectErrorResponse(result, 403, {
+        message: 'Email verification required',
+        code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+      });
+    });
+
+    it('allows unverified email when requireVerifiedEmail is false', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      mockExistingUser();
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+    });
+
+    it('still creates a new user and org before blocking on unverified email', async () => {
+      // Identity creation is authentication-time work; the gate is an
+      // authorization check that runs after it. A brand-new (unverified)
+      // user must still get their user/org records so /me works.
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expectErrorResponse(result, 403, {
+        message: 'Email verification required',
+        code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+      });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
     });
   });
 

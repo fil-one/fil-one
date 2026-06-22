@@ -1,11 +1,12 @@
-import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import type Stripe from 'stripe';
 import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
-import { updateTenantStatus } from './aurora-backoffice.js';
-import { setOrgAuroraTenantStatus } from './org-profile.js';
-import { isOrgSetupComplete } from './org-setup-status.js';
+import {
+  assertRegionSyncSucceeded,
+  syncTenantStatusInProvisionedRegions,
+} from './region-helpers.js';
 
 const dynamo = getDynamoClient();
 
@@ -54,27 +55,15 @@ export async function saveBillingRecord(
   );
 }
 
-export async function unlockAuroraTenant(orgId: string): Promise<void> {
-  const { Item: orgProfile } = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: {
-        pk: { S: `ORG#${orgId}` },
-        sk: { S: 'PROFILE' },
-      },
-    }),
-  );
-  const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const setupStatus = orgProfile?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    throw new Error(`Aurora tenant setup is not complete for org ${orgId}`);
-  }
+// Unlocks the org's tenant on every orchestrator where it exists (Aurora, FTH,
+// ...). Each orchestrator resolves its own tenant and is skipped when the org
+// has none there, so this is a no-op for orchestrators the org never used.
+export async function unlockAllProvisionedRegions(orgId: string): Promise<void> {
   try {
-    await updateTenantStatus({ tenantId: auroraTenantId, status: 'ACTIVE' });
-    await setOrgAuroraTenantStatus(orgId, 'ACTIVE');
-    console.log('[billing-activation] Aurora tenant unlocked', { orgId, auroraTenantId });
+    assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'active'));
+    console.log('[billing-activation] Tenant unlocked', { orgId });
   } catch (error) {
-    console.error('[billing-activation] Failed to unlock Aurora tenant', {
+    console.error('[billing-activation] Failed to unlock tenant', {
       orgId,
       error,
       cause: error instanceof Error ? error.cause : undefined,

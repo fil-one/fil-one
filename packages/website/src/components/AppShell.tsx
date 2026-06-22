@@ -24,14 +24,14 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      {tenantStatus === 'WRITE_LOCKED' && (
+      {tenantStatus === 'write-locked' && (
         <Banner variant="warning" action={{ label: 'Upgrade', href: '/billing' }}>
           {isGracePeriod
             ? `Your free trial has expired.${graceDays !== null ? ` ${graceDays} days left` : ''} to upgrade or download your data.`
             : 'Storage limit exceeded. Uploads are disabled. Delete files or upgrade to resume.'}
         </Banner>
       )}
-      {tenantStatus === 'DISABLED' && (
+      {tenantStatus === 'disabled' && (
         <Banner variant="error" action={{ label: 'Manage account', href: '/billing' }}>
           Account disabled. Visit billing to restore access.
         </Banner>

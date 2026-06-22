@@ -248,6 +248,33 @@ Radar prevents fraudulent payments. It does not verify identity. If identity ver
    |-- Open question: MEK deletion timing and grace period
 ```
 
+### Tenant status propagation
+
+Locking (`write-locked`, `disabled`) and unlocking (`active`) a tenant in response to billing
+changes propagates to **every region where the org has a provisioned tenant** — not just Aurora.
+All billing-driven status-change sites (grace-period enforcer, usage-reporting worker, Stripe
+webhook, subscription activation) go through the shared helper
+`syncTenantStatusInProvisionedRegions`, so an account is locked/unlocked everywhere it exists.
+
+The retry budget for each region's probe + status update is caller-dependent. Background callers
+(the `grace-period-enforcer` and `usage-reporting-worker` crons, the activate-subscription API)
+have generous timeouts and re-run, so they use the default several-retry policy. The Stripe webhook
+awaits this sync synchronously and should return a 2xx quickly, so it passes a tight override
+(`WEBHOOK_STATUS_SYNC_RETRY` in `region-helpers.ts`): a single retry with a ~200ms backoff. With
+typical ~200–300ms orchestrator round-trips the webhook's sync stays well under Stripe's ~2s window.
+A brief transient blip is ridden out, so the webhook never blocks on a region that is down. A
+persistent failure leaves the region out of sync, reconciled afterwards by the next relevant billing
+event (the sync is probe-first and idempotent) or by the `grace-period-enforcer` cron re-attempting
+locks; the customer-deletion path instead returns 500 so Stripe retries. The
+`subscription-drift-checker` cron (every 12h) is **observe-only** — it surfaces residual drift via
+logs/metrics for alerting, but does not itself reconcile.
+
+Longer term, the most robust fix per Stripe's guidance ("return a 2xx before any complex logic that
+might cause a timeout") is to acknowledge the webhook immediately and run this tenant-status sync
+out-of-band (e.g. via an event/queue), making the response time independent of orchestrator latency
+entirely. See
+[FIL-498](https://linear.app/filecoin-foundation/issue/FIL-498/stripe-webhook-must-return-quickly).
+
 ---
 
 ## Webhook Events to Handle

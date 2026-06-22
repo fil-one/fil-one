@@ -38,13 +38,44 @@ export function getRegionLabel(region: S3Region | string | null | undefined): st
   return REGION_LABELS[r as S3Region] ?? r;
 }
 
+/** Filecoin Foundation email domain, allowlisted for early-access regions. */
+export const FOUNDATION_EMAIL_DOMAIN = '@fil.org';
+
 /**
- * Regions selectable in the given stage. Production currently exposes only
- * `eu-west-1`; non-production stages also expose `us-east-1` for dogfooding.
+ * True when `email` is a Filecoin Foundation address.
+ * The caller is responsible for ensuring the email is verified before
+ * granting any allowlist-based access.
  */
-export function getAvailableRegions(stage: Stage | string): S3Region[] {
-  if (stage === Stage.Production) return [S3Region.EuWest1];
-  return [S3Region.EuWest1, S3Region.UsEast1];
+export function isFoundationEmail(email: string | undefined): boolean {
+  return !!email && email.toLowerCase().endsWith(FOUNDATION_EMAIL_DOMAIN);
+}
+
+/** Regions selectable in the given stage. Non-production stages expose
+ * `us-east-1` for dogfooding. Production currently restricts selection to `eu-west-1`.
+ * `verifiedEmail` is reserved for future early-access gating and should be passed only when verified —
+ * see {@link isFoundationEmail}.
+ */
+export function getAvailableRegions(stage: Stage | string, _verifiedEmail?: string): S3Region[] {
+  // Do not enable us-east-1 in production yet, since we don't have the prod FTH account set up yet
+  // if (stage !== Stage.Production || isFoundationEmail(_verifiedEmail)) {
+  if (stage !== Stage.Production) {
+    return [S3Region.EuWest1, S3Region.UsEast1];
+  }
+  return [S3Region.EuWest1];
+}
+
+/**
+ * Checks if the region is supported in the given stage (optionally for a
+ * specific verified user email — see {@link getAvailableRegions}).
+ * Provides type-narrowing information to TypeScript, changing `region`
+ * from `string` to `S3Region` when the function returns `true`.
+ */
+export function isSupportedRegion(
+  stage: Stage | string,
+  region: string,
+  email?: string,
+): region is S3Region {
+  return getAvailableRegions(stage, email).includes(region as S3Region);
 }
 
 /**
@@ -54,7 +85,12 @@ export function getAvailableRegions(stage: Stage | string): S3Region[] {
 export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
   //TODO change this when aurora supports staging URL structure through our DNS.
   if (stage != Stage.Production) {
-    return 'https://s3.dev.aur.lu';
+    switch (region) {
+      case S3Region.EuWest1:
+        return 'https://s3.dev.aur.lu';
+      case S3Region.UsEast1:
+        return 'https://us-east-1.fortilyx.com';
+    }
   }
   const base = 's3.fil.one';
   // const base = stage === Stage.Production ? 's3.fil.one' : 's3.staging.fil.one';

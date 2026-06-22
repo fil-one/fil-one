@@ -9,12 +9,21 @@ export interface MeResponse {
   name?: string;
   connectionType?: string;
   mfaEnrollments: MfaEnrollment[];
+  passkeys?: PasskeyEnrollment[];
   picture?: string;
 }
 
 export interface MfaEnrollment {
   id: string;
   type: 'authenticator' | 'webauthn-roaming' | 'webauthn-platform';
+  name?: string;
+  createdAt?: string;
+}
+
+export const PASSKEY_PER_USER_LIMIT = 20;
+
+export interface PasskeyEnrollment {
+  id: string;
   name?: string;
   createdAt?: string;
 }

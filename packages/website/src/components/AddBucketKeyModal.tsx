@@ -19,7 +19,7 @@ export type AddBucketKeyModalProps = {
   open: boolean;
   onClose: () => void;
   bucketName: string;
-  bucketRegion: S3Region;
+  region: S3Region;
   onKeyAdded: () => void;
 };
 
@@ -31,7 +31,7 @@ export function AddBucketKeyModal({
   open,
   onClose,
   bucketName,
-  bucketRegion,
+  region,
   onKeyAdded,
 }: AddBucketKeyModalProps) {
   const [credentials, setCredentials] = useState<{
@@ -40,7 +40,7 @@ export function AddBucketKeyModal({
   } | null>(null);
   const form = useAccessKeyForm({
     defaultBucket: bucketName,
-    region: bucketRegion,
+    region: region,
     onSuccess: (response: CreateAccessKeyResponse) => {
       setCredentials({
         accessKeyId: response.accessKeyId,
@@ -61,13 +61,13 @@ export function AddBucketKeyModal({
   }
 
   return (
-    <Modal open={open} onClose={handleClose} size="lg">
+    <Modal open={open} onClose={handleClose} size="lg" testId="add-bucket-key-modal">
       <ModalHeader onClose={handleClose}>Create API key for {bucketName}</ModalHeader>
       <ModalBody>
         <div className="flex gap-6">
           {/* Left: form fields */}
           <div className="flex-1">
-            <AccessKeyFormFields form={form} region={bucketRegion} />
+            <AccessKeyFormFields form={form} region={region} />
           </div>
 
           {/* Right: info panel */}
@@ -108,10 +108,15 @@ export function AddBucketKeyModal({
       <ModalFooter>
         <div className="flex flex-col gap-3">
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={handleClose}>
+            <Button id="add-bucket-key-cancel-button" variant="ghost" onClick={handleClose}>
               Cancel
             </Button>
-            <Button variant="primary" disabled={!form.canSubmit} onClick={form.handleSubmit}>
+            <Button
+              id="add-bucket-key-submit-button"
+              variant="primary"
+              disabled={!form.canSubmit}
+              onClick={form.handleSubmit}
+            >
               {form.creating ? 'Creating...' : 'Create API key'}
             </Button>
           </div>

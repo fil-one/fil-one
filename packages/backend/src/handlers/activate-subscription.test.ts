@@ -24,9 +24,17 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockUpdateTenantStatus = vi.fn();
-vi.mock('../lib/aurora-backoffice.js', () => ({
-  updateTenantStatus: (...args: unknown[]) => mockUpdateTenantStatus(...args),
+// The orchestrator registry instantiates real clients at import time; mock it
+// so the otherwise-real region-helpers module can be loaded below.
+vi.mock('../lib/service-orchestrator-registry.js', () => ({
+  getAvailableOrchestrators: () => [],
+}));
+
+const mockSyncTenantStatusInProvisionedRegions = vi.fn();
+vi.mock('../lib/region-helpers.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/region-helpers.js')>()),
+  syncTenantStatusInProvisionedRegions: (...args: unknown[]) =>
+    mockSyncTenantStatusInProvisionedRegions(...args),
 }));
 
 vi.mock('../lib/stripe-client.js', () => ({
@@ -87,7 +95,7 @@ function orgProfileWithTenant(tenantId: string) {
       pk: { S: 'ORG#org-1' },
       sk: { S: 'PROFILE' },
       auroraTenantId: { S: tenantId },
-      setupStatus: { S: FINAL_SETUP_STATUS },
+      auroraSetupStatus: { S: FINAL_SETUP_STATUS },
     },
   };
 }
@@ -116,12 +124,12 @@ describe('activate-subscription handler', () => {
     mockSubscriptionsCreate.mockReset();
     mockSubscriptionsUpdate.mockReset();
     mockPromotionCodesList.mockReset();
-    mockUpdateTenantStatus.mockReset();
+    mockSyncTenantStatusInProvisionedRegions.mockReset();
 
     mockSetupIntentsList.mockResolvedValue({
       data: [{ status: 'succeeded', payment_method: 'pm_test_789' }],
     });
-    mockUpdateTenantStatus.mockResolvedValue({});
+    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
   });
 
   it('updates existing trial subscription when subscriptionId exists', async () => {
@@ -152,6 +160,26 @@ describe('activate-subscription handler', () => {
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
 
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
+  });
+
+  it('unlocks every provisioned region on activation', async () => {
+    ddbMock.on(GetItemCommand).resolvesOnce({
+      Item: buildBillingRecord({
+        subscriptionId: 'sub_trial_123',
+        subscriptionStatus: SubscriptionStatus.Trialing,
+      }),
+    });
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    await handler(event, {} as never);
+
+    expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith('org-1', 'active');
   });
 
   it('attaches payment method before ending trial to prevent cancellation', async () => {
@@ -307,7 +335,7 @@ describe('activate-subscription handler', () => {
     await handler(event, {} as never);
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(2); // billing update + org profile auroraTenantStatus
+    expect(updateCalls).toHaveLength(1); // billing update only
     const updateExpr = updateCalls[0].args[0].input.UpdateExpression as string;
     // trial_end: 'now' makes Stripe return active, so trialEndsAt should be removed
     expect(updateExpr).toContain('REMOVE trialEndsAt');
@@ -330,7 +358,7 @@ describe('activate-subscription handler', () => {
     await handler(event, {} as never);
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(2); // billing update + org profile auroraTenantStatus
+    expect(updateCalls).toHaveLength(1); // billing update only
     const updateExpr = updateCalls[0].args[0].input.UpdateExpression as string;
     expect(updateExpr).toContain('REMOVE trialEndsAt');
   });
@@ -358,7 +386,7 @@ describe('activate-subscription handler', () => {
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
 
     // Aurora tenant should NOT have been unlocked
-    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
   });
 
   it('returns 402 when subscription status is unpaid after activation', async () => {
@@ -378,77 +406,23 @@ describe('activate-subscription handler', () => {
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
-  });
-
-  it('returns 500 when Aurora org setup is incomplete', async () => {
-    ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
-      .resolvesOnce({
-        Item: {
-          pk: { S: 'ORG#org-1' },
-          sk: { S: 'PROFILE' },
-          auroraTenantId: { S: 'aurora-t-1' },
-          setupStatus: { S: 'AURORA_TENANT_CREATED' },
-        },
-      });
-    ddbMock.on(UpdateItemCommand).resolves({});
-    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
-
-    const event = buildEvent({
-      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
-      method: 'POST',
-      rawPath: '/api/billing/activate',
-    });
-    const result = await handler(event, {} as never);
-    expect((result as { statusCode: number }).statusCode).toBe(500);
-  });
-
-  it('returns 500 when auroraTenantId is missing from profile', async () => {
-    ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
-      .resolvesOnce({
-        Item: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
-      });
-    ddbMock.on(UpdateItemCommand).resolves({});
-    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
-
-    const event = buildEvent({
-      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
-      method: 'POST',
-      rawPath: '/api/billing/activate',
-    });
-    const result = await handler(event, {} as never);
-    expect((result as { statusCode: number }).statusCode).toBe(500);
-  });
-
-  it('returns 500 when profile DynamoDB lookup fails', async () => {
-    ddbMock
-      .on(GetItemCommand)
-      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
-      .rejectsOnce(new Error('DynamoDB error'));
-    ddbMock.on(UpdateItemCommand).resolves({});
-    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
-
-    const event = buildEvent({
-      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
-      method: 'POST',
-      rawPath: '/api/billing/activate',
-    });
-    const result = await handler(event, {} as never);
-    expect((result as { statusCode: number }).statusCode).toBe(500);
+    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
   });
 
   it('returns 500 when updateTenantStatus fails', async () => {
     ddbMock
       .on(GetItemCommand)
-      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) })
-      .resolvesOnce(orgProfileWithTenant('aurora-t-1'));
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
     ddbMock.on(UpdateItemCommand).resolves({});
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
-    mockUpdateTenantStatus.mockRejectedValue(new Error('Aurora down'));
+    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([
+      {
+        orchestratorId: 'aurora',
+        tenantId: 'aurora-t-1',
+        outcome: 'error',
+        cause: new Error('Aurora down'),
+      },
+    ]);
 
     const event = buildEvent({
       userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
@@ -611,7 +585,7 @@ describe('activate-subscription handler', () => {
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    expect(mockUpdateTenantStatus).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
   });
 
   // ── promotion code ────────────────────────────────────────────────────
