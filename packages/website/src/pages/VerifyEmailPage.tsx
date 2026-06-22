@@ -84,7 +84,7 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
           )}
 
           <div className="flex flex-col gap-1">
-            <Heading tag="h1" size="xl">
+            <Heading id="verify-email-heading" tag="h1" size="xl">
               Verify your email
             </Heading>
             <p className="text-sm text-zinc-500">
@@ -97,6 +97,7 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
           {error && <p className="text-xs text-red-600">{error}</p>}
 
           <Button
+            id="verify-email-check-button"
             variant="primary"
             type="button"
             className="w-full justify-center"

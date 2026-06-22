@@ -414,10 +414,10 @@ export default $config({
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
-    const auroraS3GatewayPermissions: sst.aws.FunctionPermissionArgs[] = [
+    const consoleS3KeysPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
-        resources: [auroraS3KeySsmArn],
+        resources: [auroraS3KeySsmArn, fthS3KeySsmArn],
       },
     ];
 
@@ -557,7 +557,7 @@ export default $config({
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
       extraEnv: { ...fthEnv },
-      permissions: auroraS3GatewayPermissions,
+      permissions: consoleS3KeysPermissions,
     });
     addRoute({
       method: 'GET',
@@ -598,9 +598,7 @@ export default $config({
       routePath: '/api/presign',
       handler: 'presign',
       extraEnv: { ...fthEnv },
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: consoleS3KeysPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '512 MB',
     });
@@ -608,8 +606,8 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}/analytics',
       handler: 'get-bucket-analytics',
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
-      extraEnv: auroraEnv,
+      permissions: consoleS3KeysPermissions,
+      extraEnv: orchestratorEnv,
     });
 
     // ── Auth routes ──────────────────────────────────────────────────
@@ -689,13 +687,21 @@ export default $config({
       extraLink: mgmtRuntimeResources,
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/mfa/passkeys/{methodId}',
+      handler: 'delete-passkey',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
 
     // ── Usage + Dashboard routes ─────────────────────────────────────
     addRoute({
       method: 'GET',
       routePath: '/api/usage',
       handler: 'get-usage',
-      extraEnv: auroraEnv,
+      extraEnv: orchestratorEnv,
+      permissions: consoleS3KeysPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
@@ -703,9 +709,7 @@ export default $config({
       routePath: '/api/activity',
       handler: 'get-activity',
       extraEnv: orchestratorEnv,
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraS3KeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: consoleS3KeysPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });

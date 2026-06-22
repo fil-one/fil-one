@@ -33,6 +33,18 @@ describe('requireMfa', () => {
     expect(result).toBeUndefined();
   });
 
+  it('passes when amr contains "phr" (passkey login satisfies step-up)', async () => {
+    const result = await requireMfa().before(buildRequest({ amr: ['phr'] }));
+
+    expect(result).toBeUndefined();
+  });
+
+  it('passes when amr contains "phr" alongside other methods', async () => {
+    const result = await requireMfa().before(buildRequest({ amr: ['pwd', 'phr'] }));
+
+    expect(result).toBeUndefined();
+  });
+
   it('returns 401 step_up_required when amr is empty', async () => {
     const result = await requireMfa().before(buildRequest({ amr: [] }));
 

@@ -1,6 +1,6 @@
 # Authentication and Authorization Overview
 
-This document describes how authentication and authorization work in the Hyperspace console (fil.one). For background and trade-offs on MFA, see ADR at [`docs/architectural-decisions/2026-03-mfa-enrollment.md`](https://github.com/filecoin-project/fil-one/blob/main/docs/architectural-decisions/2026-03-mfa-enrollment.md).
+This document describes how authentication and authorization work in the Hyperspace console (fil.one). For background and trade-offs on MFA, see ADR at [`docs/architectural-decisions/2026-03-mfa-enrollment.md`](https://github.com/filecoin-project/fil-one/blob/main/docs/architectural-decisions/2026-03-mfa-enrollment.md). For passkeys as a primary authentication factor (phishing-resistant, satisfies MFA), see [`docs/architectural-decisions/2026-05-passkey-primary-authentication.md`](https://github.com/filecoin-project/fil-one/blob/main/docs/architectural-decisions/2026-05-passkey-primary-authentication.md).
 
 ## TL;DR
 
@@ -305,6 +305,14 @@ Engineers adding a new sensitive endpoint should reach for `requireFreshMfa` rat
 ### MFA in `/api/me`
 
 `/api/me?include=mfa` calls the Management API to list current enrollments. Without the flag, the handler skips that call to avoid a per-request M2M token roundtrip ([`get-me.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/get-me.ts)). There are cost implications to overusing the API, hence why we specifically are requesting that info from the client only when necessary.
+
+The handler additionally short-circuits the passkey-list call for non-database connections (`google-oauth2`, etc.) since passkeys are only configured on `Username-Password-Authentication`. The trade-off is documented in the passkey ADR: enabling Auth0 account linking later would require revisiting this gate.
+
+## Passkeys as a primary factor
+
+Designed in [`docs/architectural-decisions/2026-05-passkey-primary-authentication.md`](https://github.com/filecoin-project/fil-one/blob/main/docs/architectural-decisions/2026-05-passkey-primary-authentication.md).
+
+Passkeys on the `Username-Password-Authentication` connection are a phishing-resistant primary factor (distinct from the `webauthn-platform` / `webauthn-roaming` factors used for MFA). When a user signs in with a passkey, the Post-Login Action returns early — passkey login satisfies MFA via the `phr` AMR signal. New passkeys are enrolled by Auth0 Universal Login's Progressive Enrollment (no SPA enrollment UI). The Settings page surfaces enrolled passkeys via `GET /api/me?include=mfa`; individual deletes are gated by `requireMfa` step-up.
 
 ## Per-request user context
 

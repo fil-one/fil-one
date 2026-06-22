@@ -49,7 +49,9 @@ export function CreateApiKeyPage() {
             onClick={() => void navigate({ to: '/api-keys' })}
           />
           <div>
-            <Heading tag="h1">Create API key</Heading>
+            <Heading id="create-api-key-heading" tag="h1">
+              Create API key
+            </Heading>
             <p className="text-sm text-zinc-500">
               Generate credentials for S3-compatible API access
             </p>
@@ -64,7 +66,12 @@ export function CreateApiKeyPage() {
               <AccessKeyFormFields form={form} region={region} onRegionChange={setRegion} />
             </div>
 
-            <Button type="submit" variant="primary" disabled={!form.canSubmit}>
+            <Button
+              id="create-api-key-submit-button"
+              type="submit"
+              variant="primary"
+              disabled={!form.canSubmit}
+            >
               {form.creating ? 'Creating...' : 'Create API key'}
             </Button>
             <SlowOperationIndicator isLoading={form.creating} operation="Creating access key" />

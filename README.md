@@ -107,7 +107,7 @@ pnpx sst secret set GrafanaLokiAuth '<instanceId>:<apiKey>' [--stage <stage>]
 
 Omit `--stage` to set for your personal dev stage (defaults to OS username).
 
-There are two Auth0 M2M credentials with different scopes — see the [Auth0 M2M Setup](#auth0-machine-to-machine-m2m-application) section below. The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below. The `GrafanaLokiAuth` secret is from Grafana Cloud — see the [Observability](#observability) section below.
+There are two Auth0 M2M credentials with different scopes — see [`docs/Auth0OneTimeSetup.md`](./docs/Auth0OneTimeSetup.md). The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below. The `GrafanaLokiAuth` secret is from Grafana Cloud — see the [Observability](#observability) section below.
 
 ## Commands
 
@@ -295,12 +295,12 @@ Custom domains require an ACM certificate in **us-east-1** (CloudFront requireme
 
 ## Auth0
 
-Two Auth0 tenants are used:
+Auth0 powers authentication: Universal Login, two M2M applications per tenant (deploy-time and runtime), MFA, and passkeys as primary authentication. Most of this is automated by the deploy-time setup Lambda — but a handful of dashboard toggles must be configured manually once per tenant before the first deploy.
 
-| Environment | Tenant        | Domain                              | Dashboard                                                                                                                      |
-| ----------- | ------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Staging/dev | **FilOneDev** | `dev-oar2nhqh58xf5pwf.us.auth0.com` | [Dashboard](https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ/settings) |
-| Production  | **fil-one**   | `fil-one.us.auth0.com`              | [Dashboard](https://manage.auth0.com/dashboard/us/fil-one)                                                                     |
+The full operator runbook (tenant settings, application settings, MFA, passkeys, and both M2M apps) is in [`docs/Auth0OneTimeSetup.md`](./docs/Auth0OneTimeSetup.md). For the design rationale, see the ADRs under `docs/architectural-decisions/`:
+
+- `2026-03-mfa-enrollment.md` — MFA factor selection + Post-Login Action
+- `2026-05-passkey-primary-authentication.md` — passkeys as primary authentication
 
 Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecret`). See the "Set SST secrets" step above.
 
