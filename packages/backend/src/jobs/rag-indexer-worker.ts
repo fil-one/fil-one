@@ -14,6 +14,8 @@ import { S3VectorsStore, type VectorStore } from '@filone/rag-shared';
 import { getProvisionedRegions } from '../lib/region-helpers.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { createS3Client } from '../lib/s3-client.js';
+import { RAGKeys, type BucketRAGStatus } from '../lib/dynamo-records.js';
+import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.js';
 import { indexBucket } from './rag-indexer-helpers.js';
 import { S3Region } from '@filone/shared';
 
@@ -163,6 +165,17 @@ async function indexRegion(args: IndexRegionArgs): Promise<number> {
       await indexBucket(s3, region, bucketName, vectorStore, { deadlineEpochMs });
       indexed++;
     } catch (error) {
+      // Persist the failure so the UI can surface "Sync failed" + the reason.
+      // Best-effort: a telemetry write failure must not mask the original error.
+      const message = error instanceof Error ? error.message : String(error);
+      try {
+        await updateBucketTelemetry(bucket.bucketName, {
+          syncState: 'error',
+          lastSyncError: message,
+        });
+      } catch (telemetryError) {
+        console.error(`${LOG} Failed to persist error telemetry`, { bucketId, telemetryError });
+      }
       console.error(`${LOG} Bucket failed, continuing`, {
         orgId,
         orchestrator: orchestrator.id,

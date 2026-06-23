@@ -23,6 +23,7 @@ const {
   mockCreateS3Client,
   mockIndexBucket,
   mockS3VectorsStore,
+  mockUpdateBucketTelemetry,
   fakeS3Client,
 } = vi.hoisted(() => ({
   mockGetProvisionedRegions: vi.fn(),
@@ -30,6 +31,7 @@ const {
   mockCreateS3Client: vi.fn(),
   mockIndexBucket: vi.fn(),
   mockS3VectorsStore: vi.fn(),
+  mockUpdateBucketTelemetry: vi.fn(),
   fakeS3Client: { tag: 's3-client' },
 }));
 
@@ -43,6 +45,10 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
 
 vi.mock('../lib/s3-client.js', () => ({
   createS3Client: mockCreateS3Client,
+}));
+
+vi.mock('../lib/bucket-rag-enablement.js', () => ({
+  updateBucketTelemetry: mockUpdateBucketTelemetry,
 }));
 
 vi.mock('./rag-indexer-helpers.js', () => ({
@@ -78,19 +84,22 @@ function provisioned(orchestrator: ReturnType<typeof makeOrchestrator>, tenantId
   return { orchestrator, tenantId } as unknown as ProvisionedRegion;
 }
 
-/**
- * Wire `getProvisionedRegions` and the region->orchestrator registry from the
- * same list, mirroring production: `getOrchestratorForRegion` dispatches by
- * region to the orchestrator the org is provisioned with, and throws for an
- * unknown region (as the real registry does).
- */
-function useRegions(regions: ReturnType<typeof provisioned>[]) {
-  mockGetProvisionedRegions.mockResolvedValue(regions);
-  const byRegion = new Map(regions.map((r) => [r.orchestrator.region, r.orchestrator]));
-  mockGetOrchestratorForRegion.mockImplementation((region: S3Region) => {
-    const orchestrator = byRegion.get(region);
-    if (!orchestrator) throw new Error(`Unsupported region "${String(region)}".`);
-    return orchestrator;
+function mockRagEnabled(
+  bucketIds: string[],
+  status = 'active',
+  extra: Record<string, unknown> = {},
+) {
+  ddbMock.on(GetItemCommand).callsFake((input) => {
+    const bucketId = (input.Key.pk.S as string).replace('BUCKET#', '');
+    if (bucketIds.includes(bucketId)) {
+      return {
+        Item: marshall(
+          { pk: input.Key.pk.S, sk: 'RAG', orgId: 'org-1', status, ...extra },
+          { removeUndefinedValues: true },
+        ),
+      };
+    }
+    return { Item: undefined };
   });
 }
 
@@ -114,6 +123,7 @@ describe('rag-indexer-worker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateS3Client.mockReturnValue(fakeS3Client);
+    mockUpdateBucketTelemetry.mockResolvedValue(undefined);
     mockIndexBucket.mockResolvedValue({
       added: 0,
       updated: 0,
@@ -190,6 +200,71 @@ describe('rag-indexer-worker', () => {
     expect(mockIndexBucket).not.toHaveBeenCalled();
   });
 
+  it('still processes an active bucket whose syncState is "syncing" (gate keys off status, not sync state)', async () => {
+    // Regression (FIL-556): sync state must not affect the worker gate. A bucket
+    // left `syncing` (e.g. after a crash) is still `active`, so it must be
+    // re-indexed — otherwise it would be wedged forever.
+    const orch = makeOrchestrator('aurora', ['b1']);
+    mockGetProvisionedRegions.mockResolvedValue([region(orch, 'tenant-a')]);
+    mockRagEnabled(['b1'], 'active', { syncState: 'syncing' });
+
+    await handler(payload, AMPLE_CONTEXT);
+
+    expect(mockIndexBucket).toHaveBeenCalledOnce();
+    expect(mockIndexBucket).toHaveBeenCalledWith(
+      fakeS3Client,
+      'b1',
+      'b1',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('still processes an active bucket whose last sync errored (syncState="error")', async () => {
+    // A failed sync must not disable the bucket: status stays `active`, so the
+    // worker keeps trying on the next run.
+    const orch = makeOrchestrator('aurora', ['b1']);
+    mockGetProvisionedRegions.mockResolvedValue([region(orch, 'tenant-a')]);
+    mockRagEnabled(['b1'], 'active', { syncState: 'error', lastSyncError: 'boom' });
+
+    await handler(payload, AMPLE_CONTEXT);
+
+    expect(mockIndexBucket).toHaveBeenCalledOnce();
+  });
+
+  it('honours an explicit bucketIds filter', async () => {
+    const orch = makeOrchestrator('aurora', ['b1', 'b2']);
+    mockGetProvisionedRegions.mockResolvedValue([region(orch, 'tenant-a')]);
+    mockRagEnabled(['b1', 'b2']);
+
+    await handler({ orgId: 'org-1', bucketIds: ['b2'] }, AMPLE_CONTEXT);
+
+    expect(mockIndexBucket).toHaveBeenCalledOnce();
+    expect(mockIndexBucket).toHaveBeenCalledWith(
+      fakeS3Client,
+      'b2',
+      'b2',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('indexes across multiple regions', async () => {
+    const aurora = makeOrchestrator('aurora', ['b1']);
+    const fth = makeOrchestrator('fth', ['b2']);
+    mockGetProvisionedRegions.mockResolvedValue([
+      region(aurora, 'tenant-a'),
+      region(fth, 'tenant-f'),
+    ]);
+    mockRagEnabled(['b1', 'b2']);
+
+    await handler(payload, AMPLE_CONTEXT);
+
+    expect(mockIndexBucket).toHaveBeenCalledTimes(2);
+    expect(aurora.listBuckets).toHaveBeenCalledWith('tenant-a');
+    expect(fth.listBuckets).toHaveBeenCalledWith('tenant-f');
+  });
+
   it('isolates a region failure: other regions still index', async () => {
     const failing = makeOrchestrator('aurora', S3Region.EuWest1);
     failing.getS3ClientContext.mockRejectedValue(new Error('creds unavailable'));
@@ -228,6 +303,38 @@ describe('rag-indexer-worker', () => {
       ]),
       AMPLE_CONTEXT,
     );
+
+    expect(mockIndexBucket).toHaveBeenCalledTimes(2);
+  });
+
+  it('persists error telemetry (syncState + message, never the enablement status) when a bucket fails', async () => {
+    const orch = makeOrchestrator('aurora', ['b1']);
+    mockGetProvisionedRegions.mockResolvedValue([region(orch, 'tenant-a')]);
+    mockRagEnabled(['b1']);
+    mockIndexBucket.mockRejectedValue(new Error('index exploded'));
+
+    await handler(payload, AMPLE_CONTEXT);
+
+    expect(mockUpdateBucketTelemetry).toHaveBeenCalledWith('b1', {
+      syncState: 'error',
+      lastSyncError: 'index exploded',
+    });
+    // The failure path records sync state only — it must not flip enablement off.
+    const update = mockUpdateBucketTelemetry.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(update).not.toHaveProperty('status');
+  });
+
+  it('does not mask the original failure if writing error telemetry also fails', async () => {
+    const orch = makeOrchestrator('aurora', ['b1', 'b2']);
+    mockGetProvisionedRegions.mockResolvedValue([region(orch, 'tenant-a')]);
+    mockRagEnabled(['b1', 'b2']);
+    mockIndexBucket
+      .mockRejectedValueOnce(new Error('index failed'))
+      .mockResolvedValue({ added: 0, updated: 0, removed: 0, failed: 0, completed: true });
+    mockUpdateBucketTelemetry.mockRejectedValueOnce(new Error('telemetry write failed'));
+
+    // The region must still finish indexing the healthy bucket.
+    await handler(payload, AMPLE_CONTEXT);
 
     expect(mockIndexBucket).toHaveBeenCalledTimes(2);
   });
