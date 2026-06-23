@@ -30,8 +30,29 @@ export interface SubscriptionRecord {
   updatedAt?: string;
 }
 
-/** Operational state of a bucket's RAG index. */
+/**
+ * Enablement state of a bucket's RAG index — the SOURCE OF TRUTH for whether
+ * RAG is on for a bucket. These are the user/operator-controlled lifecycle
+ * states only: `active` (RAG on; the indexer scans/indexes it and the UI treats
+ * it as queryable), `disabled` (user turned it off), `paused` (operational hold).
+ *
+ * This field is decoupled from sync progress: the indexer's in-flight/failed
+ * state lives on {@link BucketRAGEnablementRecord.syncState} so a bucket that is
+ * currently syncing or whose last sync failed is STILL enabled (`active`) and is
+ * still scanned/indexed/queryable.
+ */
 export type BucketRAGStatus = 'active' | 'disabled' | 'paused';
+
+/**
+ * Sync progress of a bucket's RAG index, written exclusively by the indexer
+ * (FIL-556). Independent of {@link BucketRAGStatus} (enablement): the indexer
+ * sets `syncing` at the start of a bucket run, `idle` on a successful full pass,
+ * and `error` (with {@link BucketRAGEnablementRecord.lastSyncError}) on failure.
+ * Absent/`idle` means never-synced or steady. The indexer NEVER touches the
+ * enablement `status`, so liveness (orchestrator scan, worker gate) and the UI
+ * enabled-check are unaffected by sync state.
+ */
+export type BucketRAGSyncState = 'idle' | 'syncing' | 'error';
 
 /**
  * Per-account RAG configuration: whether RAG is enabled and which model to use.
@@ -62,10 +83,40 @@ export interface BucketRAGEnablementRecord {
    * without a second lookup (see rag-indexer-orchestrator).
    */
   orgId: string;
+  /**
+   * Enablement state — the source of truth for whether RAG is on for this
+   * bucket. Written only by the enablement endpoint (FIL-555); the indexer never
+   * modifies it. The orchestrator scan, the worker per-bucket gate, and the UI
+   * all treat `active` as enabled/queryable, independent of {@link syncState}.
+   */
   status: BucketRAGStatus;
+  /**
+   * Sync progress, written exclusively by the indexer (FIL-556) and decoupled
+   * from {@link status}: `syncing` during a run, `idle` after a successful full
+   * pass, `error` on failure. Absent means never-synced (rendered as idle). A
+   * `syncing`/`error` bucket whose `status` is still `active` remains enabled.
+   */
+  syncState?: BucketRAGSyncState;
+  /**
+   * Count of objects with at least one chunk currently indexed — i.e. the size
+   * of the chunk manifest after a full reconciliation. Written atomically by the
+   * indexer (FIL-556) on a successful sync; 0 until the first sync completes.
+   */
   filesIndexed: number;
-  indexSize: number; // bytes
+  /**
+   * Index size in bytes, defined as the sum of the source-object bytes (the S3
+   * `Size` reported by the listing) of every indexed object. This is the
+   * documented, UI-facing measure — NOT the embedding/vector storage size — so
+   * the Buckets-tab "index size" label matches what `formatBytes` renders.
+   * Written atomically by the indexer (FIL-556); 0 until the first sync.
+   */
+  indexSize: number;
   lastSyncedAt?: string; // ISO-8601; absent until the first sync completes
+  /**
+   * Human-readable message from the most recent failed sync. Populated only when
+   * `syncState === 'error'` and cleared (removed) when a later sync succeeds.
+   */
+  lastSyncError?: string;
   settings?: Record<string, unknown>; // future extensibility
   createdAt: string; // ISO-8601
   updatedAt: string; // ISO-8601

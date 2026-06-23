@@ -108,6 +108,7 @@ export type {
   QueryBucketRequest,
   QueryBucketResponse,
   BucketRagStatus,
+  BucketRagSyncState,
   SetBucketRagEnabledRequest,
   BucketRagEnablementResponse,
 } from './api/rag.js';

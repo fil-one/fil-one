@@ -18,6 +18,7 @@ import {
   type VectorStoreChunk,
 } from '@filone/rag-shared';
 import { getObjectBytes, listObjects } from '../lib/s3-bucket-operations.js';
+import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.js';
 import { resolveContentType } from './rag-content-type.js';
 import {
   clearCheckpoint,
@@ -83,10 +84,18 @@ export async function indexBucket(
   vectorStore: VectorStore,
   options: IndexBucketOptions = {},
 ): Promise<IndexBucketResult> {
+  // Mark the run in flight up front so the UI can show "Syncing…" immediately.
+  // Writes only `syncState` (never the enablement `status`); atomic UpdateItem on
+  // the enablement row, and a disabled-mid-run bucket is a no-op.
+  await updateBucketTelemetry(bucketName, { syncState: 'syncing' });
+
   await vectorStore.ensureIndex(bucketName);
 
   const manifest = await loadManifest(bucketId);
   const seen = new Set<string>();
+  // Source-object byte sizes observed this run, keyed by object key. Used to
+  // compute `indexSize` (sum of indexed source-object bytes) at completion.
+  const sizes = new Map<string, number>();
   const totals: PageOutcome = { added: 0, updated: 0, removed: 0, failed: 0 };
 
   const checkpoint = await loadCheckpoint(bucketId);
@@ -100,13 +109,18 @@ export async function indexBucket(
     if (isPastDeadline(options.deadlineEpochMs)) {
       await saveCheckpoint(bucketId, bucketName, continuationToken);
       console.log(`${LOG} Checkpointed mid-bucket (deadline reached)`, { bucketId, bucketName });
+      // Partial run: leave syncState as `syncing` (the next run finishes it) and
+      // do not write the success snapshot, which is only valid for a full pass.
       return { ...totals, completed: false };
     }
 
     const page = await listObjects({ s3, bucket: bucketName, continuationToken });
     const outcome = await diffAndIndexPage(s3, bucketName, bucketId, vectorStore, manifest, page);
     accumulate(totals, outcome);
-    for (const object of page.objects) seen.add(object.key);
+    for (const object of page.objects) {
+      seen.add(object.key);
+      sizes.set(object.key, object.sizeBytes);
+    }
 
     continuationToken = page.nextToken;
     if (!page.isTruncated || !continuationToken) break;
@@ -130,8 +144,36 @@ export async function indexBucket(
   }
 
   await clearCheckpoint(bucketId);
+
+  // Persist the success telemetry snapshot only for a full pass (started from the
+  // first page and reached the last): only then are the counts authoritative.
+  // `filesIndexed` is the manifest size after reconciliation (objects with >=1
+  // indexed chunk); `indexSize` sums the source-object bytes of those objects.
+  if (startedFromBeginning) {
+    await updateBucketTelemetry(bucketName, {
+      syncState: 'idle',
+      filesIndexed: manifest.size,
+      indexSize: sumIndexedBytes(manifest, sizes),
+      lastSyncedAt: new Date().toISOString(),
+    });
+  }
+
   console.log(`${LOG} Bucket reconciled`, { bucketId, bucketName, ...totals });
   return { ...totals, completed: true };
+}
+
+/**
+ * Sum the source-object bytes of every object still in the manifest (i.e. with
+ * at least one indexed chunk), using the sizes observed in this run's listing.
+ * An object in the manifest but absent from `sizes` (defensive: not seen this
+ * run) contributes 0 rather than throwing.
+ */
+function sumIndexedBytes(manifest: Map<string, ManifestEntry>, sizes: Map<string, number>): number {
+  let total = 0;
+  for (const objectKey of manifest.keys()) {
+    total += sizes.get(objectKey) ?? 0;
+  }
+  return total;
 }
 
 function isPastDeadline(deadlineEpochMs: number | undefined): boolean {
@@ -211,8 +253,16 @@ async function classifyAndIndexObject(
     if (existing) {
       await vectorStore.deleteChunks(bucketName, existing.chunkKeys);
     }
-    const indexed = await indexObject(s3, bucketName, bucketId, vectorStore, object.key, etag);
-    if (!indexed) return 'skipped';
+    const chunkKeys = await indexObject(s3, bucketName, bucketId, vectorStore, object.key, etag);
+    if (!chunkKeys) return 'skipped';
+    // Keep the in-memory manifest authoritative so the post-run telemetry
+    // snapshot (`filesIndexed` = manifest size) reflects this object too.
+    manifest.set(object.key, {
+      objectKey: object.key,
+      etag,
+      chunkKeys,
+      updatedAt: new Date().toISOString(),
+    });
     return existing ? 'updated' : 'added';
   } catch (error) {
     console.error(`${LOG} Failed to index object`, {
@@ -227,8 +277,8 @@ async function classifyAndIndexObject(
 
 /**
  * Extract, chunk, embed and upsert one object, then record its manifest entry.
- * Returns false (without throwing) for objects with no extractable content type
- * or no text — those are simply not indexed.
+ * Returns the object's chunk keys on success, or `null` (without throwing) for
+ * objects with no extractable content type or no text — those are not indexed.
  */
 async function indexObject(
   s3: S3Client,
@@ -237,18 +287,18 @@ async function indexObject(
   vectorStore: VectorStore,
   objectKey: string,
   etag: string,
-): Promise<boolean> {
+): Promise<string[] | null> {
   const { bytes, contentType: storedType } = await getObjectBytes(s3, bucketName, objectKey);
   const contentType = resolveContentType(objectKey, storedType);
   if (!contentType) {
     console.warn(`${LOG} Unsupported content type, skipping`, { bucketId, key: objectKey });
-    return false;
+    return null;
   }
 
   const text = await extractText(bytes, contentType);
   if (!text || text.trim().length === 0) {
     console.warn(`${LOG} No extractable text, skipping`, { bucketId, key: objectKey });
-    return false;
+    return null;
   }
 
   const texts = chunk(text);
@@ -261,13 +311,9 @@ async function indexObject(
   }));
 
   await vectorStore.upsertChunks(bucketName, chunks);
-  await saveManifestEntry(
-    bucketId,
-    objectKey,
-    etag,
-    chunks.map((c) => c.key),
-  );
-  return true;
+  const chunkKeys = chunks.map((c) => c.key);
+  await saveManifestEntry(bucketId, objectKey, etag, chunkKeys);
+  return chunkKeys;
 }
 
 /**
@@ -288,6 +334,9 @@ async function reconcileRemovals(
     try {
       await vectorStore.deleteChunks(bucketName, entry.chunkKeys);
       await deleteManifestEntry(bucketId, objectKey);
+      // Drop from the in-memory manifest so the telemetry snapshot
+      // (`filesIndexed` = manifest size) no longer counts the removed object.
+      manifest.delete(objectKey);
       removed++;
     } catch (error) {
       console.error(`${LOG} Failed to remove object`, {

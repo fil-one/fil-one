@@ -77,6 +77,7 @@ const ENABLEMENT: Record<string, BucketRagEnablementResponse> = {
   'my-docs-bucket': {
     enabled: true,
     status: 'active',
+    syncState: 'idle',
     filesIndexed: 847,
     indexSize: 210_000_000,
     lastSyncedAt: '2026-06-22T11:59:00Z',
@@ -84,6 +85,7 @@ const ENABLEMENT: Record<string, BucketRagEnablementResponse> = {
   'research-papers': {
     enabled: true,
     status: 'active',
+    syncState: 'idle',
     filesIndexed: 400,
     indexSize: 114_000_000,
     lastSyncedAt: '2026-06-22T11:56:00Z',
@@ -147,6 +149,40 @@ describe('RagPipelinePage — Buckets tab', () => {
     renderPage();
     await screen.findByText('marketing-assets');
     expect(screen.getByText('Not indexed')).toBeInTheDocument();
+  });
+
+  it('surfaces the indexer sync state (syncing + error) while keeping the buckets enabled', async () => {
+    // Both buckets remain enabled (status active); only their syncState differs.
+    // The UI shows the indicators WITHOUT treating them as disabled/unqueryable.
+    mockGetEnabled.mockImplementation(async (name: string) => {
+      if (name === 'my-docs-bucket') {
+        return {
+          enabled: true,
+          status: 'active',
+          syncState: 'syncing',
+          filesIndexed: 0,
+          indexSize: 0,
+        };
+      }
+      if (name === 'research-papers') {
+        return {
+          enabled: true,
+          status: 'active',
+          syncState: 'error',
+          filesIndexed: 0,
+          indexSize: 0,
+          lastSyncError: 'Connection timeout',
+        };
+      }
+      return ENABLEMENT[name];
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Syncing…')).toBeInTheDocument();
+    expect(screen.getByText(/Sync failed: Connection timeout/)).toBeInTheDocument();
+    // Both syncing + errored buckets stay queryable: two "Ask questions" actions.
+    expect(screen.getAllByRole('button', { name: 'Ask questions' })).toHaveLength(2);
   });
 
   it('enables a disabled bucket via the confirm modal', async () => {

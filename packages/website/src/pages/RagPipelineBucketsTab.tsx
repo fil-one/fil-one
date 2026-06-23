@@ -3,7 +3,12 @@ import { DotsThreeIcon, ProhibitIcon, XIcon } from '@phosphor-icons/react/dist/s
 import { useMutation } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 
-import { S3Region, formatBytes, type QueryBucketResponse } from '@filone/shared';
+import {
+  S3Region,
+  formatBytes,
+  type BucketRagSyncState,
+  type QueryBucketResponse,
+} from '@filone/shared';
 
 import { Alert } from '../components/Alert.js';
 import { Button } from '../components/Button.js';
@@ -19,11 +24,50 @@ import { timeAgo } from '../lib/time.js';
 export type RagBucket = {
   name: string;
   region: S3Region;
+  /** Enablement source of truth (`status === 'active'`); decoupled from sync. */
   enabled: boolean;
   filesIndexed: number;
   indexSize: number;
   lastSyncedAt?: string;
+  /**
+   * Sync progress from the indexer (FIL-556); drives the Syncing…/Sync-failed
+   * indicator only. Independent of `enabled`: a syncing/errored bucket is still
+   * enabled and queryable.
+   */
+  syncState?: BucketRagSyncState;
+  /** Failure reason, present only when `syncState === 'error'`. */
+  lastSyncError?: string;
 };
+
+/**
+ * Compact sync-status badge driven by the indexer telemetry (FIL-556). Renders
+ * "Syncing…" while a reconciliation is in flight and "Sync failed" with the
+ * reason (in the tooltip + visible text) on error. Returns null for the steady
+ * `idle`/absent state, which the surrounding row already describes via the
+ * files/size/last-synced line. Independent of enablement.
+ */
+function SyncStatusBadge({ bucket }: { bucket: RagBucket }) {
+  if (bucket.syncState === 'syncing') {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
+        Syncing…
+      </span>
+    );
+  }
+  if (bucket.syncState === 'error') {
+    return (
+      <span
+        title={bucket.lastSyncError ?? 'Sync failed'}
+        className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+        Sync failed
+      </span>
+    );
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // ToggleConfirmModal
@@ -303,6 +347,12 @@ function BucketDrawer({ bucket, onClose }: { bucket: RagBucket; onClose: () => v
               'Not yet synced'
             )}
           </span>
+          {bucket.syncState === 'syncing' || bucket.syncState === 'error' ? (
+            <>
+              <span className="text-zinc-300">·</span>
+              <SyncStatusBadge bucket={bucket} />
+            </>
+          ) : null}
         </div>
 
         {/* Scrollable body */}
@@ -342,6 +392,48 @@ function BucketDrawer({ bucket, onClose }: { bucket: RagBucket; onClose: () => v
 // BucketRow
 // ---------------------------------------------------------------------------
 
+/** The files-indexed · index-size · last-synced line for a steadily-synced bucket. */
+function BucketSyncedStats({ bucket }: { bucket: RagBucket }) {
+  return (
+    <>
+      <span className="text-zinc-500">{bucket.filesIndexed.toLocaleString()}</span>
+      {' files indexed'}
+      <span aria-hidden="true"> · </span>
+      <span className="text-zinc-500">{formatBytes(bucket.indexSize)}</span>
+      <span aria-hidden="true"> · </span>
+      {bucket.lastSyncedAt ? (
+        <>
+          {'Last synced '}
+          <span className="text-zinc-500">{timeAgo(bucket.lastSyncedAt)}</span>
+        </>
+      ) : (
+        'Not yet synced'
+      )}
+    </>
+  );
+}
+
+/**
+ * The row's one-line description. Enablement (`enabled`) decides "Not indexed";
+ * the indexer sync progress (FIL-556) then layers the in-flight/failed indicator
+ * WITHOUT changing whether the bucket is enabled: an enabled bucket mid-run
+ * shows "Syncing…"; a failed run shows "Sync failed" + the reason; otherwise the
+ * files/size/last-synced stats (with a "Not yet synced" fallback before the
+ * first run).
+ */
+function BucketRowDescription({ bucket }: { bucket: RagBucket }) {
+  if (!bucket.enabled) return <>Not indexed</>;
+  if (bucket.syncState === 'syncing') return <span className="text-amber-600">Syncing…</span>;
+  if (bucket.syncState === 'error') {
+    return (
+      <span className="text-red-600">
+        Sync failed{bucket.lastSyncError ? `: ${bucket.lastSyncError}` : ''}
+      </span>
+    );
+  }
+  return <BucketSyncedStats bucket={bucket} />;
+}
+
 function BucketRow({
   bucket,
   pending,
@@ -363,25 +455,7 @@ function BucketRow({
           <div>
             <p className="text-sm font-medium text-zinc-800">{bucket.name}</p>
             <p className="text-xs text-zinc-400">
-              {bucket.enabled ? (
-                <>
-                  <span className="text-zinc-500">{bucket.filesIndexed.toLocaleString()}</span>
-                  {' files indexed'}
-                  <span aria-hidden="true"> · </span>
-                  <span className="text-zinc-500">{formatBytes(bucket.indexSize)}</span>
-                  <span aria-hidden="true"> · </span>
-                  {bucket.lastSyncedAt ? (
-                    <>
-                      {'Last synced '}
-                      <span className="text-zinc-500">{timeAgo(bucket.lastSyncedAt)}</span>
-                    </>
-                  ) : (
-                    'Not yet synced'
-                  )}
-                </>
-              ) : (
-                'Not indexed'
-              )}
+              <BucketRowDescription bucket={bucket} />
             </p>
           </div>
         </div>
