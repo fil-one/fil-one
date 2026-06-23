@@ -99,6 +99,47 @@ export default $config({
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
+    // ── S3 Vectors bucket for RAG embeddings (FIL-548) ───────────────
+    // One vector bucket hosts one index per RAG-enabled bucket. The
+    // @filone/rag-shared S3VectorsStore reads the bucket name at runtime via
+    // Resource.RagVectorBucket.name.
+    const ragVectorBucket = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
+      vectorBucketName: $interpolate`filone-${$app.stage}-rag-vectors`,
+    });
+
+    // Wrap the raw Pulumi resource so handlers can read it via SST resource
+    // linking (Resource.RagVectorBucket.name).
+    const RagVectorBucket = new sst.Linkable('RagVectorBucket', {
+      properties: {
+        name: ragVectorBucket.vectorBucketName,
+        arn: ragVectorBucket.vectorBucketArn,
+      },
+    });
+
+    // s3vectors:* scoped to the vector bucket and all of its indexes, plus
+    // bedrock:InvokeModel for the Titan embeddings model (FIL-552). Granted only
+    // to handlers that opt in via addRoute({ rag: true }) — i.e. those that use
+    // @filone/rag-shared.
+    const ragPermissions: sst.aws.FunctionPermissionArgs[] = [
+      {
+        actions: [
+          's3vectors:CreateIndex',
+          's3vectors:DeleteIndex',
+          's3vectors:PutVectors',
+          's3vectors:QueryVectors',
+          's3vectors:DeleteVectors',
+        ],
+        resources: [
+          ragVectorBucket.vectorBucketArn,
+          $interpolate`${ragVectorBucket.vectorBucketArn}/index/*`,
+        ],
+      },
+      {
+        actions: ['bedrock:InvokeModel'],
+        resources: [$interpolate`arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0`],
+      },
+    ];
+
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
     const isProduction = stage === 'production';
@@ -366,6 +407,7 @@ export default $config({
       billingTable,
       userInfoTable,
       userFilesBucket,
+      RagVectorBucket,
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
@@ -453,6 +495,11 @@ export default $config({
       provisionedConcurrency?: number;
       memory?: sst.aws.FunctionArgs['memory'];
       timeout?: sst.aws.FunctionArgs['timeout'];
+      /**
+       * Grant s3vectors:* (scoped to the RAG vector bucket + indexes) and
+       * bedrock:InvokeModel for handlers that use @filone/rag-shared.
+       */
+      rag?: boolean;
     }
 
     function addRoute({
@@ -465,6 +512,7 @@ export default $config({
       provisionedConcurrency,
       memory,
       timeout,
+      rag,
     }: AddRouteProps) {
       // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
       const fnName = handler
@@ -479,7 +527,7 @@ export default $config({
           ...sharedEnv,
           ...extraEnv,
         },
-        permissions,
+        permissions: rag ? [...(permissions ?? []), ...ragPermissions] : permissions,
         timeout: timeout ?? '10 seconds',
         ...(memory ? { memory } : {}),
         ...(provisionedConcurrency && provisionedConcurrency > 0
