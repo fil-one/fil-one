@@ -13,6 +13,7 @@ import {
   QuestionIcon,
   ChatTeardropDotsIcon,
   RobotIcon,
+  LightningIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useMatchRoute } from '@tanstack/react-router';
@@ -20,6 +21,7 @@ import { Link, useMatchRoute } from '@tanstack/react-router';
 import { DOCS_URL, SubscriptionStatus, getUsageLimits, formatBytes } from '@filone/shared';
 import { getBilling, getMe, getUsage, logout } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
+import { useRagAccess } from '../lib/use-rag-access.js';
 import { daysUntil, formatDateTime } from '../lib/time.js';
 
 import { Button } from './Button.js';
@@ -72,6 +74,14 @@ const navGroups: NavGroup[] = [
         label: 'AI Agent Toolkit',
         testId: 'nav-ai-agent-toolkit',
       },
+      // RAG Pipeline (FIL-555) — gated: rendered only when the user has RAG
+      // access (filtered in NavLinks). Hidden here AND guarded at the route.
+      {
+        path: '/rag-pipeline',
+        icon: LightningIcon,
+        label: 'RAG Pipeline',
+        testId: 'nav-rag-pipeline',
+      },
     ],
   },
 ];
@@ -81,7 +91,7 @@ type NavLinksProps = {
   matchRoute: ReturnType<typeof useMatchRoute>;
 };
 
-function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
+function NavLinks({ collapsed, matchRoute, ragAccess }: NavLinksProps & { ragAccess: boolean }) {
   return (
     <div className="flex flex-col p-2">
       {navGroups.map((group, gi) => (
@@ -92,35 +102,40 @@ function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
             </p>
           )}
           <div className="flex flex-col gap-0.5">
-            {group.items.map(({ path, icon: Icon, label, testId }) => {
-              const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
-              const link = (
-                <Link
-                  key={path}
-                  to={path}
-                  data-testid={testId}
-                  aria-label={label}
-                  className={[
-                    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-                    collapsed ? 'justify-center' : '',
-                    isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                >
-                  <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
-                  {!collapsed && <span className="flex-1">{label}</span>}
-                </Link>
-              );
-              if (collapsed) {
-                return (
-                  <Tooltip key={path} content={label} side="right">
-                    {link}
-                  </Tooltip>
+            {group.items
+              .filter((item) => ragAccess || item.path !== '/rag-pipeline')
+              .map(({ path, icon: Icon, label, testId }) => {
+                const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
+                const link = (
+                  <Link
+                    key={path}
+                    to={path}
+                    data-testid={testId}
+                    aria-label={label}
+                    className={[
+                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                      collapsed ? 'justify-center' : '',
+                      isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
+                    <Icon
+                      size={18}
+                      className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`}
+                    />
+                    {!collapsed && <span className="flex-1">{label}</span>}
+                  </Link>
                 );
-              }
-              return <div key={path}>{link}</div>;
-            })}
+                if (collapsed) {
+                  return (
+                    <Tooltip key={path} content={label} side="right">
+                      {link}
+                    </Tooltip>
+                  );
+                }
+                return <div key={path}>{link}</div>;
+              })}
           </div>
         </div>
       ))}
@@ -336,6 +351,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
   const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
   const { data: usage } = useQuery({ queryKey: queryKeys.usage, queryFn: getUsage });
+  const ragAccess = useRagAccess();
 
   const displayName = me?.name || me?.email || 'User';
   const initial = displayName.charAt(0).toUpperCase();
@@ -475,7 +491,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
         </div>
 
         {/* Primary nav items */}
-        <NavLinks collapsed={collapsed} matchRoute={matchRoute} />
+        <NavLinks collapsed={collapsed} matchRoute={matchRoute} ragAccess={ragAccess} />
 
         {/* Spacer */}
         <div className="flex-1" />

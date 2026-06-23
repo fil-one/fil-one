@@ -286,3 +286,15 @@ export function createAccessKey(body: CreateAccessKeyRequest): Promise<CreateAcc
     body: JSON.stringify(body),
   });
 }
+
+// ── RAG API ──────────────────────────────────────────────────────────────
+
+// The RAG Pipeline client functions live in rag-bucket-api.ts (typed wrappers
+// over apiRequest). Re-exported here so call sites can import RAG and core API
+// functions from a single module, matching the rest of the API surface.
+export {
+  listBucketsForRag,
+  getBucketRagEnabled,
+  setBucketRagEnabled,
+  queryBucket,
+} from './rag-bucket-api.js';
