@@ -3,19 +3,19 @@ import { useQuery } from '@tanstack/react-query';
 import { CaretDownIcon, CheckIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { getMe } from '../lib/api.js';
-import { submitWaitlistForm } from '../lib/hubspot.js';
 import { queryKeys } from '../lib/query-client.js';
 import { track } from '../plausible.js';
-import { Alert } from './Alert.js';
 import { Badge } from './Badge.js';
 import { Button } from './Button.js';
 import { Card } from './Card.js';
-import { FormField } from './FormField.js';
 import { Heading } from './Heading/Heading.js';
+import {
+  InterestForm,
+  type InterestFormConfig,
+  type WaitlistSubmitValues,
+} from './InterestForm.js';
 import { Modal, ModalHeader } from './Modal/index.js';
 import { Overline } from './Overline.js';
-import { Select } from './Select.js';
-import { Textarea } from './TextArea.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,14 +49,13 @@ export type ComingSoonPageProps = {
     inclusions: string[];
   };
   hubspotFormGuid: string;
-  interestForm: {
-    workloadLabel: string;
-    workloadTypes: string[];
-    timelines: string[];
-    providersLabel: string;
-    providers: string[];
-    notesPlaceholder: string;
-  };
+  interestForm: InterestFormConfig;
+  /**
+   * Overrides how the waitlist form is submitted. Defaults to the Bucket Intelligence
+   * (RAG) HubSpot mapping; pages with different fields (e.g. the AI Agent Toolkit) pass
+   * their own handler.
+   */
+  onWaitlistSubmit?: (values: WaitlistSubmitValues) => Promise<void>;
   faqs: ComingSoonFaq[];
 };
 
@@ -244,161 +243,6 @@ function WaitlistSuccess({ title, onClose }: { title: string; onClose: () => voi
   );
 }
 
-function InterestForm({
-  config,
-  formGuid,
-  onSubmitted,
-  onCancel,
-}: {
-  config: ComingSoonPageProps['interestForm'];
-  formGuid: string;
-  onSubmitted: () => void;
-  onCancel: () => void;
-}) {
-  const workloadId = useId();
-  const providerId = useId();
-  const timelineId = useId();
-  const teamSizeId = useId();
-  const storageAmountId = useId();
-  const notesId = useId();
-
-  const [workload, setWorkload] = useState('');
-  const [timeline, setTimeline] = useState('');
-  const [provider, setProvider] = useState('');
-  const [teamSize, setTeamSize] = useState('');
-  const [storageAmount, setStorageAmount] = useState('');
-  const [notes, setNotes] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState(false);
-
-  const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
-    setSubmitError(false);
-
-    const fullName = me?.name ?? '';
-    const spaceIndex = fullName.indexOf(' ');
-    const firstName = spaceIndex !== -1 ? fullName.slice(0, spaceIndex) : fullName;
-    const lastName = spaceIndex !== -1 ? fullName.slice(spaceIndex + 1) : '';
-
-    try {
-      await submitWaitlistForm({
-        formId: formGuid,
-        firstName,
-        lastName,
-        email: me?.email ?? '',
-        primaryUseCase: workload,
-        ragProvider: provider,
-        timeline,
-        teamSize,
-        storageAmount,
-        notes,
-      });
-      onSubmitted();
-    } catch {
-      setSubmitError(true);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="px-6 py-6">
-      <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
-        <FormField label={config.workloadLabel} htmlFor={workloadId}>
-          <Select id={workloadId} value={workload} onChange={setWorkload}>
-            <option value="">Select…</option>
-            {config.workloadTypes.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-
-        <FormField label={config.providersLabel} htmlFor={providerId}>
-          <Select id={providerId} value={provider} onChange={setProvider}>
-            <option value="">Select…</option>
-            {config.providers.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-
-        <FormField label="Timeline" htmlFor={timelineId}>
-          <Select id={timelineId} value={timeline} onChange={setTimeline}>
-            <option value="">Select…</option>
-            {config.timelines.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-
-        <FormField label="Team size" htmlFor={teamSizeId}>
-          <Select id={teamSizeId} value={teamSize} onChange={setTeamSize}>
-            <option value="">Select…</option>
-            <option value="Just me">Just me</option>
-            <option value="2-10 people">2-10 people</option>
-            <option value="11-50 people">11-50 people</option>
-            <option value="51+ people">51+ people</option>
-          </Select>
-        </FormField>
-
-        <FormField label="Amount of storage" htmlFor={storageAmountId} className="sm:col-span-2">
-          <Select id={storageAmountId} value={storageAmount} onChange={setStorageAmount}>
-            <option value="">Select…</option>
-            <option value="Less than 25 TB">Less than 25 TB</option>
-            <option value="25 - 50 TB">25 - 50 TB</option>
-            <option value="50 - 100 TB">50 - 100 TB</option>
-            <option value="100 - 150 TB">100 - 150 TB</option>
-            <option value="150 - 250 TB">150 - 250 TB</option>
-            <option value="250 - 500 TB">250 - 500 TB</option>
-            <option value="500 - 1 PB">500 TB - 1 PB</option>
-            <option value="More than 1 PB">More than 1 PB</option>
-          </Select>
-        </FormField>
-      </div>
-
-      <div className="mt-5">
-        <FormField label="Notes" optional htmlFor={notesId}>
-          <Textarea
-            id={notesId}
-            rows={3}
-            placeholder={config.notesPlaceholder}
-            value={notes}
-            onChange={setNotes}
-          />
-        </FormField>
-      </div>
-
-      {submitError && (
-        <div className="mt-4">
-          <Alert
-            variant="red"
-            title="Something went wrong"
-            description="We couldn't submit your request. Please try again."
-          />
-        </div>
-      )}
-
-      <div className="mt-5 flex items-center justify-end gap-2">
-        <Button type="button" variant="ghost" size="md" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button type="submit" variant="primary" size="md" disabled={submitting}>
-          {submitting ? 'Submitting…' : 'Join waitlist'}
-        </Button>
-      </div>
-    </form>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -413,6 +257,7 @@ export function ComingSoonPage({
   pricing,
   hubspotFormGuid,
   interestForm,
+  onWaitlistSubmit,
   faqs,
 }: ComingSoonPageProps) {
   const [modalOpen, setModalOpen] = useState(false);
@@ -502,6 +347,7 @@ export function ComingSoonPage({
             <InterestForm
               config={interestForm}
               formGuid={hubspotFormGuid}
+              onSubmit={onWaitlistSubmit}
               onSubmitted={() => {
                 track('Waitlist submitted', { props: { page: title } });
                 setSubmitted(true);
