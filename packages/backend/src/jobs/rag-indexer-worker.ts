@@ -16,6 +16,7 @@ import { getDynamoClient } from '../lib/ddb-client.js';
 import { getProvisionedRegions, type ProvisionedRegion } from '../lib/region-helpers.js';
 import { createS3Client } from '../lib/s3-client.js';
 import { RAGKeys, type BucketRAGStatus } from '../lib/dynamo-records.js';
+import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.js';
 import { indexBucket } from './rag-indexer-helpers.js';
 
 const dynamo = getDynamoClient();
@@ -137,6 +138,17 @@ async function indexRegion(args: IndexRegionArgs): Promise<number> {
       await indexBucket(s3, bucketId, bucket.bucketName, vectorStore, { deadlineEpochMs });
       indexed++;
     } catch (error) {
+      // Persist the failure so the UI can surface "Sync failed" + the reason.
+      // Best-effort: a telemetry write failure must not mask the original error.
+      const message = error instanceof Error ? error.message : String(error);
+      try {
+        await updateBucketTelemetry(bucket.bucketName, {
+          syncState: 'error',
+          lastSyncError: message,
+        });
+      } catch (telemetryError) {
+        console.error(`${LOG} Failed to persist error telemetry`, { bucketId, telemetryError });
+      }
       console.error(`${LOG} Bucket failed, continuing`, {
         orgId,
         orchestrator: orchestrator.id,

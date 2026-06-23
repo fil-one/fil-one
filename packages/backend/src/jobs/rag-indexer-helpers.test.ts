@@ -20,6 +20,7 @@ const {
   mockLoadCheckpoint,
   mockSaveCheckpoint,
   mockClearCheckpoint,
+  mockUpdateBucketTelemetry,
 } = vi.hoisted(() => ({
   mockListObjects: vi.fn(),
   mockGetObjectBytes: vi.fn(),
@@ -32,11 +33,16 @@ const {
   mockLoadCheckpoint: vi.fn(),
   mockSaveCheckpoint: vi.fn(),
   mockClearCheckpoint: vi.fn(),
+  mockUpdateBucketTelemetry: vi.fn(),
 }));
 
 vi.mock('../lib/s3-bucket-operations.js', () => ({
   listObjects: mockListObjects,
   getObjectBytes: mockGetObjectBytes,
+}));
+
+vi.mock('../lib/bucket-rag-enablement.js', () => ({
+  updateBucketTelemetry: mockUpdateBucketTelemetry,
 }));
 
 vi.mock('@filone/rag-shared', () => ({
@@ -72,11 +78,14 @@ function makeVectorStore() {
   } satisfies VectorStore;
 }
 
-function page(objects: Array<{ key: string; etag?: string }>, next?: string): ListObjectsResult {
+function page(
+  objects: Array<{ key: string; etag?: string; sizeBytes?: number }>,
+  next?: string,
+): ListObjectsResult {
   return {
     objects: objects.map((o) => ({
       key: o.key,
-      sizeBytes: 1,
+      sizeBytes: o.sizeBytes ?? 1,
       lastModified: '2024-01-01T00:00:00.000Z',
       ...(o.etag ? { etag: o.etag } : {}),
     })),
@@ -108,6 +117,7 @@ describe('indexBucket', () => {
     mockExtractText.mockResolvedValue('hello world');
     mockChunk.mockReturnValue(['hello world']);
     mockEmbedMany.mockResolvedValue([[0.1, 0.2, 0.3]]);
+    mockUpdateBucketTelemetry.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -382,5 +392,100 @@ describe('indexBucket', () => {
     expect(mockSaveCheckpoint).toHaveBeenCalledWith('bucket-1', 'my-bucket', undefined);
     expect(mockClearCheckpoint).not.toHaveBeenCalled();
     expect(result.completed).toBe(false);
+  });
+
+  // -----------------------------------------------------------------------
+  // Sync telemetry (FIL-556)
+  // -----------------------------------------------------------------------
+
+  describe('sync telemetry', () => {
+    /** The telemetry update issued for a given syncState, or undefined. */
+    function telemetryCall(syncState: string) {
+      return mockUpdateBucketTelemetry.mock.calls.find(
+        (c) => (c[1] as { syncState: string }).syncState === syncState,
+      );
+    }
+
+    it('marks the bucket syncing at the very start of the run (syncState only)', async () => {
+      mockLoadManifest.mockResolvedValue(manifestOf([]));
+      mockListObjects.mockResolvedValue(page([]));
+
+      await indexBucket(s3, 'bucket-1', 'my-bucket', vectorStore);
+
+      // The first telemetry write is the syncing marker, by bucket name. It must
+      // write syncState only — never the enablement `status`.
+      const [name, update] = mockUpdateBucketTelemetry.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(name).toBe('my-bucket');
+      expect(update).toEqual({ syncState: 'syncing' });
+      expect(update).not.toHaveProperty('status');
+    });
+
+    it('writes the success snapshot with filesIndexed + indexSize + lastSyncedAt', async () => {
+      // Two new objects get indexed (added to the manifest), one stale object is
+      // removed. filesIndexed should be the post-reconciliation manifest size (2),
+      // and indexSize the sum of the two indexed objects' source bytes (10 + 25).
+      mockLoadManifest.mockResolvedValue(
+        manifestOf([
+          { objectKey: 'gone.txt', etag: 'g', chunkKeys: ['gone.txt#0'], updatedAt: 'x' },
+        ]),
+      );
+      mockListObjects.mockResolvedValue(
+        page([
+          { key: 'a.txt', etag: 'e1', sizeBytes: 10 },
+          { key: 'b.txt', etag: 'e2', sizeBytes: 25 },
+        ]),
+      );
+
+      const before = Date.now();
+      await indexBucket(s3, 'bucket-1', 'my-bucket', vectorStore);
+      const after = Date.now();
+
+      const success = telemetryCall('idle');
+      expect(success).toBeDefined();
+      const [name, update] = success! as [string, Record<string, unknown>];
+      expect(name).toBe('my-bucket');
+      // The success snapshot writes syncState=idle, never the enablement status.
+      expect(update).not.toHaveProperty('status');
+      expect(update.filesIndexed).toBe(2);
+      expect(update.indexSize).toBe(35);
+      const syncedMs = new Date(update.lastSyncedAt as string).getTime();
+      expect(syncedMs).toBeGreaterThanOrEqual(before);
+      expect(syncedMs).toBeLessThanOrEqual(after);
+    });
+
+    it('does NOT write a success snapshot when the run is checkpointed mid-bucket', async () => {
+      mockLoadManifest.mockResolvedValue(manifestOf([]));
+      mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }], 'next-tok'));
+
+      await indexBucket(s3, 'bucket-1', 'my-bucket', vectorStore, {
+        deadlineEpochMs: Date.now() - 1,
+      });
+
+      // Syncing marker fired; no idle (success) snapshot on an incomplete run.
+      expect(telemetryCall('syncing')).toBeDefined();
+      expect(telemetryCall('idle')).toBeUndefined();
+    });
+
+    it('does NOT write a success snapshot on a resumed (partial) run', async () => {
+      mockLoadCheckpoint.mockResolvedValue({
+        pk: 'INDEXER_CHECKPOINT#bucket-1',
+        sk: 'CHECKPOINT',
+        bucketId: 'bucket-1',
+        bucketName: 'my-bucket',
+        continuationToken: 'resume-tok',
+        lastPageStartedAt: '2024-01-01T00:00:00.000Z',
+        ttl: Math.floor(Date.now() / 1000) + 3600,
+      });
+      mockLoadManifest.mockResolvedValue(manifestOf([]));
+      mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
+
+      await indexBucket(s3, 'bucket-1', 'my-bucket', vectorStore);
+
+      // A resumed run's counts are not authoritative, so no idle (success) snapshot.
+      expect(telemetryCall('idle')).toBeUndefined();
+    });
   });
 });
