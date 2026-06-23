@@ -98,6 +98,9 @@ export type {
 
 export { PresignOpSchema, PresignRequestSchema } from './api/presign.js';
 
+export { QueryBucketSchema, QUERY_DEFAULT_TOP_K, QUERY_MAX_TOP_K } from './api/rag.js';
+export type { QueryBucketRequest, QueryBucketResponse } from './api/rag.js';
+
 export {
   ACCESS_KEY_PERMISSIONS,
   ACCESS_KEY_BUCKET_SCOPES,

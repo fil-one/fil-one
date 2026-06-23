@@ -676,6 +676,29 @@ export default $config({
       permissions: consoleS3KeysPermissions,
       extraEnv: orchestratorEnv,
     });
+    // RAG query playground (FIL-554): embed the question, vector-search the
+    // bucket's index, and ground a Bedrock completion on the retrieved chunks.
+    // `rag: true` grants s3vectors:QueryVectors + bedrock:InvokeModel on the
+    // Titan embeddings model; the extra permission below covers the Claude
+    // completion model — both its cross-region inference profile and the
+    // underlying foundation model. Higher timeout/memory for the Bedrock calls.
+    addRoute({
+      method: 'POST',
+      routePath: '/api/buckets/{name}/query',
+      handler: 'query-bucket',
+      rag: true,
+      permissions: [
+        {
+          actions: ['bedrock:InvokeModel'],
+          resources: [
+            $interpolate`arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-opus-4-8`,
+            $interpolate`arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-8`,
+          ],
+        },
+      ],
+      timeout: '30 seconds',
+      memory: '512 MB',
+    });
 
     // ── Auth routes ──────────────────────────────────────────────────
     const allowedRedirectOrigins = allowedOrigins.join(',');
