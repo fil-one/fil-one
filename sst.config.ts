@@ -705,6 +705,36 @@ export default $config({
       timeout: '30 seconds',
       memory: '512 MB',
     });
+    // RAG per-bucket enablement (FIL-555): read/write the BUCKET#{name}/RAG
+    // enablement row + sync telemetry for the caller's tenant. Both are gated by
+    // auth + subscriptionGuard + ragAccessMiddleware. They read/write only
+    // UserInfoTable (already linked) and resolve tenant ownership via the
+    // orchestrator (SSM-backed S3 keys), so they need the SSM read grant but not
+    // `rag: true` (no s3vectors/bedrock).
+    addRoute({
+      method: 'GET',
+      routePath: '/api/buckets/{name}/rag/enabled',
+      handler: 'get-bucket-rag-enablement',
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        ...fthEnv,
+      },
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
+      ],
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/buckets/{name}/rag/enabled',
+      handler: 'set-bucket-rag-enablement',
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        ...fthEnv,
+      },
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
+      ],
+    });
 
     // ── Auth routes ──────────────────────────────────────────────────
     const allowedRedirectOrigins = allowedOrigins.join(',');
