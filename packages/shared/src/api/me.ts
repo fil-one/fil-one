@@ -11,6 +11,12 @@ export interface MeResponse {
   mfaEnrollments: MfaEnrollment[];
   passkeys?: PasskeyEnrollment[];
   picture?: string;
+  /**
+   * Whether the user may access the RAG feature. Computed server-side from the
+   * verified email via the shared gate predicate (Foundation domain OR runtime
+   * allowlist) so the frontend stays consistent without a second lookup.
+   */
+  ragAccess: boolean;
 }
 
 export interface MfaEnrollment {
