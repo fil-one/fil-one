@@ -4,6 +4,7 @@ import {
   type BucketRAGEnablementRecord,
   type ObjectChunkManifestRecord,
   type RAGConfigRecord,
+  type RagIndexerCheckpointRecord,
   RAGKeys,
 } from './dynamo-records.js';
 
@@ -23,6 +24,11 @@ describe('RAGKeys', () => {
   it('builds manifest sks sharing a begins_with-able prefix', () => {
     expect(RAGKeys.manifestSk('file1.pdf')).toBe('MANIFEST#file1.pdf');
     expect(RAGKeys.manifestSk('file1.pdf').startsWith(RAGKeys.manifestSkPrefix())).toBe(true);
+  });
+
+  it('builds the indexer checkpoint pk/sk', () => {
+    expect(RAGKeys.checkpointPk('bucket-1')).toBe('INDEXER_CHECKPOINT#bucket-1');
+    expect(RAGKeys.checkpointSk()).toBe('CHECKPOINT');
   });
 });
 
@@ -53,6 +59,7 @@ describe('BucketRAGEnablementRecord', () => {
     const record: BucketRAGEnablementRecord = {
       pk: RAGKeys.bucketPk('bucket-1'),
       sk: RAGKeys.enablementSk(),
+      orgId: 'org-1',
       status: 'active',
       filesIndexed: 12,
       indexSize: 4096,
@@ -64,6 +71,7 @@ describe('BucketRAGEnablementRecord', () => {
 
     expect(record.pk).toBe('BUCKET#bucket-1');
     expect(record.sk).toBe('RAG');
+    expect(record.orgId).toBe('org-1');
     expect(record.filesIndexed).toBe(12);
     expect(record.indexSize).toBe(4096);
     expect(record.settings).toEqual({ chunkSize: 512 });
@@ -76,6 +84,7 @@ describe('BucketRAGEnablementRecord', () => {
       const record: BucketRAGEnablementRecord = {
         pk: RAGKeys.bucketPk('bucket-1'),
         sk: RAGKeys.enablementSk(),
+        orgId: 'org-1',
         status,
         filesIndexed: 0,
         indexSize: 0,
@@ -127,5 +136,39 @@ describe('ObjectChunkManifestRecord', () => {
       'MANIFEST#file2.pdf',
       'MANIFEST#file3.pdf',
     ]);
+  });
+});
+
+describe('RagIndexerCheckpointRecord', () => {
+  it('captures the resumable continuation token under its own partition', () => {
+    const now = new Date().toISOString();
+    const record: RagIndexerCheckpointRecord = {
+      pk: RAGKeys.checkpointPk('bucket-1'),
+      sk: RAGKeys.checkpointSk(),
+      bucketId: 'bucket-1',
+      bucketName: 'my-bucket',
+      continuationToken: 'token-abc',
+      lastPageStartedAt: now,
+      ttl: Math.floor(Date.now() / 1000) + 48 * 60 * 60,
+    };
+
+    expect(record.pk).toBe('INDEXER_CHECKPOINT#bucket-1');
+    expect(record.sk).toBe('CHECKPOINT');
+    expect(record.bucketName).toBe('my-bucket');
+    expect(record.continuationToken).toBe('token-abc');
+    expect(record.lastPageStartedAt).toMatch(ISO_8601);
+    expect(record.ttl).toBeGreaterThan(Math.floor(Date.now() / 1000));
+  });
+
+  it('omits the continuation token when a bucket finished within one run', () => {
+    const record: RagIndexerCheckpointRecord = {
+      pk: RAGKeys.checkpointPk('bucket-1'),
+      sk: RAGKeys.checkpointSk(),
+      bucketId: 'bucket-1',
+      bucketName: 'my-bucket',
+      lastPageStartedAt: new Date().toISOString(),
+      ttl: Math.floor(Date.now() / 1000) + 48 * 60 * 60,
+    };
+    expect(record.continuationToken).toBeUndefined();
   });
 });

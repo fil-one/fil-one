@@ -463,6 +463,25 @@ export default $config({
       },
     ];
 
+    // Per-tenant S3 access keys live at /filone/<stage>/<orchestrator>-s3/access-key/<tenantId>
+    // as SecureString params, so the RAG indexer worker (which fetches them via
+    // getS3ClientContext to build an S3 client) needs ssm:GetParameter on those
+    // names plus kms:Decrypt to unseal the SecureString values.
+    const auroraS3AccessKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/access-key/*`;
+    const fthS3AccessKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/access-key/*`;
+    const ragIndexerS3KeyPermissions: sst.aws.FunctionPermissionArgs[] = [
+      {
+        actions: ['ssm:GetParameter'],
+        resources: [auroraS3AccessKeySsmArn, fthS3AccessKeySsmArn],
+      },
+      {
+        // SecureString params are sealed with the AWS-managed SSM KMS key; the
+        // SDK decrypts them in-line on GetParameter (WithDecryption: true).
+        actions: ['kms:Decrypt'],
+        resources: ['*'],
+      },
+    ];
+
     const { firehose, cwToFirehoseRole } = setupFirehoseLogPipeline(grafanaLokiAuth);
 
     // Forward API Gateway access logs to Grafana Loki via the same Firehose
@@ -860,6 +879,51 @@ export default $config({
       // run the Lambda every 12 hours, one hour after usage reporting (08:00 and 20:00 UTC).
       schedule: 'cron(0 8/12 * * ? *)',
       function: gracePeriodEnforcer.arn,
+    });
+
+    // ── RAG indexer (cron → orchestrator → per-org worker) ──────────
+    // Keeps each RAG-enabled bucket's vector index in sync with S3 contents via
+    // object-level ETag diffing. The worker reads per-tenant S3 keys (SSM +
+    // KMS) and uses @filone/rag-shared to extract/chunk/embed/upsert, so it
+    // gets the RAG permission set plus a large timeout/memory budget; large
+    // buckets are resumed across runs via a persisted continuation checkpoint.
+    const ragIndexerWorker = createFn('RagIndexerWorker', {
+      handler: 'packages/backend/src/jobs/rag-indexer-worker.handler',
+      link: [
+        billingTable,
+        userInfoTable,
+        RagVectorBucket,
+        auroraBackofficeToken,
+        fthManagementApiToken,
+      ],
+      environment: orchestratorEnv,
+      timeout: '900 seconds',
+      memory: '512 MB',
+      permissions: [...ragIndexerS3KeyPermissions, ...ragPermissions],
+    });
+
+    const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
+      handler: 'packages/backend/src/jobs/rag-indexer-orchestrator.handler',
+      link: [userInfoTable],
+      environment: {
+        RAG_INDEXER_WORKER_FUNCTION_NAME: ragIndexerWorker.name,
+      },
+      timeout: '60 seconds',
+      memory: '256 MB',
+      permissions: [
+        {
+          actions: ['lambda:InvokeFunction'],
+          resources: [ragIndexerWorker.arn],
+        },
+      ],
+    });
+
+    new sst.aws.CronV2('RagIndexerCron', {
+      // Run every 6 hours (03:00, 09:00, 15:00, 21:00 UTC). Deliberately offset
+      // from the usage-reporting (07/19) and grace-period (08/20) crons so the
+      // indexer never collides with billing reconciliation.
+      schedule: 'cron(0 3/6 * * ? *)',
+      function: ragIndexerOrchestrator.arn,
     });
 
     // ── Subscription drift checker (cron-based, observe-only) ───────

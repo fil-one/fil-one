@@ -158,6 +158,19 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "RagIndexerOrchestrator": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "RagIndexerWorker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "RagVectorBucket": {
+      "arn": string
+      "name": string
+      "type": "sst.sst.Linkable"
+    }
     "RegenerateRecoveryCode": {
       "name": string
       "type": "sst.aws.Function"

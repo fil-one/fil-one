@@ -56,6 +56,12 @@ export interface RAGConfigRecord {
 export interface BucketRAGEnablementRecord {
   pk: string;
   sk: string;
+  /**
+   * Owning org. Denormalized onto the enablement row so the indexer
+   * orchestrator can group RAG-enabled buckets by org during its table scan
+   * without a second lookup (see rag-indexer-orchestrator).
+   */
+  orgId: string;
   status: BucketRAGStatus;
   filesIndexed: number;
   indexSize: number; // bytes
@@ -87,6 +93,28 @@ export interface ObjectChunkManifestRecord {
 }
 
 /**
+ * Resumable checkpoint for the RAG indexer worker. A bucket with more objects
+ * than one Lambda invocation can process persists its S3 `continuationToken`
+ * here so the next run resumes mid-bucket instead of restarting from the top.
+ *
+ * One active checkpoint per bucket. The row carries a TTL so a stale checkpoint
+ * (e.g. a worker that died mid-bucket) eventually expires and the bucket is
+ * re-scanned from the beginning rather than being wedged indefinitely.
+ *
+ * UserInfoTable — pk: INDEXER_CHECKPOINT#{bucketId}, sk: CHECKPOINT
+ */
+export interface RagIndexerCheckpointRecord {
+  pk: string;
+  sk: string;
+  bucketId: string;
+  bucketName: string;
+  /** S3 continuation token to resume listing from; absent once the bucket is done. */
+  continuationToken?: string;
+  lastPageStartedAt: string; // ISO-8601, for stale-checkpoint detection
+  ttl: number; // epoch seconds; DynamoDB TTL expiry (48h)
+}
+
+/**
  * Key builders for the RAG records above. Centralizing the pk/sk shapes keeps
  * the partition design (and the per-bucket `begins_with MANIFEST#` query)
  * consistent across handlers and jobs.
@@ -99,4 +127,6 @@ export const RAGKeys = {
   /** Shared prefix for `begins_with` queries returning a bucket's manifests. */
   manifestSkPrefix: (): string => 'MANIFEST#',
   manifestSk: (objectKey: string): string => `MANIFEST#${objectKey}`,
+  checkpointPk: (bucketId: string): string => `INDEXER_CHECKPOINT#${bucketId}`,
+  checkpointSk: (): string => 'CHECKPOINT',
 } as const;
