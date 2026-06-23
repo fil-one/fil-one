@@ -92,10 +92,7 @@ export function ModelsTab({ enabled }: { enabled: boolean }) {
 export function IntegrateTab({ enabled, buckets }: { enabled: boolean; buckets: RagBucket[] }) {
   const enabledBuckets = buckets.filter((b) => b.enabled);
   const [selected, setSelected] = useState<string>(ALL_BUCKETS_VALUE);
-  const selectedBucket = enabledBuckets.find((b) => b.name === selected);
   const arg = selected === ALL_BUCKETS_VALUE ? '{bucketName}' : selected;
-  // Bucket names are region-scoped, so the query endpoint needs the region.
-  const region = selectedBucket?.region ?? '{region}';
 
   const mcpCode = JSON.stringify(
     {
@@ -111,7 +108,7 @@ export function IntegrateTab({ enabled, buckets }: { enabled: boolean; buckets: 
     2,
   );
 
-  const queryCode = `POST /api/buckets/${arg}/query?region=${region}\n${JSON.stringify({ query: 'What are the retention policies?', top_k: 5 }, null, 2)}`;
+  const queryCode = `POST /api/buckets/${arg}/query\n${JSON.stringify({ query: 'What are the retention policies?', top_k: 5 }, null, 2)}`;
 
   return (
     <div className="space-y-6">

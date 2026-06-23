@@ -167,9 +167,7 @@ describe('RagPipelinePage — Buckets tab', () => {
     expect(screen.getByText('$15 / TB / month')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
 
-    await waitFor(() =>
-      expect(mockSetEnabled).toHaveBeenCalledWith('marketing-assets', 'us-east-1', true),
-    );
+    await waitFor(() => expect(mockSetEnabled).toHaveBeenCalledWith('marketing-assets', true));
   });
 
   it('disables an enabled bucket via the action menu + confirm modal', async () => {
@@ -192,9 +190,7 @@ describe('RagPipelinePage — Buckets tab', () => {
     const dialog = screen.getByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Disable' }));
 
-    await waitFor(() =>
-      expect(mockSetEnabled).toHaveBeenCalledWith('my-docs-bucket', 'us-east-1', false),
-    );
+    await waitFor(() => expect(mockSetEnabled).toHaveBeenCalledWith('my-docs-bucket', false));
   });
 });
 
@@ -239,7 +235,6 @@ describe('RagPipelinePage — Query Playground', () => {
     await waitFor(() =>
       expect(mockQueryBucket).toHaveBeenCalledWith(
         'my-docs-bucket',
-        'us-east-1',
         'What is the retention period?',
       ),
     );
@@ -251,7 +246,6 @@ describe('RagPipelinePage — Query Playground', () => {
     const sourceLink = screen.getByRole('link', { name: 'data-retention.pdf' });
     expect(sourceLink.getAttribute('href')).toContain('/buckets/my-docs-bucket/objects');
     expect(sourceLink.getAttribute('href')).toContain('key=policies%2Fdata-retention.pdf');
-    expect(sourceLink.getAttribute('href')).toContain('region=us-east-1');
   });
 
   it('renders an error message when the query fails', async () => {
@@ -281,7 +275,7 @@ describe('RagPipelinePage — Integrate tab', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Integrate' }));
 
     expect(await screen.findByText('Query API')).toBeInTheDocument();
-    expect(screen.getByText(/POST \/api\/buckets\/.+\/query\?region=/)).toBeInTheDocument();
+    expect(screen.getByText(/POST \/api\/buckets\/.+\/query/)).toBeInTheDocument();
 
     expect(screen.getByText('MCP endpoint')).toBeInTheDocument();
     expect(screen.getByText('Coming later')).toBeInTheDocument();

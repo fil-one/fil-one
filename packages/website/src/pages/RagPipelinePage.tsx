@@ -162,27 +162,18 @@ export function RagPipelinePage() {
 
   const enablementQueries = useQueries({
     queries: bucketList.map((b) => ({
-      queryKey: queryKeys.ragBucketEnabledFor(b.bucketName, b.region as S3Region),
-      queryFn: () => getBucketRagEnabled(b.bucketName, b.region as S3Region),
+      queryKey: queryKeys.ragBucketEnabledFor(b.bucketName),
+      queryFn: () => getBucketRagEnabled(b.bucketName),
       enabled: ragAccess,
     })),
   });
 
   const toggleMutation = useMutation({
-    mutationFn: ({
-      bucketName,
-      region,
-      enabled,
-    }: {
-      bucketName: string;
-      region: S3Region;
-      enabled: boolean;
-    }) => setBucketRagEnabled(bucketName, region, enabled),
-    onSuccess: (data, { bucketName, region }) => {
-      queryClient.setQueryData(queryKeys.ragBucketEnabledFor(bucketName, region), data);
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.ragBucketEnabledFor(bucketName, region),
-      });
+    mutationFn: ({ bucketName, enabled }: { bucketName: string; enabled: boolean }) =>
+      setBucketRagEnabled(bucketName, enabled),
+    onSuccess: (data, { bucketName }) => {
+      queryClient.setQueryData(queryKeys.ragBucketEnabledFor(bucketName), data);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.ragBucketEnabledFor(bucketName) });
       toast.success(`RAG ${data.enabled ? 'enabled' : 'disabled'} for "${bucketName}"`);
     },
     onError: (err) => {
@@ -207,11 +198,7 @@ export function RagPipelinePage() {
 
   function handleConfirmToggle(bucket: RagBucket) {
     setTogglingBucket(bucket.name);
-    toggleMutation.mutate({
-      bucketName: bucket.name,
-      region: bucket.region,
-      enabled: !bucket.enabled,
-    });
+    toggleMutation.mutate({ bucketName: bucket.name, enabled: !bucket.enabled });
   }
 
   const enablementLoading = enablementQueries.some((q) => q.isPending);

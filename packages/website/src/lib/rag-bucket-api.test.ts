@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { S3Region } from '@filone/shared';
 
 const mockApiRequest = vi.fn();
 vi.mock('./api.js', () => ({
@@ -24,50 +23,43 @@ describe('rag-bucket-api', () => {
     expect(mockApiRequest).toHaveBeenCalledWith('/buckets');
   });
 
-  it('getBucketRagEnabled GETs the per-bucket enablement endpoint with the region', async () => {
-    await getBucketRagEnabled('my-bucket', S3Region.UsEast1);
-    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/rag/enabled?region=us-east-1');
+  it('getBucketRagEnabled GETs the per-bucket enablement endpoint', async () => {
+    await getBucketRagEnabled('my-bucket');
+    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/rag/enabled');
   });
 
   it('encodes the bucket name in the enablement read path', async () => {
-    await getBucketRagEnabled('weird/name', S3Region.UsEast1);
-    expect(mockApiRequest).toHaveBeenCalledWith(
-      '/buckets/weird%2Fname/rag/enabled?region=us-east-1',
-    );
+    await getBucketRagEnabled('weird/name');
+    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/weird%2Fname/rag/enabled');
   });
 
-  it('threads a non-us-east-1 region through the enablement read path', async () => {
-    await getBucketRagEnabled('my-bucket', S3Region.EuWest1);
-    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/rag/enabled?region=eu-west-1');
-  });
-
-  it('setBucketRagEnabled POSTs the enabled flag with the region', async () => {
-    await setBucketRagEnabled('my-bucket', S3Region.UsEast1, true);
-    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/rag/enabled?region=us-east-1', {
+  it('setBucketRagEnabled POSTs the enabled flag', async () => {
+    await setBucketRagEnabled('my-bucket', true);
+    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/rag/enabled', {
       method: 'POST',
       body: JSON.stringify({ enabled: true }),
     });
   });
 
-  it('setBucketRagEnabled can disable and threads the region', async () => {
-    await setBucketRagEnabled('my-bucket', S3Region.EuWest1, false);
-    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/rag/enabled?region=eu-west-1', {
+  it('setBucketRagEnabled can disable', async () => {
+    await setBucketRagEnabled('my-bucket', false);
+    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/rag/enabled', {
       method: 'POST',
       body: JSON.stringify({ enabled: false }),
     });
   });
 
-  it('queryBucket POSTs the query with the region and optional top_k/model omitted by default', async () => {
-    await queryBucket('my-bucket', S3Region.UsEast1, 'hello');
-    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/query?region=us-east-1', {
+  it('queryBucket POSTs the query with optional top_k/model omitted by default', async () => {
+    await queryBucket('my-bucket', 'hello');
+    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/query', {
       method: 'POST',
       body: JSON.stringify({ query: 'hello' }),
     });
   });
 
-  it('queryBucket includes top_k and model when provided and threads the region', async () => {
-    await queryBucket('my-bucket', S3Region.EuWest1, 'hello', { topK: 5, model: 'm' });
-    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/query?region=eu-west-1', {
+  it('queryBucket includes top_k and model when provided', async () => {
+    await queryBucket('my-bucket', 'hello', { topK: 5, model: 'm' });
+    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/query', {
       method: 'POST',
       body: JSON.stringify({ query: 'hello', top_k: 5, model: 'm' }),
     });

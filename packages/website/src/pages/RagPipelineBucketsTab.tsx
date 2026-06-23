@@ -1,19 +1,342 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { DotsThreeIcon, ProhibitIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
+import { useMutation } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 
-import { formatBytes } from '@filone/shared';
+import { S3Region, formatBytes, type QueryBucketResponse } from '@filone/shared';
 
 import { Alert } from '../components/Alert.js';
-import { BucketActionMenu } from '../components/BucketActionMenu.js';
-import { BucketDrawer } from '../components/BucketDrawer.js';
 import { Button } from '../components/Button.js';
 import { Card } from '../components/Card.js';
 import { Heading } from '../components/Heading/Heading.js';
+import { Input } from '../components/Input.js';
+import { Modal, ModalBody, ModalFooter, ModalHeader } from '../components/Modal/index.js';
 import { Spinner } from '../components/Spinner.js';
-import { ToggleConfirmModal } from '../components/ToggleConfirmModal.js';
-import { type RagBucket } from '../lib/rag-bucket-api.js';
+import { queryBucket } from '../lib/rag-bucket-api.js';
 import { timeAgo } from '../lib/time.js';
 
-export type { RagBucket } from '../lib/rag-bucket-api.js';
+/** A bucket joined with its (possibly still-loading) RAG enablement state. */
+export type RagBucket = {
+  name: string;
+  region: S3Region;
+  enabled: boolean;
+  filesIndexed: number;
+  indexSize: number;
+  lastSyncedAt?: string;
+};
+
+// ---------------------------------------------------------------------------
+// ToggleConfirmModal
+// ---------------------------------------------------------------------------
+
+function ToggleConfirmModal({
+  enabled,
+  pending,
+  open,
+  onClose,
+  onConfirm,
+}: {
+  enabled: boolean;
+  pending: boolean;
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} size="sm">
+      <ModalHeader onClose={onClose}>
+        {enabled ? 'Disable RAG Pipeline?' : 'Enable RAG Pipeline?'}
+      </ModalHeader>
+      <ModalBody>
+        {enabled ? (
+          <p className="text-sm text-zinc-600">
+            Indexing will stop and this bucket will no longer be queryable via the API. Your
+            documents and existing index data are not deleted.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+              <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
+                Pricing
+              </p>
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-6">
+                  <span className="text-sm text-zinc-600">Per TB stored (with indexing)</span>
+                  <span className="flex-shrink-0 text-sm font-semibold text-zinc-900">
+                    $15 / TB / month
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-6">
+                  <span className="text-sm text-zinc-600">LLM / embedding costs</span>
+                  <span className="flex-shrink-0 text-sm font-semibold text-zinc-900">
+                    Included
+                  </span>
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-zinc-500">Disable at any time.</p>
+          </div>
+        )}
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="ghost" size="md" onClick={onClose} disabled={pending}>
+          Cancel
+        </Button>
+        <Button
+          variant={enabled ? 'destructive' : 'primary'}
+          size="md"
+          onClick={onConfirm}
+          disabled={pending}
+        >
+          {enabled ? 'Disable' : 'Enable'}
+        </Button>
+      </ModalFooter>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BucketActionMenu
+// ---------------------------------------------------------------------------
+
+function BucketActionMenu({ onDisable }: { onDisable: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, right: 0 });
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  function handleOpen() {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    }
+    setOpen((o) => !o);
+  }
+
+  return (
+    <div className="relative inline-block">
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-label="Bucket actions"
+        onClick={handleOpen}
+        className="rounded p-1.5 text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+      >
+        <DotsThreeIcon weight="bold" width={18} height={18} aria-hidden="true" />
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          style={{ top: pos.top, right: pos.right }}
+          className="fixed z-50 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onDisable();
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+          >
+            <ProhibitIcon size={14} />
+            Disable
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BucketDrawer — Query Playground
+// ---------------------------------------------------------------------------
+
+function QuerySources({ bucket, sources }: { bucket: RagBucket; sources: string[] }) {
+  if (sources.length === 0) return null;
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5 border-t border-zinc-100 pt-3">
+      {sources.map((source) => (
+        <Link
+          key={source}
+          to="/buckets/$bucketName/objects"
+          params={{ bucketName: bucket.name }}
+          search={{ key: source, region: bucket.region }}
+          title={source}
+          className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-[11px] text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900"
+        >
+          {source.split('/').pop() ?? source}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function QueryAnswer({
+  bucket,
+  question,
+  isPending,
+  isError,
+  error,
+  result,
+}: {
+  bucket: RagBucket;
+  question: string | null;
+  isPending: boolean;
+  isError: boolean;
+  error: unknown;
+  result: QueryBucketResponse | undefined;
+}) {
+  if (!((isPending && question) || isError || result)) return null;
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-100 bg-zinc-50/50 p-4">
+      {question && <p className="mb-3 text-xs italic text-zinc-400">"{question}"</p>}
+      {isPending ? (
+        <div className="space-y-2.5" aria-label="Loading answer">
+          <div className="h-2 w-3/4 animate-pulse rounded-full bg-zinc-200" />
+          <div className="h-2 w-full animate-pulse rounded-full bg-zinc-200" />
+          <div className="h-2 w-5/6 animate-pulse rounded-full bg-zinc-200" />
+          <div className="h-2 w-2/3 animate-pulse rounded-full bg-zinc-200" />
+        </div>
+      ) : isError ? (
+        <Alert
+          variant="red"
+          description={error instanceof Error ? error.message : 'Something went wrong. Try again.'}
+        />
+      ) : result ? (
+        <>
+          <p className="text-sm leading-relaxed text-zinc-700">{result.answer}</p>
+          <QuerySources bucket={bucket} sources={result.sources} />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function BucketDrawer({ bucket, onClose }: { bucket: RagBucket; onClose: () => void }) {
+  const [input, setInput] = useState('');
+  const [question, setQuestion] = useState<string | null>(null);
+  const [visible, setVisible] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  const queryMutation = useMutation({
+    mutationFn: (q: string) => queryBucket(bucket.name, q),
+  });
+
+  useEffect(() => {
+    requestAnimationFrame(() => setVisible(true));
+  }, []);
+
+  function handleClose() {
+    setClosing(true);
+    setTimeout(onClose, 200);
+  }
+
+  function handleAsk() {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    setQuestion(trimmed);
+    setInput('');
+    queryMutation.mutate(trimmed);
+  }
+
+  const shown = visible && !closing;
+  const { isPending, isError, error, data: result } = queryMutation;
+
+  return (
+    <>
+      <div
+        className={`fixed inset-0 z-30 transition-opacity duration-200 ${shown ? 'opacity-100' : 'opacity-0'}`}
+        onClick={handleClose}
+      />
+      <div
+        className={`fixed inset-y-0 right-0 z-40 flex w-[460px] flex-col border-l border-zinc-200 bg-white shadow-2xl transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
+      >
+        {/* Header */}
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-zinc-100 px-5 py-4">
+          <div className="flex items-center gap-2.5">
+            <span className="h-2 w-2 rounded-full bg-green-500" />
+            <span className="text-sm font-semibold text-zinc-900">{bucket.name}</span>
+          </div>
+          <button
+            onClick={handleClose}
+            aria-label="Close"
+            className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
+          >
+            <XIcon size={16} weight="bold" />
+          </button>
+        </div>
+
+        {/* Stats bar */}
+        <div className="flex flex-shrink-0 items-center gap-4 border-b border-zinc-100 bg-zinc-50/60 px-5 py-2.5 text-xs text-zinc-500">
+          <span>
+            <span className="font-medium text-zinc-800">
+              {bucket.filesIndexed.toLocaleString()}
+            </span>{' '}
+            files
+          </span>
+          <span className="text-zinc-300">·</span>
+          <span className="font-medium text-zinc-800">{formatBytes(bucket.indexSize)}</span>
+          <span className="text-zinc-300">·</span>
+          <span>
+            {bucket.lastSyncedAt ? (
+              <>
+                Last synced{' '}
+                <span className="font-medium text-zinc-800">{timeAgo(bucket.lastSyncedAt)}</span>
+              </>
+            ) : (
+              'Not yet synced'
+            )}
+          </span>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto">
+          {/* Ask section */}
+          <div className="px-5 py-5">
+            <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
+              Ask a question
+            </p>
+            <div className="flex gap-2">
+              <Input
+                placeholder={`Ask about ${bucket.name}…`}
+                value={input}
+                onChange={setInput}
+                className="flex-1"
+              />
+              <Button variant="primary" size="sm" disabled={!input.trim()} onClick={handleAsk}>
+                Ask
+              </Button>
+            </div>
+            <QueryAnswer
+              bucket={bucket}
+              question={question}
+              isPending={isPending}
+              isError={isError}
+              error={error}
+              result={result}
+            />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // BucketRow
