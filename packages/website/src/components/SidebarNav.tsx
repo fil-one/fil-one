@@ -14,13 +14,11 @@ import {
   ChatTeardropDotsIcon,
   RobotIcon,
 } from '@phosphor-icons/react/dist/ssr';
-import { useQuery } from '@tanstack/react-query';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
-import { DOCS_URL, SubscriptionStatus, getUsageLimits, formatBytes } from '@filone/shared';
-import { getBilling, getMe, getUsage, logout } from '../lib/api.js';
-import { queryKeys } from '../lib/query-client.js';
-import { daysUntil, formatDateTime } from '../lib/time.js';
+import { DOCS_URL, formatBytes } from '@filone/shared';
+import { logout } from '../lib/api.js';
+import { useSidebarData } from './use-sidebar-data.js';
 
 import { Button } from './Button.js';
 import { ProgressBar } from './ProgressBar.js';
@@ -30,6 +28,8 @@ import { Tooltip } from './Tooltip.js';
 type SidebarNavProps = {
   collapsed: boolean;
   onToggle: () => void;
+  onClose?: () => void;
+  showUserProfile?: boolean;
 };
 
 type NavItem = {
@@ -79,9 +79,10 @@ const navGroups: NavGroup[] = [
 type NavLinksProps = {
   collapsed: boolean;
   matchRoute: ReturnType<typeof useMatchRoute>;
+  onClose?: () => void;
 };
 
-function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
+function NavLinks({ collapsed, matchRoute, onClose }: NavLinksProps) {
   return (
     <div className="flex flex-col p-2">
       {navGroups.map((group, gi) => (
@@ -100,6 +101,7 @@ function NavLinks({ collapsed, matchRoute }: NavLinksProps) {
                   to={path}
                   data-testid={testId}
                   aria-label={label}
+                  onClick={onClose}
                   className={[
                     'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
                     collapsed ? 'justify-center' : '',
@@ -133,7 +135,7 @@ const utilityNavItems: NavItem[] = [
   { path: '/settings', icon: GearIcon, label: 'Settings', testId: 'nav-settings' },
 ];
 
-function UtilityNavLinks({ collapsed, matchRoute }: NavLinksProps) {
+function UtilityNavLinks({ collapsed, matchRoute, onClose }: NavLinksProps) {
   return (
     <div className="p-2 flex flex-col gap-0.5">
       {utilityNavItems.map(({ path, icon: Icon, label, testId }) => {
@@ -144,6 +146,7 @@ function UtilityNavLinks({ collapsed, matchRoute }: NavLinksProps) {
             to={path}
             data-testid={testId}
             aria-label={label}
+            onClick={onClose}
             className={[
               'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
               collapsed ? 'justify-center' : '',
@@ -263,6 +266,7 @@ export type HelpMenuProps = {
   helpMenuRef: React.RefObject<HTMLDivElement | null>;
   helpButtonRef: React.RefObject<HTMLButtonElement | null>;
   onToggle: () => void;
+  onClose?: () => void;
 };
 
 export function HelpMenu({
@@ -271,6 +275,7 @@ export function HelpMenu({
   helpMenuRef,
   helpButtonRef,
   onToggle,
+  onClose,
 }: HelpMenuProps) {
   return (
     <div className="relative">
@@ -306,6 +311,7 @@ export function HelpMenu({
             href={DOCS_URL}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={onClose}
             className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
           >
             <BookOpenIcon size={18} className="flex-shrink-0 text-zinc-400" />
@@ -313,6 +319,7 @@ export function HelpMenu({
           </a>
           <Link
             to="/support"
+            onClick={onClose}
             className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
           >
             <ChatCircleIcon size={18} className="flex-shrink-0 text-zinc-400" />
@@ -324,7 +331,12 @@ export function HelpMenu({
   );
 }
 
-export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
+export function SidebarNav({
+  collapsed,
+  onToggle,
+  onClose,
+  showUserProfile = true,
+}: SidebarNavProps) {
   const matchRoute = useMatchRoute();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -333,38 +345,21 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const helpMenuRef = useRef<HTMLDivElement>(null);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
 
-  const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
-  const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
-  const { data: usage } = useQuery({ queryKey: queryKeys.usage, queryFn: getUsage });
-
-  const displayName = me?.name || me?.email || 'User';
-  const initial = displayName.charAt(0).toUpperCase();
-
-  const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
-  const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
-  const trialDays =
-    isTrialing && billing?.subscription.trialEndsAt
-      ? daysUntil(billing.subscription.trialEndsAt)
-      : null;
-  const trialEndsLabel = billing?.subscription.trialEndsAt
-    ? `Expires ${formatDateTime(billing.subscription.trialEndsAt)}`
-    : undefined;
-  const graceDays = billing?.subscription.gracePeriodEndsAt
-    ? daysUntil(billing.subscription.gracePeriodEndsAt)
-    : null;
-  const graceEndsLabel = billing?.subscription.gracePeriodEndsAt
-    ? `Expires ${formatDateTime(billing.subscription.gracePeriodEndsAt)}`
-    : undefined;
-  const isActivePaid = billing?.subscription.status === SubscriptionStatus.Active;
-  const limits = getUsageLimits(!!isActivePaid);
-  const storageUsed = usage?.storage.usedBytes ?? 0;
-  const storagePct =
-    limits.storageLimitBytes > 0
-      ? Math.min(100, (storageUsed / limits.storageLimitBytes) * 100)
-      : 0;
-  const egressUsed = usage?.egress.usedBytes ?? 0;
-  const egressPct =
-    limits.egressLimitBytes > 0 ? Math.min(100, (egressUsed / limits.egressLimitBytes) * 100) : 0;
+  const {
+    me,
+    displayName,
+    initial,
+    isTrialing,
+    isPastDue,
+    trialDays,
+    trialEndsLabel,
+    graceDays,
+    graceEndsLabel,
+    storageUsed,
+    storagePct,
+    egressUsed,
+    egressPct,
+  } = useSidebarData();
 
   useEffect(() => {
     if (!userMenuOpen && !helpMenuOpen) return;
@@ -394,10 +389,12 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
 
   return (
     <div className="h-full">
-      <nav className="relative flex h-full flex-col border-r border-zinc-200 bg-white">
-        {/* Expand toggle (collapsed) — centered on the sidebar's right border */}
-        {collapsed && (
-          <div className="absolute -right-3 top-7 z-10 -translate-y-1/2">
+      <nav
+        className={`relative flex h-full flex-col border-zinc-200 bg-white ${showUserProfile ? 'border-r' : 'border-l'}`}
+      >
+        {/* Expand toggle (collapsed) — desktop only */}
+        {showUserProfile && collapsed && (
+          <div className="absolute -right-3 top-7 z-10 hidden -translate-y-1/2 lg:block">
             <Tooltip content="Expand sidebar" side="right">
               <button
                 type="button"
@@ -411,77 +408,79 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
           </div>
         )}
 
-        {/* User profile + collapse toggle */}
-        <div className="relative flex h-14 flex-shrink-0 items-center px-2">
-          <button
-            ref={userButtonRef}
-            type="button"
-            data-testid="user-profile"
-            onClick={() => setUserMenuOpen((o) => !o)}
-            className={[
-              'flex items-center rounded-lg hover:bg-zinc-100',
-              collapsed ? 'w-full justify-center py-1.5' : 'gap-2.5 px-2 py-1.5',
-            ].join(' ')}
-          >
-            <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">
-              {initial}
-            </span>
-            {!collapsed && (
-              <div className="min-w-0 overflow-hidden text-left">
-                <p className="truncate text-sm font-medium leading-tight text-zinc-900">
-                  {displayName}
-                </p>
-                {me?.orgName && (
-                  <p className="truncate text-xs leading-tight text-zinc-500">{me.orgName}</p>
-                )}
-              </div>
-            )}
-          </button>
+        {/* User profile + collapse toggle (desktop only) */}
+        {showUserProfile && (
+          <div className="relative flex h-14 flex-shrink-0 items-center px-2">
+            <button
+              ref={userButtonRef}
+              type="button"
+              data-testid="user-profile"
+              onClick={() => setUserMenuOpen((o) => !o)}
+              className={[
+                'flex items-center rounded-lg hover:bg-zinc-100',
+                collapsed ? 'w-full justify-center py-1.5' : 'gap-2.5 px-2 py-1.5',
+              ].join(' ')}
+            >
+              <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">
+                {initial}
+              </span>
+              {!collapsed && (
+                <div className="min-w-0 overflow-hidden text-left">
+                  <p className="truncate text-sm font-medium leading-tight text-zinc-900">
+                    {displayName}
+                  </p>
+                  {me?.orgName && (
+                    <p className="truncate text-xs leading-tight text-zinc-500">{me.orgName}</p>
+                  )}
+                </div>
+              )}
+            </button>
 
-          {/* Spacer + collapse toggle (expanded only) */}
-          {!collapsed && (
-            <>
-              <div className="flex-1" />
-              <Tooltip content="Collapse sidebar" side="right">
+            {/* Spacer + collapse toggle (expanded) */}
+            {!collapsed && (
+              <>
+                <div className="flex-1" />
+                <Tooltip content="Collapse sidebar" side="right">
+                  <button
+                    type="button"
+                    onClick={onToggle}
+                    aria-label="Collapse sidebar"
+                    className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+                  >
+                    <CaretLeftIcon size={16} />
+                  </button>
+                </Tooltip>
+              </>
+            )}
+
+            {/* User dropdown */}
+            {userMenuOpen && (
+              <div
+                ref={userMenuRef}
+                className="absolute left-2 top-14 z-50 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg"
+              >
                 <button
                   type="button"
-                  onClick={onToggle}
-                  aria-label="Collapse sidebar"
-                  className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+                  id="user-menu-logout-button"
+                  onClick={logout}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
                 >
-                  <CaretLeftIcon size={16} />
+                  <SignOutIcon size={18} className="flex-shrink-0 text-zinc-400" />
+                  Log out
                 </button>
-              </Tooltip>
-            </>
-          )}
-
-          {/* User dropdown */}
-          {userMenuOpen && (
-            <div
-              ref={userMenuRef}
-              className="absolute left-2 top-14 z-50 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg"
-            >
-              <button
-                type="button"
-                id="user-menu-logout-button"
-                onClick={logout}
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
-              >
-                <SignOutIcon size={18} className="flex-shrink-0 text-zinc-400" />
-                Log out
-              </button>
-            </div>
-          )}
-        </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Primary nav items */}
-        <NavLinks collapsed={collapsed} matchRoute={matchRoute} />
+        <NavLinks collapsed={collapsed} matchRoute={matchRoute} onClose={onClose} />
 
         {/* Spacer */}
         <div className="flex-1" />
 
         {/* Bottom utility nav */}
-        <UtilityNavLinks collapsed={collapsed} matchRoute={matchRoute} />
+        <UtilityNavLinks collapsed={collapsed} matchRoute={matchRoute} onClose={onClose} />
 
         {/* Status banners */}
         <StatusBanners
@@ -506,6 +505,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
             helpMenuRef={helpMenuRef}
             helpButtonRef={helpButtonRef}
             onToggle={() => setHelpMenuOpen((o) => !o)}
+            onClose={onClose}
           />
           <StatusIndicator collapsed={collapsed} />
         </div>
