@@ -76,6 +76,7 @@ export function BucketsPage() {
           Buckets
         </Heading>
         <Button
+          id="buckets-create-button"
           variant="ghost"
           size="sm"
           icon={PlusIcon}
@@ -93,6 +94,7 @@ export function BucketsPage() {
           description="Create your first bucket to start storing objects"
         >
           <Button
+            id="buckets-empty-create-button"
             variant="primary"
             icon={PlusIcon}
             onClick={() => navigate({ to: '/buckets/create' })}
@@ -114,12 +116,17 @@ export function BucketsPage() {
           </Table.Header>
           <Table.Body>
             {buckets.map((bucket) => (
-              <Table.Row key={bucket.bucketName}>
+              <Table.Row
+                key={bucket.bucketName}
+                data-testid="bucket-row"
+                data-bucket-name={bucket.bucketName}
+              >
                 <Table.Cell>
                   <Link
                     to="/buckets/$bucketName"
                     params={{ bucketName: bucket.bucketName }}
                     search={{ region: bucket.region as S3Region }}
+                    data-testid="bucket-link"
                     className="font-medium text-zinc-900 hover:text-brand-600"
                   >
                     {bucket.bucketName}

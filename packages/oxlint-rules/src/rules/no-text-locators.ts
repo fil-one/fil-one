@@ -31,8 +31,15 @@ export const noTextLocators = defineRule({
           node,
           message:
             `Avoid \`${name}\` in E2E tests — it's brittle to copy/i18n changes. ` +
-            `Add an \`id\` attribute to the target element and use \`page.locator('#some-id')\` instead. ` +
-            `If adding an id isn't feasible, use \`getByTestId\`.`,
+            `Add a stable identifier to the front-end element instead:\n` +
+            `  • For page-unique singletons (headings, primary/submit buttons, inputs), add an ` +
+            `\`id\` and use \`page.locator('#some-id')\` — e.g. the existing \`#bucket-name\` / ` +
+            `\`#key-name\` inputs.\n` +
+            `  • For repeated or dynamically-rendered elements and reusable components (table ` +
+            `rows, nav items, status badges, toasts), add a \`data-testid\` and use ` +
+            `\`page.getByTestId('...')\`. Add a \`data-*\` value attribute (e.g. ` +
+            `\`data-object-key\`, \`data-status\`) to select one specific instance, e.g. ` +
+            `\`page.locator('[data-object-key="..."]')\`.`,
         });
       },
     };

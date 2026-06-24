@@ -432,6 +432,7 @@ export function ApiKeysPage() {
     <div className="px-10 pt-10">
       <div className="mb-6 flex items-center justify-between">
         <Heading
+          id="api-keys-heading"
           tag="h1"
           size="xl"
           description="Manage credentials and connect via S3-compatible API"
@@ -439,6 +440,7 @@ export function ApiKeysPage() {
           API Keys
         </Heading>
         <Button
+          id="api-keys-create-button"
           variant="ghost"
           size="sm"
           icon={PlusIcon}
@@ -450,8 +452,8 @@ export function ApiKeysPage() {
 
       <Tabs>
         <TabList>
-          <Tab>API keys {keys.length > 0 && `(${keys.length})`}</Tab>
-          <Tab>Connection details</Tab>
+          <Tab testId="api-keys-tab">API keys {keys.length > 0 && `(${keys.length})`}</Tab>
+          <Tab testId="connection-details-tab">Connection details</Tab>
         </TabList>
 
         <TabPanels>

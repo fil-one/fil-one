@@ -12,6 +12,7 @@ import {
   SignOutIcon,
   QuestionIcon,
   ChatTeardropDotsIcon,
+  RobotIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
@@ -35,6 +36,7 @@ type NavItem = {
   path: string;
   icon: React.ElementType;
   label: string;
+  testId: string;
 };
 
 type NavGroup = {
@@ -44,19 +46,32 @@ type NavGroup = {
 
 const navGroups: NavGroup[] = [
   {
-    items: [{ path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard' }],
+    items: [
+      { path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard', testId: 'nav-dashboard' },
+    ],
   },
   {
     label: 'Storage',
     items: [
-      { path: '/buckets', icon: DatabaseIcon, label: 'Buckets' },
-      { path: '/api-keys', icon: KeyIcon, label: 'API Keys' },
+      { path: '/buckets', icon: DatabaseIcon, label: 'Buckets', testId: 'nav-buckets' },
+      { path: '/api-keys', icon: KeyIcon, label: 'API Keys', testId: 'nav-api-keys' },
     ],
   },
   {
     label: 'AI Tools',
     items: [
-      { path: '/bucket-intelligence', icon: ChatTeardropDotsIcon, label: 'Bucket Intelligence' },
+      {
+        path: '/bucket-intelligence',
+        icon: ChatTeardropDotsIcon,
+        label: 'Bucket Intelligence',
+        testId: 'nav-bucket-intelligence',
+      },
+      {
+        path: '/ai-agent-toolkit',
+        icon: RobotIcon,
+        label: 'AI Agent Toolkit',
+        testId: 'nav-ai-agent-toolkit',
+      },
     ],
   },
 ];
@@ -78,12 +93,13 @@ function NavLinks({ collapsed, matchRoute, onClose }: NavLinksProps) {
             </p>
           )}
           <div className="flex flex-col gap-0.5">
-            {group.items.map(({ path, icon: Icon, label }) => {
+            {group.items.map(({ path, icon: Icon, label, testId }) => {
               const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
               const link = (
                 <Link
                   key={path}
                   to={path}
+                  data-testid={testId}
                   aria-label={label}
                   onClick={onClose}
                   className={[
@@ -115,19 +131,20 @@ function NavLinks({ collapsed, matchRoute, onClose }: NavLinksProps) {
 }
 
 const utilityNavItems: NavItem[] = [
-  { path: '/billing', icon: CreditCardIcon, label: 'Billing' },
-  { path: '/settings', icon: GearIcon, label: 'Settings' },
+  { path: '/billing', icon: CreditCardIcon, label: 'Billing', testId: 'nav-billing' },
+  { path: '/settings', icon: GearIcon, label: 'Settings', testId: 'nav-settings' },
 ];
 
 function UtilityNavLinks({ collapsed, matchRoute, onClose }: NavLinksProps) {
   return (
     <div className="p-2 flex flex-col gap-0.5">
-      {utilityNavItems.map(({ path, icon: Icon, label }) => {
+      {utilityNavItems.map(({ path, icon: Icon, label, testId }) => {
         const isActive = Boolean(matchRoute({ to: path }));
         const link = (
           <Link
             key={path}
             to={path}
+            data-testid={testId}
             aria-label={label}
             onClick={onClose}
             className={[
@@ -207,7 +224,13 @@ function StatusBanners({
               </div>
             </div>
             <div className="mt-3">
-              <Button variant="ghost" size="sm" href="/billing" className="w-full justify-center">
+              <Button
+                id="sidebar-upgrade-button"
+                variant="ghost"
+                size="sm"
+                href="/billing"
+                className="w-full justify-center"
+              >
                 Upgrade
               </Button>
             </div>
@@ -222,7 +245,12 @@ function StatusBanners({
             {graceDays !== null ? ` ${graceDays} days remaining.` : ''}
           </p>
           <div className="mt-3">
-            <Button variant="primary" href="/billing" className="w-full justify-center text-xs">
+            <Button
+              id="sidebar-update-payment-button"
+              variant="primary"
+              href="/billing"
+              className="w-full justify-center text-xs"
+            >
               Update payment
             </Button>
           </div>
@@ -433,6 +461,7 @@ export function SidebarNav({
               >
                 <button
                   type="button"
+                  id="user-menu-logout-button"
                   onClick={logout}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
                 >

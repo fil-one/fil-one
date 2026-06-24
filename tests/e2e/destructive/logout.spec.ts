@@ -12,12 +12,10 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
   const page = await context.newPage();
 
   await page.goto('/dashboard');
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await expect(page.getByText('Dashboard')).toBeVisible();
+  await expect(page.locator('#dashboard-heading')).toBeVisible();
 
   await page.getByTestId('user-profile').click();
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await page.getByRole('button', { name: 'Log out' }).click();
+  await page.locator('#user-menu-logout-button').click();
 
   // Wait for the full /logout -> Auth0 /v2/logout -> returnTo chain to settle.
   await page.waitForURL(/^https:\/\/fil\.one\/?$/, { timeout: 30_000 });

@@ -144,6 +144,9 @@ importers:
       '@middy/http-header-normalizer':
         specifier: ^7.2.2
         version: 7.2.2
+      disposable-domains:
+        specifier: ^2.0.1
+        version: 2.0.1
       jose:
         specifier: ^6.2.2
         version: 6.2.2
@@ -3272,6 +3275,9 @@ packages:
     resolution: {integrity: sha512-vtcDfH3TOjP8UekytvnHH1o1P4FcUdt4eQ1Y+Abap1tk/OB2MWQvcwS2ClCd1zuIhc3JKOx6p3kod8Vfys3E+A==}
     engines: {node: '>=0.3.1'}
 
+  disposable-domains@2.0.1:
+    resolution: {integrity: sha512-HHFOvipnCiPKQyFRClxViWYHoeLVYYdBXecpJ59MzdYtlxvC/u/eFJW+ZIGw8Lk01Fp+kmUlxJPwgaRudtqJCQ==}
+
   doctrine@3.0.0:
     resolution: {integrity: sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w==}
     engines: {node: '>=6.0.0'}
@@ -3782,6 +3788,9 @@ packages:
 
   lodash.camelcase@4.3.0:
     resolution: {integrity: sha512-TwuEnCnxbc3rAvhf/LbG7tJUDzhqXyFnv3dtzLOPgCG/hODL7WFnsbwktkD7yUV0RrreP/l1PALq/YSg6VvjlA==}
+
+  lodash@4.18.1:
+    resolution: {integrity: sha512-dMInicTPVE8d1e5otfwmmjlxkZoUpiVLwyeTdUsi/Caj/gfzzblBcCE5sRHV/AsjuCmxWrte2TNGSYuCeCq+0Q==}
 
   log-update@6.1.0:
     resolution: {integrity: sha512-9ie8ItPR6tjY5uYJh8K/Zrv/RMZ5VOlOWvtZdEHYSTFKZfIBPQa9tOAEeAWhd+AnIneLJ22w5fjOYtoutpWq5w==}
@@ -4705,6 +4714,9 @@ packages:
   tmp@0.2.5:
     resolution: {integrity: sha512-voyz6MApa1rQGUxT3E+BK7/ROe8itEx7vD8/HEvt4xwXucvQ5G5oeEiHkmHZJuBO21RpOf+YYm9MOivj709jow==}
     engines: {node: '>=14.14'}
+
+  top-level-domains@1.0.10:
+    resolution: {integrity: sha512-dMFXw9iNF6wkfjuaEubHFgm9V5w7FJ63JJNnF4w0s1MASQc1JBNgORLnIfFgpus2abUGaQn2cTjqVj9+VKEozg==}
 
   totalist@3.0.1:
     resolution: {integrity: sha512-sf4i37nQ2LBx4m3wB74y+ubopq6W/dIzXg0FDGjsYnZHVa1Da8FH853wlL2gtUhg+xJXjfk3kUZS3BRoQeoQBQ==}
@@ -8511,6 +8523,12 @@ snapshots:
 
   diff@5.2.2: {}
 
+  disposable-domains@2.0.1:
+    dependencies:
+      lodash: 4.18.1
+      top-level-domains: 1.0.10
+      validator: 13.15.26
+
   doctrine@3.0.0:
     dependencies:
       esutils: 2.0.3
@@ -9006,6 +9024,8 @@ snapshots:
       p-locate: 5.0.0
 
   lodash.camelcase@4.3.0: {}
+
+  lodash@4.18.1: {}
 
   log-update@6.1.0:
     dependencies:
@@ -9980,6 +10000,8 @@ snapshots:
       tldts-core: 7.0.26
 
   tmp@0.2.5: {}
+
+  top-level-domains@1.0.10: {}
 
   totalist@3.0.1: {}
 

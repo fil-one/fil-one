@@ -4,7 +4,11 @@ import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { MeResponse } from '@filone/shared';
 import { getOrgProfile } from '../lib/org-profile.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
-import { getConnectionType, getMfaEnrollments } from '../lib/auth0-management.js';
+import {
+  getConnectionType,
+  getMfaEnrollments,
+  getPasskeyAuthenticators,
+} from '../lib/auth0-management.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -14,15 +18,15 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   const { orgId, email, emailVerified, sub, name, picture } = getUserInfo(event);
 
   const includeMfa = event.queryStringParameters?.include === 'mfa';
+  const connectionType = getConnectionType(sub);
 
-  const [orgProfile, enrollments] = await Promise.all([
+  const [orgProfile, enrollments, passkeys] = await Promise.all([
     getOrgProfile(orgId),
     includeMfa ? getMfaEnrollments(sub) : Promise.resolve([]),
+    includeMfa && connectionType === 'auth0' ? getPasskeyAuthenticators(sub) : Promise.resolve([]),
   ]);
 
   const orgName = orgProfile?.name?.S ?? '';
-
-  const connectionType = getConnectionType(sub);
 
   const body: MeResponse = {
     orgId,
@@ -36,6 +40,13 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       name: e.name,
       ...(e.enrolled_at && { createdAt: e.enrolled_at }),
     })),
+    ...(includeMfa && {
+      passkeys: passkeys.map((p) => ({
+        id: p.id,
+        name: p.name,
+        ...(p.created_at && { createdAt: p.created_at }),
+      })),
+    }),
     picture,
     connectionType,
   };

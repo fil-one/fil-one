@@ -2,9 +2,14 @@ import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { Resource } from 'sst';
-import { GB_BYTES, TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT, formatBytes } from '@filone/shared';
+import {
+  GB_BYTES,
+  TRIAL_STORAGE_LIMIT,
+  TRIAL_EGRESS_LIMIT,
+  formatBytes,
+  TenantStatus,
+} from '@filone/shared';
 import { getStripeClient, updateCustomerMetadata } from '../lib/stripe-client.js';
-import type { TenantStatus } from '../lib/service-orchestrator.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
 import {
   calculateAverageUsage,
