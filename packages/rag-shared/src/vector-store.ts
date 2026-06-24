@@ -13,9 +13,10 @@ export interface EnsureIndexOptions {
 /**
  * Store-agnostic abstraction over a vector database used by the RAG feature.
  *
- * There is one index per RAG-enabled bucket; the `bucketName` argument on every
- * method identifies that index. Implementations map these operations onto a
- * concrete backend (e.g. Amazon S3 Vectors).
+ * There is one index per RAG-enabled bucket. Because S3 bucket names are unique
+ * per region but not globally, the index is identified by the `(region,
+ * bucketName)` pair on every method, not by `bucketName` alone. Implementations
+ * map these operations onto a concrete backend (e.g. Amazon S3 Vectors).
  *
  * Conventions enforced by implementations:
  *   - Vector keys are `${objectKey}#${chunkIndex}`.
@@ -24,27 +25,29 @@ export interface EnsureIndexOptions {
  */
 export interface VectorStore {
   /**
-   * Idempotently create the index for `bucketName`. Calling this when the index
-   * already exists must not throw.
+   * Idempotently create the index for `(region, bucketName)`. Calling this when
+   * the index already exists must not throw.
    */
-  ensureIndex(bucketName: string, options?: EnsureIndexOptions): Promise<void>;
+  ensureIndex(region: string, bucketName: string, options?: EnsureIndexOptions): Promise<void>;
 
   /**
    * Insert or overwrite the given chunks. Each chunk must carry an `embedding`.
    * Rejects a chunk whose serialized metadata exceeds 40KB.
    */
-  upsertChunks(bucketName: string, chunks: VectorStoreChunk[]): Promise<void>;
+  upsertChunks(region: string, bucketName: string, chunks: VectorStoreChunk[]): Promise<void>;
 
   /**
    * Delete vectors by their explicit keys. There is no delete-by-filter path.
    */
-  deleteChunks(bucketName: string, keys: string[]): Promise<void>;
+  deleteChunks(region: string, bucketName: string, keys: string[]): Promise<void>;
 
   /**
-   * k-NN similarity search over the index, returning up to `k` results ordered
-   * by similarity. `filters` are applied against filterable metadata.
+   * k-NN search over the index, returning up to `k` results ordered from closest
+   * to farthest match (lower `score`/distance = more similar). `filters` are
+   * applied against filterable metadata.
    */
   query(
+    region: string,
     bucketName: string,
     embedding: number[],
     k: number,
@@ -52,7 +55,7 @@ export interface VectorStore {
   ): Promise<VectorQueryResult[]>;
 
   /**
-   * Drop the index for `bucketName` and all of its vectors.
+   * Drop the index for `(region, bucketName)` and all of its vectors.
    */
-  dropIndex(bucketName: string): Promise<void>;
+  dropIndex(region: string, bucketName: string): Promise<void>;
 }
