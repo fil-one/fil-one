@@ -37,6 +37,7 @@ function MobileUserMenu() {
     <div className="relative">
       <button
         ref={buttonRef}
+        id="mobile-user-menu-button"
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label={`User menu for ${displayName}`}
@@ -62,6 +63,7 @@ function MobileUserMenu() {
           <button
             type="button"
             role="menuitem"
+            id="mobile-user-menu-logout-button"
             onClick={logout}
             className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
           >
@@ -195,6 +197,7 @@ export function AppShell({ children }: AppShellProps) {
           <div className="flex h-14 flex-shrink-0 items-center justify-end border-b border-zinc-200 px-3">
             <button
               ref={closeButtonRef}
+              id="mobile-nav-close-button"
               type="button"
               onClick={closeDrawer}
               aria-label="Close"
@@ -211,6 +214,7 @@ export function AppShell({ children }: AppShellProps) {
               onToggle={() => {}}
               onClose={closeDrawer}
               showUserProfile={false}
+              showTestIds={false}
             />
           </div>
         </div>
@@ -221,6 +225,7 @@ export function AppShell({ children }: AppShellProps) {
             <MobileUserMenu />
             <button
               ref={hamburgerButtonRef}
+              id="mobile-nav-toggle-button"
               type="button"
               onClick={() => setMobileOpen(true)}
               aria-label="Open navigation menu"
