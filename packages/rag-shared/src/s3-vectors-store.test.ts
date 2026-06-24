@@ -257,6 +257,16 @@ describe('S3VectorsStore', () => {
       expect(results).toEqual([]);
     });
 
+    it('drops a result with the distance field absent (undefined)', async () => {
+      s3vMock.on(QueryVectorsCommand).resolves({
+        vectors: [
+          malformed({ key: 'doc.pdf#0', metadata: { text: 'no score', objectKey: 'doc.pdf' } }),
+        ],
+      });
+      const results = await makeStore().query(REGION, INDEX, embedding(), 5);
+      expect(results).toEqual([]);
+    });
+
     it('keeps valid results and drops the keyless / scoreless ones in the same batch', async () => {
       s3vMock.on(QueryVectorsCommand).resolves({
         vectors: [
