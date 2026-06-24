@@ -15,7 +15,7 @@ export type StatusBannersProps = {
   graceDays: number | null;
   graceEndsLabel: string | undefined;
   isPastDue: boolean;
-  showTestIds?: boolean;
+  showTestIds: boolean;
 };
 
 export function StatusBanners({
@@ -30,7 +30,7 @@ export function StatusBanners({
   graceDays,
   graceEndsLabel,
   isPastDue,
-  showTestIds = true,
+  showTestIds,
 }: StatusBannersProps) {
   return (
     <>

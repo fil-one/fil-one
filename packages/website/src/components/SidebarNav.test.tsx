@@ -48,7 +48,7 @@ vi.mock('../lib/api.js', () => ({ logout: vi.fn() }));
 function renderBothSidebars() {
   return render(
     <>
-      <SidebarNav collapsed={false} onToggle={() => {}} />
+      <SidebarNav collapsed={false} onToggle={() => {}} showTestIds={true} />
       <SidebarNav
         collapsed={false}
         onToggle={() => {}}

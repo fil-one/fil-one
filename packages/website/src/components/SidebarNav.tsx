@@ -31,8 +31,8 @@ type SidebarNavProps = {
   showUserProfile?: boolean;
   // When false, omit page-unique e2e identifiers (ids/data-testids) so the
   // secondary mobile-drawer copy doesn't duplicate the desktop sidebar's
-  // selectors. Defaults to true (the primary desktop sidebar).
-  showTestIds?: boolean;
+  // selectors. The primary desktop sidebar passes true.
+  showTestIds: boolean;
 };
 
 type NavItem = {
@@ -85,10 +85,10 @@ type NavLinksProps = {
   onClose?: () => void;
   // Suppress stable test ids on the secondary (mobile drawer) copy so e2e
   // selectors stay page-unique. See SidebarNav `showTestIds`.
-  showTestIds?: boolean;
+  showTestIds: boolean;
 };
 
-function NavLinks({ collapsed, matchRoute, onClose, showTestIds = true }: NavLinksProps) {
+function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
   return (
     <div className="flex flex-col p-2">
       {navGroups.map((group, gi) => (
@@ -141,7 +141,7 @@ const utilityNavItems: NavItem[] = [
   { path: '/settings', icon: GearIcon, label: 'Settings', testId: 'nav-settings' },
 ];
 
-function UtilityNavLinks({ collapsed, matchRoute, onClose, showTestIds = true }: NavLinksProps) {
+function UtilityNavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
   return (
     <div className="p-2 flex flex-col gap-0.5">
       {utilityNavItems.map(({ path, icon: Icon, label, testId }) => {
@@ -254,7 +254,7 @@ export function SidebarNav({
   onToggle,
   onClose,
   showUserProfile = true,
-  showTestIds = true,
+  showTestIds,
 }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
   const [userMenuOpen, setUserMenuOpen] = useState(false);

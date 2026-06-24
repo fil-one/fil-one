@@ -167,7 +167,11 @@ export function AppShell({ children }: AppShellProps) {
         <div
           className={`hidden flex-shrink-0 transition-all duration-200 lg:block ${collapsed ? 'w-20' : 'w-60'}`}
         >
-          <SidebarNav collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+          <SidebarNav
+            collapsed={collapsed}
+            onToggle={() => setCollapsed((c) => !c)}
+            showTestIds={true}
+          />
         </div>
 
         {/* Mobile drawer backdrop */}
