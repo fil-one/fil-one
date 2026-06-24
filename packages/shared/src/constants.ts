@@ -50,15 +50,14 @@ export function isFoundationEmail(email: string | undefined): boolean {
   return !!email && email.toLowerCase().endsWith(FOUNDATION_EMAIL_DOMAIN);
 }
 
-/** Regions selectable in the given stage. Non-production stages expose
- * `us-east-1` for dogfooding. Production currently restricts selection to `eu-west-1`.
- * `verifiedEmail` is reserved for future early-access gating and should be passed only when verified —
- * see {@link isFoundationEmail}.
+/**
+ * Regions selectable in the given stage. Non-production stages expose
+ * `us-east-1` for dogfooding; in production it is additionally exposed to
+ * Filecoin Foundation users (verified `@fil.org` emails) for early access.
+ * `email` should be passed only when verified — see {@link isFoundationEmail}.
  */
-export function getAvailableRegions(stage: Stage | string, _verifiedEmail?: string): S3Region[] {
-  // Do not enable us-east-1 in production yet, since we don't have the prod FTH account set up yet
-  // if (stage !== Stage.Production || isFoundationEmail(_verifiedEmail)) {
-  if (stage !== Stage.Production) {
+export function getAvailableRegions(stage: Stage | string, email?: string): S3Region[] {
+  if (stage !== Stage.Production || isFoundationEmail(email)) {
     return [S3Region.EuWest1, S3Region.UsEast1];
   }
   return [S3Region.EuWest1];
