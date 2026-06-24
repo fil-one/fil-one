@@ -274,11 +274,11 @@ export function ComingSoonPage({
 
   return (
     <>
-      <div className="px-4 py-8 sm:px-6 lg:px-10 lg:py-12 lg:pb-20">
+      <div className="px-5 pt-6 pb-10 sm:px-8 lg:px-10 lg:pt-10 lg:pb-20">
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-12">
           {/* Hero (col 1, row 1) */}
           <div className="lg:col-start-1 lg:row-start-1">
-            <Heading tag="h1" size="2xl" description={description} className="mb-10">
+            <Heading tag="h1" size="xl" description={description} className="mb-10">
               <span className="inline-flex items-center gap-2.5">
                 {title}
                 <Badge color="grey" size="sm" strength="strong">

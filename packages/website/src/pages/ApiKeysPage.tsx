@@ -7,6 +7,7 @@ import { CopySimpleIcon, DatabaseIcon, PlusIcon } from '@phosphor-icons/react/di
 import { AccessKeysTable } from '../components/AccessKeysTable';
 import { Button } from '../components/Button';
 import { Heading } from '../components/Heading/Heading';
+import { PageLayout } from '../components/PageLayout.js';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Spinner } from '../components/Spinner';
@@ -420,25 +421,23 @@ export function ApiKeysPage() {
 
   if (isError) {
     return (
-      <div className="px-10 pt-10">
+      <PageLayout
+        title="API Keys"
+        description="Manage credentials and connect via S3-compatible API"
+      >
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error?.message ?? 'Failed to load access keys'}
         </div>
-      </div>
+      </PageLayout>
     );
   }
 
   return (
-    <div className="px-10 pt-10">
-      <div className="mb-6 flex items-center justify-between">
-        <Heading
-          id="api-keys-heading"
-          tag="h1"
-          size="xl"
-          description="Manage credentials and connect via S3-compatible API"
-        >
-          API Keys
-        </Heading>
+    <PageLayout
+      title="API Keys"
+      headingId="api-keys-heading"
+      description="Manage credentials and connect via S3-compatible API"
+      action={
         <Button
           id="api-keys-create-button"
           variant="ghost"
@@ -448,8 +447,8 @@ export function ApiKeysPage() {
         >
           Create new key
         </Button>
-      </div>
-
+      }
+    >
       <Tabs>
         <TabList>
           <Tab testId="api-keys-tab">API keys {keys.length > 0 && `(${keys.length})`}</Tab>
@@ -478,6 +477,6 @@ export function ApiKeysPage() {
         description="This access key will be permanently revoked. Any applications using it will lose access immediately."
         confirmLabel="Delete key"
       />
-    </div>
+    </PageLayout>
   );
 }
