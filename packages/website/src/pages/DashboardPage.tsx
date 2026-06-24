@@ -76,7 +76,7 @@ function DashboardSkeleton() {
   return (
     <div className="p-8 animate-pulse">
       <div className="mb-6 h-8 w-40 rounded bg-zinc-200" />
-      <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
         <div className="h-[157px] rounded-xl bg-zinc-100" />
         <div className="h-[157px] rounded-xl bg-zinc-100" />
         <div className="h-[157px] rounded-xl bg-zinc-100" />
@@ -174,7 +174,7 @@ export function DashboardPage() {
   const quickSetupTotal = quickSetupTasks.length;
 
   return (
-    <div className="px-10 pt-10">
+    <div className="px-4 pt-6 sm:px-10 sm:pt-10">
       {/* 1. Page header */}
       <div className="mb-5 flex items-center justify-between">
         <Heading id="dashboard-heading" tag="h1" size="xl">
@@ -193,7 +193,7 @@ export function DashboardPage() {
 
       {/* 2. Trial banner */}
       {isTrialing && trialBannerVisible && (
-        <div className="mb-5 flex items-center justify-between rounded-xl bg-brand-50/60 px-5 py-3.5 shadow-[0px_0px_0px_1px_theme(colors.brand.100)]">
+        <div className="mb-5 flex flex-col gap-3 rounded-xl bg-brand-50/60 px-5 py-3.5 shadow-[0px_0px_0px_1px_theme(colors.brand.100)] sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
             <Badge color="blue" size="sm" strength="strong" description={trialEndsLabel}>
               {trialDaysLeft !== null ? `${trialDaysLeft} days left` : 'TRIAL'}
@@ -206,7 +206,7 @@ export function DashboardPage() {
               </span>
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 self-end sm:self-auto">
             <Button variant="primary" size="sm" href="/billing">
               Upgrade
             </Button>
@@ -231,7 +231,7 @@ export function DashboardPage() {
               {quickSetupDone} of {quickSetupTotal}
             </span>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
             {quickSetupTasks.map(({ id, icon: Icon, title, subtitle, href, done }) => (
               <Link
                 key={id}
@@ -258,9 +258,9 @@ export function DashboardPage() {
       )}
 
       {/* 4. Top row: Plan · Storage · Egress */}
-      <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
         {/* Plan card */}
-        <Card className="flex h-[157px] flex-col justify-between">
+        <Card className="flex flex-col justify-between sm:h-[157px]">
           <div>
             <div className="mb-1 flex items-center justify-between">
               <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
@@ -303,13 +303,13 @@ export function DashboardPage() {
         </Card>
 
         {/* Storage card */}
-        <Card className="flex h-[157px] flex-col justify-between">
+        <Card className="flex flex-col justify-between sm:h-[157px]">
           <div>
             <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-zinc-500">
               STORAGE
             </span>
             <div className="flex items-baseline gap-1.5">
-              <span className="text-[30px] font-medium leading-9 tracking-tight text-zinc-900">
+              <span className="text-xl font-medium text-zinc-900">
                 {formatBytes(usage.storage.usedBytes)}
               </span>
               {isTrialing && <span className="text-[13px] text-zinc-500">/ 1 TB</span>}
@@ -328,13 +328,13 @@ export function DashboardPage() {
         </Card>
 
         {/* Egress card */}
-        <Card className="flex h-[157px] flex-col justify-between">
+        <Card className="flex flex-col justify-between sm:h-[157px]">
           <div>
             <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-zinc-500">
               EGRESS
             </span>
             <div className="flex items-baseline gap-1.5">
-              <span className="text-[30px] font-medium leading-9 tracking-tight text-zinc-900">
+              <span className="text-xl font-medium text-zinc-900">
                 {formatBytes(usage.egress.usedBytes)}
               </span>
               {isTrialing && <span className="text-[13px] text-zinc-500">/ 2 TB</span>}
@@ -351,7 +351,10 @@ export function DashboardPage() {
       </div>
 
       {/* 5. Buckets · Objects · API Keys — single card with vertical dividers */}
-      <Card padding="none" className="mb-5 grid grid-cols-3 divide-x divide-zinc-200">
+      <Card
+        padding="none"
+        className="mb-5 grid grid-cols-1 divide-y divide-zinc-200 lg:grid-cols-3 lg:divide-x lg:divide-y-0"
+      >
         <div className="px-5 py-4">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
