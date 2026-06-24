@@ -5,7 +5,11 @@ import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
 import { CreateBucketSchema, isSupportedRegion, GLOBAL_BUCKET_LIMIT } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getOrgResourceCounts } from '../lib/resource-helpers.js';
-import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
+import {
+  BucketAlreadyExistsError,
+  BucketConfigurationError,
+  ResourceCountUnavailableError,
+} from '../lib/errors.js';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
@@ -48,7 +52,23 @@ export async function baseHandler(
     return unsupportedRegionResponse(region);
   }
 
-  const { bucketCount } = await getOrgResourceCounts(orgId);
+  let bucketCount: number;
+  try {
+    ({ bucketCount } = await getOrgResourceCounts(orgId));
+  } catch (err) {
+    // Fail closed: if we can't read the global count, refuse rather than risk
+    // letting the org exceed its limit. 503 tells the caller to retry.
+    if (err instanceof ResourceCountUnavailableError) {
+      return new ResponseBuilder()
+        .status(503)
+        .body<ErrorResponse>({
+          message:
+            'We could not verify your account limits right now. Please try again in a moment.',
+        })
+        .build();
+    }
+    throw err;
+  }
   if (bucketCount >= GLOBAL_BUCKET_LIMIT) {
     return new ResponseBuilder()
       .status(403)

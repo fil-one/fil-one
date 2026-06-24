@@ -34,7 +34,11 @@ vi.mock('../lib/resource-helpers.js', () => ({
 }));
 
 import { baseHandler } from './create-bucket.js';
-import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
+import {
+  BucketAlreadyExistsError,
+  BucketConfigurationError,
+  ResourceCountUnavailableError,
+} from '../lib/errors.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 import { S3_REGION, S3Region } from '@filone/shared';
 
@@ -69,6 +73,18 @@ describe('create-bucket baseHandler', () => {
     expect(result.statusCode).toBe(403);
     const body = JSON.parse(result.body as string);
     expect(body.message).toContain('100');
+    expect(mockCreateBucket).not.toHaveBeenCalled();
+  });
+
+  it('fails closed with a retryable 503 when the global count is unavailable', async () => {
+    mockGetOrgResourceCounts.mockRejectedValue(new ResourceCountUnavailableError());
+
+    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(503);
+    const body = JSON.parse(result.body as string);
+    expect(body.message).toMatch(/verify your account limits/i);
     expect(mockCreateBucket).not.toHaveBeenCalled();
   });
 

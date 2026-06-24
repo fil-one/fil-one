@@ -7,6 +7,7 @@ vi.mock('./region-helpers.js', () => ({
 }));
 
 import { aggregateResourceCounts, getOrgResourceCounts } from './resource-helpers.js';
+import { ResourceCountUnavailableError } from './errors.js';
 
 function tenantInfo(overrides: Partial<TenantInfo> = {}): TenantInfo {
   return {
@@ -71,7 +72,7 @@ describe('getOrgResourceCounts', () => {
     expect(await getOrgResourceCounts('org-1')).toEqual({ bucketCount: 3, accessKeyCount: 3 });
   });
 
-  it('skips a region whose getTenantInfo rejects and logs the failure', async () => {
+  it('fails closed: throws and logs when any region getTenantInfo rejects', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockGetProvisionedRegions.mockResolvedValue([
       {
@@ -90,9 +91,11 @@ describe('getOrgResourceCounts', () => {
       },
     ]);
 
-    // Only the surviving region counts: buckets 2, keys 3 − 1 reserved = 2.
-    const counts = await getOrgResourceCounts('org-1');
-    expect(counts).toEqual({ bucketCount: 2, accessKeyCount: 2 });
+    // A partial count could under-report usage and let the org exceed its global
+    // limits, so enforcement must refuse rather than proceed on the survivor.
+    await expect(getOrgResourceCounts('org-1')).rejects.toBeInstanceOf(
+      ResourceCountUnavailableError,
+    );
     expect(errorSpy).toHaveBeenCalledTimes(1);
 
     errorSpy.mockRestore();

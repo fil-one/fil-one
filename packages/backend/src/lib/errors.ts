@@ -52,6 +52,18 @@ export class AccessKeyValidationError extends Error {
   }
 }
 
+// Thrown by getOrgResourceCounts when one or more provisioned regions fail to
+// return tenant info. Quota enforcement on the create paths must fail CLOSED: a
+// partial count under-reports usage and would let an org slip past its global
+// limits during a regional outage. The create handlers translate this into a
+// retryable 503 rather than proceeding on an incomplete count.
+export class ResourceCountUnavailableError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('Resource counts are temporarily unavailable; cannot verify global limits', options);
+    this.name = 'ResourceCountUnavailableError';
+  }
+}
+
 export class NotImplementedError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);

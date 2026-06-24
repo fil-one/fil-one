@@ -42,7 +42,7 @@ process.env.FILONE_STAGE = 'test';
 const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './create-access-key.js';
-import { AccessKeyAlreadyExistsError } from '../lib/errors.js';
+import { AccessKeyAlreadyExistsError, ResourceCountUnavailableError } from '../lib/errors.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 // ---------------------------------------------------------------------------
@@ -91,6 +91,18 @@ describe('create-access-key baseHandler', () => {
     expect(result.statusCode).toBe(403);
     const body = JSON.parse(result.body!);
     expect(body.message).toContain('300');
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('fails closed with a retryable 503 when the global count is unavailable', async () => {
+    mockGetOrgResourceCounts.mockRejectedValue(new ResourceCountUnavailableError());
+
+    const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(503);
+    const body = JSON.parse(result.body!);
+    expect(body.message).toMatch(/verify your account limits/i);
     expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 

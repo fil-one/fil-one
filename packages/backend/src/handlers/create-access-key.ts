@@ -13,7 +13,11 @@ import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getOrgResourceCounts } from '../lib/resource-helpers.js';
-import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
+import {
+  AccessKeyAlreadyExistsError,
+  AccessKeyValidationError,
+  ResourceCountUnavailableError,
+} from '../lib/errors.js';
 import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import {
@@ -88,7 +92,23 @@ export async function baseHandler(
     return unsupportedRegionResponse(region);
   }
 
-  const { accessKeyCount } = await getOrgResourceCounts(orgId);
+  let accessKeyCount: number;
+  try {
+    ({ accessKeyCount } = await getOrgResourceCounts(orgId));
+  } catch (err) {
+    // Fail closed: if we can't read the global count, refuse rather than risk
+    // letting the org exceed its limit. 503 tells the caller to retry.
+    if (err instanceof ResourceCountUnavailableError) {
+      return new ResponseBuilder()
+        .status(503)
+        .body<ErrorResponse>({
+          message:
+            'We could not verify your account limits right now. Please try again in a moment.',
+        })
+        .build();
+    }
+    throw err;
+  }
   if (accessKeyCount >= GLOBAL_ACCESS_KEY_LIMIT) {
     return new ResponseBuilder()
       .status(403)

@@ -1,5 +1,6 @@
 import type { TenantInfo } from './service-orchestrator.js';
 import { getProvisionedRegions } from './region-helpers.js';
+import { ResourceCountUnavailableError } from './errors.js';
 
 export interface OrgResourceCounts {
   bucketCount: number;
@@ -20,8 +21,13 @@ export function aggregateResourceCounts(infos: TenantInfo[]): OrgResourceCounts 
 }
 
 /** Current global resource counts for an org across all provisioned regions.
- *  Resilient: a region whose getTenantInfo fails is logged and skipped (mirrors
- *  get-usage). Used by the create handlers to enforce global limits. */
+ *  Fails CLOSED: if ANY provisioned region's getTenantInfo rejects, throws
+ *  ResourceCountUnavailableError instead of returning a partial (under-reported)
+ *  count — otherwise a regional outage would silently let an org bypass its
+ *  global limits. Used by the create handlers, which translate the error into a
+ *  retryable 503. The dashboard (get-usage) deliberately does NOT use this: it
+ *  tolerates partial failures via aggregateResourceCounts so one region's outage
+ *  still renders the rest. */
 export async function getOrgResourceCounts(orgId: string): Promise<OrgResourceCounts> {
   const regions = await getProvisionedRegions(orgId);
   if (regions.length === 0) return { bucketCount: 0, accessKeyCount: 0 };
@@ -31,11 +37,13 @@ export async function getOrgResourceCounts(orgId: string): Promise<OrgResourceCo
   );
 
   const infos: TenantInfo[] = [];
+  let hasFailure = false;
   settled.forEach((result, i) => {
     if (result.status === 'fulfilled') {
       infos.push(result.value);
       return;
     }
+    hasFailure = true;
     console.error('[getOrgResourceCounts] Failed to fetch tenant info', {
       orgId,
       tenantId: regions[i].tenantId,
@@ -43,6 +51,10 @@ export async function getOrgResourceCounts(orgId: string): Promise<OrgResourceCo
       err: result.reason,
     });
   });
+
+  // Fail closed: enforcing a global limit on an incomplete count could let the
+  // org exceed it. Surface a retryable error rather than under-counting.
+  if (hasFailure) throw new ResourceCountUnavailableError();
 
   return aggregateResourceCounts(infos);
 }
