@@ -103,16 +103,16 @@ export default $config({
     // One vector bucket hosts one index per RAG-enabled bucket. The
     // @filone/rag-shared S3VectorsStore reads the bucket name at runtime via
     // Resource.RagVectorBucket.name.
-    const ragVectorBucket = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
+    const ragVectorBucketResource = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
       vectorBucketName: $interpolate`filone-${$app.stage}-rag-vectors`,
     });
 
     // Wrap the raw Pulumi resource so handlers can read it via SST resource
     // linking (Resource.RagVectorBucket.name).
-    const RagVectorBucket = new sst.Linkable('RagVectorBucket', {
+    const ragVectorBucket = new sst.Linkable('RagVectorBucket', {
       properties: {
-        name: ragVectorBucket.vectorBucketName,
-        arn: ragVectorBucket.vectorBucketArn,
+        name: ragVectorBucketResource.vectorBucketName,
+        arn: ragVectorBucketResource.vectorBucketArn,
       },
     });
 
@@ -130,8 +130,8 @@ export default $config({
           's3vectors:DeleteVectors',
         ],
         resources: [
-          ragVectorBucket.vectorBucketArn,
-          $interpolate`${ragVectorBucket.vectorBucketArn}/index/*`,
+          ragVectorBucketResource.vectorBucketArn,
+          $interpolate`${ragVectorBucketResource.vectorBucketArn}/index/*`,
         ],
       },
       {
@@ -408,7 +408,7 @@ export default $config({
       billingTable,
       userInfoTable,
       userFilesBucket,
-      RagVectorBucket,
+      ragVectorBucket,
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
