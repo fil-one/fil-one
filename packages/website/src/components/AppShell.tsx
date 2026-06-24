@@ -83,6 +83,7 @@ export function AppShell({ children }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const hamburgerButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
   const drawerId = useId();
 
   const { data: usage } = useQuery({ queryKey: queryKeys.usage, queryFn: getUsage });
@@ -115,11 +116,31 @@ export function AppShell({ children }: AppShellProps) {
     };
   }, [mobileOpen]);
 
-  // Close drawer on Escape
+  // Close on Escape; trap Tab focus within the drawer while open
   useEffect(() => {
     if (!mobileOpen) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') closeDrawer();
+      if (e.key === 'Escape') {
+        closeDrawer();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const drawer = drawerRef.current;
+      if (!drawer) return;
+      const focusable = drawer.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -149,6 +170,7 @@ export function AppShell({ children }: AppShellProps) {
 
         {/* Mobile drawer backdrop */}
         <div
+          data-testid="drawer-backdrop"
           aria-hidden="true"
           onClick={closeDrawer}
           className={`fixed inset-0 z-30 bg-black/40 transition-opacity duration-200 motion-reduce:duration-0 lg:hidden ${
@@ -158,6 +180,7 @@ export function AppShell({ children }: AppShellProps) {
 
         {/* Mobile drawer */}
         <div
+          ref={drawerRef}
           id={drawerId}
           role="dialog"
           aria-modal="true"
@@ -174,7 +197,7 @@ export function AppShell({ children }: AppShellProps) {
               ref={closeButtonRef}
               type="button"
               onClick={closeDrawer}
-              aria-label="Close navigation menu"
+              aria-label="Close"
               className="-mr-1 flex h-11 w-11 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
             >
               <XIcon size={20} />

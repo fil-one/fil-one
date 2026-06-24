@@ -50,7 +50,7 @@ function getHamburger() {
 }
 
 function getCloseButton() {
-  return screen.getByRole('button', { name: 'Close navigation menu' });
+  return screen.getByRole('button', { name: 'Close' });
 }
 
 function getDrawer() {
@@ -109,7 +109,7 @@ describe('AppShell mobile drawer', () => {
   it('closes drawer when backdrop is clicked', () => {
     renderAppShell();
     fireEvent.click(getHamburger());
-    const backdrop = document.querySelector('[aria-hidden="true"]') as HTMLElement;
+    const backdrop = screen.getByTestId('drawer-backdrop');
     fireEvent.click(backdrop);
     expect(getDrawer().className).toContain('translate-x-full');
   });
@@ -203,6 +203,28 @@ describe('AppShell focus management', () => {
       fireEvent.keyDown(document, { key: 'Escape' });
     });
     expect(document.activeElement).toBe(hamburger);
+  });
+
+  it('wraps focus from last to first element on Tab', async () => {
+    renderAppShell();
+    await act(async () => {
+      fireEvent.click(getHamburger());
+    });
+    const drawerLink = getDrawer().querySelector('a[href="/dashboard"]') as HTMLElement;
+    drawerLink.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(getCloseButton());
+  });
+
+  it('wraps focus from first to last element on Shift+Tab', async () => {
+    renderAppShell();
+    await act(async () => {
+      fireEvent.click(getHamburger());
+    });
+    getCloseButton().focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    const drawerLink = getDrawer().querySelector('a[href="/dashboard"]') as HTMLElement;
+    expect(document.activeElement).toBe(drawerLink);
   });
 });
 

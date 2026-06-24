@@ -283,6 +283,7 @@ export function HelpMenu({
             href={DOCS_URL}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={onClose}
             className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
           >
             <BookOpenIcon size={18} className="flex-shrink-0 text-zinc-400" />
@@ -290,9 +291,7 @@ export function HelpMenu({
           </a>
           <Link
             to="/support"
-            onClick={() => {
-              onClose?.();
-            }}
+            onClick={onClose}
             className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
           >
             <ChatCircleIcon size={18} className="flex-shrink-0 text-zinc-400" />
