@@ -155,18 +155,24 @@ export class S3VectorsStore implements VectorStore {
       }),
     );
 
-    return (response.vectors ?? []).map((vector) => {
-      const metadata = { ...((vector.metadata ?? {}) as Record<string, unknown>) };
-      const text = typeof metadata[TEXT_METADATA] === 'string' ? metadata[TEXT_METADATA] : '';
-      delete metadata[TEXT_METADATA];
+    return (response.vectors ?? [])
+      .map((vector) => {
+        if (!vector.key || vector.distance === null) {
+          return null;
+        }
 
-      return {
-        key: vector.key ?? '',
-        text,
-        metadata,
-        score: vector.distance ?? 0,
-      };
-    });
+        const metadata = { ...((vector.metadata ?? {}) as Record<string, unknown>) };
+        const text = typeof metadata[TEXT_METADATA] === 'string' ? metadata[TEXT_METADATA] : '';
+        delete metadata[TEXT_METADATA];
+
+        return {
+          key: vector.key,
+          text,
+          metadata,
+          score: vector.distance,
+        };
+      })
+      .filter((vector): vector is VectorQueryResult => vector !== null);
   }
 
   async dropIndex(region: string, bucketName: string): Promise<void> {
