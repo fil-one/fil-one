@@ -6,6 +6,7 @@ import {
   type RAGConfigRecord,
   RAGKeys,
 } from './dynamo-records.js';
+import { S3Region } from '@filone/shared';
 
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 
@@ -16,7 +17,7 @@ describe('RAGKeys', () => {
   });
 
   it('builds the per-bucket enablement pk/sk', () => {
-    expect(RAGKeys.bucketPk('bucket-1')).toBe('BUCKET#bucket-1');
+    expect(RAGKeys.bucketPk(S3Region.EuWest1, 'bucket-1')).toBe('BUCKET#eu-west-1#bucket-1');
     expect(RAGKeys.enablementSk()).toBe('RAG');
   });
 
@@ -51,7 +52,7 @@ describe('BucketRAGEnablementRecord', () => {
   it('captures status, telemetry, and settings under BUCKET#{bucketId} / RAG', () => {
     const now = new Date().toISOString();
     const record: BucketRAGEnablementRecord = {
-      pk: RAGKeys.bucketPk('bucket-1'),
+      pk: RAGKeys.bucketPk(S3Region.EuWest1, 'bucket-1'),
       sk: RAGKeys.enablementSk(),
       status: 'active',
       filesIndexed: 12,
@@ -62,7 +63,7 @@ describe('BucketRAGEnablementRecord', () => {
       updatedAt: now,
     };
 
-    expect(record.pk).toBe('BUCKET#bucket-1');
+    expect(record.pk).toBe('BUCKET#eu-west-1#bucket-1');
     expect(record.sk).toBe('RAG');
     expect(record.filesIndexed).toBe(12);
     expect(record.indexSize).toBe(4096);
@@ -74,7 +75,7 @@ describe('BucketRAGEnablementRecord', () => {
     const statuses = ['active', 'disabled', 'paused'] as const;
     for (const status of statuses) {
       const record: BucketRAGEnablementRecord = {
-        pk: RAGKeys.bucketPk('bucket-1'),
+        pk: RAGKeys.bucketPk(S3Region.EuWest1, 'bucket-1'),
         sk: RAGKeys.enablementSk(),
         status,
         filesIndexed: 0,
@@ -90,7 +91,7 @@ describe('BucketRAGEnablementRecord', () => {
 describe('ObjectChunkManifestRecord', () => {
   function makeManifest(objectKey: string, chunkKeys: string[]): ObjectChunkManifestRecord {
     return {
-      pk: RAGKeys.bucketPk('bucket-1'),
+      pk: RAGKeys.bucketPk(S3Region.EuWest1, 'bucket-1'),
       sk: RAGKeys.manifestSk(objectKey),
       objectKey,
       etag: 'etag-abc',
