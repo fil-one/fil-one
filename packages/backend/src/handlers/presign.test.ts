@@ -559,7 +559,7 @@ describe('presign baseHandler', () => {
       expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
     });
 
-    it.skip('accepts us-east-1 in production for a verified Foundation email', async () => {
+    it('accepts us-east-1 in production for a verified Foundation email', async () => {
       vi.stubEnv('FILONE_STAGE', 'production');
       mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
       const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
