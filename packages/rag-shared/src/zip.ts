@@ -92,18 +92,25 @@ export function readZip(bytes: Uint8Array): Map<string, Uint8Array> {
     throw new Error('Malformed ZIP: end-of-central-directory record not found');
   }
 
-  const entryCount = buffer.readUInt16LE(eocd + 10);
-  let offset = buffer.readUInt32LE(eocd + 16);
+  try {
+    const entryCount = buffer.readUInt16LE(eocd + 10);
+    let offset = buffer.readUInt32LE(eocd + 16);
 
-  const entries = new Map<string, Uint8Array>();
-  for (let i = 0; i < entryCount; i++) {
-    if (buffer.readUInt32LE(offset) !== CENTRAL_DIRECTORY_HEADER) {
-      throw new Error('Malformed ZIP: bad central-directory header');
+    const entries = new Map<string, Uint8Array>();
+    for (let i = 0; i < entryCount; i++) {
+      if (buffer.readUInt32LE(offset) !== CENTRAL_DIRECTORY_HEADER) {
+        throw new Error('Malformed ZIP: bad central-directory header');
+      }
+      const { entry, next } = readCentralEntry(buffer, offset);
+      entries.set(entry.name, entry.data);
+      offset = next;
     }
-    const { entry, next } = readCentralEntry(buffer, offset);
-    entries.set(entry.name, entry.data);
-    offset = next;
-  }
 
-  return entries;
+    return entries;
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw new Error('Malformed ZIP: truncated archive or invalid offsets');
+    }
+    throw error;
+  }
 }
