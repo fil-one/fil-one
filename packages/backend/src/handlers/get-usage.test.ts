@@ -75,7 +75,7 @@ describe('get-usage baseHandler', () => {
       egress: { usedBytes: 1500 },
       buckets: { count: 2, limit: 100 },
       objects: { count: 3 },
-      accessKeys: { count: 2, limit: 298 },
+      accessKeys: { count: 2, limit: 300 },
     });
   });
 
@@ -88,7 +88,7 @@ describe('get-usage baseHandler', () => {
 
     const body = await run();
 
-    expect(body.accessKeys).toEqual({ count: 0, limit: 298 });
+    expect(body.accessKeys).toEqual({ count: 0, limit: 300 });
   });
 
   it('returns defaults when no region is provisioned', async () => {
@@ -102,7 +102,7 @@ describe('get-usage baseHandler', () => {
       egress: { usedBytes: 0 },
       buckets: { count: 0, limit: 100 },
       objects: { count: 0 },
-      accessKeys: { count: 0, limit: 298 },
+      accessKeys: { count: 0, limit: 300 },
     });
     expect(aurora.getTenantUsageMetrics).not.toHaveBeenCalled();
     expect(aurora.getTenantInfo).not.toHaveBeenCalled();
@@ -122,7 +122,7 @@ describe('get-usage baseHandler', () => {
       egress: { usedBytes: 0 },
       buckets: { count: 0, limit: 100 },
       objects: { count: 0 },
-      accessKeys: { count: 0, limit: 298 },
+      accessKeys: { count: 0, limit: 300 },
     });
   });
 
@@ -168,9 +168,9 @@ describe('get-usage baseHandler', () => {
     expect(body.objects.count).toBe(6);
     expect(body.egress.usedBytes).toBe(250);
     expect(body.buckets).toEqual({ count: 3, limit: 100 });
-    // keys: (4 + 2) − 2 console keys (one per region) = 4; limit is the
-    // constant global ceiling: 300 − 2 = 298.
-    expect(body.accessKeys).toEqual({ count: 4, limit: 298 });
+    // keys: (4 + 2) − 2 console keys (one per region) = 4; only the reserved
+    // key is hidden from the count. The limit is the constant global ceiling: 300.
+    expect(body.accessKeys).toEqual({ count: 4, limit: 300 });
 
     expect(aurora.getTenantUsageMetrics).toHaveBeenCalledWith(AURORA_TENANT_ID, expect.any(Object));
     expect(fth.getTenantInfo).toHaveBeenCalledWith(FTH_TENANT_ID);
@@ -206,8 +206,8 @@ describe('get-usage baseHandler', () => {
     expect(body.storage.usedBytes).toBe(1000);
     expect(body.buckets).toEqual({ count: 2, limit: 100 });
     // Only the surviving region's console key is hidden from the count: 3 − 1 = 2.
-    // The limit is the constant global ceiling: 300 − 2 = 298.
-    expect(body.accessKeys).toEqual({ count: 2, limit: 298 });
+    // The limit is the constant global ceiling: 300.
+    expect(body.accessKeys).toEqual({ count: 2, limit: 300 });
   });
 
   it('returns defaults when every provisioned region fails to fetch usage', async () => {
@@ -220,14 +220,14 @@ describe('get-usage baseHandler', () => {
     const body = JSON.parse(String((result as { body: string }).body));
 
     // No region survives, so the response falls back to the global defaults
-    // rather than erroring out: a console key is reserved per region (300 − 2 = 298).
+    // rather than erroring out: count 0 with the constant global limit of 300.
     expect((result as { statusCode: number }).statusCode).toBe(200);
     expect(body).toStrictEqual({
       storage: { usedBytes: 0 },
       egress: { usedBytes: 0 },
       buckets: { count: 0, limit: 100 },
       objects: { count: 0 },
-      accessKeys: { count: 0, limit: 298 },
+      accessKeys: { count: 0, limit: 300 },
     });
     // tenantStatus is omitted entirely when no region reports one.
     expect(body).not.toHaveProperty('tenantStatus');

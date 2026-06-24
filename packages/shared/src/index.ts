@@ -24,6 +24,8 @@ export {
   PAID_GRACE_DAYS,
   UNLIMITED,
   getUsageLimits,
+  GLOBAL_BUCKET_LIMIT,
+  GLOBAL_ACCESS_KEY_LIMIT,
 } from './constants.js';
 export type { UsageLimits } from './constants.js';
 export { formatBytes, formatBytesShort } from './formatBytes.js';

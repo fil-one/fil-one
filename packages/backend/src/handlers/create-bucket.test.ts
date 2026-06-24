@@ -28,6 +28,11 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   },
 }));
 
+const mockGetOrgResourceCounts = vi.fn();
+vi.mock('../lib/resource-helpers.js', () => ({
+  getOrgResourceCounts: (...args: unknown[]) => mockGetOrgResourceCounts(...args),
+}));
+
 import { baseHandler } from './create-bucket.js';
 import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
@@ -51,6 +56,30 @@ describe('create-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnsureTenantReady.mockResolvedValue('aurora-t-1');
+    // Default well under the global limit so happy-path tests still succeed.
+    mockGetOrgResourceCounts.mockResolvedValue({ bucketCount: 0, accessKeyCount: 0 });
+  });
+
+  it('returns 403 and does not create a bucket when the bucket limit is reached', async () => {
+    mockGetOrgResourceCounts.mockResolvedValue({ bucketCount: 100, accessKeyCount: 0 });
+
+    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(403);
+    const body = JSON.parse(result.body as string);
+    expect(body.message).toContain('100');
+    expect(mockCreateBucket).not.toHaveBeenCalled();
+  });
+
+  it('still creates a bucket when one slot below the bucket limit', async () => {
+    mockGetOrgResourceCounts.mockResolvedValue({ bucketCount: 99, accessKeyCount: 0 });
+    mockCreateBucket.mockResolvedValue(undefined);
+
+    const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(201);
   });
 
   it('returns 201 and calls orchestrator.createBucket on success', async () => {

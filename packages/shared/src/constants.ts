@@ -154,3 +154,13 @@ export function getUsageLimits(isActivePaid: boolean): UsageLimits {
   }
   return { storageLimitBytes: TRIAL_STORAGE_LIMIT, egressLimitBytes: TRIAL_EGRESS_LIMIT };
 }
+
+// ---------------------------------------------------------------------------
+// Global account quotas — enforced on create, displayed on the usage dashboard.
+// GLOBAL and CONSTANT: the same regardless of how many regions an org is
+// provisioned in, and never summed per region. The reserved `filone-console`
+// system key (one per provisioned region) is excluded from the access-key COUNT
+// only — it does not reduce the limit, so a user gets a full 300 self-managed keys.
+// ---------------------------------------------------------------------------
+export const GLOBAL_BUCKET_LIMIT = 100;
+export const GLOBAL_ACCESS_KEY_LIMIT = 300;

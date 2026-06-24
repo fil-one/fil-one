@@ -2,8 +2,9 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
-import { CreateBucketSchema, isSupportedRegion } from '@filone/shared';
+import { CreateBucketSchema, isSupportedRegion, GLOBAL_BUCKET_LIMIT } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { getOrgResourceCounts } from '../lib/resource-helpers.js';
 import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.js';
 import {
   ResponseBuilder,
@@ -45,6 +46,16 @@ export async function baseHandler(
 
   if (!isSupportedRegion(process.env.FILONE_STAGE!, region, getVerifiedEmail(event))) {
     return unsupportedRegionResponse(region);
+  }
+
+  const { bucketCount } = await getOrgResourceCounts(orgId);
+  if (bucketCount >= GLOBAL_BUCKET_LIMIT) {
+    return new ResponseBuilder()
+      .status(403)
+      .body<ErrorResponse>({
+        message: `Bucket limit reached. You can create up to ${GLOBAL_BUCKET_LIMIT} buckets.`,
+      })
+      .build();
   }
 
   const orchestrator = getOrchestratorForRegion(region);

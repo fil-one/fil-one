@@ -32,6 +32,11 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
   },
 }));
 
+const mockGetOrgResourceCounts = vi.fn();
+vi.mock('../lib/resource-helpers.js', () => ({
+  getOrgResourceCounts: (...args: unknown[]) => mockGetOrgResourceCounts(...args),
+}));
+
 process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -73,6 +78,31 @@ describe('create-access-key baseHandler', () => {
     vi.clearAllMocks();
     ddbMock.reset();
     mockEnsureTenantReady.mockResolvedValue('aurora-t-1');
+    // Default well under the global limit so happy-path tests still succeed.
+    mockGetOrgResourceCounts.mockResolvedValue({ bucketCount: 0, accessKeyCount: 0 });
+  });
+
+  it('returns 403 and does not issue a key when the access-key limit is reached', async () => {
+    mockGetOrgResourceCounts.mockResolvedValue({ bucketCount: 0, accessKeyCount: 300 });
+
+    const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(403);
+    const body = JSON.parse(result.body!);
+    expect(body.message).toContain('300');
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('still creates a key when one slot below the access-key limit', async () => {
+    mockGetOrgResourceCounts.mockResolvedValue({ bucketCount: 0, accessKeyCount: 299 });
+    ddbMock.on(PutItemCommand).resolves({});
+    mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+
+    const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(201);
   });
 
   it('returns 201 with keyName, accessKeyId, and secretAccessKey on success', async () => {

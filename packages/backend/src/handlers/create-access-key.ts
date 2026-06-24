@@ -3,10 +3,16 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CreateAccessKeySchema, S3Region, isSupportedRegion } from '@filone/shared';
+import {
+  CreateAccessKeySchema,
+  S3Region,
+  isSupportedRegion,
+  GLOBAL_ACCESS_KEY_LIMIT,
+} from '@filone/shared';
 import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { getOrgResourceCounts } from '../lib/resource-helpers.js';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.js';
 import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
@@ -21,6 +27,33 @@ import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+
+// Handles a failed issueAccessKey call: a duplicate name triggers DynamoDB
+// recovery and a 409; a validation error becomes a 400; any other error is
+// rethrown for errorHandlerMiddleware. Kept separate to hold the handler's
+// cognitive complexity within budget.
+async function handleIssueAccessKeyError(
+  err: unknown,
+  ctx: {
+    orgId: string;
+    tenantId: string;
+    keyName: string;
+    region: S3Region;
+    orchestrator: ServiceOrchestrator;
+  },
+): Promise<APIGatewayProxyStructuredResultV2> {
+  if (err instanceof AccessKeyAlreadyExistsError) {
+    await recoverDuplicateKey(ctx.orgId, ctx.tenantId, ctx.keyName, ctx.region, ctx.orchestrator);
+    return new ResponseBuilder()
+      .status(409)
+      .body<ErrorResponse>({ message: 'An access key with this name already exists' })
+      .build();
+  }
+  if (err instanceof AccessKeyValidationError) {
+    return new ResponseBuilder().status(400).body<ErrorResponse>({ message: err.message }).build();
+  }
+  throw err;
+}
 
 // TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
@@ -55,6 +88,16 @@ export async function baseHandler(
     return unsupportedRegionResponse(region);
   }
 
+  const { accessKeyCount } = await getOrgResourceCounts(orgId);
+  if (accessKeyCount >= GLOBAL_ACCESS_KEY_LIMIT) {
+    return new ResponseBuilder()
+      .status(403)
+      .body<ErrorResponse>({
+        message: `Access key limit reached. You can create up to ${GLOBAL_ACCESS_KEY_LIMIT} access keys.`,
+      })
+      .build();
+  }
+
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
@@ -69,20 +112,7 @@ export async function baseHandler(
       expiresAt,
     });
   } catch (err) {
-    if (err instanceof AccessKeyAlreadyExistsError) {
-      await recoverDuplicateKey(orgId, tenantId, keyName, region, orchestrator);
-      return new ResponseBuilder()
-        .status(409)
-        .body<ErrorResponse>({ message: 'An access key with this name already exists' })
-        .build();
-    }
-    if (err instanceof AccessKeyValidationError) {
-      return new ResponseBuilder()
-        .status(400)
-        .body<ErrorResponse>({ message: err.message })
-        .build();
-    }
-    throw err;
+    return handleIssueAccessKeyError(err, { orgId, tenantId, keyName, region, orchestrator });
   }
 
   await getDynamoClient().send(
