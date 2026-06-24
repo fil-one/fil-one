@@ -160,14 +160,15 @@ export default $config({
       },
     });
 
-    const { getAuth0Domain, getAvailableRegions, getS3Endpoint, Stage } =
-      await import('@filone/shared');
+    const { getAuth0Domain, getS3Endpoint, S3Region, Stage } = await import('@filone/shared');
     const stageForEndpoints = isProduction ? Stage.Production : Stage.Staging;
-    // The browser hits the S3 endpoint of every region the user can pick from
-    // — list-objects, uploads, downloads, etc. all go directly to S3 — so each
-    // one needs to be in `connect-src` or the browser blocks the request with
-    // a CSP violation before it ever leaves.
-    const s3GatewayUrls = getAvailableRegions(stageForEndpoints)
+    // The browser hits the S3 endpoint of every region directly — list-objects,
+    // uploads, downloads, etc. — so each one needs to be in `connect-src` or the
+    // browser blocks the request with a CSP violation before it ever leaves.
+    // CSP is a single static document header that cannot vary per user, so it
+    // must list every regional S3 endpoint any user could reach — not just the
+    // email-gated subset returned by getAvailableRegions().
+    const s3GatewayUrls = Object.values(S3Region)
       .map((r) => getS3Endpoint(r, stageForEndpoints))
       .join(' ');
 
