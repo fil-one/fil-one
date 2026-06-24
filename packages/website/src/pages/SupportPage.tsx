@@ -69,7 +69,11 @@ export function SupportPage() {
   }
 
   return (
-    <PageLayout title="Talk to an expert" description="We typically respond within 1 business day">
+    <PageLayout
+      title="Talk to an expert"
+      headingId="support-heading"
+      description="We typically respond within 1 business day"
+    >
       <div className="max-w-xl">
         <Card padding="none">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-6">
@@ -139,7 +143,12 @@ export function SupportPage() {
             </FormField>
 
             <div className="flex justify-end">
-              <Button variant="primary" type="submit" disabled={submitting}>
+              <Button
+                id="support-submit-button"
+                variant="primary"
+                type="submit"
+                disabled={submitting}
+              >
                 {submitting ? 'Sending...' : 'Send message'}
               </Button>
             </div>

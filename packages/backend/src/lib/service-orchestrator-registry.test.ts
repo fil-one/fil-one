@@ -39,9 +39,9 @@ describe('getAvailableOrchestrators', () => {
     expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth']);
   });
 
-  it('returns only the Aurora orchestrator in production for a Foundation email', () => {
+  it('returns Aurora and FTH orchestrators in production for a Foundation email', () => {
     const orchestrators = getAvailableOrchestrators('production', 'dogfood@fil.org');
-    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora']);
+    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth']);
   });
 
   it('returns only the Aurora orchestrator in production for a non-Foundation email', () => {

@@ -250,7 +250,11 @@ export function BillingPage() {
   // ── Render ───────────────────────────────────────────────────────
 
   return (
-    <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
+    <PageLayout
+      title="Billing"
+      headingId="billing-heading"
+      description="Manage your plan, usage, and payment methods"
+    >
       {/* Past due warning banner */}
       {isPastDue && (
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
@@ -315,7 +319,11 @@ export function BillingPage() {
               </div>
 
               {/* Status badge */}
-              <div className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-2"
+                data-testid="subscription-status"
+                data-status={billing?.subscription.status}
+              >
                 {isTrialing && (
                   <Badge color="blue" size="sm" weight="medium" dot>
                     Active
@@ -345,7 +353,12 @@ export function BillingPage() {
                 <p className="text-[13px] font-medium text-zinc-900">
                   Ready to unlock unlimited storage?
                 </p>
-                <Button variant="ghost" size="sm" onClick={handleUpgradeClick}>
+                <Button
+                  id="billing-upgrade-button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleUpgradeClick}
+                >
                   Upgrade
                 </Button>
               </div>
@@ -355,7 +368,12 @@ export function BillingPage() {
             {(isActive || isPastDue) && (
               <div className="flex items-center justify-between border-t border-zinc-100 pt-3">
                 <span className="text-[12px] text-zinc-500">Billed monthly</span>
-                <Button variant="ghost" size="sm" onClick={handleUpdatePayment}>
+                <Button
+                  id="billing-manage-plan-button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleUpdatePayment}
+                >
                   Manage plan
                 </Button>
               </div>
@@ -380,6 +398,7 @@ export function BillingPage() {
                       : 'Reactivate your subscription to restore full access'}
                 </p>
                 <Button
+                  id="billing-reactivate-button"
                   variant={isCanceled ? 'destructive' : 'warning'}
                   size="sm"
                   icon={ArrowRightIcon}
@@ -479,7 +498,12 @@ export function BillingPage() {
                     {String(billing.paymentMethod.expYear).slice(-2)}
                   </p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={handleUpdatePayment}>
+                <Button
+                  id="billing-update-payment-button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleUpdatePayment}
+                >
                   Update
                 </Button>
               </div>
@@ -488,6 +512,7 @@ export function BillingPage() {
                 <IconBox icon={CreditCardIcon} color="grey" size="sm" />
                 <span className="flex-1 text-[13px] text-zinc-500">No payment method added</span>
                 <Button
+                  id="billing-add-payment-button"
                   variant="ghost"
                   size="sm"
                   icon={CreditCardIcon}
@@ -536,6 +561,8 @@ export function BillingPage() {
                   {invoices.invoices.map((inv, idx) => (
                     <div
                       key={inv.id}
+                      data-testid="invoice-row"
+                      data-invoice-id={inv.id}
                       className={`flex items-center justify-between py-3 ${
                         idx > 0 ? 'border-t border-zinc-200' : ''
                       }`}
@@ -605,6 +632,7 @@ export function BillingPage() {
               {/* CTA for trial / grace / canceled users */}
               {(isTrialing || isGracePeriod || isCanceled) && (
                 <Button
+                  id="billing-plan-cta-button"
                   variant="primary"
                   icon={LightningIcon}
                   onClick={handleUpgradeClick}

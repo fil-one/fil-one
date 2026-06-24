@@ -50,20 +50,15 @@ function getHamburger() {
 }
 
 function getCloseButton() {
-  return screen.getByRole('button', { name: 'Close navigation menu' });
+  return screen.getByRole('button', { name: 'Close' });
 }
 
 function getDrawer() {
   return screen.getByRole('dialog');
 }
 
-function getBackdrop() {
-  return document.querySelector('[aria-hidden="true"]') as HTMLElement;
-}
-
 describe('AppShell mobile drawer', () => {
   beforeEach(() => {
-    // Reset body styles between tests
     document.body.style.overflow = '';
     document.body.style.paddingRight = '';
   });
@@ -114,7 +109,8 @@ describe('AppShell mobile drawer', () => {
   it('closes drawer when backdrop is clicked', () => {
     renderAppShell();
     fireEvent.click(getHamburger());
-    fireEvent.click(getBackdrop());
+    const backdrop = screen.getByTestId('drawer-backdrop');
+    fireEvent.click(backdrop);
     expect(getDrawer().className).toContain('translate-x-full');
   });
 
@@ -132,10 +128,9 @@ describe('AppShell mobile drawer', () => {
     expect(getDrawer().className).toContain('translate-x-0');
   });
 
-  it('closes drawer when a nav link is clicked', () => {
+  it('closes drawer when a nav link inside the drawer is clicked', () => {
     renderAppShell();
     fireEvent.click(getHamburger());
-    // Click the Dashboard link inside the drawer (not the desktop sidebar's copy)
     const drawerLink = getDrawer().querySelector('a[href="/dashboard"]') as HTMLElement;
     fireEvent.click(drawerLink);
     expect(getDrawer().className).toContain('translate-x-full');
@@ -209,6 +204,28 @@ describe('AppShell focus management', () => {
     });
     expect(document.activeElement).toBe(hamburger);
   });
+
+  it('wraps focus from last to first element on Tab', async () => {
+    renderAppShell();
+    await act(async () => {
+      fireEvent.click(getHamburger());
+    });
+    const drawerLink = getDrawer().querySelector('a[href="/dashboard"]') as HTMLElement;
+    drawerLink.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(getCloseButton());
+  });
+
+  it('wraps focus from first to last element on Shift+Tab', async () => {
+    renderAppShell();
+    await act(async () => {
+      fireEvent.click(getHamburger());
+    });
+    getCloseButton().focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    const drawerLink = getDrawer().querySelector('a[href="/dashboard"]') as HTMLElement;
+    expect(document.activeElement).toBe(drawerLink);
+  });
 });
 
 describe('AppShell drawer accessibility', () => {
@@ -230,13 +247,12 @@ describe('AppShell drawer accessibility', () => {
     expect(getDrawer()).not.toHaveAttribute('inert');
   });
 
-  it('desktop sidebar is present in the DOM', () => {
+  it('renders desktop sidebar and drawer sidebars', () => {
     renderAppShell();
-    const sidebars = screen.getAllByTestId('sidebar-nav');
-    expect(sidebars.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByTestId('sidebar-nav')).toHaveLength(2);
   });
 
-  it('page content is rendered', () => {
+  it('renders page content', () => {
     renderAppShell();
     expect(screen.getByText('page content')).toBeInTheDocument();
   });

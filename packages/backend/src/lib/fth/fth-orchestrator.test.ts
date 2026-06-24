@@ -29,6 +29,7 @@ vi.mock('./fth-tenant-setup.js', () => ({
 }));
 
 const mockGetClientMetricsTimeseries = vi.fn();
+const mockGetClientMetricsCurrent = vi.fn();
 // Hoisted so it is initialized before the static import of fth-orchestrator.js,
 // whose module-level `createInstrumentedFthClient()` runs at import time and
 // reads this mock via the mocked createFthManagementClient.
@@ -37,9 +38,10 @@ const mockFthClient = vi.hoisted(() => ({
   listAccessKeys: vi.fn(),
   deleteAccessKey: vi.fn(),
   listStorageUsers: vi.fn(),
+  getClient: (...args: unknown[]) => mockGetClient(...args),
   getClientMetricsTimeseries: (...args: unknown[]) => mockGetClientMetricsTimeseries(...args),
   updateClientStatus: (...args: unknown[]) => mockUpdateClientStatus(...args),
-  getClient: (...args: unknown[]) => mockGetClient(...args),
+  getClientMetricsCurrent: (...args: unknown[]) => mockGetClientMetricsCurrent(...args),
 }));
 
 vi.mock('./fth-management-client.js', async () => {
@@ -57,7 +59,6 @@ vi.mock('./fth-api-metrics.js', () => ({
 }));
 
 process.env.FILONE_STAGE = 'test';
-process.env.FTH_S3_URL = 'https://s3.fortilyx.test';
 process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
 
 import {
@@ -65,6 +66,7 @@ import {
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   BucketConfigurationError,
+  BucketNotFoundError,
 } from '../errors.js';
 import { FthApiError, FthConflictError, FthNotFoundError } from './fth-management-client.js';
 
@@ -145,45 +147,34 @@ describe('fthOrchestrator.updateTenantStatus', () => {
     });
   }
 
-  it('retries updateClientStatus on a transient failure then succeeds', async () => {
-    vi.useFakeTimers();
-    mockUpdateClientStatus
-      .mockRejectedValueOnce(new Error('transient FTH error'))
-      .mockResolvedValue(undefined);
+  // Retrying transient failures is the caller's responsibility (region-helpers
+  // wraps the orchestrator call in pRetry), so this method does not retry.
+  it('does not retry when updateClientStatus fails', async () => {
+    mockUpdateClientStatus.mockRejectedValue(new Error('FTH error'));
 
-    const promise = fthOrchestrator.updateTenantStatus(fthClientId, 'write-locked');
-    await vi.runAllTimersAsync();
-    await promise;
+    await fthOrchestrator.updateTenantStatus(fthClientId, 'write-locked').catch(() => {});
 
-    expect(mockUpdateClientStatus).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
+    expect(mockUpdateClientStatus).toHaveBeenCalledTimes(1);
   });
 
-  it('gives up on updateClientStatus after exhausting retries (1 initial + 3 retries)', async () => {
-    vi.useFakeTimers();
-    mockUpdateClientStatus.mockRejectedValue(new Error('persistent FTH error'));
+  it('propagates the error when updateClientStatus fails', async () => {
+    mockUpdateClientStatus.mockRejectedValue(new Error('FTH error'));
 
-    const promise = fthOrchestrator.updateTenantStatus(fthClientId, 'write-locked').catch((e) => e);
-    await vi.runAllTimersAsync();
-    const err = await promise;
-
-    expect(err).toBeInstanceOf(Error);
-    expect(mockUpdateClientStatus).toHaveBeenCalledTimes(4);
-    vi.useRealTimers();
+    await expect(fthOrchestrator.updateTenantStatus(fthClientId, 'write-locked')).rejects.toThrow(
+      'FTH error',
+    );
   });
 });
 
 describe('fthOrchestrator.getTenantStatus', () => {
-  for (const status of ['active', 'write-locked', 'disabled'] as const) {
-    it(`returns the normalized "${status}" status from getClient`, async () => {
-      mockGetClient.mockResolvedValue({ id: fthClientId, status });
+  it('returns the status straight through from getClient', async () => {
+    mockGetClient.mockResolvedValue({ id: fthClientId, status: 'write-locked' });
 
-      const result = await fthOrchestrator.getTenantStatus(fthClientId);
+    const result = await fthOrchestrator.getTenantStatus(fthClientId);
 
-      expect(result).toEqual({ kind: 'ok', status });
-      expect(mockGetClient).toHaveBeenCalledWith(fthClientId);
-    });
-  }
+    expect(result).toEqual({ kind: 'ok', status: 'write-locked' });
+    expect(mockGetClient).toHaveBeenCalledWith(fthClientId);
+  });
 
   it('returns status undefined when FTH reports an unmodeled status', async () => {
     mockGetClient.mockResolvedValue({ id: fthClientId, status: 'provisioning' });
@@ -889,5 +880,138 @@ describe('fthOrchestrator.getTenantUsageMetrics', () => {
     });
 
     expect(result).toEqual({ storage: [], egress: [] });
+  });
+});
+
+describe('fthOrchestrator.getTenantInfo', () => {
+  it('maps the client record and normalizes the status', async () => {
+    mockGetClient.mockResolvedValue({
+      id: fthClientId,
+      externalId: 'org-1',
+      displayName: 'Org 1',
+      status: 'write-locked',
+      bucketCount: 4,
+      bucketLimit: 100,
+      accessKeyCount: 6,
+      accessKeyLimit: 300,
+      createdAt: '2026-01-01T00:00:00Z',
+    });
+
+    const result = await fthOrchestrator.getTenantInfo(fthClientId);
+
+    expect(result).toEqual({
+      bucketCount: 4,
+      bucketLimit: 100,
+      keyCount: 6,
+      accessKeyLimit: 300,
+      status: 'write-locked',
+    });
+    expect(mockGetClient).toHaveBeenCalledWith(fthClientId);
+  });
+
+  it.each([
+    [undefined, undefined],
+    ['unknown', undefined],
+  ])('filters unmodeled status %s -> %s', async (status, expected) => {
+    mockGetClient.mockResolvedValue({
+      id: fthClientId,
+      externalId: 'org-1',
+      displayName: 'Org 1',
+      status,
+      createdAt: '2026-01-01T00:00:00Z',
+    });
+
+    const result = await fthOrchestrator.getTenantInfo(fthClientId);
+
+    expect(result.status).toBe(expected);
+  });
+
+  it('applies ?? 0 defaults for missing count/limit fields', async () => {
+    mockGetClient.mockResolvedValue({
+      id: fthClientId,
+      externalId: 'org-1',
+      displayName: 'Org 1',
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00Z',
+    });
+
+    const result = await fthOrchestrator.getTenantInfo(fthClientId);
+
+    expect(result).toEqual({
+      bucketCount: 0,
+      bucketLimit: 0,
+      keyCount: 0,
+      accessKeyLimit: 0,
+      status: 'active',
+    });
+  });
+});
+
+describe('fthOrchestrator.getBucketUsageMetrics', () => {
+  const OPTS = { from: '2026-01-01T00:00:00Z', to: '2026-01-31T00:00:00Z', interval: '1d' };
+
+  // getBucketUsageMetrics gates the snapshot read behind a tenant-scoped getBucket
+  // ownership check, so by default stub credentials + a ListBuckets that owns it.
+  beforeEach(() => {
+    ssmMock.on(GetParameterCommand).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
+    });
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'my-bucket', CreationDate: new Date('2026-02-15T10:00:00Z') }],
+    });
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Suspended' });
+    const notFound = new Error('not configured');
+    (notFound as Error & { name: string }).name = 'ObjectLockConfigurationNotFoundError';
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(notFound);
+  });
+
+  it('throws BucketNotFoundError when the bucket is not owned by the tenant', async () => {
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'other', CreationDate: new Date('2026-02-15T10:00:00Z') }],
+    });
+
+    await expect(
+      fthOrchestrator.getBucketUsageMetrics(fthClientId, 'my-bucket', OPTS),
+    ).rejects.toThrow(BucketNotFoundError);
+    expect(mockGetClientMetricsCurrent).not.toHaveBeenCalled();
+  });
+
+  it('folds the matching by_bucket rows across tiers into one sample', async () => {
+    mockGetClientMetricsCurrent.mockResolvedValue({
+      as_of: '2026-01-15T00:00:00Z',
+      usage: {
+        by_bucket: [
+          { bucket: 'my-bucket', tier: 'L1', size: 1000, count: 3 },
+          { bucket: 'my-bucket', tier: 'L2', size: 500, count: 2 },
+          { bucket: 'other', tier: 'L1', size: 9999, count: 99 },
+        ],
+      },
+    });
+
+    const result = await fthOrchestrator.getBucketUsageMetrics(fthClientId, 'my-bucket', OPTS);
+
+    expect(result).toEqual([
+      { timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 1500, objectCount: 5 },
+    ]);
+    expect(mockGetClientMetricsCurrent).toHaveBeenCalledWith(fthClientId);
+  });
+
+  it('returns an empty array when the bucket is absent from the snapshot', async () => {
+    mockGetClientMetricsCurrent.mockResolvedValue({
+      as_of: '2026-01-15T00:00:00Z',
+      usage: { by_bucket: [{ bucket: 'other', size: 1, count: 1 }] },
+    });
+
+    const result = await fthOrchestrator.getBucketUsageMetrics(fthClientId, 'my-bucket', OPTS);
+
+    expect(result).toEqual([]);
+  });
+
+  it('returns an empty array when the snapshot has no by_bucket data', async () => {
+    mockGetClientMetricsCurrent.mockResolvedValue({ as_of: '2026-01-15T00:00:00Z', usage: {} });
+
+    const result = await fthOrchestrator.getBucketUsageMetrics(fthClientId, 'my-bucket', OPTS);
+
+    expect(result).toEqual([]);
   });
 });

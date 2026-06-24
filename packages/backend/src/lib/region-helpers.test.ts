@@ -16,6 +16,7 @@ import {
   assertRegionSyncSucceeded,
   getProvisionedRegions,
   syncTenantStatusInProvisionedRegions,
+  WEBHOOK_STATUS_SYNC_RETRY,
   type RegionSyncOutcome,
 } from './region-helpers.js';
 import { fakeOrchestrator, fakeOrgProfile } from '../test/fake-orchestrator.js';
@@ -125,7 +126,6 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     const aurora = fakeOrchestrator('aurora');
     aurora.getTenantStatus
       .mockResolvedValueOnce({ kind: 'error', cause: new Error('transient outage') })
-      .mockResolvedValueOnce({ kind: 'error', cause: new Error('transient outage') })
       .mockResolvedValue({ kind: 'ok', status: 'active' });
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
@@ -166,17 +166,53 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     expect(fth.updateTenantStatus).toHaveBeenCalledWith('fth:org-1', 'write-locked');
   });
 
-  it('returns an error outcome with the cause when updateTenantStatus rejects', async () => {
+  it('returns an error outcome with the cause when updateTenantStatus keeps failing past all retries (1 initial + 3 retries)', async () => {
+    vi.useFakeTimers();
     const updateError = new Error('FTH API error');
     const fth = fakeOrchestrator('fth', { status: 'active' });
     fth.updateTenantStatus.mockRejectedValue(updateError);
     mockGetAvailableOrchestrators.mockReturnValue([fth]);
 
-    const result = await syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
+    const promise = syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
+    await vi.runAllTimersAsync();
+    const result = await promise;
 
     expect(result).toEqual([
       { orchestratorId: 'fth', tenantId: 'fth:org-1', outcome: 'error', cause: updateError },
     ]);
+    expect(fth.updateTenantStatus).toHaveBeenCalledTimes(4);
+  });
+
+  it('retries a transient update failure and syncs the region', async () => {
+    vi.useFakeTimers();
+    const fth = fakeOrchestrator('fth', { status: 'active' });
+    fth.updateTenantStatus
+      .mockRejectedValueOnce(new Error('transient outage'))
+      .mockResolvedValue(undefined);
+    mockGetAvailableOrchestrators.mockReturnValue([fth]);
+
+    const promise = syncTenantStatusInProvisionedRegions('org-1', 'write-locked');
+    await vi.runAllTimersAsync();
+    const result = await promise;
+
+    expect(result).toEqual([{ orchestratorId: 'fth', tenantId: 'fth:org-1', outcome: 'updated' }]);
+  });
+
+  it('honors a tighter retry override (1 initial + 1 retry)', async () => {
+    vi.useFakeTimers();
+    const aurora = fakeOrchestrator('aurora');
+    aurora.getTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('outage') });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    const promise = syncTenantStatusInProvisionedRegions(
+      'org-1',
+      'write-locked',
+      WEBHOOK_STATUS_SYNC_RETRY,
+    );
+    await vi.runAllTimersAsync();
+    await promise;
+
+    expect(aurora.getTenantStatus).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -8,6 +8,8 @@ type PageLayoutProps = {
   children: React.ReactNode;
   maxWidth?: string;
   className?: string;
+  /** Optional id applied to the page heading (used as an e2e selector). */
+  headingId?: string;
 };
 
 export function PageLayout({
@@ -17,6 +19,7 @@ export function PageLayout({
   children,
   maxWidth,
   className,
+  headingId,
 }: PageLayoutProps) {
   return (
     <div
@@ -28,7 +31,7 @@ export function PageLayout({
       )}
     >
       <div className="mb-6 flex items-start justify-between gap-4">
-        <Heading tag="h1" size="xl" description={description}>
+        <Heading id={headingId} tag="h1" size="xl" description={description}>
           {title}
         </Heading>
         {action && <div className="shrink-0">{action}</div>}

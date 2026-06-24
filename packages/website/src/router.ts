@@ -18,6 +18,7 @@ import { Route as billingRoute } from './routes/_app/billing.js';
 import { Route as settingsRoute } from './routes/_app/settings.js';
 import { Route as supportRoute } from './routes/_app/support.js';
 import { Route as bucketIntelligenceRoute } from './routes/_app/bucket-intelligence.js';
+import { Route as aiAgentToolkitRoute } from './routes/_app/ai-agent-toolkit.js';
 import { Route as verifyEmailRoute } from './routes/verify-email.js';
 
 const routeTree = rootRoute.addChildren([
@@ -37,6 +38,7 @@ const routeTree = rootRoute.addChildren([
     settingsRoute,
     supportRoute,
     bucketIntelligenceRoute,
+    aiAgentToolkitRoute,
   ]),
 ]);
 

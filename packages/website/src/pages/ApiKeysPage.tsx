@@ -435,9 +435,11 @@ export function ApiKeysPage() {
   return (
     <PageLayout
       title="API Keys"
+      headingId="api-keys-heading"
       description="Manage credentials and connect via S3-compatible API"
       action={
         <Button
+          id="api-keys-create-button"
           variant="ghost"
           size="sm"
           icon={PlusIcon}
@@ -449,8 +451,8 @@ export function ApiKeysPage() {
     >
       <Tabs>
         <TabList>
-          <Tab>API keys {keys.length > 0 && `(${keys.length})`}</Tab>
-          <Tab>Connection details</Tab>
+          <Tab testId="api-keys-tab">API keys {keys.length > 0 && `(${keys.length})`}</Tab>
+          <Tab testId="connection-details-tab">Connection details</Tab>
         </TabList>
 
         <TabPanels>

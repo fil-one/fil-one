@@ -55,9 +55,9 @@ vi.mock('../lib/auth-secrets.js', () => ({
   }),
 }));
 
-const mockCreateBillingTrial = vi.fn().mockResolvedValue(undefined);
-vi.mock('../lib/create-billing-trial.js', () => ({
-  createBillingTrial: (args: unknown) => mockCreateBillingTrial(args),
+const mockEnsureTrialEntitlement = vi.fn().mockResolvedValue(true);
+vi.mock('../lib/trial-entitlement.js', () => ({
+  ensureTrialEntitlement: (args: unknown) => mockEnsureTrialEntitlement(args),
 }));
 
 const mockJwtVerify = vi.fn();
@@ -486,11 +486,43 @@ describe('authMiddleware', () => {
         },
       ]);
 
-      expect(mockCreateBillingTrial).toHaveBeenCalledWith({
+      // Entitlement claim + trial are delegated to ensureTrialEntitlement
+      // (verified-email gated). Unit-tested separately in trial-entitlement.test.ts.
+      expect(mockEnsureTrialEntitlement).toHaveBeenCalledWith({
+        sub: MOCK_SUB,
         userId: MOCK_USER_ID,
         orgId: MOCK_ORG_ID,
         email: MOCK_EMAIL,
+        emailVerified: false,
       });
+    });
+
+    it('does not block login when the trial entitlement backfill fails transiently', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, name: 'Alice Johnson' } });
+
+      ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+      ddbMock.on(TransactWriteItemsCommand).resolves({});
+      // Entitlement backfill throws (e.g. Stripe/DynamoDB down) — login must still succeed.
+      mockEnsureTrialEntitlement.mockRejectedValueOnce(new Error('Stripe down'));
+
+      const { before } = authMiddleware({ requireVerifiedEmail: false });
+      const event = buildEvent({
+        cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
+        rawPath: '/api/me',
+      });
+      const request = buildMiddyRequest(event);
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(event)).toMatchObject({
+        sub: MOCK_SUB,
+        userId: MOCK_USER_ID,
+        orgId: MOCK_ORG_ID,
+      });
+      expect(mockEnsureTrialEntitlement).toHaveBeenCalledOnce();
     });
 
     it('falls back to email-derived org name when no JWT name claim is present', async () => {
