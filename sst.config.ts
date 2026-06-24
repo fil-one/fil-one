@@ -400,7 +400,6 @@ export default $config({
 
     const fthEnv = {
       FTH_MANAGEMENT_API_URL: 'https://api.fortilyx.com',
-      FTH_S3_URL: 'https://us-east-1.fortilyx.com',
     };
 
     // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
