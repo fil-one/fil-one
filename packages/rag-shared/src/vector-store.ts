@@ -42,8 +42,9 @@ export interface VectorStore {
   deleteChunks(region: string, bucketName: string, keys: string[]): Promise<void>;
 
   /**
-   * k-NN similarity search over the index, returning up to `k` results ordered
-   * by similarity. `filters` are applied against filterable metadata.
+   * k-NN search over the index, returning up to `k` results ordered from closest
+   * to farthest match (lower `score`/distance = more similar). `filters` are
+   * applied against filterable metadata.
    */
   query(
     region: string,
