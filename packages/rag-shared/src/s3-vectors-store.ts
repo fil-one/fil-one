@@ -163,7 +163,7 @@ export class S3VectorsStore implements VectorStore {
 
     return (response.vectors ?? [])
       .map((vector) => {
-        if (!vector.key || vector.distance === null) {
+        if (!vector.key || typeof vector.distance !== 'number') {
           return null;
         }
 
