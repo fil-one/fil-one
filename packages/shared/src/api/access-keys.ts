@@ -30,6 +30,21 @@ export const DEFAULT_ACCESS_KEY_PERMISSIONS: AccessKeyPermission[] = [
   'ListBucketMultipartUploads',
 ];
 
+export const PERMISSION_PRESETS = {
+  'Read-only': ['GetObject', 'ListBucket'] as AccessKeyPermission[],
+  'Read/Write': [
+    'GetObject',
+    'ListMultipartUploadParts',
+    'PutObject',
+    'AbortMultipartUpload',
+    'ListBucket',
+    'ListBucketMultipartUploads',
+  ] as AccessKeyPermission[],
+  'Full access': [...ACCESS_KEY_PERMISSIONS] as AccessKeyPermission[],
+};
+
+export type PermissionPreset = keyof typeof PERMISSION_PRESETS;
+
 export const ACCESS_KEY_PERMISSION_GROUP_ORDER = ['Read', 'Write', 'List', 'Delete'] as const;
 export type AccessKeyPermissionGroup = (typeof ACCESS_KEY_PERMISSION_GROUP_ORDER)[number];
 
