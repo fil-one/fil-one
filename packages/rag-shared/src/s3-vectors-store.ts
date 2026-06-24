@@ -30,7 +30,9 @@ const TEXT_METADATA = 'text';
  *
  * A single S3 Vectors *vector bucket* (provisioned in `sst.config.ts` and read
  * at runtime via `Resource.RagVectorBucket.name`) hosts one *index* per
- * RAG-enabled bucket. The `bucketName` argument on each method names that index.
+ * RAG-enabled bucket. Because bucket names are unique per region but not
+ * globally, each index is named by the `(region, bucketName)` pair so
+ * same-named buckets in different regions do not collide on one index.
  *
  * Uses the default AWS SDK credential chain (SigV4 via the Lambda execution
  * role); no VPC configuration.
@@ -47,13 +49,17 @@ export class S3VectorsStore implements VectorStore {
     this.#client = client ?? new S3VectorsClient({});
   }
 
-  async ensureIndex(bucketName: string, options?: EnsureIndexOptions): Promise<void> {
+  async ensureIndex(
+    region: string,
+    bucketName: string,
+    options?: EnsureIndexOptions,
+  ): Promise<void> {
     const dimension = options?.dimension ?? EMBEDDING_DIMENSION;
     try {
       await this.#client.send(
         new CreateIndexCommand({
           vectorBucketName: this.#vectorBucketName,
-          indexName: bucketName,
+          indexName: this.#indexName(region, bucketName),
           dataType: 'float32',
           dimension,
           // Distance metric is immutable once the index exists.
@@ -73,7 +79,11 @@ export class S3VectorsStore implements VectorStore {
     }
   }
 
-  async upsertChunks(bucketName: string, chunks: VectorStoreChunk[]): Promise<void> {
+  async upsertChunks(
+    region: string,
+    bucketName: string,
+    chunks: VectorStoreChunk[],
+  ): Promise<void> {
     if (chunks.length === 0) {
       return;
     }
@@ -107,26 +117,27 @@ export class S3VectorsStore implements VectorStore {
     await this.#client.send(
       new PutVectorsCommand({
         vectorBucketName: this.#vectorBucketName,
-        indexName: bucketName,
+        indexName: this.#indexName(region, bucketName),
         vectors,
       }),
     );
   }
 
-  async deleteChunks(bucketName: string, keys: string[]): Promise<void> {
+  async deleteChunks(region: string, bucketName: string, keys: string[]): Promise<void> {
     if (keys.length === 0) {
       return;
     }
     await this.#client.send(
       new DeleteVectorsCommand({
         vectorBucketName: this.#vectorBucketName,
-        indexName: bucketName,
+        indexName: this.#indexName(region, bucketName),
         keys,
       }),
     );
   }
 
   async query(
+    region: string,
     bucketName: string,
     embedding: number[],
     k: number,
@@ -135,7 +146,7 @@ export class S3VectorsStore implements VectorStore {
     const response = await this.#client.send(
       new QueryVectorsCommand({
         vectorBucketName: this.#vectorBucketName,
-        indexName: bucketName,
+        indexName: this.#indexName(region, bucketName),
         topK: k,
         queryVector: { float32: embedding },
         returnMetadata: true,
@@ -158,13 +169,24 @@ export class S3VectorsStore implements VectorStore {
     });
   }
 
-  async dropIndex(bucketName: string): Promise<void> {
+  async dropIndex(region: string, bucketName: string): Promise<void> {
     await this.#client.send(
       new DeleteIndexCommand({
         vectorBucketName: this.#vectorBucketName,
-        indexName: bucketName,
+        indexName: this.#indexName(region, bucketName),
       }),
     );
+  }
+
+  /**
+   * Compose the region-qualified S3 Vectors index name. Bucket names are unique
+   * per region but not globally, so the region is prefixed to keep same-named
+   * buckets in different regions on distinct indexes. The `:` separator avoids
+   * ambiguity with the hyphens and dots that appear in both regions and bucket
+   * names.
+   */
+  #indexName(region: string, bucketName: string): string {
+    return `${region}:${bucketName}`;
   }
 }
 
