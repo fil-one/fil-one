@@ -99,7 +99,13 @@ export class S3VectorsStore implements VectorStore {
         [TEXT_METADATA]: chunk.text,
       } as DocumentType;
 
-      const metadataBytes = Buffer.byteLength(JSON.stringify(metadata), 'utf8');
+      let metadataJson: string;
+      try {
+        metadataJson = JSON.stringify(metadata);
+      } catch {
+        throw new Error(`Chunk "${chunk.key}" metadata is not JSON-serializable`);
+      }
+      const metadataBytes = Buffer.byteLength(metadataJson, 'utf8');
       if (metadataBytes > MAX_METADATA_BYTES) {
         throw new Error(
           `Chunk "${chunk.key}" metadata is ${metadataBytes} bytes, ` +
