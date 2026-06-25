@@ -2,7 +2,7 @@ import {
   Checkbox as HeadlessCheckbox,
   type CheckboxProps as HeadlessCheckboxProps,
 } from '@headlessui/react';
-import { CheckIcon, MinusIcon } from '@phosphor-icons/react/dist/ssr';
+import { CheckIcon } from '@phosphor-icons/react/dist/ssr';
 import clsx from 'clsx';
 
 import { Icon } from './Icon';
@@ -19,19 +19,14 @@ export function Checkbox(props: CheckboxProps) {
         className={clsx(
           'size-4 flex items-center justify-center rounded border border-zinc-300 bg-white p-0.5 text-white transition-colors',
           'group-data-checked:border-brand-600 group-data-checked:bg-brand-600',
-          'group-data-indeterminate:border-brand-600 group-data-indeterminate:bg-brand-600',
           'hover:border-zinc-400 hover:bg-zinc-50',
           'group-data-checked:hover:border-brand-600 group-data-checked:hover:bg-brand-600',
-          'group-data-indeterminate:hover:border-brand-600 group-data-indeterminate:hover:bg-brand-600',
           'group-focus:outline-2 group-focus:outline-offset-2 group-focus:outline-brand-600',
           'group-data-disabled:cursor-not-allowed group-data-disabled:opacity-50',
         )}
       >
-        <span className="hidden group-data-checked:block">
+        <span className="invisible group-data-checked:visible">
           <Icon component={CheckIcon} size={12} weight="bold" />
-        </span>
-        <span className="hidden group-data-indeterminate:block">
-          <Icon component={MinusIcon} size={12} weight="bold" />
         </span>
       </div>
     </HeadlessCheckbox>

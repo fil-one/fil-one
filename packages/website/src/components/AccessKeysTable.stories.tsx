@@ -20,7 +20,7 @@ const mockKeys: AccessKey[] = [
     createdAt: '2026-01-15T10:00:00Z',
     lastUsedAt: '2026-04-08T14:30:00Z',
     status: 'active',
-    permissions: ['GetObject', 'PutObject', 'ListBucket'],
+    permissions: ['read', 'write', 'list'],
     bucketScope: 'all',
   },
   {
@@ -29,7 +29,7 @@ const mockKeys: AccessKey[] = [
     accessKeyId: 'ACCESS_KEY_09876EXAMPL',
     createdAt: '2026-02-20T08:00:00Z',
     status: 'active',
-    permissions: ['GetObject', 'ListBucket'],
+    permissions: ['read', 'list'],
     bucketScope: 'specific',
     buckets: ['backups', 'archives'],
   },
@@ -40,7 +40,7 @@ const mockKeys: AccessKey[] = [
     createdAt: '2025-06-01T12:00:00Z',
     lastUsedAt: '2025-12-01T09:00:00Z',
     status: 'inactive',
-    permissions: ['GetObject'],
+    permissions: ['read'],
     bucketScope: 'all',
   },
 ];

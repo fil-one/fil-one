@@ -3,8 +3,8 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { AccessKey, AccessKeyPermission, ListAccessKeysResponse } from '@filone/shared';
-import { ACCESS_KEY_PERMISSIONS, S3Region } from '@filone/shared';
+import type { AccessKey, GranularPermission, ListAccessKeysResponse } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -13,11 +13,6 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
-
-// Legacy un-migrated rows store the old basic tokens (read/write/list/delete) in
-// `permissions`; filtering to the known S3-action set drops those so they never
-// surface as permissions. After the backfill runs, `permissions` holds S3 actions.
-const VALID_PERMISSIONS = new Set<string>(ACCESS_KEY_PERMISSIONS);
 
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -55,9 +50,9 @@ export async function baseHandler(
       accessKeyId: record.accessKeyId as string,
       createdAt: record.createdAt as string,
       status: record.status as AccessKey['status'],
-      permissions: ((record.permissions ?? []) as string[]).filter((p): p is AccessKeyPermission =>
-        VALID_PERMISSIONS.has(p),
-      ),
+      permissions: record.permissions as AccessKey['permissions'],
+      granularPermissions:
+        (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
       bucketScope: record.bucketScope as AccessKey['bucketScope'],
       buckets: record.buckets as string[] | undefined,
       region: (record.region as AccessKey['region']) ?? S3Region.EuWest1,

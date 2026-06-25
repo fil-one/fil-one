@@ -96,22 +96,20 @@ export type {
 export { PresignOpSchema, PresignRequestSchema } from './api/presign.js';
 
 export {
-  ACCESS_KEY_BUCKET_SCOPES,
   ACCESS_KEY_PERMISSIONS,
-  DEFAULT_ACCESS_KEY_PERMISSIONS,
-  PERMISSION_PRESETS,
-  ACCESS_KEY_PERMISSION_GROUP_ORDER,
-  ACCESS_KEY_PERMISSION_LABELS,
+  ACCESS_KEY_BUCKET_SCOPES,
+  GRANULAR_PERMISSIONS,
+  GRANULAR_PERMISSION_MAP,
+  GRANULAR_PERMISSION_LABELS,
   KEY_NAME_MAX_LENGTH,
   KEY_NAME_PATTERN,
   CreateAccessKeySchema,
 } from './api/access-keys.js';
 export type {
   AccessKeyStatus,
-  AccessKeyBucketScope,
   AccessKeyPermission,
-  AccessKeyPermissionGroup,
-  PermissionPreset,
+  AccessKeyBucketScope,
+  GranularPermission,
   AccessKey,
   ListAccessKeysResponse,
   CreateAccessKeyRequest,

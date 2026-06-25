@@ -425,7 +425,7 @@ describe('fthOrchestrator.createBucket', () => {
 describe('fthOrchestrator.issueAccessKey', () => {
   const baseOpts = {
     keyName: 'My Key',
-    permissions: ['GetObject', 'PutObject', 'ListBucket'] as const,
+    permissions: ['read', 'write'] as const,
     bucketScope: 'all' as const,
   };
 
@@ -458,16 +458,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
       '7',
       expect.objectContaining({
         name: baseOpts.keyName,
-        // FTH_ALWAYS_PERMISSIONS + mapped access-key permission actions.
-        permissions: expect.arrayContaining([
-          's3:ListAllMyBuckets',
-          's3:GetBucketLocation',
-          's3:GetBucketVersioning',
-          's3:GetBucketObjectLockConfiguration',
-          's3:GetObject',
-          's3:PutObject',
-          's3:ListBucket',
-        ]),
+        permissions: expect.arrayContaining(['s3:GetObject', 's3:PutObject', 's3:ListBucket']),
         buckets: [],
         expiresAt: null,
       }),
@@ -527,11 +518,11 @@ describe('fthOrchestrator.issueAccessKey', () => {
 
     await fthOrchestrator.issueAccessKey(fthClientId, {
       keyName: 'k1',
-      permissions: ['GetObject'],
+      permissions: ['read'],
     });
     await fthOrchestrator.issueAccessKey(fthClientId, {
       keyName: 'k2',
-      permissions: ['GetObject'],
+      permissions: ['read'],
     });
 
     expect(mockFthClient.listStorageUsers).toHaveBeenCalledTimes(1);
