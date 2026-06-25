@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
-import { S3_REGION, S3Region } from '@filone/shared';
+import { DEFAULT_ACCESS_KEY_PERMISSIONS, S3_REGION, S3Region } from '@filone/shared';
 import { ToastProvider } from '../components/Toast';
 import { useAccessKeyForm } from './use-access-key-form.js';
 
@@ -72,6 +72,11 @@ describe('useAccessKeyForm — canSubmit', () => {
     const { result } = renderForm();
     act(() => result.current.setKeyName('   '));
     expect(result.current.canSubmit).toBe(false);
+  });
+
+  it('initializes permissions to DEFAULT_ACCESS_KEY_PERMISSIONS', () => {
+    const { result } = renderForm();
+    expect(result.current.permissions).toEqual(DEFAULT_ACCESS_KEY_PERMISSIONS);
   });
 
   it('is false when no permissions are selected', () => {

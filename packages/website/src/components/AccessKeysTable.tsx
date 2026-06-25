@@ -4,8 +4,8 @@ import { DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon } from '@phosphor-icons/rea
 
 import { IconBox } from './IconBox';
 
-import type { AccessKey } from '@filone/shared';
-import { GRANULAR_PERMISSION_LABELS } from '@filone/shared';
+import type { AccessKey, AccessKeyPermission } from '@filone/shared';
+import { ACCESS_KEY_PERMISSION_LABELS } from '@filone/shared';
 
 import { Badge } from './Badge';
 import { Button } from './Button';
@@ -84,6 +84,48 @@ function ActionMenu({ onDelete }: { onDelete: () => void }) {
             Delete
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PermissionsCell
+// ---------------------------------------------------------------------------
+
+const PERMISSIONS_PREVIEW_COUNT = 3;
+
+function PermissionsCell({ permissions }: { permissions: AccessKeyPermission[] }) {
+  if (permissions.length === 0) {
+    return <span className="text-xs text-zinc-400">None</span>;
+  }
+
+  const preview = permissions.slice(0, PERMISSIONS_PREVIEW_COUNT);
+  const overflow = permissions.length - preview.length;
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {preview.map((g) => (
+        <Badge key={g} color="blue" size="sm">
+          {ACCESS_KEY_PERMISSION_LABELS[g].label}
+        </Badge>
+      ))}
+      {overflow > 0 && (
+        <Badge
+          color="blue"
+          size="sm"
+          description={
+            <ul className="flex flex-col gap-0.5">
+              {permissions.map((g) => (
+                <li key={g} className="text-xs text-zinc-700">
+                  {ACCESS_KEY_PERMISSION_LABELS[g].label}
+                </li>
+              ))}
+            </ul>
+          }
+        >
+          +{overflow} more
+        </Badge>
       )}
     </div>
   );
@@ -181,35 +223,7 @@ export function AccessKeysTable({
             {/* Permissions */}
             {showPermissions && (
               <Table.Cell className="hidden md:table-cell">
-                <div className="flex flex-wrap gap-1">
-                  {(key.permissions ?? []).map((p) => (
-                    <Badge key={p} color="blue" size="sm" className="capitalize">
-                      {p}
-                    </Badge>
-                  ))}
-                  {(key.granularPermissions ?? []).length > 0 && (
-                    <Badge
-                      color="blue"
-                      size="sm"
-                      description={
-                        <>
-                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-                            Data protection
-                          </p>
-                          <ul className="flex flex-col gap-0.5">
-                            {key.granularPermissions!.map((g) => (
-                              <li key={g} className="text-xs text-zinc-700">
-                                {GRANULAR_PERMISSION_LABELS[g].label}
-                              </li>
-                            ))}
-                          </ul>
-                        </>
-                      }
-                    >
-                      Data protection
-                    </Badge>
-                  )}
-                </div>
+                <PermissionsCell permissions={key.permissions} />
               </Table.Cell>
             )}
 

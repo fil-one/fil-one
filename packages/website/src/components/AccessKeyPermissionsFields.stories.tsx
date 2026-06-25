@@ -2,7 +2,8 @@ import { useState } from 'react';
 
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
-import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
+import type { AccessKeyPermission } from '@filone/shared';
+import { DEFAULT_ACCESS_KEY_PERMISSIONS, ACCESS_KEY_PERMISSIONS } from '@filone/shared';
 
 import { AccessKeyPermissionsFields } from './AccessKeyPermissionsFields';
 
@@ -13,7 +14,6 @@ const meta: Meta<typeof AccessKeyPermissionsFields> = {
   component: AccessKeyPermissionsFields,
   args: {
     onChange: noop,
-    onGranularPermissionsChange: noop,
   },
 };
 
@@ -23,35 +23,24 @@ type Story = StoryObj<typeof AccessKeyPermissionsFields>;
 export const NoneSelected: Story = {
   args: {
     value: [],
-    granularPermissions: [],
+  },
+};
+
+export const DefaultSelected: Story = {
+  args: {
+    value: DEFAULT_ACCESS_KEY_PERMISSIONS,
   },
 };
 
 export const AllSelected: Story = {
   args: {
-    value: ['read', 'write', 'list', 'delete'],
-    granularPermissions: [],
-  },
-};
-
-export const WithGranularPermissions: Story = {
-  args: {
-    value: ['read', 'write'],
-    granularPermissions: ['GetObjectVersion', 'GetObjectRetention', 'PutObjectRetention'],
+    value: [...ACCESS_KEY_PERMISSIONS],
   },
 };
 
 export const Interactive: Story = {
   render: () => {
-    const [value, setValue] = useState<AccessKeyPermission[]>(['read', 'list']);
-    const [granular, setGranular] = useState<GranularPermission[]>([]);
-    return (
-      <AccessKeyPermissionsFields
-        value={value}
-        onChange={setValue}
-        granularPermissions={granular}
-        onGranularPermissionsChange={setGranular}
-      />
-    );
+    const [value, setValue] = useState<AccessKeyPermission[]>(DEFAULT_ACCESS_KEY_PERMISSIONS);
+    return <AccessKeyPermissionsFields value={value} onChange={setValue} />;
   },
 };
