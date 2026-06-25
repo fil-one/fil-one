@@ -304,52 +304,71 @@ describe('getAuroraPortalApiKey', () => {
 // createAuroraAccessKey
 // ---------------------------------------------------------------------------
 
-// Always-included Aurora access tokens prepended to every access array.
-const AURORA_ACCESS_ALWAYS = ['Default', 'GetBucketVersioning', 'GetBucketObjectLockConfiguration'];
+// Base-only access array produced by buildAuroraAccessArray(['read','write','list','delete'])
+// (no granular permissions — new default behavior)
+const EXPECTED_BASE_ACCESS = [
+  'Default',
+  'GetBucketVersioning',
+  'GetBucketObjectLockConfiguration',
+  'Read',
+  'Write',
+  'List',
+  'Delete',
+];
 
 // ---------------------------------------------------------------------------
 // buildAuroraAccessArray
 // ---------------------------------------------------------------------------
 
 describe('buildAuroraAccessArray', () => {
-  it('returns the always-included tokens for an empty access-key permission list', () => {
-    expect(buildAuroraAccessArray([])).toStrictEqual(AURORA_ACCESS_ALWAYS);
+  it('returns always-included + base actions without granular permissions', () => {
+    expect(buildAuroraAccessArray(['read', 'write', 'list', 'delete'])).toStrictEqual(
+      EXPECTED_BASE_ACCESS,
+    );
   });
 
-  it('appends a single access-key permission after the always-included tokens', () => {
-    expect(buildAuroraAccessArray(['GetObject'])).toStrictEqual([
-      ...AURORA_ACCESS_ALWAYS,
-      'GetObject',
+  it('returns only always-included + single base action for one permission', () => {
+    expect(buildAuroraAccessArray(['read'])).toStrictEqual([
+      'Default',
+      'GetBucketVersioning',
+      'GetBucketObjectLockConfiguration',
+      'Read',
     ]);
   });
 
-  it('appends the default access-key permissions in order', () => {
+  it('includes granular permissions when provided', () => {
     expect(
-      buildAuroraAccessArray([
-        'GetObject',
-        'ListMultipartUploadParts',
-        'PutObject',
-        'AbortMultipartUpload',
-        'ListBucket',
-        'ListBucketMultipartUploads',
-      ]),
+      buildAuroraAccessArray(['read'], ['GetObjectVersion', 'GetObjectRetention']),
     ).toStrictEqual([
-      ...AURORA_ACCESS_ALWAYS,
-      'GetObject',
-      'ListMultipartUploadParts',
-      'PutObject',
-      'AbortMultipartUpload',
-      'ListBucket',
-      'ListBucketMultipartUploads',
-    ]);
-  });
-
-  it('appends data-protection access-key permissions', () => {
-    expect(buildAuroraAccessArray(['GetObjectVersion', 'GetObjectRetention'])).toStrictEqual([
-      ...AURORA_ACCESS_ALWAYS,
+      'Default',
+      'GetBucketVersioning',
+      'GetBucketObjectLockConfiguration',
+      'Read',
       'GetObjectVersion',
       'GetObjectRetention',
     ]);
+  });
+
+  it('includes all granular permissions for full access', () => {
+    const allGranular = [
+      'GetObjectVersion',
+      'GetObjectRetention',
+      'GetObjectLegalHold',
+      'PutObjectRetention',
+      'PutObjectLegalHold',
+      'ListBucketVersions',
+      'DeleteObjectVersion',
+    ] as const;
+
+    expect(
+      buildAuroraAccessArray(['read', 'write', 'list', 'delete'], [...allGranular]),
+    ).toStrictEqual([...EXPECTED_BASE_ACCESS, ...allGranular]);
+  });
+
+  it('treats undefined granularPermissions the same as empty', () => {
+    expect(buildAuroraAccessArray(['read'], undefined)).toStrictEqual(
+      buildAuroraAccessArray(['read']),
+    );
   });
 });
 
@@ -382,7 +401,7 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+      permissions: ['read', 'write', 'list', 'delete'],
     });
 
     const ssmCalls = ssmMock.commandCalls(GetParameterCommand);
@@ -400,28 +419,26 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+      permissions: ['read', 'write', 'list', 'delete'],
     });
 
     expect(mockPostAccessKeys).toHaveBeenCalledWith({
       client: 'mock-portal-client',
       path: { tenantId: 'tenant-1' },
-      body: {
-        name: 'my-key',
-        access: [...AURORA_ACCESS_ALWAYS, 'GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
-      },
+      body: { name: 'my-key', access: EXPECTED_BASE_ACCESS },
       throwOnError: false,
     });
   });
 
-  it('includes data-protection access-key permissions in the Aurora access array', async () => {
+  it('includes granular permissions in Aurora access array when provided', async () => {
     setupSsmMock();
     mockPostAccessKeys.mockResolvedValue(VALID_ACCESS_KEY_RESPONSE);
 
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      permissions: ['GetObject', 'GetObjectVersion', 'GetObjectRetention'],
+      permissions: ['read'],
+      granularPermissions: ['GetObjectVersion', 'GetObjectRetention'],
     });
 
     expect(mockPostAccessKeys).toHaveBeenCalledWith({
@@ -429,7 +446,14 @@ describe('createAuroraAccessKey', () => {
       path: { tenantId: 'tenant-1' },
       body: {
         name: 'my-key',
-        access: [...AURORA_ACCESS_ALWAYS, 'GetObject', 'GetObjectVersion', 'GetObjectRetention'],
+        access: [
+          'Default',
+          'GetBucketVersioning',
+          'GetBucketObjectLockConfiguration',
+          'Read',
+          'GetObjectVersion',
+          'GetObjectRetention',
+        ],
       },
       throwOnError: false,
     });
@@ -442,7 +466,7 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      permissions: ['GetObject'],
+      permissions: ['read'],
       expiresAt: '2026-06-01',
     });
 
@@ -460,7 +484,7 @@ describe('createAuroraAccessKey', () => {
     await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      permissions: ['GetObject'],
+      permissions: ['read'],
       expiresAt: null,
     });
 
@@ -475,7 +499,7 @@ describe('createAuroraAccessKey', () => {
     const result = await createAuroraAccessKey({
       tenantId: 'tenant-1',
       keyName: 'my-key',
-      permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+      permissions: ['read', 'write', 'list', 'delete'],
     });
 
     expect(result).toStrictEqual({
@@ -498,7 +522,7 @@ describe('createAuroraAccessKey', () => {
       await createAuroraAccessKey({
         tenantId: 'tenant-1',
         keyName: 'my-key',
-        permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+        permissions: ['read', 'write', 'list', 'delete'],
       });
       expect.unreachable('Expected AccessKeyAlreadyExistsError to be thrown');
     } catch (err) {
@@ -521,7 +545,7 @@ describe('createAuroraAccessKey', () => {
       createAuroraAccessKey({
         tenantId: 'tenant-1',
         keyName: 'my-key',
-        permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+        permissions: ['read', 'write', 'list', 'delete'],
       }),
     ).rejects.toThrow('Failed to create Aurora access key "my-key" for tenant tenant-1');
   });
@@ -537,7 +561,7 @@ describe('createAuroraAccessKey', () => {
       createAuroraAccessKey({
         tenantId: 'tenant-1',
         keyName: 'my-key',
-        permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+        permissions: ['read', 'write', 'list', 'delete'],
       }),
     ).rejects.toThrow('Aurora API returned invalid access key for tenant tenant-1');
   });
@@ -560,7 +584,7 @@ describe('createAuroraAccessKey', () => {
         createAuroraAccessKey({
           tenantId: 'tenant-1',
           keyName: 'my-key',
-          permissions: ['GetObject', 'PutObject', 'ListBucket', 'DeleteObject'],
+          permissions: ['read', 'write', 'list', 'delete'],
         }),
       ).rejects.toThrow(
         `Aurora Portal API returned empty access key "${field}" for tenant tenant-1`,
