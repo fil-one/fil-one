@@ -105,7 +105,9 @@ export default $config({
     // Resource.RagVectorBucket.name.
     const ragVectorBucketName = `filone-${$app.stage}-rag-vectors`;
     if (ragVectorBucketName.length > 63) {
-      throw new Error(`RagVectorBucket name too long (${ragVectorBucketName.length} chars): ${ragVectorBucketName}`);
+      throw new Error(
+        `RagVectorBucket name too long (${ragVectorBucketName.length} chars): ${ragVectorBucketName}`,
+      );
     }
     const ragVectorBucketResource = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
       vectorBucketName: ragVectorBucketName,
