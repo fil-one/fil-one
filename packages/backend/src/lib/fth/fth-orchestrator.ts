@@ -12,7 +12,7 @@ import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region, TenantStatus } from '@filone/shared';
-import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
+import type { AccessKeyPermission } from '@filone/shared';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
 import {
   AccessKeyAlreadyExistsError,
