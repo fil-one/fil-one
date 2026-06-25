@@ -212,6 +212,44 @@ describe('createBillingTrial', () => {
     expect(input.ExpressionAttributeValues?.[':now']).toBeDefined();
   });
 
+  it('heals a status-less record with no stripeCustomerId: creates a customer and backfills via UpdateItem (not Put)', async () => {
+    // A record that exists without stripeCustomerId AND without subscriptionStatus.
+    // The write must branch on record presence, not on customer presence — a PutItem
+    // guarded on attribute_not_exists(pk) would always fail here and be swallowed,
+    // leaving the record unhealed after Stripe side effects already happened.
+    ddbMock.on(GetItemCommand).resolves({
+      Item: {
+        pk: { S: 'CUSTOMER#user-1' },
+        sk: { S: 'SUBSCRIPTION' },
+      },
+    });
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
+
+    // No existing customer on the record → a new Stripe customer is created.
+    expect(mockCustomersCreate).toHaveBeenCalledOnce();
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: 'cus_test_123' }),
+      { idempotencyKey: 'billing-trial-sub-user-1' },
+    );
+
+    // Heals via UpdateItem, never PutItem.
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updateCalls).toHaveLength(1);
+
+    const input = updateCalls[0].args[0].input;
+    expect(input.ConditionExpression).toBe('attribute_not_exists(subscriptionStatus)');
+    // Backfills stripeCustomerId/orgId without clobbering (if_not_exists).
+    expect(input.UpdateExpression).toContain(
+      'stripeCustomerId = if_not_exists(stripeCustomerId, :cid)',
+    );
+    expect(input.UpdateExpression).toContain('orgId = if_not_exists(orgId, :orgId)');
+    expect(input.ExpressionAttributeValues?.[':cid']).toEqual({ S: 'cus_test_123' });
+    expect(input.ExpressionAttributeValues?.[':orgId']).toEqual({ S: 'org-1' });
+  });
+
   it('heals a bare record: no-ops when a concurrent writer already set subscriptionStatus (ConditionalCheckFailedException)', async () => {
     ddbMock.on(GetItemCommand).resolves({
       Item: {

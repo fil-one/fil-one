@@ -37,9 +37,14 @@ export async function createBillingTrial({
   );
   // Already provisioned (trial or paid) — nothing to do.
   if (existing.Item?.subscriptionStatus) return;
-  // A bare record is present → reuse its Stripe customer so we never orphan a
+  // Reuse the Stripe customer from an existing record so we never orphan a
   // duplicate customer in Stripe when healing.
   const existingCustomerId = existing.Item?.stripeCustomerId?.S;
+  // Any existing status-less record must be healed via UpdateItem — a PutItem
+  // guarded on attribute_not_exists(pk) would always fail for it and be swallowed,
+  // leaving the record unhealed after Stripe side effects already happened. This
+  // also covers a record that exists without a stripeCustomerId.
+  const recordExists = Boolean(existing.Item);
 
   const now = new Date();
   const trialDurationMs = TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000;
@@ -81,18 +86,20 @@ export async function createBillingTrial({
     subscription.items.data[0].current_period_end * 1000,
   ).toISOString();
 
-  // 3. Persist the trial. When healing a bare record, fill in the trial fields
-  // with an UpdateItem guarded on the status still being absent. Otherwise create
-  // the record outright. Both writes are idempotent: a concurrent writer that wins
-  // the race trips the condition and we no-op. (FIL-546)
+  // 3. Persist the trial. When healing an existing status-less record, fill in the
+  // trial fields — and backfill stripeCustomerId/orgId with if_not_exists so the
+  // record becomes canonical without clobbering — via an UpdateItem guarded on the
+  // status still being absent. Otherwise create the record outright. Both writes are
+  // idempotent: a concurrent writer that wins the race trips the condition and we
+  // no-op. (FIL-546)
   try {
-    if (existingCustomerId) {
+    if (recordExists) {
       await getDynamoClient().send(
         new UpdateItemCommand({
           TableName: Resource.BillingTable.name,
           Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
           UpdateExpression:
-            'SET subscriptionId = :subId, subscriptionStatus = :status, trialStartedAt = :ts, trialEndsAt = :te, currentPeriodStart = :cps, currentPeriodEnd = :cpe, updatedAt = :now',
+            'SET subscriptionId = :subId, subscriptionStatus = :status, trialStartedAt = :ts, trialEndsAt = :te, currentPeriodStart = :cps, currentPeriodEnd = :cpe, updatedAt = :now, stripeCustomerId = if_not_exists(stripeCustomerId, :cid), orgId = if_not_exists(orgId, :orgId)',
           ConditionExpression: 'attribute_not_exists(subscriptionStatus)',
           ExpressionAttributeValues: {
             ':subId': { S: subscription.id },
@@ -102,6 +109,8 @@ export async function createBillingTrial({
             ':cps': { S: currentPeriodStart },
             ':cpe': { S: currentPeriodEnd },
             ':now': { S: now.toISOString() },
+            ':cid': { S: stripeCustomer.id },
+            ':orgId': { S: orgId },
           },
         }),
       );
