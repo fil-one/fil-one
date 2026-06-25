@@ -59,7 +59,6 @@ vi.mock('./fth-api-metrics.js', () => ({
 }));
 
 process.env.FILONE_STAGE = 'test';
-process.env.FTH_S3_URL = 'https://s3.fortilyx.test';
 process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
 
 import {
