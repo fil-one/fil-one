@@ -103,8 +103,12 @@ export default $config({
     // One vector bucket hosts one index per RAG-enabled bucket. The
     // @filone/rag-shared S3VectorsStore reads the bucket name at runtime via
     // Resource.RagVectorBucket.name.
+    const ragVectorBucketName = `filone-${$app.stage}-rag-vectors`;
+    if (ragVectorBucketName.length > 63) {
+      throw new Error(`RagVectorBucket name too long (${ragVectorBucketName.length} chars): ${ragVectorBucketName}`);
+    }
     const ragVectorBucketResource = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
-      vectorBucketName: $interpolate`filone-${$app.stage}-rag-vectors`,
+      vectorBucketName: ragVectorBucketName,
     });
 
     // Wrap the raw Pulumi resource so handlers can read it via SST resource
