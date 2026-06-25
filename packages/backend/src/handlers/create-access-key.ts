@@ -45,7 +45,7 @@ export async function baseHandler(
       .build();
   }
 
-  const { keyName, permissions, bucketScope, region } = parsed.data;
+  const { keyName, permissions, granularPermissions, bucketScope, region } = parsed.data;
   const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
   const expiresAt = parsed.data.expiresAt ?? null;
 
@@ -64,6 +64,7 @@ export async function baseHandler(
     accessKey = await orchestrator.issueAccessKey(tenantId, {
       keyName,
       permissions,
+      granularPermissions,
       buckets,
       expiresAt,
     });
@@ -96,6 +97,7 @@ export async function baseHandler(
         status: 'active',
         region,
         permissions,
+        ...(granularPermissions?.length ? { granularPermissions } : {}),
         bucketScope,
         ...(buckets ? { buckets } : {}),
         ...(expiresAt ? { expiresAt } : {}),
