@@ -8,7 +8,12 @@ import { crc32, deflateRawSync } from 'node:zlib';
 
 interface ZipFile {
   name: string;
-  data: string;
+  /**
+   * Entry contents. A string is encoded as UTF-8; raw bytes are used as-is,
+   * which lets a bomb fixture declare a large uncompressed size that DEFLATEs
+   * to a tiny payload.
+   */
+  data: string | Uint8Array;
   /** When true, store uncompressed (method 0) instead of DEFLATE (method 8). */
   store?: boolean;
 }
@@ -36,7 +41,8 @@ export function buildZip(files: ZipFile[]): Uint8Array {
 
   for (const file of files) {
     const nameBuf = Buffer.from(file.name, 'utf8');
-    const raw = Buffer.from(file.data, 'utf8');
+    const raw =
+      typeof file.data === 'string' ? Buffer.from(file.data, 'utf8') : Buffer.from(file.data);
     const stored = file.store === true;
     const payload = stored ? raw : deflateRawSync(raw);
     const method = stored ? 0 : 8;

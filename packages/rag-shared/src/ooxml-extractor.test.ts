@@ -41,6 +41,22 @@ describe('extractTextFromDocx', () => {
     );
   });
 
+  it('extracts despite unrelated bomb entries the extractor never reads', () => {
+    // A 40 MB-uncompressed entry that DEFLATEs tiny — above the 32 MB default
+    // per-entry cap. If readZip inflated every entry eagerly this would throw;
+    // lazy decompression means only word/document.xml is inflated, so extraction
+    // succeeds.
+    const document =
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      `<w:body>${docxParagraph('Hello world')}</w:body></w:document>`;
+    const docx = buildZip([
+      { name: 'word/document.xml', data: document },
+      { name: 'bloat.bin', data: new Uint8Array(40 * 1024 * 1024) },
+    ]);
+    expect(extractTextFromDocx(docx)).toBe('Hello world');
+  });
+
   it('is deterministic for identical bytes', () => {
     const body = docxParagraph('alpha') + docxParagraph('beta');
     const docx = buildDocx(body);

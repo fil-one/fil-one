@@ -109,7 +109,7 @@ export function extractTextFromDocx(bytes: Uint8Array): string {
   if (!document) {
     throw new Error('Malformed DOCX: missing word/document.xml');
   }
-  return extractPartText(document)
+  return extractPartText(document())
     .replace(/\n{2,}/g, '\n')
     .trim();
 }
@@ -155,7 +155,7 @@ export function extractTextFromPptx(bytes: Uint8Array): string {
     throw new Error('Malformed PPTX: no slides found under ppt/slides/');
   }
 
-  const slides = slideNames.map((name) => extractPartText(entries.get(name)!).trim());
+  const slides = slideNames.map((name) => extractPartText(entries.get(name)!()).trim());
   return slides
     .filter((slide) => slide.length > 0)
     .join('\n')
