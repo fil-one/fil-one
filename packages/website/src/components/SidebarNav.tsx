@@ -16,12 +16,11 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
-import { DOCS_URL, formatBytes } from '@filone/shared';
+import { DOCS_URL } from '@filone/shared';
 import { logout } from '../lib/api.js';
 import { useSidebarData } from './use-sidebar-data.js';
 
-import { Button } from './Button.js';
-import { ProgressBar } from './ProgressBar.js';
+import { StatusBanners } from './SidebarStatusBanners.js';
 import { StatusIndicator } from './StatusIndicator.js';
 import { Tooltip } from './Tooltip.js';
 
@@ -30,6 +29,10 @@ type SidebarNavProps = {
   onToggle: () => void;
   onClose?: () => void;
   showUserProfile?: boolean;
+  // When false, omit page-unique e2e identifiers (ids/data-testids) so the
+  // secondary mobile-drawer copy doesn't duplicate the desktop sidebar's
+  // selectors. The primary desktop sidebar passes true.
+  showTestIds: boolean;
 };
 
 type NavItem = {
@@ -80,9 +83,12 @@ type NavLinksProps = {
   collapsed: boolean;
   matchRoute: ReturnType<typeof useMatchRoute>;
   onClose?: () => void;
+  // Suppress stable test ids on the secondary (mobile drawer) copy so e2e
+  // selectors stay page-unique. See SidebarNav `showTestIds`.
+  showTestIds: boolean;
 };
 
-function NavLinks({ collapsed, matchRoute, onClose }: NavLinksProps) {
+function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
   return (
     <div className="flex flex-col p-2">
       {navGroups.map((group, gi) => (
@@ -99,7 +105,7 @@ function NavLinks({ collapsed, matchRoute, onClose }: NavLinksProps) {
                 <Link
                   key={path}
                   to={path}
-                  data-testid={testId}
+                  data-testid={showTestIds ? testId : undefined}
                   aria-label={label}
                   onClick={onClose}
                   className={[
@@ -135,7 +141,7 @@ const utilityNavItems: NavItem[] = [
   { path: '/settings', icon: GearIcon, label: 'Settings', testId: 'nav-settings' },
 ];
 
-function UtilityNavLinks({ collapsed, matchRoute, onClose }: NavLinksProps) {
+function UtilityNavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
   return (
     <div className="p-2 flex flex-col gap-0.5">
       {utilityNavItems.map(({ path, icon: Icon, label, testId }) => {
@@ -144,7 +150,7 @@ function UtilityNavLinks({ collapsed, matchRoute, onClose }: NavLinksProps) {
           <Link
             key={path}
             to={path}
-            data-testid={testId}
+            data-testid={showTestIds ? testId : undefined}
             aria-label={label}
             onClick={onClose}
             className={[
@@ -169,94 +175,6 @@ function UtilityNavLinks({ collapsed, matchRoute, onClose }: NavLinksProps) {
         return <div key={path}>{link}</div>;
       })}
     </div>
-  );
-}
-
-type StatusBannersProps = {
-  collapsed: boolean;
-  isTrialing: boolean;
-  trialDays: number | null;
-  trialEndsLabel: string | undefined;
-  storageUsed: number;
-  storagePct: number;
-  egressUsed: number;
-  egressPct: number;
-  graceDays: number | null;
-  graceEndsLabel: string | undefined;
-  isPastDue: boolean;
-};
-
-function StatusBanners({
-  collapsed,
-  isTrialing,
-  trialDays,
-  trialEndsLabel,
-  storageUsed,
-  storagePct,
-  egressUsed,
-  egressPct,
-  graceDays,
-  graceEndsLabel,
-  isPastDue,
-}: StatusBannersProps) {
-  return (
-    <>
-      {!collapsed && isTrialing && (
-        <div className="border-t border-zinc-200 px-3 py-3">
-          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-            <p className="text-xs font-medium text-zinc-900" title={trialEndsLabel}>
-              {trialDays !== null ? `${trialDays} days left in trial` : 'Trial active'}
-            </p>
-            <div className="mt-2.5 space-y-2.5">
-              <div>
-                <div className="mb-1 flex items-center justify-between text-xs">
-                  <span className="text-zinc-500">Storage</span>
-                  <span className="text-zinc-700">{formatBytes(storageUsed)} / 1 TB</span>
-                </div>
-                <ProgressBar value={storagePct} size="sm" label="Storage usage" />
-              </div>
-              <div>
-                <div className="mb-1 flex items-center justify-between text-xs">
-                  <span className="text-zinc-500">Egress</span>
-                  <span className="text-zinc-700">{formatBytes(egressUsed)} / 2 TB</span>
-                </div>
-                <ProgressBar value={egressPct} size="sm" label="Egress usage" />
-              </div>
-            </div>
-            <div className="mt-3">
-              <Button
-                id="sidebar-upgrade-button"
-                variant="ghost"
-                size="sm"
-                href="/billing"
-                className="w-full justify-center"
-              >
-                Upgrade
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!collapsed && isPastDue && (
-        <div className="border-t border-amber-200 bg-amber-50 px-3 py-4">
-          <p className="text-xs font-medium text-amber-800" title={graceEndsLabel}>
-            Payment failed. Update your payment method to avoid losing access.
-            {graceDays !== null ? ` ${graceDays} days remaining.` : ''}
-          </p>
-          <div className="mt-3">
-            <Button
-              id="sidebar-update-payment-button"
-              variant="primary"
-              href="/billing"
-              className="w-full justify-center text-xs"
-            >
-              Update payment
-            </Button>
-          </div>
-        </div>
-      )}
-    </>
   );
 }
 
@@ -336,6 +254,7 @@ export function SidebarNav({
   onToggle,
   onClose,
   showUserProfile = true,
+  showTestIds,
 }: SidebarNavProps) {
   const matchRoute = useMatchRoute();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -474,17 +393,28 @@ export function SidebarNav({
         )}
 
         {/* Primary nav items */}
-        <NavLinks collapsed={collapsed} matchRoute={matchRoute} onClose={onClose} />
+        <NavLinks
+          collapsed={collapsed}
+          matchRoute={matchRoute}
+          onClose={onClose}
+          showTestIds={showTestIds}
+        />
 
         {/* Spacer */}
         <div className="flex-1" />
 
         {/* Bottom utility nav */}
-        <UtilityNavLinks collapsed={collapsed} matchRoute={matchRoute} onClose={onClose} />
+        <UtilityNavLinks
+          collapsed={collapsed}
+          matchRoute={matchRoute}
+          onClose={onClose}
+          showTestIds={showTestIds}
+        />
 
         {/* Status banners */}
         <StatusBanners
           collapsed={collapsed}
+          showTestIds={showTestIds}
           isTrialing={isTrialing}
           trialDays={trialDays}
           trialEndsLabel={trialEndsLabel}

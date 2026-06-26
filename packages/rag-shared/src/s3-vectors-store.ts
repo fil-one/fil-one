@@ -1,5 +1,4 @@
 import {
-  ConflictException,
   CreateIndexCommand,
   DeleteIndexCommand,
   DeleteVectorsCommand,
@@ -70,9 +69,9 @@ export class S3VectorsStore implements VectorStore {
           },
         }),
       );
-    } catch (error) {
+    } catch (error: unknown) {
       // Idempotent: an existing index surfaces as a ConflictException.
-      if (error instanceof ConflictException) {
+      if ((error as { name?: string }).name === 'ConflictException') {
         return;
       }
       throw error;

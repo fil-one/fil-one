@@ -6,6 +6,7 @@ import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 import { UserIcon, BellIcon, ShieldCheckIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Heading } from '../components/Heading/Heading';
+import { PageLayout } from '../components/PageLayout.js';
 import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
@@ -384,24 +385,17 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="px-10 pt-10">
-      <div className="mb-1">
-        <Heading
-          id="settings-heading"
-          tag="h1"
-          size="xl"
-          description="Manage your profile and preferences"
-        >
-          Settings
-        </Heading>
-      </div>
-
-      <div className="mt-6 flex max-w-2xl flex-col gap-6">
+    <PageLayout
+      title="Settings"
+      headingId="settings-heading"
+      description="Manage your profile and preferences"
+    >
+      <div className="flex max-w-2xl flex-col gap-6">
         <ProfileSection me={me} />
         <NotificationsSection />
         <SecuritySection me={me} />
         <DangerSection />
       </div>
-    </div>
+    </PageLayout>
   );
 }
