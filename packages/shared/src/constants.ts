@@ -51,20 +51,6 @@ export function isFoundationEmail(email: string | undefined): boolean {
 }
 
 /**
- * Pure predicate gating access to the RAG pipeline. Access is granted when the
- * verified email is a Filecoin Foundation address ({@link isFoundationEmail})
- * OR the email is present in the runtime DynamoDB allowlist (`isAllowlisted`).
- *
- * Pure (no side effects) so the frontend and backend share one gate decision:
- * the backend resolves `isAllowlisted` from DynamoDB and computes `ragAccess`
- * server-side; the frontend reads that server flag. The caller is responsible
- * for ensuring the email is verified before passing it (see {@link isFoundationEmail}).
- */
-export function canUseRagPipeline(email: string | undefined, isAllowlisted: boolean): boolean {
-  return isFoundationEmail(email) || isAllowlisted;
-}
-
-/**
  * Regions selectable in the given stage. Non-production stages expose
  * `us-east-1` for dogfooding; in production it is additionally exposed to
  * Filecoin Foundation users (verified `@fil.org` emails) for early access.

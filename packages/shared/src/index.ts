@@ -9,7 +9,6 @@ export {
   REGION_LABELS,
   FOUNDATION_EMAIL_DOMAIN,
   isFoundationEmail,
-  canUseRagPipeline,
   formatRegion,
   getRegionLabel,
   getAvailableRegions,

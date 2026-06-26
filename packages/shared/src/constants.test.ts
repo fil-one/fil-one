@@ -10,7 +10,6 @@ import {
   getStageFromHostname,
   getAvailableRegions,
   isFoundationEmail,
-  canUseRagPipeline,
   formatRegion,
   getRegionLabel,
   REGION_LABELS,
@@ -171,36 +170,6 @@ describe('isFoundationEmail', () => {
   it('rejects undefined and empty', () => {
     expect(isFoundationEmail(undefined)).toBe(false);
     expect(isFoundationEmail('')).toBe(false);
-  });
-});
-
-describe('canUseRagPipeline', () => {
-  it('grants access to a Foundation email even when not allowlisted', () => {
-    expect(canUseRagPipeline('alice@fil.org', false)).toBe(true);
-  });
-
-  it('grants access to an allowlisted non-Foundation email', () => {
-    expect(canUseRagPipeline('bob@example.com', true)).toBe(true);
-  });
-
-  it('grants access when both Foundation and allowlisted', () => {
-    expect(canUseRagPipeline('alice@fil.org', true)).toBe(true);
-  });
-
-  it('denies access when neither Foundation nor allowlisted', () => {
-    expect(canUseRagPipeline('eve@example.com', false)).toBe(false);
-  });
-
-  it('matches the Foundation domain case-insensitively', () => {
-    expect(canUseRagPipeline('Alice@FIL.ORG', false)).toBe(true);
-  });
-
-  it('denies access for an undefined email that is not allowlisted', () => {
-    expect(canUseRagPipeline(undefined, false)).toBe(false);
-  });
-
-  it('grants access for an undefined email that is allowlisted', () => {
-    expect(canUseRagPipeline(undefined, true)).toBe(true);
   });
 });
 
