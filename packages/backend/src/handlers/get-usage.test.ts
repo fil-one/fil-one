@@ -69,7 +69,6 @@ describe('get-usage baseHandler', () => {
 
     const body = await run();
 
-    // Limits are global constants, not the per-region values reported above.
     expect(body).toStrictEqual({
       storage: { usedBytes: 4000 },
       egress: { usedBytes: 1500 },
@@ -147,7 +146,7 @@ describe('get-usage baseHandler', () => {
     expect(body.egress.usedBytes).toBe(350);
   });
 
-  it('sums usage and counts across all provisioned regions; limits stay constant', async () => {
+  it('sums usage and counts across all provisioned regions', async () => {
     const aurora = fakeOrchestrator('aurora', {
       region: S3Region.EuWest1,
       storage: [{ timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 1000, objectCount: 5 }],
@@ -216,7 +215,7 @@ describe('get-usage baseHandler', () => {
     const body = JSON.parse(String((result as { body: string }).body));
 
     // No region survives, so the response falls back to the global defaults
-    // rather than erroring out: a console key is reserved per region (300 − 2 = 298).
+    // rather than erroring out: a console key is reserved per region
     expect((result as { statusCode: number }).statusCode).toBe(200);
     expect(body).toStrictEqual({
       storage: { usedBytes: 0 },

@@ -82,11 +82,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
 
 // Folds the per-region usages into the dashboard totals. Counts (storage,
 // egress, objects, buckets, keys) are summed; storage/egress are pre-reduced
-// per region (see `fetchRegionUsage`); status collapses to the most-restrictive
-// across regions. The limit is global and constant (always `300 − 2`, never
-// summed or adjusted by provisioned-region count). The system `filone-console`
-// key present in each provisioned region is subtracted from the key *count*
-// only, so users see just the keys they manage.
+// per region (see `fetchRegionUsage`); status collapses to the most-restrictive across regions.
+// The system `filone-console` key present in each provisioned region
+// is subtracted from the key *count* only, so users see just the keys they manage.
 function aggregateRegionUsages(regionUsages: RegionUsage[]): UsageResponse {
   let storageUsedBytes = 0;
   let objectCount = 0;
