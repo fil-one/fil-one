@@ -68,7 +68,11 @@ export const Interactive: Story = {
     const [collapsed, setCollapsed] = useState(false);
     return (
       <div style={{ height: 600, width: collapsed ? 80 : 240 }}>
-        <SidebarNav collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+        <SidebarNav
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((c) => !c)}
+          showTestIds={true}
+        />
       </div>
     );
   },
