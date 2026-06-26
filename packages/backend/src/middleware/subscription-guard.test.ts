@@ -297,20 +297,17 @@ describe('subscriptionGuardMiddleware', () => {
     );
     mockEnsureTrialEntitlement.mockResolvedValue(true);
 
+    const event = buildEvent({
+      userInfo: {
+        sub: 'auth0|sub-1',
+        userId: USER_ID,
+        orgId: 'test-org-uuid',
+        email: 'test@example.com',
+        emailVerified: true,
+      },
+    });
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
-    const result = await before(
-      buildMiddyRequest(
-        buildEvent({
-          userInfo: {
-            sub: 'auth0|sub-1',
-            userId: USER_ID,
-            orgId: 'test-org-uuid',
-            email: 'test@example.com',
-            emailVerified: true,
-          },
-        }),
-      ),
-    );
+    const result = await before(buildMiddyRequest(event));
 
     // Entitled user with bare record → allowed (heal path)
     expect(result).toBeUndefined();
@@ -321,6 +318,9 @@ describe('subscriptionGuardMiddleware', () => {
       email: 'test@example.com',
       emailVerified: true,
     });
+    // After healing, the resolved status must be written to the request context
+    // so downstream handlers read Trialing rather than an unset value.
+    expect(event.requestContext.subscriptionStatus).toBe(SubscriptionStatus.Trialing);
   });
 
   it('blocks a bare record (no subscriptionStatus) when user is not entitled', async () => {

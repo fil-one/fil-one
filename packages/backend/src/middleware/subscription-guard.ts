@@ -70,8 +70,10 @@ async function runSubscriptionGuard(
   // create-setup-intent to remember the Stripe customer before a trial was ever
   // created. Heal it via the entitlement path (identical to the no-record branch
   // above) instead of blocking permanently; only genuinely un-entitled users are
-  // blocked. The heal writes the canonical Trialing record for subsequent requests.
-  // (FIL-546)
+  // blocked. The heal writes the canonical Trialing record, so we continue as a
+  // freshly-trialing request: the status falls through to the Trialing handling
+  // below (which sets event.requestContext.subscriptionStatus and runs the lazy
+  // trial-expiry transition against the just-written 30-day trial). (FIL-546)
   if (!status) {
     const entitled = await ensureTrialEntitlement({
       sub,
@@ -80,7 +82,8 @@ async function runSubscriptionGuard(
       email: email ?? null,
       emailVerified,
     });
-    return entitled ? undefined : buildInactiveResponse();
+    if (!entitled) return buildInactiveResponse();
+    status = SubscriptionStatus.Trialing;
   }
 
   // Store the resolved status on the event so handlers can read it
