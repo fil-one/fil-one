@@ -73,9 +73,9 @@ describe('get-usage baseHandler', () => {
     expect(body).toStrictEqual({
       storage: { usedBytes: 4000 },
       egress: { usedBytes: 1500 },
-      buckets: { count: 2, limit: 100 },
+      buckets: { count: 2 },
       objects: { count: 3 },
-      accessKeys: { count: 2, limit: 298 },
+      accessKeys: { count: 2 },
     });
   });
 
@@ -88,7 +88,7 @@ describe('get-usage baseHandler', () => {
 
     const body = await run();
 
-    expect(body.accessKeys).toEqual({ count: 0, limit: 298 });
+    expect(body.accessKeys).toEqual({ count: 0 });
   });
 
   it('returns defaults when no region is provisioned', async () => {
@@ -100,9 +100,9 @@ describe('get-usage baseHandler', () => {
     expect(body).toStrictEqual({
       storage: { usedBytes: 0 },
       egress: { usedBytes: 0 },
-      buckets: { count: 0, limit: 100 },
+      buckets: { count: 0 },
       objects: { count: 0 },
-      accessKeys: { count: 0, limit: 298 },
+      accessKeys: { count: 0 },
     });
     expect(aurora.getTenantUsageMetrics).not.toHaveBeenCalled();
     expect(aurora.getTenantInfo).not.toHaveBeenCalled();
@@ -120,9 +120,9 @@ describe('get-usage baseHandler', () => {
     expect(body).toStrictEqual({
       storage: { usedBytes: 0 },
       egress: { usedBytes: 0 },
-      buckets: { count: 0, limit: 100 },
+      buckets: { count: 0 },
       objects: { count: 0 },
-      accessKeys: { count: 0, limit: 298 },
+      accessKeys: { count: 0 },
     });
   });
 
@@ -167,10 +167,8 @@ describe('get-usage baseHandler', () => {
     expect(body.storage.usedBytes).toBe(1500);
     expect(body.objects.count).toBe(6);
     expect(body.egress.usedBytes).toBe(250);
-    expect(body.buckets).toEqual({ count: 3, limit: 100 });
-    // keys: (4 + 2) − 2 console keys (one per region) = 4; limit is the
-    // constant global ceiling: 300 − 2 = 298.
-    expect(body.accessKeys).toEqual({ count: 4, limit: 298 });
+    expect(body.buckets).toEqual({ count: 3 });
+    expect(body.accessKeys).toEqual({ count: 4 });
 
     expect(aurora.getTenantUsageMetrics).toHaveBeenCalledWith(AURORA_TENANT_ID, expect.any(Object));
     expect(fth.getTenantInfo).toHaveBeenCalledWith(FTH_TENANT_ID);
@@ -204,10 +202,8 @@ describe('get-usage baseHandler', () => {
     const body = await run();
 
     expect(body.storage.usedBytes).toBe(1000);
-    expect(body.buckets).toEqual({ count: 2, limit: 100 });
-    // Only the surviving region's console key is hidden from the count: 3 − 1 = 2.
-    // The limit is the constant global ceiling: 300 − 2 = 298.
-    expect(body.accessKeys).toEqual({ count: 2, limit: 298 });
+    expect(body.buckets).toEqual({ count: 2 });
+    expect(body.accessKeys).toEqual({ count: 2 });
   });
 
   it('returns defaults when every provisioned region fails to fetch usage', async () => {
@@ -225,9 +221,9 @@ describe('get-usage baseHandler', () => {
     expect(body).toStrictEqual({
       storage: { usedBytes: 0 },
       egress: { usedBytes: 0 },
-      buckets: { count: 0, limit: 100 },
+      buckets: { count: 0 },
       objects: { count: 0 },
-      accessKeys: { count: 0, limit: 298 },
+      accessKeys: { count: 0 },
     });
     // tenantStatus is omitted entirely when no region reports one.
     expect(body).not.toHaveProperty('tenantStatus');
