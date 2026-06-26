@@ -1,4 +1,4 @@
-import type { SubscriptionStatus } from '@filone/shared';
+import type { S3Region, SubscriptionStatus } from '@filone/shared';
 
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
 export interface AccessKeyRecord {
@@ -51,7 +51,7 @@ export interface RAGConfigRecord {
 /**
  * Per-bucket RAG enablement, settings, and sync telemetry.
  *
- * UserInfoTable — pk: BUCKET#{bucketId}, sk: RAG
+ * UserInfoTable — pk: BUCKET#{region}#{bucketId}, sk: RAG
  */
 export interface BucketRAGEnablementRecord {
   pk: string;
@@ -75,10 +75,10 @@ export interface BucketRAGEnablementRecord {
  * Object-to-chunk manifest: the authoritative list of vector-store keys for an
  * object, so the system can delete/reindex an object's chunks by explicit key.
  *
- * One query (pk: BUCKET#{bucketId}, sk begins_with MANIFEST#) returns every
- * object indexed in a bucket.
+ * One query (pk: BUCKET#{region}#{bucketId}, sk begins_with MANIFEST#) returns
+ * every object indexed in a bucket.
  *
- * UserInfoTable — pk: BUCKET#{bucketId}, sk: MANIFEST#{objectKey}
+ * UserInfoTable — pk: BUCKET#{region}#{bucketId}, sk: MANIFEST#{objectKey}
  */
 export interface ObjectChunkManifestRecord {
   pk: string;
@@ -122,7 +122,7 @@ export interface RagIndexerCheckpointRecord {
 export const RAGKeys = {
   configPk: (orgId: string): string => `ORG#${orgId}`,
   configSk: (): string => 'RAGCONFIG',
-  bucketPk: (bucketId: string): string => `BUCKET#${bucketId}`,
+  bucketPk: (region: S3Region, bucketId: string): string => `BUCKET#${region}#${bucketId}`,
   enablementSk: (): string => 'RAG',
   /** Shared prefix for `begins_with` queries returning a bucket's manifests. */
   manifestSkPrefix: (): string => 'MANIFEST#',

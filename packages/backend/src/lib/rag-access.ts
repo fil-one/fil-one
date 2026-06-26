@@ -16,27 +16,31 @@ import { getVerifiedEmail } from './user-context.js';
 
 const dynamo = getDynamoClient();
 
-/** DynamoDB sort key shared by every allowlist row. */
-const ALLOWLIST_SK = 'ALLOWLIST';
+/**
+ * DynamoDB sort key for the RAG feature-flag allowlist row. The sort key names
+ * the flag, so additional feature flags can reuse the same per-email partition
+ * (`pk: ALLOWLIST#<email>`) with their own sort key.
+ */
+const RAG_FLAG_SK = 'RAG';
 
 /**
  * Whether `email` is on the per-email RAG allowlist stored in UserInfoTable.
  *
- * Reads a single row keyed `pk: ALLOWLIST#<lowercased-email>, sk: ALLOWLIST`
- * via a single GetItemCommand (mirrors org-profile.ts). The lookup is
+ * Reads a single row keyed `pk: ALLOWLIST#<lowercased-email>, sk: RAG` via a
+ * single GetItemCommand (mirrors org-profile.ts). The lookup is
  * case-insensitive: the email is lowercased before building the key. Presence
  * of the item is what grants access — attribute values are irrelevant.
  *
  * Onboarding a customer is a manual operation: put one item with
- * `pk = ALLOWLIST#<lowercased-email>` and `sk = ALLOWLIST` into UserInfoTable
- * (any attribute values are fine; the row's existence is the allowlist entry).
- * No redeploy is required.
+ * `pk = ALLOWLIST#<lowercased-email>` and `sk = RAG` into UserInfoTable (any
+ * attribute values are fine; the row's existence is the allowlist entry). No
+ * redeploy is required.
  */
-export async function isAllowlisted(email: string): Promise<boolean> {
+export async function isAllowlisted(verifiedEmail: string): Promise<boolean> {
   const { Item } = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
-      Key: { pk: { S: `ALLOWLIST#${email.toLowerCase()}` }, sk: { S: ALLOWLIST_SK } },
+      Key: { pk: { S: `ALLOWLIST#${verifiedEmail.toLowerCase()}` }, sk: { S: RAG_FLAG_SK } },
     }),
   );
   return Item !== undefined;
@@ -47,10 +51,10 @@ export async function isAllowlisted(email: string): Promise<boolean> {
  * from DynamoDB only when needed. Returns `false` for unverified/missing
  * emails. Used by the getMe handler to expose the gate decision to the frontend.
  */
-export async function hasRagAccess(email: string | undefined): Promise<boolean> {
-  if (!email) return false;
-  if (isFoundationEmail(email)) return true;
-  return isAllowlisted(email);
+export async function hasRagAccess(verifiedEmail: string | undefined): Promise<boolean> {
+  if (!verifiedEmail) return false;
+  if (isFoundationEmail(verifiedEmail)) return true;
+  return isAllowlisted(verifiedEmail);
 }
 
 type GuardRequest = Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>;

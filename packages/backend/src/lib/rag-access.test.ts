@@ -19,7 +19,7 @@ describe('isAllowlisted', () => {
     ddbMock.reset();
   });
 
-  it('reads ALLOWLIST#<email>/ALLOWLIST from UserInfoTable via a single GetItemCommand', async () => {
+  it('reads ALLOWLIST#<email>/RAG from UserInfoTable via a single GetItemCommand', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: {} });
 
     await isAllowlisted('alice@example.com');
@@ -27,13 +27,13 @@ describe('isAllowlisted', () => {
     expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
     expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toEqual({
       TableName: 'UserInfoTable',
-      Key: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'ALLOWLIST' } },
+      Key: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'RAG' } },
     });
   });
 
   it('returns true when the allowlist row exists', async () => {
     ddbMock.on(GetItemCommand).resolves({
-      Item: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'ALLOWLIST' } },
+      Item: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'RAG' } },
     });
 
     expect(await isAllowlisted('alice@example.com')).toBe(true);
@@ -52,7 +52,7 @@ describe('isAllowlisted', () => {
 
     expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toEqual({
       TableName: 'UserInfoTable',
-      Key: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'ALLOWLIST' } },
+      Key: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'RAG' } },
     });
   });
 
@@ -60,9 +60,9 @@ describe('isAllowlisted', () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
-        Key: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'ALLOWLIST' } },
+        Key: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'RAG' } },
       })
-      .resolves({ Item: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'ALLOWLIST' } } });
+      .resolves({ Item: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'RAG' } } });
 
     expect(await isAllowlisted('ALICE@EXAMPLE.COM')).toBe(true);
   });
@@ -85,7 +85,7 @@ describe('hasRagAccess', () => {
 
   it('returns true for an allowlisted email', async () => {
     ddbMock.on(GetItemCommand).resolves({
-      Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'ALLOWLIST' } },
+      Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } },
     });
 
     expect(await hasRagAccess('bob@example.com')).toBe(true);
@@ -124,7 +124,7 @@ describe('ragAccessMiddleware', () => {
 
   it('passes through (returns no response) for a verified allowlisted email', async () => {
     ddbMock.on(GetItemCommand).resolves({
-      Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'ALLOWLIST' } },
+      Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } },
     });
 
     const { before } = ragAccessMiddleware();
@@ -168,7 +168,7 @@ describe('ragAccessMiddleware', () => {
     // Even though an allowlist row would exist, an unverified email must be denied
     // without reading the allowlist (verified-only).
     ddbMock.on(GetItemCommand).resolves({
-      Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'ALLOWLIST' } },
+      Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } },
     });
 
     const { before } = ragAccessMiddleware();

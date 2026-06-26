@@ -63,5 +63,6 @@ export async function embedMany(
   texts: string[],
   client?: BedrockRuntimeClient,
 ): Promise<number[][]> {
-  return Promise.all(texts.map((text) => embed(text, client)));
+  const bedrock = client ?? new BedrockRuntimeClient({});
+  return Promise.all(texts.map((text) => embed(text, bedrock)));
 }

@@ -103,16 +103,22 @@ export default $config({
     // One vector bucket hosts one index per RAG-enabled bucket. The
     // @filone/rag-shared S3VectorsStore reads the bucket name at runtime via
     // Resource.RagVectorBucket.name.
-    const ragVectorBucket = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
-      vectorBucketName: $interpolate`filone-${$app.stage}-rag-vectors`,
+    const ragVectorBucketName = `filone-${$app.stage}-rag-vectors`;
+    if (ragVectorBucketName.length > 63) {
+      throw new Error(
+        `RagVectorBucket name too long (${ragVectorBucketName.length} chars): ${ragVectorBucketName}`,
+      );
+    }
+    const ragVectorBucketResource = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
+      vectorBucketName: ragVectorBucketName,
     });
 
     // Wrap the raw Pulumi resource so handlers can read it via SST resource
     // linking (Resource.RagVectorBucket.name).
-    const RagVectorBucket = new sst.Linkable('RagVectorBucket', {
+    const ragVectorBucket = new sst.Linkable('RagVectorBucket', {
       properties: {
-        name: ragVectorBucket.vectorBucketName,
-        arn: ragVectorBucket.vectorBucketArn,
+        name: ragVectorBucketResource.vectorBucketName,
+        arn: ragVectorBucketResource.vectorBucketArn,
       },
     });
 
@@ -130,8 +136,8 @@ export default $config({
           's3vectors:DeleteVectors',
         ],
         resources: [
-          ragVectorBucket.vectorBucketArn,
-          $interpolate`${ragVectorBucket.vectorBucketArn}/index/*`,
+          ragVectorBucketResource.vectorBucketArn,
+          $interpolate`${ragVectorBucketResource.vectorBucketArn}/index/*`,
         ],
       },
       {
@@ -201,14 +207,15 @@ export default $config({
       },
     });
 
-    const { getAuth0Domain, getAvailableRegions, getS3Endpoint, Stage } =
-      await import('@filone/shared');
+    const { getAuth0Domain, getS3Endpoint, S3Region, Stage } = await import('@filone/shared');
     const stageForEndpoints = isProduction ? Stage.Production : Stage.Staging;
-    // The browser hits the S3 endpoint of every region the user can pick from
-    // — list-objects, uploads, downloads, etc. all go directly to S3 — so each
-    // one needs to be in `connect-src` or the browser blocks the request with
-    // a CSP violation before it ever leaves.
-    const s3GatewayUrls = getAvailableRegions(stageForEndpoints)
+    // The browser hits the S3 endpoint of every region directly — list-objects,
+    // uploads, downloads, etc. — so each one needs to be in `connect-src` or the
+    // browser blocks the request with a CSP violation before it ever leaves.
+    // CSP is a single static document header that cannot vary per user, so it
+    // must list every regional S3 endpoint any user could reach — not just the
+    // email-gated subset returned by getAvailableRegions().
+    const s3GatewayUrls = Object.values(S3Region)
       .map((r) => getS3Endpoint(r, stageForEndpoints))
       .join(' ');
 
@@ -373,7 +380,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              Version: '2.10',
+              Version: '2.11',
             },
           },
         },
@@ -407,7 +414,7 @@ export default $config({
       billingTable,
       userInfoTable,
       userFilesBucket,
-      RagVectorBucket,
+      ragVectorBucket,
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
@@ -442,7 +449,6 @@ export default $config({
 
     const fthEnv = {
       FTH_MANAGEMENT_API_URL: 'https://api.fortilyx.com',
-      FTH_S3_URL: 'https://us-east-1.fortilyx.com',
     };
 
     // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE

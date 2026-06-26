@@ -13,12 +13,45 @@ const METHOD_STORED = 0;
 const METHOD_DEFLATED = 8;
 
 /**
- * A single entry decoded from a ZIP archive: its name and its decompressed
- * bytes.
+ * Decompression limits, sized for the 512 MB worker Lambda. Peak memory for a
+ * read part is roughly the inflated bytes plus its UTF-16 string (~2x) plus
+ * parser overhead, and only the parts an extractor actually reads are inflated.
+ * These are deliberately generous for real Office documents while bounding the
+ * blast radius of a ZIP-bomb.
  */
-export interface ZipEntry {
+const MAX_ENTRY_OUTPUT = 32 * 1024 * 1024; // 32 MB per decompressed entry
+const MAX_TOTAL_OUTPUT = 64 * 1024 * 1024; // 64 MB aggregate across a single readZip
+
+/**
+ * Options for {@link readZip}. The defaults apply in production; tests override
+ * them with tiny caps so a bomb fixture can trip a limit without allocating
+ * large buffers.
+ */
+export interface ReadZipOptions {
+  maxEntryOutput?: number;
+  maxTotalOutput?: number;
+}
+
+/**
+ * Shared decompression budget threaded through every entry's lazy thunk so the
+ * per-entry cap and the aggregate cap are both enforced across however many
+ * entries an extractor ends up reading.
+ */
+interface DecompressBudget {
+  perEntry: number;
+  total: number;
+  remaining: number;
+}
+
+/**
+ * The parsed (but not yet decompressed) location of a central-directory entry:
+ * its name, compression method, and the still-compressed payload slice.
+ */
+interface CentralEntry {
   name: string;
-  data: Uint8Array;
+  method: number;
+  payload: Buffer;
+  next: number;
 }
 
 /**
@@ -37,23 +70,50 @@ function findEndOfCentralDirectory(buffer: Buffer): number {
 }
 
 /**
- * Decompress one entry's payload given its compression method.
+ * Decompress one entry's payload given its compression method, bounding the
+ * output against the shared budget. A DEFLATE entry is capped per-entry via
+ * `maxOutputLength` (zlib throws `ERR_BUFFER_TOO_LARGE` before allocating the
+ * full output) and then charged against the aggregate budget. STORED payloads
+ * are a view into the source buffer, already bounded by the input size, so they
+ * are returned directly without copying.
  */
-function decompress(method: number, payload: Buffer, name: string): Buffer {
+function decompress(
+  method: number,
+  payload: Buffer,
+  name: string,
+  budget: DecompressBudget,
+): Uint8Array {
   if (method === METHOD_STORED) {
     return payload;
   }
   if (method === METHOD_DEFLATED) {
-    return inflateRawSync(payload);
+    let data: Buffer;
+    try {
+      data = inflateRawSync(payload, { maxOutputLength: budget.perEntry });
+    } catch (error) {
+      if (error instanceof RangeError) {
+        throw new Error(
+          `ZIP entry "${name}" exceeds the ${budget.perEntry}-byte decompression limit`,
+        );
+      }
+      throw error;
+    }
+    if (data.length > budget.remaining) {
+      throw new Error(`ZIP archive exceeds the ${budget.total}-byte aggregate decompression limit`);
+    }
+    budget.remaining -= data.length;
+    return data;
   }
   throw new Error(`Unsupported ZIP compression method ${method} for entry "${name}"`);
 }
 
 /**
- * Read a single central-directory entry, returning the decoded entry and the
- * offset of the next central-directory record.
+ * Read a single central-directory entry, returning its name, compression
+ * method, and the still-compressed payload slice, plus the offset of the next
+ * central-directory record. Decompression is deferred to a lazy thunk in
+ * {@link readZip} so unreferenced entries are never inflated.
  */
-function readCentralEntry(buffer: Buffer, offset: number): { entry: ZipEntry; next: number } {
+function readCentralEntry(buffer: Buffer, offset: number): CentralEntry {
   const compressionMethod = buffer.readUInt16LE(offset + 10);
   const compressedSize = buffer.readUInt32LE(offset + 20);
   const nameLength = buffer.readUInt16LE(offset + 28);
@@ -72,38 +132,63 @@ function readCentralEntry(buffer: Buffer, offset: number): { entry: ZipEntry; ne
   const dataStart = localHeaderOffset + 30 + localNameLength + localExtraLength;
   const payload = buffer.subarray(dataStart, dataStart + compressedSize);
 
-  const data = decompress(compressionMethod, payload, name);
   const next = offset + 46 + nameLength + extraLength + commentLength;
-  return { entry: { name, data: new Uint8Array(data) }, next };
+  return { name, method: compressionMethod, payload, next };
 }
 
 /**
- * Parse a ZIP archive (e.g. an OOXML .docx/.pptx) into a map of entry name to
- * decompressed bytes. Only the STORED and DEFLATE methods are supported, which
- * covers everything the Office formats use.
+ * Parse a ZIP archive (e.g. an OOXML .docx/.pptx) into a map of entry name to a
+ * lazy thunk that decompresses that entry on demand. Only the STORED and
+ * DEFLATE methods are supported, which covers everything the Office formats
+ * use.
  *
- * @throws if the buffer is not a valid ZIP archive or uses an unsupported
- *   compression method.
+ * Decompression is deferred so that an archive padded with many entries (the
+ * central directory holds up to 65,535) costs nothing for the entries an
+ * extractor never reads. Each thunk bounds its output against {@link
+ * ReadZipOptions.maxEntryOutput} and a shared aggregate budget
+ * ({@link ReadZipOptions.maxTotalOutput}), so a ZIP-bomb fails fast with a
+ * clear error rather than exhausting memory.
+ *
+ * @throws if the buffer is not a valid ZIP archive. A thunk additionally throws
+ *   when its entry uses an unsupported compression method or exceeds a
+ *   decompression limit.
  */
-export function readZip(bytes: Uint8Array): Map<string, Uint8Array> {
+export function readZip(
+  bytes: Uint8Array,
+  options: ReadZipOptions = {},
+): Map<string, () => Uint8Array> {
   const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const eocd = findEndOfCentralDirectory(buffer);
   if (eocd === -1) {
     throw new Error('Malformed ZIP: end-of-central-directory record not found');
   }
 
-  const entryCount = buffer.readUInt16LE(eocd + 10);
-  let offset = buffer.readUInt32LE(eocd + 16);
+  const total = options.maxTotalOutput ?? MAX_TOTAL_OUTPUT;
+  const budget: DecompressBudget = {
+    perEntry: options.maxEntryOutput ?? MAX_ENTRY_OUTPUT,
+    total,
+    remaining: total,
+  };
 
-  const entries = new Map<string, Uint8Array>();
-  for (let i = 0; i < entryCount; i++) {
-    if (buffer.readUInt32LE(offset) !== CENTRAL_DIRECTORY_HEADER) {
-      throw new Error('Malformed ZIP: bad central-directory header');
+  try {
+    const entryCount = buffer.readUInt16LE(eocd + 10);
+    let offset = buffer.readUInt32LE(eocd + 16);
+
+    const entries = new Map<string, () => Uint8Array>();
+    for (let i = 0; i < entryCount; i++) {
+      if (buffer.readUInt32LE(offset) !== CENTRAL_DIRECTORY_HEADER) {
+        throw new Error('Malformed ZIP: bad central-directory header');
+      }
+      const { name, method, payload, next } = readCentralEntry(buffer, offset);
+      entries.set(name, () => decompress(method, payload, name, budget));
+      offset = next;
     }
-    const { entry, next } = readCentralEntry(buffer, offset);
-    entries.set(entry.name, entry.data);
-    offset = next;
-  }
 
-  return entries;
+    return entries;
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw new Error('Malformed ZIP: truncated archive or invalid offsets');
+    }
+    throw error;
+  }
 }

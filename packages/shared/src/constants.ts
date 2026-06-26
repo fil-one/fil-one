@@ -51,28 +51,13 @@ export function isFoundationEmail(email: string | undefined): boolean {
 }
 
 /**
- * Pure predicate gating access to the RAG pipeline. Access is granted when the
- * verified email is a Filecoin Foundation address ({@link isFoundationEmail})
- * OR the email is present in the runtime DynamoDB allowlist (`isAllowlisted`).
- *
- * Pure (no side effects) so the frontend and backend share one gate decision:
- * the backend resolves `isAllowlisted` from DynamoDB and computes `ragAccess`
- * server-side; the frontend reads that server flag. The caller is responsible
- * for ensuring the email is verified before passing it (see {@link isFoundationEmail}).
+ * Regions selectable in the given stage. Non-production stages expose
+ * `us-east-1` for dogfooding; in production it is additionally exposed to
+ * Filecoin Foundation users (verified `@fil.org` emails) for early access.
+ * `email` should be passed only when verified — see {@link isFoundationEmail}.
  */
-export function canUseRagPipeline(email: string | undefined, isAllowlisted: boolean): boolean {
-  return isFoundationEmail(email) || isAllowlisted;
-}
-
-/** Regions selectable in the given stage. Non-production stages expose
- * `us-east-1` for dogfooding. Production currently restricts selection to `eu-west-1`.
- * `verifiedEmail` is reserved for future early-access gating and should be passed only when verified —
- * see {@link isFoundationEmail}.
- */
-export function getAvailableRegions(stage: Stage | string, _verifiedEmail?: string): S3Region[] {
-  // Do not enable us-east-1 in production yet, since we don't have the prod FTH account set up yet
-  // if (stage !== Stage.Production || isFoundationEmail(_verifiedEmail)) {
-  if (stage !== Stage.Production) {
+export function getAvailableRegions(stage: Stage | string, email?: string): S3Region[] {
+  if (stage !== Stage.Production || isFoundationEmail(email)) {
     return [S3Region.EuWest1, S3Region.UsEast1];
   }
   return [S3Region.EuWest1];
