@@ -31,7 +31,16 @@ export const NoneSelected: Story = {
 
 export const AllSelected: Story = {
   args: {
-    value: ['read', 'write', 'list', 'delete'],
+    value: [
+      'read',
+      'write',
+      'list',
+      'delete',
+      'GetBucketVersioning',
+      'GetBucketObjectLockConfiguration',
+      'CreateBucket',
+      'DeleteBucket',
+    ],
     granularPermissions: [],
   },
 };

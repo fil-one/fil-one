@@ -113,6 +113,15 @@ describe('useAccessKeyForm — canSubmit', () => {
   });
 });
 
+describe('useAccessKeyForm — default permissions', () => {
+  it('enables the bucket-info read permissions by default', () => {
+    const { result } = renderForm();
+    expect(result.current.permissions).toEqual(
+      expect.arrayContaining(['GetBucketVersioning', 'GetBucketObjectLockConfiguration']),
+    );
+  });
+});
+
 describe('useAccessKeyForm — region change', () => {
   function renderWithRegion(initialRegion: S3Region, opts?: { defaultBucket?: string }) {
     return renderHook(

@@ -28,7 +28,13 @@ export type UseAccessKeyFormOptions = {
   onSuccess: (response: CreateAccessKeyResponse) => void;
 };
 
-const FALLBACK_PERMISSIONS: AccessKeyPermission[] = ['read', 'write', 'list'];
+const FALLBACK_PERMISSIONS: AccessKeyPermission[] = [
+  'read',
+  'write',
+  'list',
+  'GetBucketVersioning',
+  'GetBucketObjectLockConfiguration',
+];
 
 export function useAccessKeyForm({
   defaultBucket,
