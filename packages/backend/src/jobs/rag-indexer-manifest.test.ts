@@ -3,6 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
   DeleteItemCommand,
+  GetItemCommand,
   PutItemCommand,
   QueryCommand,
 } from '@aws-sdk/client-dynamodb';
@@ -129,43 +130,43 @@ describe('rag-indexer-manifest', () => {
     });
 
     it('loads a live checkpoint', async () => {
-      ddbMock.on(QueryCommand).resolves({
-        Items: [
-          marshall({
-            pk: 'INDEXER_CHECKPOINT#eu-west-1#bucket-1',
-            sk: 'CHECKPOINT',
-            bucketName: 'bucket-1',
-            continuationToken: 'tok-9',
-            lastPageStartedAt: '2024-01-01T00:00:00.000Z',
-            ttl: Math.floor(Date.now() / 1000) + 3600,
-          }),
-        ],
+      ddbMock.on(GetItemCommand).resolves({
+        Item: marshall({
+          pk: 'INDEXER_CHECKPOINT#eu-west-1#bucket-1',
+          sk: 'CHECKPOINT',
+          bucketName: 'bucket-1',
+          continuationToken: 'tok-9',
+          lastPageStartedAt: '2024-01-01T00:00:00.000Z',
+          ttl: Math.floor(Date.now() / 1000) + 3600,
+        }),
       });
 
       const checkpoint = await loadCheckpoint(S3Region.EuWest1, 'bucket-1');
 
       expect(checkpoint?.continuationToken).toBe('tok-9');
+      expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input.Key).toEqual({
+        pk: { S: 'INDEXER_CHECKPOINT#eu-west-1#bucket-1' },
+        sk: { S: 'CHECKPOINT' },
+      });
     });
 
     it('treats an expired checkpoint as absent', async () => {
-      ddbMock.on(QueryCommand).resolves({
-        Items: [
-          marshall({
-            pk: 'INDEXER_CHECKPOINT#eu-west-1#bucket-1',
-            sk: 'CHECKPOINT',
-            bucketName: 'bucket-1',
-            continuationToken: 'stale',
-            lastPageStartedAt: '2020-01-01T00:00:00.000Z',
-            ttl: Math.floor(Date.now() / 1000) - 10,
-          }),
-        ],
+      ddbMock.on(GetItemCommand).resolves({
+        Item: marshall({
+          pk: 'INDEXER_CHECKPOINT#eu-west-1#bucket-1',
+          sk: 'CHECKPOINT',
+          bucketName: 'bucket-1',
+          continuationToken: 'stale',
+          lastPageStartedAt: '2020-01-01T00:00:00.000Z',
+          ttl: Math.floor(Date.now() / 1000) - 10,
+        }),
       });
 
       expect(await loadCheckpoint(S3Region.EuWest1, 'bucket-1')).toBeUndefined();
     });
 
     it('returns undefined when no checkpoint exists', async () => {
-      ddbMock.on(QueryCommand).resolves({ Items: [] });
+      ddbMock.on(GetItemCommand).resolves({});
 
       expect(await loadCheckpoint(S3Region.EuWest1, 'bucket-1')).toBeUndefined();
     });

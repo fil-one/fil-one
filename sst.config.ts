@@ -485,7 +485,7 @@ export default $config({
         // SDK decrypts them in-line on GetParameter (WithDecryption: true).
         actions: ['kms:Decrypt'],
         resources: ['arn:aws:kms:*:*:alias/aws/ssm'],
-      }
+      },
     ];
 
     const { firehose, cwToFirehoseRole } = setupFirehoseLogPipeline(grafanaLokiAuth);
