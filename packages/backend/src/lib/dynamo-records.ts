@@ -1,4 +1,5 @@
-import type { S3Region, SubscriptionStatus } from '@filone/shared';
+import { S3Region } from '@filone/shared';
+import type { SubscriptionStatus } from '@filone/shared';
 
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
 export interface AccessKeyRecord {
@@ -122,7 +123,25 @@ export interface RagIndexerCheckpointRecord {
 export const RAGKeys = {
   configPk: (orgId: string): string => `ORG#${orgId}`,
   configSk: (): string => 'RAGCONFIG',
-  bucketPk: (region: S3Region, bucketId: string): string => `BUCKET#${region}#${bucketId}`,
+  bucketPk: (region: S3Region, bucketName: string): string => `BUCKET#${region}#${bucketName}`,
+  /**
+   * Inverse of {@link bucketPk}: parse a `BUCKET#{region}#{bucketName}` pk back into its parts.
+   * Returns `undefined` for any malformed pk (missing prefix, unknown region, empty bucket name).
+   * Region membership is checked stage-independently (a valid-but-currently-disabled region must
+   * still parse), so this does NOT use the stage-aware `isSupportedRegion`.
+   */
+  parseBucketPk: (pk: string): { region: S3Region; bucketName: string } | undefined => {
+    const PREFIX = 'BUCKET#';
+    if (!pk.startsWith(PREFIX)) return undefined;
+    const rest = pk.slice(PREFIX.length);
+    const sep = rest.indexOf('#');
+    if (sep <= 0) return undefined;
+    const region = rest.slice(0, sep);
+    const bucketName = rest.slice(sep + 1);
+    if (!bucketName) return undefined;
+    if (!Object.values(S3Region).includes(region as S3Region)) return undefined;
+    return { region: region as S3Region, bucketName };
+  },
   enablementSk: (): string => 'RAG',
   /** Shared prefix for `begins_with` queries returning a bucket's manifests. */
   manifestSkPrefix: (): string => 'MANIFEST#',

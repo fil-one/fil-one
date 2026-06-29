@@ -1,25 +1,21 @@
 // RAG indexer worker: keeps one org's RAG-enabled bucket indices in sync with
-// S3. The orchestrator fans out one async invoke per org; this worker resolves
-// the org's provisioned regions, builds an S3 client per region from the
-// orchestrator's credentials, enumerates buckets, and reconciles each
-// RAG-enabled bucket's vector index (object-level ETag diffing).
+// S3. The orchestrator fans out one async invoke per org, handing this worker
+// the authoritative list of buckets to index (each tagged with its region).
+// The worker resolves the org's provisioned regions (for per-region tenant
+// credentials), builds an S3 client per region, and reconciles each bucket's
+// vector index (object-level ETag diffing).
 //
 // Failures are isolated at the region and bucket level: one failing region or
 // bucket is logged and does not abort the rest of the org's work.
 
 import type { Context } from 'aws-lambda';
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { S3VectorsStore, type VectorStore } from '@filone/rag-shared';
-import { getDynamoClient } from '../lib/ddb-client.js';
-import { getProvisionedRegions, type ProvisionedRegion } from '../lib/region-helpers.js';
+import { getProvisionedRegions } from '../lib/region-helpers.js';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { createS3Client } from '../lib/s3-client.js';
-import { RAGKeys, type BucketRAGStatus } from '../lib/dynamo-records.js';
 import { indexBucket } from './rag-indexer-helpers.js';
 import { S3Region } from '@filone/shared';
-
-const dynamo = getDynamoClient();
 
 const LOG = '[rag-indexer-worker]';
 
@@ -31,10 +27,16 @@ const LOG = '[rag-indexer-worker]';
  */
 const DEADLINE_BUFFER_MS = 60_000;
 
+/** A single bucket to index, identified by its region + name (unique per region). */
+export interface RagIndexerBucketRef {
+  region: S3Region;
+  bucketName: string;
+}
+
 export interface RagIndexerWorkerPayload {
   orgId: string;
-  /** When omitted/empty, index every RAG-enabled bucket the org owns. */
-  bucketIds?: string[];
+  /** The authoritative set of buckets to index, supplied by the orchestrator. */
+  buckets: RagIndexerBucketRef[];
 }
 
 /**
@@ -49,7 +51,7 @@ export async function handler(
   context: Context,
   getRemainingTimeInMillis: RemainingTimeFn = () => context.getRemainingTimeInMillis(),
 ): Promise<void> {
-  const { orgId, bucketIds } = event;
+  const { orgId, buckets } = event;
   const deadlineEpochMs = computeDeadline(getRemainingTimeInMillis);
 
   const regions = await getProvisionedRegions(orgId);
@@ -58,25 +60,43 @@ export async function handler(
     return;
   }
 
+  // tenantId is required to build each region's S3 client; a region the org is
+  // not provisioned in has no tenant and its buckets cannot be indexed.
+  const tenantByRegion = new Map<S3Region, string>(
+    regions.map(({ orchestrator, tenantId }) => [orchestrator.region, tenantId]),
+  );
+  const bucketsByRegion = groupBucketsByRegion(buckets);
+
   const vectorStore = new S3VectorsStore(Resource.RagVectorBucket.name);
-  const filter = bucketIds && bucketIds.length > 0 ? new Set(bucketIds) : undefined;
 
   let regionsProcessed = 0;
   let bucketsIndexed = 0;
   let regionFailures = 0;
 
-  for (const region of regions) {
+  for (const [region, bucketNames] of bucketsByRegion) {
+    const tenantId = tenantByRegion.get(region);
+    if (!tenantId) {
+      console.warn(`${LOG} Bucket region not provisioned for org, skipping`, {
+        orgId,
+        region,
+        bucketCount: bucketNames.length,
+      });
+      continue;
+    }
+
     try {
-      bucketsIndexed += await indexRegion({ orgId, region, vectorStore, filter, deadlineEpochMs });
+      bucketsIndexed += await indexRegion({
+        orgId,
+        region,
+        tenantId,
+        bucketNames,
+        vectorStore,
+        deadlineEpochMs,
+      });
       regionsProcessed++;
     } catch (error) {
       regionFailures++;
-      console.error(`${LOG} Region failed, continuing`, {
-        orgId,
-        orchestrator: region.orchestrator.id,
-        tenantId: region.tenantId,
-        error,
-      });
+      console.error(`${LOG} Region failed, continuing`, { orgId, region, tenantId, error });
     }
   }
 
@@ -86,6 +106,17 @@ export async function handler(
     regionFailures,
     bucketsIndexed,
   });
+}
+
+/** Group the payload's buckets into the list of bucket names to index per region. */
+function groupBucketsByRegion(buckets: RagIndexerBucketRef[]): Map<S3Region, string[]> {
+  const byRegion = new Map<S3Region, string[]>();
+  for (const { region, bucketName } of buckets) {
+    const existing = byRegion.get(region);
+    if (existing) existing.push(bucketName);
+    else byRegion.set(region, [bucketName]);
+  }
+  return byRegion;
 }
 
 /**
@@ -105,69 +136,41 @@ function computeDeadline(getRemainingTimeInMillis: RemainingTimeFn): number {
 
 interface IndexRegionArgs {
   orgId: string;
-  region: ProvisionedRegion;
+  region: S3Region;
+  tenantId: string;
+  bucketNames: string[];
   vectorStore: VectorStore;
-  filter: Set<string> | undefined;
   deadlineEpochMs: number;
 }
 
 /**
- * Reconcile every RAG-enabled bucket in a single region. Builds the S3 client
- * from the orchestrator's tenant credentials, lists the tenant's buckets, and
- * indexes each one whose RAG enablement row is `active`. Returns the number of
- * buckets reconciled. Per-bucket failures are isolated (logged, counted, and
- * skipped) so they do not abort the region.
+ * Reconcile the given buckets in a single region. Resolves the region's
+ * orchestrator, builds the S3 client from its tenant credentials, and indexes
+ * each requested bucket's vector index. Returns the number of buckets
+ * reconciled. Per-bucket failures are isolated (logged, counted, and skipped)
+ * so they do not abort the region.
  */
 async function indexRegion(args: IndexRegionArgs): Promise<number> {
-  const { orgId, region, vectorStore, filter, deadlineEpochMs } = args;
-  const { orchestrator, tenantId } = region;
+  const { orgId, region, tenantId, bucketNames, vectorStore, deadlineEpochMs } = args;
 
+  const orchestrator = getOrchestratorForRegion(region);
   const ctx = await orchestrator.getS3ClientContext(tenantId);
   const s3 = createS3Client(ctx);
-  const buckets = await orchestrator.listBuckets(tenantId);
 
   let indexed = 0;
-  for (const bucket of buckets) {
-    const bucketName = bucket.bucketName;
-    if (filter && !filter.has(bucketName)) continue;
-
-    const status = await getBucketRagStatus(orchestrator.region, bucket.bucketName);
-    if (status !== 'active') continue;
-
+  for (const bucketName of bucketNames) {
     try {
-      await indexBucket(s3, orchestrator.region, bucketName, vectorStore, { deadlineEpochMs });
+      await indexBucket(s3, region, bucketName, vectorStore, { deadlineEpochMs });
       indexed++;
     } catch (error) {
       console.error(`${LOG} Bucket failed, continuing`, {
         orgId,
         orchestrator: orchestrator.id,
-        bucketId: bucketName,
+        region,
+        bucketName,
         error,
       });
     }
   }
   return indexed;
-}
-
-/**
- * Read a bucket's RAG enablement status (BUCKET#{bucketId} / RAG). Returns
- * `undefined` when RAG was never enabled for the bucket, so the worker skips
- * non-RAG buckets returned by listBuckets.
- */
-async function getBucketRagStatus(
-  region: S3Region,
-  bucketId: string,
-): Promise<BucketRAGStatus | undefined> {
-  const result = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: {
-        pk: { S: RAGKeys.bucketPk(region, bucketId) },
-        sk: { S: RAGKeys.enablementSk() },
-      },
-    }),
-  );
-  if (!result.Item) return undefined;
-  const record = unmarshall(result.Item);
-  return typeof record.status === 'string' ? (record.status as BucketRAGStatus) : undefined;
 }
