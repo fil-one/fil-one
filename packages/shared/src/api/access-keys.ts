@@ -17,15 +17,37 @@ export type ObjectPermission = (typeof OBJECT_PERMISSIONS)[number];
 export const BUCKET_PERMISSIONS = ['CreateBucket', 'DeleteBucket'] as const;
 export type BucketPermission = (typeof BUCKET_PERMISSIONS)[number];
 
+/**
+ * Bucket-configuration read permissions. Selectable in every region (including
+ * the Aurora region), unlike {@link BUCKET_PERMISSIONS}: they only read
+ * bucket-level settings and don't require the region's bucket-management API.
+ */
+export const BUCKET_INFO_PERMISSIONS = [
+  'GetBucketVersioning',
+  'GetBucketObjectLockConfiguration',
+] as const;
+export type BucketInfoPermission = (typeof BUCKET_INFO_PERMISSIONS)[number];
+
 /** All permissions selectable on an access key: object operations plus bucket management. */
-export const ACCESS_KEY_PERMISSIONS = [...OBJECT_PERMISSIONS, ...BUCKET_PERMISSIONS] as const;
+export const ACCESS_KEY_PERMISSIONS = [
+  ...OBJECT_PERMISSIONS,
+  ...BUCKET_PERMISSIONS,
+  ...BUCKET_INFO_PERMISSIONS,
+] as const;
 export type AccessKeyPermission = (typeof ACCESS_KEY_PERMISSIONS)[number];
 
-/** Type guard: is this permission a bucket-management permission? */
+/** Type guard: is this permission a (region-gated) bucket-management permission? */
 export function isBucketPermission(
   permission: AccessKeyPermission,
 ): permission is BucketPermission {
   return (BUCKET_PERMISSIONS as readonly string[]).includes(permission);
+}
+
+/** Type guard: is this permission a bucket-configuration read permission? */
+export function isBucketInfoPermission(
+  permission: AccessKeyPermission,
+): permission is BucketInfoPermission {
+  return (BUCKET_INFO_PERMISSIONS as readonly string[]).includes(permission);
 }
 
 /** Type guard: is this permission an object-level permission? */
@@ -98,6 +120,20 @@ export const BUCKET_PERMISSION_LABELS: Record<
   DeleteBucket: {
     label: 'Delete bucket',
     description: 'Delete buckets',
+  },
+};
+
+export const BUCKET_INFO_PERMISSION_LABELS: Record<
+  BucketInfoPermission,
+  { label: string; description: string }
+> = {
+  GetBucketVersioning: {
+    label: 'Read bucket versioning',
+    description: 'View the versioning state of buckets',
+  },
+  GetBucketObjectLockConfiguration: {
+    label: 'Read object lock configuration',
+    description: 'View the object lock settings of buckets',
   },
 };
 

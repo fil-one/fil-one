@@ -346,11 +346,7 @@ function createInstrumentedFthClient(): FthManagementClient {
   return client;
 }
 
-const FTH_ALWAYS_PERMISSIONS: readonly string[] = [
-  's3:ListAllMyBuckets',
-  's3:GetBucketVersioning',
-  's3:GetBucketObjectLockConfiguration',
-];
+const FTH_ALWAYS_PERMISSIONS: readonly string[] = ['s3:ListAllMyBuckets'];
 
 const FTH_BASE_PERMISSIONS: Record<AccessKeyPermission, readonly string[]> = {
   read: ['s3:GetObject', 's3:ListBucket'],
@@ -359,6 +355,8 @@ const FTH_BASE_PERMISSIONS: Record<AccessKeyPermission, readonly string[]> = {
   delete: ['s3:DeleteObject'],
   CreateBucket: ['s3:CreateBucket'],
   DeleteBucket: ['s3:DeleteBucket'],
+  GetBucketVersioning: ['s3:GetBucketVersioning'],
+  GetBucketObjectLockConfiguration: ['s3:GetBucketObjectLockConfiguration'],
 };
 
 const FTH_GRANULAR_PERMISSIONS: Record<GranularPermission, string> = {

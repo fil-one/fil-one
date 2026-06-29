@@ -1,11 +1,14 @@
 import type {
   AccessKeyPermission,
+  BucketInfoPermission,
   BucketPermission,
   GranularPermission,
   ObjectPermission,
   S3Region,
 } from '@filone/shared';
 import {
+  BUCKET_INFO_PERMISSIONS,
+  BUCKET_INFO_PERMISSION_LABELS,
   BUCKET_PERMISSIONS,
   BUCKET_PERMISSION_LABELS,
   GRANULAR_PERMISSION_MAP,
@@ -63,7 +66,7 @@ export function AccessKeyPermissionsFields({
     }
   }
 
-  function toggleBucket(permission: BucketPermission) {
+  function toggleBucket(permission: BucketPermission | BucketInfoPermission) {
     if (value.includes(permission)) {
       onChange(value.filter((p) => p !== permission));
     } else {
@@ -151,7 +154,7 @@ function Section({
 
 type BucketManagementFieldsProps = {
   permissions: AccessKeyPermission[];
-  onToggle: (permission: BucketPermission) => void;
+  onToggle: (permission: BucketPermission | BucketInfoPermission) => void;
   region: S3Region;
 };
 
@@ -170,6 +173,21 @@ function BucketManagementFields({ permissions, onToggle, region }: BucketManagem
         disabled
         tooltip="Always enabled — this permission is currently not configurable."
       />
+
+      {/* Bucket-info reads — selectable in every region, not region-gated. */}
+      {BUCKET_INFO_PERMISSIONS.map((permission: BucketInfoPermission) => {
+        const meta = BUCKET_INFO_PERMISSION_LABELS[permission];
+        return (
+          <PermissionRow
+            key={permission}
+            testId={`permission-${permission}`}
+            label={meta.label}
+            description={meta.description}
+            checked={permissions.includes(permission)}
+            onChange={() => onToggle(permission)}
+          />
+        );
+      })}
 
       {BUCKET_PERMISSIONS.map((permission: BucketPermission) => {
         const meta = BUCKET_PERMISSION_LABELS[permission];
