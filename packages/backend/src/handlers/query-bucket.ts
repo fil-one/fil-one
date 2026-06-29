@@ -3,7 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { Resource } from 'sst';
 import type { ErrorResponse, QueryBucketResponse } from '@filone/shared';
-import { QueryBucketSchema, S3_REGION, isSupportedRegion } from '@filone/shared';
+import { QueryBucketSchema, S3Region, isSupportedRegion } from '@filone/shared';
 import { S3VectorsStore, complete, embed } from '@filone/rag-shared';
 import type { VectorQueryResult } from '@filone/rag-shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
@@ -80,7 +80,7 @@ export async function baseHandler(
 
   const { orgId } = getUserInfo(event);
 
-  const region = event.queryStringParameters?.region ?? S3_REGION;
+  const region = event.queryStringParameters?.region ?? S3Region.EuWest1;
   if (!isSupportedRegion(process.env.FILONE_STAGE!, region, getVerifiedEmail(event))) {
     return unsupportedRegionResponse(region);
   }
@@ -99,7 +99,7 @@ export async function baseHandler(
   }
 
   const objectKey = event.queryStringParameters?.objectKey;
-  const chunks = await retrieveChunks(bucketName, query, top_k, objectKey);
+  const chunks = await retrieveChunks(region, bucketName, query, top_k, objectKey);
 
   if (chunks.length === 0) {
     return new ResponseBuilder()
@@ -126,6 +126,7 @@ export async function baseHandler(
  * "no relevant content" rather than an error.
  */
 async function retrieveChunks(
+  region: S3Region,
   bucketName: string,
   query: string,
   topK: number,
@@ -136,7 +137,7 @@ async function retrieveChunks(
   const filter = objectKey ? { objectKey } : undefined;
 
   try {
-    return await vectorStore.query(bucketName, embedding, topK, filter);
+    return await vectorStore.query(region, bucketName, embedding, topK, filter);
   } catch (error) {
     if (error instanceof Error && error.name === 'NotFoundException') {
       return [];
