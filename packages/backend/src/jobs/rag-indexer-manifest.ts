@@ -5,6 +5,7 @@
 
 import {
   DeleteItemCommand,
+  GetItemCommand,
   PutItemCommand,
   QueryCommand,
   type AttributeValue,
@@ -127,19 +128,17 @@ export async function loadCheckpoint(
   bucketName: string,
 ): Promise<RagIndexerCheckpointRecord | undefined> {
   const result = await dynamo.send(
-    new QueryCommand({
+    new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
-      KeyConditionExpression: 'pk = :pk AND sk = :sk',
-      ExpressionAttributeValues: {
-        ':pk': { S: RAGKeys.checkpointPk(region, bucketName) },
-        ':sk': { S: RAGKeys.checkpointSk() },
+      Key: {
+        pk: { S: RAGKeys.checkpointPk(region, bucketName) },
+        sk: { S: RAGKeys.checkpointSk() },
       },
     }),
   );
-  const item = result.Items?.[0];
-  if (!item) return undefined;
+  if (!result.Item) return undefined;
 
-  const record = unmarshall(item) as RagIndexerCheckpointRecord;
+  const record = unmarshall(result.Item) as RagIndexerCheckpointRecord;
   if (typeof record.ttl === 'number' && record.ttl <= Math.floor(Date.now() / 1000)) {
     return undefined;
   }

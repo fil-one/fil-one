@@ -68,6 +68,7 @@ async function scanEnabledBuckets(): Promise<EnabledBucket[]> {
         TableName: Resource.UserInfoTable.name,
         FilterExpression: 'sk = :sk AND #status = :active',
         ExpressionAttributeNames: { '#status': 'status' },
+        ProjectionExpression: 'pk, orgId',
         ExpressionAttributeValues: {
           ':sk': { S: RAGKeys.enablementSk() },
           ':active': { S: 'active' },
