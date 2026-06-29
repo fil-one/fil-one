@@ -1,5 +1,5 @@
 import type { S3Region } from '@filone/shared';
-import { KEY_NAME_MAX_LENGTH } from '@filone/shared';
+import { KEY_NAME_MAX_LENGTH, isBucketPermission } from '@filone/shared';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyBucketScopeFields } from './AccessKeyBucketScopeFields.js';
 import { AccessKeyExpirationFields } from './AccessKeyExpirationFields.js';
@@ -83,7 +83,11 @@ export function AccessKeyFormFields({
       {/* Permissions */}
       <FormField
         label="What can this key do?"
-        error={permissions.length === 0 ? 'Select at least one permission.' : undefined}
+        error={
+          permissions.length === 0 && !granularPermissions.some(isBucketPermission)
+            ? 'Select at least one permission.'
+            : undefined
+        }
       >
         <AccessKeyPermissionsFields
           value={permissions}
