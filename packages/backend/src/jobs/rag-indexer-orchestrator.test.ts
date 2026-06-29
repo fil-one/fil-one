@@ -26,10 +26,15 @@ import { handler } from './rag-indexer-orchestrator.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function enablementItem(bucketId: string, orgId: string, extra: Record<string, unknown> = {}) {
+function enablementItem(
+  bucketName: string,
+  orgId: string,
+  extra: Record<string, unknown> = {},
+  region = 'eu-west-1',
+) {
   return marshall(
     {
-      pk: `BUCKET#${bucketId}`,
+      pk: `BUCKET#${region}#${bucketName}`,
       sk: 'RAG',
       orgId,
       status: 'active',
@@ -98,7 +103,7 @@ describe('rag-indexer-orchestrator', () => {
 
     const payloads = payloadsFrom();
     expect(payloads[0].orgId).toBe('org-1');
-    expect(payloads[0].bucketIds).toEqual(['bucket-1']);
+    expect(payloads[0].buckets).toEqual([{ region: 'eu-west-1', bucketName: 'bucket-1' }]);
   });
 
   it('groups multiple buckets of one org into a single worker invocation', async () => {
@@ -110,7 +115,10 @@ describe('rag-indexer-orchestrator', () => {
     await handler();
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
-    expect(payloadsFrom()[0].bucketIds).toEqual(['bucket-1', 'bucket-2']);
+    expect(payloadsFrom()[0].buckets).toEqual([
+      { region: 'eu-west-1', bucketName: 'bucket-1' },
+      { region: 'eu-west-1', bucketName: 'bucket-2' },
+    ]);
   });
 
   it('invokes one worker per distinct org', async () => {
@@ -131,7 +139,7 @@ describe('rag-indexer-orchestrator', () => {
       .on(ScanCommand)
       .resolvesOnce({
         Items: [enablementItem('bucket-1', 'org-1')],
-        LastEvaluatedKey: marshall({ pk: 'BUCKET#bucket-1', sk: 'RAG' }),
+        LastEvaluatedKey: marshall({ pk: 'BUCKET#eu-west-1#bucket-1', sk: 'RAG' }),
       })
       .resolvesOnce({ Items: [enablementItem('bucket-2', 'org-2')] });
     lambdaMock.on(InvokeCommand).resolves({});
@@ -151,6 +159,28 @@ describe('rag-indexer-orchestrator', () => {
     await handler();
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+  });
+
+  it('skips enablement rows whose bucket pk is unparseable (unknown region)', async () => {
+    ddbMock
+      .on(ScanCommand)
+      .resolves({ Items: [enablementItem('bucket-1', 'org-1', {}, 'mars-1')] });
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+  });
+
+  it('carries the bucket region through to the worker payload', async () => {
+    ddbMock
+      .on(ScanCommand)
+      .resolves({ Items: [enablementItem('bucket-2', 'org-2', {}, 'us-east-1')] });
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    expect(payloadsFrom()[0].buckets).toEqual([{ region: 'us-east-1', bucketName: 'bucket-2' }]);
   });
 
   it('continues when one org worker invoke fails (per-org isolation)', async () => {

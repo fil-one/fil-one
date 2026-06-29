@@ -102,7 +102,7 @@ describe('GET /api/me handler', () => {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
-        Key: { pk: { S: `ALLOWLIST#${MOCK_EMAIL}` }, sk: { S: 'ALLOWLIST' } },
+        Key: { pk: { S: `ALLOWLIST#${MOCK_EMAIL}` }, sk: { S: 'RAG' } },
       })
       .resolves({ Item: undefined });
   });
@@ -413,9 +413,9 @@ describe('GET /api/me handler', () => {
       ddbMock
         .on(GetItemCommand, {
           TableName: 'UserInfoTable',
-          Key: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'ALLOWLIST' } },
+          Key: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } },
         })
-        .resolves({ Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'ALLOWLIST' } } });
+        .resolves({ Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } } });
 
       const result = await handler(authenticatedEvent(), buildContext());
 
@@ -430,7 +430,7 @@ describe('GET /api/me handler', () => {
       ddbMock
         .on(GetItemCommand, {
           TableName: 'UserInfoTable',
-          Key: { pk: { S: 'ALLOWLIST#eve@example.com' }, sk: { S: 'ALLOWLIST' } },
+          Key: { pk: { S: 'ALLOWLIST#eve@example.com' }, sk: { S: 'RAG' } },
         })
         .resolves({ Item: undefined });
 
@@ -448,9 +448,9 @@ describe('GET /api/me handler', () => {
       ddbMock
         .on(GetItemCommand, {
           TableName: 'UserInfoTable',
-          Key: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'ALLOWLIST' } },
+          Key: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } },
         })
-        .resolves({ Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'ALLOWLIST' } } });
+        .resolves({ Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } } });
 
       const result = await handler(authenticatedEvent(), buildContext());
 

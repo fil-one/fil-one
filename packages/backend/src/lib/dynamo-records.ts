@@ -1,3 +1,4 @@
+import { S3Region } from '@filone/shared';
 import type { SubscriptionStatus } from '@filone/shared';
 
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
@@ -51,7 +52,7 @@ export interface RAGConfigRecord {
 /**
  * Per-bucket RAG enablement, settings, and sync telemetry.
  *
- * UserInfoTable — pk: BUCKET#{bucketId}, sk: RAG
+ * UserInfoTable — pk: BUCKET#{region}#{bucketId}, sk: RAG
  */
 export interface BucketRAGEnablementRecord {
   pk: string;
@@ -75,10 +76,10 @@ export interface BucketRAGEnablementRecord {
  * Object-to-chunk manifest: the authoritative list of vector-store keys for an
  * object, so the system can delete/reindex an object's chunks by explicit key.
  *
- * One query (pk: BUCKET#{bucketId}, sk begins_with MANIFEST#) returns every
- * object indexed in a bucket.
+ * One query (pk: BUCKET#{region}#{bucketId}, sk begins_with MANIFEST#) returns
+ * every object indexed in a bucket.
  *
- * UserInfoTable — pk: BUCKET#{bucketId}, sk: MANIFEST#{objectKey}
+ * UserInfoTable — pk: BUCKET#{region}#{bucketId}, sk: MANIFEST#{objectKey}
  */
 export interface ObjectChunkManifestRecord {
   pk: string;
@@ -122,11 +123,30 @@ export interface RagIndexerCheckpointRecord {
 export const RAGKeys = {
   configPk: (orgId: string): string => `ORG#${orgId}`,
   configSk: (): string => 'RAGCONFIG',
-  bucketPk: (bucketId: string): string => `BUCKET#${bucketId}`,
+  bucketPk: (region: S3Region, bucketName: string): string => `BUCKET#${region}#${bucketName}`,
+  /**
+   * Inverse of {@link bucketPk}: parse a `BUCKET#{region}#{bucketName}` pk back into its parts.
+   * Returns `undefined` for any malformed pk (missing prefix, unknown region, empty bucket name).
+   * Region membership is checked stage-independently (a valid-but-currently-disabled region must
+   * still parse), so this does NOT use the stage-aware `isSupportedRegion`.
+   */
+  parseBucketPk: (pk: string): { region: S3Region; bucketName: string } | undefined => {
+    const PREFIX = 'BUCKET#';
+    if (!pk.startsWith(PREFIX)) return undefined;
+    const rest = pk.slice(PREFIX.length);
+    const sep = rest.indexOf('#');
+    if (sep <= 0) return undefined;
+    const region = rest.slice(0, sep);
+    const bucketName = rest.slice(sep + 1);
+    if (!bucketName) return undefined;
+    if (!Object.values(S3Region).includes(region as S3Region)) return undefined;
+    return { region: region as S3Region, bucketName };
+  },
   enablementSk: (): string => 'RAG',
   /** Shared prefix for `begins_with` queries returning a bucket's manifests. */
   manifestSkPrefix: (): string => 'MANIFEST#',
   manifestSk: (objectKey: string): string => `MANIFEST#${objectKey}`,
-  checkpointPk: (bucketId: string): string => `INDEXER_CHECKPOINT#${bucketId}`,
+  checkpointPk: (region: S3Region, bucketName: string): string =>
+    `INDEXER_CHECKPOINT#${region}#${bucketName}`,
   checkpointSk: (): string => 'CHECKPOINT',
 } as const;

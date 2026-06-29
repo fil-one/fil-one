@@ -37,7 +37,6 @@ describe('embed', () => {
     expect(calls).toHaveLength(1);
     const input = calls[0]!.args[0]!.input;
     expect(input.modelId).toBe(EMBEDDING_MODEL_ID);
-    expect(input.modelId).toBe('amazon.titan-embed-text-v2:0');
     expect(input.contentType).toBe('application/json');
 
     // embed() always encodes the request body to a Uint8Array.

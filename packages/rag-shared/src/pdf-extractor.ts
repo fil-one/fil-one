@@ -30,18 +30,12 @@ const DEFAULT_MAX_POLLS = 300;
 export type StageDocument = (bytes: Uint8Array) => Promise<S3Object>;
 
 /**
- * Options controlling {@link extractTextFromPdf}.
+ * Options common to every {@link extractTextFromPdf} call, regardless of how the
+ * document is supplied to Textract.
  */
-export interface PdfExtractionOptions {
+interface PdfExtractionOptionsBase {
   /** Textract client to use. Defaults to a new {@link TextractClient}. */
   client?: TextractClient;
-  /**
-   * S3 location of the document to analyse. When omitted, `stageDocument` is
-   * used to upload the bytes and obtain a location.
-   */
-  documentLocation?: S3Object;
-  /** Stages the bytes to S3 when `documentLocation` is not supplied. */
-  stageDocument?: StageDocument;
   /** Delay between polls in ms. Defaults to {@link DEFAULT_POLL_INTERVAL_MS}. */
   pollIntervalMs?: number;
   /** Maximum number of polls. Defaults to {@link DEFAULT_MAX_POLLS}. */
@@ -53,6 +47,30 @@ export interface PdfExtractionOptions {
    */
   sleep?: (ms: number) => Promise<void>;
 }
+
+/**
+ * Options controlling {@link extractTextFromPdf}.
+ *
+ * The asynchronous Textract API only reads documents from S3, so exactly one
+ * way of reaching the bytes must be supplied: either an explicit
+ * `documentLocation` pointing at an already-staged S3 object, or a
+ * `stageDocument` callback that uploads the bytes and returns their location.
+ * The union makes this a compile-time requirement — passing neither (or both)
+ * is a type error.
+ */
+export type PdfExtractionOptions = PdfExtractionOptionsBase &
+  (
+    | {
+        /** S3 location of an already-staged document to analyse. */
+        documentLocation: S3Object;
+        stageDocument?: never;
+      }
+    | {
+        /** Stages the bytes to S3 and returns their location. */
+        stageDocument: StageDocument;
+        documentLocation?: never;
+      }
+  );
 
 /**
  * Resolve the S3 location of the document, staging the raw bytes if no explicit
@@ -155,16 +173,15 @@ function linesInReadingOrder(blocks: Block[]): string[] {
  * Starts a `StartDocumentTextDetection` job, polls `GetDocumentTextDetection`
  * (sleeping between polls, never busy-looping) until it finishes, follows every
  * `NextToken` to assemble all pages, and concatenates the LINE blocks in reading
- * order. The asynchronous API requires the document in S3; supply either an
- * explicit `documentLocation` or a `stageDocument` callback that uploads the
- * bytes.
+ * order. The asynchronous API requires the document in S3;
+ * {@link PdfExtractionOptions} requires either an explicit `documentLocation` or a
+ * `stageDocument` callback that uploads the bytes.
  *
- * @throws if no location/stager is provided, if the Textract job fails, or if
- *   the poll budget is exhausted.
+ * @throws if the Textract job fails or the poll budget is exhausted.
  */
 export async function extractTextFromPdf(
   bytes: Uint8Array,
-  options: PdfExtractionOptions = {},
+  options: PdfExtractionOptions,
 ): Promise<string> {
   const client = options.client ?? new TextractClient({});
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;

@@ -8,7 +8,7 @@ import {
 import { mockClient } from 'aws-sdk-client-mock';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { extractTextFromPdf } from './pdf-extractor.js';
+import { extractTextFromPdf, type PdfExtractionOptions } from './pdf-extractor.js';
 
 const textractMock = mockClient(TextractClient);
 
@@ -152,7 +152,10 @@ describe('extractTextFromPdf', () => {
   });
 
   it('throws when neither documentLocation nor stageDocument is provided', async () => {
-    await expect(extractTextFromPdf(new Uint8Array([1]), { client: client() })).rejects.toThrow(
+    // The options union makes this a compile-time error; the cast exercises the
+    // defensive runtime guard that protects untyped JS callers.
+    const optionsWithNeither = { client: client() } as unknown as PdfExtractionOptions;
+    await expect(extractTextFromPdf(new Uint8Array([1]), optionsWithNeither)).rejects.toThrow(
       /documentLocation or stageDocument/,
     );
     expect(textractMock.commandCalls(StartDocumentTextDetectionCommand)).toHaveLength(0);

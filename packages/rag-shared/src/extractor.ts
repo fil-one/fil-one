@@ -63,6 +63,11 @@ export async function extractText(
 
   switch (type) {
     case CONTENT_TYPE.pdf:
+      if (!options.pdf) {
+        throw new Error(
+          'PDF extraction requires options.pdf with documentLocation or stageDocument to reach Textract',
+        );
+      }
       return extractTextFromPdf(bytes, options.pdf);
     case CONTENT_TYPE.plain:
     case CONTENT_TYPE.markdown:
