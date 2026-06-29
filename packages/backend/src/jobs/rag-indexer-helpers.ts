@@ -31,6 +31,9 @@ import {
 
 const LOG = '[rag-indexer-helpers]';
 
+/** Content type whose extraction is routed through Textract and needs PDF options. */
+const PDF_CONTENT_TYPE = 'application/pdf';
+
 export interface IndexBucketResult {
   added: number;
   updated: number;
@@ -96,7 +99,7 @@ export async function indexBucket(
   // must not treat unseen manifest entries as removed.
   const startedFromBeginning = continuationToken === undefined;
 
-  for (;;) {
+  while (true) {
     if (isPastDeadline(options.deadlineEpochMs)) {
       await saveCheckpoint(region, bucketName, continuationToken);
       console.log(`${LOG} Checkpointed mid-bucket (deadline reached)`, { region, bucketName });
@@ -249,7 +252,13 @@ async function indexObject(
     return false;
   }
 
-  const text = await extractText(bytes, contentType);
+  const text = await extractText(
+    bytes,
+    contentType,
+    contentType === PDF_CONTENT_TYPE
+      ? { pdf: { documentLocation: { Bucket: bucketName, Name: objectKey } } }
+      : {},
+  );
   if (!text || text.trim().length === 0) {
     console.warn(`${LOG} No extractable text, skipping`, { region, bucketName, key: objectKey });
     return false;

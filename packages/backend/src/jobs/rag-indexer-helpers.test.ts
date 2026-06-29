@@ -163,6 +163,73 @@ describe('indexBucket', () => {
     expect(result).toMatchObject({ added: 1, updated: 0, removed: 0, failed: 0, completed: true });
   });
 
+  // -----------------------------------------------------------------------
+  // PDF objects: extraction is routed through Textract, which reads the object
+  // straight from S3, so the object's own location is handed in as `documentLocation`.
+  // -----------------------------------------------------------------------
+
+  it('indexes a PDF object, handing Textract the object S3 location as documentLocation', async () => {
+    mockLoadManifest.mockResolvedValue(manifestOf([]));
+    mockListObjects.mockResolvedValue(page([{ key: 'doc.pdf', etag: 'e1' }]));
+    const bytes = new Uint8Array([1, 2, 3]);
+    mockGetObjectBytes.mockResolvedValue({ bytes, contentType: 'application/pdf' });
+    mockExtractText.mockResolvedValue('pdf text');
+
+    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+
+    expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf', {
+      pdf: { documentLocation: { Bucket: 'bucket-1', Name: 'doc.pdf' } },
+    });
+    expect(vectorStore.upsertChunks).toHaveBeenCalledOnce();
+    expect(mockSaveManifestEntry).toHaveBeenCalledWith(
+      S3Region.EuWest1,
+      'bucket-1',
+      'doc.pdf',
+      'e1',
+      ['doc.pdf#0'],
+    );
+    expect(result).toMatchObject({ added: 1, failed: 0, completed: true });
+  });
+
+  it('treats a PDF resolved by file extension (generic stored type) as a PDF', async () => {
+    mockLoadManifest.mockResolvedValue(manifestOf([]));
+    mockListObjects.mockResolvedValue(page([{ key: 'report.pdf', etag: 'e1' }]));
+    const bytes = new Uint8Array([9]);
+    // Stored content type carries no signal; the .pdf extension drives the type.
+    mockGetObjectBytes.mockResolvedValue({ bytes, contentType: 'application/octet-stream' });
+
+    await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+
+    expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf', {
+      pdf: { documentLocation: { Bucket: 'bucket-1', Name: 'report.pdf' } },
+    });
+  });
+
+  it('forwards no PDF options for a non-PDF object', async () => {
+    mockLoadManifest.mockResolvedValue(manifestOf([]));
+    mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
+
+    await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+
+    expect(mockExtractText).toHaveBeenCalledWith(new Uint8Array([1]), 'text/plain', {});
+  });
+
+  it('counts a PDF as failed (isolated) when Textract extraction throws', async () => {
+    mockLoadManifest.mockResolvedValue(manifestOf([]));
+    mockListObjects.mockResolvedValue(page([{ key: 'doc.pdf', etag: 'e1' }]));
+    mockGetObjectBytes.mockResolvedValue({
+      bytes: new Uint8Array([1]),
+      contentType: 'application/pdf',
+    });
+    mockExtractText.mockRejectedValue(new Error('Textract job failed'));
+
+    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+
+    expect(vectorStore.upsertChunks).not.toHaveBeenCalled();
+    expect(mockSaveManifestEntry).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ added: 0, failed: 1, completed: true });
+  });
+
   it('re-indexes a changed object: deletes old chunks then re-upserts + updates manifest', async () => {
     mockLoadManifest.mockResolvedValue(
       manifestOf([
