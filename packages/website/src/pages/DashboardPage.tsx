@@ -364,7 +364,7 @@ export function DashboardPage() {
           </div>
           <div className="flex items-baseline gap-1">
             <span className="text-xl font-medium text-zinc-900">{usage.buckets.count}</span>
-            <span className="text-[11px] text-zinc-500">/ {usage.buckets.limit}</span>
+            <span className="text-[11px] text-zinc-500">total</span>
           </div>
         </div>
         <div className="px-5 py-4">
@@ -387,7 +387,7 @@ export function DashboardPage() {
           </div>
           <div className="flex items-baseline gap-1">
             <span className="text-xl font-medium text-zinc-900">{usage.accessKeys.count}</span>
-            <span className="text-[11px] text-zinc-500">/ {usage.accessKeys.limit}</span>
+            <span className="text-[11px] text-zinc-500">total</span>
           </div>
         </div>
       </Card>

@@ -10,13 +10,6 @@ import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
-// Account-wide quotas. These are GLOBAL and CONSTANT — the displayed limit is
-// the same regardless of how many regions an org is provisioned in, and is not
-// summed per region. The displayed access-key limit reserves one system
-// `filone-console` key for each of the two regions: 300 − 2 = 298.
-const GLOBAL_BUCKET_LIMIT = 100;
-const GLOBAL_ACCESS_KEY_LIMIT = 300;
-
 interface RegionUsage {
   /** Most-recent storage reading for the region (point-in-time). */
   storageBytes: number;
@@ -37,9 +30,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     const response: UsageResponse = {
       storage: { usedBytes: 0 },
       egress: { usedBytes: 0 },
-      buckets: { count: 0, limit: GLOBAL_BUCKET_LIMIT },
+      buckets: { count: 0 },
       objects: { count: 0 },
-      accessKeys: { count: 0, limit: GLOBAL_ACCESS_KEY_LIMIT - 2 },
+      accessKeys: { count: 0 },
     };
     return new ResponseBuilder().status(200).body(response).build();
   }
@@ -75,9 +68,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     const response: UsageResponse = {
       storage: { usedBytes: 0 },
       egress: { usedBytes: 0 },
-      buckets: { count: 0, limit: GLOBAL_BUCKET_LIMIT },
+      buckets: { count: 0 },
       objects: { count: 0 },
-      accessKeys: { count: 0, limit: GLOBAL_ACCESS_KEY_LIMIT - 2 },
+      accessKeys: { count: 0 },
     };
     return new ResponseBuilder().status(200).body(response).build();
   }
@@ -89,11 +82,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
 
 // Folds the per-region usages into the dashboard totals. Counts (storage,
 // egress, objects, buckets, keys) are summed; storage/egress are pre-reduced
-// per region (see `fetchRegionUsage`); status collapses to the most-restrictive
-// across regions. The limit is global and constant (always `300 − 2`, never
-// summed or adjusted by provisioned-region count). The system `filone-console`
-// key present in each provisioned region is subtracted from the key *count*
-// only, so users see just the keys they manage.
+// per region (see `fetchRegionUsage`); status collapses to the most-restrictive across regions.
+// The system `filone-console` key present in each provisioned region
+// is subtracted from the key *count* only, so users see just the keys they manage.
 function aggregateRegionUsages(regionUsages: RegionUsage[]): UsageResponse {
   let storageUsedBytes = 0;
   let objectCount = 0;
@@ -114,11 +105,10 @@ function aggregateRegionUsages(regionUsages: RegionUsage[]): UsageResponse {
   return {
     storage: { usedBytes: storageUsedBytes },
     egress: { usedBytes: egressUsedBytes },
-    buckets: { count: bucketCount, limit: GLOBAL_BUCKET_LIMIT },
+    buckets: { count: bucketCount },
     objects: { count: objectCount },
     accessKeys: {
       count: Math.max(0, rawKeyCount - regionUsages.length),
-      limit: GLOBAL_ACCESS_KEY_LIMIT - 2,
     },
     tenantStatus: pickMostRestrictiveStatus(statuses),
   };
