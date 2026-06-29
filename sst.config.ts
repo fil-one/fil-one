@@ -484,8 +484,8 @@ export default $config({
         // SecureString params are sealed with the AWS-managed SSM KMS key; the
         // SDK decrypts them in-line on GetParameter (WithDecryption: true).
         actions: ['kms:Decrypt'],
-        resources: ['*'],
-      },
+        resources: ['arn:aws:kms:*:*:alias/aws/ssm'],
+      }
     ];
 
     const { firehose, cwToFirehoseRole } = setupFirehoseLogPipeline(grafanaLokiAuth);
