@@ -147,6 +147,17 @@ async function retrieveChunks(
 }
 
 /**
+ * Defang our prompt delimiters in untrusted text so a chunk or query cannot
+ * close the <context>/<question> data region early and break out into what the
+ * model reads as the trusted region (delimiter injection, follow-up to FIL-554).
+ * Escapes the leading `<` of any context/question open or close tag; the system
+ * prompt's untrusted-DATA instruction remains the semantic backstop.
+ */
+function neutralizeDelimiters(text: string): string {
+  return text.replace(/<(\/?\s*(?:context|question)\s*)>/gi, '&lt;$1>');
+}
+
+/**
  * Build the grounded user prompt: the retrieved chunk texts and the user's
  * question, each wrapped in unambiguous delimiters so the model can tell the
  * trusted instruction (the system prompt) from untrusted DATA.
@@ -155,11 +166,15 @@ async function retrieveChunks(
  * structurally contained inside <context>...</context> and
  * <question>...</question>. Any injection attempt (e.g. "ignore previous
  * instructions") embedded in a chunk or the query lands INSIDE these data
- * regions rather than in the instruction channel (FIL-554).
+ * regions rather than in the instruction channel (FIL-554). Delimiter tokens in
+ * that untrusted text are defanged ({@link neutralizeDelimiters}) so the content
+ * cannot close a region early and escape containment.
  */
 function buildPrompt(query: string, chunks: VectorQueryResult[]): string {
-  const context = chunks.map((chunk, index) => `[${index + 1}] ${chunk.text}`).join('\n\n');
-  return `<context>\n${context}\n</context>\n\n<question>\n${query}\n</question>`;
+  const context = chunks
+    .map((chunk, index) => `[${index + 1}] ${neutralizeDelimiters(chunk.text)}`)
+    .join('\n\n');
+  return `<context>\n${context}\n</context>\n\n<question>\n${neutralizeDelimiters(query)}\n</question>`;
 }
 
 /**
