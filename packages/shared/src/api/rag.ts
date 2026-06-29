@@ -7,12 +7,11 @@ export const QUERY_DEFAULT_TOP_K = 10;
 export const QUERY_MAX_TOP_K = 100;
 
 /**
- * Request body accepted by `POST /v1/buckets/{id}/query` (FIL-554).
+ * Request body accepted by `POST /api/buckets/{name}/query` (FIL-554).
  *
- * `query` is required and must be a non-empty trimmed string. `top_k` is
- * clamped to [1, {@link QUERY_MAX_TOP_K}] and defaults to
- * {@link QUERY_DEFAULT_TOP_K}. `model` optionally overrides the default Bedrock
- * completion model.
+ * `query` is required and must be a non-empty trimmed string. `top_k` must be in
+ * [1, {@link QUERY_MAX_TOP_K}] and defaults to {@link QUERY_DEFAULT_TOP_K}.
+ * `model` optionally requests a specific Bedrock completion model.
  */
 export const QueryBucketSchema = z.object({
   query: z.string().trim().min(1, 'Query is required'),
