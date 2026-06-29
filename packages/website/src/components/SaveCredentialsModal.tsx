@@ -48,7 +48,7 @@ export function SaveCredentialsModal({ open, onDone, credentials }: SaveCredenti
   }
 
   return (
-    <Modal open={open} onClose={() => {}} size="md">
+    <Modal open={open} onClose={() => {}} size="md" testId="save-credentials-modal">
       <ModalHeader>Save your credentials</ModalHeader>
       <ModalBody>
         <div className="mb-4">
@@ -93,7 +93,7 @@ export function SaveCredentialsModal({ open, onDone, credentials }: SaveCredenti
         </div>
       </ModalBody>
       <ModalFooter fullWidth>
-        <Button variant="ghost" onClick={onDone}>
+        <Button id="save-credentials-done-button" variant="ghost" onClick={onDone}>
           Done
         </Button>
         <SplitButton

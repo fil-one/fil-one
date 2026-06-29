@@ -225,7 +225,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
   --endpoint-url ${s3Endpoint}`;
 
   return (
-    <div className="mx-auto max-w-2xl px-10 pt-10">
+    <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
       {/* Breadcrumb */}
       <Breadcrumb
         items={[
@@ -249,7 +249,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
           }
         />
         <div className="min-w-0 flex-1">
-          <Heading tag="h1" className="truncate">
+          <Heading id="object-detail-heading" tag="h1" className="truncate">
             {objectKey}
           </Heading>
           <p className="text-sm text-(--color-paragraph-text-subtle)">{bucketName}</p>
@@ -257,6 +257,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
 
         <div className="flex items-center gap-1">
           <IconButton
+            id="object-download-button"
             icon={DownloadSimpleIcon}
             aria-label="Download object"
             tooltip="Download"
@@ -264,6 +265,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
             onClick={() => void objectActions.downloadObject(objectKey, versionId)}
           />
           <IconButton
+            id="object-share-button"
             icon={LinkIcon}
             aria-label="Share object"
             tooltip={
@@ -276,6 +278,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
             onClick={() => setShareOpen(true)}
           />
           <IconButton
+            id="object-delete-button"
             icon={TrashIcon}
             aria-label="Delete object"
             tooltip="Delete"

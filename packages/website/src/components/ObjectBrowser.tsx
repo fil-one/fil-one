@@ -145,6 +145,8 @@ function VersionSubRow({
 }) {
   return (
     <Table.Row
+      data-testid="object-version-row"
+      data-version-id={version.versionId}
       className="cursor-pointer bg-zinc-50/50 hover:bg-zinc-100/50"
       role="button"
       tabIndex={0}
@@ -212,6 +214,8 @@ function LatestVersionRow({
 
   return (
     <Table.Row
+      data-testid="object-row"
+      data-object-key={group.key}
       className="cursor-pointer"
       role="button"
       tabIndex={0}
@@ -378,6 +382,7 @@ export function ObjectBrowser({
           description="Upload your first object to this bucket"
         >
           <Button
+            id="object-browser-upload-button"
             variant="primary"
             icon={ArrowUpIcon}
             onClick={() =>
@@ -388,7 +393,7 @@ export function ObjectBrowser({
               })
             }
           >
-            Upload
+            Upload object
           </Button>
         </EmptyStateCard>
       </div>
@@ -398,11 +403,11 @@ export function ObjectBrowser({
   const groups = groupVersionsByKey(versions);
   const entries = getEntriesAtPrefix(groups, currentPrefix);
 
-  function navigateToObject(key: string, versionId: string) {
+  function navigateToObject(key: string, versionId?: string) {
     void navigate({
       to: '/buckets/$bucketName/objects',
       params: { bucketName },
-      search: { key, region, versionId },
+      search: { key, region, ...(versionId && { versionId }) },
     });
   }
 
@@ -442,6 +447,8 @@ export function ObjectBrowser({
                 return (
                   <Table.Row
                     key={`folder:${entry.prefix}`}
+                    data-testid="folder-row"
+                    data-folder-prefix={entry.prefix}
                     className="cursor-pointer"
                     onClick={() => onPrefixChange(entry.prefix)}
                   >

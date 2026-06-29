@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { Heading } from '../components/Heading/Heading';
+import { PageLayout } from '../components/PageLayout.js';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { FormField } from '../components/FormField';
@@ -69,12 +69,12 @@ export function SupportPage() {
   }
 
   return (
-    <div className="px-10 pt-10">
-      <Heading tag="h1" size="xl" description="We typically respond within 1 business day">
-        Talk to an expert
-      </Heading>
-
-      <div className="max-w-xl mt-8">
+    <PageLayout
+      title="Talk to an expert"
+      headingId="support-heading"
+      description="We typically respond within 1 business day"
+    >
+      <div className="max-w-xl">
         <Card padding="none">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-6">
             <div className="grid grid-cols-2 gap-4">
@@ -143,13 +143,18 @@ export function SupportPage() {
             </FormField>
 
             <div className="flex justify-end">
-              <Button variant="primary" type="submit" disabled={submitting}>
+              <Button
+                id="support-submit-button"
+                variant="primary"
+                type="submit"
+                disabled={submitting}
+              >
                 {submitting ? 'Sending...' : 'Send message'}
               </Button>
             </div>
           </form>
         </Card>
       </div>
-    </div>
+    </PageLayout>
   );
 }

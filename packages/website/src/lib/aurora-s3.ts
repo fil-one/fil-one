@@ -55,9 +55,10 @@ function parseVersionElements(doc: Document): S3ObjectVersion[] {
     const key = getText(el, 'Key');
     if (!key) continue;
     const etag = getText(el, 'ETag');
+    const versionId = getText(el, 'VersionId');
     results.push({
       key,
-      versionId: getText(el, 'VersionId') ?? '',
+      versionId: versionId && versionId !== 'null' ? versionId : '',
       isLatest: getText(el, 'IsLatest') === 'true',
       isDeleteMarker: false,
       sizeBytes: parseInt(getText(el, 'Size') ?? '0', 10),

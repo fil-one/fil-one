@@ -87,6 +87,9 @@ let capturedAuth0PatchBody: Record<string, unknown> | undefined;
 let capturedEmailProviderBody: Record<string, unknown> | undefined;
 let capturedMfaActionBody: Record<string, unknown> | undefined;
 let capturedMfaBindingsBody: Record<string, unknown> | undefined;
+let capturedPasskeyConnectionPatchBody: Record<string, unknown> | undefined;
+
+const PASSKEY_CONNECTION_ID = 'con_passkey_123';
 
 function stubAuth0Fetch(
   clientState = {
@@ -103,6 +106,7 @@ function stubAuth0Fetch(
   capturedEmailProviderBody = undefined;
   capturedMfaActionBody = undefined;
   capturedMfaBindingsBody = undefined;
+  capturedPasskeyConnectionPatchBody = undefined;
 
   mockFetch.mockImplementation(async (url, init) => {
     const urlStr = String(url);
@@ -175,6 +179,44 @@ function stubAuth0Fetch(
       init?.method === 'PATCH'
     ) {
       capturedMfaBindingsBody = JSON.parse(init.body!);
+      return new Response('{}', { status: 200 });
+    }
+    // Passkey connection endpoints
+    if (
+      urlStr.includes('/api/v2/connections?strategy=auth0&name=') &&
+      (!init?.method || init.method === 'GET')
+    ) {
+      return new Response(
+        JSON.stringify([
+          {
+            id: PASSKEY_CONNECTION_ID,
+            name: 'Username-Password-Authentication',
+            strategy: 'auth0',
+            options: {},
+          },
+        ]),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (
+      urlStr.includes(`/api/v2/connections/${PASSKEY_CONNECTION_ID}`) &&
+      (!init?.method || init.method === 'GET')
+    ) {
+      return new Response(
+        JSON.stringify({
+          id: PASSKEY_CONNECTION_ID,
+          name: 'Username-Password-Authentication',
+          strategy: 'auth0',
+          options: {},
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (
+      urlStr.includes(`/api/v2/connections/${PASSKEY_CONNECTION_ID}`) &&
+      init?.method === 'PATCH'
+    ) {
+      capturedPasskeyConnectionPatchBody = JSON.parse(init.body!);
       return new Response('{}', { status: 200 });
     }
     if (init?.method === 'PUT') {
@@ -944,6 +986,326 @@ describe('setup-integrations', () => {
       );
 
       expect(capturedMfaActionBody).toBeUndefined();
+    });
+  });
+
+  // ── Auth0 Passkey Connection ───────────────────────────────────────
+
+  describe('Auth0 Passkey Connection', () => {
+    it('enables passkeys on the connection on Create for staging', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://staging.fil.one',
+            Stage: 'staging',
+          },
+        }),
+      );
+
+      expect(capturedPasskeyConnectionPatchBody).toEqual({
+        options: {
+          authentication_methods: {
+            passkey: { enabled: true },
+            password: { enabled: true },
+          },
+          passkey_options: {
+            progressive_enrollment_enabled: true,
+            local_enrollment_enabled: true,
+            challenge_ui: 'both',
+          },
+        },
+      });
+    });
+
+    it('does not patch the connection for dev stages', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      await handler(buildCfnEvent({ RequestType: 'Create' }));
+
+      expect(capturedPasskeyConnectionPatchBody).toBeUndefined();
+    });
+
+    it('skips the PATCH when the existing connection already has the desired shape', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      mockFetch.mockImplementation(async (url, init) => {
+        const urlStr = String(url);
+        if (urlStr.includes('/oauth/token')) {
+          return new Response(JSON.stringify({ access_token: 'mgmt-token' }), { status: 200 });
+        }
+        if (urlStr.includes('/api/v2/clients/') && (!init?.method || init.method === 'GET')) {
+          return new Response(
+            JSON.stringify({ callbacks: [], allowed_logout_urls: [], web_origins: [] }),
+            { status: 200 },
+          );
+        }
+        if (urlStr.includes('/api/v2/clients/') && init?.method === 'PATCH') {
+          return new Response('{}', { status: 200 });
+        }
+        if (urlStr.includes('/api/v2/emails/provider')) {
+          return new Response('{}', { status: 200 });
+        }
+        if (urlStr.includes('/api/v2/actions/actions') && urlStr.includes('actionName=')) {
+          return new Response(JSON.stringify({ actions: [] }), { status: 200 });
+        }
+        if (
+          urlStr.includes('/api/v2/actions/actions') &&
+          !urlStr.includes('/deploy') &&
+          init?.method === 'POST'
+        ) {
+          return new Response(
+            JSON.stringify({ id: 'action-123', name: 'MFA Enrollment Trigger' }),
+            { status: 201 },
+          );
+        }
+        if (
+          urlStr.includes('/api/v2/actions/actions/action-123') &&
+          (!init?.method || init.method === 'GET')
+        ) {
+          return new Response(JSON.stringify({ id: 'action-123', status: 'built' }), {
+            status: 200,
+          });
+        }
+        if (urlStr.includes('/deploy')) {
+          return new Response('{}', { status: 200 });
+        }
+        if (
+          urlStr.includes('/api/v2/actions/triggers/post-login/bindings') &&
+          (!init?.method || init.method === 'GET')
+        ) {
+          return new Response(JSON.stringify({ bindings: [] }), { status: 200 });
+        }
+        if (
+          urlStr.includes('/api/v2/actions/triggers/post-login/bindings') &&
+          init?.method === 'PATCH'
+        ) {
+          return new Response('{}', { status: 200 });
+        }
+        if (
+          urlStr.includes('/api/v2/connections?strategy=') &&
+          (!init?.method || init.method === 'GET')
+        ) {
+          return new Response(
+            JSON.stringify([
+              {
+                id: PASSKEY_CONNECTION_ID,
+                name: 'Username-Password-Authentication',
+                strategy: 'auth0',
+                options: {
+                  authentication_methods: {
+                    passkey: { enabled: true },
+                    password: { enabled: true },
+                  },
+                  passkey_options: {
+                    progressive_enrollment_enabled: true,
+                    local_enrollment_enabled: true,
+                    challenge_ui: 'both',
+                  },
+                },
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        if (
+          urlStr.includes(`/api/v2/connections/${PASSKEY_CONNECTION_ID}`) &&
+          (!init?.method || init.method === 'GET')
+        ) {
+          return new Response(
+            JSON.stringify({
+              id: PASSKEY_CONNECTION_ID,
+              name: 'Username-Password-Authentication',
+              strategy: 'auth0',
+              options: {
+                authentication_methods: {
+                  passkey: { enabled: true },
+                  password: { enabled: true },
+                },
+                passkey_options: {
+                  progressive_enrollment_enabled: true,
+                  local_enrollment_enabled: true,
+                  challenge_ui: 'both',
+                },
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        if (
+          urlStr.includes(`/api/v2/connections/${PASSKEY_CONNECTION_ID}`) &&
+          init?.method === 'PATCH'
+        ) {
+          capturedPasskeyConnectionPatchBody = JSON.parse(init.body!);
+          return new Response('{}', { status: 200 });
+        }
+        if (init?.method === 'PUT') {
+          capturedCfnBody = JSON.parse(init.body!);
+          return new Response('', { status: 200 });
+        }
+        return new Response('Not found', { status: 404 });
+      });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://staging.fil.one',
+            Stage: 'staging',
+          },
+        }),
+      );
+
+      expect(capturedPasskeyConnectionPatchBody).toBeUndefined();
+    });
+
+    it('preserves unrelated connection options on PATCH', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({
+        id: 'we_1',
+        secret: 'whsec_1',
+      });
+
+      const existingConnectionOptions = {
+        passwordPolicy: 'fair',
+        brute_force_protection: true,
+        disable_signup: false,
+      };
+      const connectionWithOptions = {
+        id: PASSKEY_CONNECTION_ID,
+        name: 'Username-Password-Authentication',
+        strategy: 'auth0',
+        options: existingConnectionOptions,
+      };
+
+      mockFetch.mockImplementation(async (url, init) => {
+        const urlStr = String(url);
+        if (urlStr.includes('/oauth/token')) {
+          return new Response(JSON.stringify({ access_token: 'mgmt-token' }), { status: 200 });
+        }
+        if (urlStr.includes('/api/v2/clients/') && (!init?.method || init.method === 'GET')) {
+          return new Response(
+            JSON.stringify({ callbacks: [], allowed_logout_urls: [], web_origins: [] }),
+            { status: 200 },
+          );
+        }
+        if (urlStr.includes('/api/v2/clients/') && init?.method === 'PATCH') {
+          return new Response('{}', { status: 200 });
+        }
+        if (urlStr.includes('/api/v2/emails/provider')) {
+          return new Response('{}', { status: 200 });
+        }
+        if (urlStr.includes('/api/v2/actions/actions') && urlStr.includes('actionName=')) {
+          return new Response(JSON.stringify({ actions: [] }), { status: 200 });
+        }
+        if (
+          urlStr.includes('/api/v2/actions/actions') &&
+          !urlStr.includes('/deploy') &&
+          init?.method === 'POST'
+        ) {
+          return new Response(
+            JSON.stringify({ id: 'action-123', name: 'MFA Enrollment Trigger' }),
+            { status: 201 },
+          );
+        }
+        if (
+          urlStr.includes('/api/v2/actions/actions/action-123') &&
+          (!init?.method || init.method === 'GET')
+        ) {
+          return new Response(JSON.stringify({ id: 'action-123', status: 'built' }), {
+            status: 200,
+          });
+        }
+        if (urlStr.includes('/deploy')) {
+          return new Response('{}', { status: 200 });
+        }
+        if (
+          urlStr.includes('/api/v2/actions/triggers/post-login/bindings') &&
+          (!init?.method || init.method === 'GET')
+        ) {
+          return new Response(JSON.stringify({ bindings: [] }), { status: 200 });
+        }
+        if (
+          urlStr.includes('/api/v2/actions/triggers/post-login/bindings') &&
+          init?.method === 'PATCH'
+        ) {
+          return new Response('{}', { status: 200 });
+        }
+        if (
+          urlStr.includes('/api/v2/connections?strategy=') &&
+          (!init?.method || init.method === 'GET')
+        ) {
+          return new Response(JSON.stringify([connectionWithOptions]), { status: 200 });
+        }
+        if (
+          urlStr.includes(`/api/v2/connections/${PASSKEY_CONNECTION_ID}`) &&
+          (!init?.method || init.method === 'GET')
+        ) {
+          return new Response(JSON.stringify(connectionWithOptions), { status: 200 });
+        }
+        if (
+          urlStr.includes(`/api/v2/connections/${PASSKEY_CONNECTION_ID}`) &&
+          init?.method === 'PATCH'
+        ) {
+          capturedPasskeyConnectionPatchBody = JSON.parse(init.body!);
+          return new Response('{}', { status: 200 });
+        }
+        if (init?.method === 'PUT') {
+          capturedCfnBody = JSON.parse(init.body!);
+          return new Response('', { status: 200 });
+        }
+        return new Response('Not found', { status: 404 });
+      });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://staging.fil.one',
+            Stage: 'staging',
+          },
+        }),
+      );
+
+      expect(capturedPasskeyConnectionPatchBody).toEqual({
+        options: {
+          ...existingConnectionOptions,
+          authentication_methods: {
+            passkey: { enabled: true },
+            password: { enabled: true },
+          },
+          passkey_options: {
+            progressive_enrollment_enabled: true,
+            local_enrollment_enabled: true,
+            challenge_ui: 'both',
+          },
+        },
+      });
     });
   });
 

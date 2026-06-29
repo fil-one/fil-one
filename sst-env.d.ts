@@ -90,6 +90,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "DeletePasskey": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "DisableMfa": {
       "name": string
       "type": "sst.aws.Function"

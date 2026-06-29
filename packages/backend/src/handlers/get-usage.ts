@@ -1,82 +1,158 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { UsageResponse } from '@filone/shared';
-import { getOrgProfile } from '../lib/org-profile.js';
-import { isOrgSetupComplete } from '../lib/org-setup-status.js';
+import type { UsageResponse, TenantStatus } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.js';
+import { getProvisionedRegions } from '../lib/region-helpers.js';
+import type { ServiceOrchestrator, TenantInfo } from '../lib/service-orchestrator.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import {
-  getStorageSamples,
-  getOperationsSamples,
-  getTenantInfo,
-} from '../lib/aurora/aurora-backoffice.js';
 
-async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
+interface RegionUsage {
+  /** Most-recent storage reading for the region (point-in-time). */
+  storageBytes: number;
+  objectCount: number;
+  /** Total egress over the window for the region. */
+  egressBytes: number;
+  info: TenantInfo;
+}
+
+export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId } = getUserInfo(event);
 
-  // 1. Look up org profile for Aurora S3 credentials
-  const orgProfile = await getOrgProfile(orgId);
+  // The dashboard aggregates usage across every region the org is provisioned
+  // in, so resolve the ready tenant on each available orchestrator.
+  const regions = await getProvisionedRegions(orgId);
 
-  const auroraTenantId = orgProfile?.auroraTenantId?.S;
-  const auroraSetupStatus = orgProfile?.auroraSetupStatus?.S;
+  if (regions.length === 0) {
+    const response: UsageResponse = {
+      storage: { usedBytes: 0 },
+      egress: { usedBytes: 0 },
+      buckets: { count: 0 },
+      objects: { count: 0 },
+      accessKeys: { count: 0 },
+    };
+    return new ResponseBuilder().status(200).body(response).build();
+  }
 
-  // 2. Fetch usage data from Aurora in parallel
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime());
   thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
-  const shouldFetchData = auroraTenantId && isOrgSetupComplete(auroraSetupStatus);
+  // Swallow per-orchestrator errors so one region's outage still renders the
+  // rest: settle every fetch, log the failures, and keep the successes.
+  const settled = await Promise.allSettled(
+    regions.map(({ orchestrator, tenantId }) =>
+      fetchRegionUsage(orchestrator, tenantId, thirtyDaysAgo, now),
+    ),
+  );
 
-  const [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
-    shouldFetchData
-      ? getStorageSamples({
-          tenantId: auroraTenantId,
-          from: thirtyDaysAgo.toISOString(),
-          to: now.toISOString(),
-          window: '720h',
-        })
-      : [],
-    shouldFetchData
-      ? getOperationsSamples({
-          tenantId: auroraTenantId,
-          from: thirtyDaysAgo.toISOString(),
-          to: now.toISOString(),
-          window: '720h',
-        })
-      : [],
-    shouldFetchData ? getTenantInfo({ tenantId: auroraTenantId }) : null,
-  ]);
+  const regionUsages: RegionUsage[] = [];
+  settled.forEach((result, i) => {
+    if (result.status === 'fulfilled') {
+      regionUsages.push(result.value);
+      return;
+    }
+    const { orchestrator, tenantId } = regions[i];
+    console.error('[get-usage] Failed to fetch usage', {
+      orgId,
+      tenantId,
+      region: orchestrator.region,
+      err: result.reason,
+    });
+  });
 
-  const latestStorage = storageSamples.at(-1);
-  const storageUsedBytes = latestStorage?.bytesUsed ?? 0;
-  const objectCount = latestStorage?.objectCount ?? 0;
+  if (regionUsages.length === 0) {
+    const response: UsageResponse = {
+      storage: { usedBytes: 0 },
+      egress: { usedBytes: 0 },
+      buckets: { count: 0 },
+      objects: { count: 0 },
+      accessKeys: { count: 0 },
+    };
+    return new ResponseBuilder().status(200).body(response).build();
+  }
 
-  const egressSample = operationsSamples.at(-1);
-  const egressUsedBytes = egressSample?.txBytes ?? 0;
-
-  const bucketCount = tenantInfo?.bucketCount ?? 0;
-  const bucketLimit = tenantInfo?.bucketQuantityLimit ?? 100;
-  // Reserve one slot for the system `filone-console` key created during onboarding,
-  // so users see the count and limit relative to the keys they themselves can manage.
-  const rawKeyCount = tenantInfo?.keyCount ?? 0;
-  const rawKeyLimit = tenantInfo?.accessKeyQuantityLimit ?? 300;
-  const accessKeyCount = Math.max(0, rawKeyCount - 1);
-  const accessKeyLimit = Math.max(0, rawKeyLimit - 1);
-
-  const response: UsageResponse = {
-    storage: { usedBytes: storageUsedBytes },
-    egress: { usedBytes: egressUsedBytes },
-    buckets: { count: bucketCount, limit: bucketLimit },
-    objects: { count: objectCount },
-    accessKeys: { count: accessKeyCount, limit: accessKeyLimit },
-    tenantStatus: tenantInfo?.status,
-  };
+  const response = aggregateRegionUsages(regionUsages);
 
   return new ResponseBuilder().status(200).body(response).build();
+}
+
+// Folds the per-region usages into the dashboard totals. Counts (storage,
+// egress, objects, buckets, keys) are summed; storage/egress are pre-reduced
+// per region (see `fetchRegionUsage`); status collapses to the most-restrictive across regions.
+// The system `filone-console` key present in each provisioned region
+// is subtracted from the key *count* only, so users see just the keys they manage.
+function aggregateRegionUsages(regionUsages: RegionUsage[]): UsageResponse {
+  let storageUsedBytes = 0;
+  let objectCount = 0;
+  let egressUsedBytes = 0;
+  let bucketCount = 0;
+  let rawKeyCount = 0;
+  let statuses: TenantStatus[] = [];
+
+  for (const r of regionUsages) {
+    storageUsedBytes += r.storageBytes;
+    objectCount += r.objectCount;
+    egressUsedBytes += r.egressBytes;
+    bucketCount += r.info.bucketCount;
+    rawKeyCount += r.info.keyCount;
+    if (r.info.status) statuses.push(r.info.status);
+  }
+
+  return {
+    storage: { usedBytes: storageUsedBytes },
+    egress: { usedBytes: egressUsedBytes },
+    buckets: { count: bucketCount },
+    objects: { count: objectCount },
+    accessKeys: {
+      count: Math.max(0, rawKeyCount - regionUsages.length),
+    },
+    tenantStatus: pickMostRestrictiveStatus(statuses),
+  };
+}
+
+async function fetchRegionUsage(
+  orchestrator: ServiceOrchestrator,
+  tenantId: string,
+  from: Date,
+  to: Date,
+): Promise<RegionUsage> {
+  const [metrics, info] = await Promise.all([
+    orchestrator.getTenantUsageMetrics(tenantId, {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      interval: '1d',
+    }),
+    orchestrator.getTenantInfo(tenantId),
+  ]);
+
+  // Storage is point-in-time: take the most recent reading. Egress is
+  // cumulative: sum the whole series for the window total.
+  const latestStorage = metrics.storage.reduce<(typeof metrics.storage)[number] | undefined>(
+    (latest, s) => (!latest || s.timestamp > latest.timestamp ? s : latest),
+    undefined,
+  );
+  const egressBytes = metrics.egress.reduce((sum, e) => sum + e.bytesUsed, 0);
+
+  return {
+    storageBytes: latestStorage?.bytesUsed ?? 0,
+    objectCount: latestStorage?.objectCount ?? 0,
+    egressBytes,
+    info,
+  };
+}
+
+// Returns the most-restrictive status present, or `undefined` when none of the
+// regions report a status we model.
+function pickMostRestrictiveStatus(
+  statuses: (TenantStatus | undefined)[],
+): TenantStatus | undefined {
+  // Tenant statuses ordered most- to least-restrictive: when regions disagree,
+  // the dashboard reflects the most restrictive status in effect anywhere.
+  return (['disabled', 'write-locked', 'active'] as const).find((s) => statuses.includes(s));
 }
 
 export const handler = middy(baseHandler)

@@ -11,13 +11,14 @@
 import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
-import { getS3Endpoint, S3Region } from '@filone/shared';
+import { getS3Endpoint, S3Region, TenantStatus } from '@filone/shared';
 import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
 import { ensureTenantReady as ensureFthTenantReady } from './fth-tenant-setup.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketConfigurationError,
+  BucketNotFoundError,
   NotImplementedError,
 } from '../errors.js';
 import type {
@@ -28,8 +29,9 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   ServiceOrchestrator,
-  TenantStatus,
   TenantStatusProbe,
+  StorageUsageSample,
+  TenantInfo,
   TenantUsageMetrics,
 } from '../service-orchestrator.js';
 import type { OrgProfileItem } from '../org-profile.js';
@@ -62,9 +64,6 @@ const FTH_CONSOLE_USER_CODE = 'filone-console';
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
-// Mirrors the retry policy of Aurora's updateTenantStatus (aurora-backoffice.ts).
-const STATUS_UPDATE_RETRY = { retries: 3 } as const;
-
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
 const client = createInstrumentedFthClient();
 
@@ -90,9 +89,9 @@ export const fthOrchestrator = {
 
   async updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void> {
     // FTH uses the same lowercase-dashed status values, so no mapping is needed.
-    // A status PATCH is naturally idempotent, so no idempotency key is sent and
-    // transient failures are safe to retry.
-    await pRetry(() => client.updateClientStatus(tenantId, { status }), STATUS_UPDATE_RETRY);
+    // A status PATCH is naturally idempotent, so no idempotency key is sent;
+    // transient failures are retried by the caller (region-helpers).
+    await client.updateClientStatus(tenantId, { status });
   },
 
   async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
@@ -282,6 +281,44 @@ export const fthOrchestrator = {
         bytesUsed: p.egress_bytes ?? 0,
       }));
     return { storage, egress };
+  },
+
+  async getTenantInfo(tenantId: string): Promise<TenantInfo> {
+    const c = await client.getClient(tenantId);
+    return {
+      bucketCount: c.bucketCount ?? 0,
+      bucketLimit: c.bucketLimit ?? 0,
+      keyCount: c.accessKeyCount ?? 0,
+      accessKeyLimit: c.accessKeyLimit ?? 0,
+      status: normalizeFthStatus(c.status),
+    };
+  },
+
+  async getBucketUsageMetrics(
+    tenantId: string,
+    bucketName: string,
+    _opts: GetTenantUsageMetricsOptions,
+  ): Promise<StorageUsageSample[]> {
+    // Ownership check (tenant-scoped): only the owning tenant's S3 client lists
+    // the bucket. A snapshot miss alone can't distinguish "not owned" from
+    // "owned but absent from the current breakdown" (e.g. an empty bucket), so
+    // confirm existence before reading metrics.
+    const bucket = await fthOrchestrator.getBucket(tenantId, bucketName);
+    if (!bucket) throw new BucketNotFoundError(bucketName);
+
+    // FTH has no per-bucket time series; the current-snapshot `by_bucket`
+    // breakdown is the finest per-bucket reading available. A bucket can appear
+    // once per storage tier, so fold all matching rows into one sample.
+    const snapshot = await client.getClientMetricsCurrent(tenantId);
+    const rows = (snapshot.usage?.by_bucket ?? []).filter((b) => b.bucket === bucketName);
+    if (rows.length === 0) return [];
+
+    const bytesUsed = rows.reduce((sum, b) => sum + (b.size ?? 0), 0);
+    const objectCount = rows.reduce((sum, b) => sum + (b.count ?? 0), 0);
+    const timestamp = snapshot.as_of
+      ? new Date(snapshot.as_of).toISOString()
+      : new Date().toISOString();
+    return [{ timestamp, bytesUsed, objectCount }];
   },
 } satisfies ServiceOrchestrator;
 

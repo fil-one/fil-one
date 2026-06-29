@@ -95,9 +95,13 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
   // Bucket analytics (object count + storage)
   const { data: analyticsData } = useQuery({
-    queryKey: queryKeys.bucketAnalytics(bucketName),
-    queryFn: () =>
-      apiRequest<BucketAnalyticsResponse>(`/buckets/${encodeURIComponent(bucketName)}/analytics`),
+    queryKey: queryKeys.bucketAnalytics(bucketName, region),
+    queryFn: () => {
+      const params = new URLSearchParams({ region });
+      return apiRequest<BucketAnalyticsResponse>(
+        `/buckets/${encodeURIComponent(bucketName)}/analytics?${params.toString()}`,
+      );
+    },
   });
 
   // Access keys scoped to this bucket
@@ -148,7 +152,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
   if (objectsIsError) {
     return (
-      <div className="px-10 pt-10">
+      <div className="px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
         <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
         <div className="mt-4">
           <Alert variant="red" description={objectsError?.message ?? 'Failed to load objects'} />
@@ -158,7 +162,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   }
 
   return (
-    <div className="px-10 pt-10">
+    <div className="px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
 
       <div className="mt-4 mb-2 flex items-center justify-between">
@@ -166,6 +170,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
           {bucketName}
         </Heading>
         <Button
+          id="upload-object-button"
           variant="primary"
           size="sm"
           icon={PlusIcon}
@@ -178,7 +183,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
             })
           }
         >
-          Upload
+          Upload object
         </Button>
       </div>
 
@@ -202,8 +207,10 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
       <Tabs>
         <TabList>
-          <Tab>Objects ({versions.length.toLocaleString()})</Tab>
-          <Tab>API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}</Tab>
+          <Tab testId="bucket-objects-tab">Objects ({versions.length.toLocaleString()})</Tab>
+          <Tab testId="bucket-keys-tab">
+            API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}
+          </Tab>
         </TabList>
 
         <TabPanels>

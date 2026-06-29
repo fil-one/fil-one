@@ -17,12 +17,14 @@ export type ModalProps = {
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg';
   panelClassName?: string;
+  testId?: string;
 };
 
 export type ModalHeaderProps = {
   children: React.ReactNode;
   description?: string;
   onClose?: () => void;
+  titleId?: string;
 };
 
 export type ModalBodyProps = {
@@ -40,7 +42,14 @@ const sizeClasses = {
   lg: 'modal-panel--lg',
 } as const;
 
-export function Modal({ open, onClose, children, size = 'md', panelClassName }: ModalProps) {
+export function Modal({
+  open,
+  onClose,
+  children,
+  size = 'md',
+  panelClassName,
+  testId,
+}: ModalProps) {
   return (
     <Transition show={open} as={Fragment}>
       <Dialog className="relative z-50" onClose={onClose}>
@@ -68,7 +77,10 @@ export function Modal({ open, onClose, children, size = 'md', panelClassName }: 
             leaveFrom="opacity-100 scale-100"
             leaveTo="opacity-0 scale-95"
           >
-            <DialogPanel className={clsx('modal-panel', sizeClasses[size], panelClassName)}>
+            <DialogPanel
+              data-testid={testId}
+              className={clsx('modal-panel', sizeClasses[size], panelClassName)}
+            >
               {children}
             </DialogPanel>
           </TransitionChild>
@@ -78,11 +90,11 @@ export function Modal({ open, onClose, children, size = 'md', panelClassName }: 
   );
 }
 
-export function ModalHeader({ children, description, onClose }: ModalHeaderProps) {
+export function ModalHeader({ children, description, onClose, titleId }: ModalHeaderProps) {
   return (
     <div className={clsx('modal-header', description && 'modal-header--with-description')}>
       <div className="modal-header-content">
-        <DialogTitle as="span" className="modal-header-title">
+        <DialogTitle as="span" id={titleId} className="modal-header-title">
           {children}
         </DialogTitle>
         {description && <p className="modal-header-description">{description}</p>}

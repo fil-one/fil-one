@@ -19,6 +19,5 @@ test('paid user signs in via Auth0 and lands on dashboard', async ({ page }) => 
   await maybeSkipPasskeyEnrollment(page);
 
   await expect(page).toHaveURL(/\/dashboard$/);
-  // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
+  await expect(page.locator('#dashboard-heading')).toBeVisible();
 });

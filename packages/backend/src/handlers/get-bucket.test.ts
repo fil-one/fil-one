@@ -272,7 +272,7 @@ describe('get-bucket baseHandler', () => {
     }
   });
 
-  it.skip('accepts us-east-1 in production for a verified Foundation email', async () => {
+  it('accepts us-east-1 in production for a verified Foundation email', async () => {
     const previous = process.env.FILONE_STAGE;
     process.env.FILONE_STAGE = 'production';
     mockGetBucket.mockResolvedValue({

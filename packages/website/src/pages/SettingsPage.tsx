@@ -6,6 +6,7 @@ import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 import { UserIcon, BellIcon, ShieldCheckIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Heading } from '../components/Heading/Heading';
+import { PageLayout } from '../components/PageLayout.js';
 import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
@@ -253,7 +254,12 @@ function ProfileSaveBar({ form }: { form: ReturnType<typeof useProfileForm> }) {
 
   return (
     <div className="flex items-center gap-3">
-      <Button variant="primary" onClick={form.save} disabled={form.isSaving || !form.hasChanges}>
+      <Button
+        id="settings-save-button"
+        variant="primary"
+        onClick={form.save}
+        disabled={form.isSaving || !form.hasChanges}
+      >
         {form.isSaving ? 'Saving...' : 'Save changes'}
       </Button>
       {form.hasChanges && <p className="text-xs text-zinc-500">Saving: {changedLabels}</p>}
@@ -379,19 +385,17 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="px-10 pt-10">
-      <div className="mb-1">
-        <Heading tag="h1" size="xl" description="Manage your profile and preferences">
-          Settings
-        </Heading>
-      </div>
-
-      <div className="mt-6 flex max-w-2xl flex-col gap-6">
+    <PageLayout
+      title="Settings"
+      headingId="settings-heading"
+      description="Manage your profile and preferences"
+    >
+      <div className="flex max-w-2xl flex-col gap-6">
         <ProfileSection me={me} />
         <NotificationsSection />
         <SecuritySection me={me} />
         <DangerSection />
       </div>
-    </div>
+    </PageLayout>
   );
 }

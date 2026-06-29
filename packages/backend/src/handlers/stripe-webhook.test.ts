@@ -58,6 +58,7 @@ const reportMetricMock = vi.mocked(reportMetric);
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './stripe-webhook.js';
+import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
 // ---------------------------------------------------------------------------
@@ -854,6 +855,7 @@ describe('stripe-webhook handler', () => {
       expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
         MOCK_ORG_ID,
         'write-locked',
+        WEBHOOK_STATUS_SYNC_RETRY,
       );
 
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
@@ -900,6 +902,7 @@ describe('stripe-webhook handler', () => {
       expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
         MOCK_ORG_ID,
         'disabled',
+        WEBHOOK_STATUS_SYNC_RETRY,
       );
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -1099,7 +1102,11 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(MOCK_ORG_ID, 'active');
+      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
+        MOCK_ORG_ID,
+        'active',
+        WEBHOOK_STATUS_SYNC_RETRY,
+      );
 
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -1411,7 +1418,11 @@ describe('stripe-webhook handler', () => {
         attemptBucket: '4+',
       });
       // Aurora re-activation must still run
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(MOCK_ORG_ID, 'active');
+      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
+        MOCK_ORG_ID,
+        'active',
+        WEBHOOK_STATUS_SYNC_RETRY,
+      );
     });
 
     it('does NOT emit recovered on normal renewal (prior status was active)', async () => {

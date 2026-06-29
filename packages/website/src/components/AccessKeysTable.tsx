@@ -145,7 +145,7 @@ export function AccessKeysTable({
       </Table.Header>
       <Table.Body>
         {keys.map((key) => (
-          <Table.Row key={key.id}>
+          <Table.Row key={key.id} data-testid="access-key-row" data-access-key-id={key.accessKeyId}>
             {/* Name + Access Key ID */}
             <Table.Cell>
               <p className="text-xs font-medium text-zinc-900">{key.keyName}</p>
