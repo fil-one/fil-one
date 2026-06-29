@@ -47,5 +47,6 @@ export const queryKeys = {
   // ['rag-bucket-enabled'] is the prefix — invalidateQueries on this key also
   // invalidates all per-bucket enablement queries (prefix match).
   ragBucketEnabled: ['rag-bucket-enabled'] as const,
-  ragBucketEnabledFor: (bucketName: string) => ['rag-bucket-enabled', bucketName] as const,
+  ragBucketEnabledFor: (bucketName: string, region: S3Region) =>
+    ['rag-bucket-enabled', bucketName, region] as const,
 };

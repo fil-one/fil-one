@@ -17,10 +17,11 @@ import {
   toEnablementResponse,
 } from './bucket-rag-enablement.js';
 import type { BucketRAGEnablementRecord } from './dynamo-records.js';
+import { S3Region } from '@filone/shared';
 
 function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablementRecord {
   return {
-    pk: 'BUCKET#my-bucket',
+    pk: 'BUCKET#eu-west-1#my-bucket',
     sk: 'RAG',
     orgId: 'org-1',
     status: 'active',
@@ -36,22 +37,22 @@ function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablem
 describe('getBucketRagEnablement', () => {
   beforeEach(() => ddbMock.reset());
 
-  it('reads BUCKET#{name}/RAG from UserInfoTable via a single GetItemCommand', async () => {
+  it('reads BUCKET#{region}#{name}/RAG from UserInfoTable via a single GetItemCommand', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: marshall(record()) });
 
-    const result = await getBucketRagEnablement('my-bucket');
+    const result = await getBucketRagEnablement(S3Region.EuWest1, 'my-bucket');
 
     expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
     expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toEqual({
       TableName: 'UserInfoTable',
-      Key: { pk: { S: 'BUCKET#my-bucket' }, sk: { S: 'RAG' } },
+      Key: { pk: { S: 'BUCKET#eu-west-1#my-bucket' }, sk: { S: 'RAG' } },
     });
     expect(result?.status).toBe('active');
   });
 
   it('returns undefined when no enablement row exists', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-    expect(await getBucketRagEnablement('my-bucket')).toBeUndefined();
+    expect(await getBucketRagEnablement(S3Region.EuWest1, 'my-bucket')).toBeUndefined();
   });
 });
 
@@ -62,6 +63,7 @@ describe('setBucketRagEnablement', () => {
     ddbMock.on(PutItemCommand).resolves({});
 
     const result = await setBucketRagEnablement({
+      region: S3Region.EuWest1,
       bucketName: 'my-bucket',
       orgId: 'org-1',
       enabled: true,
@@ -69,7 +71,7 @@ describe('setBucketRagEnablement', () => {
     });
 
     expect(result.status).toBe('active');
-    expect(result.pk).toBe('BUCKET#my-bucket');
+    expect(result.pk).toBe('BUCKET#eu-west-1#my-bucket');
     expect(result.sk).toBe('RAG');
     expect(result.orgId).toBe('org-1');
     expect(result.filesIndexed).toBe(0);
@@ -83,6 +85,7 @@ describe('setBucketRagEnablement', () => {
     const existing = record({ filesIndexed: 99, indexSize: 5000 });
 
     const result = await setBucketRagEnablement({
+      region: S3Region.EuWest1,
       bucketName: 'my-bucket',
       orgId: 'org-1',
       enabled: false,

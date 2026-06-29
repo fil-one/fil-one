@@ -86,7 +86,7 @@ function enablementRecord(
   over: Partial<BucketRAGEnablementRecord> = {},
 ): BucketRAGEnablementRecord {
   return {
-    pk: 'BUCKET#my-bucket',
+    pk: 'BUCKET#eu-west-1#my-bucket',
     sk: 'RAG',
     orgId: 'org-1',
     status: 'active',
@@ -131,9 +131,14 @@ describe('get-bucket-rag-enablement baseHandler', () => {
     });
   });
 
-  it('reads the enablement row by bucket name', async () => {
+  it('reads the enablement row by region + bucket name', async () => {
     await baseHandler(event());
-    expect(mockGetEnablement).toHaveBeenCalledWith('my-bucket');
+    expect(mockGetEnablement).toHaveBeenCalledWith(S3_REGION, 'my-bucket');
+  });
+
+  it('forwards the resolved region from the query param into the helper', async () => {
+    await baseHandler(event({ region: S3Region.UsEast1 }));
+    expect(mockGetEnablement).toHaveBeenCalledWith(S3Region.UsEast1, 'my-bucket');
   });
 
   it('returns enabled:false with zeroed telemetry for a never-enabled bucket', async () => {

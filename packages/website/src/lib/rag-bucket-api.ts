@@ -2,6 +2,7 @@ import type {
   BucketRagEnablementResponse,
   ListBucketsResponse,
   QueryBucketResponse,
+  S3Region,
   SetBucketRagEnabledRequest,
 } from '@filone/shared';
 import { apiRequest } from './api.js';
@@ -12,26 +13,47 @@ import { apiRequest } from './api.js';
  * keeps the page's TanStack Query hooks free of fetch/serialization details.
  */
 
+/** A bucket joined with its (possibly still-loading) RAG enablement state. */
+export type RagBucket = {
+  name: string;
+  region: S3Region;
+  enabled: boolean;
+  filesIndexed: number;
+  indexSize: number;
+  lastSyncedAt?: string;
+};
+
 /** List the caller's buckets — reuses GET /api/buckets. */
 export function listBucketsForRag(): Promise<ListBucketsResponse> {
   return apiRequest<ListBucketsResponse>('/buckets');
 }
 
-/** Read a bucket's RAG enablement state + sync telemetry. */
-export function getBucketRagEnabled(bucketName: string): Promise<BucketRagEnablementResponse> {
+/**
+ * Read a bucket's RAG enablement state + sync telemetry.
+ *
+ * Bucket names are region-scoped (not globally unique), so `region` is required
+ * and forwarded to the regional orchestrator via `?region=`.
+ */
+export function getBucketRagEnabled(
+  bucketName: string,
+  region: S3Region,
+): Promise<BucketRagEnablementResponse> {
+  const qs = new URLSearchParams({ region }).toString();
   return apiRequest<BucketRagEnablementResponse>(
-    `/buckets/${encodeURIComponent(bucketName)}/rag/enabled`,
+    `/buckets/${encodeURIComponent(bucketName)}/rag/enabled?${qs}`,
   );
 }
 
 /** Enable or disable RAG indexing on a bucket. */
 export function setBucketRagEnabled(
   bucketName: string,
+  region: S3Region,
   enabled: boolean,
 ): Promise<BucketRagEnablementResponse> {
   const body: SetBucketRagEnabledRequest = { enabled };
+  const qs = new URLSearchParams({ region }).toString();
   return apiRequest<BucketRagEnablementResponse>(
-    `/buckets/${encodeURIComponent(bucketName)}/rag/enabled`,
+    `/buckets/${encodeURIComponent(bucketName)}/rag/enabled?${qs}`,
     { method: 'POST', body: JSON.stringify(body) },
   );
 }
@@ -39,10 +61,12 @@ export function setBucketRagEnabled(
 /** Submit a grounded query against a bucket's index (FIL-554). */
 export function queryBucket(
   bucketName: string,
+  region: S3Region,
   query: string,
   options: { topK?: number; model?: string } = {},
 ): Promise<QueryBucketResponse> {
-  return apiRequest<QueryBucketResponse>(`/buckets/${encodeURIComponent(bucketName)}/query`, {
+  const qs = new URLSearchParams({ region }).toString();
+  return apiRequest<QueryBucketResponse>(`/buckets/${encodeURIComponent(bucketName)}/query?${qs}`, {
     method: 'POST',
     body: JSON.stringify({
       query,

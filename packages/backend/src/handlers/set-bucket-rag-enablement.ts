@@ -27,7 +27,7 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
  * POST /api/buckets/{name}/rag/enabled — toggle a bucket's RAG indexing on/off
  * for the caller's tenant (FIL-555).
  *
- * Body: `{ enabled: boolean }`. Creates/updates the `BUCKET#{name}` / `RAG`
+ * Body: `{ enabled: boolean }`. Creates/updates the `BUCKET#{region}#{name}` / `RAG`
  * enablement row, flipping `status` to `active`/`disabled` while preserving
  * telemetry and the original `createdAt`. Tenant-scoped (404 for buckets the
  * tenant does not own), RAG-gated, and Write-gated by the subscription guard.
@@ -82,11 +82,17 @@ export async function baseHandler(
       .build();
   }
 
-  const existing = await getBucketRagEnablement(bucketName);
+  const existing = await getBucketRagEnablement(region, bucketName);
   // Defense in depth: never carry over a record stamped with a different org.
   const owned = existing && existing.orgId === orgId ? existing : undefined;
 
-  const record = await setBucketRagEnablement({ bucketName, orgId, enabled, existing: owned });
+  const record = await setBucketRagEnablement({
+    region,
+    bucketName,
+    orgId,
+    enabled,
+    existing: owned,
+  });
 
   return new ResponseBuilder()
     .status(200)

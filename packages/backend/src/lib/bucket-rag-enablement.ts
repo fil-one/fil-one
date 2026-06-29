@@ -1,28 +1,30 @@
 import { GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
-import type { BucketRagEnablementResponse } from '@filone/shared';
+import type { BucketRagEnablementResponse, S3Region } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
 import { RAGKeys, type BucketRAGEnablementRecord, type BucketRAGStatus } from './dynamo-records.js';
 
 const dynamo = getDynamoClient();
 
 /**
- * Read a bucket's RAG enablement row (`BUCKET#{bucketName}` / `RAG`).
+ * Read a bucket's RAG enablement row (`BUCKET#{region}#{bucketName}` / `RAG`).
  *
- * The enablement records are keyed by bucket *name* — the indexer worker treats
- * `bucketId === bucket.bucketName` (see rag-indexer-worker), so handlers keep
- * the same convention. Returns `undefined` when RAG was never enabled for the
- * bucket so callers can render a never-synced state gracefully.
+ * Buckets are unique per region, so the enablement record shares the same
+ * region-qualified partition the indexer keys manifests under (see
+ * rag-indexer-manifest / rag-indexer-worker). Returns `undefined` when RAG was
+ * never enabled for the bucket so callers can render a never-synced state
+ * gracefully.
  */
 export async function getBucketRagEnablement(
+  region: S3Region,
   bucketName: string,
 ): Promise<BucketRAGEnablementRecord | undefined> {
   const { Item } = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: {
-        pk: { S: RAGKeys.bucketPk(bucketName) },
+        pk: { S: RAGKeys.bucketPk(region, bucketName) },
         sk: { S: RAGKeys.enablementSk() },
       },
     }),
@@ -39,17 +41,18 @@ export async function getBucketRagEnablement(
  * RAG-enabled buckets by org without a second lookup (see dynamo-records).
  */
 export async function setBucketRagEnablement(args: {
+  region: S3Region;
   bucketName: string;
   orgId: string;
   enabled: boolean;
   existing: BucketRAGEnablementRecord | undefined;
 }): Promise<BucketRAGEnablementRecord> {
-  const { bucketName, orgId, enabled, existing } = args;
+  const { region, bucketName, orgId, enabled, existing } = args;
   const now = new Date().toISOString();
   const status: BucketRAGStatus = enabled ? 'active' : 'disabled';
 
   const record: BucketRAGEnablementRecord = {
-    pk: RAGKeys.bucketPk(bucketName),
+    pk: RAGKeys.bucketPk(region, bucketName),
     sk: RAGKeys.enablementSk(),
     orgId,
     status,
