@@ -36,11 +36,8 @@ describe('AccessKeyFormFields — permissions error', () => {
   });
 
   it('hides the error when only a bucket-management permission is selected', async () => {
-    renderForm((form) => {
-      form.setPermissions([]);
-      form.setGranularPermissions(['CreateBucket']);
-    });
-    // Wait for the empty-permissions state to flush, then confirm no error remains.
+    renderForm((form) => form.setPermissions(['CreateBucket']));
+    // Wait for the permissions state to flush, then confirm no error remains.
     await screen.findByTestId('permission-CreateBucket');
     expect(screen.queryByText('Select at least one permission.')).not.toBeInTheDocument();
   });

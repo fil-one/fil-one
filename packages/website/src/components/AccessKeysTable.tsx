@@ -5,7 +5,12 @@ import { DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon } from '@phosphor-icons/rea
 import { IconBox } from './IconBox';
 
 import type { AccessKey, GranularPermission } from '@filone/shared';
-import { GRANULAR_PERMISSION_LABELS, isBucketPermission } from '@filone/shared';
+import {
+  BUCKET_PERMISSION_LABELS,
+  GRANULAR_PERMISSION_LABELS,
+  isBucketPermission,
+  isObjectPermission,
+} from '@filone/shared';
 
 import { Badge } from './Badge';
 import { Button } from './Button';
@@ -32,42 +37,48 @@ function PermissionBadges({
   permissions: AccessKey['permissions'];
   granularPermissions: GranularPermission[];
 }) {
-  const dataProtection = granularPermissions.filter((g) => !isBucketPermission(g));
-  const bucketManagement = granularPermissions.filter(isBucketPermission);
+  const objectPermissions = permissions.filter(isObjectPermission);
+  const bucketManagement = permissions.filter(isBucketPermission);
 
   return (
     <div className="flex flex-wrap gap-1">
-      {permissions.map((p) => (
+      {objectPermissions.map((p) => (
         <Badge key={p} color="blue" size="sm" className="capitalize">
           {p}
         </Badge>
       ))}
-      {dataProtection.length > 0 && (
-        <GranularGroupBadge
+      {granularPermissions.length > 0 && (
+        <GroupBadge
           title="Data protection"
           testId="permission-badge-data-protection"
-          permissions={dataProtection}
+          items={granularPermissions.map((g) => ({
+            key: g,
+            label: GRANULAR_PERMISSION_LABELS[g].label,
+          }))}
         />
       )}
       {bucketManagement.length > 0 && (
-        <GranularGroupBadge
+        <GroupBadge
           title="Bucket management"
           testId="permission-badge-bucket-management"
-          permissions={bucketManagement}
+          items={bucketManagement.map((p) => ({
+            key: p,
+            label: BUCKET_PERMISSION_LABELS[p].label,
+          }))}
         />
       )}
     </div>
   );
 }
 
-function GranularGroupBadge({
+function GroupBadge({
   title,
   testId,
-  permissions,
+  items,
 }: {
   title: string;
   testId: string;
-  permissions: GranularPermission[];
+  items: { key: string; label: string }[];
 }) {
   return (
     <Badge
@@ -80,9 +91,9 @@ function GranularGroupBadge({
             {title}
           </p>
           <ul className="flex flex-col gap-0.5">
-            {permissions.map((g) => (
-              <li key={g} className="text-xs text-zinc-700">
-                {GRANULAR_PERMISSION_LABELS[g].label}
+            {items.map((item) => (
+              <li key={item.key} className="text-xs text-zinc-700">
+                {item.label}
               </li>
             ))}
           </ul>

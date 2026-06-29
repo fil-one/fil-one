@@ -156,38 +156,49 @@ describe('useAccessKeyForm — region change', () => {
     expect(result.current.selectedBuckets).toEqual(['a', 'b']);
   });
 
-  it('drops bucket-management granulars when switching to the Aurora region', () => {
+  it('drops bucket-management permissions when switching to the Aurora region', () => {
     const { result, rerender } = renderWithRegion(S3Region.UsEast1);
-    act(() => result.current.setGranularPermissions(['CreateBucket', 'DeleteBucket']));
-    expect(result.current.granularPermissions).toEqual(['CreateBucket', 'DeleteBucket']);
+    act(() => result.current.setPermissions(['read', 'CreateBucket', 'DeleteBucket']));
+    expect(result.current.permissions).toEqual(['read', 'CreateBucket', 'DeleteBucket']);
 
     rerender({ region: S3Region.EuWest1 });
-    expect(result.current.granularPermissions).toEqual([]);
+    expect(result.current.permissions).toEqual(['read']);
   });
 
-  it('keeps bucket-management granulars when switching between non-Aurora regions', () => {
+  it('keeps bucket-management permissions when switching between non-Aurora regions', () => {
     const { result, rerender } = renderWithRegion(S3Region.EuWest1);
     rerender({ region: S3Region.UsEast1 });
-    act(() => result.current.setGranularPermissions(['CreateBucket']));
+    act(() => result.current.setPermissions(['read', 'CreateBucket']));
 
     rerender({ region: S3Region.UsEast1 });
-    expect(result.current.granularPermissions).toEqual(['CreateBucket']);
+    expect(result.current.permissions).toEqual(['read', 'CreateBucket']);
   });
 });
 
 describe('useAccessKeyForm — granular permission filtering', () => {
-  it('keeps bucket-management granulars when a basic permission is deselected', () => {
+  it('strips data-protection granulars when their object permission is deselected', () => {
     const { result } = renderHook(
       () => useAccessKeyForm({ region: S3Region.UsEast1, onSuccess: () => {} }),
       { wrapper },
     );
     act(() => {
-      result.current.setPermissions(['read', 'write']);
-      result.current.setGranularPermissions(['GetObjectVersion', 'CreateBucket']);
+      result.current.setPermissions(['read', 'write', 'CreateBucket']);
+      result.current.setGranularPermissions(['GetObjectVersion']);
     });
 
-    // Deselecting `read` strips its data-protection granular but not bucket ones.
-    act(() => result.current.setPermissions(['write']));
-    expect(result.current.granularPermissions).toEqual(['CreateBucket']);
+    // Deselecting `read` strips its data-protection granular.
+    act(() => result.current.setPermissions(['write', 'CreateBucket']));
+    expect(result.current.granularPermissions).toEqual([]);
+  });
+
+  it('keeps bucket-management permissions when an object permission is deselected', () => {
+    const { result } = renderHook(
+      () => useAccessKeyForm({ region: S3Region.UsEast1, onSuccess: () => {} }),
+      { wrapper },
+    );
+    act(() => result.current.setPermissions(['read', 'CreateBucket']));
+
+    act(() => result.current.setPermissions(['CreateBucket']));
+    expect(result.current.permissions).toEqual(['CreateBucket']);
   });
 });

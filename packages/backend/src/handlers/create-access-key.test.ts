@@ -549,14 +549,13 @@ describe('create-access-key baseHandler', () => {
     function bucketBody(region: string) {
       return JSON.stringify({
         keyName: 'My Key',
-        permissions: ['read'],
-        granularPermissions: ['CreateBucket', 'DeleteBucket'],
+        permissions: ['read', 'CreateBucket', 'DeleteBucket'],
         bucketScope: 'all',
         region,
       });
     }
 
-    it('passes bucket-management granulars to the orchestrator for a non-Aurora region', async () => {
+    it('passes bucket-management permissions to the orchestrator for a non-Aurora region', async () => {
       const event = buildEvent({ body: bucketBody('us-east-1'), userInfo: USER_INFO });
       const result = await baseHandler(event);
 
@@ -564,20 +563,24 @@ describe('create-access-key baseHandler', () => {
       expect(mockIssueAccessKey).toHaveBeenCalledWith(
         'aurora-t-1',
         expect.objectContaining({
-          granularPermissions: ['CreateBucket', 'DeleteBucket'],
+          permissions: ['read', 'CreateBucket', 'DeleteBucket'],
         }),
       );
     });
 
-    it('persists bucket-management granulars in DynamoDB', async () => {
+    it('persists bucket-management permissions in DynamoDB', async () => {
       const event = buildEvent({ body: bucketBody('us-east-1'), userInfo: USER_INFO });
       await baseHandler(event);
 
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-      expect(item.granularPermissions.L).toEqual([{ S: 'CreateBucket' }, { S: 'DeleteBucket' }]);
+      expect(item.permissions.L).toEqual([
+        { S: 'read' },
+        { S: 'CreateBucket' },
+        { S: 'DeleteBucket' },
+      ]);
     });
 
-    it('returns 400 for bucket-management granulars in the Aurora region', async () => {
+    it('returns 400 for bucket-management permissions in the Aurora region', async () => {
       const event = buildEvent({ body: bucketBody('eu-west-1'), userInfo: USER_INFO });
       const result = await baseHandler(event);
 

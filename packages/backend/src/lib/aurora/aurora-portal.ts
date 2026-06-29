@@ -12,9 +12,11 @@ import {
 import type {
   AccessKeyPermission,
   GranularPermission,
+  ObjectPermission,
   RetentionDurationType,
   RetentionMode,
 } from '@filone/shared';
+import { isObjectPermission } from '@filone/shared';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -105,8 +107,9 @@ const AURORA_ACCESS_ALWAYS: string[] = [
   'GetBucketObjectLockConfiguration',
 ];
 
-// Maps basic permissions to their base Aurora access type.
-const AURORA_BASE_ACTION: Record<AccessKeyPermission, string> = {
+// Maps object permissions to their base Aurora access type. Bucket-management
+// permissions are unsupported in the Aurora region and never reach this mapping.
+const AURORA_BASE_ACTION: Record<ObjectPermission, string> = {
   read: 'Read',
   write: 'Write',
   list: 'List',
@@ -117,7 +120,7 @@ export function buildAuroraAccessArray(
   permissions: AccessKeyPermission[],
   granularPermissions?: GranularPermission[],
 ): string[] {
-  const base = permissions.map((p) => AURORA_BASE_ACTION[p]);
+  const base = permissions.filter(isObjectPermission).map((p) => AURORA_BASE_ACTION[p]);
   const granular = granularPermissions ?? [];
   return [...AURORA_ACCESS_ALWAYS, ...base, ...granular];
 }

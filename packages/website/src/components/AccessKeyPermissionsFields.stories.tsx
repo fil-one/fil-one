@@ -45,8 +45,8 @@ export const WithGranularPermissions: Story = {
 
 export const WithBucketManagement: Story = {
   args: {
-    value: ['read'],
-    granularPermissions: ['CreateBucket', 'DeleteBucket'],
+    value: ['read', 'CreateBucket', 'DeleteBucket'],
+    granularPermissions: [],
   },
 };
 

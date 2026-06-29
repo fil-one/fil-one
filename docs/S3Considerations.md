@@ -333,11 +333,13 @@ Permissions are scoped and enforced server-side in your console/control plane:
 
 Each access key carries a set of permissions selected at creation time:
 
-| Group               | Permissions                                                                 | Notes                                                                                       |
-| ------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| **Object**          | `read`, `write`, `list`, `delete`                                            | Core object operations. At least one object or bucket-management permission is required.     |
-| **Data protection** | Object versions, retention, legal hold (granular sub-permissions)           | Tied to the matching object permission (e.g. version reads require `read`).                  |
-| **Bucket management** | Create bucket, Delete bucket                                               | Stored as granular permissions. **Not supported in the Aurora region (`eu-west-1`)** — disabled in the UI and rejected by the backend for that region. |
+| Group                 | Permissions                                                       | Notes                                                                                                                                                                                                                    |
+| --------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Object**            | `read`, `write`, `list`, `delete`                                 | Core object operations.                                                                                                                                                                                                  |
+| **Data protection**   | Object versions, retention, legal hold (granular sub-permissions) | Tied to the matching object permission (e.g. version reads require `read`).                                                                                                                                              |
+| **Bucket management** | `CreateBucket`, `DeleteBucket`                                    | Standalone top-level permissions stored in the `permissions` array (no parent object permission). **Not supported in the Aurora region (`eu-west-1`)** — disabled in the UI and rejected by the backend for that region. |
+
+At least one permission (object or bucket-management) is required.
 
 **List all buckets** is always granted in every region and is not configurable
 (Aurora always allows `ListAllMyBuckets`, and the FTH region hard-codes it into

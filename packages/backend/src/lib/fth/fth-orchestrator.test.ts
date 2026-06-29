@@ -465,7 +465,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
     );
   });
 
-  it('maps bucket-management granular permissions to s3 bucket actions', async () => {
+  it('maps bucket-management permissions to s3 bucket actions', async () => {
     stubConsoleStorageUser();
     mockFthClient.createAccessKey.mockResolvedValue({
       id: 'AKIAFTH',
@@ -479,8 +479,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
 
     await fthOrchestrator.issueAccessKey(fthClientId, {
       keyName: baseOpts.keyName,
-      permissions: [...baseOpts.permissions],
-      granularPermissions: ['CreateBucket', 'DeleteBucket'],
+      permissions: ['read', 'write', 'CreateBucket', 'DeleteBucket'],
     });
 
     expect(mockFthClient.createAccessKey).toHaveBeenCalledWith(

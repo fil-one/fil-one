@@ -11,6 +11,7 @@ import {
   CreateAccessKeySchema,
   GRANULAR_PERMISSION_MAP,
   isBucketPermission,
+  isObjectPermission,
   supportsBucketManagement,
 } from '@filone/shared';
 import { createAccessKey } from './api.js';
@@ -59,7 +60,7 @@ export function useAccessKeyForm({
     setSelectedBuckets([]);
     // Drop bucket-management permissions when the new region can't support them.
     if (!supportsBucketManagement(region)) {
-      setGranularPermissions((prev) => prev.filter((g) => !isBucketPermission(g)));
+      setPermissions((prev) => prev.filter((p) => !isBucketPermission(p)));
     }
   }, [region]);
 
@@ -76,12 +77,11 @@ export function useAccessKeyForm({
 
   function handlePermissionsChange(newPermissions: AccessKeyPermission[]) {
     setPermissions(newPermissions);
-    // Remove data-protection granulars that no longer belong to any selected basic
-    // permission. Bucket-management granulars are standalone and always kept.
-    const validGranular = new Set(newPermissions.flatMap((p) => GRANULAR_PERMISSION_MAP[p]));
-    setGranularPermissions((prev) =>
-      prev.filter((g) => isBucketPermission(g) || validGranular.has(g)),
+    // Remove granulars that no longer belong to any selected object permission.
+    const validGranular = new Set(
+      newPermissions.filter(isObjectPermission).flatMap((p) => GRANULAR_PERMISSION_MAP[p]),
     );
+    setGranularPermissions((prev) => prev.filter((g) => validGranular.has(g)));
   }
 
   function reset() {

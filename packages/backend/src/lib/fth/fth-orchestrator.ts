@@ -348,6 +348,8 @@ const FTH_BASE_PERMISSIONS: Record<AccessKeyPermission, readonly string[]> = {
   write: ['s3:PutObject'],
   list: ['s3:ListBucket'],
   delete: ['s3:DeleteObject'],
+  CreateBucket: ['s3:CreateBucket'],
+  DeleteBucket: ['s3:DeleteBucket'],
 };
 
 const FTH_GRANULAR_PERMISSIONS: Record<GranularPermission, string> = {
@@ -358,8 +360,6 @@ const FTH_GRANULAR_PERMISSIONS: Record<GranularPermission, string> = {
   PutObjectLegalHold: 's3:PutObjectLegalHold',
   ListBucketVersions: 's3:ListBucketVersions',
   DeleteObjectVersion: 's3:DeleteObjectVersion',
-  CreateBucket: 's3:CreateBucket',
-  DeleteBucket: 's3:DeleteBucket',
 };
 
 function buildFthPermissions(

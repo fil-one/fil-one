@@ -2,10 +2,12 @@ import type {
   AccessKeyPermission,
   BucketPermission,
   GranularPermission,
+  ObjectPermission,
   S3Region,
 } from '@filone/shared';
 import {
   BUCKET_PERMISSIONS,
+  BUCKET_PERMISSION_LABELS,
   GRANULAR_PERMISSION_MAP,
   GRANULAR_PERMISSION_LABELS,
   getRegionLabel,
@@ -16,7 +18,7 @@ import { Checkbox } from './Checkbox';
 import { Tooltip } from './Tooltip';
 
 type PermissionOption = {
-  value: AccessKeyPermission;
+  value: ObjectPermission;
   label: string;
   description: string;
 };
@@ -43,7 +45,7 @@ export function AccessKeyPermissionsFields({
   onGranularPermissionsChange,
   region,
 }: AccessKeyPermissionsFieldsProps) {
-  function toggleBasic(permission: AccessKeyPermission) {
+  function toggleBasic(permission: ObjectPermission) {
     if (value.includes(permission)) {
       onChange(value.filter((p) => p !== permission));
       const toRemove = new Set(GRANULAR_PERMISSION_MAP[permission]);
@@ -58,6 +60,14 @@ export function AccessKeyPermissionsFields({
       onGranularPermissionsChange(granularPermissions.filter((g) => g !== granular));
     } else {
       onGranularPermissionsChange([...granularPermissions, granular]);
+    }
+  }
+
+  function toggleBucket(permission: BucketPermission) {
+    if (value.includes(permission)) {
+      onChange(value.filter((p) => p !== permission));
+    } else {
+      onChange([...value, permission]);
     }
   }
 
@@ -114,11 +124,7 @@ export function AccessKeyPermissionsFields({
       </Section>
 
       <Section title="Bucket management" testId="permissions-section-bucket">
-        <BucketManagementFields
-          granularPermissions={granularPermissions}
-          onToggle={toggleGranular}
-          region={region}
-        />
+        <BucketManagementFields permissions={value} onToggle={toggleBucket} region={region} />
       </Section>
     </div>
   );
@@ -144,16 +150,12 @@ function Section({
 }
 
 type BucketManagementFieldsProps = {
-  granularPermissions: GranularPermission[];
-  onToggle: (granular: GranularPermission) => void;
+  permissions: AccessKeyPermission[];
+  onToggle: (permission: BucketPermission) => void;
   region: S3Region;
 };
 
-function BucketManagementFields({
-  granularPermissions,
-  onToggle,
-  region,
-}: BucketManagementFieldsProps) {
+function BucketManagementFields({ permissions, onToggle, region }: BucketManagementFieldsProps) {
   const supported = supportsBucketManagement(region);
   const unsupportedReason = `Not supported in ${getRegionLabel(region)}`;
 
@@ -170,14 +172,14 @@ function BucketManagementFields({
       />
 
       {BUCKET_PERMISSIONS.map((permission: BucketPermission) => {
-        const meta = GRANULAR_PERMISSION_LABELS[permission];
+        const meta = BUCKET_PERMISSION_LABELS[permission];
         return (
           <PermissionRow
             key={permission}
             testId={`permission-${permission}`}
             label={meta.label}
             description={meta.description}
-            checked={supported && granularPermissions.includes(permission)}
+            checked={supported && permissions.includes(permission)}
             disabled={!supported}
             tooltip={supported ? undefined : unsupportedReason}
             onChange={() => onToggle(permission)}

@@ -126,7 +126,7 @@ describe('list-access-keys baseHandler', () => {
     });
   });
 
-  it('returns granular permissions including bucket-management ones', async () => {
+  it('returns permissions including bucket-management ones', async () => {
     ddbMock.on(QueryCommand).resolves({
       Items: [
         ddbItem({
@@ -134,8 +134,8 @@ describe('list-access-keys baseHandler', () => {
           keyName: 'Bucket Admin',
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
-          permissions: ['read'],
-          granularPermissions: ['GetObjectVersion', 'CreateBucket', 'DeleteBucket'],
+          permissions: ['read', 'CreateBucket', 'DeleteBucket'],
+          granularPermissions: ['GetObjectVersion'],
           bucketScope: 'all',
         }),
       ],
@@ -145,11 +145,7 @@ describe('list-access-keys baseHandler', () => {
     const result = await baseHandler(event);
 
     const body = JSON.parse(result.body!);
-    expect(body.keys[0].granularPermissions).toEqual([
-      'GetObjectVersion',
-      'CreateBucket',
-      'DeleteBucket',
-    ]);
+    expect(body.keys[0].permissions).toEqual(['read', 'CreateBucket', 'DeleteBucket']);
   });
 
   it('returns the persisted region from the row', async () => {
