@@ -198,11 +198,20 @@ export const fthOrchestrator = {
   async issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey> {
     const storageUserId = await getFthConsoleStorageUserId(tenantId);
 
+    const permissions = buildFthPermissions(opts.permissions, opts.granularPermissions);
+    const buckets = opts.buckets ?? [];
+
+    console.log(
+      `Creating FTH access key "${opts.keyName}" for tenant ${tenantId} with permissions [${permissions.join(
+        ', ',
+      )}] and bucket scopes [${buckets.join(', ')}]`,
+    );
+
     try {
       const accessKey = await client.createAccessKey(tenantId, storageUserId, {
         name: opts.keyName,
-        permissions: buildFthPermissions(opts.permissions, opts.granularPermissions),
-        buckets: opts.buckets ?? [],
+        permissions,
+        buckets,
         expiresAt: opts.expiresAt ?? null,
         idempotencyKey: `issue-key-${opts.keyName}`,
       });
