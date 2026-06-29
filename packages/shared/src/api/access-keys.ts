@@ -1,10 +1,20 @@
 import { z } from 'zod';
-import { S3Region } from '../constants.js';
+import { S3Region, supportsBucketManagement } from '../constants.js';
 
 export type AccessKeyStatus = 'active' | 'inactive';
 
 export const ACCESS_KEY_PERMISSIONS = ['read', 'write', 'list', 'delete'] as const;
 export type AccessKeyPermission = (typeof ACCESS_KEY_PERMISSIONS)[number];
+
+/**
+ * Configurable, region-gated bucket-management permissions. They ride on the
+ * `granularPermissions` array (see {@link GRANULAR_PERMISSIONS}) but, unlike the
+ * data-protection granulars, are not tied to a parent object permission. Note
+ * that "list all buckets" is intentionally absent: it is always granted by every
+ * region and is therefore not configurable.
+ */
+export const BUCKET_PERMISSIONS = ['CreateBucket', 'DeleteBucket'] as const;
+export type BucketPermission = (typeof BUCKET_PERMISSIONS)[number];
 
 export const GRANULAR_PERMISSIONS = [
   'GetObjectVersion',
@@ -14,8 +24,14 @@ export const GRANULAR_PERMISSIONS = [
   'PutObjectLegalHold',
   'ListBucketVersions',
   'DeleteObjectVersion',
+  ...BUCKET_PERMISSIONS,
 ] as const;
 export type GranularPermission = (typeof GRANULAR_PERMISSIONS)[number];
+
+/** Type guard: is this granular permission a bucket-management permission? */
+export function isBucketPermission(granular: GranularPermission): granular is BucketPermission {
+  return (BUCKET_PERMISSIONS as readonly string[]).includes(granular);
+}
 
 export const GRANULAR_PERMISSION_MAP: Record<AccessKeyPermission, GranularPermission[]> = {
   read: ['GetObjectVersion', 'GetObjectRetention', 'GetObjectLegalHold'],
@@ -56,6 +72,14 @@ export const GRANULAR_PERMISSION_LABELS: Record<
     label: 'Delete object versions',
     description: 'Remove specific object versions',
   },
+  CreateBucket: {
+    label: 'Create bucket',
+    description: 'Create new buckets',
+  },
+  DeleteBucket: {
+    label: 'Delete bucket',
+    description: 'Delete buckets',
+  },
 };
 
 export const ACCESS_KEY_BUCKET_SCOPES = ['all', 'specific'] as const;
@@ -75,9 +99,7 @@ export const CreateAccessKeySchema = z
         KEY_NAME_PATTERN,
         'Key name can only contain letters, numbers, spaces, hyphens, underscores, and periods',
       ),
-    permissions: z
-      .array(z.enum(ACCESS_KEY_PERMISSIONS))
-      .min(1, 'At least one permission is required'),
+    permissions: z.array(z.enum(ACCESS_KEY_PERMISSIONS)),
     granularPermissions: z.array(z.enum(GRANULAR_PERMISSIONS)).optional(),
     bucketScope: z.enum(ACCESS_KEY_BUCKET_SCOPES).default('all'),
     buckets: z.array(z.string()).optional(),
@@ -93,13 +115,32 @@ export const CreateAccessKeySchema = z
     path: ['buckets'],
   })
   .refine(
+    (data) =>
+      data.permissions.length > 0 || (data.granularPermissions ?? []).some(isBucketPermission),
+    {
+      message: 'At least one permission is required',
+      path: ['permissions'],
+    },
+  )
+  .refine(
     (data) => {
-      if (!data.granularPermissions?.length) return true;
+      // Only data-protection granulars must belong to a selected basic permission.
+      const dataProtection = (data.granularPermissions ?? []).filter((g) => !isBucketPermission(g));
+      if (!dataProtection.length) return true;
       const valid = data.permissions.flatMap((p) => GRANULAR_PERMISSION_MAP[p]);
-      return data.granularPermissions.every((g) => valid.includes(g));
+      return dataProtection.every((g) => valid.includes(g));
     },
     {
       message: 'Granular permissions must belong to the selected basic permissions',
+      path: ['granularPermissions'],
+    },
+  )
+  .refine(
+    (data) =>
+      !(data.granularPermissions ?? []).some(isBucketPermission) ||
+      supportsBucketManagement(data.region),
+    {
+      message: 'Bucket management permissions are not supported in the selected region',
       path: ['granularPermissions'],
     },
   );

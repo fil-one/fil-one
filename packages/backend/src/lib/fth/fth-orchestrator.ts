@@ -358,6 +358,8 @@ const FTH_GRANULAR_PERMISSIONS: Record<GranularPermission, string> = {
   PutObjectLegalHold: 's3:PutObjectLegalHold',
   ListBucketVersions: 's3:ListBucketVersions',
   DeleteObjectVersion: 's3:DeleteObjectVersion',
+  CreateBucket: 's3:CreateBucket',
+  DeleteBucket: 's3:DeleteBucket',
 };
 
 function buildFthPermissions(

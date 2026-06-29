@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
 import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 
 import { AccessKeyPermissionsFields } from './AccessKeyPermissionsFields';
 
@@ -14,6 +15,7 @@ const meta: Meta<typeof AccessKeyPermissionsFields> = {
   args: {
     onChange: noop,
     onGranularPermissionsChange: noop,
+    region: S3Region.UsEast1,
   },
 };
 
@@ -41,6 +43,21 @@ export const WithGranularPermissions: Story = {
   },
 };
 
+export const WithBucketManagement: Story = {
+  args: {
+    value: ['read'],
+    granularPermissions: ['CreateBucket', 'DeleteBucket'],
+  },
+};
+
+export const BucketManagementUnsupported: Story = {
+  args: {
+    value: ['read'],
+    granularPermissions: [],
+    region: S3Region.EuWest1,
+  },
+};
+
 export const Interactive: Story = {
   render: () => {
     const [value, setValue] = useState<AccessKeyPermission[]>(['read', 'list']);
@@ -51,6 +68,7 @@ export const Interactive: Story = {
         onChange={setValue}
         granularPermissions={granular}
         onGranularPermissionsChange={setGranular}
+        region={S3Region.UsEast1}
       />
     );
   },

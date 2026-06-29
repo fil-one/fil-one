@@ -465,6 +465,37 @@ describe('fthOrchestrator.issueAccessKey', () => {
     );
   });
 
+  it('maps bucket-management granular permissions to s3 bucket actions', async () => {
+    stubConsoleStorageUser();
+    mockFthClient.createAccessKey.mockResolvedValue({
+      id: 'AKIAFTH',
+      accessKeyId: 'AKIAFTH',
+      secretAccessKey: 'sk-secret',
+      name: baseOpts.keyName,
+      permissions: [],
+      buckets: [],
+      createdAt: '2026-03-10T00:00:00Z',
+    });
+
+    await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: baseOpts.keyName,
+      permissions: [...baseOpts.permissions],
+      granularPermissions: ['CreateBucket', 'DeleteBucket'],
+    });
+
+    expect(mockFthClient.createAccessKey).toHaveBeenCalledWith(
+      fthClientId,
+      '7',
+      expect.objectContaining({
+        permissions: expect.arrayContaining([
+          's3:CreateBucket',
+          's3:DeleteBucket',
+          's3:ListAllMyBuckets',
+        ]),
+      }),
+    );
+  });
+
   it('maps FthConflictError to AccessKeyAlreadyExistsError', async () => {
     stubConsoleStorageUser();
     mockFthClient.createAccessKey.mockRejectedValue(

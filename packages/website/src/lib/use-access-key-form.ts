@@ -7,7 +7,12 @@ import type {
   GranularPermission,
   S3Region,
 } from '@filone/shared';
-import { CreateAccessKeySchema, GRANULAR_PERMISSION_MAP } from '@filone/shared';
+import {
+  CreateAccessKeySchema,
+  GRANULAR_PERMISSION_MAP,
+  isBucketPermission,
+  supportsBucketManagement,
+} from '@filone/shared';
 import { createAccessKey } from './api.js';
 import { expiresAtFromForm } from './time.js';
 import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';
@@ -52,6 +57,10 @@ export function useAccessKeyForm({
     if (prevRegionRef.current === region) return;
     prevRegionRef.current = region;
     setSelectedBuckets([]);
+    // Drop bucket-management permissions when the new region can't support them.
+    if (!supportsBucketManagement(region)) {
+      setGranularPermissions((prev) => prev.filter((g) => !isBucketPermission(g)));
+    }
   }, [region]);
 
   const candidatePayload = {
@@ -67,9 +76,12 @@ export function useAccessKeyForm({
 
   function handlePermissionsChange(newPermissions: AccessKeyPermission[]) {
     setPermissions(newPermissions);
-    // Remove granular permissions that no longer belong to any selected basic permission
+    // Remove data-protection granulars that no longer belong to any selected basic
+    // permission. Bucket-management granulars are standalone and always kept.
     const validGranular = new Set(newPermissions.flatMap((p) => GRANULAR_PERMISSION_MAP[p]));
-    setGranularPermissions((prev) => prev.filter((g) => validGranular.has(g)));
+    setGranularPermissions((prev) =>
+      prev.filter((g) => isBucketPermission(g) || validGranular.has(g)),
+    );
   }
 
   function reset() {

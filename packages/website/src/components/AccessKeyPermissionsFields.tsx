@@ -1,7 +1,19 @@
-import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
-import { GRANULAR_PERMISSION_MAP, GRANULAR_PERMISSION_LABELS } from '@filone/shared';
+import type {
+  AccessKeyPermission,
+  BucketPermission,
+  GranularPermission,
+  S3Region,
+} from '@filone/shared';
+import {
+  BUCKET_PERMISSIONS,
+  GRANULAR_PERMISSION_MAP,
+  GRANULAR_PERMISSION_LABELS,
+  getRegionLabel,
+  supportsBucketManagement,
+} from '@filone/shared';
 
 import { Checkbox } from './Checkbox';
+import { Tooltip } from './Tooltip';
 
 type PermissionOption = {
   value: AccessKeyPermission;
@@ -21,6 +33,7 @@ type AccessKeyPermissionsFieldsProps = {
   onChange: (value: AccessKeyPermission[]) => void;
   granularPermissions: GranularPermission[];
   onGranularPermissionsChange: (value: GranularPermission[]) => void;
+  region: S3Region;
 };
 
 export function AccessKeyPermissionsFields({
@@ -28,6 +41,7 @@ export function AccessKeyPermissionsFields({
   onChange,
   granularPermissions,
   onGranularPermissionsChange,
+  region,
 }: AccessKeyPermissionsFieldsProps) {
   function toggleBasic(permission: AccessKeyPermission) {
     if (value.includes(permission)) {
@@ -48,50 +62,171 @@ export function AccessKeyPermissionsFields({
   }
 
   return (
-    <div className="flex flex-col">
-      {PERMISSION_OPTIONS.map((option) => {
-        const isChecked = value.includes(option.value);
-        const granularOptions = GRANULAR_PERMISSION_MAP[option.value];
+    <div className="flex flex-col gap-4" data-testid="access-key-permissions">
+      <Section title="Object permissions" testId="permissions-section-object">
+        {PERMISSION_OPTIONS.map((option) => {
+          const isChecked = value.includes(option.value);
+          const granularOptions = GRANULAR_PERMISSION_MAP[option.value];
 
+          return (
+            <div key={option.value}>
+              <label
+                data-testid={`permission-${option.value}`}
+                className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-zinc-50"
+              >
+                <Checkbox
+                  aria-label={option.label}
+                  checked={isChecked}
+                  onChange={() => toggleBasic(option.value)}
+                />
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs font-medium text-zinc-900">{option.label}</span>
+                  <span className="text-[11px] text-zinc-500">{option.description}</span>
+                </div>
+              </label>
+
+              {isChecked && granularOptions.length > 0 && (
+                <div className="ml-9 mb-1 flex flex-col border-l-2 border-zinc-100 pl-2">
+                  {granularOptions.map((granular) => {
+                    const meta = GRANULAR_PERMISSION_LABELS[granular];
+                    return (
+                      <label
+                        key={granular}
+                        data-testid={`granular-permission-${granular}`}
+                        className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-zinc-50"
+                      >
+                        <Checkbox
+                          checked={granularPermissions.includes(granular)}
+                          onChange={() => toggleGranular(granular)}
+                        />
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-xs font-medium text-zinc-800">{meta.label}</span>
+                          <span className="text-[11px] text-zinc-500">{meta.description}</span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </Section>
+
+      <Section title="Bucket management" testId="permissions-section-bucket">
+        <BucketManagementFields
+          granularPermissions={granularPermissions}
+          onToggle={toggleGranular}
+          region={region}
+        />
+      </Section>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  testId,
+  children,
+}: {
+  title: string;
+  testId: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col" data-testid={testId}>
+      <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+        {title}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+type BucketManagementFieldsProps = {
+  granularPermissions: GranularPermission[];
+  onToggle: (granular: GranularPermission) => void;
+  region: S3Region;
+};
+
+function BucketManagementFields({
+  granularPermissions,
+  onToggle,
+  region,
+}: BucketManagementFieldsProps) {
+  const supported = supportsBucketManagement(region);
+  const unsupportedReason = `Not supported in ${getRegionLabel(region)}`;
+
+  return (
+    <>
+      {/* List all buckets — always granted, not configurable. */}
+      <PermissionRow
+        testId="permission-list-buckets"
+        label="List all buckets"
+        description="List all buckets in the account"
+        checked
+        disabled
+        tooltip="Always enabled — this permission is currently not configurable."
+      />
+
+      {BUCKET_PERMISSIONS.map((permission: BucketPermission) => {
+        const meta = GRANULAR_PERMISSION_LABELS[permission];
         return (
-          <div key={option.value}>
-            <label className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-zinc-50">
-              <Checkbox
-                aria-label={option.label}
-                checked={isChecked}
-                onChange={() => toggleBasic(option.value)}
-              />
-              <div className="flex flex-col gap-0.5">
-                <span className="text-xs font-medium text-zinc-900">{option.label}</span>
-                <span className="text-[11px] text-zinc-500">{option.description}</span>
-              </div>
-            </label>
-
-            {isChecked && granularOptions.length > 0 && (
-              <div className="ml-9 mb-1 flex flex-col border-l-2 border-zinc-100 pl-2">
-                {granularOptions.map((granular) => {
-                  const meta = GRANULAR_PERMISSION_LABELS[granular];
-                  return (
-                    <label
-                      key={granular}
-                      className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-zinc-50"
-                    >
-                      <Checkbox
-                        checked={granularPermissions.includes(granular)}
-                        onChange={() => toggleGranular(granular)}
-                      />
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-xs font-medium text-zinc-800">{meta.label}</span>
-                        <span className="text-[11px] text-zinc-500">{meta.description}</span>
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <PermissionRow
+            key={permission}
+            testId={`permission-${permission}`}
+            label={meta.label}
+            description={meta.description}
+            checked={supported && granularPermissions.includes(permission)}
+            disabled={!supported}
+            tooltip={supported ? undefined : unsupportedReason}
+            onChange={() => onToggle(permission)}
+          />
         );
       })}
-    </div>
+    </>
+  );
+}
+
+type PermissionRowProps = {
+  testId: string;
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled?: boolean;
+  tooltip?: string;
+  onChange?: () => void;
+};
+
+function PermissionRow({
+  testId,
+  label,
+  description,
+  checked,
+  disabled = false,
+  tooltip,
+  onChange,
+}: PermissionRowProps) {
+  const row = (
+    <label
+      data-testid={testId}
+      className={
+        'flex items-center gap-3 rounded-lg px-3 py-2 transition-colors ' +
+        (disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:bg-zinc-50')
+      }
+    >
+      <Checkbox aria-label={label} checked={checked} disabled={disabled} onChange={onChange} />
+      <div className="flex flex-col gap-0.5">
+        <span className="text-xs font-medium text-zinc-900">{label}</span>
+        <span className="text-[11px] text-zinc-500">{description}</span>
+      </div>
+    </label>
+  );
+
+  if (!tooltip) return row;
+  return (
+    <Tooltip content={tooltip} side="top">
+      {row}
+    </Tooltip>
   );
 }

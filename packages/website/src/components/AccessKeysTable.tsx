@@ -4,8 +4,8 @@ import { DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon } from '@phosphor-icons/rea
 
 import { IconBox } from './IconBox';
 
-import type { AccessKey } from '@filone/shared';
-import { GRANULAR_PERMISSION_LABELS } from '@filone/shared';
+import type { AccessKey, GranularPermission } from '@filone/shared';
+import { GRANULAR_PERMISSION_LABELS, isBucketPermission } from '@filone/shared';
 
 import { Badge } from './Badge';
 import { Button } from './Button';
@@ -21,6 +21,75 @@ function StatusBadge({ status }: { status: AccessKey['status'] }) {
   ) : (
     <Badge color="grey" size="sm" weight="medium">
       Inactive
+    </Badge>
+  );
+}
+
+function PermissionBadges({
+  permissions,
+  granularPermissions,
+}: {
+  permissions: AccessKey['permissions'];
+  granularPermissions: GranularPermission[];
+}) {
+  const dataProtection = granularPermissions.filter((g) => !isBucketPermission(g));
+  const bucketManagement = granularPermissions.filter(isBucketPermission);
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {permissions.map((p) => (
+        <Badge key={p} color="blue" size="sm" className="capitalize">
+          {p}
+        </Badge>
+      ))}
+      {dataProtection.length > 0 && (
+        <GranularGroupBadge
+          title="Data protection"
+          testId="permission-badge-data-protection"
+          permissions={dataProtection}
+        />
+      )}
+      {bucketManagement.length > 0 && (
+        <GranularGroupBadge
+          title="Bucket management"
+          testId="permission-badge-bucket-management"
+          permissions={bucketManagement}
+        />
+      )}
+    </div>
+  );
+}
+
+function GranularGroupBadge({
+  title,
+  testId,
+  permissions,
+}: {
+  title: string;
+  testId: string;
+  permissions: GranularPermission[];
+}) {
+  return (
+    <Badge
+      color="blue"
+      size="sm"
+      data-testid={testId}
+      description={
+        <>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+            {title}
+          </p>
+          <ul className="flex flex-col gap-0.5">
+            {permissions.map((g) => (
+              <li key={g} className="text-xs text-zinc-700">
+                {GRANULAR_PERMISSION_LABELS[g].label}
+              </li>
+            ))}
+          </ul>
+        </>
+      }
+    >
+      {title}
     </Badge>
   );
 }
@@ -181,35 +250,10 @@ export function AccessKeysTable({
             {/* Permissions */}
             {showPermissions && (
               <Table.Cell className="hidden md:table-cell">
-                <div className="flex flex-wrap gap-1">
-                  {(key.permissions ?? []).map((p) => (
-                    <Badge key={p} color="blue" size="sm" className="capitalize">
-                      {p}
-                    </Badge>
-                  ))}
-                  {(key.granularPermissions ?? []).length > 0 && (
-                    <Badge
-                      color="blue"
-                      size="sm"
-                      description={
-                        <>
-                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-                            Data protection
-                          </p>
-                          <ul className="flex flex-col gap-0.5">
-                            {key.granularPermissions!.map((g) => (
-                              <li key={g} className="text-xs text-zinc-700">
-                                {GRANULAR_PERMISSION_LABELS[g].label}
-                              </li>
-                            ))}
-                          </ul>
-                        </>
-                      }
-                    >
-                      Data protection
-                    </Badge>
-                  )}
-                </div>
+                <PermissionBadges
+                  permissions={key.permissions ?? []}
+                  granularPermissions={key.granularPermissions ?? []}
+                />
               </Table.Cell>
             )}
 
