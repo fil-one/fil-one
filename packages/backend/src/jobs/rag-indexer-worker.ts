@@ -17,6 +17,7 @@ import { getProvisionedRegions, type ProvisionedRegion } from '../lib/region-hel
 import { createS3Client } from '../lib/s3-client.js';
 import { RAGKeys, type BucketRAGStatus } from '../lib/dynamo-records.js';
 import { indexBucket } from './rag-indexer-helpers.js';
+import { S3Region } from '@filone/shared';
 
 const dynamo = getDynamoClient();
 
@@ -127,20 +128,20 @@ async function indexRegion(args: IndexRegionArgs): Promise<number> {
 
   let indexed = 0;
   for (const bucket of buckets) {
-    const bucketId = bucket.bucketName;
-    if (filter && !filter.has(bucketId)) continue;
+    const bucketName = bucket.bucketName;
+    if (filter && !filter.has(bucketName)) continue;
 
-    const status = await getBucketRagStatus(bucketId);
+    const status = await getBucketRagStatus(orchestrator.region, bucket.bucketName);
     if (status !== 'active') continue;
 
     try {
-      await indexBucket(s3, bucketId, bucket.bucketName, vectorStore, { deadlineEpochMs });
+      await indexBucket(s3, orchestrator.region, bucketName, vectorStore, { deadlineEpochMs });
       indexed++;
     } catch (error) {
       console.error(`${LOG} Bucket failed, continuing`, {
         orgId,
         orchestrator: orchestrator.id,
-        bucketId,
+        bucketId: bucketName,
         error,
       });
     }
@@ -153,12 +154,15 @@ async function indexRegion(args: IndexRegionArgs): Promise<number> {
  * `undefined` when RAG was never enabled for the bucket, so the worker skips
  * non-RAG buckets returned by listBuckets.
  */
-async function getBucketRagStatus(bucketId: string): Promise<BucketRAGStatus | undefined> {
+async function getBucketRagStatus(
+  region: S3Region,
+  bucketId: string,
+): Promise<BucketRAGStatus | undefined> {
   const result = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: {
-        pk: { S: RAGKeys.bucketPk(bucketId) },
+        pk: { S: RAGKeys.bucketPk(region, bucketId) },
         sk: { S: RAGKeys.enablementSk() },
       },
     }),

@@ -13,6 +13,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { RAGKeys, type RagIndexerCheckpointRecord } from '../lib/dynamo-records.js';
+import { S3Region } from '@filone/shared';
 
 const dynamo = getDynamoClient();
 
@@ -32,7 +33,10 @@ export interface ManifestEntry {
  * One `begins_with MANIFEST#` query (paged) returns the authoritative set of
  * indexed objects and their vector-store keys.
  */
-export async function loadManifest(bucketId: string): Promise<Map<string, ManifestEntry>> {
+export async function loadManifest(
+  region: S3Region,
+  bucketId: string,
+): Promise<Map<string, ManifestEntry>> {
   const manifest = new Map<string, ManifestEntry>();
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
 
@@ -42,7 +46,7 @@ export async function loadManifest(bucketId: string): Promise<Map<string, Manife
         TableName: Resource.UserInfoTable.name,
         KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
         ExpressionAttributeValues: {
-          ':pk': { S: RAGKeys.bucketPk(bucketId) },
+          ':pk': { S: RAGKeys.bucketPk(region, bucketId) },
           ':prefix': { S: RAGKeys.manifestSkPrefix() },
         },
         ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
@@ -73,6 +77,7 @@ function toManifestEntry(record: Record<string, unknown>): ManifestEntry | null 
 
 /** Upsert an object's manifest row with its current ETag and vector-store keys. */
 export async function saveManifestEntry(
+  region: S3Region,
   bucketId: string,
   objectKey: string,
   etag: string,
@@ -82,7 +87,7 @@ export async function saveManifestEntry(
     new PutItemCommand({
       TableName: Resource.UserInfoTable.name,
       Item: marshall({
-        pk: RAGKeys.bucketPk(bucketId),
+        pk: RAGKeys.bucketPk(region, bucketId),
         sk: RAGKeys.manifestSk(objectKey),
         objectKey,
         etag,
@@ -95,12 +100,16 @@ export async function saveManifestEntry(
 }
 
 /** Remove an object's manifest row (after its vectors have been deleted). */
-export async function deleteManifestEntry(bucketId: string, objectKey: string): Promise<void> {
+export async function deleteManifestEntry(
+  region: S3Region,
+  bucketId: string,
+  objectKey: string,
+): Promise<void> {
   await dynamo.send(
     new DeleteItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: {
-        pk: { S: RAGKeys.bucketPk(bucketId) },
+        pk: { S: RAGKeys.bucketPk(region, bucketId) },
         sk: { S: RAGKeys.manifestSk(objectKey) },
       },
     }),
@@ -114,14 +123,15 @@ export async function deleteManifestEntry(bucketId: string, objectKey: string): 
  * treated as absent so the bucket re-scans from the top.
  */
 export async function loadCheckpoint(
-  bucketId: string,
+  region: S3Region,
+  bucketName: string,
 ): Promise<RagIndexerCheckpointRecord | undefined> {
   const result = await dynamo.send(
     new QueryCommand({
       TableName: Resource.UserInfoTable.name,
       KeyConditionExpression: 'pk = :pk AND sk = :sk',
       ExpressionAttributeValues: {
-        ':pk': { S: RAGKeys.checkpointPk(bucketId) },
+        ':pk': { S: RAGKeys.checkpointPk(region, bucketName) },
         ':sk': { S: RAGKeys.checkpointSk() },
       },
     }),
@@ -142,7 +152,7 @@ export async function loadCheckpoint(
  * reconciled), which lets the next run start fresh.
  */
 export async function saveCheckpoint(
-  bucketId: string,
+  region: S3Region,
   bucketName: string,
   continuationToken: string | undefined,
 ): Promise<void> {
@@ -151,9 +161,9 @@ export async function saveCheckpoint(
       TableName: Resource.UserInfoTable.name,
       Item: marshall(
         {
-          pk: RAGKeys.checkpointPk(bucketId),
+          pk: RAGKeys.checkpointPk(region, bucketName),
           sk: RAGKeys.checkpointSk(),
-          bucketId,
+          region,
           bucketName,
           continuationToken,
           lastPageStartedAt: new Date().toISOString(),
@@ -166,12 +176,12 @@ export async function saveCheckpoint(
 }
 
 /** Drop the checkpoint once a bucket has been fully reconciled. */
-export async function clearCheckpoint(bucketId: string): Promise<void> {
+export async function clearCheckpoint(region: S3Region, bucketName: string): Promise<void> {
   await dynamo.send(
     new DeleteItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: {
-        pk: { S: RAGKeys.checkpointPk(bucketId) },
+        pk: { S: RAGKeys.checkpointPk(region, bucketName) },
         sk: { S: RAGKeys.checkpointSk() },
       },
     }),

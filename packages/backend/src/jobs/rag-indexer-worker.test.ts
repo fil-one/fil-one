@@ -88,7 +88,8 @@ function region(orchestrator: ReturnType<typeof makeOrchestrator>, tenantId: str
 
 function mockRagEnabled(bucketIds: string[], status = 'active') {
   ddbMock.on(GetItemCommand).callsFake((input) => {
-    const bucketId = (input.Key.pk.S as string).replace('BUCKET#', '');
+    // pk is BUCKET#{region}#{bucketName}; the bucket name is the last segment.
+    const bucketId = (input.Key.pk.S as string).split('#').pop() as string;
     if (bucketIds.includes(bucketId)) {
       return { Item: marshall({ pk: input.Key.pk.S, sk: 'RAG', orgId: 'org-1', status }) };
     }
@@ -157,7 +158,7 @@ describe('rag-indexer-worker', () => {
     expect(mockIndexBucket).toHaveBeenCalledOnce();
     expect(mockIndexBucket).toHaveBeenCalledWith(
       fakeS3Client,
-      'b1',
+      'eu-west-1',
       'b1',
       expect.anything(),
       expect.objectContaining({ deadlineEpochMs: expect.any(Number) }),
@@ -184,7 +185,7 @@ describe('rag-indexer-worker', () => {
     expect(mockIndexBucket).toHaveBeenCalledOnce();
     expect(mockIndexBucket).toHaveBeenCalledWith(
       fakeS3Client,
-      'b2',
+      'eu-west-1',
       'b2',
       expect.anything(),
       expect.anything(),
@@ -222,7 +223,7 @@ describe('rag-indexer-worker', () => {
     expect(mockIndexBucket).toHaveBeenCalledOnce();
     expect(mockIndexBucket).toHaveBeenCalledWith(
       fakeS3Client,
-      'b2',
+      'eu-west-1',
       'b2',
       expect.anything(),
       expect.anything(),

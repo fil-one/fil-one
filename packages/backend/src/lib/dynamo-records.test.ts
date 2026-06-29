@@ -28,7 +28,9 @@ describe('RAGKeys', () => {
   });
 
   it('builds the indexer checkpoint pk/sk', () => {
-    expect(RAGKeys.checkpointPk('bucket-1')).toBe('INDEXER_CHECKPOINT#bucket-1');
+    expect(RAGKeys.checkpointPk(S3Region.EuWest1, 'bucket-1')).toBe(
+      'INDEXER_CHECKPOINT#eu-west-1#bucket-1',
+    );
     expect(RAGKeys.checkpointSk()).toBe('CHECKPOINT');
   });
 });
@@ -144,7 +146,7 @@ describe('RagIndexerCheckpointRecord', () => {
   it('captures the resumable continuation token under its own partition', () => {
     const now = new Date().toISOString();
     const record: RagIndexerCheckpointRecord = {
-      pk: RAGKeys.checkpointPk('bucket-1'),
+      pk: RAGKeys.checkpointPk(S3Region.EuWest1, 'bucket-1'),
       sk: RAGKeys.checkpointSk(),
       bucketId: 'bucket-1',
       bucketName: 'my-bucket',
@@ -153,7 +155,7 @@ describe('RagIndexerCheckpointRecord', () => {
       ttl: Math.floor(Date.now() / 1000) + 48 * 60 * 60,
     };
 
-    expect(record.pk).toBe('INDEXER_CHECKPOINT#bucket-1');
+    expect(record.pk).toBe('INDEXER_CHECKPOINT#eu-west-1#bucket-1');
     expect(record.sk).toBe('CHECKPOINT');
     expect(record.bucketName).toBe('my-bucket');
     expect(record.continuationToken).toBe('token-abc');
@@ -163,7 +165,7 @@ describe('RagIndexerCheckpointRecord', () => {
 
   it('omits the continuation token when a bucket finished within one run', () => {
     const record: RagIndexerCheckpointRecord = {
-      pk: RAGKeys.checkpointPk('bucket-1'),
+      pk: RAGKeys.checkpointPk(S3Region.EuWest1, 'bucket-1'),
       sk: RAGKeys.checkpointSk(),
       bucketId: 'bucket-1',
       bucketName: 'my-bucket',

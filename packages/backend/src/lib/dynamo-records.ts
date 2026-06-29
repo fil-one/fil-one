@@ -127,6 +127,7 @@ export const RAGKeys = {
   /** Shared prefix for `begins_with` queries returning a bucket's manifests. */
   manifestSkPrefix: (): string => 'MANIFEST#',
   manifestSk: (objectKey: string): string => `MANIFEST#${objectKey}`,
-  checkpointPk: (bucketId: string): string => `INDEXER_CHECKPOINT#${bucketId}`,
+  checkpointPk: (region: S3Region, bucketName: string): string =>
+    `INDEXER_CHECKPOINT#${region}#${bucketName}`,
   checkpointSk: (): string => 'CHECKPOINT',
 } as const;

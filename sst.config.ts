@@ -898,7 +898,7 @@ export default $config({
       link: [
         billingTable,
         userInfoTable,
-        RagVectorBucket,
+        ragVectorBucket,
         auroraBackofficeToken,
         fthManagementApiToken,
       ],
