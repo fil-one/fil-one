@@ -1,91 +1,134 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import {
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  createRouter,
-  RouterProvider,
-} from '@tanstack/react-router';
+import { render, fireEvent } from '@testing-library/react';
 
-import type { MeResponse } from '@filone/shared';
+import { SidebarNav } from './SidebarNav';
 
-import { queryKeys } from '../lib/query-client.js';
-import { SidebarNav } from './SidebarNav.js';
+// Render <a>/no-op router primitives so SidebarNav can mount without a router.
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to, ...rest }: { children: React.ReactNode; to: string }) => (
+    <a href={to} {...rest}>
+      {children}
+    </a>
+  ),
+  useMatchRoute: () => () => false,
+}));
 
-// The instatus summary query fires on mount; stub the network call so the test
-// exercises nav rendering without a real fetch.
-vi.mock('../lib/instatus.js', async () => {
-  const actual = await vi.importActual<typeof import('../lib/instatus.js')>('../lib/instatus.js');
-  return { ...actual, fetchInstatusSummary: vi.fn(async () => null) };
-});
+// Force both status banners to render so their button ids are present.
+vi.mock('./use-sidebar-data.js', () => ({
+  useSidebarData: () => ({
+    me: { name: 'Ada', email: 'ada@example.com', orgName: 'Acme' },
+    displayName: 'Ada',
+    initial: 'A',
+    isTrialing: true,
+    isPastDue: true,
+    trialDays: 5,
+    trialEndsLabel: 'Expires soon',
+    graceDays: 3,
+    graceEndsLabel: 'Expires soon',
+    storageUsed: 1,
+    storagePct: 10,
+    egressUsed: 1,
+    egressPct: 10,
+  }),
+}));
 
-const NAV_PATHS = [
-  '/dashboard',
-  '/buckets',
-  '/api-keys',
-  '/billing',
-  '/settings',
-  '/support',
-  '/bucket-intelligence',
-  '/ai-agent-toolkit',
-  '/rag-pipeline',
+// RAG access is gated by useRagAccess() (FIL-555). Mock it so the gate can be
+// driven directly — its real implementation needs a QueryClientProvider, which
+// these mock-based render helpers intentionally avoid.
+vi.mock('../lib/use-rag-access.js', () => ({ useRagAccess: vi.fn(() => false) }));
+
+vi.mock('./Tooltip.js', () => ({
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock('./StatusIndicator.js', () => ({
+  StatusIndicator: () => <div data-testid="status-indicator" />,
+}));
+
+vi.mock('../lib/api.js', () => ({ logout: vi.fn() }));
+
+import { useRagAccess } from '../lib/use-rag-access.js';
+
+const mockUseRagAccess = vi.mocked(useRagAccess);
+
+// Mirrors how AppShell mounts the sidebar twice: the visible desktop sidebar
+// plus the mobile drawer copy. The drawer copy must not duplicate the
+// page-unique e2e selectors, or Playwright strict-mode locators break.
+function renderBothSidebars() {
+  return render(
+    <>
+      <SidebarNav collapsed={false} onToggle={() => {}} showTestIds={true} />
+      <SidebarNav
+        collapsed={false}
+        onToggle={() => {}}
+        onClose={() => {}}
+        showUserProfile={false}
+        showTestIds={false}
+      />
+    </>,
+  );
+}
+
+const UNIQUE_IDS = ['sidebar-upgrade-button', 'sidebar-update-payment-button'];
+const UNIQUE_TESTIDS = [
+  'nav-dashboard',
+  'nav-buckets',
+  'nav-api-keys',
+  'nav-billing',
+  'nav-settings',
+  'user-profile',
 ];
 
-function me(ragAccess: boolean): MeResponse {
-  return {
-    orgId: 'org-1',
-    orgName: 'Acme',
-    emailVerified: true,
-    email: 'user@example.com',
-    name: 'User',
-    mfaEnrollments: [],
-    ragAccess,
-  };
-}
-
-function renderSidebar(ragAccess: boolean) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  client.setQueryData(queryKeys.me, me(ragAccess));
-
-  const rootRoute = createRootRoute({
-    component: () => <SidebarNav collapsed={false} onToggle={vi.fn()} />,
-  });
-  const routes = NAV_PATHS.map((path) =>
-    createRoute({ getParentRoute: () => rootRoute, path, component: () => null }),
-  );
-  const router = createRouter({
-    routeTree: rootRoute.addChildren(routes),
-    history: createMemoryHistory({ initialEntries: ['/dashboard'] }),
+describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => {
+  beforeEach(() => {
+    mockUseRagAccess.mockReturnValue(false);
   });
 
-  return render(
-    <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
-  );
-}
+  it.each(UNIQUE_IDS)('renders #%s exactly once', (id) => {
+    const { container } = renderBothSidebars();
+    expect(container.querySelectorAll(`#${id}`)).toHaveLength(1);
+  });
+
+  it.each(UNIQUE_TESTIDS)('renders [data-testid="%s"] exactly once', (testId) => {
+    const { container } = renderBothSidebars();
+    expect(container.querySelectorAll(`[data-testid="${testId}"]`)).toHaveLength(1);
+  });
+
+  it('renders #user-menu-logout-button exactly once after opening the menu', () => {
+    const { container } = renderBothSidebars();
+    // Only the desktop sidebar has a user-profile trigger; the drawer omits it.
+    const triggers = container.querySelectorAll('[data-testid="user-profile"]');
+    expect(triggers).toHaveLength(1);
+    fireEvent.click(triggers[0]);
+    expect(container.querySelectorAll('#user-menu-logout-button')).toHaveLength(1);
+  });
+});
 
 describe('SidebarNav RAG Pipeline gating', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('shows the RAG Pipeline nav item for users with RAG access', async () => {
-    renderSidebar(true);
+  function renderSidebar() {
+    return render(<SidebarNav collapsed={false} onToggle={() => {}} showTestIds={true} />);
+  }
 
-    const item = await screen.findByTestId('nav-rag-pipeline');
-    expect(item).toBeInTheDocument();
+  it('shows the RAG Pipeline nav item for users with RAG access', () => {
+    mockUseRagAccess.mockReturnValue(true);
+    const { container } = renderSidebar();
+
+    const item = container.querySelector('[data-testid="nav-rag-pipeline"]');
+    expect(item).not.toBeNull();
     expect(item).toHaveAttribute('href', '/rag-pipeline');
     expect(item).toHaveTextContent('RAG Pipeline');
   });
 
-  it('hides the RAG Pipeline nav item for users without RAG access', async () => {
-    renderSidebar(false);
+  it('hides the RAG Pipeline nav item for users without RAG access', () => {
+    mockUseRagAccess.mockReturnValue(false);
+    const { container } = renderSidebar();
 
     // The AI Tools group still renders so we can assert the gate is specific.
-    expect(await screen.findByTestId('nav-ai-agent-toolkit')).toBeInTheDocument();
-    expect(screen.queryByTestId('nav-rag-pipeline')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-testid="nav-ai-agent-toolkit"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="nav-rag-pipeline"]')).toBeNull();
   });
 });

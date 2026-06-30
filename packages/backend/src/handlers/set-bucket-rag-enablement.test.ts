@@ -59,7 +59,7 @@ process.env.FILONE_STAGE = 'test';
 
 import { baseHandler, handler } from './set-bucket-rag-enablement.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
-import { S3_REGION } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.js';
 
@@ -71,14 +71,14 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1', email: 'dev@fil.org', emai
 
 const BUCKET = {
   bucketName: 'my-bucket',
-  region: S3_REGION,
+  region: S3Region.EuWest1,
   createdAt: '2026-01-15T10:00:00Z',
   isPublic: false,
 };
 
 function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablementRecord {
   return {
-    pk: 'BUCKET#my-bucket',
+    pk: 'BUCKET#eu-west-1#my-bucket',
     sk: 'RAG',
     orgId: 'org-1',
     status: 'active',
@@ -126,7 +126,20 @@ describe('set-bucket-rag-enablement baseHandler', () => {
       orgId: 'org-1',
       enabled: true,
       existing: undefined,
+      region: S3Region.EuWest1,
     });
+  });
+
+  it('forwards the resolved region from the query param into both helpers', async () => {
+    const e = event({ enabled: true });
+    e.queryStringParameters = { region: S3Region.UsEast1 };
+
+    await baseHandler(e);
+
+    expect(mockGetEnablement).toHaveBeenCalledWith(S3Region.UsEast1, 'my-bucket');
+    expect(mockSetEnablement).toHaveBeenCalledWith(
+      expect.objectContaining({ region: S3Region.UsEast1, bucketName: 'my-bucket' }),
+    );
   });
 
   it('disables RAG and returns status disabled', async () => {

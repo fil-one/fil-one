@@ -58,7 +58,7 @@ export async function baseHandler(
       .build();
   }
 
-  const record = await getBucketRagEnablement(bucketName);
+  const record = await getBucketRagEnablement(region, bucketName);
   // Defense in depth: ignore a record stamped with a different org.
   const owned = record && record.orgId === orgId ? record : undefined;
 

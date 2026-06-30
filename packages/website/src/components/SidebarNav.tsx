@@ -17,11 +17,10 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
-import { DOCS_URL, SubscriptionStatus, getUsageLimits, formatBytes } from '@filone/shared';
-import { getBilling, getMe, getUsage, logout } from '../lib/api.js';
-import { queryKeys } from '../lib/query-client.js';
+import { DOCS_URL } from '@filone/shared';
+import { logout } from '../lib/api.js';
+import { useSidebarData } from './use-sidebar-data.js';
 import { useRagAccess } from '../lib/use-rag-access.js';
-import { daysUntil, formatDateTime } from '../lib/time.js';
 
 import { StatusBanners } from './SidebarStatusBanners.js';
 import { StatusIndicator } from './StatusIndicator.js';
@@ -99,7 +98,13 @@ type NavLinksProps = {
   showTestIds: boolean;
 };
 
-function NavLinks({ collapsed, matchRoute, ragAccess }: NavLinksProps & { ragAccess: boolean }) {
+function NavLinks({
+  collapsed,
+  matchRoute,
+  onClose,
+  showTestIds,
+  ragAccess,
+}: NavLinksProps & { ragAccess: boolean }) {
   return (
     <div className="flex flex-col p-2">
       {navGroups.map((group, gi) => (
@@ -118,8 +123,9 @@ function NavLinks({ collapsed, matchRoute, ragAccess }: NavLinksProps & { ragAcc
                   <Link
                     key={path}
                     to={path}
-                    data-testid={testId}
+                    data-testid={showTestIds ? testId : undefined}
                     aria-label={label}
+                    onClick={onClose}
                     className={[
                       'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
                       collapsed ? 'justify-center' : '',
@@ -279,39 +285,22 @@ export function SidebarNav({
   const helpMenuRef = useRef<HTMLDivElement>(null);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
 
-  const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
-  const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
-  const { data: usage } = useQuery({ queryKey: queryKeys.usage, queryFn: getUsage });
+  const {
+    me,
+    displayName,
+    initial,
+    isTrialing,
+    isPastDue,
+    trialDays,
+    trialEndsLabel,
+    graceDays,
+    graceEndsLabel,
+    storageUsed,
+    storagePct,
+    egressUsed,
+    egressPct,
+  } = useSidebarData();
   const ragAccess = useRagAccess();
-
-  const displayName = me?.name || me?.email || 'User';
-  const initial = displayName.charAt(0).toUpperCase();
-
-  const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
-  const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
-  const trialDays =
-    isTrialing && billing?.subscription.trialEndsAt
-      ? daysUntil(billing.subscription.trialEndsAt)
-      : null;
-  const trialEndsLabel = billing?.subscription.trialEndsAt
-    ? `Expires ${formatDateTime(billing.subscription.trialEndsAt)}`
-    : undefined;
-  const graceDays = billing?.subscription.gracePeriodEndsAt
-    ? daysUntil(billing.subscription.gracePeriodEndsAt)
-    : null;
-  const graceEndsLabel = billing?.subscription.gracePeriodEndsAt
-    ? `Expires ${formatDateTime(billing.subscription.gracePeriodEndsAt)}`
-    : undefined;
-  const isActivePaid = billing?.subscription.status === SubscriptionStatus.Active;
-  const limits = getUsageLimits(!!isActivePaid);
-  const storageUsed = usage?.storage.usedBytes ?? 0;
-  const storagePct =
-    limits.storageLimitBytes > 0
-      ? Math.min(100, (storageUsed / limits.storageLimitBytes) * 100)
-      : 0;
-  const egressUsed = usage?.egress.usedBytes ?? 0;
-  const egressPct =
-    limits.egressLimitBytes > 0 ? Math.min(100, (egressUsed / limits.egressLimitBytes) * 100) : 0;
 
   useEffect(() => {
     if (!userMenuOpen && !helpMenuOpen) return;
@@ -426,7 +415,13 @@ export function SidebarNav({
         )}
 
         {/* Primary nav items */}
-        <NavLinks collapsed={collapsed} matchRoute={matchRoute} ragAccess={ragAccess} />
+        <NavLinks
+          collapsed={collapsed}
+          matchRoute={matchRoute}
+          onClose={onClose}
+          showTestIds={showTestIds}
+          ragAccess={ragAccess}
+        />
 
         {/* Spacer */}
         <div className="flex-1" />

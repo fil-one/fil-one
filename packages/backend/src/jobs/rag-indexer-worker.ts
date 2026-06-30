@@ -14,7 +14,6 @@ import { S3VectorsStore, type VectorStore } from '@filone/rag-shared';
 import { getProvisionedRegions } from '../lib/region-helpers.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { createS3Client } from '../lib/s3-client.js';
-import { RAGKeys, type BucketRAGStatus } from '../lib/dynamo-records.js';
 import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.js';
 import { indexBucket } from './rag-indexer-helpers.js';
 import { S3Region } from '@filone/shared';
@@ -169,12 +168,12 @@ async function indexRegion(args: IndexRegionArgs): Promise<number> {
       // Best-effort: a telemetry write failure must not mask the original error.
       const message = error instanceof Error ? error.message : String(error);
       try {
-        await updateBucketTelemetry(bucket.bucketName, {
+        await updateBucketTelemetry(region, bucketName, {
           syncState: 'error',
           lastSyncError: message,
         });
       } catch (telemetryError) {
-        console.error(`${LOG} Failed to persist error telemetry`, { bucketId, telemetryError });
+        console.error(`${LOG} Failed to persist error telemetry`, { bucketName, telemetryError });
       }
       console.error(`${LOG} Bucket failed, continuing`, {
         orgId,

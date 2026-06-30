@@ -118,7 +118,7 @@ describe('rag-indexer-orchestrator', () => {
     await handler();
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
-    expect(payloadsFrom()[0].bucketIds).toEqual(['bucket-1']);
+    expect(payloadsFrom()[0].buckets).toEqual([{ region: 'eu-west-1', bucketName: 'bucket-1' }]);
   });
 
   it('still picks up an active bucket whose last sync errored (syncState="error")', async () => {
@@ -130,7 +130,7 @@ describe('rag-indexer-orchestrator', () => {
     await handler();
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
-    expect(payloadsFrom()[0].bucketIds).toEqual(['bucket-1']);
+    expect(payloadsFrom()[0].buckets).toEqual([{ region: 'eu-west-1', bucketName: 'bucket-1' }]);
   });
 
   it('groups multiple buckets of one org into a single worker invocation', async () => {

@@ -487,7 +487,7 @@ describe('indexBucket', () => {
     /** The telemetry update issued for a given syncState, or undefined. */
     function telemetryCall(syncState: string) {
       return mockUpdateBucketTelemetry.mock.calls.find(
-        (c) => (c[1] as { syncState: string }).syncState === syncState,
+        (c) => (c[2] as { syncState: string }).syncState === syncState,
       );
     }
 
@@ -495,15 +495,17 @@ describe('indexBucket', () => {
       mockLoadManifest.mockResolvedValue(manifestOf([]));
       mockListObjects.mockResolvedValue(page([]));
 
-      await indexBucket(s3, 'bucket-1', 'my-bucket', vectorStore);
+      await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
 
-      // The first telemetry write is the syncing marker, by bucket name. It must
-      // write syncState only — never the enablement `status`.
-      const [name, update] = mockUpdateBucketTelemetry.mock.calls[0] as [
+      // The first telemetry write is the syncing marker, keyed by (region,
+      // bucketName). It must write syncState only — never the enablement `status`.
+      const [region, name, update] = mockUpdateBucketTelemetry.mock.calls[0] as [
+        string,
         string,
         Record<string, unknown>,
       ];
-      expect(name).toBe('my-bucket');
+      expect(region).toBe(S3Region.EuWest1);
+      expect(name).toBe('bucket-1');
       expect(update).toEqual({ syncState: 'syncing' });
       expect(update).not.toHaveProperty('status');
     });
@@ -525,13 +527,14 @@ describe('indexBucket', () => {
       );
 
       const before = Date.now();
-      await indexBucket(s3, 'bucket-1', 'my-bucket', vectorStore);
+      await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
       const after = Date.now();
 
       const success = telemetryCall('idle');
       expect(success).toBeDefined();
-      const [name, update] = success! as [string, Record<string, unknown>];
-      expect(name).toBe('my-bucket');
+      const [region, name, update] = success! as [string, string, Record<string, unknown>];
+      expect(region).toBe(S3Region.EuWest1);
+      expect(name).toBe('bucket-1');
       // The success snapshot writes syncState=idle, never the enablement status.
       expect(update).not.toHaveProperty('status');
       expect(update.filesIndexed).toBe(2);
@@ -545,7 +548,7 @@ describe('indexBucket', () => {
       mockLoadManifest.mockResolvedValue(manifestOf([]));
       mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }], 'next-tok'));
 
-      await indexBucket(s3, 'bucket-1', 'my-bucket', vectorStore, {
+      await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore, {
         deadlineEpochMs: Date.now() - 1,
       });
 
@@ -558,8 +561,7 @@ describe('indexBucket', () => {
       mockLoadCheckpoint.mockResolvedValue({
         pk: 'INDEXER_CHECKPOINT#bucket-1',
         sk: 'CHECKPOINT',
-        bucketId: 'bucket-1',
-        bucketName: 'my-bucket',
+        bucketName: 'bucket-1',
         continuationToken: 'resume-tok',
         lastPageStartedAt: '2024-01-01T00:00:00.000Z',
         ttl: Math.floor(Date.now() / 1000) + 3600,
@@ -567,7 +569,7 @@ describe('indexBucket', () => {
       mockLoadManifest.mockResolvedValue(manifestOf([]));
       mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
-      await indexBucket(s3, 'bucket-1', 'my-bucket', vectorStore);
+      await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
 
       // A resumed run's counts are not authoritative, so no idle (success) snapshot.
       expect(telemetryCall('idle')).toBeUndefined();

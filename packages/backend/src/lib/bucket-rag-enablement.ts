@@ -7,7 +7,7 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
-import type { BucketRagEnablementResponse } from '@filone/shared';
+import type { BucketRagEnablementResponse, S3Region } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.js';
 import {
   RAGKeys,
@@ -22,7 +22,7 @@ const dynamo = getDynamoClient();
 const MAX_SYNC_ERROR_LENGTH = 500;
 
 /**
- * Read a bucket's RAG enablement row (`BUCKET#{bucketName}` / `RAG`).
+ * Read a bucket's RAG enablement row (`BUCKET#{region}#{bucketName}` / `RAG`).
  *
  * The enablement records are keyed by bucket *name* — the indexer worker treats
  * `bucketId === bucket.bucketName` (see rag-indexer-worker), so handlers keep
@@ -30,13 +30,14 @@ const MAX_SYNC_ERROR_LENGTH = 500;
  * bucket so callers can render a never-synced state gracefully.
  */
 export async function getBucketRagEnablement(
+  region: S3Region,
   bucketName: string,
 ): Promise<BucketRAGEnablementRecord | undefined> {
   const { Item } = await dynamo.send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: {
-        pk: { S: RAGKeys.bucketPk(bucketName) },
+        pk: { S: RAGKeys.bucketPk(region, bucketName) },
         sk: { S: RAGKeys.enablementSk() },
       },
     }),
@@ -55,17 +56,18 @@ export async function getBucketRagEnablement(
  * progress): toggling enablement never disturbs the indexer's sync state.
  */
 export async function setBucketRagEnablement(args: {
+  region: S3Region;
   bucketName: string;
   orgId: string;
   enabled: boolean;
   existing: BucketRAGEnablementRecord | undefined;
 }): Promise<BucketRAGEnablementRecord> {
-  const { bucketName, orgId, enabled, existing } = args;
+  const { bucketName, orgId, enabled, existing, region } = args;
   const now = new Date().toISOString();
   const status: BucketRAGStatus = enabled ? 'active' : 'disabled';
 
   const record: BucketRAGEnablementRecord = {
-    pk: RAGKeys.bucketPk(bucketName),
+    pk: RAGKeys.bucketPk(region, bucketName),
     sk: RAGKeys.enablementSk(),
     orgId,
     status,
@@ -162,6 +164,7 @@ export interface BucketTelemetryUpdate {
  * RAG-enabled buckets carry the row — so the update is a safe no-op otherwise.
  */
 export async function updateBucketTelemetry(
+  region: S3Region,
   bucketName: string,
   update: BucketTelemetryUpdate,
 ): Promise<void> {
@@ -201,7 +204,7 @@ export async function updateBucketTelemetry(
       new UpdateItemCommand({
         TableName: Resource.UserInfoTable.name,
         Key: {
-          pk: { S: RAGKeys.bucketPk(bucketName) },
+          pk: { S: RAGKeys.bucketPk(region, bucketName) },
           sk: { S: RAGKeys.enablementSk() },
         },
         UpdateExpression: updateExpression,
