@@ -159,10 +159,9 @@ export interface BucketTelemetryUpdate {
  * of truth for liveness (orchestrator scan / worker gate) and the UI enabled
  * check, and decoupling it from sync progress is the whole point of `syncState`.
  *
- * A `ConditionExpression` (`attribute_exists(pk)`) guards against writing
- * telemetry to a bucket whose enablement row was deleted/never created — only
- * RAG-enabled buckets carry the row — so the update is a safe no-op otherwise.
- */
+ * A `ConditionExpression` (`attribute_exists(pk)`) guards against writing telemetry when the
+ * enablement row was never created (bucket never enabled) or was deleted — so the update is
+ * a safe no-op otherwise.
 export async function updateBucketTelemetry(
   region: S3Region,
   bucketName: string,
