@@ -22,3 +22,15 @@ export const EMBEDDING_MODEL_ID = 'amazon.titan-embed-text-v2:0';
  * enforce it client-side to surface a clear error before the request is sent.
  */
 export const MAX_METADATA_BYTES = 40 * 1024;
+
+/**
+ * Default target chunk size, in characters, used by the chunker (FIL-551) when
+ * the caller does not override it.
+ */
+export const DEFAULT_CHUNK_SIZE = 1000;
+
+/**
+ * Default overlap, in characters, carried from the end of one chunk into the
+ * start of the next so that context spanning a boundary is not lost.
+ */
+export const DEFAULT_OVERLAP_SIZE = 200;
