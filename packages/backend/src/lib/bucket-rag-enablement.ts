@@ -62,7 +62,7 @@ export async function setBucketRagEnablement(args: {
   enabled: boolean;
   existing: BucketRAGEnablementRecord | undefined;
 }): Promise<BucketRAGEnablementRecord> {
-  const { bucketName, orgId, enabled, existing, region } = args;
+  const { region, bucketName, orgId, enabled, existing } = args;
   const now = new Date().toISOString();
   const status: BucketRAGStatus = enabled ? 'active' : 'disabled';
 
