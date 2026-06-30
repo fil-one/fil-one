@@ -6,8 +6,10 @@ import { IconBox } from './IconBox';
 
 import type { AccessKey, GranularPermission } from '@filone/shared';
 import {
+  BUCKET_INFO_PERMISSION_LABELS,
   BUCKET_PERMISSION_LABELS,
   GRANULAR_PERMISSION_LABELS,
+  isBucketInfoPermission,
   isBucketPermission,
   isObjectPermission,
 } from '@filone/shared';
@@ -39,6 +41,7 @@ function PermissionBadges({
 }) {
   const objectPermissions = permissions.filter(isObjectPermission);
   const bucketManagement = permissions.filter(isBucketPermission);
+  const bucketInfo = permissions.filter(isBucketInfoPermission);
 
   return (
     <div className="flex flex-wrap gap-1">
@@ -64,6 +67,16 @@ function PermissionBadges({
           items={bucketManagement.map((p) => ({
             key: p,
             label: BUCKET_PERMISSION_LABELS[p].label,
+          }))}
+        />
+      )}
+      {bucketInfo.length > 0 && (
+        <GroupBadge
+          title="Bucket info"
+          testId="permission-badge-bucket-info"
+          items={bucketInfo.map((p) => ({
+            key: p,
+            label: BUCKET_INFO_PERMISSION_LABELS[p].label,
           }))}
         />
       )}
