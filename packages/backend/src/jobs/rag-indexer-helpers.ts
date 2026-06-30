@@ -96,9 +96,7 @@ export async function indexBucket(
 
   const manifest = await loadManifest(region, bucketName);
   const seen = new Set<string>();
-  // Source-object byte sizes observed this run, keyed by object key. Used to
-  // compute `indexSize` (sum of indexed source-object bytes) at completion.
-  const sizes = new Map<string, number>();
+  let indexSize = 0;
   const totals: PageOutcome = { added: 0, updated: 0, removed: 0, failed: 0 };
 
   const checkpoint = await loadCheckpoint(region, bucketName);
@@ -122,7 +120,7 @@ export async function indexBucket(
     accumulate(totals, outcome);
     for (const object of page.objects) {
       seen.add(object.key);
-      sizes.set(object.key, object.sizeBytes);
+      if (manifest.has(object.key)) indexSize += object.sizeBytes;
     }
 
     continuationToken = page.nextToken;
@@ -156,27 +154,13 @@ export async function indexBucket(
     await updateBucketTelemetry(region, bucketName, {
       syncState: 'idle',
       filesIndexed: manifest.size,
-      indexSize: sumIndexedBytes(manifest, sizes),
+      indexSize,
       lastSyncedAt: new Date().toISOString(),
     });
   }
 
   console.log(`${LOG} Bucket reconciled`, { region, bucketName, ...totals });
   return { ...totals, completed: true };
-}
-
-/**
- * Sum the source-object bytes of every object still in the manifest (i.e. with
- * at least one indexed chunk), using the sizes observed in this run's listing.
- * An object in the manifest but absent from `sizes` (defensive: not seen this
- * run) contributes 0 rather than throwing.
- */
-function sumIndexedBytes(manifest: Map<string, ManifestEntry>, sizes: Map<string, number>): number {
-  let total = 0;
-  for (const objectKey of manifest.keys()) {
-    total += sizes.get(objectKey) ?? 0;
-  }
-  return total;
 }
 
 function isPastDeadline(deadlineEpochMs: number | undefined): boolean {
