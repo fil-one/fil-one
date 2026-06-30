@@ -45,9 +45,50 @@ const mockKeys: AccessKey[] = [
   },
 ];
 
+const keysWithBucketPermissions: AccessKey[] = [
+  {
+    id: '10',
+    keyName: 'Full Access Key',
+    accessKeyId: 'ACCESS_KEY_FULL0EXAMPL',
+    createdAt: '2026-03-10T10:00:00Z',
+    lastUsedAt: '2026-04-08T14:30:00Z',
+    status: 'active',
+    permissions: [
+      'read',
+      'write',
+      'list',
+      'delete',
+      'CreateBucket',
+      'DeleteBucket',
+      'GetBucketVersioning',
+      'GetBucketObjectLockConfiguration',
+    ],
+    granularPermissions: ['GetObjectVersion', 'PutObjectRetention'],
+    bucketScope: 'all',
+  },
+  {
+    id: '11',
+    keyName: 'Bucket Info Reader',
+    accessKeyId: 'ACCESS_KEY_INFO0EXAMPL',
+    createdAt: '2026-03-12T09:00:00Z',
+    status: 'active',
+    permissions: ['read', 'list', 'GetBucketVersioning', 'GetBucketObjectLockConfiguration'],
+    bucketScope: 'specific',
+    buckets: ['backups'],
+  },
+];
+
 export const Default: Story = {
   args: {
     keys: mockKeys,
+  },
+};
+
+export const WithBucketPermissions: Story = {
+  args: {
+    keys: keysWithBucketPermissions,
+    showBuckets: true,
+    showPermissions: true,
   },
 };
 
