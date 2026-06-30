@@ -90,6 +90,7 @@ export function AccessKeyFormFields({
           onChange={setPermissions}
           granularPermissions={granularPermissions}
           onGranularPermissionsChange={setGranularPermissions}
+          region={region}
         />
       </FormField>
 
