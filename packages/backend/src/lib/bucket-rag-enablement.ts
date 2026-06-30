@@ -162,6 +162,7 @@ export interface BucketTelemetryUpdate {
  * A `ConditionExpression` (`attribute_exists(pk)`) guards against writing telemetry when the
  * enablement row was never created (bucket never enabled) or was deleted — so the update is
  * a safe no-op otherwise.
+ * */
 export async function updateBucketTelemetry(
   region: S3Region,
   bucketName: string,
