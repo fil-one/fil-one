@@ -49,10 +49,14 @@ export function BucketDrawer({ bucket, onClose }: BucketDrawerProps) {
   return (
     <>
       <div
-        className={`fixed inset-0 z-30 transition-opacity duration-200 ${shown ? 'opacity-100' : 'opacity-0'}`}
+        aria-hidden="true"
         onClick={handleClose}
+        className={`fixed inset-0 z-30 bg-black/40 transition-opacity duration-200 ${shown ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
       />
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`RAG query playground for ${bucket.name}`}
         className={`fixed inset-y-0 right-0 z-40 flex w-[460px] flex-col border-l border-zinc-200 bg-white shadow-2xl transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
       >
         {/* Header */}
