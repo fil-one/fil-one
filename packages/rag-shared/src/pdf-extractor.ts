@@ -97,12 +97,16 @@ async function resolveLocation(
  *
  * @throws if the job fails or the poll budget is exhausted.
  */
+interface PollOptions {
+  pollIntervalMs: number;
+  maxPolls: number;
+  sleep: (ms: number) => Promise<void>;
+}
+
 async function pollUntilDone(
   client: TextractClient,
   jobId: string,
-  pollIntervalMs: number,
-  maxPolls: number,
-  sleep: (ms: number) => Promise<void>,
+  { pollIntervalMs, maxPolls, sleep }: PollOptions,
 ): Promise<GetDocumentTextDetectionCommandOutput> {
   for (let attempt = 0; attempt < maxPolls; attempt++) {
     const response = await client.send(new GetDocumentTextDetectionCommand({ JobId: jobId }));
@@ -198,7 +202,7 @@ export async function extractTextFromPdf(
     throw new Error('Textract did not return a JobId for the document');
   }
 
-  const terminal = await pollUntilDone(client, jobId, pollIntervalMs, maxPolls, sleep);
+  const terminal = await pollUntilDone(client, jobId, { pollIntervalMs, maxPolls, sleep });
   const blocks = await collectBlocks(client, jobId, terminal);
   return linesInReadingOrder(blocks).join('\n');
 }

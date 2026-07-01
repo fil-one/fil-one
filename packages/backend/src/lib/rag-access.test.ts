@@ -28,6 +28,7 @@ describe('isAllowlisted', () => {
     expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toEqual({
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'RAG' } },
+      ConsistentRead: true,
     });
   });
 
@@ -53,6 +54,7 @@ describe('isAllowlisted', () => {
     expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toEqual({
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'RAG' } },
+      ConsistentRead: true,
     });
   });
 
@@ -61,6 +63,7 @@ describe('isAllowlisted', () => {
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
         Key: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'RAG' } },
+        ConsistentRead: true,
       })
       .resolves({ Item: { pk: { S: 'ALLOWLIST#alice@example.com' }, sk: { S: 'RAG' } } });
 

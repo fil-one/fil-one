@@ -539,4 +539,53 @@ describe('create-access-key baseHandler', () => {
       }
     });
   });
+
+  describe('bucket management permissions', () => {
+    beforeEach(() => {
+      ddbMock.on(PutItemCommand).resolves({});
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+    });
+
+    function bucketBody(region: string) {
+      return JSON.stringify({
+        keyName: 'My Key',
+        permissions: ['read', 'CreateBucket', 'DeleteBucket'],
+        bucketScope: 'all',
+        region,
+      });
+    }
+
+    it('passes bucket-management permissions to the orchestrator for a non-Aurora region', async () => {
+      const event = buildEvent({ body: bucketBody('us-east-1'), userInfo: USER_INFO });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(201);
+      expect(mockIssueAccessKey).toHaveBeenCalledWith(
+        'aurora-t-1',
+        expect.objectContaining({
+          permissions: ['read', 'CreateBucket', 'DeleteBucket'],
+        }),
+      );
+    });
+
+    it('persists bucket-management permissions in DynamoDB', async () => {
+      const event = buildEvent({ body: bucketBody('us-east-1'), userInfo: USER_INFO });
+      await baseHandler(event);
+
+      const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+      expect(item.permissions.L).toEqual([
+        { S: 'read' },
+        { S: 'CreateBucket' },
+        { S: 'DeleteBucket' },
+      ]);
+    });
+
+    it('returns 400 for bucket-management permissions in the Aurora region', async () => {
+      const event = buildEvent({ body: bucketBody('eu-west-1'), userInfo: USER_INFO });
+      const result = await baseHandler(event);
+
+      expect(result.statusCode).toBe(400);
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
+    });
+  });
 });

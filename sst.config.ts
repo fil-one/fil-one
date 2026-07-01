@@ -96,6 +96,21 @@ export default $config({
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
     });
 
+    // RAG indexer's own store: per-object chunk manifests
+    // (BUCKET#{region}#{bucket} / MANIFEST#{objectKey}) and resumable indexer
+    // checkpoints (INDEXER_CHECKPOINT#{region}#{bucket} / CHECKPOINT). Kept out
+    // of UserInfoTable so this high-churn, indexer-derived state doesn't mix with
+    // user/org data. TTL attribute expires stale checkpoints (see
+    // rag-indexer-manifest.ts).
+    const ragIndexerTable = new sst.aws.Dynamo('RagIndexerTable', {
+      fields: {
+        pk: 'string',
+        sk: 'string',
+      },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      ttl: 'ttl',
+    });
+
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
@@ -467,25 +482,6 @@ export default $config({
       {
         actions: ['ssm:GetParameter'],
         resources: [auroraS3KeySsmArn, fthS3KeySsmArn],
-      },
-    ];
-
-    // Per-tenant S3 access keys live at /filone/<stage>/<orchestrator>-s3/access-key/<tenantId>
-    // as SecureString params, so the RAG indexer worker (which fetches them via
-    // getS3ClientContext to build an S3 client) needs ssm:GetParameter on those
-    // names plus kms:Decrypt to unseal the SecureString values.
-    const auroraS3AccessKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/access-key/*`;
-    const fthS3AccessKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/access-key/*`;
-    const ragIndexerS3KeyPermissions: sst.aws.FunctionPermissionArgs[] = [
-      {
-        actions: ['ssm:GetParameter'],
-        resources: [auroraS3AccessKeySsmArn, fthS3AccessKeySsmArn],
-      },
-      {
-        // SecureString params are sealed with the AWS-managed SSM KMS key; the
-        // SDK decrypts them in-line on GetParameter (WithDecryption: true).
-        actions: ['kms:Decrypt'],
-        resources: ['arn:aws:kms:*:*:alias/aws/ssm'],
       },
     ];
 
@@ -954,6 +950,7 @@ export default $config({
       link: [
         billingTable,
         userInfoTable,
+        ragIndexerTable,
         ragVectorBucket,
         auroraBackofficeToken,
         fthManagementApiToken,
@@ -961,7 +958,7 @@ export default $config({
       environment: orchestratorEnv,
       timeout: '900 seconds',
       memory: '512 MB',
-      permissions: [...ragIndexerS3KeyPermissions, ...ragPermissions],
+      permissions: [...consoleS3KeysPermissions, ...ragPermissions],
     });
 
     const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {

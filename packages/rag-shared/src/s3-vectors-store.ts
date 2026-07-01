@@ -10,7 +10,7 @@ import type { DocumentType } from '@smithy/types';
 
 import { EMBEDDING_DIMENSION, MAX_METADATA_BYTES } from './constants.js';
 import type { VectorQueryResult, VectorStoreChunk } from './schemas.js';
-import type { EnsureIndexOptions, VectorStore } from './vector-store.js';
+import type { EnsureIndexOptions, QueryOptions, VectorStore } from './vector-store.js';
 
 /**
  * Metadata key under which the chunk's `objectKey` is stored. It is left
@@ -145,9 +145,9 @@ export class S3VectorsStore implements VectorStore {
     region: string,
     bucketName: string,
     embedding: number[],
-    k: number,
-    filters?: Record<string, unknown>,
+    options: QueryOptions,
   ): Promise<VectorQueryResult[]> {
+    const { k, filters } = options;
     const response = await this.#client.send(
       new QueryVectorsCommand({
         vectorBucketName: this.#vectorBucketName,

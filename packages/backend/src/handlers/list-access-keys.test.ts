@@ -31,6 +31,7 @@ function ddbItem(overrides: {
   createdAt: string;
   status?: string;
   permissions?: string[];
+  granularPermissions?: string[];
   bucketScope?: string;
   buckets?: string[];
   expiresAt?: string;
@@ -45,6 +46,8 @@ function ddbItem(overrides: {
     status: { S: overrides.status ?? 'active' },
   };
   if (overrides.permissions) item.permissions = { L: overrides.permissions.map((p) => ({ S: p })) };
+  if (overrides.granularPermissions)
+    item.granularPermissions = { L: overrides.granularPermissions.map((g) => ({ S: g })) };
   if (overrides.bucketScope) item.bucketScope = { S: overrides.bucketScope };
   if (overrides.buckets) item.buckets = { L: overrides.buckets.map((b) => ({ S: b })) };
   if (overrides.expiresAt) item.expiresAt = { S: overrides.expiresAt };
@@ -121,6 +124,28 @@ describe('list-access-keys baseHandler', () => {
       bucketScope: 'specific',
       buckets: ['bucket-a', 'bucket-b'],
     });
+  });
+
+  it('returns permissions including bucket-management ones', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        ddbItem({
+          id: 'key-1',
+          keyName: 'Bucket Admin',
+          accessKeyId: 'AKIA1111',
+          createdAt: '2026-01-01T00:00:00Z',
+          permissions: ['read', 'CreateBucket', 'DeleteBucket'],
+          granularPermissions: ['GetObjectVersion'],
+          bucketScope: 'all',
+        }),
+      ],
+    });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    const body = JSON.parse(result.body!);
+    expect(body.keys[0].permissions).toEqual(['read', 'CreateBucket', 'DeleteBucket']);
   });
 
   it('returns the persisted region from the row', async () => {

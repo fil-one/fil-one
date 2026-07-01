@@ -198,11 +198,20 @@ export const fthOrchestrator = {
   async issueAccessKey(tenantId: string, opts: IssueAccessKeyOpts): Promise<IssuedAccessKey> {
     const storageUserId = await getFthConsoleStorageUserId(tenantId);
 
+    const permissions = buildFthPermissions(opts.permissions, opts.granularPermissions);
+    const buckets = opts.buckets ?? [];
+
+    console.log(
+      `Creating FTH access key "${opts.keyName}" for tenant ${tenantId} with permissions [${permissions.join(
+        ', ',
+      )}] and bucket scopes [${buckets.join(', ')}]`,
+    );
+
     try {
       const accessKey = await client.createAccessKey(tenantId, storageUserId, {
         name: opts.keyName,
-        permissions: buildFthPermissions(opts.permissions, opts.granularPermissions),
-        buckets: opts.buckets ?? [],
+        permissions,
+        buckets,
         expiresAt: opts.expiresAt ?? null,
         idempotencyKey: `issue-key-${opts.keyName}`,
       });
@@ -337,17 +346,17 @@ function createInstrumentedFthClient(): FthManagementClient {
   return client;
 }
 
-const FTH_ALWAYS_PERMISSIONS: readonly string[] = [
-  's3:ListAllMyBuckets',
-  's3:GetBucketVersioning',
-  's3:GetBucketObjectLockConfiguration',
-];
+const FTH_ALWAYS_PERMISSIONS: readonly string[] = ['s3:ListAllMyBuckets'];
 
 const FTH_BASE_PERMISSIONS: Record<AccessKeyPermission, readonly string[]> = {
   read: ['s3:GetObject', 's3:ListBucket'],
   write: ['s3:PutObject'],
   list: ['s3:ListBucket'],
   delete: ['s3:DeleteObject'],
+  CreateBucket: ['s3:CreateBucket'],
+  DeleteBucket: ['s3:DeleteBucket'],
+  GetBucketVersioning: ['s3:GetBucketVersioning'],
+  GetBucketObjectLockConfiguration: ['s3:GetBucketObjectLockConfiguration'],
 };
 
 const FTH_GRANULAR_PERMISSIONS: Record<GranularPermission, string> = {
