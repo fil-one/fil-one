@@ -80,10 +80,9 @@ function toManifestEntry(record: Record<string, unknown>): ManifestEntry | null 
 export async function saveManifestEntry(
   region: S3Region,
   bucketId: string,
-  objectKey: string,
-  etag: string,
-  chunkKeys: string[],
+  entry: { objectKey: string; etag: string; chunkKeys: string[] },
 ): Promise<void> {
+  const { objectKey, etag, chunkKeys } = entry;
   await dynamo.send(
     new PutItemCommand({
       TableName: Resource.UserInfoTable.name,

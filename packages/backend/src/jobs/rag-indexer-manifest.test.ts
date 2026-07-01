@@ -86,7 +86,11 @@ describe('rag-indexer-manifest', () => {
     it('writes the manifest row with etag, chunk keys and count', async () => {
       ddbMock.on(PutItemCommand).resolves({});
 
-      await saveManifestEntry(S3Region.EuWest1, 'bucket-1', 'a.txt', 'e9', ['a.txt#0', 'a.txt#1']);
+      await saveManifestEntry(S3Region.EuWest1, 'bucket-1', {
+        objectKey: 'a.txt',
+        etag: 'e9',
+        chunkKeys: ['a.txt#0', 'a.txt#1'],
+      });
 
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.pk).toEqual({ S: 'BUCKET#eu-west-1#bucket-1' });

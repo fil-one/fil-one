@@ -34,6 +34,18 @@ const LOG = '[rag-indexer-helpers]';
 /** Content type whose extraction is routed through Textract and needs PDF options. */
 const PDF_CONTENT_TYPE = 'application/pdf';
 
+/**
+ * The core values that travel together through the whole bucket-indexing call
+ * chain. Bundled into one object so each helper stays under the param limit and
+ * the shared context is threaded explicitly rather than re-passed positionally.
+ */
+export interface BucketIndexContext {
+  s3: S3Client;
+  region: S3Region;
+  bucketName: string;
+  vectorStore: VectorStore;
+}
+
 export interface IndexBucketResult {
   added: number;
   updated: number;
@@ -80,12 +92,10 @@ interface PageOutcome {
  * correct.)
  */
 export async function indexBucket(
-  s3: S3Client,
-  region: S3Region,
-  bucketName: string,
-  vectorStore: VectorStore,
+  ctx: BucketIndexContext,
   options: IndexBucketOptions = {},
 ): Promise<IndexBucketResult> {
+  const { s3, region, bucketName, vectorStore } = ctx;
   await vectorStore.ensureIndex(region, bucketName);
 
   const manifest = await loadManifest(region, bucketName);
@@ -107,7 +117,7 @@ export async function indexBucket(
     }
 
     const page = await listObjects({ s3, bucket: bucketName, continuationToken });
-    const outcome = await diffAndIndexPage(s3, region, bucketName, vectorStore, manifest, page);
+    const outcome = await diffAndIndexPage(ctx, manifest, page);
     accumulate(totals, outcome);
     for (const object of page.objects) seen.add(object.key);
 
@@ -123,7 +133,7 @@ export async function indexBucket(
   // resumed run we skip this entirely to avoid deleting still-present objects
   // that were indexed in an earlier pass.
   if (startedFromBeginning) {
-    const removed = await reconcileRemovals(region, bucketName, vectorStore, manifest, seen);
+    const removed = await reconcileRemovals(ctx, manifest, seen);
     totals.removed += removed;
   } else {
     console.log(`${LOG} Skipping removal reconciliation on resumed run (partial enumeration)`, {
@@ -157,24 +167,14 @@ function accumulate(totals: PageOutcome, page: PageOutcome): void {
  * Each object is isolated: a failure is logged and counted, never thrown.
  */
 export async function diffAndIndexPage(
-  s3: S3Client,
-  region: S3Region,
-  bucketName: string,
-  vectorStore: VectorStore,
+  ctx: BucketIndexContext,
   manifest: Map<string, ManifestEntry>,
   page: { objects: S3Object[] },
 ): Promise<PageOutcome> {
   const outcome: PageOutcome = { added: 0, updated: 0, removed: 0, failed: 0 };
 
   for (const object of page.objects) {
-    const action = await classifyAndIndexObject(
-      s3,
-      region,
-      bucketName,
-      vectorStore,
-      manifest,
-      object,
-    );
+    const action = await classifyAndIndexObject(ctx, manifest, object);
     if (action === 'added') outcome.added++;
     else if (action === 'updated') outcome.updated++;
     else if (action === 'failed') outcome.failed++;
@@ -193,13 +193,11 @@ type ObjectAction = 'added' | 'updated' | 'skipped' | 'failed';
  * keeps going.
  */
 async function classifyAndIndexObject(
-  s3: S3Client,
-  region: S3Region,
-  bucketName: string,
-  vectorStore: VectorStore,
+  ctx: BucketIndexContext,
   manifest: Map<string, ManifestEntry>,
   object: S3Object,
 ): Promise<ObjectAction> {
+  const { region, bucketName, vectorStore } = ctx;
   const etag = object.etag;
   if (!etag) {
     console.warn(`${LOG} Object has no ETag, skipping`, { bucketName, key: object.key });
@@ -214,7 +212,7 @@ async function classifyAndIndexObject(
     if (existing) {
       await vectorStore.deleteChunks(region, bucketName, existing.chunkKeys);
     }
-    const indexed = await indexObject(s3, region, bucketName, vectorStore, object.key, etag);
+    const indexed = await indexObject(ctx, object.key, etag);
     if (!indexed) return 'skipped';
     return existing ? 'updated' : 'added';
   } catch (error) {
@@ -234,13 +232,11 @@ async function classifyAndIndexObject(
  * or no text — those are simply not indexed.
  */
 async function indexObject(
-  s3: S3Client,
-  region: S3Region,
-  bucketName: string,
-  vectorStore: VectorStore,
+  ctx: BucketIndexContext,
   objectKey: string,
   etag: string,
 ): Promise<boolean> {
+  const { s3, region, bucketName, vectorStore } = ctx;
   const { bytes, contentType: storedType } = await getObjectBytes(s3, bucketName, objectKey);
   const contentType = resolveContentType(objectKey, storedType);
   if (!contentType) {
@@ -274,13 +270,11 @@ async function indexObject(
   }));
 
   await vectorStore.upsertChunks(region, bucketName, chunks);
-  await saveManifestEntry(
-    region,
-    bucketName,
+  await saveManifestEntry(region, bucketName, {
     objectKey,
     etag,
-    chunks.map((c) => c.key),
-  );
+    chunkKeys: chunks.map((c) => c.key),
+  });
   return true;
 }
 
@@ -290,12 +284,11 @@ async function indexObject(
  * Returns the number of objects removed. Failures are isolated per object.
  */
 async function reconcileRemovals(
-  region: S3Region,
-  bucketName: string,
-  vectorStore: VectorStore,
+  ctx: BucketIndexContext,
   manifest: Map<string, ManifestEntry>,
   seen: Set<string>,
 ): Promise<number> {
+  const { region, bucketName, vectorStore } = ctx;
   let removed = 0;
   for (const [objectKey, entry] of manifest) {
     if (seen.has(objectKey)) continue;
