@@ -178,7 +178,7 @@ describe('S3VectorsStore', () => {
       const deleted = s3vMock.commandCalls(DeleteVectorsCommand)[0]!.args[0]!.input;
       expect(deleted.keys).toEqual(['doc.pdf#0']);
 
-      const results = await store.query(REGION, INDEX, embedding(), 5);
+      const results = await store.query(REGION, INDEX, embedding(), { k: 5 });
       expect(results.map((r) => r.key)).toEqual(['doc.pdf#1']);
     });
   });
@@ -195,8 +195,9 @@ describe('S3VectorsStore', () => {
         ],
       });
 
-      const results = await makeStore().query(REGION, INDEX, embedding(), 3, {
-        objectKey: 'doc.pdf',
+      const results = await makeStore().query(REGION, INDEX, embedding(), {
+        k: 3,
+        filters: { objectKey: 'doc.pdf' },
       });
 
       const input = s3vMock.commandCalls(QueryVectorsCommand)[0]!.args[0]!.input;
@@ -222,7 +223,7 @@ describe('S3VectorsStore', () => {
 
     it('omits the filter when none is provided and tolerates missing vectors', async () => {
       s3vMock.on(QueryVectorsCommand).resolves({});
-      const results = await makeStore().query(REGION, INDEX, embedding(), 1);
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 1 });
       expect(results).toEqual([]);
       expect(s3vMock.commandCalls(QueryVectorsCommand)[0]!.args[0]!.input.filter).toBeUndefined();
     });
@@ -231,7 +232,7 @@ describe('S3VectorsStore', () => {
       s3vMock.on(QueryVectorsCommand).resolves({
         vectors: [malformed({ distance: 0.1, metadata: { text: 'orphan', objectKey: 'doc.pdf' } })],
       });
-      const results = await makeStore().query(REGION, INDEX, embedding(), 5);
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 5 });
       expect(results).toEqual([]);
     });
 
@@ -239,7 +240,7 @@ describe('S3VectorsStore', () => {
       s3vMock.on(QueryVectorsCommand).resolves({
         vectors: [{ key: '', distance: 0.1, metadata: { text: 'orphan', objectKey: 'doc.pdf' } }],
       });
-      const results = await makeStore().query(REGION, INDEX, embedding(), 5);
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 5 });
       expect(results).toEqual([]);
     });
 
@@ -253,7 +254,7 @@ describe('S3VectorsStore', () => {
           }),
         ],
       });
-      const results = await makeStore().query(REGION, INDEX, embedding(), 5);
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 5 });
       expect(results).toEqual([]);
     });
 
@@ -263,7 +264,7 @@ describe('S3VectorsStore', () => {
           malformed({ key: 'doc.pdf#0', metadata: { text: 'no score', objectKey: 'doc.pdf' } }),
         ],
       });
-      const results = await makeStore().query(REGION, INDEX, embedding(), 5);
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 5 });
       expect(results).toEqual([]);
     });
 
@@ -284,7 +285,7 @@ describe('S3VectorsStore', () => {
           },
         ],
       });
-      const results = await makeStore().query(REGION, INDEX, embedding(), 5);
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 5 });
       expect(results).toEqual([
         { key: 'doc.pdf#0', text: 'good', metadata: { objectKey: 'doc.pdf' }, score: 0.1 },
         { key: 'doc.pdf#3', text: 'also good', metadata: { objectKey: 'doc.pdf' }, score: 0.4 },
@@ -297,7 +298,7 @@ describe('S3VectorsStore', () => {
           { key: 'doc.pdf#0', distance: 0, metadata: { text: 'identical', objectKey: 'doc.pdf' } },
         ],
       });
-      const results = await makeStore().query(REGION, INDEX, embedding(), 5);
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 5 });
       expect(results).toEqual([
         { key: 'doc.pdf#0', text: 'identical', metadata: { objectKey: 'doc.pdf' }, score: 0 },
       ]);

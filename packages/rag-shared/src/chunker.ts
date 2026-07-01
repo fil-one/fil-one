@@ -31,9 +31,9 @@ function normalizeWhitespace(text: string): string {
 }
 
 /**
- * Recursively split `text` into pieces no larger than `chunkSize`, trying each
- * separator in {@link SEPARATORS} in turn. The returned pieces are *not* yet
- * merged or overlapped; {@link mergePieces} does that.
+ * Hard-split `text` into fixed-size pieces of up to `chunkSize` characters.
+ * Used as the last resort by {@link splitToPieces} when no separator can keep
+ * an oversized token within the target size.
  */
 function hardSplit(text: string, chunkSize: number): string[] {
   const pieces: string[] = [];

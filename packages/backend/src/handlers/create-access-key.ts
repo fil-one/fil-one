@@ -70,7 +70,7 @@ export async function baseHandler(
     });
   } catch (err) {
     if (err instanceof AccessKeyAlreadyExistsError) {
-      await recoverDuplicateKey(orgId, tenantId, keyName, region, orchestrator);
+      await recoverDuplicateKey({ orgId, tenantId, keyName, region, orchestrator });
       return new ResponseBuilder()
         .status(409)
         .body<ErrorResponse>({ message: 'An access key with this name already exists' })
@@ -117,13 +117,21 @@ export async function baseHandler(
     .build();
 }
 
-async function recoverDuplicateKey(
-  orgId: string,
-  tenantId: string,
-  keyName: string,
-  region: S3Region,
-  orchestrator: ServiceOrchestrator,
-): Promise<void> {
+interface RecoverDuplicateKeyParams {
+  orgId: string;
+  tenantId: string;
+  keyName: string;
+  region: S3Region;
+  orchestrator: ServiceOrchestrator;
+}
+
+async function recoverDuplicateKey({
+  orgId,
+  tenantId,
+  keyName,
+  region,
+  orchestrator,
+}: RecoverDuplicateKeyParams): Promise<void> {
   // Check if we already have a DynamoDB record for this key
   const { Items: existingKeys } = await getDynamoClient().send(
     new QueryCommand({

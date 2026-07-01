@@ -73,9 +73,10 @@ function findEndOfCentralDirectory(buffer: Buffer): number {
  * Decompress one entry's payload given its compression method, bounding the
  * output against the shared budget. A DEFLATE entry is capped per-entry via
  * `maxOutputLength` (zlib throws `ERR_BUFFER_TOO_LARGE` before allocating the
- * full output) and then charged against the aggregate budget. STORED payloads
- * are a view into the source buffer, already bounded by the input size, so they
- * are returned directly without copying.
+ * full output) and then charged against the aggregate budget. A STORED entry is
+ * uncompressed, so its payload length is the output size; that length comes from
+ * the attacker-controlled compressedSize header, so it is charged against the
+ * same per-entry and aggregate caps before the (uncopied) view is returned.
  */
 function decompress(
   method: number,
@@ -84,6 +85,18 @@ function decompress(
   budget: DecompressBudget,
 ): Uint8Array {
   if (method === METHOD_STORED) {
+    // STORED is uncompressed: the payload length IS the output size, and it
+    // derives from the attacker-controlled compressedSize header. Charge it
+    // against both caps exactly like a DEFLATE entry.
+    if (payload.length > budget.perEntry) {
+      throw new Error(
+        `ZIP entry "${name}" exceeds the ${budget.perEntry}-byte decompression limit`,
+      );
+    }
+    if (payload.length > budget.remaining) {
+      throw new Error(`ZIP archive exceeds the ${budget.total}-byte aggregate decompression limit`);
+    }
+    budget.remaining -= payload.length;
     return payload;
   }
   if (method === METHOD_DEFLATED) {
@@ -130,6 +143,12 @@ function readCentralEntry(buffer: Buffer, offset: number): CentralEntry {
   const localNameLength = buffer.readUInt16LE(localHeaderOffset + 26);
   const localExtraLength = buffer.readUInt16LE(localHeaderOffset + 28);
   const dataStart = localHeaderOffset + 30 + localNameLength + localExtraLength;
+  // subarray clamps out-of-range bounds silently, so a truncated archive would
+  // yield a short payload (and, for STORED entries, partial extraction) instead
+  // of an error. Validate the slice lies fully within the buffer first.
+  if (dataStart + compressedSize > buffer.length) {
+    throw new Error(`Malformed ZIP: truncated payload for entry "${name}"`);
+  }
   const payload = buffer.subarray(dataStart, dataStart + compressedSize);
 
   const next = offset + 46 + nameLength + extraLength + commentLength;
