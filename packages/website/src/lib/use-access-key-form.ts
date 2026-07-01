@@ -7,7 +7,13 @@ import type {
   GranularPermission,
   S3Region,
 } from '@filone/shared';
-import { CreateAccessKeySchema, GRANULAR_PERMISSION_MAP } from '@filone/shared';
+import {
+  CreateAccessKeySchema,
+  GRANULAR_PERMISSION_MAP,
+  isBucketPermission,
+  isObjectPermission,
+  supportsBucketManagement,
+} from '@filone/shared';
 import { createAccessKey } from './api.js';
 import { expiresAtFromForm } from './time.js';
 import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';
@@ -22,7 +28,13 @@ export type UseAccessKeyFormOptions = {
   onSuccess: (response: CreateAccessKeyResponse) => void;
 };
 
-const FALLBACK_PERMISSIONS: AccessKeyPermission[] = ['read', 'write', 'list'];
+const FALLBACK_PERMISSIONS: AccessKeyPermission[] = [
+  'read',
+  'write',
+  'list',
+  'GetBucketVersioning',
+  'GetBucketObjectLockConfiguration',
+];
 
 export function useAccessKeyForm({
   defaultBucket,
@@ -52,6 +64,10 @@ export function useAccessKeyForm({
     if (prevRegionRef.current === region) return;
     prevRegionRef.current = region;
     setSelectedBuckets([]);
+    // Drop bucket-management permissions when the new region can't support them.
+    if (!supportsBucketManagement(region)) {
+      setPermissions((prev) => prev.filter((p) => !isBucketPermission(p)));
+    }
   }, [region]);
 
   const candidatePayload = {
@@ -67,8 +83,10 @@ export function useAccessKeyForm({
 
   function handlePermissionsChange(newPermissions: AccessKeyPermission[]) {
     setPermissions(newPermissions);
-    // Remove granular permissions that no longer belong to any selected basic permission
-    const validGranular = new Set(newPermissions.flatMap((p) => GRANULAR_PERMISSION_MAP[p]));
+    // Remove granulars that no longer belong to any selected object permission.
+    const validGranular = new Set(
+      newPermissions.filter(isObjectPermission).flatMap((p) => GRANULAR_PERMISSION_MAP[p]),
+    );
     setGranularPermissions((prev) => prev.filter((g) => validGranular.has(g)));
   }
 

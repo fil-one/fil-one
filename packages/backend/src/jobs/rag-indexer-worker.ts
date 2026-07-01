@@ -161,7 +161,7 @@ async function indexRegion(args: IndexRegionArgs): Promise<number> {
   let indexed = 0;
   for (const bucketName of bucketNames) {
     try {
-      await indexBucket(s3, region, bucketName, vectorStore, { deadlineEpochMs });
+      await indexBucket({ s3, region, bucketName, vectorStore }, { deadlineEpochMs });
       indexed++;
     } catch (error) {
       // Persist the failure so the UI can surface "Sync failed" + the reason.

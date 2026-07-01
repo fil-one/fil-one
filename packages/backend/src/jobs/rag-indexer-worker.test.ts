@@ -158,10 +158,12 @@ describe('rag-indexer-worker', () => {
 
     expect(mockIndexBucket).toHaveBeenCalledOnce();
     expect(mockIndexBucket).toHaveBeenCalledWith(
-      fakeS3Client,
-      S3Region.EuWest1,
-      'b1',
-      expect.anything(),
+      {
+        s3: fakeS3Client,
+        region: S3Region.EuWest1,
+        bucketName: 'b1',
+        vectorStore: expect.anything(),
+      },
       expect.objectContaining({ deadlineEpochMs: expect.any(Number) }),
     );
   });
@@ -212,10 +214,12 @@ describe('rag-indexer-worker', () => {
 
     expect(mockIndexBucket).toHaveBeenCalledOnce();
     expect(mockIndexBucket).toHaveBeenCalledWith(
-      fakeS3Client,
-      S3Region.UsEast1,
-      'b2',
-      expect.anything(),
+      {
+        s3: fakeS3Client,
+        region: S3Region.UsEast1,
+        bucketName: 'b2',
+        vectorStore: expect.anything(),
+      },
       expect.anything(),
     );
   });
@@ -301,7 +305,7 @@ describe('rag-indexer-worker', () => {
     const after = Date.now();
 
     expect(mockIndexBucket).toHaveBeenCalledOnce();
-    const deadlineEpochMs = mockIndexBucket.mock.calls[0][4].deadlineEpochMs as number;
+    const deadlineEpochMs = mockIndexBucket.mock.calls[0][1].deadlineEpochMs as number;
     // Deadline = now + (remaining - 60s headroom). It must be a real, finite,
     // future deadline (not Infinity) and strictly earlier than the hard timeout.
     expect(Number.isFinite(deadlineEpochMs)).toBe(true);
@@ -321,7 +325,7 @@ describe('rag-indexer-worker', () => {
     );
 
     expect(mockIndexBucket).toHaveBeenCalledOnce();
-    const deadlineEpochMs = mockIndexBucket.mock.calls[0][4].deadlineEpochMs as number;
+    const deadlineEpochMs = mockIndexBucket.mock.calls[0][1].deadlineEpochMs as number;
     expect(deadlineEpochMs).toBe(Number.POSITIVE_INFINITY);
   });
 

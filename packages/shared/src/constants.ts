@@ -78,6 +78,15 @@ export function isSupportedRegion(
 }
 
 /**
+ * Whether the region supports bucket-management operations (create/delete) via
+ * the S3 API. Supported everywhere except the Aurora region (`eu-west-1`), which
+ * cannot manage buckets through the S3 API.
+ */
+export function supportsBucketManagement(region: S3Region): boolean {
+  return region !== S3Region.EuWest1;
+}
+
+/**
  * Build the S3-compatible endpoint URL for a given region and stage.
  * e.g. https://eu-west-1.s3.fil.one (production) or https://eu-west-1.s3.staging.fil.one (non-prod).
  */

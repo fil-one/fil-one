@@ -129,7 +129,7 @@ describe('indexBucket', () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([]));
 
-    await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
     expect(vectorStore.ensureIndex).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1');
   });
@@ -138,7 +138,7 @@ describe('indexBucket', () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
-    await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
     expect(mockListObjects).toHaveBeenCalledWith({
       s3,
@@ -155,7 +155,12 @@ describe('indexBucket', () => {
     mockChunk.mockReturnValue(['c0', 'c1']);
     mockEmbedMany.mockResolvedValue([[0.1], [0.2]]);
 
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
 
     expect(mockExtractText).toHaveBeenCalledOnce();
     expect(mockEmbedMany).toHaveBeenCalledWith(['c0', 'c1']);
@@ -163,13 +168,11 @@ describe('indexBucket', () => {
       { key: 'a.txt#0', text: 'c0', metadata: { objectKey: 'a.txt' }, embedding: [0.1] },
       { key: 'a.txt#1', text: 'c1', metadata: { objectKey: 'a.txt' }, embedding: [0.2] },
     ]);
-    expect(mockSaveManifestEntry).toHaveBeenCalledWith(
-      S3Region.EuWest1,
-      'bucket-1',
-      'a.txt',
-      'e1',
-      ['a.txt#0', 'a.txt#1'],
-    );
+    expect(mockSaveManifestEntry).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', {
+      objectKey: 'a.txt',
+      etag: 'e1',
+      chunkKeys: ['a.txt#0', 'a.txt#1'],
+    });
     expect(result).toMatchObject({ added: 1, updated: 0, removed: 0, failed: 0, completed: true });
   });
 
@@ -185,19 +188,22 @@ describe('indexBucket', () => {
     mockGetObjectBytes.mockResolvedValue({ bytes, contentType: 'application/pdf' });
     mockExtractText.mockResolvedValue('pdf text');
 
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
 
     expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf', {
       pdf: { documentLocation: { Bucket: 'bucket-1', Name: 'doc.pdf' } },
     });
     expect(vectorStore.upsertChunks).toHaveBeenCalledOnce();
-    expect(mockSaveManifestEntry).toHaveBeenCalledWith(
-      S3Region.EuWest1,
-      'bucket-1',
-      'doc.pdf',
-      'e1',
-      ['doc.pdf#0'],
-    );
+    expect(mockSaveManifestEntry).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', {
+      objectKey: 'doc.pdf',
+      etag: 'e1',
+      chunkKeys: ['doc.pdf#0'],
+    });
     expect(result).toMatchObject({ added: 1, failed: 0, completed: true });
   });
 
@@ -208,7 +214,7 @@ describe('indexBucket', () => {
     // Stored content type carries no signal; the .pdf extension drives the type.
     mockGetObjectBytes.mockResolvedValue({ bytes, contentType: 'application/octet-stream' });
 
-    await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
     expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf', {
       pdf: { documentLocation: { Bucket: 'bucket-1', Name: 'report.pdf' } },
@@ -219,7 +225,7 @@ describe('indexBucket', () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
-    await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
     expect(mockExtractText).toHaveBeenCalledWith(new Uint8Array([1]), 'text/plain', {});
   });
@@ -233,7 +239,12 @@ describe('indexBucket', () => {
     });
     mockExtractText.mockRejectedValue(new Error('Textract job failed'));
 
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
 
     expect(vectorStore.upsertChunks).not.toHaveBeenCalled();
     expect(mockSaveManifestEntry).not.toHaveBeenCalled();
@@ -250,19 +261,22 @@ describe('indexBucket', () => {
     mockChunk.mockReturnValue(['c0']);
     mockEmbedMany.mockResolvedValue([[0.9]]);
 
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
 
     expect(vectorStore.deleteChunks).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', [
       'a.txt#0',
     ]);
     expect(vectorStore.upsertChunks).toHaveBeenCalledOnce();
-    expect(mockSaveManifestEntry).toHaveBeenCalledWith(
-      S3Region.EuWest1,
-      'bucket-1',
-      'a.txt',
-      'new',
-      ['a.txt#0'],
-    );
+    expect(mockSaveManifestEntry).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', {
+      objectKey: 'a.txt',
+      etag: 'new',
+      chunkKeys: ['a.txt#0'],
+    });
     expect(result).toMatchObject({ added: 0, updated: 1, removed: 0 });
   });
 
@@ -274,7 +288,12 @@ describe('indexBucket', () => {
     );
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'same' }]));
 
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
 
     expect(mockGetObjectBytes).not.toHaveBeenCalled();
     expect(mockExtractText).not.toHaveBeenCalled();
@@ -296,7 +315,12 @@ describe('indexBucket', () => {
     );
     mockListObjects.mockResolvedValue(page([]));
 
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
 
     expect(vectorStore.deleteChunks).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', [
       'gone.txt#0',
@@ -318,17 +342,20 @@ describe('indexBucket', () => {
       .mockRejectedValueOnce(new Error('S3 read failed'))
       .mockResolvedValue({ bytes: new Uint8Array([1]), contentType: 'text/plain' });
 
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
 
     expect(result).toMatchObject({ added: 1, failed: 1, completed: true });
     expect(mockSaveManifestEntry).toHaveBeenCalledOnce();
-    expect(mockSaveManifestEntry).toHaveBeenCalledWith(
-      S3Region.EuWest1,
-      'bucket-1',
-      'good.txt',
-      'e2',
-      ['good.txt#0'],
-    );
+    expect(mockSaveManifestEntry).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', {
+      objectKey: 'good.txt',
+      etag: 'e2',
+      chunkKeys: ['good.txt#0'],
+    });
   });
 
   it('skips objects with no usable content type without failing the run', async () => {
@@ -336,7 +363,12 @@ describe('indexBucket', () => {
     mockListObjects.mockResolvedValue(page([{ key: 'photo.png', etag: 'e1' }]));
     mockGetObjectBytes.mockResolvedValue({ bytes: new Uint8Array([1]), contentType: undefined });
 
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
 
     expect(mockExtractText).not.toHaveBeenCalled();
     expect(vectorStore.upsertChunks).not.toHaveBeenCalled();
@@ -347,7 +379,12 @@ describe('indexBucket', () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt' }]));
 
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
 
     expect(mockGetObjectBytes).not.toHaveBeenCalled();
     expect(result).toMatchObject({ added: 0, failed: 0 });
@@ -363,7 +400,12 @@ describe('indexBucket', () => {
       .mockResolvedValueOnce(page([{ key: 'a.txt', etag: 'e1' }], 'tok-1'))
       .mockResolvedValueOnce(page([{ key: 'b.txt', etag: 'e2' }]));
 
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
 
     expect(mockListObjects).toHaveBeenNthCalledWith(1, {
       s3,
@@ -384,7 +426,7 @@ describe('indexBucket', () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
-    await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
     expect(mockClearCheckpoint).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1');
   });
@@ -402,7 +444,7 @@ describe('indexBucket', () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
-    await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
     expect(mockListObjects).toHaveBeenCalledWith({
       s3,
@@ -434,7 +476,12 @@ describe('indexBucket', () => {
     // The resumed invocation only lists the final page (page 2).
     mockListObjects.mockResolvedValue(page([{ key: 'b.txt', etag: 'e2' }]));
 
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
 
     // a.txt still exists in S3 — it must NOT be removed from the index.
     expect(vectorStore.deleteChunks).not.toHaveBeenCalled();
@@ -455,7 +502,12 @@ describe('indexBucket', () => {
     );
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
 
     expect(vectorStore.deleteChunks).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', [
       'gone.txt#0',
@@ -469,9 +521,10 @@ describe('indexBucket', () => {
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }], 'next-tok'));
 
     // Deadline already passed: indexBucket must checkpoint without listing.
-    const result = await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore, {
-      deadlineEpochMs: Date.now() - 1,
-    });
+    const result = await indexBucket(
+      { s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore },
+      { deadlineEpochMs: Date.now() - 1 },
+    );
 
     expect(mockListObjects).not.toHaveBeenCalled();
     expect(mockSaveCheckpoint).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', undefined);
@@ -495,7 +548,7 @@ describe('indexBucket', () => {
       mockLoadManifest.mockResolvedValue(manifestOf([]));
       mockListObjects.mockResolvedValue(page([]));
 
-      await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+      await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
       // The first telemetry write is the syncing marker, keyed by (region,
       // bucketName). It must write syncState only — never the enablement `status`.
@@ -527,7 +580,7 @@ describe('indexBucket', () => {
       );
 
       const before = Date.now();
-      await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+      await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
       const after = Date.now();
 
       const success = telemetryCall('idle');
@@ -548,9 +601,12 @@ describe('indexBucket', () => {
       mockLoadManifest.mockResolvedValue(manifestOf([]));
       mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }], 'next-tok'));
 
-      await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore, {
-        deadlineEpochMs: Date.now() - 1,
-      });
+      await indexBucket(
+        { s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore },
+        {
+          deadlineEpochMs: Date.now() - 1,
+        },
+      );
 
       // Syncing marker fired; no idle (success) snapshot on an incomplete run.
       expect(telemetryCall('syncing')).toBeDefined();
@@ -569,7 +625,7 @@ describe('indexBucket', () => {
       mockLoadManifest.mockResolvedValue(manifestOf([]));
       mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
-      await indexBucket(s3, S3Region.EuWest1, 'bucket-1', vectorStore);
+      await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
       // A resumed run's counts are not authoritative, so no idle (success) snapshot.
       expect(telemetryCall('idle')).toBeUndefined();

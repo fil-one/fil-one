@@ -158,6 +158,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "RagIndexerTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
     "RagIndexerOrchestrator": {
       "name": string
       "type": "sst.aws.Function"

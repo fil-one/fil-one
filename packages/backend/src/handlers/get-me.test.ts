@@ -103,6 +103,7 @@ describe('GET /api/me handler', () => {
       .on(GetItemCommand, {
         TableName: 'UserInfoTable',
         Key: { pk: { S: `ALLOWLIST#${MOCK_EMAIL}` }, sk: { S: 'RAG' } },
+        ConsistentRead: true,
       })
       .resolves({ Item: undefined });
   });
@@ -414,6 +415,7 @@ describe('GET /api/me handler', () => {
         .on(GetItemCommand, {
           TableName: 'UserInfoTable',
           Key: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } },
+          ConsistentRead: true,
         })
         .resolves({ Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } } });
 
@@ -431,6 +433,7 @@ describe('GET /api/me handler', () => {
         .on(GetItemCommand, {
           TableName: 'UserInfoTable',
           Key: { pk: { S: 'ALLOWLIST#eve@example.com' }, sk: { S: 'RAG' } },
+          ConsistentRead: true,
         })
         .resolves({ Item: undefined });
 
@@ -449,6 +452,7 @@ describe('GET /api/me handler', () => {
         .on(GetItemCommand, {
           TableName: 'UserInfoTable',
           Key: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } },
+          ConsistentRead: true,
         })
         .resolves({ Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } } });
 

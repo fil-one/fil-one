@@ -10,6 +10,7 @@ export default defineConfig({
       { max: 100, skipBlankLines: true, skipComments: true, IIFEs: false },
     ],
     'complexity/complexity': ['error', { cyclomatic: 20, cognitive: 15 }],
+    'max-params': ['error', { max: 4 }],
     'typescript/no-explicit-any': 'error',
     'typescript/no-floating-promises': 'error',
   },

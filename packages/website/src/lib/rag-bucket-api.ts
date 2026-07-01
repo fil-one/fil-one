@@ -32,6 +32,16 @@ export type RagBucket = {
   lastSyncError?: string;
 };
 
+/**
+ * Stable, collision-free identifier for a bucket. Bucket names are only
+ * region-scoped (not globally unique), so `name` alone is unsafe as a React
+ * key or state lookup — two buckets sharing a name across regions would
+ * collide. Qualify with the region.
+ */
+export function bucketKey(bucket: Pick<RagBucket, 'name' | 'region'>): string {
+  return `${bucket.region}:${bucket.name}`;
+}
+
 /** List the caller's buckets — reuses GET /api/buckets. */
 export function listBucketsForRag(): Promise<ListBucketsResponse> {
   return apiRequest<ListBucketsResponse>('/buckets');

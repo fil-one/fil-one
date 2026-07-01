@@ -41,6 +41,7 @@ export async function isAllowlisted(verifiedEmail: string): Promise<boolean> {
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: { pk: { S: `ALLOWLIST#${verifiedEmail.toLowerCase()}` }, sk: { S: RAG_FLAG_SK } },
+      ConsistentRead: true,
     }),
   );
   return Item !== undefined;

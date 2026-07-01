@@ -42,6 +42,8 @@ export function BucketActionMenu({ onDisable }: BucketActionMenuProps) {
         ref={buttonRef}
         type="button"
         aria-label="Bucket actions"
+        aria-expanded={open}
+        aria-haspopup="menu"
         onClick={handleOpen}
         className="rounded p-1.5 text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
       >
@@ -50,11 +52,13 @@ export function BucketActionMenu({ onDisable }: BucketActionMenuProps) {
       {open && (
         <div
           ref={menuRef}
+          role="menu"
           style={{ top: pos.top, right: pos.right }}
           className="fixed z-50 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
         >
           <button
             type="button"
+            role="menuitem"
             onClick={() => {
               setOpen(false);
               onDisable();
