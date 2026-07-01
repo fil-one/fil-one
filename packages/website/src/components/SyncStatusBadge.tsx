@@ -3,8 +3,8 @@ import { type RagBucket } from '../lib/rag-bucket-api.js';
 /**
  * Compact sync-status badge driven by the indexer telemetry (FIL-556). Renders
  * "Syncing…" while a reconciliation is in flight and "Sync failed" with the
- * reason (in the tooltip + visible text) on error. Returns null for the steady
- * `idle`/absent state, which the surrounding row already describes via the
+ * reason in the tooltip on error. Returns null for the steady `idle`/absent
+ * state, which the surrounding row already describes via the
  * files/size/last-synced line. Independent of enablement: a syncing/errored
  * bucket is still enabled and queryable.
  */
