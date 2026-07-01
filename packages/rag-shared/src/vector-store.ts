@@ -11,6 +11,16 @@ export interface EnsureIndexOptions {
 }
 
 /**
+ * Options accepted by {@link VectorStore.query}.
+ */
+export interface QueryOptions {
+  /** Maximum number of results to return, ordered closest-first. */
+  k: number;
+  /** Filters applied against filterable metadata. */
+  filters?: Record<string, unknown>;
+}
+
+/**
  * Store-agnostic abstraction over a vector database used by the RAG feature.
  *
  * There is one index per RAG-enabled bucket. Because S3 bucket names are unique
@@ -42,16 +52,15 @@ export interface VectorStore {
   deleteChunks(region: string, bucketName: string, keys: string[]): Promise<void>;
 
   /**
-   * k-NN search over the index, returning up to `k` results ordered from closest
-   * to farthest match (lower `score`/distance = more similar). `filters` are
-   * applied against filterable metadata.
+   * k-NN search over the index, returning up to `options.k` results ordered from
+   * closest to farthest match (lower `score`/distance = more similar).
+   * `options.filters` are applied against filterable metadata.
    */
   query(
     region: string,
     bucketName: string,
     embedding: number[],
-    k: number,
-    filters?: Record<string, unknown>,
+    options: QueryOptions,
   ): Promise<VectorQueryResult[]>;
 
   /**

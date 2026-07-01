@@ -52,6 +52,10 @@ declare module "sst" {
       name: string;
       type: "sst.aws.Dynamo";
     };
+    RagIndexerTable: {
+      name: string;
+      type: "sst.aws.Dynamo";
+    };
     AuroraTenantSetupQueue: {
       url: string;
       type: "sst.aws.Queue";

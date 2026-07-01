@@ -42,6 +42,7 @@ import {
   _resetSsmCacheForTesting,
 } from './aurora-portal.js';
 import { AccessKeyAlreadyExistsError } from '../errors.js';
+import { ACCESS_KEY_PERMISSIONS } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -306,15 +307,7 @@ describe('getAuroraPortalApiKey', () => {
 
 // Base-only access array produced by buildAuroraAccessArray(['read','write','list','delete'])
 // (no granular permissions — new default behavior)
-const EXPECTED_BASE_ACCESS = [
-  'Default',
-  'GetBucketVersioning',
-  'GetBucketObjectLockConfiguration',
-  'Read',
-  'Write',
-  'List',
-  'Delete',
-];
+const EXPECTED_BASE_ACCESS = ['Default', 'Read', 'Write', 'List', 'Delete'];
 
 // ---------------------------------------------------------------------------
 // buildAuroraAccessArray
@@ -328,25 +321,31 @@ describe('buildAuroraAccessArray', () => {
   });
 
   it('returns only always-included + single base action for one permission', () => {
-    expect(buildAuroraAccessArray(['read'])).toStrictEqual([
-      'Default',
-      'GetBucketVersioning',
-      'GetBucketObjectLockConfiguration',
-      'Read',
-    ]);
+    expect(buildAuroraAccessArray(['read'])).toStrictEqual(['Default', 'Read']);
   });
 
   it('includes granular permissions when provided', () => {
     expect(
       buildAuroraAccessArray(['read'], ['GetObjectVersion', 'GetObjectRetention']),
-    ).toStrictEqual([
-      'Default',
-      'GetBucketVersioning',
-      'GetBucketObjectLockConfiguration',
-      'Read',
-      'GetObjectVersion',
-      'GetObjectRetention',
-    ]);
+    ).toStrictEqual(['Default', 'Read', 'GetObjectVersion', 'GetObjectRetention']);
+  });
+
+  it('appends bucket-info access types when those permissions are selected', () => {
+    expect(
+      buildAuroraAccessArray(['GetBucketVersioning', 'GetBucketObjectLockConfiguration']),
+    ).toStrictEqual(['Default', 'GetBucketVersioning', 'GetBucketObjectLockConfiguration']);
+  });
+
+  it('omits bucket-info access types when those permissions are not selected', () => {
+    const access = buildAuroraAccessArray(['read']);
+    expect(access).not.toContain('GetBucketVersioning');
+    expect(access).not.toContain('GetBucketObjectLockConfiguration');
+  });
+
+  it('includes bucket-info access types for the internal full-access (filone-console) key', () => {
+    const access = buildAuroraAccessArray([...ACCESS_KEY_PERMISSIONS]);
+    expect(access).toContain('GetBucketVersioning');
+    expect(access).toContain('GetBucketObjectLockConfiguration');
   });
 
   it('includes all granular permissions for full access', () => {
@@ -446,14 +445,7 @@ describe('createAuroraAccessKey', () => {
       path: { tenantId: 'tenant-1' },
       body: {
         name: 'my-key',
-        access: [
-          'Default',
-          'GetBucketVersioning',
-          'GetBucketObjectLockConfiguration',
-          'Read',
-          'GetObjectVersion',
-          'GetObjectRetention',
-        ],
+        access: ['Default', 'Read', 'GetObjectVersion', 'GetObjectRetention'],
       },
       throwOnError: false,
     });

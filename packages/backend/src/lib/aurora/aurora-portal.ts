@@ -11,10 +11,13 @@ import {
 } from '@filone/aurora-portal-client';
 import type {
   AccessKeyPermission,
+  BucketInfoPermission,
   GranularPermission,
+  ObjectPermission,
   RetentionDurationType,
   RetentionMode,
 } from '@filone/shared';
+import { isBucketInfoPermission, isObjectPermission } from '@filone/shared';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -98,28 +101,35 @@ export async function createAuroraBucket({
   console.log(`Aurora bucket "${bucketName}" created for tenant ${tenantId}`);
 }
 
-// Always-included Aurora access types required for Object Lock / versioning.
-const AURORA_ACCESS_ALWAYS: string[] = [
-  'Default',
-  'GetBucketVersioning',
-  'GetBucketObjectLockConfiguration',
-];
+// Always-included Aurora access type.
+const AURORA_ACCESS_ALWAYS: string[] = ['Default'];
 
-// Maps basic permissions to their base Aurora access type.
-const AURORA_BASE_ACTION: Record<AccessKeyPermission, string> = {
+// Maps object permissions to their base Aurora access type. Bucket-management
+// permissions are unsupported in the Aurora region and never reach this mapping.
+const AURORA_BASE_ACTION: Record<ObjectPermission, string> = {
   read: 'Read',
   write: 'Write',
   list: 'List',
   delete: 'Delete',
 };
 
+// Maps bucket-info permissions to their Aurora access type. These are
+// user-selectable and available in every region (including Aurora).
+const AURORA_BUCKET_INFO_ACTION: Record<BucketInfoPermission, string> = {
+  GetBucketVersioning: 'GetBucketVersioning',
+  GetBucketObjectLockConfiguration: 'GetBucketObjectLockConfiguration',
+};
+
 export function buildAuroraAccessArray(
   permissions: AccessKeyPermission[],
   granularPermissions?: GranularPermission[],
 ): string[] {
-  const base = permissions.map((p) => AURORA_BASE_ACTION[p]);
+  const base = permissions.filter(isObjectPermission).map((p) => AURORA_BASE_ACTION[p]);
+  const bucketInfo = permissions
+    .filter(isBucketInfoPermission)
+    .map((p) => AURORA_BUCKET_INFO_ACTION[p]);
   const granular = granularPermissions ?? [];
-  return [...AURORA_ACCESS_ALWAYS, ...base, ...granular];
+  return [...AURORA_ACCESS_ALWAYS, ...base, ...bucketInfo, ...granular];
 }
 
 export interface CreateAuroraAccessKeyOptions {
