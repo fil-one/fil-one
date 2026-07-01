@@ -20,6 +20,7 @@ const {
   mockLoadCheckpoint,
   mockSaveCheckpoint,
   mockClearCheckpoint,
+  mockUpdateBucketTelemetry,
 } = vi.hoisted(() => ({
   mockListObjects: vi.fn(),
   mockGetObjectBytes: vi.fn(),
@@ -32,11 +33,16 @@ const {
   mockLoadCheckpoint: vi.fn(),
   mockSaveCheckpoint: vi.fn(),
   mockClearCheckpoint: vi.fn(),
+  mockUpdateBucketTelemetry: vi.fn(),
 }));
 
 vi.mock('../lib/s3-bucket-operations.js', () => ({
   listObjects: mockListObjects,
   getObjectBytes: mockGetObjectBytes,
+}));
+
+vi.mock('../lib/bucket-rag-enablement.js', () => ({
+  updateBucketTelemetry: mockUpdateBucketTelemetry,
 }));
 
 vi.mock('@filone/rag-shared', () => ({
@@ -73,11 +79,14 @@ function makeVectorStore() {
   } satisfies VectorStore;
 }
 
-function page(objects: Array<{ key: string; etag?: string }>, next?: string): ListObjectsResult {
+function page(
+  objects: Array<{ key: string; etag?: string; sizeBytes?: number }>,
+  next?: string,
+): ListObjectsResult {
   return {
     objects: objects.map((o) => ({
       key: o.key,
-      sizeBytes: 1,
+      sizeBytes: o.sizeBytes ?? 1,
       lastModified: '2024-01-01T00:00:00.000Z',
       ...(o.etag ? { etag: o.etag } : {}),
     })),
@@ -109,6 +118,7 @@ describe('indexBucket', () => {
     mockExtractText.mockResolvedValue('hello world');
     mockChunk.mockReturnValue(['hello world']);
     mockEmbedMany.mockResolvedValue([[0.1, 0.2, 0.3]]);
+    mockUpdateBucketTelemetry.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -268,6 +278,44 @@ describe('indexBucket', () => {
       chunkKeys: ['a.txt#0'],
     });
     expect(result).toMatchObject({ added: 0, updated: 1, removed: 0 });
+  });
+
+  it('removes a previously indexed object when its changed version is no longer indexable', async () => {
+    // The object is in the manifest with chunks, but its new version yields no
+    // extractable text (indexObject -> null). Its old chunks are deleted, so the
+    // manifest entry must be dropped too — otherwise it keeps inflating
+    // filesIndexed/indexSize while pointing at chunks that no longer exist.
+    mockLoadManifest.mockResolvedValue(
+      manifestOf([
+        { objectKey: 'doc.txt', etag: 'old', chunkKeys: ['doc.txt#0'], updatedAt: '2024-01-01' },
+      ]),
+    );
+    mockListObjects.mockResolvedValue(page([{ key: 'doc.txt', etag: 'new', sizeBytes: 10 }]));
+    mockExtractText.mockResolvedValue('');
+
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
+
+    expect(vectorStore.deleteChunks).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', [
+      'doc.txt#0',
+    ]);
+    expect(vectorStore.upsertChunks).not.toHaveBeenCalled();
+    expect(mockSaveManifestEntry).not.toHaveBeenCalled();
+    expect(mockDeleteManifestEntry).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', 'doc.txt');
+    expect(result).toMatchObject({ added: 0, updated: 0, removed: 1, completed: true });
+
+    // The success snapshot no longer counts the now-unindexable object.
+    const success = mockUpdateBucketTelemetry.mock.calls.find(
+      (c) => (c[2] as { syncState: string }).syncState === 'idle',
+    );
+    expect(success).toBeDefined();
+    const update = success![2] as Record<string, unknown>;
+    expect(update.filesIndexed).toBe(0);
+    expect(update.indexSize).toBe(0);
   });
 
   it('skips an unchanged object: zero embed/upsert on a same-ETag re-run', async () => {
@@ -520,5 +568,105 @@ describe('indexBucket', () => {
     expect(mockSaveCheckpoint).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', undefined);
     expect(mockClearCheckpoint).not.toHaveBeenCalled();
     expect(result.completed).toBe(false);
+  });
+
+  // -----------------------------------------------------------------------
+  // Sync telemetry (FIL-556)
+  // -----------------------------------------------------------------------
+
+  describe('sync telemetry', () => {
+    /** The telemetry update issued for a given syncState, or undefined. */
+    function telemetryCall(syncState: string) {
+      return mockUpdateBucketTelemetry.mock.calls.find(
+        (c) => (c[2] as { syncState: string }).syncState === syncState,
+      );
+    }
+
+    it('marks the bucket syncing at the very start of the run (syncState only)', async () => {
+      mockLoadManifest.mockResolvedValue(manifestOf([]));
+      mockListObjects.mockResolvedValue(page([]));
+
+      await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
+
+      // The first telemetry write is the syncing marker, keyed by (region,
+      // bucketName). It must write syncState only — never the enablement `status`.
+      const [region, name, update] = mockUpdateBucketTelemetry.mock.calls[0] as [
+        string,
+        string,
+        Record<string, unknown>,
+      ];
+      expect(region).toBe(S3Region.EuWest1);
+      expect(name).toBe('bucket-1');
+      expect(update).toEqual({ syncState: 'syncing' });
+      expect(update).not.toHaveProperty('status');
+    });
+
+    it('writes the success snapshot with filesIndexed + indexSize + lastSyncedAt', async () => {
+      // Two new objects get indexed (added to the manifest), one stale object is
+      // removed. filesIndexed should be the post-reconciliation manifest size (2),
+      // and indexSize the sum of the two indexed objects' source bytes (10 + 25).
+      mockLoadManifest.mockResolvedValue(
+        manifestOf([
+          { objectKey: 'gone.txt', etag: 'g', chunkKeys: ['gone.txt#0'], updatedAt: 'x' },
+        ]),
+      );
+      mockListObjects.mockResolvedValue(
+        page([
+          { key: 'a.txt', etag: 'e1', sizeBytes: 10 },
+          { key: 'b.txt', etag: 'e2', sizeBytes: 25 },
+        ]),
+      );
+
+      const before = Date.now();
+      await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
+      const after = Date.now();
+
+      const success = telemetryCall('idle');
+      expect(success).toBeDefined();
+      const [region, name, update] = success! as [string, string, Record<string, unknown>];
+      expect(region).toBe(S3Region.EuWest1);
+      expect(name).toBe('bucket-1');
+      // The success snapshot writes syncState=idle, never the enablement status.
+      expect(update).not.toHaveProperty('status');
+      expect(update.filesIndexed).toBe(2);
+      expect(update.indexSize).toBe(35);
+      const syncedMs = new Date(update.lastSyncedAt as string).getTime();
+      expect(syncedMs).toBeGreaterThanOrEqual(before);
+      expect(syncedMs).toBeLessThanOrEqual(after);
+    });
+
+    it('does NOT write a success snapshot when the run is checkpointed mid-bucket', async () => {
+      mockLoadManifest.mockResolvedValue(manifestOf([]));
+      mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }], 'next-tok'));
+
+      await indexBucket(
+        { s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore },
+        {
+          deadlineEpochMs: Date.now() - 1,
+        },
+      );
+
+      // Syncing marker fired; no idle (success) snapshot on an incomplete run.
+      expect(telemetryCall('syncing')).toBeDefined();
+      expect(telemetryCall('idle')).toBeUndefined();
+    });
+
+    it('does NOT write a success snapshot on a resumed (partial) run', async () => {
+      mockLoadCheckpoint.mockResolvedValue({
+        pk: 'INDEXER_CHECKPOINT#bucket-1',
+        sk: 'CHECKPOINT',
+        bucketName: 'bucket-1',
+        continuationToken: 'resume-tok',
+        lastPageStartedAt: '2024-01-01T00:00:00.000Z',
+        ttl: Math.floor(Date.now() / 1000) + 3600,
+      });
+      mockLoadManifest.mockResolvedValue(manifestOf([]));
+      mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
+
+      await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
+
+      // A resumed run's counts are not authoritative, so no idle (success) snapshot.
+      expect(telemetryCall('idle')).toBeUndefined();
+    });
   });
 });

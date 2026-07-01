@@ -18,6 +18,7 @@ import {
   type VectorStoreChunk,
 } from '@filone/rag-shared';
 import { getObjectBytes, listObjects } from '../lib/s3-bucket-operations.js';
+import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.js';
 import { resolveContentType } from './rag-content-type.js';
 import {
   clearCheckpoint,
@@ -98,8 +99,14 @@ export async function indexBucket(
   const { s3, region, bucketName, vectorStore } = ctx;
   await vectorStore.ensureIndex(region, bucketName);
 
+  // Mark the run in flight up front so the UI can show "Syncing…" immediately.
+  // Writes only `syncState` (never the enablement `status`); atomic UpdateItem on
+  // the enablement row, and a disabled-mid-run bucket is a no-op.
+  await updateBucketTelemetry(region, bucketName, { syncState: 'syncing' });
+
   const manifest = await loadManifest(region, bucketName);
   const seen = new Set<string>();
+  let indexSize = 0;
   const totals: PageOutcome = { added: 0, updated: 0, removed: 0, failed: 0 };
 
   const checkpoint = await loadCheckpoint(region, bucketName);
@@ -113,13 +120,18 @@ export async function indexBucket(
     if (isPastDeadline(options.deadlineEpochMs)) {
       await saveCheckpoint(region, bucketName, continuationToken);
       console.log(`${LOG} Checkpointed mid-bucket (deadline reached)`, { region, bucketName });
+      // Partial run: leave syncState as `syncing` (the next run finishes it) and
+      // do not write the success snapshot, which is only valid for a full pass.
       return { ...totals, completed: false };
     }
 
     const page = await listObjects({ s3, bucket: bucketName, continuationToken });
     const outcome = await diffAndIndexPage(ctx, manifest, page);
     accumulate(totals, outcome);
-    for (const object of page.objects) seen.add(object.key);
+    for (const object of page.objects) {
+      seen.add(object.key);
+      if (manifest.has(object.key)) indexSize += object.sizeBytes;
+    }
 
     continuationToken = page.nextToken;
     if (!page.isTruncated || !continuationToken) break;
@@ -143,6 +155,20 @@ export async function indexBucket(
   }
 
   await clearCheckpoint(region, bucketName);
+
+  // Persist the success telemetry snapshot only for a full pass (started from the
+  // first page and reached the last): only then are the counts authoritative.
+  // `filesIndexed` is the manifest size after reconciliation (objects with >=1
+  // indexed chunk); `indexSize` sums the source-object bytes of those objects.
+  if (startedFromBeginning) {
+    await updateBucketTelemetry(region, bucketName, {
+      syncState: 'idle',
+      filesIndexed: manifest.size,
+      indexSize,
+      lastSyncedAt: new Date().toISOString(),
+    });
+  }
+
   console.log(`${LOG} Bucket reconciled`, { region, bucketName, ...totals });
   return { ...totals, completed: true };
 }
@@ -177,13 +203,14 @@ export async function diffAndIndexPage(
     const action = await classifyAndIndexObject(ctx, manifest, object);
     if (action === 'added') outcome.added++;
     else if (action === 'updated') outcome.updated++;
+    else if (action === 'removed') outcome.removed++;
     else if (action === 'failed') outcome.failed++;
   }
 
   return outcome;
 }
 
-type ObjectAction = 'added' | 'updated' | 'skipped' | 'failed';
+type ObjectAction = 'added' | 'updated' | 'removed' | 'skipped' | 'failed';
 
 /**
  * Classify a single listed object against the manifest and apply the minimal
@@ -212,8 +239,27 @@ async function classifyAndIndexObject(
     if (existing) {
       await vectorStore.deleteChunks(region, bucketName, existing.chunkKeys);
     }
-    const indexed = await indexObject(ctx, object.key, etag);
-    if (!indexed) return 'skipped';
+    const chunkKeys = await indexObject(ctx, object.key, etag);
+    if (!chunkKeys) {
+      // A previously indexed object whose new version is no longer indexable:
+      // its old chunks were just deleted above, so drop the manifest entry too
+      // (persisted + in-memory) to keep the manifest authoritative and stop it
+      // inflating filesIndexed/indexSize. A never-indexed object stays skipped.
+      if (existing) {
+        await deleteManifestEntry(region, bucketName, object.key);
+        manifest.delete(object.key);
+        return 'removed';
+      }
+      return 'skipped';
+    }
+    // Keep the in-memory manifest authoritative so the post-run telemetry
+    // snapshot (`filesIndexed` = manifest size) reflects this object too.
+    manifest.set(object.key, {
+      objectKey: object.key,
+      etag,
+      chunkKeys,
+      updatedAt: new Date().toISOString(),
+    });
     return existing ? 'updated' : 'added';
   } catch (error) {
     console.error(`${LOG} Failed to index object`, {
@@ -228,14 +274,14 @@ async function classifyAndIndexObject(
 
 /**
  * Extract, chunk, embed and upsert one object, then record its manifest entry.
- * Returns false (without throwing) for objects with no extractable content type
- * or no text — those are simply not indexed.
+ * Returns the object's chunk keys on success, or `null` (without throwing) for
+ * objects with no extractable content type or no text — those are not indexed.
  */
 async function indexObject(
   ctx: BucketIndexContext,
   objectKey: string,
   etag: string,
-): Promise<boolean> {
+): Promise<string[] | null> {
   const { s3, region, bucketName, vectorStore } = ctx;
   const { bytes, contentType: storedType } = await getObjectBytes(s3, bucketName, objectKey);
   const contentType = resolveContentType(objectKey, storedType);
@@ -245,7 +291,7 @@ async function indexObject(
       bucketName,
       key: objectKey,
     });
-    return false;
+    return null;
   }
 
   const text = await extractText(
@@ -257,7 +303,7 @@ async function indexObject(
   );
   if (!text || text.trim().length === 0) {
     console.warn(`${LOG} No extractable text, skipping`, { region, bucketName, key: objectKey });
-    return false;
+    return null;
   }
 
   const texts = chunk(text);
@@ -270,12 +316,9 @@ async function indexObject(
   }));
 
   await vectorStore.upsertChunks(region, bucketName, chunks);
-  await saveManifestEntry(region, bucketName, {
-    objectKey,
-    etag,
-    chunkKeys: chunks.map((c) => c.key),
-  });
-  return true;
+  const chunkKeys = chunks.map((c) => c.key);
+  await saveManifestEntry(region, bucketName, { objectKey, etag, chunkKeys });
+  return chunkKeys;
 }
 
 /**
@@ -295,6 +338,9 @@ async function reconcileRemovals(
     try {
       await vectorStore.deleteChunks(region, bucketName, entry.chunkKeys);
       await deleteManifestEntry(region, bucketName, objectKey);
+      // Drop from the in-memory manifest so the telemetry snapshot
+      // (`filesIndexed` = manifest size) no longer counts the removed object.
+      manifest.delete(objectKey);
       removed++;
     } catch (error) {
       console.error(`${LOG} Failed to remove object`, {

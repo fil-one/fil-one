@@ -20,6 +20,48 @@ export type { RagBucket } from '../lib/rag-bucket-api.js';
 // BucketRow
 // ---------------------------------------------------------------------------
 
+/** The files-indexed · index-size · last-synced line for a steadily-synced bucket. */
+function BucketSyncedStats({ bucket }: { bucket: RagBucket }) {
+  return (
+    <>
+      <span className="text-zinc-500">{bucket.filesIndexed.toLocaleString()}</span>
+      {' files indexed'}
+      <span aria-hidden="true"> · </span>
+      <span className="text-zinc-500">{formatBytes(bucket.indexSize)}</span>
+      <span aria-hidden="true"> · </span>
+      {bucket.lastSyncedAt ? (
+        <>
+          {'Last synced '}
+          <span className="text-zinc-500">{timeAgo(bucket.lastSyncedAt)}</span>
+        </>
+      ) : (
+        'Not yet synced'
+      )}
+    </>
+  );
+}
+
+/**
+ * The row's one-line description. Enablement (`enabled`) decides "Not indexed";
+ * the indexer sync progress (FIL-556) then layers the in-flight/failed indicator
+ * WITHOUT changing whether the bucket is enabled: an enabled bucket mid-run
+ * shows "Syncing…"; a failed run shows "Sync failed" + the reason; otherwise the
+ * files/size/last-synced stats (with a "Not yet synced" fallback before the
+ * first run).
+ */
+function BucketRowDescription({ bucket }: { bucket: RagBucket }) {
+  if (!bucket.enabled) return <>Not indexed</>;
+  if (bucket.syncState === 'syncing') return <span className="text-amber-600">Syncing…</span>;
+  if (bucket.syncState === 'error') {
+    return (
+      <span className="text-red-600">
+        Sync failed{bucket.lastSyncError ? `: ${bucket.lastSyncError}` : ''}
+      </span>
+    );
+  }
+  return <BucketSyncedStats bucket={bucket} />;
+}
+
 function BucketRow({
   bucket,
   pending,
@@ -41,25 +83,7 @@ function BucketRow({
           <div>
             <p className="text-sm font-medium text-zinc-800">{bucket.name}</p>
             <p className="text-xs text-zinc-400">
-              {bucket.enabled ? (
-                <>
-                  <span className="text-zinc-500">{bucket.filesIndexed.toLocaleString()}</span>
-                  {' files indexed'}
-                  <span aria-hidden="true"> · </span>
-                  <span className="text-zinc-500">{formatBytes(bucket.indexSize)}</span>
-                  <span aria-hidden="true"> · </span>
-                  {bucket.lastSyncedAt ? (
-                    <>
-                      {'Last synced '}
-                      <span className="text-zinc-500">{timeAgo(bucket.lastSyncedAt)}</span>
-                    </>
-                  ) : (
-                    'Not yet synced'
-                  )}
-                </>
-              ) : (
-                'Not indexed'
-              )}
+              <BucketRowDescription bucket={bucket} />
             </p>
           </div>
         </div>

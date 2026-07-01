@@ -74,14 +74,26 @@ export interface QueryBucketResponse {
 }
 
 /**
- * Operational state of a bucket's RAG index, exposed to the frontend.
+ * Enablement state of a bucket's RAG index, exposed to the frontend.
  *
- * Mirrors the backend `BucketRAGStatus` (`active | disabled | paused`):
- * `active` means indexing is on, `disabled` means the user turned it off, and
- * `paused` is a transient operational hold. A bucket with no enablement record
- * is reported as `disabled`.
+ * Mirrors the backend `BucketRAGStatus` (the source of truth for enablement):
+ * `active` means indexing is on and the bucket is queryable, `disabled` means
+ * the user turned it off, and `paused` is a transient operational hold. A bucket
+ * with no enablement record is reported as `disabled`. This is decoupled from
+ * sync progress — see {@link BucketRagSyncState}.
  */
 export type BucketRagStatus = 'active' | 'disabled' | 'paused';
+
+/**
+ * Sync progress of a bucket's RAG index, exposed to the frontend and written by
+ * the indexer (FIL-556). Mirrors the backend `BucketRAGSyncState` and is
+ * INDEPENDENT of {@link BucketRagStatus}: `syncing` while a reconciliation is in
+ * flight, `error` when the last run failed (see `lastSyncError`), `idle`/absent
+ * when steady or never-synced. A `syncing`/`error` bucket whose `status` is
+ * still `active` remains enabled and queryable; the UI only uses this to render
+ * the Syncing…/Sync-failed indicator.
+ */
+export type BucketRagSyncState = 'idle' | 'syncing' | 'error';
 
 /**
  * Request body for `POST /api/buckets/{name}/rag/enabled` (FIL-555).
@@ -101,19 +113,34 @@ export interface SetBucketRagEnabledRequest {
  * Per-bucket RAG enablement + sync telemetry returned by both the GET (read)
  * and POST (write) enablement endpoints (FIL-555).
  *
- * Telemetry fields (`filesIndexed`, `indexSize`, `lastSyncedAt`) come from the
- * indexer (FIL-556) and are absent/zero until the first sync completes —
- * callers must render a "Not yet synced" state gracefully. `enabled` is the
- * convenience boolean (`status === 'active'`).
+ * `status`/`enabled` are the enablement source of truth (independent of sync
+ * progress). Telemetry fields (`filesIndexed`, `indexSize`, `lastSyncedAt`, and
+ * the `syncState`/`lastSyncError` sync indicator) are written by the indexer
+ * (FIL-556) and are absent/zero until the first sync completes — callers must
+ * render a "Not yet synced" state gracefully. `enabled` is the convenience
+ * boolean (`status === 'active'`). `indexSize` is the sum of indexed
+ * source-object bytes (the documented measure surfaced via `formatBytes`).
  */
 export interface BucketRagEnablementResponse {
   /** Convenience flag: `true` when `status === 'active'`. */
   enabled: boolean;
+  /** Enablement state (source of truth); independent of {@link syncState}. */
   status: BucketRagStatus;
+  /**
+   * Sync progress from the indexer; independent of {@link status}. Absent means
+   * never-synced/idle. The UI renders Syncing…/Sync-failed from this WITHOUT
+   * changing whether the bucket is treated as enabled.
+   */
+  syncState?: BucketRagSyncState;
   /** Number of files currently indexed; 0 until the first sync completes. */
   filesIndexed: number;
-  /** Index size in bytes; 0 until the first sync completes. */
+  /** Index size in bytes (sum of indexed source-object bytes); 0 until the first sync. */
   indexSize: number;
   /** ISO-8601 timestamp of the last successful sync; absent until first sync. */
   lastSyncedAt?: string;
+  /**
+   * Message from the most recent failed sync. Present only when
+   * `syncState === 'error'`; the UI surfaces it as the sync-failed reason.
+   */
+  lastSyncError?: string;
 }

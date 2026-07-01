@@ -4,6 +4,7 @@ import type {
   QueryBucketResponse,
   S3Region,
   SetBucketRagEnabledRequest,
+  BucketRagSyncState,
 } from '@filone/shared';
 import { apiRequest } from './api.js';
 
@@ -21,6 +22,14 @@ export type RagBucket = {
   filesIndexed: number;
   indexSize: number;
   lastSyncedAt?: string;
+  /**
+   * Sync progress from the indexer (FIL-556); drives the Syncing…/Sync-failed
+   * indicator only. Independent of `enabled`: a syncing/errored bucket is still
+   * enabled and queryable.
+   */
+  syncState?: BucketRagSyncState;
+  /** Failure reason, present only when `syncState === 'error'`. */
+  lastSyncError?: string;
 };
 
 /**
