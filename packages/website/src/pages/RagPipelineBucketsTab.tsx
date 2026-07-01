@@ -10,9 +10,10 @@ import { Card } from '../components/Card.js';
 import { Heading } from '../components/Heading/Heading.js';
 import { Spinner } from '../components/Spinner.js';
 import { ToggleConfirmModal } from '../components/ToggleConfirmModal.js';
-import { type RagBucket } from '../lib/rag-bucket-api.js';
+import { bucketKey, type RagBucket } from '../lib/rag-bucket-api.js';
 import { timeAgo } from '../lib/time.js';
 
+export { bucketKey } from '../lib/rag-bucket-api.js';
 export type { RagBucket } from '../lib/rag-bucket-api.js';
 
 // ---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ export function BucketsTab({
 }) {
   const [confirm, setConfirm] = useState<RagBucket | null>(null);
   const [activeDrawer, setActiveDrawer] = useState<string | null>(null);
-  const activeBucket = buckets.find((b) => b.name === activeDrawer) ?? null;
+  const activeBucket = buckets.find((b) => bucketKey(b) === activeDrawer) ?? null;
 
   return (
     <section className="space-y-6">
@@ -125,11 +126,11 @@ export function BucketsTab({
         <div className="space-y-3">
           {buckets.map((b) => (
             <BucketRow
-              key={b.name}
+              key={bucketKey(b)}
               bucket={b}
-              pending={togglingBucket === b.name}
+              pending={togglingBucket === bucketKey(b)}
               onToggle={() => setConfirm(b)}
-              onAsk={() => setActiveDrawer(b.name)}
+              onAsk={() => setActiveDrawer(bucketKey(b))}
             />
           ))}
         </div>
@@ -141,7 +142,7 @@ export function BucketsTab({
 
       <ToggleConfirmModal
         enabled={confirm?.enabled ?? false}
-        pending={confirm != null && togglingBucket === confirm.name}
+        pending={confirm != null && togglingBucket === bucketKey(confirm)}
         open={confirm != null}
         onClose={() => setConfirm(null)}
         onConfirm={() => {

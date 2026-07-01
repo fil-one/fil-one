@@ -25,7 +25,8 @@ const mockGetEnabled = vi.fn();
 const mockSetEnabled = vi.fn();
 const mockQueryBucket = vi.fn();
 
-vi.mock('../lib/rag-bucket-api.js', () => ({
+vi.mock('../lib/rag-bucket-api.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/rag-bucket-api.js')>()),
   listBucketsForRag: (...a: unknown[]) => mockListBuckets(...a),
   getBucketRagEnabled: (...a: unknown[]) => mockGetEnabled(...a),
   setBucketRagEnabled: (...a: unknown[]) => mockSetEnabled(...a),

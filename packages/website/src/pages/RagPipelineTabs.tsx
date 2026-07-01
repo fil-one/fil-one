@@ -12,7 +12,7 @@ import { Card } from '../components/Card.js';
 import { CodeBlock } from '../components/CodeBlock.js';
 import { Heading } from '../components/Heading/Heading.js';
 import { Select } from '../components/Select.js';
-import type { RagBucket } from './RagPipelineBucketsTab.js';
+import { bucketKey, type RagBucket } from './RagPipelineBucketsTab.js';
 
 const ALL_BUCKETS_VALUE = '__all__';
 
@@ -92,8 +92,8 @@ export function ModelsTab({ enabled }: { enabled: boolean }) {
 export function IntegrateTab({ enabled, buckets }: { enabled: boolean; buckets: RagBucket[] }) {
   const enabledBuckets = buckets.filter((b) => b.enabled);
   const [selected, setSelected] = useState<string>(ALL_BUCKETS_VALUE);
-  const selectedBucket = enabledBuckets.find((b) => b.name === selected);
-  const arg = selected === ALL_BUCKETS_VALUE ? '{bucketName}' : selected;
+  const selectedBucket = enabledBuckets.find((b) => bucketKey(b) === selected);
+  const arg = selectedBucket ? selectedBucket.name : '{bucketName}';
   // Bucket names are region-scoped, so the query endpoint needs the region.
   const region = selectedBucket?.region ?? '{region}';
 
@@ -130,7 +130,7 @@ export function IntegrateTab({ enabled, buckets }: { enabled: boolean; buckets: 
               <Select value={selected} onChange={setSelected} aria-label="Select bucket">
                 <option value={ALL_BUCKETS_VALUE}>All buckets</option>
                 {enabledBuckets.map((b) => (
-                  <option key={b.name} value={b.name}>
+                  <option key={bucketKey(b)} value={bucketKey(b)}>
                     {b.name}
                   </option>
                 ))}

@@ -9,6 +9,7 @@ import { Heading } from '../components/Heading/Heading.js';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs/index.js';
 import { useToast } from '../components/Toast/index.js';
 import {
+  bucketKey,
   getBucketRagEnabled,
   listBucketsForRag,
   setBucketRagEnabled,
@@ -206,7 +207,7 @@ export function RagPipelinePage() {
   });
 
   function handleConfirmToggle(bucket: RagBucket) {
-    setTogglingBucket(bucket.name);
+    setTogglingBucket(bucketKey(bucket));
     toggleMutation.mutate({
       bucketName: bucket.name,
       region: bucket.region,
