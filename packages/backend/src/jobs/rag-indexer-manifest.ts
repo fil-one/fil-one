@@ -44,7 +44,7 @@ export async function loadManifest(
   do {
     const result = await dynamo.send(
       new QueryCommand({
-        TableName: Resource.UserInfoTable.name,
+        TableName: Resource.RagIndexerTable.name,
         KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
         ExpressionAttributeValues: {
           ':pk': { S: RAGKeys.bucketPk(region, bucketId) },
@@ -85,7 +85,7 @@ export async function saveManifestEntry(
   const { objectKey, etag, chunkKeys } = entry;
   await dynamo.send(
     new PutItemCommand({
-      TableName: Resource.UserInfoTable.name,
+      TableName: Resource.RagIndexerTable.name,
       Item: marshall({
         pk: RAGKeys.bucketPk(region, bucketId),
         sk: RAGKeys.manifestSk(objectKey),
@@ -107,7 +107,7 @@ export async function deleteManifestEntry(
 ): Promise<void> {
   await dynamo.send(
     new DeleteItemCommand({
-      TableName: Resource.UserInfoTable.name,
+      TableName: Resource.RagIndexerTable.name,
       Key: {
         pk: { S: RAGKeys.bucketPk(region, bucketId) },
         sk: { S: RAGKeys.manifestSk(objectKey) },
@@ -128,7 +128,7 @@ export async function loadCheckpoint(
 ): Promise<RagIndexerCheckpointRecord | undefined> {
   const result = await dynamo.send(
     new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
+      TableName: Resource.RagIndexerTable.name,
       Key: {
         pk: { S: RAGKeys.checkpointPk(region, bucketName) },
         sk: { S: RAGKeys.checkpointSk() },
@@ -156,7 +156,7 @@ export async function saveCheckpoint(
 ): Promise<void> {
   await dynamo.send(
     new PutItemCommand({
-      TableName: Resource.UserInfoTable.name,
+      TableName: Resource.RagIndexerTable.name,
       Item: marshall(
         {
           pk: RAGKeys.checkpointPk(region, bucketName),
@@ -177,7 +177,7 @@ export async function saveCheckpoint(
 export async function clearCheckpoint(region: S3Region, bucketName: string): Promise<void> {
   await dynamo.send(
     new DeleteItemCommand({
-      TableName: Resource.UserInfoTable.name,
+      TableName: Resource.RagIndexerTable.name,
       Key: {
         pk: { S: RAGKeys.checkpointPk(region, bucketName) },
         sk: { S: RAGKeys.checkpointSk() },

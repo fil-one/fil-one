@@ -10,7 +10,7 @@ import {
 import { marshall } from '@aws-sdk/util-dynamodb';
 
 vi.mock('sst', () => ({
-  Resource: { UserInfoTable: { name: 'UserInfoTable' } },
+  Resource: { RagIndexerTable: { name: 'RagIndexerTable' } },
 }));
 
 const ddbMock = mockClient(DynamoDBClient);

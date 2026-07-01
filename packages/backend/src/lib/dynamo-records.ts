@@ -79,7 +79,7 @@ export interface BucketRAGEnablementRecord {
  * One query (pk: BUCKET#{region}#{bucketId}, sk begins_with MANIFEST#) returns
  * every object indexed in a bucket.
  *
- * UserInfoTable — pk: BUCKET#{region}#{bucketId}, sk: MANIFEST#{objectKey}
+ * RagIndexerTable — pk: BUCKET#{region}#{bucketId}, sk: MANIFEST#{objectKey}
  */
 export interface ObjectChunkManifestRecord {
   pk: string;
@@ -102,7 +102,7 @@ export interface ObjectChunkManifestRecord {
  * (e.g. a worker that died mid-bucket) eventually expires and the bucket is
  * re-scanned from the beginning rather than being wedged indefinitely.
  *
- * UserInfoTable — pk: INDEXER_CHECKPOINT#{bucketId}, sk: CHECKPOINT
+ * RagIndexerTable — pk: INDEXER_CHECKPOINT#{bucketId}, sk: CHECKPOINT
  */
 export interface RagIndexerCheckpointRecord {
   pk: string;
