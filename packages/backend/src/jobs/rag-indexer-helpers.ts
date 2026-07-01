@@ -203,13 +203,14 @@ export async function diffAndIndexPage(
     const action = await classifyAndIndexObject(ctx, manifest, object);
     if (action === 'added') outcome.added++;
     else if (action === 'updated') outcome.updated++;
+    else if (action === 'removed') outcome.removed++;
     else if (action === 'failed') outcome.failed++;
   }
 
   return outcome;
 }
 
-type ObjectAction = 'added' | 'updated' | 'skipped' | 'failed';
+type ObjectAction = 'added' | 'updated' | 'removed' | 'skipped' | 'failed';
 
 /**
  * Classify a single listed object against the manifest and apply the minimal
@@ -239,7 +240,18 @@ async function classifyAndIndexObject(
       await vectorStore.deleteChunks(region, bucketName, existing.chunkKeys);
     }
     const chunkKeys = await indexObject(ctx, object.key, etag);
-    if (!chunkKeys) return 'skipped';
+    if (!chunkKeys) {
+      // A previously indexed object whose new version is no longer indexable:
+      // its old chunks were just deleted above, so drop the manifest entry too
+      // (persisted + in-memory) to keep the manifest authoritative and stop it
+      // inflating filesIndexed/indexSize. A never-indexed object stays skipped.
+      if (existing) {
+        await deleteManifestEntry(region, bucketName, object.key);
+        manifest.delete(object.key);
+        return 'removed';
+      }
+      return 'skipped';
+    }
     // Keep the in-memory manifest authoritative so the post-run telemetry
     // snapshot (`filesIndexed` = manifest size) reflects this object too.
     manifest.set(object.key, {

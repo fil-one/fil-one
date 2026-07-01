@@ -280,6 +280,44 @@ describe('indexBucket', () => {
     expect(result).toMatchObject({ added: 0, updated: 1, removed: 0 });
   });
 
+  it('removes a previously indexed object when its changed version is no longer indexable', async () => {
+    // The object is in the manifest with chunks, but its new version yields no
+    // extractable text (indexObject -> null). Its old chunks are deleted, so the
+    // manifest entry must be dropped too — otherwise it keeps inflating
+    // filesIndexed/indexSize while pointing at chunks that no longer exist.
+    mockLoadManifest.mockResolvedValue(
+      manifestOf([
+        { objectKey: 'doc.txt', etag: 'old', chunkKeys: ['doc.txt#0'], updatedAt: '2024-01-01' },
+      ]),
+    );
+    mockListObjects.mockResolvedValue(page([{ key: 'doc.txt', etag: 'new', sizeBytes: 10 }]));
+    mockExtractText.mockResolvedValue('');
+
+    const result = await indexBucket({
+      s3,
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      vectorStore,
+    });
+
+    expect(vectorStore.deleteChunks).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', [
+      'doc.txt#0',
+    ]);
+    expect(vectorStore.upsertChunks).not.toHaveBeenCalled();
+    expect(mockSaveManifestEntry).not.toHaveBeenCalled();
+    expect(mockDeleteManifestEntry).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', 'doc.txt');
+    expect(result).toMatchObject({ added: 0, updated: 0, removed: 1, completed: true });
+
+    // The success snapshot no longer counts the now-unindexable object.
+    const success = mockUpdateBucketTelemetry.mock.calls.find(
+      (c) => (c[2] as { syncState: string }).syncState === 'idle',
+    );
+    expect(success).toBeDefined();
+    const update = success![2] as Record<string, unknown>;
+    expect(update.filesIndexed).toBe(0);
+    expect(update.indexSize).toBe(0);
+  });
+
   it('skips an unchanged object: zero embed/upsert on a same-ETag re-run', async () => {
     mockLoadManifest.mockResolvedValue(
       manifestOf([
