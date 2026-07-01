@@ -35,7 +35,8 @@ async function runSubscriptionGuard(
   accessLevel: AccessLevel,
 ): Promise<APIGatewayProxyStructuredResultV2 | void> {
   const event = request.event as AuthenticatedEvent;
-  const { sub, userId, orgId, email, emailVerified } = getUserInfo(event);
+  const userInfo = getUserInfo(event);
+  const { userId } = userInfo;
   const tableName = Resource.BillingTable.name;
 
   // Consistent read so a trial just written by the auth middleware (same request)
@@ -53,13 +54,7 @@ async function runSubscriptionGuard(
 
   // No billing record → only entitled (verified, claim-owning) users get a trial.
   if (!result.Item) {
-    const entitled = await ensureTrialEntitlement({
-      sub,
-      userId,
-      orgId,
-      email: email ?? null,
-      emailVerified,
-    });
+    const entitled = await checkTrialEntitlement(userInfo);
     return entitled ? undefined : buildInactiveResponse();
   }
 
@@ -75,15 +70,12 @@ async function runSubscriptionGuard(
   // below (which sets event.requestContext.subscriptionStatus and runs the lazy
   // trial-expiry transition against the just-written 30-day trial). (FIL-546)
   if (!status) {
-    const entitled = await ensureTrialEntitlement({
-      sub,
-      userId,
-      orgId,
-      email: email ?? null,
-      emailVerified,
-    });
-    if (!entitled) return buildInactiveResponse();
-    status = SubscriptionStatus.Trialing;
+    const entitled = await checkTrialEntitlement(userInfo);
+    if (entitled) {
+      status = SubscriptionStatus.Trialing;
+    } else {
+      return buildInactiveResponse();
+    }
   }
 
   // Store the resolved status on the event so handlers can read it
@@ -109,6 +101,21 @@ async function runSubscriptionGuard(
 
   // Unknown or unhandled status → block (fail closed)
   return buildInactiveResponse();
+}
+
+/**
+ * Run the trial-entitlement check for a user. Only verified, claim-owning users
+ * are granted a trial. Shared by the no-record and bare-record (no-status) heal
+ * paths so both apply identical entitlement rules.
+ */
+async function checkTrialEntitlement(user: ReturnType<typeof getUserInfo>): Promise<boolean> {
+  return ensureTrialEntitlement({
+    sub: user.sub,
+    userId: user.userId,
+    orgId: user.orgId,
+    email: user.email ?? null,
+    emailVerified: user.emailVerified,
+  });
 }
 
 /**
