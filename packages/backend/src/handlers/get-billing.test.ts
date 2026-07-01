@@ -289,6 +289,30 @@ describe('get-billing baseHandler', () => {
     });
   });
 
+  it('returns trial state when billing record has stripeCustomerId but no subscriptionStatus (bare record)', async () => {
+    // A bare record written by create-setup-intent: has a Stripe customer but
+    // no subscriptionStatus yet. FIL-546: present as trial rather than relying
+    // on the silent ?? Trialing default in evaluateStatusTransitions.
+    ddbMock.on(GetItemCommand).resolves(
+      subscriptionItem({
+        stripeCustomerId: 'cus_bare_123',
+      }),
+    );
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(String(result.body));
+    expect(body).toStrictEqual({
+      subscription: {
+        planId: PlanId.FreeTrial,
+        status: SubscriptionStatus.Trialing,
+        trialEndsAt: expect.any(String),
+      },
+    });
+  });
+
   it('queries DynamoDB with correct key', async () => {
     ddbMock.on(GetItemCommand).resolves({});
 
