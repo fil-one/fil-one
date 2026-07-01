@@ -44,7 +44,7 @@ function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablem
 describe('getBucketRagEnablement', () => {
   beforeEach(() => ddbMock.reset());
 
-  it('reads BUCKET#{name}/RAG from UserInfoTable via a single GetItemCommand', async () => {
+  it('reads BUCKET#{region}#{bucketName}/RAG from UserInfoTable via a single GetItemCommand', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: marshall(record()) });
 
     const result = await getBucketRagEnablement(S3Region.EuWest1, 'bucket-1');
