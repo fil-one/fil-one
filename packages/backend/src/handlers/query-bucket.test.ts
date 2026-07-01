@@ -69,7 +69,7 @@ process.env.FILONE_STAGE = 'test';
 
 import { baseHandler, handler } from './query-bucket.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
-import { S3_REGION, S3Region } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
 // ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1', email: 'dev@fil.org', emai
 
 const BUCKET = {
   bucketName: 'my-bucket',
-  region: S3_REGION,
+  region: S3Region.EuWest1,
   createdAt: '2026-01-15T10:00:00Z',
   isPublic: false,
 };
@@ -134,18 +134,25 @@ describe('query-bucket baseHandler', () => {
     await baseHandler(queryEvent({ query: 'hello', top_k: 5 }));
 
     expect(mockEmbed).toHaveBeenCalledWith('hello');
-    expect(mockQuery).toHaveBeenCalledWith(S3_REGION, 'my-bucket', [0.1, 0.2, 0.3], 5, undefined);
+    expect(mockQuery).toHaveBeenCalledWith(S3Region.EuWest1, 'my-bucket', [0.1, 0.2, 0.3], {
+      k: 5,
+      filters: undefined,
+    });
   });
 
   it('defaults top_k to 10 when omitted', async () => {
     await baseHandler(queryEvent({ query: 'hello' }));
-    expect(mockQuery).toHaveBeenCalledWith(S3_REGION, 'my-bucket', [0.1, 0.2, 0.3], 10, undefined);
+    expect(mockQuery).toHaveBeenCalledWith(S3Region.EuWest1, 'my-bucket', [0.1, 0.2, 0.3], {
+      k: 10,
+      filters: undefined,
+    });
   });
 
   it('applies an objectKey equality filter when supplied as a query param', async () => {
     await baseHandler(queryEvent({ query: 'hello' }, { objectKey: 'only.pdf' }));
-    expect(mockQuery).toHaveBeenCalledWith(S3_REGION, 'my-bucket', [0.1, 0.2, 0.3], 10, {
-      objectKey: 'only.pdf',
+    expect(mockQuery).toHaveBeenCalledWith(S3Region.EuWest1, 'my-bucket', [0.1, 0.2, 0.3], {
+      k: 10,
+      filters: { objectKey: 'only.pdf' },
     });
   });
 
