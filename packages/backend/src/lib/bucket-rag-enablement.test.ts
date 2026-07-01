@@ -28,7 +28,7 @@ import { S3Region } from '@filone/shared';
 
 function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablementRecord {
   return {
-    pk: 'BUCKET#bucket-1',
+    pk: 'BUCKET#eu-west-1#bucket-1',
     sk: 'RAG',
     orgId: 'org-1',
     status: 'active',
