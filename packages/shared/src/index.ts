@@ -7,6 +7,8 @@ export {
   S3_REGION,
   S3Region,
   REGION_LABELS,
+  FOUNDATION_EMAIL_DOMAIN,
+  isFoundationEmail,
   formatRegion,
   getRegionLabel,
   getAvailableRegions,
