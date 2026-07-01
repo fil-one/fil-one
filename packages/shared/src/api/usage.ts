@@ -9,14 +9,12 @@ export interface UsageResponse {
   };
   buckets: {
     count: number;
-    limit: number;
   };
   objects: {
     count: number;
   };
   accessKeys: {
     count: number;
-    limit: number;
   };
   tenantStatus?: TenantStatus;
 }
