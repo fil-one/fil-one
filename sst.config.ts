@@ -96,6 +96,21 @@ export default $config({
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
     });
 
+    // RAG indexer's own store: per-object chunk manifests
+    // (BUCKET#{region}#{bucket} / MANIFEST#{objectKey}) and resumable indexer
+    // checkpoints (INDEXER_CHECKPOINT#{region}#{bucket} / CHECKPOINT). Kept out
+    // of UserInfoTable so this high-churn, indexer-derived state doesn't mix with
+    // user/org data. TTL attribute expires stale checkpoints (see
+    // rag-indexer-manifest.ts).
+    const ragIndexerTable = new sst.aws.Dynamo('RagIndexerTable', {
+      fields: {
+        pk: 'string',
+        sk: 'string',
+      },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      ttl: 'ttl',
+    });
+
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
@@ -866,6 +881,52 @@ export default $config({
       // run the Lambda every 12 hours, one hour after usage reporting (08:00 and 20:00 UTC).
       schedule: 'cron(0 8/12 * * ? *)',
       function: gracePeriodEnforcer.arn,
+    });
+
+    // ── RAG indexer (cron → orchestrator → per-org worker) ──────────
+    // Keeps each RAG-enabled bucket's vector index in sync with S3 contents via
+    // object-level ETag diffing. The worker reads per-tenant S3 keys (SSM +
+    // KMS) and uses @filone/rag-shared to extract/chunk/embed/upsert, so it
+    // gets the RAG permission set plus a large timeout/memory budget; large
+    // buckets are resumed across runs via a persisted continuation checkpoint.
+    const ragIndexerWorker = createFn('RagIndexerWorker', {
+      handler: 'packages/backend/src/jobs/rag-indexer-worker.handler',
+      link: [
+        billingTable,
+        userInfoTable,
+        ragIndexerTable,
+        ragVectorBucket,
+        auroraBackofficeToken,
+        fthManagementApiToken,
+      ],
+      environment: orchestratorEnv,
+      timeout: '900 seconds',
+      memory: '512 MB',
+      permissions: [...consoleS3KeysPermissions, ...ragPermissions],
+    });
+
+    const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
+      handler: 'packages/backend/src/jobs/rag-indexer-orchestrator.handler',
+      link: [userInfoTable],
+      environment: {
+        RAG_INDEXER_WORKER_FUNCTION_NAME: ragIndexerWorker.name,
+      },
+      timeout: '60 seconds',
+      memory: '256 MB',
+      permissions: [
+        {
+          actions: ['lambda:InvokeFunction'],
+          resources: [ragIndexerWorker.arn],
+        },
+      ],
+    });
+
+    new sst.aws.CronV2('RagIndexerCron', {
+      // Run every 6 hours (03:00, 09:00, 15:00, 21:00 UTC). Deliberately offset
+      // from the usage-reporting (07/19) and grace-period (08/20) crons so the
+      // indexer never collides with billing reconciliation.
+      schedule: 'cron(0 3/6 * * ? *)',
+      function: ragIndexerOrchestrator.arn,
     });
 
     // ── Subscription drift checker (cron-based, observe-only) ───────

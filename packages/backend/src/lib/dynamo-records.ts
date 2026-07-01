@@ -1,4 +1,5 @@
-import type { S3Region, SubscriptionStatus } from '@filone/shared';
+import { S3Region } from '@filone/shared';
+import type { SubscriptionStatus } from '@filone/shared';
 
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
 export interface AccessKeyRecord {
@@ -56,6 +57,12 @@ export interface RAGConfigRecord {
 export interface BucketRAGEnablementRecord {
   pk: string;
   sk: string;
+  /**
+   * Owning org. Denormalized onto the enablement row so the indexer
+   * orchestrator can group RAG-enabled buckets by org during its table scan
+   * without a second lookup (see rag-indexer-orchestrator).
+   */
+  orgId: string;
   status: BucketRAGStatus;
   filesIndexed: number;
   indexSize: number; // bytes
@@ -72,7 +79,7 @@ export interface BucketRAGEnablementRecord {
  * One query (pk: BUCKET#{region}#{bucketId}, sk begins_with MANIFEST#) returns
  * every object indexed in a bucket.
  *
- * UserInfoTable — pk: BUCKET#{region}#{bucketId}, sk: MANIFEST#{objectKey}
+ * RagIndexerTable — pk: BUCKET#{region}#{bucketId}, sk: MANIFEST#{objectKey}
  */
 export interface ObjectChunkManifestRecord {
   pk: string;
@@ -87,6 +94,28 @@ export interface ObjectChunkManifestRecord {
 }
 
 /**
+ * Resumable checkpoint for the RAG indexer worker. A bucket with more objects
+ * than one Lambda invocation can process persists its S3 `continuationToken`
+ * here so the next run resumes mid-bucket instead of restarting from the top.
+ *
+ * One active checkpoint per bucket. The row carries a TTL so a stale checkpoint
+ * (e.g. a worker that died mid-bucket) eventually expires and the bucket is
+ * re-scanned from the beginning rather than being wedged indefinitely.
+ *
+ * RagIndexerTable — pk: INDEXER_CHECKPOINT#{bucketId}, sk: CHECKPOINT
+ */
+export interface RagIndexerCheckpointRecord {
+  pk: string;
+  sk: string;
+  bucketId: string;
+  bucketName: string;
+  /** S3 continuation token to resume listing from; absent once the bucket is done. */
+  continuationToken?: string;
+  lastPageStartedAt: string; // ISO-8601, for stale-checkpoint detection
+  ttl: number; // epoch seconds; DynamoDB TTL expiry (48h)
+}
+
+/**
  * Key builders for the RAG records above. Centralizing the pk/sk shapes keeps
  * the partition design (and the per-bucket `begins_with MANIFEST#` query)
  * consistent across handlers and jobs.
@@ -94,9 +123,30 @@ export interface ObjectChunkManifestRecord {
 export const RAGKeys = {
   configPk: (orgId: string): string => `ORG#${orgId}`,
   configSk: (): string => 'RAGCONFIG',
-  bucketPk: (region: S3Region, bucketId: string): string => `BUCKET#${region}#${bucketId}`,
+  bucketPk: (region: S3Region, bucketName: string): string => `BUCKET#${region}#${bucketName}`,
+  /**
+   * Inverse of {@link bucketPk}: parse a `BUCKET#{region}#{bucketName}` pk back into its parts.
+   * Returns `undefined` for any malformed pk (missing prefix, unknown region, empty bucket name).
+   * Region membership is checked stage-independently (a valid-but-currently-disabled region must
+   * still parse), so this does NOT use the stage-aware `isSupportedRegion`.
+   */
+  parseBucketPk: (pk: string): { region: S3Region; bucketName: string } | undefined => {
+    const PREFIX = 'BUCKET#';
+    if (!pk.startsWith(PREFIX)) return undefined;
+    const rest = pk.slice(PREFIX.length);
+    const sep = rest.indexOf('#');
+    if (sep <= 0) return undefined;
+    const region = rest.slice(0, sep);
+    const bucketName = rest.slice(sep + 1);
+    if (!bucketName) return undefined;
+    if (!Object.values(S3Region).includes(region as S3Region)) return undefined;
+    return { region: region as S3Region, bucketName };
+  },
   enablementSk: (): string => 'RAG',
   /** Shared prefix for `begins_with` queries returning a bucket's manifests. */
   manifestSkPrefix: (): string => 'MANIFEST#',
   manifestSk: (objectKey: string): string => `MANIFEST#${objectKey}`,
+  checkpointPk: (region: S3Region, bucketName: string): string =>
+    `INDEXER_CHECKPOINT#${region}#${bucketName}`,
+  checkpointSk: (): string => 'CHECKPOINT',
 } as const;
