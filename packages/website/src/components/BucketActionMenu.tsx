@@ -65,7 +65,7 @@ export function BucketActionMenu({ onDisable }: BucketActionMenuProps) {
             }}
             className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
           >
-            <ProhibitIcon size={14} />
+            <ProhibitIcon size={14} aria-hidden="true" />
             Disable
           </button>
         </div>

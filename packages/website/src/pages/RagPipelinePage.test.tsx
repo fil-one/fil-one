@@ -186,7 +186,7 @@ describe('RagPipelinePage — Buckets tab', () => {
     // Open the action menu for the first enabled bucket and pick Disable.
     const menus = screen.getAllByRole('button', { name: 'Bucket actions' });
     fireEvent.click(menus[0]);
-    fireEvent.click(await screen.findByRole('button', { name: 'Disable' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Disable' }));
 
     // Confirm modal opens; confirm the disable.
     expect(await screen.findByText('Disable RAG Pipeline?')).toBeInTheDocument();
