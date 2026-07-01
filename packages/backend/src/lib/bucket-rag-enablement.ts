@@ -143,7 +143,7 @@ export interface BucketTelemetryUpdate {
 
 /**
  * Atomically update a bucket's RAG sync telemetry on the existing enablement row
- * (`BUCKET#{bucketName}` / `RAG`) via a single DynamoDB `UpdateItemCommand`.
+ * (`BUCKET#{region}#{bucketName}` / `RAG`) via a single DynamoDB `UpdateItemCommand`.
  *
  * A single `UpdateItem` is applied atomically by DynamoDB — there is no
  * read-modify-write window — so concurrent indexer workers cannot clobber each
