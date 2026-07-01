@@ -10,7 +10,8 @@ import { BucketsTab, type RagBucket } from './RagPipelineBucketsTab.js';
 // free of the network/router boundary.
 // ---------------------------------------------------------------------------
 
-vi.mock('../lib/rag-bucket-api.js', () => ({
+vi.mock('../lib/rag-bucket-api.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/rag-bucket-api.js')>()),
   queryBucket: vi.fn(),
 }));
 
