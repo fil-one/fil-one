@@ -207,7 +207,8 @@ export default $config({
       },
     });
 
-    const { getAuth0Domain, getS3Endpoint, S3Region, Stage } = await import('@filone/shared');
+    const { getAuth0Domain, getS3Endpoint, S3Region, Stage, SUPPORTED_COMPLETION_MODELS } =
+      await import('@filone/shared');
     const stageForEndpoints = isProduction ? Stage.Production : Stage.Staging;
     // The browser hits the S3 endpoint of every region directly — list-objects,
     // uploads, downloads, etc. — so each one needs to be in `connect-src` or the
@@ -696,10 +697,12 @@ export default $config({
       permissions: [
         {
           actions: ['bedrock:InvokeModel'],
-          resources: [
-            $interpolate`arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-opus-4-8`,
-            $interpolate`arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-8`,
-          ],
+          // Built from the shared allowlist so the grant and QueryBucketSchema's
+          // accepted `model` ids stay in sync — a model added there is invokable here.
+          resources: SUPPORTED_COMPLETION_MODELS.flatMap((m) => [
+            m.inferenceProfileArn,
+            m.foundationModelArn,
+          ]),
         },
       ],
       timeout: '30 seconds',

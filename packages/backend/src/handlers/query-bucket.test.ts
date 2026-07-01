@@ -302,9 +302,19 @@ describe('query-bucket baseHandler', () => {
     expect(prompt).not.toContain('&lt;');
   });
 
-  it('honors the optional model override', async () => {
-    await baseHandler(queryEvent({ query: 'hello', model: 'us.anthropic.other-model' }));
-    expect(mockComplete.mock.calls[0][1].modelId).toBe('us.anthropic.other-model');
+  it('honors the optional model override for a supported model', async () => {
+    await baseHandler(queryEvent({ query: 'hello', model: 'us.anthropic.claude-opus-4-8' }));
+    expect(mockComplete.mock.calls[0][1].modelId).toBe('us.anthropic.claude-opus-4-8');
+  });
+
+  it('returns 400 for an unsupported model instead of a Bedrock 500', async () => {
+    const result = await baseHandler(
+      queryEvent({ query: 'hello', model: 'us.anthropic.other-model' }),
+    );
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body!).message).toContain('model must be one of');
+    expect(mockEmbed).not.toHaveBeenCalled();
+    expect(mockComplete).not.toHaveBeenCalled();
   });
 
   it('returns a graceful 200 with empty sources when no chunks are retrieved', async () => {
