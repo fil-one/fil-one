@@ -66,7 +66,7 @@ export function createFthManagementClient(config: FthManagementClientConfig): Ft
     errorInterceptors: [],
   };
   const request: RequestFn = (method, pathTemplate, pathParams, opts) =>
-    runRequest(ctx, method, pathTemplate, pathParams, opts);
+    runRequest(ctx, { method, pathTemplate, pathParams, opts });
 
   return {
     ...buildEndpointMethods(request),
@@ -267,16 +267,20 @@ function buildHttpRequest(
   return new Request(url, init);
 }
 
-async function runRequest<T>(
-  ctx: RequestContext,
-  method: string,
-  pathTemplate: string,
-  pathParams: Record<string, string>,
-  opts: {
+interface RequestSpec {
+  method: string;
+  pathTemplate: string;
+  pathParams: Record<string, string>;
+  opts?: {
     body?: unknown;
     idempotencyKey?: string;
     query?: URLSearchParams;
-  } = {},
+  };
+}
+
+async function runRequest<T>(
+  ctx: RequestContext,
+  { method, pathTemplate, pathParams, opts = {} }: RequestSpec,
 ): Promise<T> {
   const path = renderPath(pathTemplate, pathParams);
   let httpRequest = buildHttpRequest(ctx, method, path, opts);
@@ -290,7 +294,12 @@ async function runRequest<T>(
   try {
     httpResponse = await ctx.fetchImpl(httpRequest);
   } catch (err) {
-    throw await runErrorInterceptors(ctx, err, undefined, httpRequest, interceptorOpts);
+    throw await runErrorInterceptors(ctx, {
+      error: err,
+      response: undefined,
+      request: httpRequest,
+      options: interceptorOpts,
+    });
   }
 
   for (const fn of ctx.responseInterceptors) {
@@ -301,7 +310,12 @@ async function runRequest<T>(
     const responseBody = await readBodySafe(httpResponse);
     const message = extractErrorMessage(responseBody) ?? httpResponse.statusText;
     const apiError = createApiError(httpResponse.status, message, responseBody);
-    throw await runErrorInterceptors(ctx, apiError, httpResponse, httpRequest, interceptorOpts);
+    throw await runErrorInterceptors(ctx, {
+      error: apiError,
+      response: httpResponse,
+      request: httpRequest,
+      options: interceptorOpts,
+    });
   }
 
   if (httpResponse.status === 204) return undefined as T;
@@ -310,12 +324,16 @@ async function runRequest<T>(
   return JSON.parse(text) as T;
 }
 
+interface ErrorInterceptorParams {
+  error: unknown;
+  response: Response | undefined;
+  request: Request;
+  options: InterceptorOptions;
+}
+
 async function runErrorInterceptors(
   ctx: RequestContext,
-  initialError: unknown,
-  response: Response | undefined,
-  request: Request,
-  options: InterceptorOptions,
+  { error: initialError, response, request, options }: ErrorInterceptorParams,
 ): Promise<unknown> {
   let error = initialError;
   for (const fn of ctx.errorInterceptors) {

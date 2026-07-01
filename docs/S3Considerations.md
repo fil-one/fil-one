@@ -329,6 +329,32 @@ Permissions are scoped and enforced server-side in your console/control plane:
 | **Prefix**       | Optional finer-grained scoping within a bucket        | `s3://shared/team-alpha/*` accessible only by team-alpha's API keys                  |
 | **Object**       | Per-object DEKs provide cryptographic isolation       | Compromise of one object's DEK does not expose any other object                      |
 
+### Access Key Permissions
+
+Each access key carries a set of permissions selected at creation time:
+
+| Group                 | Permissions                                                                               | Notes                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Object**            | `read`, `write`, `list`, `delete`                                                         | Core object operations.                                                                                                                                                                                                                                                                                                                                                                |
+| **Data protection**   | Object versions, retention, legal hold (granular sub-permissions)                         | Tied to the matching object permission (e.g. version reads require `read`).                                                                                                                                                                                                                                                                                                            |
+| **Bucket management** | `GetBucketVersioning`, `GetBucketObjectLockConfiguration`, `CreateBucket`, `DeleteBucket` | Standalone top-level permissions stored in the `permissions` array (no parent object permission). `GetBucketVersioning`/`GetBucketObjectLockConfiguration` read bucket-level settings and are selectable in **every** region. `CreateBucket`/`DeleteBucket` are **not supported in the Aurora region (`eu-west-1`)** — disabled in the UI and rejected by the backend for that region. |
+
+At least one permission (object or bucket-management) is required.
+
+`GetBucketVersioning` and `GetBucketObjectLockConfiguration` used to be granted
+to every key automatically; they are now opt-in user-selectable permissions
+(`BUCKET_INFO_PERMISSIONS` in `packages/shared/src/api/access-keys.ts`) shown in
+the bucket-management group and available in all regions.
+
+**List all buckets** is always granted in every region and is not configurable
+(Aurora always allows `ListAllMyBuckets`, and the FTH region hard-codes it into
+its always-on permission set). The UI shows it as a checked, disabled checkbox.
+
+Region support is centralized in `supportsBucketManagement(region)`
+(`packages/shared/src/constants.ts`): bucket create/delete are supported in every
+region except Aurora. Validation runs in the shared `CreateAccessKeySchema`, so the
+same rule applies on both the website form and the `create-access-key` handler.
+
 ### How Access Control Maps to Operations
 
 | S3 Operation    | Access check                                                                                                                                                                  |

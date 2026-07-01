@@ -9,6 +9,7 @@ import {
   getAuth0Domain,
   getStageFromHostname,
   getAvailableRegions,
+  supportsBucketManagement,
   isFoundationEmail,
   formatRegion,
   getRegionLabel,
@@ -149,6 +150,16 @@ describe('getAvailableRegions', () => {
 
   it('returns only eu-west-1 in production when no email is provided', () => {
     expect(getAvailableRegions(Stage.Production, undefined)).toEqual([S3Region.EuWest1]);
+  });
+});
+
+describe('supportsBucketManagement', () => {
+  it('returns false for the Aurora region (eu-west-1)', () => {
+    expect(supportsBucketManagement(S3Region.EuWest1)).toBe(false);
+  });
+
+  it('returns true for non-Aurora regions', () => {
+    expect(supportsBucketManagement(S3Region.UsEast1)).toBe(true);
   });
 });
 
