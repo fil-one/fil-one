@@ -18,7 +18,7 @@ export function ToggleConfirmModal({
   onConfirm,
 }: ToggleConfirmModalProps) {
   return (
-    <Modal open={open} onClose={onClose} size="sm">
+    <Modal open={open} onClose={onClose} size="sm" testId="toggle-confirm-modal">
       <ModalHeader onClose={onClose}>
         {enabled ? 'Disable RAG Pipeline?' : 'Enable RAG Pipeline?'}
       </ModalHeader>
@@ -54,10 +54,17 @@ export function ToggleConfirmModal({
         )}
       </ModalBody>
       <ModalFooter>
-        <Button variant="ghost" size="md" onClick={onClose} disabled={pending}>
+        <Button
+          data-testid="toggle-confirm-cancel"
+          variant="ghost"
+          size="md"
+          onClick={onClose}
+          disabled={pending}
+        >
           Cancel
         </Button>
         <Button
+          data-testid="toggle-confirm-submit"
           variant={enabled ? 'destructive' : 'primary'}
           size="md"
           onClick={onConfirm}

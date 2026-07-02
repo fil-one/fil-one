@@ -37,9 +37,10 @@ export function BucketActionMenu({ onDisable }: BucketActionMenuProps) {
   }
 
   return (
-    <div className="relative inline-block">
+    <div data-testid="bucket-action-menu" className="relative inline-block">
       <button
         ref={buttonRef}
+        data-testid="bucket-action-menu-trigger"
         type="button"
         aria-label="Bucket actions"
         aria-expanded={open}
@@ -52,11 +53,13 @@ export function BucketActionMenu({ onDisable }: BucketActionMenuProps) {
       {open && (
         <div
           ref={menuRef}
+          data-testid="bucket-action-menu-list"
           role="menu"
           style={{ top: pos.top, right: pos.right }}
           className="fixed z-50 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
         >
           <button
+            data-testid="bucket-action-menu-disable"
             type="button"
             role="menuitem"
             onClick={() => {
