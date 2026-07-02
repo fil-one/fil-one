@@ -11,16 +11,9 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockIsTenantReady = vi.fn();
-const mockGetBucket = vi.fn();
 const mockGetOrchestratorForRegion = vi.fn();
 
-const mockOrchestrator = {
-  id: 'aurora',
-  region: 'eu-west-1',
-  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
-  getBucket: (...args: unknown[]) => mockGetBucket(...args),
-};
+let orch: FakeOrchestrator;
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
@@ -69,6 +62,7 @@ process.env.FILONE_STAGE = 'test';
 
 import { baseHandler, handler } from './query-bucket.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
 import { S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 
@@ -83,6 +77,8 @@ const BUCKET = {
   region: S3Region.EuWest1,
   createdAt: '2026-01-15T10:00:00Z',
   isPublic: false,
+  versioning: false,
+  encrypted: true,
 };
 
 function queryEvent(body: unknown, query?: Record<string, string>): AuthenticatedEvent {
@@ -106,9 +102,8 @@ function vector(key: string, objectKey: string, text = 'chunk') {
 describe('query-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockIsTenantReady.mockReturnValue('aurora-t-1');
-    mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
-    mockGetBucket.mockResolvedValue(BUCKET);
+    orch = fakeOrchestrator('aurora', { bucket: BUCKET });
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
     mockEmbed.mockResolvedValue([0.1, 0.2, 0.3]);
     mockComplete.mockResolvedValue('grounded answer');
     mockQuery.mockResolvedValue([vector('doc.pdf#0', 'doc.pdf'), vector('doc.pdf#1', 'doc.pdf')]);
@@ -395,7 +390,7 @@ describe('query-bucket baseHandler', () => {
   });
 
   it('returns 404 when the bucket is not in the caller tenant (cross-tenant scope)', async () => {
-    mockGetBucket.mockResolvedValue(null);
+    orch.getBucket.mockResolvedValue(null);
 
     const result = await baseHandler(queryEvent({ query: 'hello' }));
 
@@ -405,10 +400,10 @@ describe('query-bucket baseHandler', () => {
   });
 
   it('returns 503 when the tenant is not ready', async () => {
-    mockIsTenantReady.mockReturnValue(null);
+    orch.isTenantReady.mockReturnValue(null);
     const result = await baseHandler(queryEvent({ query: 'hello' }));
     expect(result.statusCode).toBe(503);
-    expect(mockGetBucket).not.toHaveBeenCalled();
+    expect(orch.getBucket).not.toHaveBeenCalled();
   });
 
   it('returns 400 for an unsupported region', async () => {
@@ -449,9 +444,8 @@ describe('query-bucket handler (RAG access gate)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    mockIsTenantReady.mockReturnValue('aurora-t-1');
-    mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
-    mockGetBucket.mockResolvedValue(BUCKET);
+    orch = fakeOrchestrator('aurora', { bucket: BUCKET });
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
     mockEmbed.mockResolvedValue([0.1]);
     mockComplete.mockResolvedValue('answer');
     mockQuery.mockResolvedValue([vector('a.pdf#0', 'a.pdf')]);

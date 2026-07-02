@@ -1,5 +1,6 @@
 import { vi } from 'vitest';
 import type {
+  BucketDetails,
   EgressUsageSample,
   StorageUsageSample,
   TenantInfo,
@@ -15,6 +16,7 @@ export interface FakeOrchestrator {
   getTenantUsageMetrics: ReturnType<typeof vi.fn>;
   getTenantInfo: ReturnType<typeof vi.fn>;
   getBucketUsageMetrics: ReturnType<typeof vi.fn>;
+  getBucket: ReturnType<typeof vi.fn>;
 }
 
 export interface FakeOrchestratorOpts {
@@ -32,6 +34,8 @@ export interface FakeOrchestratorOpts {
   info?: Partial<TenantInfo>;
   /** Storage series (or an Error to reject with) for `getBucketUsageMetrics`. */
   bucketMetrics?: StorageUsageSample[] | Error;
+  /** Bucket resolved by `getBucket`; `null` = not found. Defaults to `null`. */
+  bucket?: BucketDetails | null;
   /** When true, both `getTenantUsageMetrics` and `getTenantInfo` reject. */
   failUsage?: boolean;
 }
@@ -72,6 +76,7 @@ export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): F
       bucketMetrics instanceof Error
         ? vi.fn().mockRejectedValue(bucketMetrics)
         : vi.fn().mockResolvedValue(bucketMetrics),
+    getBucket: vi.fn().mockResolvedValue(opts.bucket ?? null),
   };
 }
 

@@ -10,16 +10,9 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockIsTenantReady = vi.fn();
-const mockGetBucket = vi.fn();
 const mockGetOrchestratorForRegion = vi.fn();
 
-const mockOrchestrator = {
-  id: 'aurora',
-  region: 'eu-west-1',
-  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
-  getBucket: (...args: unknown[]) => mockGetBucket(...args),
-};
+let orch: FakeOrchestrator;
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
@@ -65,6 +58,7 @@ process.env.FILONE_STAGE = 'test';
 
 import { baseHandler, handler } from './get-bucket-rag-enablement.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
 import { S3_REGION, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.js';
@@ -80,6 +74,8 @@ const BUCKET = {
   region: S3_REGION,
   createdAt: '2026-01-15T10:00:00Z',
   isPublic: false,
+  versioning: false,
+  encrypted: true,
 };
 
 function enablementRecord(
@@ -112,9 +108,8 @@ function event(query?: Record<string, string>): AuthenticatedEvent {
 describe('get-bucket-rag-enablement baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockIsTenantReady.mockReturnValue('aurora-t-1');
-    mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
-    mockGetBucket.mockResolvedValue(BUCKET);
+    orch = fakeOrchestrator('aurora', { bucket: BUCKET });
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
     mockGetEnablement.mockResolvedValue(enablementRecord());
   });
 
@@ -195,7 +190,7 @@ describe('get-bucket-rag-enablement baseHandler', () => {
   });
 
   it('returns 404 when the bucket is not in the caller tenant (cross-tenant scope)', async () => {
-    mockGetBucket.mockResolvedValue(null);
+    orch.getBucket.mockResolvedValue(null);
 
     const result = await baseHandler(event());
 
@@ -212,10 +207,10 @@ describe('get-bucket-rag-enablement baseHandler', () => {
   });
 
   it('returns 503 when the tenant is not ready', async () => {
-    mockIsTenantReady.mockReturnValue(null);
+    orch.isTenantReady.mockReturnValue(null);
     const result = await baseHandler(event());
     expect(result.statusCode).toBe(503);
-    expect(mockGetBucket).not.toHaveBeenCalled();
+    expect(orch.getBucket).not.toHaveBeenCalled();
   });
 
   it('returns 400 for an unsupported region', async () => {
@@ -249,9 +244,8 @@ describe('get-bucket-rag-enablement handler (RAG access gate)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ddbMock.reset();
-    mockIsTenantReady.mockReturnValue('aurora-t-1');
-    mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
-    mockGetBucket.mockResolvedValue(BUCKET);
+    orch = fakeOrchestrator('aurora', { bucket: BUCKET });
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
     mockGetEnablement.mockResolvedValue(enablementRecord());
   });
 
