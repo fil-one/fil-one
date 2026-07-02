@@ -14,7 +14,6 @@ vi.mock('sst', () => ({
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
-const ORG = 'org-1';
 
 import {
   clearCheckpoint,
@@ -28,7 +27,7 @@ import { S3Region } from '@filone/shared';
 
 function manifestRow(objectKey: string, etag: string, chunkKeys: string[]) {
   return marshall({
-    pk: `BUCKET#org-1#eu-west-1#bucket-1`,
+    pk: `BUCKET#eu-west-1#bucket-1`,
     sk: `MANIFEST#${objectKey}`,
     objectKey,
     etag,
@@ -50,12 +49,12 @@ describe('rag-indexer-manifest', () => {
         Items: [manifestRow('a.txt', 'e1', ['a.txt#0']), manifestRow('b.txt', 'e2', ['b.txt#0'])],
       });
 
-      const manifest = await loadManifest(ORG, S3Region.EuWest1, 'bucket-1');
+      const manifest = await loadManifest(S3Region.EuWest1, 'bucket-1');
 
       const input = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
       expect(input.KeyConditionExpression).toContain('begins_with(sk, :prefix)');
       expect(input.ExpressionAttributeValues).toMatchObject({
-        ':pk': { S: 'BUCKET#org-1#eu-west-1#bucket-1' },
+        ':pk': { S: 'BUCKET#eu-west-1#bucket-1' },
         ':prefix': { S: 'MANIFEST#' },
       });
       expect(manifest.get('a.txt')).toEqual({
@@ -72,14 +71,11 @@ describe('rag-indexer-manifest', () => {
         .on(QueryCommand)
         .resolvesOnce({
           Items: [manifestRow('a.txt', 'e1', ['a.txt#0'])],
-          LastEvaluatedKey: marshall({
-            pk: 'BUCKET#org-1#eu-west-1#bucket-1',
-            sk: 'MANIFEST#a.txt',
-          }),
+          LastEvaluatedKey: marshall({ pk: 'BUCKET#eu-west-1#bucket-1', sk: 'MANIFEST#a.txt' }),
         })
         .resolvesOnce({ Items: [manifestRow('b.txt', 'e2', ['b.txt#0'])] });
 
-      const manifest = await loadManifest(ORG, S3Region.EuWest1, 'bucket-1');
+      const manifest = await loadManifest(S3Region.EuWest1, 'bucket-1');
 
       expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(2);
       expect(manifest.size).toBe(2);
@@ -90,14 +86,14 @@ describe('rag-indexer-manifest', () => {
     it('writes the manifest row with etag, chunk keys and count', async () => {
       ddbMock.on(PutItemCommand).resolves({});
 
-      await saveManifestEntry(ORG, S3Region.EuWest1, 'bucket-1', {
+      await saveManifestEntry(S3Region.EuWest1, 'bucket-1', {
         objectKey: 'a.txt',
         etag: 'e9',
         chunkKeys: ['a.txt#0', 'a.txt#1'],
       });
 
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-      expect(item.pk).toEqual({ S: 'BUCKET#org-1#eu-west-1#bucket-1' });
+      expect(item.pk).toEqual({ S: 'BUCKET#eu-west-1#bucket-1' });
       expect(item.sk).toEqual({ S: 'MANIFEST#a.txt' });
       expect(item.etag).toEqual({ S: 'e9' });
       expect(item.chunkCount).toEqual({ N: '2' });
@@ -106,10 +102,10 @@ describe('rag-indexer-manifest', () => {
     it('deletes by explicit manifest key', async () => {
       ddbMock.on(DeleteItemCommand).resolves({});
 
-      await deleteManifestEntry(ORG, S3Region.EuWest1, 'bucket-1', 'a.txt');
+      await deleteManifestEntry(S3Region.EuWest1, 'bucket-1', 'a.txt');
 
       expect(ddbMock.commandCalls(DeleteItemCommand)[0].args[0].input.Key).toEqual({
-        pk: { S: 'BUCKET#org-1#eu-west-1#bucket-1' },
+        pk: { S: 'BUCKET#eu-west-1#bucket-1' },
         sk: { S: 'MANIFEST#a.txt' },
       });
     });
@@ -119,10 +115,10 @@ describe('rag-indexer-manifest', () => {
     it('persists the continuation token with a TTL', async () => {
       ddbMock.on(PutItemCommand).resolves({});
 
-      await saveCheckpoint(ORG, S3Region.EuWest1, 'bucket-1', 'tok-1');
+      await saveCheckpoint(S3Region.EuWest1, 'bucket-1', 'tok-1');
 
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-      expect(item.pk).toEqual({ S: 'INDEXER_CHECKPOINT#org-1#eu-west-1#bucket-1' });
+      expect(item.pk).toEqual({ S: 'INDEXER_CHECKPOINT#eu-west-1#bucket-1' });
       expect(item.sk).toEqual({ S: 'CHECKPOINT' });
       expect(item.continuationToken).toEqual({ S: 'tok-1' });
       expect(Number(item.ttl!.N)).toBeGreaterThan(Math.floor(Date.now() / 1000));
@@ -131,7 +127,7 @@ describe('rag-indexer-manifest', () => {
     it('omits the continuation token when undefined', async () => {
       ddbMock.on(PutItemCommand).resolves({});
 
-      await saveCheckpoint(ORG, S3Region.EuWest1, 'bucket-1', undefined);
+      await saveCheckpoint(S3Region.EuWest1, 'bucket-1', undefined);
 
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
       expect(item.continuationToken).toBeUndefined();
@@ -140,7 +136,7 @@ describe('rag-indexer-manifest', () => {
     it('loads a live checkpoint', async () => {
       ddbMock.on(GetItemCommand).resolves({
         Item: marshall({
-          pk: 'INDEXER_CHECKPOINT#org-1#eu-west-1#bucket-1',
+          pk: 'INDEXER_CHECKPOINT#eu-west-1#bucket-1',
           sk: 'CHECKPOINT',
           bucketName: 'bucket-1',
           continuationToken: 'tok-9',
@@ -149,11 +145,11 @@ describe('rag-indexer-manifest', () => {
         }),
       });
 
-      const checkpoint = await loadCheckpoint(ORG, S3Region.EuWest1, 'bucket-1');
+      const checkpoint = await loadCheckpoint(S3Region.EuWest1, 'bucket-1');
 
       expect(checkpoint?.continuationToken).toBe('tok-9');
       expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input.Key).toEqual({
-        pk: { S: 'INDEXER_CHECKPOINT#org-1#eu-west-1#bucket-1' },
+        pk: { S: 'INDEXER_CHECKPOINT#eu-west-1#bucket-1' },
         sk: { S: 'CHECKPOINT' },
       });
     });
@@ -161,7 +157,7 @@ describe('rag-indexer-manifest', () => {
     it('treats an expired checkpoint as absent', async () => {
       ddbMock.on(GetItemCommand).resolves({
         Item: marshall({
-          pk: 'INDEXER_CHECKPOINT#org-1#eu-west-1#bucket-1',
+          pk: 'INDEXER_CHECKPOINT#eu-west-1#bucket-1',
           sk: 'CHECKPOINT',
           bucketName: 'bucket-1',
           continuationToken: 'stale',
@@ -170,22 +166,22 @@ describe('rag-indexer-manifest', () => {
         }),
       });
 
-      expect(await loadCheckpoint(ORG, S3Region.EuWest1, 'bucket-1')).toBeUndefined();
+      expect(await loadCheckpoint(S3Region.EuWest1, 'bucket-1')).toBeUndefined();
     });
 
     it('returns undefined when no checkpoint exists', async () => {
       ddbMock.on(GetItemCommand).resolves({});
 
-      expect(await loadCheckpoint(ORG, S3Region.EuWest1, 'bucket-1')).toBeUndefined();
+      expect(await loadCheckpoint(S3Region.EuWest1, 'bucket-1')).toBeUndefined();
     });
 
     it('clears the checkpoint row', async () => {
       ddbMock.on(DeleteItemCommand).resolves({});
 
-      await clearCheckpoint(ORG, S3Region.EuWest1, 'bucket-1');
+      await clearCheckpoint(S3Region.EuWest1, 'bucket-1');
 
       expect(ddbMock.commandCalls(DeleteItemCommand)[0].args[0].input.Key).toEqual({
-        pk: { S: 'INDEXER_CHECKPOINT#org-1#eu-west-1#bucket-1' },
+        pk: { S: 'INDEXER_CHECKPOINT#eu-west-1#bucket-1' },
         sk: { S: 'CHECKPOINT' },
       });
     });

@@ -99,11 +99,7 @@ export async function baseHandler(
   }
 
   const objectKey = event.queryStringParameters?.objectKey;
-  const chunks = await retrieveChunks(orgId, region, bucketName, {
-    query,
-    topK: top_k,
-    objectKey,
-  });
+  const chunks = await retrieveChunks(region, bucketName, query, { topK: top_k, objectKey });
 
   if (chunks.length === 0) {
     return new ResponseBuilder()
@@ -130,18 +126,18 @@ export async function baseHandler(
  * "no relevant content" rather than an error.
  */
 async function retrieveChunks(
-  orgId: string,
   region: S3Region,
   bucketName: string,
-  options: { query: string; topK: number; objectKey: string | undefined },
+  query: string,
+  options: { topK: number; objectKey: string | undefined },
 ): Promise<VectorQueryResult[]> {
-  const { query, topK, objectKey } = options;
+  const { topK, objectKey } = options;
   const embedding = await embed(query);
   const vectorStore = new S3VectorsStore(Resource.RagVectorBucket.name);
   const filters = objectKey ? { objectKey } : undefined;
 
   try {
-    return await vectorStore.query(orgId, region, bucketName, { embedding, k: topK, filters });
+    return await vectorStore.query(region, bucketName, embedding, { k: topK, filters });
   } catch (error) {
     if (error instanceof Error && error.name === 'NotFoundException') {
       return [];

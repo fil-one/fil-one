@@ -34,7 +34,7 @@ function enablementItem(
 ) {
   return marshall(
     {
-      pk: `BUCKET#${orgId}#${region}#${bucketName}`,
+      pk: `BUCKET#${region}#${bucketName}`,
       sk: 'RAG',
       orgId,
       status: 'active',
@@ -139,7 +139,7 @@ describe('rag-indexer-orchestrator', () => {
       .on(ScanCommand)
       .resolvesOnce({
         Items: [enablementItem('bucket-1', 'org-1')],
-        LastEvaluatedKey: marshall({ pk: 'BUCKET#org-1#eu-west-1#bucket-1', sk: 'RAG' }),
+        LastEvaluatedKey: marshall({ pk: 'BUCKET#eu-west-1#bucket-1', sk: 'RAG' }),
       })
       .resolvesOnce({ Items: [enablementItem('bucket-2', 'org-2')] });
     lambdaMock.on(InvokeCommand).resolves({});

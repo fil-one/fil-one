@@ -8,27 +8,17 @@ import {
   QueryVectorsCommand,
   S3VectorsClient,
 } from '@aws-sdk/client-s3vectors';
-import { createHash } from 'node:crypto';
 import { mockClient } from 'aws-sdk-client-mock';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { EMBEDDING_DIMENSION, MAX_METADATA_BYTES } from './constants.js';
 import { S3VectorsStore } from './s3-vectors-store.js';
 
 const VECTOR_BUCKET = 'rag-vectors';
-const ORG = 'org-abc';
 const REGION = 'eu-west-1';
 const INDEX = 'bucket-1';
-
-// The index name is a charset/length-safe hash of the (orgId, region, bucketName)
-// triple (S3 Vectors names are 3–63 chars from [a-z0-9-.]). Mirror the store's
-// derivation so assertions pin the format without hardcoding a digest.
-function expectedIndexName(orgId: string, region: string, bucketName: string): string {
-  const digest = createHash('sha256').update([orgId, region, bucketName].join(':')).digest('hex');
-  return `rag-${digest.slice(0, 56)}`;
-}
-// Tenant-scoped index name for the common (ORG, REGION, INDEX) fixture.
-const QUALIFIED_INDEX = expectedIndexName(ORG, REGION, INDEX);
+// Bucket names are unique per region, so the index is region-qualified.
+const QUALIFIED_INDEX = `${REGION}:${INDEX}`;
 
 const s3vMock = mockClient(S3VectorsClient);
 
@@ -59,7 +49,7 @@ describe('S3VectorsStore', () => {
   describe('ensureIndex', () => {
     it('creates a 1024-dim cosine float32 index with text non-filterable', async () => {
       s3vMock.on(CreateIndexCommand).resolves({});
-      await makeStore().ensureIndex(ORG, REGION, INDEX);
+      await makeStore().ensureIndex(REGION, INDEX);
 
       const calls = s3vMock.commandCalls(CreateIndexCommand);
       expect(calls).toHaveLength(1);
@@ -73,54 +63,23 @@ describe('S3VectorsStore', () => {
       });
     });
 
-    it('is idempotent: an existing index (ConflictException) does not throw but warns', async () => {
+    it('is idempotent: an existing index (ConflictException) does not throw', async () => {
       s3vMock
         .on(CreateIndexCommand)
         .rejects(new ConflictException({ message: 'index exists', $metadata: {} }));
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      try {
-        await expect(makeStore().ensureIndex(ORG, REGION, INDEX)).resolves.toBeUndefined();
-        expect(warn).toHaveBeenCalledWith(
-          expect.stringContaining('ConflictException'),
-          expect.objectContaining({ orgId: ORG, region: REGION, bucketName: INDEX }),
-        );
-      } finally {
-        warn.mockRestore();
-      }
+      await expect(makeStore().ensureIndex(REGION, INDEX)).resolves.toBeUndefined();
     });
 
     it('propagates non-conflict errors', async () => {
       s3vMock.on(CreateIndexCommand).rejects(new Error('boom'));
-      await expect(makeStore().ensureIndex(ORG, REGION, INDEX)).rejects.toThrow('boom');
-    });
-  });
-
-  describe('index-name tenant isolation (FIL-596)', () => {
-    it('produces a charset/length-valid S3 Vectors index name', async () => {
-      s3vMock.on(CreateIndexCommand).resolves({});
-      await makeStore().ensureIndex(ORG, REGION, INDEX);
-      const { indexName } = s3vMock.commandCalls(CreateIndexCommand)[0]!.args[0]!.input;
-      // 3–63 chars, [a-z0-9-.], begins and ends alphanumeric.
-      expect(indexName).toMatch(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/);
-      expect(indexName!.length).toBeLessThanOrEqual(63);
-    });
-
-    it('gives two orgs distinct indexes for the same region+bucketName', async () => {
-      s3vMock.on(CreateIndexCommand).resolves({});
-      const store = makeStore();
-      await store.ensureIndex('org-a', REGION, INDEX);
-      await store.ensureIndex('org-b', REGION, INDEX);
-      const [a, b] = s3vMock
-        .commandCalls(CreateIndexCommand)
-        .map((c) => c.args[0]!.input.indexName);
-      expect(a).not.toBe(b);
+      await expect(makeStore().ensureIndex(REGION, INDEX)).rejects.toThrow('boom');
     });
   });
 
   describe('upsertChunks', () => {
     it('formats vector keys as objectKey#chunkIndex and stores objectKey + text metadata', async () => {
       s3vMock.on(PutVectorsCommand).resolves({});
-      await makeStore().upsertChunks(ORG, REGION, INDEX, [
+      await makeStore().upsertChunks(REGION, INDEX, [
         {
           key: 'doc.pdf#0',
           text: 'hello world',
@@ -147,7 +106,7 @@ describe('S3VectorsStore', () => {
 
     it('derives objectKey using the final # so keys with # in the object name survive', async () => {
       s3vMock.on(PutVectorsCommand).resolves({});
-      await makeStore().upsertChunks(ORG, REGION, INDEX, [
+      await makeStore().upsertChunks(REGION, INDEX, [
         { key: 'a#b/c.txt#3', text: 't', metadata: {}, embedding: embedding() },
       ]);
 
@@ -159,7 +118,7 @@ describe('S3VectorsStore', () => {
       s3vMock.on(PutVectorsCommand).resolves({});
       const huge = 'x'.repeat(MAX_METADATA_BYTES + 1);
       await expect(
-        makeStore().upsertChunks(ORG, REGION, INDEX, [
+        makeStore().upsertChunks(REGION, INDEX, [
           { key: 'doc.pdf#0', text: huge, metadata: {}, embedding: embedding() },
         ]),
       ).rejects.toThrow(/40KB|per-vector limit/);
@@ -169,14 +128,12 @@ describe('S3VectorsStore', () => {
     it('rejects a chunk missing its embedding', async () => {
       s3vMock.on(PutVectorsCommand).resolves({});
       await expect(
-        makeStore().upsertChunks(ORG, REGION, INDEX, [
-          { key: 'doc.pdf#0', text: 't', metadata: {} },
-        ]),
+        makeStore().upsertChunks(REGION, INDEX, [{ key: 'doc.pdf#0', text: 't', metadata: {} }]),
       ).rejects.toThrow(/missing an embedding/);
     });
 
     it('no-ops on empty input', async () => {
-      await makeStore().upsertChunks(ORG, REGION, INDEX, []);
+      await makeStore().upsertChunks(REGION, INDEX, []);
       expect(s3vMock.commandCalls(PutVectorsCommand)).toHaveLength(0);
     });
   });
@@ -184,7 +141,7 @@ describe('S3VectorsStore', () => {
   describe('deleteChunks', () => {
     it('deletes only by explicit keys', async () => {
       s3vMock.on(DeleteVectorsCommand).resolves({});
-      await makeStore().deleteChunks(ORG, REGION, INDEX, ['doc.pdf#0', 'doc.pdf#2']);
+      await makeStore().deleteChunks(REGION, INDEX, ['doc.pdf#0', 'doc.pdf#2']);
 
       const calls = s3vMock.commandCalls(DeleteVectorsCommand);
       expect(calls).toHaveLength(1);
@@ -196,7 +153,7 @@ describe('S3VectorsStore', () => {
     });
 
     it('no-ops on empty keys', async () => {
-      await makeStore().deleteChunks(ORG, REGION, INDEX, []);
+      await makeStore().deleteChunks(REGION, INDEX, []);
       expect(s3vMock.commandCalls(DeleteVectorsCommand)).toHaveLength(0);
     });
   });
@@ -212,16 +169,16 @@ describe('S3VectorsStore', () => {
       });
 
       const store = makeStore();
-      await store.upsertChunks(ORG, REGION, INDEX, [
+      await store.upsertChunks(REGION, INDEX, [
         { key: 'doc.pdf#0', text: 'first', metadata: {}, embedding: embedding() },
         { key: 'doc.pdf#1', text: 'second', metadata: {}, embedding: embedding() },
       ]);
-      await store.deleteChunks(ORG, REGION, INDEX, ['doc.pdf#0']);
+      await store.deleteChunks(REGION, INDEX, ['doc.pdf#0']);
 
       const deleted = s3vMock.commandCalls(DeleteVectorsCommand)[0]!.args[0]!.input;
       expect(deleted.keys).toEqual(['doc.pdf#0']);
 
-      const results = await store.query(ORG, REGION, INDEX, { embedding: embedding(), k: 5 });
+      const results = await store.query(REGION, INDEX, embedding(), { k: 5 });
       expect(results.map((r) => r.key)).toEqual(['doc.pdf#1']);
     });
   });
@@ -238,8 +195,7 @@ describe('S3VectorsStore', () => {
         ],
       });
 
-      const results = await makeStore().query(ORG, REGION, INDEX, {
-        embedding: embedding(),
+      const results = await makeStore().query(REGION, INDEX, embedding(), {
         k: 3,
         filters: { objectKey: 'doc.pdf' },
       });
@@ -267,7 +223,7 @@ describe('S3VectorsStore', () => {
 
     it('omits the filter when none is provided and tolerates missing vectors', async () => {
       s3vMock.on(QueryVectorsCommand).resolves({});
-      const results = await makeStore().query(ORG, REGION, INDEX, { embedding: embedding(), k: 1 });
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 1 });
       expect(results).toEqual([]);
       expect(s3vMock.commandCalls(QueryVectorsCommand)[0]!.args[0]!.input.filter).toBeUndefined();
     });
@@ -276,7 +232,7 @@ describe('S3VectorsStore', () => {
       s3vMock.on(QueryVectorsCommand).resolves({
         vectors: [malformed({ distance: 0.1, metadata: { text: 'orphan', objectKey: 'doc.pdf' } })],
       });
-      const results = await makeStore().query(ORG, REGION, INDEX, { embedding: embedding(), k: 5 });
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 5 });
       expect(results).toEqual([]);
     });
 
@@ -284,7 +240,7 @@ describe('S3VectorsStore', () => {
       s3vMock.on(QueryVectorsCommand).resolves({
         vectors: [{ key: '', distance: 0.1, metadata: { text: 'orphan', objectKey: 'doc.pdf' } }],
       });
-      const results = await makeStore().query(ORG, REGION, INDEX, { embedding: embedding(), k: 5 });
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 5 });
       expect(results).toEqual([]);
     });
 
@@ -298,7 +254,7 @@ describe('S3VectorsStore', () => {
           }),
         ],
       });
-      const results = await makeStore().query(ORG, REGION, INDEX, { embedding: embedding(), k: 5 });
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 5 });
       expect(results).toEqual([]);
     });
 
@@ -308,7 +264,7 @@ describe('S3VectorsStore', () => {
           malformed({ key: 'doc.pdf#0', metadata: { text: 'no score', objectKey: 'doc.pdf' } }),
         ],
       });
-      const results = await makeStore().query(ORG, REGION, INDEX, { embedding: embedding(), k: 5 });
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 5 });
       expect(results).toEqual([]);
     });
 
@@ -329,7 +285,7 @@ describe('S3VectorsStore', () => {
           },
         ],
       });
-      const results = await makeStore().query(ORG, REGION, INDEX, { embedding: embedding(), k: 5 });
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 5 });
       expect(results).toEqual([
         { key: 'doc.pdf#0', text: 'good', metadata: { objectKey: 'doc.pdf' }, score: 0.1 },
         { key: 'doc.pdf#3', text: 'also good', metadata: { objectKey: 'doc.pdf' }, score: 0.4 },
@@ -342,7 +298,7 @@ describe('S3VectorsStore', () => {
           { key: 'doc.pdf#0', distance: 0, metadata: { text: 'identical', objectKey: 'doc.pdf' } },
         ],
       });
-      const results = await makeStore().query(ORG, REGION, INDEX, { embedding: embedding(), k: 5 });
+      const results = await makeStore().query(REGION, INDEX, embedding(), { k: 5 });
       expect(results).toEqual([
         { key: 'doc.pdf#0', text: 'identical', metadata: { objectKey: 'doc.pdf' }, score: 0 },
       ]);
@@ -352,7 +308,7 @@ describe('S3VectorsStore', () => {
   describe('dropIndex', () => {
     it('deletes the index', async () => {
       s3vMock.on(DeleteIndexCommand).resolves({});
-      await makeStore().dropIndex(ORG, REGION, INDEX);
+      await makeStore().dropIndex(REGION, INDEX);
       expect(s3vMock.commandCalls(DeleteIndexCommand)[0]!.args[0]!.input).toMatchObject({
         vectorBucketName: VECTOR_BUCKET,
         indexName: QUALIFIED_INDEX,

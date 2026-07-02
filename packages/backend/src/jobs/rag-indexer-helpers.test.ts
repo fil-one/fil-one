@@ -61,7 +61,6 @@ import { S3Region } from '@filone/shared';
 // Helpers
 // ---------------------------------------------------------------------------
 
-const ORG = 'org-1';
 const s3 = {} as S3Client;
 
 function makeVectorStore() {
@@ -120,28 +119,16 @@ describe('indexBucket', () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([]));
 
-    await indexBucket({
-      orgId: ORG,
-      s3,
-      region: S3Region.EuWest1,
-      bucketName: 'bucket-1',
-      vectorStore,
-    });
+    await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
-    expect(vectorStore.ensureIndex).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1');
+    expect(vectorStore.ensureIndex).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1');
   });
 
   it('enumerates objects via listObjects with no HeadObject calls', async () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
-    await indexBucket({
-      orgId: ORG,
-      s3,
-      region: S3Region.EuWest1,
-      bucketName: 'bucket-1',
-      vectorStore,
-    });
+    await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
     expect(mockListObjects).toHaveBeenCalledWith({
       s3,
@@ -159,7 +146,6 @@ describe('indexBucket', () => {
     mockEmbedMany.mockResolvedValue([[0.1], [0.2]]);
 
     const result = await indexBucket({
-      orgId: ORG,
       s3,
       region: S3Region.EuWest1,
       bucketName: 'bucket-1',
@@ -168,11 +154,11 @@ describe('indexBucket', () => {
 
     expect(mockExtractText).toHaveBeenCalledOnce();
     expect(mockEmbedMany).toHaveBeenCalledWith(['c0', 'c1']);
-    expect(vectorStore.upsertChunks).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1', [
+    expect(vectorStore.upsertChunks).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', [
       { key: 'a.txt#0', text: 'c0', metadata: { objectKey: 'a.txt' }, embedding: [0.1] },
       { key: 'a.txt#1', text: 'c1', metadata: { objectKey: 'a.txt' }, embedding: [0.2] },
     ]);
-    expect(mockSaveManifestEntry).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1', {
+    expect(mockSaveManifestEntry).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', {
       objectKey: 'a.txt',
       etag: 'e1',
       chunkKeys: ['a.txt#0', 'a.txt#1'],
@@ -193,7 +179,6 @@ describe('indexBucket', () => {
     mockExtractText.mockResolvedValue('pdf text');
 
     const result = await indexBucket({
-      orgId: ORG,
       s3,
       region: S3Region.EuWest1,
       bucketName: 'bucket-1',
@@ -204,7 +189,7 @@ describe('indexBucket', () => {
       pdf: { documentLocation: { Bucket: 'bucket-1', Name: 'doc.pdf' } },
     });
     expect(vectorStore.upsertChunks).toHaveBeenCalledOnce();
-    expect(mockSaveManifestEntry).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1', {
+    expect(mockSaveManifestEntry).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', {
       objectKey: 'doc.pdf',
       etag: 'e1',
       chunkKeys: ['doc.pdf#0'],
@@ -219,13 +204,7 @@ describe('indexBucket', () => {
     // Stored content type carries no signal; the .pdf extension drives the type.
     mockGetObjectBytes.mockResolvedValue({ bytes, contentType: 'application/octet-stream' });
 
-    await indexBucket({
-      orgId: ORG,
-      s3,
-      region: S3Region.EuWest1,
-      bucketName: 'bucket-1',
-      vectorStore,
-    });
+    await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
     expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf', {
       pdf: { documentLocation: { Bucket: 'bucket-1', Name: 'report.pdf' } },
@@ -236,13 +215,7 @@ describe('indexBucket', () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
-    await indexBucket({
-      orgId: ORG,
-      s3,
-      region: S3Region.EuWest1,
-      bucketName: 'bucket-1',
-      vectorStore,
-    });
+    await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
     expect(mockExtractText).toHaveBeenCalledWith(new Uint8Array([1]), 'text/plain', {});
   });
@@ -257,7 +230,6 @@ describe('indexBucket', () => {
     mockExtractText.mockRejectedValue(new Error('Textract job failed'));
 
     const result = await indexBucket({
-      orgId: ORG,
       s3,
       region: S3Region.EuWest1,
       bucketName: 'bucket-1',
@@ -280,18 +252,17 @@ describe('indexBucket', () => {
     mockEmbedMany.mockResolvedValue([[0.9]]);
 
     const result = await indexBucket({
-      orgId: ORG,
       s3,
       region: S3Region.EuWest1,
       bucketName: 'bucket-1',
       vectorStore,
     });
 
-    expect(vectorStore.deleteChunks).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1', [
+    expect(vectorStore.deleteChunks).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', [
       'a.txt#0',
     ]);
     expect(vectorStore.upsertChunks).toHaveBeenCalledOnce();
-    expect(mockSaveManifestEntry).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1', {
+    expect(mockSaveManifestEntry).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', {
       objectKey: 'a.txt',
       etag: 'new',
       chunkKeys: ['a.txt#0'],
@@ -308,7 +279,6 @@ describe('indexBucket', () => {
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'same' }]));
 
     const result = await indexBucket({
-      orgId: ORG,
       s3,
       region: S3Region.EuWest1,
       bucketName: 'bucket-1',
@@ -336,23 +306,17 @@ describe('indexBucket', () => {
     mockListObjects.mockResolvedValue(page([]));
 
     const result = await indexBucket({
-      orgId: ORG,
       s3,
       region: S3Region.EuWest1,
       bucketName: 'bucket-1',
       vectorStore,
     });
 
-    expect(vectorStore.deleteChunks).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1', [
+    expect(vectorStore.deleteChunks).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', [
       'gone.txt#0',
       'gone.txt#1',
     ]);
-    expect(mockDeleteManifestEntry).toHaveBeenCalledWith(
-      ORG,
-      S3Region.EuWest1,
-      'bucket-1',
-      'gone.txt',
-    );
+    expect(mockDeleteManifestEntry).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', 'gone.txt');
     expect(result).toMatchObject({ added: 0, updated: 0, removed: 1 });
   });
 
@@ -369,7 +333,6 @@ describe('indexBucket', () => {
       .mockResolvedValue({ bytes: new Uint8Array([1]), contentType: 'text/plain' });
 
     const result = await indexBucket({
-      orgId: ORG,
       s3,
       region: S3Region.EuWest1,
       bucketName: 'bucket-1',
@@ -378,7 +341,7 @@ describe('indexBucket', () => {
 
     expect(result).toMatchObject({ added: 1, failed: 1, completed: true });
     expect(mockSaveManifestEntry).toHaveBeenCalledOnce();
-    expect(mockSaveManifestEntry).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1', {
+    expect(mockSaveManifestEntry).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', {
       objectKey: 'good.txt',
       etag: 'e2',
       chunkKeys: ['good.txt#0'],
@@ -391,7 +354,6 @@ describe('indexBucket', () => {
     mockGetObjectBytes.mockResolvedValue({ bytes: new Uint8Array([1]), contentType: undefined });
 
     const result = await indexBucket({
-      orgId: ORG,
       s3,
       region: S3Region.EuWest1,
       bucketName: 'bucket-1',
@@ -408,7 +370,6 @@ describe('indexBucket', () => {
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt' }]));
 
     const result = await indexBucket({
-      orgId: ORG,
       s3,
       region: S3Region.EuWest1,
       bucketName: 'bucket-1',
@@ -430,7 +391,6 @@ describe('indexBucket', () => {
       .mockResolvedValueOnce(page([{ key: 'b.txt', etag: 'e2' }]));
 
     const result = await indexBucket({
-      orgId: ORG,
       s3,
       region: S3Region.EuWest1,
       bucketName: 'bucket-1',
@@ -448,7 +408,7 @@ describe('indexBucket', () => {
       continuationToken: 'tok-1',
     });
     // A checkpoint is persisted after each non-final page.
-    expect(mockSaveCheckpoint).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1', 'tok-1');
+    expect(mockSaveCheckpoint).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', 'tok-1');
     expect(result).toMatchObject({ added: 2, completed: true });
   });
 
@@ -456,15 +416,9 @@ describe('indexBucket', () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
-    await indexBucket({
-      orgId: ORG,
-      s3,
-      region: S3Region.EuWest1,
-      bucketName: 'bucket-1',
-      vectorStore,
-    });
+    await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
-    expect(mockClearCheckpoint).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1');
+    expect(mockClearCheckpoint).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1');
   });
 
   it('resumes from a persisted continuation token', async () => {
@@ -480,13 +434,7 @@ describe('indexBucket', () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
-    await indexBucket({
-      orgId: ORG,
-      s3,
-      region: S3Region.EuWest1,
-      bucketName: 'bucket-1',
-      vectorStore,
-    });
+    await indexBucket({ s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore });
 
     expect(mockListObjects).toHaveBeenCalledWith({
       s3,
@@ -519,7 +467,6 @@ describe('indexBucket', () => {
     mockListObjects.mockResolvedValue(page([{ key: 'b.txt', etag: 'e2' }]));
 
     const result = await indexBucket({
-      orgId: ORG,
       s3,
       region: S3Region.EuWest1,
       bucketName: 'bucket-1',
@@ -532,7 +479,7 @@ describe('indexBucket', () => {
     expect(result.removed).toBe(0);
     // The new object on this page is still indexed normally.
     expect(result).toMatchObject({ added: 1, completed: true });
-    expect(mockClearCheckpoint).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1');
+    expect(mockClearCheckpoint).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1');
   });
 
   it('reconciles removals on a fresh (non-resumed) full pass', async () => {
@@ -546,22 +493,16 @@ describe('indexBucket', () => {
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
     const result = await indexBucket({
-      orgId: ORG,
       s3,
       region: S3Region.EuWest1,
       bucketName: 'bucket-1',
       vectorStore,
     });
 
-    expect(vectorStore.deleteChunks).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1', [
+    expect(vectorStore.deleteChunks).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', [
       'gone.txt#0',
     ]);
-    expect(mockDeleteManifestEntry).toHaveBeenCalledWith(
-      ORG,
-      S3Region.EuWest1,
-      'bucket-1',
-      'gone.txt',
-    );
+    expect(mockDeleteManifestEntry).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', 'gone.txt');
     expect(result).toMatchObject({ added: 1, removed: 1, completed: true });
   });
 
@@ -571,12 +512,12 @@ describe('indexBucket', () => {
 
     // Deadline already passed: indexBucket must checkpoint without listing.
     const result = await indexBucket(
-      { orgId: ORG, s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore },
+      { s3, region: S3Region.EuWest1, bucketName: 'bucket-1', vectorStore },
       { deadlineEpochMs: Date.now() - 1 },
     );
 
     expect(mockListObjects).not.toHaveBeenCalled();
-    expect(mockSaveCheckpoint).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1', undefined);
+    expect(mockSaveCheckpoint).toHaveBeenCalledWith(S3Region.EuWest1, 'bucket-1', undefined);
     expect(mockClearCheckpoint).not.toHaveBeenCalled();
     expect(result.completed).toBe(false);
   });

@@ -82,7 +82,7 @@ export async function baseHandler(
       .build();
   }
 
-  const existing = await getBucketRagEnablement(orgId, region, bucketName);
+  const existing = await getBucketRagEnablement(region, bucketName);
   // Defense in depth: never carry over a record stamped with a different org.
   // getBucket already proved tenant ownership, so a mismatch here is a data
   // anomaly (stale/reused row), not a client error — re-stamp the row with the

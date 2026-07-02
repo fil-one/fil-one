@@ -40,8 +40,6 @@ const PDF_CONTENT_TYPE = 'application/pdf';
  * the shared context is threaded explicitly rather than re-passed positionally.
  */
 export interface BucketIndexContext {
-  /** Owning org — scopes every manifest/checkpoint key and the vector index name. */
-  orgId: string;
   s3: S3Client;
   region: S3Region;
   bucketName: string;
@@ -97,14 +95,14 @@ export async function indexBucket(
   ctx: BucketIndexContext,
   options: IndexBucketOptions = {},
 ): Promise<IndexBucketResult> {
-  const { orgId, s3, region, bucketName, vectorStore } = ctx;
-  await vectorStore.ensureIndex(orgId, region, bucketName);
+  const { s3, region, bucketName, vectorStore } = ctx;
+  await vectorStore.ensureIndex(region, bucketName);
 
-  const manifest = await loadManifest(orgId, region, bucketName);
+  const manifest = await loadManifest(region, bucketName);
   const seen = new Set<string>();
   const totals: PageOutcome = { added: 0, updated: 0, removed: 0, failed: 0 };
 
-  const checkpoint = await loadCheckpoint(orgId, region, bucketName);
+  const checkpoint = await loadCheckpoint(region, bucketName);
   let continuationToken = checkpoint?.continuationToken;
   // True only when this invocation walks the bucket from the very first page.
   // When we resume from a checkpoint, `seen` is necessarily incomplete, so we
@@ -113,7 +111,7 @@ export async function indexBucket(
 
   while (true) {
     if (isPastDeadline(options.deadlineEpochMs)) {
-      await saveCheckpoint(orgId, region, bucketName, continuationToken);
+      await saveCheckpoint(region, bucketName, continuationToken);
       console.log(`${LOG} Checkpointed mid-bucket (deadline reached)`, { region, bucketName });
       return { ...totals, completed: false };
     }
@@ -127,7 +125,7 @@ export async function indexBucket(
     if (!page.isTruncated || !continuationToken) break;
 
     // Persist progress after each page so a crash/timeout resumes here.
-    await saveCheckpoint(orgId, region, bucketName, continuationToken);
+    await saveCheckpoint(region, bucketName, continuationToken);
   }
 
   // Only reconcile removals when `seen` is a complete enumeration of the bucket
@@ -144,7 +142,7 @@ export async function indexBucket(
     });
   }
 
-  await clearCheckpoint(orgId, region, bucketName);
+  await clearCheckpoint(region, bucketName);
   console.log(`${LOG} Bucket reconciled`, { region, bucketName, ...totals });
   return { ...totals, completed: true };
 }
@@ -199,7 +197,7 @@ async function classifyAndIndexObject(
   manifest: Map<string, ManifestEntry>,
   object: S3Object,
 ): Promise<ObjectAction> {
-  const { orgId, region, bucketName, vectorStore } = ctx;
+  const { region, bucketName, vectorStore } = ctx;
   const etag = object.etag;
   if (!etag) {
     console.warn(`${LOG} Object has no ETag, skipping`, { bucketName, key: object.key });
@@ -212,7 +210,7 @@ async function classifyAndIndexObject(
 
   try {
     if (existing) {
-      await vectorStore.deleteChunks(orgId, region, bucketName, existing.chunkKeys);
+      await vectorStore.deleteChunks(region, bucketName, existing.chunkKeys);
     }
     const indexed = await indexObject(ctx, object.key, etag);
     if (!indexed) return 'skipped';
@@ -238,7 +236,7 @@ async function indexObject(
   objectKey: string,
   etag: string,
 ): Promise<boolean> {
-  const { orgId, s3, region, bucketName, vectorStore } = ctx;
+  const { s3, region, bucketName, vectorStore } = ctx;
   const { bytes, contentType: storedType } = await getObjectBytes(s3, bucketName, objectKey);
   const contentType = resolveContentType(objectKey, storedType);
   if (!contentType) {
@@ -271,8 +269,8 @@ async function indexObject(
     embedding: embeddings[index],
   }));
 
-  await vectorStore.upsertChunks(orgId, region, bucketName, chunks);
-  await saveManifestEntry(orgId, region, bucketName, {
+  await vectorStore.upsertChunks(region, bucketName, chunks);
+  await saveManifestEntry(region, bucketName, {
     objectKey,
     etag,
     chunkKeys: chunks.map((c) => c.key),
@@ -290,13 +288,13 @@ async function reconcileRemovals(
   manifest: Map<string, ManifestEntry>,
   seen: Set<string>,
 ): Promise<number> {
-  const { orgId, region, bucketName, vectorStore } = ctx;
+  const { region, bucketName, vectorStore } = ctx;
   let removed = 0;
   for (const [objectKey, entry] of manifest) {
     if (seen.has(objectKey)) continue;
     try {
-      await vectorStore.deleteChunks(orgId, region, bucketName, entry.chunkKeys);
-      await deleteManifestEntry(orgId, region, bucketName, objectKey);
+      await vectorStore.deleteChunks(region, bucketName, entry.chunkKeys);
+      await deleteManifestEntry(region, bucketName, objectKey);
       removed++;
     } catch (error) {
       console.error(`${LOG} Failed to remove object`, {

@@ -136,7 +136,7 @@ describe('set-bucket-rag-enablement baseHandler', () => {
 
     await baseHandler(e);
 
-    expect(mockGetEnablement).toHaveBeenCalledWith('org-1', S3Region.UsEast1, 'my-bucket');
+    expect(mockGetEnablement).toHaveBeenCalledWith(S3Region.UsEast1, 'my-bucket');
     expect(mockSetEnablement).toHaveBeenCalledWith(
       expect.objectContaining({ region: S3Region.UsEast1, bucketName: 'my-bucket' }),
     );
