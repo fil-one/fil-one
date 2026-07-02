@@ -11,7 +11,7 @@ import type { RagIndexerWorkerPayload } from './rag-indexer-worker.js';
 
 vi.mock('sst', () => ({
   Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
+    RagIndexerTable: { name: 'RagIndexerTable' },
   },
 }));
 
@@ -82,7 +82,7 @@ describe('rag-indexer-orchestrator', () => {
     await handler();
 
     const scanInput = ddbMock.commandCalls(ScanCommand)[0].args[0].input;
-    expect(scanInput.TableName).toBe('UserInfoTable');
+    expect(scanInput.TableName).toBe('RagIndexerTable');
     expect(scanInput.FilterExpression).toContain('sk = :sk');
     expect(scanInput.ExpressionAttributeValues).toMatchObject({
       ':sk': { S: 'RAG' },

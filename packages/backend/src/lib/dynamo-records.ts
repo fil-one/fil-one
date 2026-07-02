@@ -50,9 +50,10 @@ export interface RAGConfigRecord {
 }
 
 /**
- * Per-bucket RAG enablement, settings, and sync telemetry.
+ * Per-bucket RAG enablement, settings, and sync telemetry. Co-located with this
+ * bucket's manifests: same `RagIndexerTable` partition, distinguished by sk.
  *
- * UserInfoTable — pk: BUCKET#{orgId}#{region}#{bucketName}, sk: RAG
+ * RagIndexerTable — pk: BUCKET#{orgId}#{region}#{bucketName}, sk: RAG
  */
 export interface BucketRAGEnablementRecord {
   pk: string;

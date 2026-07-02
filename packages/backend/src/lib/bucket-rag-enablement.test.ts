@@ -5,7 +5,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 
 vi.mock('sst', () => ({
   Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
+    RagIndexerTable: { name: 'RagIndexerTable' },
   },
 }));
 
@@ -37,14 +37,14 @@ function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablem
 describe('getBucketRagEnablement', () => {
   beforeEach(() => ddbMock.reset());
 
-  it('reads BUCKET#{region}#{name}/RAG from UserInfoTable via a single GetItemCommand', async () => {
+  it('reads BUCKET#{orgId}#{region}#{name}/RAG from RagIndexerTable via a single GetItemCommand', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: marshall(record()) });
 
     const result = await getBucketRagEnablement('org-1', S3Region.EuWest1, 'my-bucket');
 
     expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
     expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toEqual({
-      TableName: 'UserInfoTable',
+      TableName: 'RagIndexerTable',
       Key: { pk: { S: 'BUCKET#org-1#eu-west-1#my-bucket' }, sk: { S: 'RAG' } },
     });
     expect(result?.status).toBe('active');

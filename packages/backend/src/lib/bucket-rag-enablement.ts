@@ -8,14 +8,14 @@ import { RAGKeys, type BucketRAGEnablementRecord, type BucketRAGStatus } from '.
 const dynamo = getDynamoClient();
 
 /**
- * Read a bucket's RAG enablement row (`BUCKET#{orgId}#{region}#{bucketName}` / `RAG`).
+ * Read a bucket's RAG enablement row (`BUCKET#{orgId}#{region}#{bucketName}` / `RAG`)
+ * from `RagIndexerTable`.
  *
  * The partition is org-scoped so a bucket name reused across tenants can never
- * resolve to another org's record — the enablement record shares the same
- * org+region-qualified partition the indexer keys manifests under (see
- * rag-indexer-manifest / rag-indexer-worker). Returns `undefined` when RAG was
- * never enabled for the bucket so callers can render a never-synced state
- * gracefully.
+ * resolve to another org's record, and the row lives in the SAME `RagIndexerTable`
+ * partition the indexer keys this bucket's manifests under (see rag-indexer-manifest /
+ * rag-indexer-worker). Returns `undefined` when RAG was never enabled for the bucket so
+ * callers can render a never-synced state gracefully.
  */
 export async function getBucketRagEnablement(
   orgId: string,
@@ -24,7 +24,7 @@ export async function getBucketRagEnablement(
 ): Promise<BucketRAGEnablementRecord | undefined> {
   const { Item } = await dynamo.send(
     new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
+      TableName: Resource.RagIndexerTable.name,
       Key: {
         pk: { S: RAGKeys.bucketPk(orgId, region, bucketName) },
         sk: { S: RAGKeys.enablementSk() },
@@ -68,7 +68,7 @@ export async function setBucketRagEnablement(args: {
 
   await dynamo.send(
     new PutItemCommand({
-      TableName: Resource.UserInfoTable.name,
+      TableName: Resource.RagIndexerTable.name,
       Item: marshall(record, { removeUndefinedValues: true }),
     }),
   );
