@@ -24,13 +24,15 @@ function ModelCard({
   icon,
   heading,
   description,
+  testId,
 }: {
   icon: React.ReactNode;
   heading: string;
   description: string;
+  testId: string;
 }) {
   return (
-    <Card padding="md">
+    <Card data-testid={testId} padding="md">
       <div className="space-y-5">
         <div>
           <div className="flex items-center gap-2">
@@ -61,7 +63,7 @@ function ModelCard({
 
 export function ModelsTab({ enabled }: { enabled: boolean }) {
   return (
-    <div className="space-y-6">
+    <div data-testid="models-tab" className="space-y-6">
       <Heading
         tag="h2"
         size="lg"
@@ -71,11 +73,13 @@ export function ModelsTab({ enabled }: { enabled: boolean }) {
       </Heading>
       <div className={`grid grid-cols-2 gap-6${!enabled ? ' opacity-60' : ''}`}>
         <ModelCard
+          testId="model-card-index"
           icon={<CubeIcon size={16} />}
           heading="Index model"
           description="Creates embeddings when files are uploaded to your buckets."
         />
         <ModelCard
+          testId="model-card-query"
           icon={<ChatCircleIcon size={16} />}
           heading="Query model"
           description="Generates answers when you search across your indexed buckets."
@@ -114,7 +118,7 @@ export function IntegrateTab({ enabled, buckets }: { enabled: boolean; buckets: 
   const queryCode = `POST /api/buckets/${arg}/query?region=${region}\n${JSON.stringify({ query: 'What are the retention policies?', top_k: 5 }, null, 2)}`;
 
   return (
-    <div className="space-y-6">
+    <div data-testid="integrate-tab" className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <Heading
           tag="h2"
@@ -126,7 +130,7 @@ export function IntegrateTab({ enabled, buckets }: { enabled: boolean; buckets: 
         {enabled && enabledBuckets.length > 0 && (
           <div className="mt-1 flex flex-shrink-0 items-center gap-3">
             <span className="flex-shrink-0 text-xs font-medium text-zinc-400">Select bucket</span>
-            <div className="w-44">
+            <div data-testid="integrate-bucket-select" className="w-44">
               <Select value={selected} onChange={setSelected} aria-label="Select bucket">
                 <option value={ALL_BUCKETS_VALUE}>All buckets</option>
                 {enabledBuckets.map((b) => (
@@ -146,7 +150,7 @@ export function IntegrateTab({ enabled, buckets }: { enabled: boolean; buckets: 
         />
       )}
       <div className="grid grid-cols-2 divide-x divide-zinc-100">
-        <div className="pr-6">
+        <div data-testid="integrate-query-api" className="pr-6">
           <div className="flex items-center gap-2">
             <LightningIcon size={16} className="text-zinc-400" />
             <span className="text-sm font-semibold text-zinc-800">Query API</span>
@@ -156,7 +160,7 @@ export function IntegrateTab({ enabled, buckets }: { enabled: boolean; buckets: 
             <CodeBlock code={queryCode} language="bash" />
           </div>
         </div>
-        <div className="pl-6">
+        <div data-testid="integrate-mcp" className="pl-6">
           <div className="flex items-center gap-2">
             <TerminalIcon size={16} className="text-zinc-400" />
             <span className="text-sm font-semibold text-zinc-800">MCP endpoint</span>

@@ -11,10 +11,14 @@ export type QuerySourcesProps = {
 export function QuerySources({ bucket, sources }: QuerySourcesProps) {
   if (sources.length === 0) return null;
   return (
-    <div className="mt-3 flex flex-wrap gap-1.5 border-t border-zinc-100 pt-3">
+    <div
+      data-testid="query-sources"
+      className="mt-3 flex flex-wrap gap-1.5 border-t border-zinc-100 pt-3"
+    >
       {sources.map((source) => (
         <Link
           key={source}
+          data-testid="query-sources-item"
           to="/buckets/$bucketName/objects"
           params={{ bucketName: bucket.name }}
           search={{ key: source, region: bucket.region }}

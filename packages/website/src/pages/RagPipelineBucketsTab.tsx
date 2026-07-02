@@ -74,14 +74,20 @@ function BucketRow({
   onAsk: () => void;
 }) {
   return (
-    <Card padding="none" className="overflow-hidden">
+    <Card
+      data-testid={`bucket-row-${bucketKey(bucket)}`}
+      padding="none"
+      className="overflow-hidden"
+    >
       <div className="flex items-center justify-between px-5 py-4">
         <div className="flex items-center gap-3">
           <span
             className={`h-2 w-2 flex-shrink-0 rounded-full ${bucket.enabled ? 'bg-green-500' : 'bg-zinc-300'}`}
           />
           <div>
-            <p className="text-sm font-medium text-zinc-800">{bucket.name}</p>
+            <p data-testid="bucket-row-name" className="text-sm font-medium text-zinc-800">
+              {bucket.name}
+            </p>
             <p className="text-xs text-zinc-400">
               <BucketRowDescription bucket={bucket} />
             </p>
@@ -90,13 +96,19 @@ function BucketRow({
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
           {bucket.enabled ? (
             <>
-              <Button variant="ghost" size="sm" onClick={onAsk}>
+              <Button data-testid="bucket-row-ask" variant="ghost" size="sm" onClick={onAsk}>
                 Ask questions
               </Button>
               <BucketActionMenu onDisable={onToggle} />
             </>
           ) : (
-            <Button variant="primary" size="sm" disabled={pending} onClick={onToggle}>
+            <Button
+              data-testid="bucket-row-index"
+              variant="primary"
+              size="sm"
+              disabled={pending}
+              onClick={onToggle}
+            >
               {pending ? 'Enabling…' : 'Index'}
             </Button>
           )}
@@ -130,7 +142,7 @@ export function BucketsTab({
   const activeBucket = buckets.find((b) => bucketKey(b) === activeDrawer) ?? null;
 
   return (
-    <section className="space-y-6">
+    <section data-testid="buckets-tab" className="space-y-6">
       <Heading
         tag="h2"
         size="lg"
@@ -139,15 +151,19 @@ export function BucketsTab({
         Buckets
       </Heading>
       {isError ? (
-        <Alert variant="red" description={errorMessage ?? 'Failed to load buckets'} />
+        <div data-testid="buckets-error">
+          <Alert variant="red" description={errorMessage ?? 'Failed to load buckets'} />
+        </div>
       ) : isLoading ? (
-        <div className="flex items-center justify-center py-12">
+        <div data-testid="buckets-loading" className="flex items-center justify-center py-12">
           <Spinner ariaLabel="Loading buckets" size={28} />
         </div>
       ) : buckets.length === 0 ? (
-        <Alert variant="grey" description="You don't have any buckets yet." />
+        <div data-testid="buckets-empty">
+          <Alert variant="grey" description="You don't have any buckets yet." />
+        </div>
       ) : (
-        <div className="space-y-3">
+        <div data-testid="buckets-list" className="space-y-3">
           {buckets.map((b) => (
             <BucketRow
               key={bucketKey(b)}

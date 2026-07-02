@@ -61,7 +61,7 @@ function RagPipelineView({
   ];
 
   return (
-    <div className="px-10 py-12 pb-20">
+    <div data-testid="rag-pipeline-page" className="px-10 py-12 pb-20">
       <div className="space-y-8">
         <div className="flex items-start justify-between gap-6">
           <Heading
@@ -84,9 +84,16 @@ function RagPipelineView({
           </Heading>
         </div>
 
-        <div className={`grid grid-cols-3 gap-3 ${!anyEnabled ? 'opacity-60' : ''}`}>
+        <div
+          data-testid="rag-pipeline-stats"
+          className={`grid grid-cols-3 gap-3 ${!anyEnabled ? 'opacity-60' : ''}`}
+        >
           {stats.map((s) => (
-            <div key={s.label} className="rounded-xl border border-zinc-200 bg-white p-5">
+            <div
+              key={s.label}
+              data-testid="rag-pipeline-stat"
+              className="rounded-xl border border-zinc-200 bg-white p-5"
+            >
               <p className="mb-2.5 text-xs font-medium uppercase tracking-wider text-zinc-500">
                 {s.label}
               </p>
@@ -132,7 +139,7 @@ function RagPipelineView({
 
 function NotAvailable() {
   return (
-    <div className="px-10 py-12">
+    <div data-testid="rag-pipeline-not-available" className="px-10 py-12">
       <Alert variant="grey" description="RAG Pipeline is not available for your account." />
     </div>
   );
