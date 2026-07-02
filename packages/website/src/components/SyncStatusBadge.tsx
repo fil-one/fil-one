@@ -11,7 +11,11 @@ import { type RagBucket } from '../lib/rag-bucket-api.js';
 export function SyncStatusBadge({ bucket }: { bucket: RagBucket }) {
   if (bucket.syncState === 'syncing') {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+      <span
+        data-testid="sync-status-badge"
+        data-sync-state="syncing"
+        className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+      >
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
         Syncing…
       </span>
@@ -20,6 +24,8 @@ export function SyncStatusBadge({ bucket }: { bucket: RagBucket }) {
   if (bucket.syncState === 'error') {
     return (
       <span
+        data-testid="sync-status-badge"
+        data-sync-state="error"
         title={bucket.lastSyncError ?? 'Sync failed'}
         className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700"
       >
