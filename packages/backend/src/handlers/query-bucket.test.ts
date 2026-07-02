@@ -134,7 +134,8 @@ describe('query-bucket baseHandler', () => {
     await baseHandler(queryEvent({ query: 'hello', top_k: 5 }));
 
     expect(mockEmbed).toHaveBeenCalledWith('hello');
-    expect(mockQuery).toHaveBeenCalledWith(S3Region.EuWest1, 'my-bucket', [0.1, 0.2, 0.3], {
+    expect(mockQuery).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'my-bucket', {
+      embedding: [0.1, 0.2, 0.3],
       k: 5,
       filters: undefined,
     });
@@ -142,7 +143,8 @@ describe('query-bucket baseHandler', () => {
 
   it('defaults top_k to 10 when omitted', async () => {
     await baseHandler(queryEvent({ query: 'hello' }));
-    expect(mockQuery).toHaveBeenCalledWith(S3Region.EuWest1, 'my-bucket', [0.1, 0.2, 0.3], {
+    expect(mockQuery).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'my-bucket', {
+      embedding: [0.1, 0.2, 0.3],
       k: 10,
       filters: undefined,
     });
@@ -150,7 +152,8 @@ describe('query-bucket baseHandler', () => {
 
   it('applies an objectKey equality filter when supplied as a query param', async () => {
     await baseHandler(queryEvent({ query: 'hello' }, { objectKey: 'only.pdf' }));
-    expect(mockQuery).toHaveBeenCalledWith(S3Region.EuWest1, 'my-bucket', [0.1, 0.2, 0.3], {
+    expect(mockQuery).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'my-bucket', {
+      embedding: [0.1, 0.2, 0.3],
       k: 10,
       filters: { objectKey: 'only.pdf' },
     });

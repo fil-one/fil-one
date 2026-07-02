@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   CreateIndexCommand,
   DeleteIndexCommand,
@@ -29,9 +30,10 @@ const TEXT_METADATA = 'text';
  *
  * A single S3 Vectors *vector bucket* (provisioned in `sst.config.ts` and read
  * at runtime via `Resource.RagVectorBucket.name`) hosts one *index* per
- * RAG-enabled bucket. Because bucket names are unique per region but not
- * globally, each index is named by the `(region, bucketName)` pair so
- * same-named buckets in different regions do not collide on one index.
+ * RAG-enabled bucket. Bucket names are globally namespaced and can be reused
+ * across tenants, so each index is named from the `(orgId, region, bucketName)`
+ * triple (see {@link #indexName}) — this is what keeps a reused bucket name from
+ * resolving to another tenant's index (FIL-596).
  *
  * Uses the default AWS SDK credential chain (SigV4 via the Lambda execution
  * role); no VPC configuration.
@@ -49,6 +51,7 @@ export class S3VectorsStore implements VectorStore {
   }
 
   async ensureIndex(
+    orgId: string,
     region: string,
     bucketName: string,
     options?: EnsureIndexOptions,
@@ -58,7 +61,7 @@ export class S3VectorsStore implements VectorStore {
       await this.#client.send(
         new CreateIndexCommand({
           vectorBucketName: this.#vectorBucketName,
-          indexName: this.#indexName(region, bucketName),
+          indexName: this.#indexName(orgId, region, bucketName),
           dataType: 'float32',
           dimension,
           // Distance metric is immutable once the index exists.
@@ -70,8 +73,18 @@ export class S3VectorsStore implements VectorStore {
         }),
       );
     } catch (error: unknown) {
-      // Idempotent: an existing index surfaces as a ConflictException.
+      // Idempotent: an existing index surfaces as a ConflictException, which we
+      // treat as success. Under org-scoped index names a conflict for a
+      // genuinely new bucket should not happen, but a same-org delete+recreate
+      // of a bucket name can still hit its own leftover index until RAG teardown
+      // ships (FIL-596 follow-up). So we surface it for triage rather than
+      // failing the run; escalating to a hard error is deferred to that PR.
       if ((error as { name?: string }).name === 'ConflictException') {
+        console.warn('[s3-vectors-store] ensureIndex hit existing index (ConflictException)', {
+          orgId,
+          region,
+          bucketName,
+        });
         return;
       }
       throw error;
@@ -79,6 +92,7 @@ export class S3VectorsStore implements VectorStore {
   }
 
   async upsertChunks(
+    orgId: string,
     region: string,
     bucketName: string,
     chunks: VectorStoreChunk[],
@@ -122,36 +136,41 @@ export class S3VectorsStore implements VectorStore {
     await this.#client.send(
       new PutVectorsCommand({
         vectorBucketName: this.#vectorBucketName,
-        indexName: this.#indexName(region, bucketName),
+        indexName: this.#indexName(orgId, region, bucketName),
         vectors,
       }),
     );
   }
 
-  async deleteChunks(region: string, bucketName: string, keys: string[]): Promise<void> {
+  async deleteChunks(
+    orgId: string,
+    region: string,
+    bucketName: string,
+    keys: string[],
+  ): Promise<void> {
     if (keys.length === 0) {
       return;
     }
     await this.#client.send(
       new DeleteVectorsCommand({
         vectorBucketName: this.#vectorBucketName,
-        indexName: this.#indexName(region, bucketName),
+        indexName: this.#indexName(orgId, region, bucketName),
         keys,
       }),
     );
   }
 
   async query(
+    orgId: string,
     region: string,
     bucketName: string,
-    embedding: number[],
     options: QueryOptions,
   ): Promise<VectorQueryResult[]> {
-    const { k, filters } = options;
+    const { embedding, k, filters } = options;
     const response = await this.#client.send(
       new QueryVectorsCommand({
         vectorBucketName: this.#vectorBucketName,
-        indexName: this.#indexName(region, bucketName),
+        indexName: this.#indexName(orgId, region, bucketName),
         topK: k,
         queryVector: { float32: embedding },
         returnMetadata: true,
@@ -180,24 +199,35 @@ export class S3VectorsStore implements VectorStore {
       .filter((vector): vector is VectorQueryResult => vector !== null);
   }
 
-  async dropIndex(region: string, bucketName: string): Promise<void> {
+  async dropIndex(orgId: string, region: string, bucketName: string): Promise<void> {
     await this.#client.send(
       new DeleteIndexCommand({
         vectorBucketName: this.#vectorBucketName,
-        indexName: this.#indexName(region, bucketName),
+        indexName: this.#indexName(orgId, region, bucketName),
       }),
     );
   }
 
   /**
-   * Compose the region-qualified S3 Vectors index name. Bucket names are unique
-   * per region but not globally, so the region is prefixed to keep same-named
-   * buckets in different regions on distinct indexes. The `:` separator avoids
-   * ambiguity with the hyphens and dots that appear in both regions and bucket
-   * names.
+   * Compose the S3 Vectors index name for a bucket's vectors, isolated per
+   * tenant. `orgId` is part of the identity so a bucket name reused across
+   * tenants never collides on one index (FIL-596).
+   *
+   * S3 Vectors index names are constrained to 3-63 chars from [a-z0-9-.], must
+   * begin and end with an alphanumeric, and must be unique within the vector
+   * bucket. The raw orgId:region:bucketName triple satisfies none of that (the
+   * colon is invalid and a 36-char UUID plus a 63-char bucket name blows the
+   * length cap), so we hash the triple into a fixed-width, charset-safe name.
+   * The parts are joined on ':', a character that cannot appear in any component
+   * (orgId is a UUID, region an enum, bucket names are [a-z0-9-]), so the mapping
+   * is unambiguous; it lives inside the hashed input, not the final name, so the
+   * name's charset constraints do not apply to it. SHA-256 makes it
+   * deterministic and collision-resistant; 56 hex chars (224 bits) under a fixed
+   * `rag-` prefix is 60 chars total — within the cap and always valid.
    */
-  #indexName(region: string, bucketName: string): string {
-    return `${region}:${bucketName}`;
+  #indexName(orgId: string, region: string, bucketName: string): string {
+    const digest = createHash('sha256').update([orgId, region, bucketName].join(':')).digest('hex');
+    return `rag-${digest.slice(0, 56)}`;
   }
 }
 

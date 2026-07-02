@@ -133,12 +133,12 @@ describe('get-bucket-rag-enablement baseHandler', () => {
 
   it('reads the enablement row by region + bucket name', async () => {
     await baseHandler(event());
-    expect(mockGetEnablement).toHaveBeenCalledWith(S3_REGION, 'my-bucket');
+    expect(mockGetEnablement).toHaveBeenCalledWith('org-1', S3_REGION, 'my-bucket');
   });
 
   it('forwards the resolved region from the query param into the helper', async () => {
     await baseHandler(event({ region: S3Region.UsEast1 }));
-    expect(mockGetEnablement).toHaveBeenCalledWith(S3Region.UsEast1, 'my-bucket');
+    expect(mockGetEnablement).toHaveBeenCalledWith('org-1', S3Region.UsEast1, 'my-bucket');
   });
 
   it('returns enabled:false with zeroed telemetry for a never-enabled bucket', async () => {
