@@ -167,6 +167,7 @@ export async function saveCheckpoint(
         {
           pk: RAGKeys.checkpointPk(orgId, region, bucketName),
           sk: RAGKeys.checkpointSk(),
+          orgId,
           region,
           bucketName,
           continuationToken,

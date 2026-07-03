@@ -215,18 +215,19 @@ export class S3VectorsStore implements VectorStore {
    *
    * S3 Vectors index names are constrained to 3-63 chars from [a-z0-9-.], must
    * begin and end with an alphanumeric, and must be unique within the vector
-   * bucket. The raw orgId:region:bucketName triple satisfies none of that (the
-   * colon is invalid and a 36-char UUID plus a 63-char bucket name blows the
-   * length cap), so we hash the triple into a fixed-width, charset-safe name.
-   * The parts are joined on ':', a character that cannot appear in any component
-   * (orgId is a UUID, region an enum, bucket names are [a-z0-9-]), so the mapping
-   * is unambiguous; it lives inside the hashed input, not the final name, so the
-   * name's charset constraints do not apply to it. SHA-256 makes it
-   * deterministic and collision-resistant; 56 hex chars (224 bits) under a fixed
-   * `rag-` prefix is 60 chars total — within the cap and always valid.
+   * bucket. The raw orgId/region/bucketName triple satisfies none of that (a
+   * 36-char UUID plus a 63-char bucket name blows the length cap), so we hash
+   * the triple into a fixed-width, charset-safe name. The parts are joined on
+   * '#' — the same delimiter used for our DynamoDB key values, and a character
+   * that cannot appear in any component (orgId is a UUID, region an enum, bucket
+   * names are [a-z0-9-]) — so the mapping is unambiguous. The delimiter lives
+   * inside the hashed input, not the final name, so the name's charset
+   * constraints do not apply to it. SHA-256 makes it deterministic and
+   * collision-resistant; 56 hex chars (224 bits) under a fixed `rag-` prefix is
+   * 60 chars total — within the cap and always valid.
    */
   #indexName(orgId: string, region: string, bucketName: string): string {
-    const digest = createHash('sha256').update([orgId, region, bucketName].join(':')).digest('hex');
+    const digest = createHash('sha256').update([orgId, region, bucketName].join('#')).digest('hex');
     return `rag-${digest.slice(0, 56)}`;
   }
 }

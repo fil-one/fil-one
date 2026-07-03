@@ -108,7 +108,13 @@ export interface ObjectChunkManifestRecord {
 export interface RagIndexerCheckpointRecord {
   pk: string;
   sk: string;
-  bucketId: string;
+  /**
+   * Owning org and region, denormalized onto the row (as with
+   * {@link BucketRAGEnablementRecord}) so the persisted shape matches this type
+   * rather than relying on the values embedded in the pk.
+   */
+  orgId: string;
+  region: S3Region;
   bucketName: string;
   /** S3 continuation token to resume listing from; absent once the bucket is done. */
   continuationToken?: string;

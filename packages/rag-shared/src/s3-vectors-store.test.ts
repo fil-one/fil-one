@@ -24,7 +24,7 @@ const INDEX = 'bucket-1';
 // triple (S3 Vectors names are 3–63 chars from [a-z0-9-.]). Mirror the store's
 // derivation so assertions pin the format without hardcoding a digest.
 function expectedIndexName(orgId: string, region: string, bucketName: string): string {
-  const digest = createHash('sha256').update([orgId, region, bucketName].join(':')).digest('hex');
+  const digest = createHash('sha256').update([orgId, region, bucketName].join('#')).digest('hex');
   return `rag-${digest.slice(0, 56)}`;
 }
 // Tenant-scoped index name for the common (ORG, REGION, INDEX) fixture.

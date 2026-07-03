@@ -176,8 +176,9 @@ describe('RagIndexerCheckpointRecord', () => {
     const record: RagIndexerCheckpointRecord = {
       pk: RAGKeys.checkpointPk('org-1', S3Region.EuWest1, 'bucket-1'),
       sk: RAGKeys.checkpointSk(),
-      bucketId: 'bucket-1',
-      bucketName: 'my-bucket',
+      orgId: 'org-1',
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
       continuationToken: 'token-abc',
       lastPageStartedAt: now,
       ttl: Math.floor(Date.now() / 1000) + 48 * 60 * 60,
@@ -185,7 +186,7 @@ describe('RagIndexerCheckpointRecord', () => {
 
     expect(record.pk).toBe('INDEXER_CHECKPOINT#org-1#eu-west-1#bucket-1');
     expect(record.sk).toBe('CHECKPOINT');
-    expect(record.bucketName).toBe('my-bucket');
+    expect(record.bucketName).toBe('bucket-1');
     expect(record.continuationToken).toBe('token-abc');
     expect(record.lastPageStartedAt).toMatch(ISO_8601);
     expect(record.ttl).toBeGreaterThan(Math.floor(Date.now() / 1000));
@@ -195,8 +196,9 @@ describe('RagIndexerCheckpointRecord', () => {
     const record: RagIndexerCheckpointRecord = {
       pk: RAGKeys.checkpointPk('org-1', S3Region.EuWest1, 'bucket-1'),
       sk: RAGKeys.checkpointSk(),
-      bucketId: 'bucket-1',
-      bucketName: 'my-bucket',
+      orgId: 'org-1',
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
       lastPageStartedAt: new Date().toISOString(),
       ttl: Math.floor(Date.now() / 1000) + 48 * 60 * 60,
     };

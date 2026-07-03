@@ -142,6 +142,8 @@ describe('rag-indexer-manifest', () => {
         Item: marshall({
           pk: 'INDEXER_CHECKPOINT#org-1#eu-west-1#bucket-1',
           sk: 'CHECKPOINT',
+          orgId: 'org-1',
+          region: S3Region.EuWest1,
           bucketName: 'bucket-1',
           continuationToken: 'tok-9',
           lastPageStartedAt: '2024-01-01T00:00:00.000Z',
@@ -163,6 +165,8 @@ describe('rag-indexer-manifest', () => {
         Item: marshall({
           pk: 'INDEXER_CHECKPOINT#org-1#eu-west-1#bucket-1',
           sk: 'CHECKPOINT',
+          orgId: 'org-1',
+          region: S3Region.EuWest1,
           bucketName: 'bucket-1',
           continuationToken: 'stale',
           lastPageStartedAt: '2020-01-01T00:00:00.000Z',
