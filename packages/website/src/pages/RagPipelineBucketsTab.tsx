@@ -24,15 +24,21 @@ export type { RagBucket } from '../lib/rag-bucket-api.js';
 function BucketSyncedStats({ bucket }: { bucket: RagBucket }) {
   return (
     <>
-      <span className="text-zinc-500">{bucket.filesIndexed.toLocaleString()}</span>
+      <span data-testid="bucket-row-stat-files" className="text-zinc-500">
+        {bucket.filesIndexed.toLocaleString()}
+      </span>
       {' files indexed'}
       <span aria-hidden="true"> · </span>
-      <span className="text-zinc-500">{formatBytes(bucket.indexSize)}</span>
+      <span data-testid="bucket-row-stat-size" className="text-zinc-500">
+        {formatBytes(bucket.indexSize)}
+      </span>
       <span aria-hidden="true"> · </span>
       {bucket.lastSyncedAt ? (
         <>
           {'Last synced '}
-          <span className="text-zinc-500">{timeAgo(bucket.lastSyncedAt)}</span>
+          <span data-testid="bucket-row-stat-synced" className="text-zinc-500">
+            {timeAgo(bucket.lastSyncedAt)}
+          </span>
         </>
       ) : (
         'Not yet synced'
