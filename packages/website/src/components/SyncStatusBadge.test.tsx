@@ -22,6 +22,18 @@ describe('SyncStatusBadge', () => {
     expect(screen.getByText('Syncing…')).toBeInTheDocument();
   });
 
+  it('exposes a stable, label-independent hook for the syncing state', () => {
+    render(<SyncStatusBadge bucket={bucket({ syncState: 'syncing' })} />);
+    const badge = screen.getByTestId('sync-status-badge');
+    expect(badge).toHaveAttribute('data-sync-state', 'syncing');
+  });
+
+  it('exposes a stable, label-independent hook for the error state', () => {
+    render(<SyncStatusBadge bucket={bucket({ syncState: 'error' })} />);
+    const badge = screen.getByTestId('sync-status-badge');
+    expect(badge).toHaveAttribute('data-sync-state', 'error');
+  });
+
   it('renders "Sync failed" with the error message in the tooltip on error', () => {
     render(
       <SyncStatusBadge

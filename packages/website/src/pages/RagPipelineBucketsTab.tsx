@@ -42,6 +42,18 @@ function BucketSyncedStats({ bucket }: { bucket: RagBucket }) {
 }
 
 /**
+ * The coarse state driving the row description, exposed via `data-sync-state` so
+ * E2E can assert status without matching on human labels like "Syncing…". Mirrors
+ * the branches of {@link BucketRowDescription}.
+ */
+function bucketRowSyncState(bucket: RagBucket): 'not-indexed' | 'syncing' | 'error' | 'synced' {
+  if (!bucket.enabled) return 'not-indexed';
+  if (bucket.syncState === 'syncing') return 'syncing';
+  if (bucket.syncState === 'error') return 'error';
+  return 'synced';
+}
+
+/**
  * The row's one-line description. Enablement (`enabled`) decides "Not indexed";
  * the indexer sync progress (FIL-556) then layers the in-flight/failed indicator
  * WITHOUT changing whether the bucket is enabled: an enabled bucket mid-run
@@ -76,6 +88,7 @@ function BucketRow({
   return (
     <Card
       data-testid={`bucket-row-${bucketKey(bucket)}`}
+      data-bucket-name={bucket.name}
       padding="none"
       className="overflow-hidden"
     >
@@ -88,7 +101,11 @@ function BucketRow({
             <p data-testid="bucket-row-name" className="text-sm font-medium text-zinc-800">
               {bucket.name}
             </p>
-            <p className="text-xs text-zinc-400">
+            <p
+              data-testid="bucket-row-status"
+              data-sync-state={bucketRowSyncState(bucket)}
+              className="text-xs text-zinc-400"
+            >
               <BucketRowDescription bucket={bucket} />
             </p>
           </div>

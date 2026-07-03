@@ -112,4 +112,28 @@ describe('BucketsTab — sync telemetry display', () => {
     expect(screen.queryByText('Syncing…')).not.toBeInTheDocument();
     expect(screen.queryByText(/Sync failed/)).not.toBeInTheDocument();
   });
+
+  it('exposes stable, label-independent E2E hooks: the row by name and the sync state', () => {
+    renderTab([
+      bucket({ name: 'alpha', enabled: true, syncState: 'syncing' }),
+      bucket({ name: 'beta', enabled: true, syncState: 'error' }),
+      bucket({ name: 'gamma', enabled: true, syncState: 'idle' }),
+      bucket({ name: 'delta', enabled: false }),
+    ]);
+
+    // Rows are identifiable by bucket name, not by their text label.
+    const alpha = document.querySelector('[data-bucket-name="alpha"]');
+    expect(alpha).not.toBeNull();
+
+    const statusOf = (name: string) =>
+      document
+        .querySelector(`[data-bucket-name="${name}"]`)
+        ?.querySelector('[data-testid="bucket-row-status"]')
+        ?.getAttribute('data-sync-state');
+
+    expect(statusOf('alpha')).toBe('syncing');
+    expect(statusOf('beta')).toBe('error');
+    expect(statusOf('gamma')).toBe('synced');
+    expect(statusOf('delta')).toBe('not-indexed');
+  });
 });
