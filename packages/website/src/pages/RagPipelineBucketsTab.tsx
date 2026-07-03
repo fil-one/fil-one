@@ -49,8 +49,8 @@ function BucketSyncedStats({ bucket }: { bucket: RagBucket }) {
 
 /**
  * The coarse state driving the row description, exposed via `data-sync-state` so
- * E2E can assert status without matching on human labels like "Syncing…". Mirrors
- * the branches of {@link BucketRowDescription}.
+ * E2E can assert status without matching on human labels like "Syncing…".
+ * Note: the steady state includes both synced and never-synced (no `lastSyncedAt`) buckets.
  */
 function bucketRowSyncState(bucket: RagBucket): 'not-indexed' | 'syncing' | 'error' | 'synced' {
   if (!bucket.enabled) return 'not-indexed';
