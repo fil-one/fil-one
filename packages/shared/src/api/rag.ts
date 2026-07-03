@@ -72,3 +72,48 @@ export interface QueryBucketResponse {
   /** Deduplicated source object keys of the retrieved chunks. */
   sources: string[];
 }
+
+/**
+ * Operational state of a bucket's RAG index, exposed to the frontend.
+ *
+ * Mirrors the backend `BucketRAGStatus` (`active | disabled | paused`):
+ * `active` means indexing is on, `disabled` means the user turned it off, and
+ * `paused` is a transient operational hold. A bucket with no enablement record
+ * is reported as `disabled`.
+ */
+export type BucketRagStatus = 'active' | 'disabled' | 'paused';
+
+/**
+ * Request body for `POST /api/buckets/{name}/rag/enabled` (FIL-555).
+ *
+ * `enabled` toggles per-bucket RAG indexing on (`true` → status `active`) or
+ * off (`false` → status `disabled`).
+ */
+export const SetBucketRagEnabledSchema = z.object({
+  enabled: z.boolean(),
+});
+
+export interface SetBucketRagEnabledRequest {
+  enabled: boolean;
+}
+
+/**
+ * Per-bucket RAG enablement + sync telemetry returned by both the GET (read)
+ * and POST (write) enablement endpoints (FIL-555).
+ *
+ * Telemetry fields (`filesIndexed`, `indexSize`, `lastSyncedAt`) come from the
+ * indexer (FIL-556) and are absent/zero until the first sync completes —
+ * callers must render a "Not yet synced" state gracefully. `enabled` is the
+ * convenience boolean (`status === 'active'`).
+ */
+export interface BucketRagEnablementResponse {
+  /** Convenience flag: `true` when `status === 'active'`. */
+  enabled: boolean;
+  status: BucketRagStatus;
+  /** Number of files currently indexed; 0 until the first sync completes. */
+  filesIndexed: number;
+  /** Index size in bytes; 0 until the first sync completes. */
+  indexSize: number;
+  /** ISO-8601 timestamp of the last successful sync; absent until first sync. */
+  lastSyncedAt?: string;
+}

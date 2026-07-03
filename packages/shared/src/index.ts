@@ -104,8 +104,17 @@ export {
   QUERY_MAX_TOP_K,
   SUPPORTED_COMPLETION_MODELS,
   SUPPORTED_COMPLETION_MODEL_IDS,
+  SetBucketRagEnabledSchema,
 } from './api/rag.js';
-export type { QueryBucketRequest, QueryBucketResponse, CompletionModel } from './api/rag.js';
+
+export type {
+  QueryBucketRequest,
+  QueryBucketResponse,
+  CompletionModel,
+  BucketRagStatus,
+  SetBucketRagEnabledRequest,
+  BucketRagEnablementResponse,
+} from './api/rag.js';
 
 export {
   ACCESS_KEY_PERMISSIONS,
