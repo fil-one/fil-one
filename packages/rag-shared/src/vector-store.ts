@@ -11,9 +11,13 @@ export interface EnsureIndexOptions {
 }
 
 /**
- * Options accepted by {@link VectorStore.query}.
+ * Options accepted by {@link VectorStore.query}. Carries the query vector
+ * alongside the search parameters so the index-identity args (orgId, region,
+ * bucketName) stay a clean triple.
  */
 export interface QueryOptions {
+  /** The query embedding to search for nearest neighbours of. */
+  embedding: number[];
   /** Maximum number of results to return, ordered closest-first. */
   k: number;
   /** Filters applied against filterable metadata. */
@@ -23,10 +27,12 @@ export interface QueryOptions {
 /**
  * Store-agnostic abstraction over a vector database used by the RAG feature.
  *
- * There is one index per RAG-enabled bucket. Because S3 bucket names are unique
- * per region but not globally, the index is identified by the `(region,
- * bucketName)` pair on every method, not by `bucketName` alone. Implementations
- * map these operations onto a concrete backend (e.g. Amazon S3 Vectors).
+ * There is one index per RAG-enabled bucket. Bucket names are globally
+ * namespaced and can be reused across tenants, so the index is identified by the
+ * `(orgId, region, bucketName)` triple on every method — never by
+ * `(region, bucketName)` alone, which would let a reused name resolve to another
+ * tenant's index (FIL-596). Implementations map these operations onto a concrete
+ * backend (e.g. Amazon S3 Vectors).
  *
  * Conventions enforced by implementations:
  *   - Vector keys are `${objectKey}#${chunkIndex}`.
@@ -35,21 +41,31 @@ export interface QueryOptions {
  */
 export interface VectorStore {
   /**
-   * Idempotently create the index for `(region, bucketName)`. Calling this when
-   * the index already exists must not throw.
+   * Idempotently create the index for `(orgId, region, bucketName)`. Calling
+   * this when the index already exists must not throw.
    */
-  ensureIndex(region: string, bucketName: string, options?: EnsureIndexOptions): Promise<void>;
+  ensureIndex(
+    orgId: string,
+    region: string,
+    bucketName: string,
+    options?: EnsureIndexOptions,
+  ): Promise<void>;
 
   /**
    * Insert or overwrite the given chunks. Each chunk must carry an `embedding`.
    * Rejects a chunk whose serialized metadata exceeds 40KB.
    */
-  upsertChunks(region: string, bucketName: string, chunks: VectorStoreChunk[]): Promise<void>;
+  upsertChunks(
+    orgId: string,
+    region: string,
+    bucketName: string,
+    chunks: VectorStoreChunk[],
+  ): Promise<void>;
 
   /**
    * Delete vectors by their explicit keys. There is no delete-by-filter path.
    */
-  deleteChunks(region: string, bucketName: string, keys: string[]): Promise<void>;
+  deleteChunks(orgId: string, region: string, bucketName: string, keys: string[]): Promise<void>;
 
   /**
    * k-NN search over the index, returning up to `options.k` results ordered from
@@ -57,14 +73,14 @@ export interface VectorStore {
    * `options.filters` are applied against filterable metadata.
    */
   query(
+    orgId: string,
     region: string,
     bucketName: string,
-    embedding: number[],
     options: QueryOptions,
   ): Promise<VectorQueryResult[]>;
 
   /**
-   * Drop the index for `(region, bucketName)` and all of its vectors.
+   * Drop the index for `(orgId, region, bucketName)` and all of its vectors.
    */
-  dropIndex(region: string, bucketName: string): Promise<void>;
+  dropIndex(orgId: string, region: string, bucketName: string): Promise<void>;
 }

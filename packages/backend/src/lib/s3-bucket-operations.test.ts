@@ -3,6 +3,8 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   CreateBucketCommand,
   GetBucketVersioningCommand,
+  GetObjectCommand,
+  type GetObjectCommandOutput,
   GetObjectLockConfigurationCommand,
   ListBucketsCommand,
   ListObjectsV2Command,
@@ -15,6 +17,7 @@ import {
   createBucket,
   getBucketObjectLock,
   getBucketVersioning,
+  getObjectBytes,
   listBuckets,
   listObjects,
   putObjectLockConfiguration,
@@ -214,6 +217,42 @@ describe('s3 bucket operations', () => {
       expect(result.objects[0]).toMatchObject({ key: 'a.txt', sizeBytes: 0 });
       expect(typeof result.objects[0]?.lastModified).toBe('string');
       expect(result.objects[0]?.etag).toBeUndefined();
+    });
+  });
+
+  describe('getObjectBytes', () => {
+    // The helper only touches Body.transformToByteArray(); model that one method
+    // and present it as the SDK's Body type without resorting to `any`.
+    function body(bytes: Uint8Array): GetObjectCommandOutput['Body'] {
+      return {
+        transformToByteArray: vi.fn().mockResolvedValue(bytes),
+      } as unknown as GetObjectCommandOutput['Body'];
+    }
+
+    it('returns the object bytes and stored content type', async () => {
+      const bytes = new Uint8Array([1, 2, 3]);
+      s3Mock.on(GetObjectCommand).resolves({ Body: body(bytes), ContentType: 'application/pdf' });
+
+      const result = await getObjectBytes(s3, 'my-bucket', 'doc.pdf');
+
+      const input = s3Mock.commandCalls(GetObjectCommand)[0].args[0].input;
+      expect(input).toEqual({ Bucket: 'my-bucket', Key: 'doc.pdf' });
+      expect(result.bytes).toEqual(bytes);
+      expect(result.contentType).toBe('application/pdf');
+    });
+
+    it('omits the content type when S3 reports none', async () => {
+      s3Mock.on(GetObjectCommand).resolves({ Body: body(new Uint8Array([9])) });
+
+      const result = await getObjectBytes(s3, 'my-bucket', 'a.txt');
+
+      expect(result.contentType).toBeUndefined();
+    });
+
+    it('throws when the object body is empty', async () => {
+      s3Mock.on(GetObjectCommand).resolves({});
+
+      await expect(getObjectBytes(s3, 'my-bucket', 'a.txt')).rejects.toThrow(/empty body/);
     });
   });
 

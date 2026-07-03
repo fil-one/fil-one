@@ -4,6 +4,7 @@ import {
   type BucketRAGEnablementRecord,
   type ObjectChunkManifestRecord,
   type RAGConfigRecord,
+  type RagIndexerCheckpointRecord,
   RAGKeys,
 } from './dynamo-records.js';
 import { S3Region } from '@filone/shared';
@@ -17,13 +18,48 @@ describe('RAGKeys', () => {
   });
 
   it('builds the per-bucket enablement pk/sk', () => {
-    expect(RAGKeys.bucketPk(S3Region.EuWest1, 'bucket-1')).toBe('BUCKET#eu-west-1#bucket-1');
+    expect(RAGKeys.bucketPk('org-1', S3Region.EuWest1, 'bucket-1')).toBe(
+      'BUCKET#org-1#eu-west-1#bucket-1',
+    );
     expect(RAGKeys.enablementSk()).toBe('RAG');
   });
 
   it('builds manifest sks sharing a begins_with-able prefix', () => {
     expect(RAGKeys.manifestSk('file1.pdf')).toBe('MANIFEST#file1.pdf');
     expect(RAGKeys.manifestSk('file1.pdf').startsWith(RAGKeys.manifestSkPrefix())).toBe(true);
+  });
+
+  it('builds the indexer checkpoint pk/sk', () => {
+    expect(RAGKeys.checkpointPk('org-1', S3Region.EuWest1, 'bucket-1')).toBe(
+      'INDEXER_CHECKPOINT#org-1#eu-west-1#bucket-1',
+    );
+    expect(RAGKeys.checkpointSk()).toBe('CHECKPOINT');
+  });
+
+  it('round-trips bucketPk through parseBucketPk, recovering orgId/region/bucketName', () => {
+    const pk = RAGKeys.bucketPk('org-1', S3Region.EuWest1, 'my-bucket');
+    expect(RAGKeys.parseBucketPk(pk)).toEqual({
+      orgId: 'org-1',
+      region: S3Region.EuWest1,
+      bucketName: 'my-bucket',
+    });
+  });
+
+  it('rejects any pk that is not exactly BUCKET#{orgId}#{region}#{bucketName}', () => {
+    expect(RAGKeys.parseBucketPk('NOTBUCKET#org-1#eu-west-1#b')).toBeUndefined(); // wrong prefix
+    expect(RAGKeys.parseBucketPk('BUCKET#org-1')).toBeUndefined(); // too few segments
+    expect(RAGKeys.parseBucketPk('BUCKET#org-1#eu-west-1#b#c')).toBeUndefined(); // too many segments
+    expect(RAGKeys.parseBucketPk('BUCKET#org-1#not-a-region#b')).toBeUndefined(); // unknown region
+    expect(RAGKeys.parseBucketPk('BUCKET#org-1#eu-west-1#')).toBeUndefined(); // empty bucket name
+  });
+
+  it('isolates tenants: two orgs sharing region+bucketName get distinct pks (FIL-596)', () => {
+    const a = RAGKeys.bucketPk('org-a', S3Region.EuWest1, 'shared-name');
+    const b = RAGKeys.bucketPk('org-b', S3Region.EuWest1, 'shared-name');
+    expect(a).not.toBe(b);
+    expect(RAGKeys.checkpointPk('org-a', S3Region.EuWest1, 'shared-name')).not.toBe(
+      RAGKeys.checkpointPk('org-b', S3Region.EuWest1, 'shared-name'),
+    );
   });
 });
 
@@ -52,8 +88,9 @@ describe('BucketRAGEnablementRecord', () => {
   it('captures status, telemetry, and settings under BUCKET#{bucketId} / RAG', () => {
     const now = new Date().toISOString();
     const record: BucketRAGEnablementRecord = {
-      pk: RAGKeys.bucketPk(S3Region.EuWest1, 'bucket-1'),
+      pk: RAGKeys.bucketPk('org-1', S3Region.EuWest1, 'bucket-1'),
       sk: RAGKeys.enablementSk(),
+      orgId: 'org-1',
       status: 'active',
       filesIndexed: 12,
       indexSize: 4096,
@@ -63,8 +100,9 @@ describe('BucketRAGEnablementRecord', () => {
       updatedAt: now,
     };
 
-    expect(record.pk).toBe('BUCKET#eu-west-1#bucket-1');
+    expect(record.pk).toBe('BUCKET#org-1#eu-west-1#bucket-1');
     expect(record.sk).toBe('RAG');
+    expect(record.orgId).toBe('org-1');
     expect(record.filesIndexed).toBe(12);
     expect(record.indexSize).toBe(4096);
     expect(record.settings).toEqual({ chunkSize: 512 });
@@ -75,8 +113,9 @@ describe('BucketRAGEnablementRecord', () => {
     const statuses = ['active', 'disabled', 'paused'] as const;
     for (const status of statuses) {
       const record: BucketRAGEnablementRecord = {
-        pk: RAGKeys.bucketPk(S3Region.EuWest1, 'bucket-1'),
+        pk: RAGKeys.bucketPk('org-1', S3Region.EuWest1, 'bucket-1'),
         sk: RAGKeys.enablementSk(),
+        orgId: 'org-1',
         status,
         filesIndexed: 0,
         indexSize: 0,
@@ -91,7 +130,7 @@ describe('BucketRAGEnablementRecord', () => {
 describe('ObjectChunkManifestRecord', () => {
   function makeManifest(objectKey: string, chunkKeys: string[]): ObjectChunkManifestRecord {
     return {
-      pk: RAGKeys.bucketPk(S3Region.EuWest1, 'bucket-1'),
+      pk: RAGKeys.bucketPk('org-1', S3Region.EuWest1, 'bucket-1'),
       sk: RAGKeys.manifestSk(objectKey),
       objectKey,
       etag: 'etag-abc',
@@ -128,5 +167,41 @@ describe('ObjectChunkManifestRecord', () => {
       'MANIFEST#file2.pdf',
       'MANIFEST#file3.pdf',
     ]);
+  });
+});
+
+describe('RagIndexerCheckpointRecord', () => {
+  it('captures the resumable continuation token under its own partition', () => {
+    const now = new Date().toISOString();
+    const record: RagIndexerCheckpointRecord = {
+      pk: RAGKeys.checkpointPk('org-1', S3Region.EuWest1, 'bucket-1'),
+      sk: RAGKeys.checkpointSk(),
+      orgId: 'org-1',
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      continuationToken: 'token-abc',
+      lastPageStartedAt: now,
+      ttl: Math.floor(Date.now() / 1000) + 48 * 60 * 60,
+    };
+
+    expect(record.pk).toBe('INDEXER_CHECKPOINT#org-1#eu-west-1#bucket-1');
+    expect(record.sk).toBe('CHECKPOINT');
+    expect(record.bucketName).toBe('bucket-1');
+    expect(record.continuationToken).toBe('token-abc');
+    expect(record.lastPageStartedAt).toMatch(ISO_8601);
+    expect(record.ttl).toBeGreaterThan(Math.floor(Date.now() / 1000));
+  });
+
+  it('omits the continuation token when a bucket finished within one run', () => {
+    const record: RagIndexerCheckpointRecord = {
+      pk: RAGKeys.checkpointPk('org-1', S3Region.EuWest1, 'bucket-1'),
+      sk: RAGKeys.checkpointSk(),
+      orgId: 'org-1',
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      lastPageStartedAt: new Date().toISOString(),
+      ttl: Math.floor(Date.now() / 1000) + 48 * 60 * 60,
+    };
+    expect(record.continuationToken).toBeUndefined();
   });
 });

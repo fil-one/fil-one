@@ -10,16 +10,9 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockIsTenantReady = vi.fn();
-const mockGetBucket = vi.fn();
 const mockGetOrchestratorForRegion = vi.fn();
 
-const mockOrchestrator = {
-  id: 'aurora',
-  region: 'eu-west-1',
-  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
-  getBucket: (...args: unknown[]) => mockGetBucket(...args),
-};
+let orch: FakeOrchestrator;
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getOrchestratorForRegion: (...args: unknown[]) => mockGetOrchestratorForRegion(...args),
@@ -33,6 +26,7 @@ process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './get-bucket.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
+import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.js';
 import { S3_REGION, S3Region } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -48,12 +42,12 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 describe('get-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockIsTenantReady.mockReturnValue('aurora-t-1');
-    mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
+    orch = fakeOrchestrator('aurora');
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
   });
 
   it('returns 200 with bucket data from the orchestrator', async () => {
-    mockGetBucket.mockResolvedValue({
+    orch.getBucket.mockResolvedValue({
       bucketName: 'my-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
@@ -83,7 +77,7 @@ describe('get-bucket baseHandler', () => {
   });
 
   it('returns objectLockEnabled true when the orchestrator reports it', async () => {
-    mockGetBucket.mockResolvedValue({
+    orch.getBucket.mockResolvedValue({
       bucketName: 'locked-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
@@ -103,7 +97,7 @@ describe('get-bucket baseHandler', () => {
   });
 
   it('passes through versioning, encryption, and retention fields', async () => {
-    mockGetBucket.mockResolvedValue({
+    orch.getBucket.mockResolvedValue({
       bucketName: 'full-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
@@ -139,7 +133,7 @@ describe('get-bucket baseHandler', () => {
   });
 
   it('calls orchestrator.getBucket with tenantId and bucketName', async () => {
-    mockGetBucket.mockResolvedValue({
+    orch.getBucket.mockResolvedValue({
       bucketName: 'my-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
@@ -152,11 +146,11 @@ describe('get-bucket baseHandler', () => {
     event.pathParameters = { name: 'my-bucket' };
     await baseHandler(event);
 
-    expect(mockGetBucket).toHaveBeenCalledWith('aurora-t-1', 'my-bucket');
+    expect(orch.getBucket).toHaveBeenCalledWith(tenantFor('aurora', 'org-1'), 'my-bucket');
   });
 
   it('returns 404 when orchestrator.getBucket returns null', async () => {
-    mockGetBucket.mockResolvedValue(null);
+    orch.getBucket.mockResolvedValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     event.pathParameters = { name: 'nonexistent-bucket' };
@@ -168,7 +162,7 @@ describe('get-bucket baseHandler', () => {
   });
 
   it('throws when the orchestrator throws', async () => {
-    mockGetBucket.mockRejectedValue(
+    orch.getBucket.mockRejectedValue(
       new Error('Failed to get bucket "my-bucket" from Aurora for tenant aurora-t-1'),
     );
 
@@ -190,18 +184,18 @@ describe('get-bucket baseHandler', () => {
   });
 
   it('returns 503 when tenant is missing', async () => {
-    mockIsTenantReady.mockReturnValue(null);
+    orch.isTenantReady.mockReturnValue(null);
 
     const event = buildEvent({ userInfo: USER_INFO });
     event.pathParameters = { name: 'my-bucket' };
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(503);
-    expect(mockGetBucket).not.toHaveBeenCalled();
+    expect(orch.getBucket).not.toHaveBeenCalled();
   });
 
   it('uses S3_REGION when region query param is omitted', async () => {
-    mockGetBucket.mockResolvedValue({
+    orch.getBucket.mockResolvedValue({
       bucketName: 'my-bucket',
       region: S3_REGION,
       createdAt: '2026-01-15T10:00:00Z',
@@ -218,7 +212,7 @@ describe('get-bucket baseHandler', () => {
   });
 
   it('selects the orchestrator using the region from the query string', async () => {
-    mockGetBucket.mockResolvedValue({
+    orch.getBucket.mockResolvedValue({
       bucketName: 'my-bucket',
       region: S3Region.UsEast1,
       createdAt: '2026-01-15T10:00:00Z',
@@ -249,8 +243,8 @@ describe('get-bucket baseHandler', () => {
     const body = JSON.parse(result.body!);
     expect(body.message).toContain('Unsupported region');
     expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
-    expect(mockIsTenantReady).not.toHaveBeenCalled();
-    expect(mockGetBucket).not.toHaveBeenCalled();
+    expect(orch.isTenantReady).not.toHaveBeenCalled();
+    expect(orch.getBucket).not.toHaveBeenCalled();
   });
 
   it('rejects us-east-1 in production for a non-Foundation user', async () => {
@@ -275,7 +269,7 @@ describe('get-bucket baseHandler', () => {
   it('accepts us-east-1 in production for a verified Foundation email', async () => {
     const previous = process.env.FILONE_STAGE;
     process.env.FILONE_STAGE = 'production';
-    mockGetBucket.mockResolvedValue({
+    orch.getBucket.mockResolvedValue({
       bucketName: 'my-bucket',
       region: S3Region.UsEast1,
       createdAt: '2026-01-15T10:00:00Z',
