@@ -159,6 +159,7 @@ describe('rag-indexer-worker', () => {
     expect(mockIndexBucket).toHaveBeenCalledOnce();
     expect(mockIndexBucket).toHaveBeenCalledWith(
       {
+        orgId: 'org-1',
         s3: fakeS3Client,
         region: S3Region.EuWest1,
         bucketName: 'b1',
@@ -215,6 +216,7 @@ describe('rag-indexer-worker', () => {
     expect(mockIndexBucket).toHaveBeenCalledOnce();
     expect(mockIndexBucket).toHaveBeenCalledWith(
       {
+        orgId: 'org-1',
         s3: fakeS3Client,
         region: S3Region.UsEast1,
         bucketName: 'b2',
@@ -249,7 +251,7 @@ describe('rag-indexer-worker', () => {
 
     await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
 
-    expect(mockUpdateBucketTelemetry).toHaveBeenCalledWith(S3Region.EuWest1, 'b1', {
+    expect(mockUpdateBucketTelemetry).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'b1', {
       syncState: 'error',
       lastSyncError: 'index exploded',
     });

@@ -161,14 +161,14 @@ async function indexRegion(args: IndexRegionArgs): Promise<number> {
   let indexed = 0;
   for (const bucketName of bucketNames) {
     try {
-      await indexBucket({ s3, region, bucketName, vectorStore }, { deadlineEpochMs });
+      await indexBucket({ orgId, s3, region, bucketName, vectorStore }, { deadlineEpochMs });
       indexed++;
     } catch (error) {
       // Persist the failure so the UI can surface "Sync failed" + the reason.
       // Best-effort: a telemetry write failure must not mask the original error.
       const message = error instanceof Error ? error.message : String(error);
       try {
-        await updateBucketTelemetry(region, bucketName, {
+        await updateBucketTelemetry(orgId, region, bucketName, {
           syncState: 'error',
           lastSyncError: message,
         });

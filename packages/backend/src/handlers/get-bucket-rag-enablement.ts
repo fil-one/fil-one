@@ -58,8 +58,9 @@ export async function baseHandler(
       .build();
   }
 
-  const record = await getBucketRagEnablement(region, bucketName);
-  // Defense in depth: ignore a record stamped with a different org.
+  const record = await getBucketRagEnablement(orgId, region, bucketName);
+  // Defense in depth: the org-scoped pk already prevents addressing another
+  // org's row, but keep ignoring a record whose stamped org somehow differs.
   const owned = record && record.orgId === orgId ? record : undefined;
 
   return new ResponseBuilder()

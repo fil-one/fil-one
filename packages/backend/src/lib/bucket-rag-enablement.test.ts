@@ -11,7 +11,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 
 vi.mock('sst', () => ({
   Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
+    RagIndexerTable: { name: 'RagIndexerTable' },
   },
 }));
 
@@ -28,7 +28,7 @@ import { S3Region } from '@filone/shared';
 
 function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablementRecord {
   return {
-    pk: 'BUCKET#eu-west-1#bucket-1',
+    pk: 'BUCKET#org-1#eu-west-1#bucket-1',
     sk: 'RAG',
     orgId: 'org-1',
     status: 'active',
@@ -44,22 +44,22 @@ function record(over: Partial<BucketRAGEnablementRecord> = {}): BucketRAGEnablem
 describe('getBucketRagEnablement', () => {
   beforeEach(() => ddbMock.reset());
 
-  it('reads BUCKET#{region}#{bucketName}/RAG from UserInfoTable via a single GetItemCommand', async () => {
+  it('reads BUCKET#{orgId}#{region}#{name}/RAG from RagIndexerTable via a single GetItemCommand', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: marshall(record()) });
 
-    const result = await getBucketRagEnablement(S3Region.EuWest1, 'bucket-1');
+    const result = await getBucketRagEnablement('org-1', S3Region.EuWest1, 'bucket-1');
 
     expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
     expect(ddbMock.commandCalls(GetItemCommand)[0]?.args[0].input).toEqual({
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: 'BUCKET#eu-west-1#bucket-1' }, sk: { S: 'RAG' } },
+      TableName: 'RagIndexerTable',
+      Key: { pk: { S: 'BUCKET#org-1#eu-west-1#bucket-1' }, sk: { S: 'RAG' } },
     });
     expect(result?.status).toBe('active');
   });
 
   it('returns undefined when no enablement row exists', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-    expect(await getBucketRagEnablement(S3Region.EuWest1, 'bucket-1')).toBeUndefined();
+    expect(await getBucketRagEnablement('org-1', S3Region.EuWest1, 'bucket-1')).toBeUndefined();
   });
 });
 
@@ -78,7 +78,7 @@ describe('setBucketRagEnablement', () => {
     });
 
     expect(result.status).toBe('active');
-    expect(result.pk).toBe('BUCKET#eu-west-1#bucket-1');
+    expect(result.pk).toBe('BUCKET#org-1#eu-west-1#bucket-1');
     expect(result.sk).toBe('RAG');
     expect(result.orgId).toBe('org-1');
     expect(result.filesIndexed).toBe(0);
@@ -213,14 +213,14 @@ describe('updateBucketTelemetry', () => {
     return calls[0]!.args[0].input;
   }
 
-  it('targets BUCKET#{name}/RAG on UserInfoTable and guards on the row existing', async () => {
+  it('targets BUCKET#{orgId}#{region}#{name}/RAG on RagIndexerTable and guards on the row existing', async () => {
     ddbMock.on(UpdateItemCommand).resolves({});
 
-    await updateBucketTelemetry(S3Region.EuWest1, 'bucket-1', { syncState: 'syncing' });
+    await updateBucketTelemetry('org-1', S3Region.EuWest1, 'bucket-1', { syncState: 'syncing' });
 
     const input = lastUpdateInput();
-    expect(input.TableName).toBe('UserInfoTable');
-    expect(input.Key).toEqual({ pk: { S: 'BUCKET#eu-west-1#bucket-1' }, sk: { S: 'RAG' } });
+    expect(input.TableName).toBe('RagIndexerTable');
+    expect(input.Key).toEqual({ pk: { S: 'BUCKET#org-1#eu-west-1#bucket-1' }, sk: { S: 'RAG' } });
     // Only telemetry for an existing (RAG-enabled) row — never resurrects a deleted one.
     expect(input.ConditionExpression).toBe('attribute_exists(pk)');
   });
@@ -228,7 +228,7 @@ describe('updateBucketTelemetry', () => {
   it('writes syncState (NOT the enablement status) — status is left untouched', async () => {
     ddbMock.on(UpdateItemCommand).resolves({});
 
-    await updateBucketTelemetry(S3Region.EuWest1, 'bucket-1', { syncState: 'syncing' });
+    await updateBucketTelemetry('org-1', S3Region.EuWest1, 'bucket-1', { syncState: 'syncing' });
 
     const input = lastUpdateInput();
     // The indexer must never modify the enablement source of truth.
@@ -242,7 +242,7 @@ describe('updateBucketTelemetry', () => {
   it('marks a run in flight: SET syncState=syncing without touching the counters', async () => {
     ddbMock.on(UpdateItemCommand).resolves({});
 
-    await updateBucketTelemetry(S3Region.EuWest1, 'bucket-1', { syncState: 'syncing' });
+    await updateBucketTelemetry('org-1', S3Region.EuWest1, 'bucket-1', { syncState: 'syncing' });
 
     const input = lastUpdateInput();
     // Atomic single-expression update via SET (no read-modify-write).
@@ -259,7 +259,7 @@ describe('updateBucketTelemetry', () => {
   it('writes the success snapshot: SET counters + lastSyncedAt + syncState=idle', async () => {
     ddbMock.on(UpdateItemCommand).resolves({});
 
-    await updateBucketTelemetry(S3Region.EuWest1, 'bucket-1', {
+    await updateBucketTelemetry('org-1', S3Region.EuWest1, 'bucket-1', {
       syncState: 'idle',
       filesIndexed: 42,
       indexSize: 1_048_576,
@@ -285,7 +285,7 @@ describe('updateBucketTelemetry', () => {
   it('records a failure: SET syncState=error + lastSyncError, no REMOVE', async () => {
     ddbMock.on(UpdateItemCommand).resolves({});
 
-    await updateBucketTelemetry(S3Region.EuWest1, 'bucket-1', {
+    await updateBucketTelemetry('org-1', S3Region.EuWest1, 'bucket-1', {
       syncState: 'error',
       lastSyncError: 'Connection timeout',
     });
@@ -301,7 +301,7 @@ describe('updateBucketTelemetry', () => {
     ddbMock.on(UpdateItemCommand).resolves({});
     const huge = 'x'.repeat(2000);
 
-    await updateBucketTelemetry(S3Region.EuWest1, 'bucket-1', {
+    await updateBucketTelemetry('org-1', S3Region.EuWest1, 'bucket-1', {
       syncState: 'error',
       lastSyncError: huge,
     });
@@ -317,14 +317,14 @@ describe('updateBucketTelemetry', () => {
 
     // Must not throw — a disabled bucket simply has no telemetry row to update.
     await expect(
-      updateBucketTelemetry(S3Region.EuWest1, 'gone', { syncState: 'syncing' }),
+      updateBucketTelemetry('org-1', S3Region.EuWest1, 'gone', { syncState: 'syncing' }),
     ).resolves.toBeUndefined();
   });
 
   it('rethrows non-conditional DynamoDB failures', async () => {
     ddbMock.on(UpdateItemCommand).rejects(new Error('throttled'));
     await expect(
-      updateBucketTelemetry(S3Region.EuWest1, 'bucket-1', { syncState: 'syncing' }),
+      updateBucketTelemetry('org-1', S3Region.EuWest1, 'bucket-1', { syncState: 'syncing' }),
     ).rejects.toThrow('throttled');
   });
 });

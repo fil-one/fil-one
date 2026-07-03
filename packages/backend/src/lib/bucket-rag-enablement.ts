@@ -30,14 +30,15 @@ const MAX_SYNC_ERROR_LENGTH = 500;
  * bucket so callers can render a never-synced state gracefully.
  */
 export async function getBucketRagEnablement(
+  orgId: string,
   region: S3Region,
   bucketName: string,
 ): Promise<BucketRAGEnablementRecord | undefined> {
   const { Item } = await dynamo.send(
     new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
+      TableName: Resource.RagIndexerTable.name,
       Key: {
-        pk: { S: RAGKeys.bucketPk(region, bucketName) },
+        pk: { S: RAGKeys.bucketPk(orgId, region, bucketName) },
         sk: { S: RAGKeys.enablementSk() },
       },
     }),
@@ -67,7 +68,7 @@ export async function setBucketRagEnablement(args: {
   const status: BucketRAGStatus = enabled ? 'active' : 'disabled';
 
   const record: BucketRAGEnablementRecord = {
-    pk: RAGKeys.bucketPk(region, bucketName),
+    pk: RAGKeys.bucketPk(orgId, region, bucketName),
     sk: RAGKeys.enablementSk(),
     orgId,
     status,
@@ -83,7 +84,7 @@ export async function setBucketRagEnablement(args: {
 
   await dynamo.send(
     new PutItemCommand({
-      TableName: Resource.UserInfoTable.name,
+      TableName: Resource.RagIndexerTable.name,
       Item: marshall(record, { removeUndefinedValues: true }),
     }),
   );
@@ -143,7 +144,7 @@ export interface BucketTelemetryUpdate {
 
 /**
  * Atomically update a bucket's RAG sync telemetry on the existing enablement row
- * (`BUCKET#{region}#{bucketName}` / `RAG`) via a single DynamoDB `UpdateItemCommand`.
+ * (`BUCKET#{orgId}#{region}#{bucketName}` / `RAG`) via a single DynamoDB `UpdateItemCommand`.
  *
  * A single `UpdateItem` is applied atomically by DynamoDB — there is no
  * read-modify-write window — so concurrent indexer workers cannot clobber each
@@ -164,6 +165,7 @@ export interface BucketTelemetryUpdate {
  * a safe no-op otherwise.
  * */
 export async function updateBucketTelemetry(
+  orgId: string,
   region: S3Region,
   bucketName: string,
   update: BucketTelemetryUpdate,
@@ -202,9 +204,9 @@ export async function updateBucketTelemetry(
   try {
     await dynamo.send(
       new UpdateItemCommand({
-        TableName: Resource.UserInfoTable.name,
+        TableName: Resource.RagIndexerTable.name,
         Key: {
-          pk: { S: RAGKeys.bucketPk(region, bucketName) },
+          pk: { S: RAGKeys.bucketPk(orgId, region, bucketName) },
           sk: { S: RAGKeys.enablementSk() },
         },
         UpdateExpression: updateExpression,

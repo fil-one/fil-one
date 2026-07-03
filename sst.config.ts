@@ -963,7 +963,8 @@ export default $config({
 
     const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
       handler: 'packages/backend/src/jobs/rag-indexer-orchestrator.handler',
-      link: [userInfoTable],
+      // Scans the enablement rows, now in ragIndexerTable (its only table dependency).
+      link: [ragIndexerTable],
       environment: {
         RAG_INDEXER_WORKER_FUNCTION_NAME: ragIndexerWorker.name,
       },

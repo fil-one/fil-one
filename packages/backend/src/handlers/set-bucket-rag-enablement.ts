@@ -82,9 +82,18 @@ export async function baseHandler(
       .build();
   }
 
-  const existing = await getBucketRagEnablement(region, bucketName);
+  const existing = await getBucketRagEnablement(orgId, region, bucketName);
   // Defense in depth: never carry over a record stamped with a different org.
+  // getBucket already proved tenant ownership, so a mismatch here is a data
+  // anomaly (stale/reused row), not a client error — re-stamp the row with the
+  // correct org rather than rejecting the caller, but surface it for triage.
   const owned = existing && existing.orgId === orgId ? existing : undefined;
+  if (existing && !owned) {
+    console.warn(
+      '[set-bucket-rag-enablement] RAG enablement row org mismatch; re-stamping with caller org',
+      { region, bucketName, recordOrgId: existing.orgId, callerOrgId: orgId },
+    );
+  }
 
   const record = await setBucketRagEnablement({
     region,
