@@ -23,6 +23,7 @@ const {
   mockCreateS3Client,
   mockIndexBucket,
   mockS3VectorsStore,
+  mockUpdateBucketTelemetry,
   fakeS3Client,
 } = vi.hoisted(() => ({
   mockGetProvisionedRegions: vi.fn(),
@@ -30,6 +31,7 @@ const {
   mockCreateS3Client: vi.fn(),
   mockIndexBucket: vi.fn(),
   mockS3VectorsStore: vi.fn(),
+  mockUpdateBucketTelemetry: vi.fn(),
   fakeS3Client: { tag: 's3-client' },
 }));
 
@@ -43,6 +45,10 @@ vi.mock('../lib/service-orchestrator-registry.js', () => ({
 
 vi.mock('../lib/s3-client.js', () => ({
   createS3Client: mockCreateS3Client,
+}));
+
+vi.mock('../lib/bucket-rag-enablement.js', () => ({
+  updateBucketTelemetry: mockUpdateBucketTelemetry,
 }));
 
 vi.mock('./rag-indexer-helpers.js', () => ({
@@ -79,18 +85,17 @@ function provisioned(orchestrator: ReturnType<typeof makeOrchestrator>, tenantId
 }
 
 /**
- * Wire `getProvisionedRegions` and the region->orchestrator registry from the
- * same list, mirroring production: `getOrchestratorForRegion` dispatches by
- * region to the orchestrator the org is provisioned with, and throws for an
- * unknown region (as the real registry does).
+ * Wire both region mocks from one provisioned-region list: `getProvisionedRegions`
+ * returns them (so the worker can resolve each region's tenant), and
+ * `getOrchestratorForRegion` resolves a region back to its orchestrator (used to
+ * build that region's S3 client). In these tests the two are the same object.
  */
-function useRegions(regions: ReturnType<typeof provisioned>[]) {
+function useRegions(regions: ProvisionedRegion[]) {
   mockGetProvisionedRegions.mockResolvedValue(regions);
-  const byRegion = new Map(regions.map((r) => [r.orchestrator.region, r.orchestrator]));
   mockGetOrchestratorForRegion.mockImplementation((region: S3Region) => {
-    const orchestrator = byRegion.get(region);
-    if (!orchestrator) throw new Error(`Unsupported region "${String(region)}".`);
-    return orchestrator;
+    const match = regions.find((r) => r.orchestrator.region === region);
+    if (!match) throw new Error(`no orchestrator registered for region ${region}`);
+    return match.orchestrator;
   });
 }
 
@@ -114,6 +119,7 @@ describe('rag-indexer-worker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateS3Client.mockReturnValue(fakeS3Client);
+    mockUpdateBucketTelemetry.mockResolvedValue(undefined);
     mockIndexBucket.mockResolvedValue({
       added: 0,
       updated: 0,
@@ -227,6 +233,42 @@ describe('rag-indexer-worker', () => {
       .mockRejectedValueOnce(new Error('index failed'))
       .mockResolvedValue({ added: 0, updated: 0, removed: 0, failed: 0, completed: true });
 
+    await handler(
+      payload([
+        { region: S3Region.EuWest1, bucketName: 'b1' },
+        { region: S3Region.EuWest1, bucketName: 'b2' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    expect(mockIndexBucket).toHaveBeenCalledTimes(2);
+  });
+
+  it('persists error telemetry (syncState + message, never the enablement status) when a bucket fails', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+    mockIndexBucket.mockRejectedValue(new Error('index exploded'));
+
+    await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
+
+    expect(mockUpdateBucketTelemetry).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'b1', {
+      syncState: 'error',
+      lastSyncError: 'index exploded',
+    });
+    // The failure path records sync state only — it must not flip enablement off.
+    const update = mockUpdateBucketTelemetry.mock.calls[0]?.[3] as Record<string, unknown>;
+    expect(update).not.toHaveProperty('status');
+  });
+
+  it('does not mask the original failure if writing error telemetry also fails', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+    mockIndexBucket
+      .mockRejectedValueOnce(new Error('index failed'))
+      .mockResolvedValue({ added: 0, updated: 0, removed: 0, failed: 0, completed: true });
+    mockUpdateBucketTelemetry.mockRejectedValueOnce(new Error('telemetry write failed'));
+
+    // The region must still finish indexing the healthy bucket.
     await handler(
       payload([
         { region: S3Region.EuWest1, bucketName: 'b1' },

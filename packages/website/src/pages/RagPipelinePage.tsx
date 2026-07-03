@@ -210,6 +210,8 @@ export function RagPipelinePage() {
       filesIndexed: enablement?.filesIndexed ?? 0,
       indexSize: enablement?.indexSize ?? 0,
       ...(enablement?.lastSyncedAt ? { lastSyncedAt: enablement.lastSyncedAt } : {}),
+      ...(enablement?.syncState ? { syncState: enablement.syncState } : {}),
+      ...(enablement?.lastSyncError ? { lastSyncError: enablement.lastSyncError } : {}),
     };
   });
 

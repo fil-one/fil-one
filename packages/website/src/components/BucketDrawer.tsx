@@ -9,6 +9,7 @@ import { timeAgo } from '../lib/time.js';
 import { Button } from './Button.js';
 import { Input } from './Input.js';
 import { QueryAnswer } from './QueryAnswer.js';
+import { SyncStatusBadge } from './SyncStatusBadge.js';
 
 export type BucketDrawerProps = {
   bucket: RagBucket;
@@ -139,6 +140,12 @@ function StatsBar({ bucket }: StatsBarProps) {
           'Not yet synced'
         )}
       </span>
+      {bucket.syncState === 'syncing' || bucket.syncState === 'error' ? (
+        <>
+          <span className="text-zinc-300">·</span>
+          <SyncStatusBadge bucket={bucket} />
+        </>
+      ) : null}
     </div>
   );
 }

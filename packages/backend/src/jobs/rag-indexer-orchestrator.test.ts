@@ -106,6 +106,33 @@ describe('rag-indexer-orchestrator', () => {
     expect(payloads[0].buckets).toEqual([{ region: 'eu-west-1', bucketName: 'bucket-1' }]);
   });
 
+  it('still picks up an active bucket whose syncState is "syncing" (scan keys off status, not sync state)', async () => {
+    // Regression (FIL-556): a bucket left `syncing` (e.g. after a crash) is still
+    // `active`, so the orchestrator scan must continue to include it for
+    // re-indexing. Sync state must not affect liveness.
+    ddbMock
+      .on(ScanCommand)
+      .resolves({ Items: [enablementItem('bucket-1', 'org-1', { syncState: 'syncing' })] });
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
+    expect(payloadsFrom()[0].buckets).toEqual([{ region: 'eu-west-1', bucketName: 'bucket-1' }]);
+  });
+
+  it('still picks up an active bucket whose last sync errored (syncState="error")', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [enablementItem('bucket-1', 'org-1', { syncState: 'error', lastSyncError: 'boom' })],
+    });
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
+    expect(payloadsFrom()[0].buckets).toEqual([{ region: 'eu-west-1', bucketName: 'bucket-1' }]);
+  });
+
   it('groups multiple buckets of one org into a single worker invocation', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [enablementItem('bucket-1', 'org-1'), enablementItem('bucket-2', 'org-1')],

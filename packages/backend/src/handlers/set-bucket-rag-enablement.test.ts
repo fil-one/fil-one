@@ -53,7 +53,7 @@ process.env.FILONE_STAGE = 'test';
 import { baseHandler, handler } from './set-bucket-rag-enablement.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
 import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
-import { S3_REGION, S3Region } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.js';
 
@@ -65,7 +65,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1', email: 'dev@fil.org', emai
 
 const BUCKET = {
   bucketName: 'my-bucket',
-  region: S3_REGION,
+  region: S3Region.EuWest1,
   createdAt: '2026-01-15T10:00:00Z',
   isPublic: false,
   versioning: false,
@@ -117,11 +117,11 @@ describe('set-bucket-rag-enablement baseHandler', () => {
     expect(result.statusCode).toBe(200);
     expect(JSON.parse(result.body!)).toMatchObject({ enabled: true, status: 'active' });
     expect(mockSetEnablement).toHaveBeenCalledWith({
-      region: S3_REGION,
       bucketName: 'my-bucket',
       orgId: 'org-1',
       enabled: true,
       existing: undefined,
+      region: S3Region.EuWest1,
     });
   });
 

@@ -20,6 +20,66 @@ export type { RagBucket } from '../lib/rag-bucket-api.js';
 // BucketRow
 // ---------------------------------------------------------------------------
 
+/** The files-indexed · index-size · last-synced line for a steadily-synced bucket. */
+function BucketSyncedStats({ bucket }: { bucket: RagBucket }) {
+  return (
+    <>
+      <span data-testid="bucket-row-stat-files" className="text-zinc-500">
+        {bucket.filesIndexed.toLocaleString()}
+      </span>
+      {' files indexed'}
+      <span aria-hidden="true"> · </span>
+      <span data-testid="bucket-row-stat-size" className="text-zinc-500">
+        {formatBytes(bucket.indexSize)}
+      </span>
+      <span aria-hidden="true"> · </span>
+      {bucket.lastSyncedAt ? (
+        <>
+          {'Last synced '}
+          <span data-testid="bucket-row-stat-synced" className="text-zinc-500">
+            {timeAgo(bucket.lastSyncedAt)}
+          </span>
+        </>
+      ) : (
+        'Not yet synced'
+      )}
+    </>
+  );
+}
+
+/**
+ * The coarse state driving the row description, exposed via `data-sync-state` so
+ * E2E can assert status without matching on human labels like "Syncing…".
+ * Note: the steady state includes both synced and never-synced (no `lastSyncedAt`) buckets.
+ */
+function bucketRowSyncState(bucket: RagBucket): 'not-indexed' | 'syncing' | 'error' | 'synced' {
+  if (!bucket.enabled) return 'not-indexed';
+  if (bucket.syncState === 'syncing') return 'syncing';
+  if (bucket.syncState === 'error') return 'error';
+  return 'synced';
+}
+
+/**
+ * The row's one-line description. Enablement (`enabled`) decides "Not indexed";
+ * the indexer sync progress (FIL-556) then layers the in-flight/failed indicator
+ * WITHOUT changing whether the bucket is enabled: an enabled bucket mid-run
+ * shows "Syncing…"; a failed run shows "Sync failed" + the reason; otherwise the
+ * files/size/last-synced stats (with a "Not yet synced" fallback before the
+ * first run).
+ */
+function BucketRowDescription({ bucket }: { bucket: RagBucket }) {
+  if (!bucket.enabled) return <>Not indexed</>;
+  if (bucket.syncState === 'syncing') return <span className="text-amber-600">Syncing…</span>;
+  if (bucket.syncState === 'error') {
+    return (
+      <span className="text-red-600">
+        Sync failed{bucket.lastSyncError ? `: ${bucket.lastSyncError}` : ''}
+      </span>
+    );
+  }
+  return <BucketSyncedStats bucket={bucket} />;
+}
+
 function BucketRow({
   bucket,
   pending,
@@ -34,6 +94,7 @@ function BucketRow({
   return (
     <Card
       data-testid={`bucket-row-${bucketKey(bucket)}`}
+      data-bucket-name={bucket.name}
       padding="none"
       className="overflow-hidden"
     >
@@ -46,26 +107,12 @@ function BucketRow({
             <p data-testid="bucket-row-name" className="text-sm font-medium text-zinc-800">
               {bucket.name}
             </p>
-            <p className="text-xs text-zinc-400">
-              {bucket.enabled ? (
-                <>
-                  <span className="text-zinc-500">{bucket.filesIndexed.toLocaleString()}</span>
-                  {' files indexed'}
-                  <span aria-hidden="true"> · </span>
-                  <span className="text-zinc-500">{formatBytes(bucket.indexSize)}</span>
-                  <span aria-hidden="true"> · </span>
-                  {bucket.lastSyncedAt ? (
-                    <>
-                      {'Last synced '}
-                      <span className="text-zinc-500">{timeAgo(bucket.lastSyncedAt)}</span>
-                    </>
-                  ) : (
-                    'Not yet synced'
-                  )}
-                </>
-              ) : (
-                'Not indexed'
-              )}
+            <p
+              data-testid="bucket-row-status"
+              data-sync-state={bucketRowSyncState(bucket)}
+              className="text-xs text-zinc-400"
+            >
+              <BucketRowDescription bucket={bucket} />
             </p>
           </div>
         </div>

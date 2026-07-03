@@ -160,6 +160,41 @@ describe('get-bucket-rag-enablement baseHandler', () => {
     expect(JSON.parse(result.body!).status).toBe('disabled');
   });
 
+  it('surfaces the error syncState + lastSyncError after a failed sync while staying enabled', async () => {
+    mockGetEnablement.mockResolvedValue(
+      enablementRecord({
+        status: 'active',
+        syncState: 'error',
+        lastSyncError: 'Connection timeout',
+      }),
+    );
+
+    const result = await baseHandler(event());
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body!);
+    // Sync failed, but enablement (source of truth) is untouched: still queryable.
+    expect(body.status).toBe('active');
+    expect(body.enabled).toBe(true);
+    expect(body.syncState).toBe('error');
+    expect(body.lastSyncError).toBe('Connection timeout');
+  });
+
+  it('reports an in-flight syncState from the indexer while staying enabled', async () => {
+    mockGetEnablement.mockResolvedValue(
+      enablementRecord({ status: 'active', syncState: 'syncing' }),
+    );
+
+    const result = await baseHandler(event());
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body!);
+    expect(body.syncState).toBe('syncing');
+    // A syncing bucket is still enabled/queryable.
+    expect(body.enabled).toBe(true);
+    expect(body.status).toBe('active');
+  });
+
   it('omits lastSyncedAt for a bucket that has never synced', async () => {
     mockGetEnablement.mockResolvedValue(
       enablementRecord({ filesIndexed: 0, indexSize: 0, lastSyncedAt: undefined }),
