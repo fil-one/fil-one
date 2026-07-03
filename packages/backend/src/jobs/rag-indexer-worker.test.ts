@@ -153,6 +153,7 @@ describe('rag-indexer-worker', () => {
     expect(mockIndexBucket).toHaveBeenCalledOnce();
     expect(mockIndexBucket).toHaveBeenCalledWith(
       {
+        orgId: 'org-1',
         s3: fakeS3Client,
         region: S3Region.EuWest1,
         bucketName: 'b1',
@@ -209,6 +210,7 @@ describe('rag-indexer-worker', () => {
     expect(mockIndexBucket).toHaveBeenCalledOnce();
     expect(mockIndexBucket).toHaveBeenCalledWith(
       {
+        orgId: 'org-1',
         s3: fakeS3Client,
         region: S3Region.UsEast1,
         bucketName: 'b2',

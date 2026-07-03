@@ -1,7 +1,7 @@
 // RAG indexer orchestrator: a cron-triggered scan that fans out indexing work
-// per org. It scans the per-bucket RAG enablement rows (UserInfoTable —
-// BUCKET#{region}#{bucketName} / RAG), groups the active ones by their owning org, and
-// async-invokes the worker once per org (InvocationType 'Event'). It has no
+// per org. It scans the per-bucket RAG enablement rows (RagIndexerTable —
+// BUCKET#{orgId}#{region}#{bucketName} / RAG), groups the active ones by their owning
+// org, and async-invokes the worker once per org (InvocationType 'Event'). It has no
 // side effects beyond those invocations; all S3/vector work lives in the worker.
 
 import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
@@ -65,7 +65,7 @@ async function scanEnabledBuckets(): Promise<EnabledBucket[]> {
   do {
     const result = await dynamo.send(
       new ScanCommand({
-        TableName: Resource.UserInfoTable.name,
+        TableName: Resource.RagIndexerTable.name,
         FilterExpression: 'sk = :sk AND #status = :active',
         ExpressionAttributeNames: { '#status': 'status' },
         ProjectionExpression: 'pk, orgId',

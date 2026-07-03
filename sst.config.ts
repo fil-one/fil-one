@@ -706,10 +706,11 @@ export default $config({
     });
     // RAG per-bucket enablement (FIL-555): read/write the BUCKET#{name}/RAG
     // enablement row + sync telemetry for the caller's tenant. Both are gated by
-    // auth + subscriptionGuard + ragAccessMiddleware. They read/write only
-    // UserInfoTable (already linked) and resolve tenant ownership via the
-    // orchestrator (SSM-backed S3 keys), so they need the SSM read grant but not
-    // `rag: true` (no s3vectors/bedrock).
+    // auth + subscriptionGuard + ragAccessMiddleware. The enablement row lives in
+    // ragIndexerTable (extraLink below); they also read UserInfoTable (already
+    // linked via allResources) for tenant/org profile, and resolve tenant
+    // ownership via the orchestrator (SSM-backed S3 keys), so they need the SSM
+    // read grant but not `rag: true` (no s3vectors/bedrock).
     addRoute({
       method: 'GET',
       routePath: '/api/buckets/{name}/rag/enabled',
@@ -718,6 +719,7 @@ export default $config({
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         ...fthEnv,
       },
+      extraLink: [ragIndexerTable],
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
       ],
@@ -730,6 +732,7 @@ export default $config({
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         ...fthEnv,
       },
+      extraLink: [ragIndexerTable],
       permissions: [
         { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
       ],
@@ -963,7 +966,8 @@ export default $config({
 
     const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
       handler: 'packages/backend/src/jobs/rag-indexer-orchestrator.handler',
-      link: [userInfoTable],
+      // Scans the enablement rows, now in ragIndexerTable (its only table dependency).
+      link: [ragIndexerTable],
       environment: {
         RAG_INDEXER_WORKER_FUNCTION_NAME: ragIndexerWorker.name,
       },

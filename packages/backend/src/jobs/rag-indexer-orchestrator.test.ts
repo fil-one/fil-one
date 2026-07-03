@@ -11,7 +11,7 @@ import type { RagIndexerWorkerPayload } from './rag-indexer-worker.js';
 
 vi.mock('sst', () => ({
   Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
+    RagIndexerTable: { name: 'RagIndexerTable' },
   },
 }));
 
@@ -34,7 +34,7 @@ function enablementItem(
 ) {
   return marshall(
     {
-      pk: `BUCKET#${region}#${bucketName}`,
+      pk: `BUCKET#${orgId}#${region}#${bucketName}`,
       sk: 'RAG',
       orgId,
       status: 'active',
@@ -82,7 +82,7 @@ describe('rag-indexer-orchestrator', () => {
     await handler();
 
     const scanInput = ddbMock.commandCalls(ScanCommand)[0].args[0].input;
-    expect(scanInput.TableName).toBe('UserInfoTable');
+    expect(scanInput.TableName).toBe('RagIndexerTable');
     expect(scanInput.FilterExpression).toContain('sk = :sk');
     expect(scanInput.ExpressionAttributeValues).toMatchObject({
       ':sk': { S: 'RAG' },
@@ -139,7 +139,7 @@ describe('rag-indexer-orchestrator', () => {
       .on(ScanCommand)
       .resolvesOnce({
         Items: [enablementItem('bucket-1', 'org-1')],
-        LastEvaluatedKey: marshall({ pk: 'BUCKET#eu-west-1#bucket-1', sk: 'RAG' }),
+        LastEvaluatedKey: marshall({ pk: 'BUCKET#org-1#eu-west-1#bucket-1', sk: 'RAG' }),
       })
       .resolvesOnce({ Items: [enablementItem('bucket-2', 'org-2')] });
     lambdaMock.on(InvokeCommand).resolves({});
