@@ -256,7 +256,7 @@ describe('rag-indexer-worker', () => {
       lastSyncError: 'index exploded',
     });
     // The failure path records sync state only — it must not flip enablement off.
-    const update = mockUpdateBucketTelemetry.mock.calls[0]?.[2] as Record<string, unknown>;
+    const update = mockUpdateBucketTelemetry.mock.calls[0]?.[3] as Record<string, unknown>;
     expect(update).not.toHaveProperty('status');
   });
 

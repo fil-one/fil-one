@@ -22,7 +22,7 @@ const dynamo = getDynamoClient();
 const MAX_SYNC_ERROR_LENGTH = 500;
 
 /**
- * Read a bucket's RAG enablement row (`BUCKET#{region}#{bucketName}` / `RAG`).
+ * Read a bucket's RAG enablement row (`BUCKET#{orgId}#{region}#{bucketName}` / `RAG`).
  *
  * The enablement records are keyed by bucket *name* — the indexer worker treats
  * `bucketId === bucket.bucketName` (see rag-indexer-worker), so handlers keep
