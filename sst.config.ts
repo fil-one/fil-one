@@ -222,7 +222,8 @@ export default $config({
       },
     });
 
-    const { getAuth0Domain, getS3Endpoint, S3Region, Stage } = await import('@filone/shared');
+    const { getAuth0Domain, getS3Endpoint, S3Region, Stage, SUPPORTED_COMPLETION_MODELS } =
+      await import('@filone/shared');
     const stageForEndpoints = isProduction ? Stage.Production : Stage.Staging;
     // The browser hits the S3 endpoint of every region directly — list-objects,
     // uploads, downloads, etc. — so each one needs to be in `connect-src` or the
@@ -678,6 +679,64 @@ export default $config({
       permissions: consoleS3KeysPermissions,
       extraEnv: orchestratorEnv,
     });
+    // RAG query playground (FIL-554): embed the question, vector-search the
+    // bucket's index, and ground a Bedrock completion on the retrieved chunks.
+    // `rag: true` grants s3vectors:QueryVectors + bedrock:InvokeModel on the
+    // Titan embeddings model; the extra permission below covers the Claude
+    // completion model — both its cross-region inference profile and the
+    // underlying foundation model. Higher timeout/memory for the Bedrock calls.
+    addRoute({
+      method: 'POST',
+      routePath: '/api/buckets/{name}/query',
+      handler: 'query-bucket',
+      rag: true,
+      permissions: [
+        {
+          actions: ['bedrock:InvokeModel'],
+          // Built from the shared allowlist so the grant and QueryBucketSchema's
+          // accepted `model` ids stay in sync — a model added there is invokable here.
+          resources: SUPPORTED_COMPLETION_MODELS.flatMap((m) => [
+            m.inferenceProfileArn,
+            m.foundationModelArn,
+          ]),
+        },
+      ],
+      timeout: '30 seconds',
+      memory: '512 MB',
+    });
+    // RAG per-bucket enablement (FIL-555): read/write the BUCKET#{name}/RAG
+    // enablement row + sync telemetry for the caller's tenant. Both are gated by
+    // auth + subscriptionGuard + ragAccessMiddleware. The enablement row lives in
+    // ragIndexerTable (extraLink below); they also read UserInfoTable (already
+    // linked via allResources) for tenant/org profile, and resolve tenant
+    // ownership via the orchestrator (SSM-backed S3 keys), so they need the SSM
+    // read grant but not `rag: true` (no s3vectors/bedrock).
+    addRoute({
+      method: 'GET',
+      routePath: '/api/buckets/{name}/rag/enabled',
+      handler: 'get-bucket-rag-enablement',
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        ...fthEnv,
+      },
+      extraLink: [ragIndexerTable],
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
+      ],
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/buckets/{name}/rag/enabled',
+      handler: 'set-bucket-rag-enablement',
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        ...fthEnv,
+      },
+      extraLink: [ragIndexerTable],
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
+      ],
+    });
 
     // ── Auth routes ──────────────────────────────────────────────────
     const allowedRedirectOrigins = allowedOrigins.join(',');
@@ -907,7 +966,8 @@ export default $config({
 
     const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
       handler: 'packages/backend/src/jobs/rag-indexer-orchestrator.handler',
-      link: [userInfoTable],
+      // Scans the enablement rows, now in ragIndexerTable (its only table dependency).
+      link: [ragIndexerTable],
       environment: {
         RAG_INDEXER_WORKER_FUNCTION_NAME: ragIndexerWorker.name,
       },
