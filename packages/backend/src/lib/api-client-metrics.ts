@@ -25,7 +25,7 @@ export interface InstrumentableClient {
         fn: (
           error: unknown,
           response: Response | undefined,
-          request: Request,
+          request: Request | undefined,
           options: InterceptorOptions,
         ) => unknown,
       ): number;
@@ -71,7 +71,8 @@ export function instrumentApiClient<ApiName extends string>(
   client.interceptors.error.use((error, response, request, requestOptions) => {
     // Only emit for network errors (response is undefined).
     // For HTTP errors, the response interceptor already emitted the metric.
-    if (response === undefined) {
+    // The request is undefined when the error was thrown while building it.
+    if (response === undefined && request !== undefined) {
       const start = timings.get(request);
       const duration = start !== undefined ? performance.now() - start : 0;
       const endpoint = `${request.method} ${requestOptions.url ?? 'unknown'}`;
