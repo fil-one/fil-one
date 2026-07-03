@@ -96,6 +96,21 @@ export default $config({
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
     });
 
+    // RAG indexer's own store: per-object chunk manifests
+    // (BUCKET#{region}#{bucket} / MANIFEST#{objectKey}) and resumable indexer
+    // checkpoints (INDEXER_CHECKPOINT#{region}#{bucket} / CHECKPOINT). Kept out
+    // of UserInfoTable so this high-churn, indexer-derived state doesn't mix with
+    // user/org data. TTL attribute expires stale checkpoints (see
+    // rag-indexer-manifest.ts).
+    const ragIndexerTable = new sst.aws.Dynamo('RagIndexerTable', {
+      fields: {
+        pk: 'string',
+        sk: 'string',
+      },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      ttl: 'ttl',
+    });
+
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
@@ -207,7 +222,8 @@ export default $config({
       },
     });
 
-    const { getAuth0Domain, getS3Endpoint, S3Region, Stage } = await import('@filone/shared');
+    const { getAuth0Domain, getS3Endpoint, S3Region, Stage, SUPPORTED_COMPLETION_MODELS } =
+      await import('@filone/shared');
     const stageForEndpoints = isProduction ? Stage.Production : Stage.Staging;
     // The browser hits the S3 endpoint of every region directly — list-objects,
     // uploads, downloads, etc. — so each one needs to be in `connect-src` or the
@@ -663,6 +679,64 @@ export default $config({
       permissions: consoleS3KeysPermissions,
       extraEnv: orchestratorEnv,
     });
+    // RAG query playground (FIL-554): embed the question, vector-search the
+    // bucket's index, and ground a Bedrock completion on the retrieved chunks.
+    // `rag: true` grants s3vectors:QueryVectors + bedrock:InvokeModel on the
+    // Titan embeddings model; the extra permission below covers the Claude
+    // completion model — both its cross-region inference profile and the
+    // underlying foundation model. Higher timeout/memory for the Bedrock calls.
+    addRoute({
+      method: 'POST',
+      routePath: '/api/buckets/{name}/query',
+      handler: 'query-bucket',
+      rag: true,
+      permissions: [
+        {
+          actions: ['bedrock:InvokeModel'],
+          // Built from the shared allowlist so the grant and QueryBucketSchema's
+          // accepted `model` ids stay in sync — a model added there is invokable here.
+          resources: SUPPORTED_COMPLETION_MODELS.flatMap((m) => [
+            m.inferenceProfileArn,
+            m.foundationModelArn,
+          ]),
+        },
+      ],
+      timeout: '30 seconds',
+      memory: '512 MB',
+    });
+    // RAG per-bucket enablement (FIL-555): read/write the BUCKET#{name}/RAG
+    // enablement row + sync telemetry for the caller's tenant. Both are gated by
+    // auth + subscriptionGuard + ragAccessMiddleware. The enablement row lives in
+    // ragIndexerTable (extraLink below); they also read UserInfoTable (already
+    // linked via allResources) for tenant/org profile, and resolve tenant
+    // ownership via the orchestrator (SSM-backed S3 keys), so they need the SSM
+    // read grant but not `rag: true` (no s3vectors/bedrock).
+    addRoute({
+      method: 'GET',
+      routePath: '/api/buckets/{name}/rag/enabled',
+      handler: 'get-bucket-rag-enablement',
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        ...fthEnv,
+      },
+      extraLink: [ragIndexerTable],
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
+      ],
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/buckets/{name}/rag/enabled',
+      handler: 'set-bucket-rag-enablement',
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        ...fthEnv,
+      },
+      extraLink: [ragIndexerTable],
+      permissions: [
+        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
+      ],
+    });
 
     // ── Auth routes ──────────────────────────────────────────────────
     const allowedRedirectOrigins = allowedOrigins.join(',');
@@ -866,6 +940,53 @@ export default $config({
       // run the Lambda every 12 hours, one hour after usage reporting (08:00 and 20:00 UTC).
       schedule: 'cron(0 8/12 * * ? *)',
       function: gracePeriodEnforcer.arn,
+    });
+
+    // ── RAG indexer (cron → orchestrator → per-org worker) ──────────
+    // Keeps each RAG-enabled bucket's vector index in sync with S3 contents via
+    // object-level ETag diffing. The worker reads per-tenant S3 keys (SSM +
+    // KMS) and uses @filone/rag-shared to extract/chunk/embed/upsert, so it
+    // gets the RAG permission set plus a large timeout/memory budget; large
+    // buckets are resumed across runs via a persisted continuation checkpoint.
+    const ragIndexerWorker = createFn('RagIndexerWorker', {
+      handler: 'packages/backend/src/jobs/rag-indexer-worker.handler',
+      link: [
+        billingTable,
+        userInfoTable,
+        ragIndexerTable,
+        ragVectorBucket,
+        auroraBackofficeToken,
+        fthManagementApiToken,
+      ],
+      environment: orchestratorEnv,
+      timeout: '900 seconds',
+      memory: '512 MB',
+      permissions: [...consoleS3KeysPermissions, ...ragPermissions],
+    });
+
+    const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
+      handler: 'packages/backend/src/jobs/rag-indexer-orchestrator.handler',
+      // Scans the enablement rows, now in ragIndexerTable (its only table dependency).
+      link: [ragIndexerTable],
+      environment: {
+        RAG_INDEXER_WORKER_FUNCTION_NAME: ragIndexerWorker.name,
+      },
+      timeout: '60 seconds',
+      memory: '256 MB',
+      permissions: [
+        {
+          actions: ['lambda:InvokeFunction'],
+          resources: [ragIndexerWorker.arn],
+        },
+      ],
+    });
+
+    new sst.aws.CronV2('RagIndexerCron', {
+      // Run every 6 hours (03:00, 09:00, 15:00, 21:00 UTC). Deliberately offset
+      // from the usage-reporting (07/19) and grace-period (08/20) crons so the
+      // indexer never collides with billing reconciliation.
+      schedule: 'cron(0 3/6 * * ? *)',
+      function: ragIndexerOrchestrator.arn,
     });
 
     // ── Subscription drift checker (cron-based, observe-only) ───────

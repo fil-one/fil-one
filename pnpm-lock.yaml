@@ -135,6 +135,9 @@ importers:
       '@filone/aurora-portal-client':
         specifier: workspace:*
         version: link:../aurora-portal-client
+      '@filone/rag-shared':
+        specifier: workspace:*
+        version: link:../rag-shared
       '@filone/shared':
         specifier: workspace:*
         version: link:../shared

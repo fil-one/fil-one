@@ -19,6 +19,7 @@ import { Route as settingsRoute } from './routes/_app/settings.js';
 import { Route as supportRoute } from './routes/_app/support.js';
 import { Route as bucketIntelligenceRoute } from './routes/_app/bucket-intelligence.js';
 import { Route as aiAgentToolkitRoute } from './routes/_app/ai-agent-toolkit.js';
+import { Route as ragPipelineRoute } from './routes/_app/rag-pipeline.js';
 import { Route as verifyEmailRoute } from './routes/verify-email.js';
 
 const routeTree = rootRoute.addChildren([
@@ -39,6 +40,7 @@ const routeTree = rootRoute.addChildren([
     supportRoute,
     bucketIntelligenceRoute,
     aiAgentToolkitRoute,
+    ragPipelineRoute,
   ]),
 ]);
 
