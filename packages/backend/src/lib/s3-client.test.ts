@@ -29,7 +29,7 @@ describe('createS3Client', () => {
     expect(endpoint.protocol).toBe('https:');
   });
 
-  it('disables auto checksum calculation/validation so presigned PUT URLs carry no x-amz-checksum params', async () => {
+  it('disables auto checksum calculation/validation by setting WHEN_REQUIRED in the S3 client config', async () => {
     const client = createS3Client(ctx);
 
     // The SDK normalizes these into async providers.
