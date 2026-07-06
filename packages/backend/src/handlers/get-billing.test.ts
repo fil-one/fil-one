@@ -236,7 +236,7 @@ describe('get-billing baseHandler', () => {
     expect(updateCalls).toHaveLength(1);
   });
 
-  it('transitions expired grace_period to canceled', async () => {
+  it('reports expired grace_period as canceled but does NOT persist the transition', async () => {
     const expiredGracePeriod = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
     ddbMock.on(GetItemCommand).resolves(
       subscriptionItem({
@@ -260,8 +260,10 @@ describe('get-billing baseHandler', () => {
       },
     });
 
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1);
+    // Surfaces `canceled` in the response, but must NOT write it: the record
+    // stays `grace_period` so the grace-period-enforcer still disables the
+    // tenant. Persisting `canceled` here would hide it from the enforcer.
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('returns no paymentMethod when none exists', async () => {

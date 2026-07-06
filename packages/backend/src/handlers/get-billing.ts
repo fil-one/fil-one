@@ -189,27 +189,20 @@ async function evaluateStatusTransitions(
     billingRecord.gracePeriodEndsAt = gracePeriodEndsAt;
   }
 
-  // Lazy eval: grace_period / past_due expired → canceled
+  // Lazy eval: grace_period / past_due expired → report as canceled, but do NOT
+  // persist the transition here. Persisting `canceled` from this read path flips
+  // the record out of `grace_period` without disabling the tenant at the
+  // orchestrator; since the grace-period-enforcer only scans `grace_period`, the
+  // record would become invisible to the job that disables tenants, leaving
+  // standing S3 access keys with data-plane access indefinitely. Leave the
+  // record in `grace_period` so the enforcer owns the terminal cancel + tenant
+  // disable; we only surface the canceled status in this response.
   if (
     (currentStatus === SubscriptionStatus.GracePeriod ||
       currentStatus === SubscriptionStatus.PastDue) &&
     billingRecord.gracePeriodEndsAt &&
     new Date(billingRecord.gracePeriodEndsAt).getTime() < Date.now()
   ) {
-    await dynamo.send(
-      new UpdateItemCommand({
-        TableName: billingTableName,
-        Key: {
-          pk: { S: `CUSTOMER#${userId}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
-        ExpressionAttributeValues: {
-          ':status': { S: SubscriptionStatus.Canceled },
-          ':now': { S: new Date().toISOString() },
-        },
-      }),
-    );
     currentStatus = SubscriptionStatus.Canceled;
   }
 
