@@ -718,27 +718,17 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}/rag/enabled',
       handler: 'get-bucket-rag-enablement',
-      extraEnv: {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        ...fthEnv,
-      },
+      extraEnv: orchestratorEnv,
       extraLink: [ragIndexerTable],
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: consoleS3KeysPermissions,
     });
     addRoute({
       method: 'POST',
       routePath: '/api/buckets/{name}/rag/enabled',
       handler: 'set-bucket-rag-enablement',
-      extraEnv: {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        ...fthEnv,
-      },
+      extraEnv: orchestratorEnv,
       extraLink: [ragIndexerTable],
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: consoleS3KeysPermissions,
     });
 
     // ── Auth routes ──────────────────────────────────────────────────
