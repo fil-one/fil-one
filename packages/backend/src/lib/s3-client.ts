@@ -17,5 +17,12 @@ export function createS3Client(ctx: S3ClientContext): S3Client {
     region: ctx.region,
     credentials: ctx.credentials,
     forcePathStyle: ctx.forcePathStyle,
+    // Restore pre-v3.729 behavior: do not auto-add CRC32 checksum params.
+    // Without this, presigned PutObject URLs carry x-amz-checksum-crc32
+    // (computed over an empty body at presign time) and x-amz-sdk-checksum-
+    // algorithm in the signed query string. The browser then uploads the real
+    // bytes without a matching checksum, so the gateway returns 400 BadDigest.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
 }

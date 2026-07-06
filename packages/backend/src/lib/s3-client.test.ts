@@ -29,6 +29,14 @@ describe('createS3Client', () => {
     expect(endpoint.protocol).toBe('https:');
   });
 
+  it('disables auto checksum calculation/validation by setting WHEN_REQUIRED in the S3 client config', async () => {
+    const client = createS3Client(ctx);
+
+    // The SDK normalizes these into async providers.
+    expect(await client.config.requestChecksumCalculation()).toBe('WHEN_REQUIRED');
+    expect(await client.config.responseChecksumValidation()).toBe('WHEN_REQUIRED');
+  });
+
   it('forwards a custom region and disabled path-style', async () => {
     const client = createS3Client({
       ...ctx,

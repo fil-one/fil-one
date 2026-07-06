@@ -148,6 +148,7 @@ export default $config({
           's3vectors:DeleteIndex',
           's3vectors:PutVectors',
           's3vectors:QueryVectors',
+          's3vectors:GetVectors',
           's3vectors:DeleteVectors',
         ],
         resources: [
@@ -690,7 +691,9 @@ export default $config({
       routePath: '/api/buckets/{name}/query',
       handler: 'query-bucket',
       rag: true,
+      extraEnv: orchestratorEnv,
       permissions: [
+        ...consoleS3KeysPermissions,
         {
           actions: ['bedrock:InvokeModel'],
           // Built from the shared allowlist so the grant and QueryBucketSchema's
@@ -715,27 +718,17 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}/rag/enabled',
       handler: 'get-bucket-rag-enablement',
-      extraEnv: {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        ...fthEnv,
-      },
+      extraEnv: orchestratorEnv,
       extraLink: [ragIndexerTable],
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: consoleS3KeysPermissions,
     });
     addRoute({
       method: 'POST',
       routePath: '/api/buckets/{name}/rag/enabled',
       handler: 'set-bucket-rag-enablement',
-      extraEnv: {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        ...fthEnv,
-      },
+      extraEnv: orchestratorEnv,
       extraLink: [ragIndexerTable],
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: consoleS3KeysPermissions,
     });
 
     // ── Auth routes ──────────────────────────────────────────────────
