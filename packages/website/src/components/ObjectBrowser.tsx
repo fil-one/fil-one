@@ -40,10 +40,25 @@ function groupVersionsByKey(versions: S3ObjectVersion[]): VersionGroup[] {
     existing.push(v);
     groups.set(v.key, existing);
   }
-  return Array.from(groups.entries()).map(([key, vers]) => {
-    const latest = vers.find((v) => v.isLatest) ?? vers[0];
-    return { key, latest, versions: vers, versionCount: vers.length };
-  });
+  return (
+    Array.from(groups.entries())
+      .map(([key, vers]) => {
+        const latest = vers.find((v) => v.isLatest) ?? vers[0];
+        return { key, latest, versions: vers, versionCount: vers.length };
+      })
+      // A key whose current version is a delete marker is logically deleted — it
+      // should not appear as a live object (matches the AWS console default view).
+      .filter((group) => !group.latest.isDeleteMarker)
+  );
+}
+
+/**
+ * Count distinct live objects (keys whose current version is not a delete marker)
+ * in a flat list of versions. Shares grouping logic with the browser so the count
+ * always matches the rendered rows.
+ */
+export function countLiveObjects(versions: S3ObjectVersion[]): number {
+  return groupVersionsByKey(versions).length;
 }
 
 type BrowseEntry =

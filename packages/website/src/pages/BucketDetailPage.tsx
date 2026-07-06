@@ -11,7 +11,7 @@ import { Alert } from '../components/Alert';
 import { Spinner } from '../components/Spinner';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { BucketPropertyCards } from '../components/BucketPropertiesCard';
-import { ObjectBrowser } from '../components/ObjectBrowser';
+import { ObjectBrowser, countLiveObjects } from '../components/ObjectBrowser';
 import { BucketAccessTab } from '../components/BucketAccessTab';
 import type { S3Region } from '@filone/shared';
 import { getS3Endpoint, formatBytes } from '@filone/shared';
@@ -28,7 +28,11 @@ import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { queryKeys } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
-import { parseListObjectVersionsResponse, executePresignedUrl } from '../lib/aurora-s3.js';
+import {
+  parseListObjectVersionsResponse,
+  parseListObjectsResponse,
+  executePresignedUrl,
+} from '../lib/aurora-s3.js';
 
 function formatStorage(bytesUsed: number | undefined): string {
   if (bytesUsed === undefined) return '—';
@@ -75,7 +79,12 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   });
   const bucket = bucketData?.bucket ?? null;
 
-  // Objects (via presigned URL — versioned listing)
+  // Objects (via presigned URL). Versioned buckets use ListObjectVersions so
+  // version history is available inline; non-versioned buckets use ListObjectsV2,
+  // which only ever returns live objects (never delete markers). The query is
+  // gated on the bucket metadata so we know the versioning state before choosing
+  // the op, and both paths are normalized to the ListObjectVersionsResponse shape
+  // so the cache and invalidation logic below stay identical.
   const {
     data: objectsData,
     isPending: objectsLoading,
@@ -83,12 +92,28 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     error: objectsError,
   } = useQuery({
     queryKey: queryKeys.objects(bucketName),
+    enabled: bucketData !== undefined,
     queryFn: async (): Promise<ListObjectVersionsResponse> => {
-      const { items } = await batchPresign(region, [
-        { op: 'listObjectVersions', bucket: bucketName },
-      ]);
+      if (bucket?.versioning) {
+        const { items } = await batchPresign(region, [
+          { op: 'listObjectVersions', bucket: bucketName },
+        ]);
+        const response = await executePresignedUrl(items[0].url, items[0].method);
+        return parseListObjectVersionsResponse(await response.text());
+      }
+
+      const { items } = await batchPresign(region, [{ op: 'listObjects', bucket: bucketName }]);
       const response = await executePresignedUrl(items[0].url, items[0].method);
-      return parseListObjectVersionsResponse(await response.text());
+      const { objects, isTruncated } = parseListObjectsResponse(await response.text());
+      return {
+        versions: objects.map((obj) => ({
+          ...obj,
+          versionId: '',
+          isLatest: true,
+          isDeleteMarker: false,
+        })),
+        isTruncated,
+      };
     },
   });
   const versions = objectsData?.versions ?? [];
@@ -207,7 +232,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
       <Tabs>
         <TabList>
-          <Tab testId="bucket-objects-tab">Objects ({versions.length.toLocaleString()})</Tab>
+          <Tab testId="bucket-objects-tab">
+            Objects ({countLiveObjects(versions).toLocaleString()})
+          </Tab>
           <Tab testId="bucket-keys-tab">
             API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}
           </Tab>
