@@ -31,7 +31,7 @@ export const queryKeys = {
   activityTrends: (period: '7d' | '30d') => ['activity', 'trends', period] as const,
   buckets: ['buckets'] as const,
   bucket: (bucketName: string, region: S3Region) => ['bucket', bucketName, region] as const,
-  objects: (bucketName: string) => ['objects', bucketName] as const,
+  objects: (bucketName: string, region: S3Region) => ['objects', bucketName, region] as const,
   objectMetadata: (bucketName: string, objectKey: string, versionId?: string) =>
     ['object-metadata', bucketName, objectKey, ...(versionId ? [versionId] : [])] as const,
   // ['access-keys'] is the prefix — invalidateQueries on this key also invalidates

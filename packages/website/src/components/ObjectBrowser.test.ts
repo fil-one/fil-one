@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import type { S3ObjectVersion } from '@filone/shared';
 
-import { countLiveObjects } from './ObjectBrowser.js';
+import { countObjects } from './ObjectBrowser.js';
 
 function version(
   overrides: Partial<S3ObjectVersion> & Pick<S3ObjectVersion, 'key'>,
@@ -17,13 +17,13 @@ function version(
   };
 }
 
-describe('countLiveObjects', () => {
-  it('counts distinct live object keys', () => {
+describe('countObjects', () => {
+  it('counts distinct object keys', () => {
     const versions = [version({ key: 'a.txt' }), version({ key: 'b.txt' })];
-    expect(countLiveObjects(versions)).toBe(2);
+    expect(countObjects(versions)).toBe(2);
   });
 
-  it('excludes keys whose current version is a delete marker', () => {
+  it('counts a key whose current version is a delete marker', () => {
     const versions = [
       version({ key: 'live.txt' }),
       // deleted object: older real version + a delete marker that is now latest
@@ -42,18 +42,18 @@ describe('countLiveObjects', () => {
         lastModified: '2026-01-02T00:00:00.000Z',
       }),
     ];
-    expect(countLiveObjects(versions)).toBe(1);
+    expect(countObjects(versions)).toBe(2);
   });
 
-  it('counts a key with multiple live versions once', () => {
+  it('counts a key with multiple versions once', () => {
     const versions = [
       version({ key: 'obj.txt', versionId: 'v1', isLatest: false }),
       version({ key: 'obj.txt', versionId: 'v2', isLatest: true }),
     ];
-    expect(countLiveObjects(versions)).toBe(1);
+    expect(countObjects(versions)).toBe(1);
   });
 
   it('returns 0 for an empty list', () => {
-    expect(countLiveObjects([])).toBe(0);
+    expect(countObjects([])).toBe(0);
   });
 });
