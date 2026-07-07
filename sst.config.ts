@@ -617,9 +617,7 @@ export default $config({
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         ...fthEnv,
       },
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: consoleS3KeysPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
@@ -644,7 +642,7 @@ export default $config({
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
         },
       ],
       timeout: '30 seconds',
@@ -657,12 +655,7 @@ export default $config({
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         ...fthEnv,
       },
-      permissions: [
-        {
-          actions: ['ssm:GetParameter'],
-          resources: [auroraApiKeySsmArn],
-        },
-      ],
+      permissions: consoleS3KeysPermissions,
     });
     addRoute({
       method: 'POST',
