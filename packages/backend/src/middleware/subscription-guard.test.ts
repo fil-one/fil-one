@@ -245,7 +245,7 @@ describe('subscriptionGuardMiddleware', () => {
     expect(result).toBeUndefined();
   });
 
-  it('transitions grace_period → canceled when grace expired, returns 403', async () => {
+  it('responds canceled when grace expired but does NOT persist the transition', async () => {
     const pastGrace = new Date(Date.now() - 1000).toISOString();
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
@@ -267,21 +267,11 @@ describe('subscriptionGuardMiddleware', () => {
       code: ApiErrorCode.SUBSCRIPTION_CANCELED,
     });
 
-    // Verify transition to canceled
-    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-    expect(updateCalls).toHaveLength(1);
-    expect(updateCalls[0].args[0].input).toStrictEqual({
-      TableName: 'BillingTable',
-      Key: {
-        pk: { S: `CUSTOMER#${USER_ID}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-      UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
-      ExpressionAttributeValues: {
-        ':status': { S: SubscriptionStatus.Canceled },
-        ':now': { S: expect.any(String) },
-      },
-    });
+    // Must NOT write `canceled` from this hot path: the record stays in
+    // `grace_period` so the grace-period-enforcer can still see it and disable
+    // the tenant. Persisting `canceled` here would hide the record from the
+    // enforcer, leaving the tenant enabled.
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('blocks when billing record exists but has no subscriptionStatus (fail closed)', async () => {
