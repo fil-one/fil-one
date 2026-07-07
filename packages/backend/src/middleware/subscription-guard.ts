@@ -84,7 +84,7 @@ async function runSubscriptionGuard(
   }
 
   if (status === SubscriptionStatus.GracePeriod || status === SubscriptionStatus.PastDue) {
-    return handleGracePeriod(record, userId, tableName, accessLevel);
+    return handleGracePeriod(record, accessLevel);
   }
 
   if (status === SubscriptionStatus.Canceled) {
@@ -134,27 +134,17 @@ async function transitionExpiredTrial(
 
 async function handleGracePeriod(
   record: Record<string, unknown>,
-  userId: string,
-  tableName: string,
   accessLevel: AccessLevel,
 ): Promise<APIGatewayProxyStructuredResultV2 | void> {
   const gracePeriodEndsAt = record.gracePeriodEndsAt as string | undefined;
   if (gracePeriodEndsAt && new Date(gracePeriodEndsAt).getTime() < Date.now()) {
-    // Lazy transition: grace expired → canceled
-    await dynamo.send(
-      new UpdateItemCommand({
-        TableName: tableName,
-        Key: {
-          pk: { S: `CUSTOMER#${userId}` },
-          sk: { S: 'SUBSCRIPTION' },
-        },
-        UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
-        ExpressionAttributeValues: {
-          ':status': { S: SubscriptionStatus.Canceled },
-          ':now': { S: new Date().toISOString() },
-        },
-      }),
-    );
+    // Grace expired → respond as canceled, but do NOT persist the transition
+    // here. Persisting `canceled` from this read/hot path flips the record out
+    // of `grace_period` without disabling the tenant at the orchestrator — and
+    // the grace-period-enforcer only scans `grace_period`, so the record would
+    // become invisible to the one job that disables tenants, leaving standing
+    // S3 access keys with data-plane access indefinitely. Leave the record in
+    // `grace_period` so the enforcer owns the terminal cancel + tenant disable.
     return buildCanceledResponse();
   }
 
