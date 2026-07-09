@@ -117,7 +117,7 @@ Priorities are tiered against our **initial compatibility run of 2026-02-19**:
 - **Tests:** `test_cors_presigned_get_object_v2`,
   `test_cors_presigned_put_object_v2`.
 
-## P2-7. Document the permission action model (Delete* actions are distinct)
+## P2-7. Document the permission action model (Delete\* actions are distinct)
 
 - **Observation:** FTH requires distinct actions for delete operations
   (`s3:DeleteBucketTagging`, `DeleteBucketCors`, `DeleteBucketLifecycle`,

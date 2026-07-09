@@ -1,33 +1,33 @@
 # S3 Compatibility Test — fth
 
-| Field | Value |
-|---|---|
+| Field  | Value                |
+| ------ | -------------------- |
 | Script | `compatibility_test` |
-| Run | `20260707_181732` |
+| Run    | `20260707_181732`    |
 
 ## Summary
 
-| Total | OK | Failed | Status |
-|---:|---:|---:|:---|
-| 598 | 372 | 226 | **FAIL** |
+| Total |  OK | Failed | Status   |
+| ----: | --: | -----: | :------- |
+|   598 | 372 |    226 | **FAIL** |
 
 ## BY CATEGORY
 
-| Category | Pass rate | OK | Failed | Total | Avg | Stddev | Min | Max |
-|---|:---|---:|---:|---:|---:|---:|---:|---:|
-| `bucket_logging` | **0%** (0/6) | 0 | 6 | 6 | 2.789s | 0.611s | 2.170s | 3.869s |
-| `bucket_policy` | **17%** (2/12) | 2 | 10 | 12 | 3.467s | 2.783s | 1.534s | 12.398s |
-| `checksum` | **91%** (10/11) | 10 | 1 | 11 | 10.765s | 7.487s | 2.684s | 27.039s |
-| `conditional_write` | **43%** (3/7) | 3 | 4 | 7 | 11.126s | 6.449s | 3.018s | 24.227s |
-| `copy` | **68%** (21/31) | 21 | 10 | 31 | 7.394s | 8.548s | 1.241s | 32.478s |
-| `delete_marker` | **100%** (3/3) | 3 | 0 | 3 | 4.448s | 1.694s | 2.290s | 6.427s |
-| `encryption` | **58%** (63/108) | 63 | 45 | 108 | 3.974s | 4.323s | 1.338s | 37.768s |
-| `lifecycle` | **80%** (12/15) | 12 | 3 | 15 | 1.874s | 0.773s | 1.289s | 4.491s |
-| `lifecycle_expiration` | **67%** (4/6) | 4 | 2 | 6 | 13.161s | 23.055s | 2.285s | 64.707s |
-| `list_objects_v2` | **85%** (40/47) | 40 | 7 | 47 | 3.083s | 1.800s | 0.684s | 12.672s |
-| `s3_core` | **65%** (211/324) | 211 | 113 | 324 | 9.588s | 46.943s | 0.697s | 543.905s |
-| `sse_s3` | **33%** (1/3) | 1 | 2 | 3 | 1.539s | 0.229s | 1.239s | 1.796s |
-| `tagging` | **8%** (2/25) | 2 | 23 | 25 | 3.685s | 1.272s | 1.679s | 7.025s |
+| Category               | Pass rate         |  OK | Failed | Total |     Avg |  Stddev |    Min |      Max |
+| ---------------------- | :---------------- | --: | -----: | ----: | ------: | ------: | -----: | -------: |
+| `bucket_logging`       | **0%** (0/6)      |   0 |      6 |     6 |  2.789s |  0.611s | 2.170s |   3.869s |
+| `bucket_policy`        | **17%** (2/12)    |   2 |     10 |    12 |  3.467s |  2.783s | 1.534s |  12.398s |
+| `checksum`             | **91%** (10/11)   |  10 |      1 |    11 | 10.765s |  7.487s | 2.684s |  27.039s |
+| `conditional_write`    | **43%** (3/7)     |   3 |      4 |     7 | 11.126s |  6.449s | 3.018s |  24.227s |
+| `copy`                 | **68%** (21/31)   |  21 |     10 |    31 |  7.394s |  8.548s | 1.241s |  32.478s |
+| `delete_marker`        | **100%** (3/3)    |   3 |      0 |     3 |  4.448s |  1.694s | 2.290s |   6.427s |
+| `encryption`           | **58%** (63/108)  |  63 |     45 |   108 |  3.974s |  4.323s | 1.338s |  37.768s |
+| `lifecycle`            | **80%** (12/15)   |  12 |      3 |    15 |  1.874s |  0.773s | 1.289s |   4.491s |
+| `lifecycle_expiration` | **67%** (4/6)     |   4 |      2 |     6 | 13.161s | 23.055s | 2.285s |  64.707s |
+| `list_objects_v2`      | **85%** (40/47)   |  40 |      7 |    47 |  3.083s |  1.800s | 0.684s |  12.672s |
+| `s3_core`              | **65%** (211/324) | 211 |    113 |   324 |  9.588s | 46.943s | 0.697s | 543.905s |
+| `sse_s3`               | **33%** (1/3)     |   1 |      2 |     3 |  1.539s |  0.229s | 1.239s |   1.796s |
+| `tagging`              | **8%** (2/25)     |   2 |     23 |    25 |  3.685s |  1.272s | 1.679s |   7.025s |
 
 ## Run details
 
@@ -3956,7 +3956,7 @@ E   botocore.errorfactory.AccessDenied: An error occurred (AccessDenied) when ca
 
 **Test description**
 
-> Policy granting GetObject on `public/*` only; alt user can UploadPartCopy from public/* keys but is denied for private/* sources.
+> Policy granting GetObject on `public/*` only; alt user can UploadPartCopy from public/_ keys but is denied for private/_ sources.
 
 **Error stack trace** — `copy` — `failed` — 8.359s
 
@@ -4599,7 +4599,7 @@ E   botocore.errorfactory.AccessDenied: An error occurred (AccessDenied) when ca
 s3tests/functional/test_s3.py:14555: in test_get_bucket_encryption_s3
     assert response_code == 'ServerSideEncryptionConfigurationNotFoundError'
 E   AssertionError: assert 'AccessDenied' == 'ServerSideEn...NotFoundError'
-E     
+E
 E     [0m[91m- ServerSideEncryptionConfigurationNotFoundError[39;49;00m[90m[39;49;00m
 E     [92m+ AccessDenied[39;49;00m[90m[39;49;00m
 ```
@@ -4619,7 +4619,7 @@ E     [92m+ AccessDenied[39;49;00m[90m[39;49;00m
 s3tests/functional/test_s3.py:14578: in test_get_bucket_encryption_kms
     assert response_code == 'ServerSideEncryptionConfigurationNotFoundError'
 E   AssertionError: assert 'AccessDenied' == 'ServerSideEn...NotFoundError'
-E     
+E
 E     [0m[91m- ServerSideEncryptionConfigurationNotFoundError[39;49;00m[90m[39;49;00m
 E     [92m+ AccessDenied[39;49;00m[90m[39;49;00m
 ```
@@ -4821,7 +4821,7 @@ E    +  where 400 = <Response [400]>.status_code
 s3tests/functional/test_s3.py:15114: in test_multipart_reupload_checksum_and_etag
     assert res1['ETag'] == res2['ETag']
 E   assert '"b2add96cc97...cdfc6b7747-3"' == ''
-E     
+E
 E     [0m[92m+ "b2add96cc9702bbf4efb0ccdfc6b7747-3"[39;49;00m[90m[39;49;00m
 ```
 
@@ -4905,7 +4905,7 @@ s3tests/functional/test_s3.py:16670: in test_bucket_logging_owner
 s3tests/functional/test_s3.py:16641: in _verify_access_denied
     assert e.response['Error']['Code'] == 'AccessDenied'
 E   AssertionError: assert 'InvalidArgument' == 'AccessDenied'
-E     
+E
 E     [0m[91m- AccessDenied[39;49;00m[90m[39;49;00m
 E     [92m+ InvalidArgument[39;49;00m[90m[39;49;00m
 ```
@@ -4940,7 +4940,7 @@ s3tests/functional/test_s3.py:16704: in test_put_bucket_logging_permissions
 s3tests/functional/test_s3.py:16641: in _verify_access_denied
     assert e.response['Error']['Code'] == 'AccessDenied'
 E   AssertionError: assert 'InvalidArgument' == 'AccessDenied'
-E     
+E
 E     [0m[91m- AccessDenied[39;49;00m[90m[39;49;00m
 E     [92m+ InvalidArgument[39;49;00m[90m[39;49;00m
 ```
@@ -6008,4 +6008,3 @@ E   botocore.errorfactory.InvalidRequest: An error occurred (InvalidRequest) whe
 ```
 
 </details>
-

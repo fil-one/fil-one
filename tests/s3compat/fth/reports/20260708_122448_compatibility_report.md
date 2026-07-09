@@ -1,33 +1,33 @@
 # S3 Compatibility Test — fth
 
-| Field | Value |
-|---|---|
+| Field  | Value                |
+| ------ | -------------------- |
 | Script | `compatibility_test` |
-| Run | `20260708_122448` |
+| Run    | `20260708_122448`    |
 
 ## Summary
 
-| Total | OK | Failed | Status |
-|---:|---:|---:|:---|
-| 598 | 415 | 183 | **FAIL** |
+| Total |  OK | Failed | Status   |
+| ----: | --: | -----: | :------- |
+|   598 | 415 |    183 | **FAIL** |
 
 ## BY CATEGORY
 
-| Category | Pass rate | OK | Failed | Total | Avg | Stddev | Min | Max |
-|---|:---|---:|---:|---:|---:|---:|---:|---:|
-| `bucket_logging` | **0%** (0/6) | 0 | 6 | 6 | 2.836s | 0.383s | 2.345s | 3.505s |
-| `bucket_policy` | **50%** (6/12) | 6 | 6 | 12 | 2.977s | 1.320s | 2.201s | 7.116s |
-| `checksum` | **91%** (10/11) | 10 | 1 | 11 | 7.966s | 5.829s | 2.843s | 22.867s |
-| `conditional_write` | **43%** (3/7) | 3 | 4 | 7 | 4.833s | 2.881s | 2.132s | 11.136s |
-| `copy` | **68%** (21/31) | 21 | 10 | 31 | 4.879s | 4.310s | 1.811s | 17.041s |
-| `delete_marker` | **100%** (3/3) | 3 | 0 | 3 | 2.598s | 0.230s | 2.326s | 2.889s |
-| `encryption` | **58%** (63/108) | 63 | 45 | 108 | 4.043s | 5.717s | 1.338s | 52.421s |
-| `lifecycle` | **93%** (14/15) | 14 | 1 | 15 | 1.930s | 0.125s | 1.772s | 2.277s |
-| `lifecycle_expiration` | **100%** (6/6) | 6 | 0 | 6 | 12.525s | 22.559s | 2.282s | 62.967s |
-| `list_objects_v2` | **85%** (40/47) | 40 | 7 | 47 | 2.693s | 0.813s | 1.270s | 7.037s |
-| `s3_core` | **70%** (228/324) | 228 | 96 | 324 | 5.411s | 14.204s | 1.229s | 142.081s |
-| `sse_s3` | **33%** (1/3) | 1 | 2 | 3 | 1.819s | 0.065s | 1.767s | 1.911s |
-| `tagging` | **80%** (20/25) | 20 | 5 | 25 | 2.850s | 0.451s | 2.157s | 4.184s |
+| Category               | Pass rate         |  OK | Failed | Total |     Avg |  Stddev |    Min |      Max |
+| ---------------------- | :---------------- | --: | -----: | ----: | ------: | ------: | -----: | -------: |
+| `bucket_logging`       | **0%** (0/6)      |   0 |      6 |     6 |  2.836s |  0.383s | 2.345s |   3.505s |
+| `bucket_policy`        | **50%** (6/12)    |   6 |      6 |    12 |  2.977s |  1.320s | 2.201s |   7.116s |
+| `checksum`             | **91%** (10/11)   |  10 |      1 |    11 |  7.966s |  5.829s | 2.843s |  22.867s |
+| `conditional_write`    | **43%** (3/7)     |   3 |      4 |     7 |  4.833s |  2.881s | 2.132s |  11.136s |
+| `copy`                 | **68%** (21/31)   |  21 |     10 |    31 |  4.879s |  4.310s | 1.811s |  17.041s |
+| `delete_marker`        | **100%** (3/3)    |   3 |      0 |     3 |  2.598s |  0.230s | 2.326s |   2.889s |
+| `encryption`           | **58%** (63/108)  |  63 |     45 |   108 |  4.043s |  5.717s | 1.338s |  52.421s |
+| `lifecycle`            | **93%** (14/15)   |  14 |      1 |    15 |  1.930s |  0.125s | 1.772s |   2.277s |
+| `lifecycle_expiration` | **100%** (6/6)    |   6 |      0 |     6 | 12.525s | 22.559s | 2.282s |  62.967s |
+| `list_objects_v2`      | **85%** (40/47)   |  40 |      7 |    47 |  2.693s |  0.813s | 1.270s |   7.037s |
+| `s3_core`              | **70%** (228/324) | 228 |     96 |   324 |  5.411s | 14.204s | 1.229s | 142.081s |
+| `sse_s3`               | **33%** (1/3)     |   1 |      2 |     3 |  1.819s |  0.065s | 1.767s |   1.911s |
+| `tagging`              | **80%** (20/25)   |  20 |      5 |    25 |  2.850s |  0.451s | 2.157s |   4.184s |
 
 ## Run details
 
@@ -1081,7 +1081,7 @@ E   botocore.exceptions.ClientError: An error occurred (InternalError) when call
 s3tests/functional/test_s3.py:3946: in test_bucket_acl_default
     assert response['Owner']['DisplayName'] == display_name
 E   AssertionError: assert 'admin' == 'Your Name'
-E     
+E
 E     [0m[91m- Your Name[39;49;00m[90m[39;49;00m
 E     [92m+ admin[39;49;00m[90m[39;49;00m
 ```
@@ -1103,7 +1103,7 @@ s3tests/functional/test_s3.py:4007: in test_bucket_acl_canned
 s3tests/functional/test_s3.py:3929: in check_grants
     assert g['Grantee'].pop('DisplayName', None) == w['DisplayName']
 E   AssertionError: assert '186' == 'Your Name'
-E     
+E
 E     [0m[91m- Your Name[39;49;00m[90m[39;49;00m
 E     [92m+ 186[39;49;00m[90m[39;49;00m
 ```
@@ -1125,7 +1125,7 @@ s3tests/functional/test_s3.py:4056: in test_bucket_acl_canned_publicreadwrite
 s3tests/functional/test_s3.py:3929: in check_grants
     assert g['Grantee'].pop('DisplayName', None) == w['DisplayName']
 E   AssertionError: assert '186' == 'Your Name'
-E     
+E
 E     [0m[91m- Your Name[39;49;00m[90m[39;49;00m
 E     [92m+ 186[39;49;00m[90m[39;49;00m
 ```
@@ -1147,7 +1147,7 @@ s3tests/functional/test_s3.py:4096: in test_bucket_acl_canned_authenticatedread
 s3tests/functional/test_s3.py:3929: in check_grants
     assert g['Grantee'].pop('DisplayName', None) == w['DisplayName']
 E   AssertionError: assert '186' == 'Your Name'
-E     
+E
 E     [0m[91m- Your Name[39;49;00m[90m[39;49;00m
 E     [92m+ 186[39;49;00m[90m[39;49;00m
 ```
@@ -1169,7 +1169,7 @@ s3tests/functional/test_s3.py:4131: in test_put_bucket_acl_grant_group_read
 s3tests/functional/test_s3.py:3929: in check_grants
     assert g['Grantee'].pop('DisplayName', None) == w['DisplayName']
 E   AssertionError: assert '186' == 'Your Name'
-E     
+E
 E     [0m[91m- Your Name[39;49;00m[90m[39;49;00m
 E     [92m+ 186[39;49;00m[90m[39;49;00m
 ```
@@ -1191,7 +1191,7 @@ s3tests/functional/test_s3.py:4165: in test_object_acl_default
 s3tests/functional/test_s3.py:3929: in check_grants
     assert g['Grantee'].pop('DisplayName', None) == w['DisplayName']
 E   AssertionError: assert '186' == 'Your Name'
-E     
+E
 E     [0m[91m- Your Name[39;49;00m[90m[39;49;00m
 E     [92m+ 186[39;49;00m[90m[39;49;00m
 ```
@@ -1213,7 +1213,7 @@ s3tests/functional/test_s3.py:4191: in test_object_acl_canned_during_create
 s3tests/functional/test_s3.py:3929: in check_grants
     assert g['Grantee'].pop('DisplayName', None) == w['DisplayName']
 E   AssertionError: assert '186' == 'Your Name'
-E     
+E
 E     [0m[91m- Your Name[39;49;00m[90m[39;49;00m
 E     [92m+ 186[39;49;00m[90m[39;49;00m
 ```
@@ -1235,7 +1235,7 @@ s3tests/functional/test_s3.py:4225: in test_object_acl_canned
 s3tests/functional/test_s3.py:3929: in check_grants
     assert g['Grantee'].pop('DisplayName', None) == w['DisplayName']
 E   AssertionError: assert '186' == 'Your Name'
-E     
+E
 E     [0m[91m- Your Name[39;49;00m[90m[39;49;00m
 E     [92m+ 186[39;49;00m[90m[39;49;00m
 ```
@@ -1257,7 +1257,7 @@ s3tests/functional/test_s3.py:4277: in test_object_acl_canned_publicreadwrite
 s3tests/functional/test_s3.py:3929: in check_grants
     assert g['Grantee'].pop('DisplayName', None) == w['DisplayName']
 E   AssertionError: assert '186' == 'Your Name'
-E     
+E
 E     [0m[91m- Your Name[39;49;00m[90m[39;49;00m
 E     [92m+ 186[39;49;00m[90m[39;49;00m
 ```
@@ -1279,7 +1279,7 @@ s3tests/functional/test_s3.py:4318: in test_object_acl_canned_authenticatedread
 s3tests/functional/test_s3.py:3929: in check_grants
     assert g['Grantee'].pop('DisplayName', None) == w['DisplayName']
 E   AssertionError: assert '186' == 'Your Name'
-E     
+E
 E     [0m[91m- Your Name[39;49;00m[90m[39;49;00m
 E     [92m+ 186[39;49;00m[90m[39;49;00m
 ```
@@ -1944,7 +1944,7 @@ E   botocore.errorfactory.AccessDenied: An error occurred (AccessDenied) when ca
 s3tests/functional/test_s3.py:6860: in test_100_continue
     assert status == '403'
 E   AssertionError: assert '100' == '403'
-E     
+E
 E     [0m[91m- 403[39;49;00m[90m[39;49;00m
 E     [92m+ 100[39;49;00m[90m[39;49;00m
 ```
@@ -2450,7 +2450,7 @@ E   botocore.exceptions.ClientError: An error occurred (SignatureDoesNotMatch) w
 s3tests/functional/test_s3.py:8252: in test_versioned_object_acl
     assert response['Owner']['DisplayName'] == display_name
 E   AssertionError: assert '186' == 'Your Name'
-E     
+E
 E     [0m[91m- Your Name[39;49;00m[90m[39;49;00m
 E     [92m+ 186[39;49;00m[90m[39;49;00m
 ```
@@ -2470,7 +2470,7 @@ E     [92m+ 186[39;49;00m[90m[39;49;00m
 s3tests/functional/test_s3.py:8321: in test_versioned_object_acl_no_version_specified
     assert response['Owner']['DisplayName'] == display_name
 E   AssertionError: assert '186' == 'Your Name'
-E     
+E
 E     [0m[91m- Your Name[39;49;00m[90m[39;49;00m
 E     [92m+ 186[39;49;00m[90m[39;49;00m
 ```
@@ -2951,7 +2951,7 @@ E   AssertionError: ClientError not raised
 
 **Test description**
 
-> Policy granting GetObject on `public/*` only; alt user can UploadPartCopy from public/* keys but is denied for private/* sources.
+> Policy granting GetObject on `public/*` only; alt user can UploadPartCopy from public/_ keys but is denied for private/_ sources.
 
 **Error stack trace** — `copy` — `failed` — 4.381s
 
@@ -3333,7 +3333,7 @@ E   botocore.errorfactory.AccessDenied: An error occurred (AccessDenied) when ca
 s3tests/functional/test_s3.py:14555: in test_get_bucket_encryption_s3
     assert response_code == 'ServerSideEncryptionConfigurationNotFoundError'
 E   AssertionError: assert '' == 'ServerSideEn...NotFoundError'
-E     
+E
 E     [0m[91m- ServerSideEncryptionConfigurationNotFoundError[39;49;00m[90m[39;49;00m
 ```
 
@@ -3352,7 +3352,7 @@ E     [0m[91m- ServerSideEncryptionConfigurationNotFoundError[39;49;00m[90m
 s3tests/functional/test_s3.py:14578: in test_get_bucket_encryption_kms
     assert response_code == 'ServerSideEncryptionConfigurationNotFoundError'
 E   AssertionError: assert '' == 'ServerSideEn...NotFoundError'
-E     
+E
 E     [0m[91m- ServerSideEncryptionConfigurationNotFoundError[39;49;00m[90m[39;49;00m
 ```
 
@@ -3553,7 +3553,7 @@ E    +  where 400 = <Response [400]>.status_code
 s3tests/functional/test_s3.py:15114: in test_multipart_reupload_checksum_and_etag
     assert res1['ETag'] == res2['ETag']
 E   assert '"b2add96cc97...cdfc6b7747-3"' == ''
-E     
+E
 E     [0m[92m+ "b2add96cc9702bbf4efb0ccdfc6b7747-3"[39;49;00m[90m[39;49;00m
 ```
 
@@ -3662,7 +3662,7 @@ s3tests/functional/test_s3.py:16704: in test_put_bucket_logging_permissions
 s3tests/functional/test_s3.py:16641: in _verify_access_denied
     assert e.response['Error']['Code'] == 'AccessDenied'
 E   AssertionError: assert 'InvalidArgument' == 'AccessDenied'
-E     
+E
 E     [0m[91m- AccessDenied[39;49;00m[90m[39;49;00m
 E     [92m+ InvalidArgument[39;49;00m[90m[39;49;00m
 ```
@@ -4796,4 +4796,3 @@ E   botocore.exceptions.ClientError: An error occurred (BucketNotEmpty) when cal
 ```
 
 </details>
-

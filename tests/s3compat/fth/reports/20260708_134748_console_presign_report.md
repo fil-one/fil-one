@@ -1,44 +1,44 @@
 # Console Presigned-URL Test
 
-| Field | Value |
-|---|---|
+| Field  | Value             |
+| ------ | ----------------- |
 | Script | `console_presign` |
-| Run | `20260708_134748` |
+| Run    | `20260708_134748` |
 
 ## Summary
 
-| Total | OK | Skipped | Failed | Status |
-|---:|---:|---:|---:|:---|
-| 24 | 20 | 1 | 3 | **FAIL** |
+| Total |  OK | Skipped | Failed | Status   |
+| ----: | --: | ------: | -----: | :------- |
+|    24 |  20 |       1 |      3 | **FAIL** |
 
 ## BY OPERATION
 
-| Operation | OK | Failed | Total | Avg | Stddev | Min | Max |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| `bucket_cors_read_pre` | 1 | 0 | 1 | — | — | — | — |
-| `execute_deleteObject` | 1 | 0 | 1 | 1.131s | 0.000s | 1.131s | 1.131s |
-| `execute_getObject` | 1 | 0 | 1 | 1.025s | 0.000s | 1.025s | 1.025s |
-| `execute_getObjectRetention` | 1 | 0 | 1 | 0.477s | 0.000s | 0.477s | 0.477s |
-| `execute_headObject` | 1 | 0 | 1 | 1.586s | 0.000s | 1.586s | 1.586s |
-| `execute_headObjectFilMeta` | 1 | 0 | 1 | 0.480s | 0.000s | 0.480s | 0.480s |
-| `execute_listObjects` | 1 | 0 | 1 | 0.491s | 0.000s | 0.491s | 0.491s |
-| `execute_putObject` | 1 | 0 | 1 | 1.364s | 0.000s | 1.364s | 1.364s |
-| `preflight_deleteObject` | 1 | 0 | 1 | 0.463s | 0.000s | 0.463s | 0.463s |
-| `preflight_putObject` | 1 | 0 | 1 | 0.473s | 0.000s | 0.473s | 0.473s |
-| `presign_deleteObject` | 1 | 0 | 1 | 0.001s | 0.000s | 0.001s | 0.001s |
-| `presign_getObject` | 1 | 0 | 1 | 0.001s | 0.000s | 0.001s | 0.001s |
-| `presign_getObjectRetention` | 1 | 0 | 1 | 0.002s | 0.000s | 0.002s | 0.002s |
-| `presign_headObject` | 1 | 0 | 1 | 0.001s | 0.000s | 0.001s | 0.001s |
-| `presign_headObjectFilMeta` | 1 | 0 | 1 | 0.000s | 0.000s | 0.000s | 0.000s |
-| `presign_listObjects` | 1 | 0 | 1 | 0.002s | 0.000s | 0.002s | 0.002s |
-| `presign_putObject` | 1 | 0 | 1 | 0.002s | 0.000s | 0.002s | 0.002s |
-| `response_cors_deleteObject` | 1 | 0 | 1 | — | — | — | — |
-| `response_cors_getObject` | 0 | 1 | 1 | — | — | — | — |
-| `response_cors_getObjectRetention` | 1 | 0 | 1 | — | — | — | — |
-| `response_cors_headObject` | 0 | 1 | 1 | — | — | — | — |
-| `response_cors_headObjectFilMeta` | 0 | 1 | 1 | — | — | — | — |
-| `response_cors_listObjects` | 1 | 0 | 1 | — | — | — | — |
-| `response_cors_putObject` | 1 | 0 | 1 | — | — | — | — |
+| Operation                          |  OK | Failed | Total |    Avg | Stddev |    Min |    Max |
+| ---------------------------------- | --: | -----: | ----: | -----: | -----: | -----: | -----: |
+| `bucket_cors_read_pre`             |   1 |      0 |     1 |      — |      — |      — |      — |
+| `execute_deleteObject`             |   1 |      0 |     1 | 1.131s | 0.000s | 1.131s | 1.131s |
+| `execute_getObject`                |   1 |      0 |     1 | 1.025s | 0.000s | 1.025s | 1.025s |
+| `execute_getObjectRetention`       |   1 |      0 |     1 | 0.477s | 0.000s | 0.477s | 0.477s |
+| `execute_headObject`               |   1 |      0 |     1 | 1.586s | 0.000s | 1.586s | 1.586s |
+| `execute_headObjectFilMeta`        |   1 |      0 |     1 | 0.480s | 0.000s | 0.480s | 0.480s |
+| `execute_listObjects`              |   1 |      0 |     1 | 0.491s | 0.000s | 0.491s | 0.491s |
+| `execute_putObject`                |   1 |      0 |     1 | 1.364s | 0.000s | 1.364s | 1.364s |
+| `preflight_deleteObject`           |   1 |      0 |     1 | 0.463s | 0.000s | 0.463s | 0.463s |
+| `preflight_putObject`              |   1 |      0 |     1 | 0.473s | 0.000s | 0.473s | 0.473s |
+| `presign_deleteObject`             |   1 |      0 |     1 | 0.001s | 0.000s | 0.001s | 0.001s |
+| `presign_getObject`                |   1 |      0 |     1 | 0.001s | 0.000s | 0.001s | 0.001s |
+| `presign_getObjectRetention`       |   1 |      0 |     1 | 0.002s | 0.000s | 0.002s | 0.002s |
+| `presign_headObject`               |   1 |      0 |     1 | 0.001s | 0.000s | 0.001s | 0.001s |
+| `presign_headObjectFilMeta`        |   1 |      0 |     1 | 0.000s | 0.000s | 0.000s | 0.000s |
+| `presign_listObjects`              |   1 |      0 |     1 | 0.002s | 0.000s | 0.002s | 0.002s |
+| `presign_putObject`                |   1 |      0 |     1 | 0.002s | 0.000s | 0.002s | 0.002s |
+| `response_cors_deleteObject`       |   1 |      0 |     1 |      — |      — |      — |      — |
+| `response_cors_getObject`          |   0 |      1 |     1 |      — |      — |      — |      — |
+| `response_cors_getObjectRetention` |   1 |      0 |     1 |      — |      — |      — |      — |
+| `response_cors_headObject`         |   0 |      1 |     1 |      — |      — |      — |      — |
+| `response_cors_headObjectFilMeta`  |   0 |      1 |     1 |      — |      — |      — |      — |
+| `response_cors_listObjects`        |   1 |      0 |     1 |      — |      — |      — |      — |
+| `response_cors_putObject`          |   1 |      0 |     1 |      — |      — |      — |      — |
 
 ## Run details
 
@@ -59,7 +59,14 @@ BUCKET CORS CONFIGURATION (before test)
 ## Skipped
 
 - ```json
-  {"ts": "2026-07-08T11:47:49.236652+00:00", "op": "bucket_cors_read_pre", "status": "skipped", "bucket": "us-ceph-bucket-1", "error_code": "AccessDenied", "error_message": "An error occurred (AccessDenied) when calling the GetBucketCors operation: Access Denied"}
+  {
+    "ts": "2026-07-08T11:47:49.236652+00:00",
+    "op": "bucket_cors_read_pre",
+    "status": "skipped",
+    "bucket": "us-ceph-bucket-1",
+    "error_code": "AccessDenied",
+    "error_message": "An error occurred (AccessDenied) when calling the GetBucketCors operation: Access Denied"
+  }
   ```
 
 ## Successes
@@ -111,10 +118,7 @@ BUCKET CORS CONFIGURATION (before test)
     "x-amz-request-id",
     "x-amz-version-id"
   ],
-  "missing_expose_headers": [
-    "content-type",
-    "last-modified"
-  ],
+  "missing_expose_headers": ["content-type", "last-modified"],
   "missing_response_meta_headers": [],
   "origin_ok": true,
   "expose_ok": false,
@@ -146,11 +150,7 @@ BUCKET CORS CONFIGURATION (before test)
     "x-amz-request-id",
     "x-amz-version-id"
   ],
-  "missing_expose_headers": [
-    "content-type",
-    "last-modified",
-    "x-fil-cid"
-  ],
+  "missing_expose_headers": ["content-type", "last-modified", "x-fil-cid"],
   "missing_response_meta_headers": [],
   "origin_ok": true,
   "expose_ok": false,
@@ -182,10 +182,7 @@ BUCKET CORS CONFIGURATION (before test)
     "x-amz-request-id",
     "x-amz-version-id"
   ],
-  "missing_expose_headers": [
-    "content-type",
-    "last-modified"
-  ],
+  "missing_expose_headers": ["content-type", "last-modified"],
   "missing_response_meta_headers": [],
   "origin_ok": true,
   "expose_ok": false,
@@ -194,7 +191,6 @@ BUCKET CORS CONFIGURATION (before test)
 ```
 
 </details>
-
 
 ## Log files
 
