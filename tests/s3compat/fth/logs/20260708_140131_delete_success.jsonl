@@ -1,0 +1,2 @@
+{"ts": "2026-07-08T12:01:31.829828+00:00", "op": "delete_object", "status": "ok", "key": "gov-data/README.md", "version_id": null, "bucket": "us-ceph-bucket-1", "elapsed_s": 0.627, "delete_marker": null, "resp_version_id": null}
+{"ts": "2026-07-08T12:01:32.156522+00:00", "op": "delete_object", "status": "ok", "key": "gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip", "version_id": null, "bucket": "us-ceph-bucket-1", "elapsed_s": 0.326, "delete_marker": null, "resp_version_id": null}

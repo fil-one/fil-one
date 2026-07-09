@@ -1,0 +1,2 @@
+{"ts": "2026-07-08T12:02:11.737868+00:00", "op": "upload", "status": "ok", "key": "gov-data/README.md", "size": 5555, "elapsed_s": 2.048, "target_bucket": "us-ceph-bucket-1", "etag": "1256826d336c6689c73c3e1a52e34b19", "version_id": null}
+{"ts": "2026-07-08T12:02:15.262656+00:00", "op": "upload", "status": "ok", "key": "gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip", "size": 740853, "elapsed_s": 3.523, "target_bucket": "us-ceph-bucket-1", "etag": "e23c5682f81e05aa47b7885ef44fc7b1", "version_id": null}
