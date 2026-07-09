@@ -191,7 +191,8 @@ for (const region of REGIONS) {
       await expect(page.locator('#upload-retry-button')).toBeVisible();
       await expect(page).toHaveURL(
         (url) =>
-          url.pathname === `/buckets/${bucketName}/upload` && url.searchParams.get('region') === region,
+          url.pathname === `/buckets/${bucketName}/upload` &&
+          url.searchParams.get('region') === region,
       );
     });
   });
