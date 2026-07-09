@@ -94,13 +94,17 @@ for (const region of REGIONS) {
       await submitUpload(page, bucketName, objectName);
 
       // On success the upload page navigates back to the bucket detail page.
-      await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}`);
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === `/buckets/${bucketName}` && url.searchParams.get('region') === region,
+      );
 
       // The object row is keyed by its object key via data-object-key.
       await page.locator(`[data-testid="object-row"][data-object-key="${objectName}"]`).click();
       await expect(page).toHaveURL(
         (url) =>
           url.pathname === `/buckets/${bucketName}/objects` &&
+          url.searchParams.get('region') === region &&
           url.searchParams.get('key') === objectName,
       );
     });
@@ -125,12 +129,16 @@ for (const region of REGIONS) {
 
       await submitUpload(page, bucketName, objectName);
 
-      await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}`);
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === `/buckets/${bucketName}` && url.searchParams.get('region') === region,
+      );
 
       await page.locator(`[data-testid="object-row"][data-object-key="${objectName}"]`).click();
       await expect(page).toHaveURL(
         (url) =>
           url.pathname === `/buckets/${bucketName}/objects` &&
+          url.searchParams.get('region') === region &&
           url.searchParams.get('key') === objectName,
       );
     });
@@ -181,7 +189,10 @@ for (const region of REGIONS) {
       // only renders once a failure has been processed, so it is the stable
       // signal that the upload was rejected.
       await expect(page.locator('#upload-retry-button')).toBeVisible();
-      await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}/upload`);
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === `/buckets/${bucketName}/upload` && url.searchParams.get('region') === region,
+      );
     });
   });
 }
