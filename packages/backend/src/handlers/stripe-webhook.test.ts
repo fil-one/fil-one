@@ -66,6 +66,8 @@ import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 // ---------------------------------------------------------------------------
 
 const TABLE_NAME = 'BillingTable';
+// Fence applied to all billing-record updates (FIL-112 account deletion).
+const DELETION_FENCE = 'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)';
 const MOCK_USER_ID = 'test-user-uuid';
 const MOCK_CUSTOMER_ID = 'cus_test_123';
 const MOCK_SUBSCRIPTION_ID = 'sub_test_456';
@@ -371,6 +373,7 @@ describe('stripe-webhook handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: DELETION_FENCE,
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -574,6 +577,7 @@ describe('stripe-webhook handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: DELETION_FENCE,
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -657,7 +661,7 @@ describe('stripe-webhook handler', () => {
           ':expYear': { N: String(MOCK_PM_EXP_YEAR) },
           ':now': { S: expect.any(String) },
         },
-        ConditionExpression: 'attribute_exists(pk)',
+        ConditionExpression: DELETION_FENCE,
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -792,6 +796,7 @@ describe('stripe-webhook handler', () => {
           ':now': { S: expect.any(String) },
           ':grace': { S: expect.any(String) },
         },
+        ConditionExpression: DELETION_FENCE,
       });
 
       const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();
@@ -1048,6 +1053,7 @@ describe('stripe-webhook handler', () => {
           ':now': { S: expect.any(String) },
         },
         ReturnValues: 'ALL_OLD',
+        ConditionExpression: DELETION_FENCE,
       });
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
@@ -1153,6 +1159,7 @@ describe('stripe-webhook handler', () => {
           ':failedAt': { S: expect.any(String) },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: DELETION_FENCE,
       });
 
       // Must NOT set gracePeriodEndsAt — Stripe Smart Retries handle the retry window
@@ -1603,6 +1610,87 @@ describe('stripe-webhook handler', () => {
       await handler(buildWebhookEvent('{}'));
 
       expect(invoiceFinalizationFailedEmissions()).toHaveLength(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Deletion fence (FIL-112): events for purged or mid-deletion orgs are
+  // acknowledged without resurrecting billing state or touching tenants.
+  // -----------------------------------------------------------------------
+  describe('deletion fence', () => {
+    function fenceRejection() {
+      const err = new Error('The conditional request failed');
+      (err as { name: string }).name = 'ConditionalCheckFailedException';
+      ddbMock.on(UpdateItemCommand).rejects(err);
+    }
+
+    it('subscription.deleted for a fenced record: 200, no upsert side effects, no write-lock sync', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      fenceRejection();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(dunningEmissions()).toHaveLength(0);
+      // Idempotency claim is kept — no DeleteItem release on the fenced path
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+    });
+
+    it('payment_succeeded for a fenced record: 200 and does NOT re-activate the tenant', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+      fenceRejection();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    });
+
+    it('subscription.updated for a purged record: 200, no zombie record written', async () => {
+      setupStripeEvent('customer.subscription.updated', mockSubscription());
+      fenceRejection();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('payment_failed for a fenced record: 200, no dunning metric', async () => {
+      setupStripeEvent('invoice.payment_failed', mockInvoice());
+      setupCustomerRetrieve();
+      fenceRejection();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(dunningEmissions()).toHaveLength(0);
+    });
+
+    it('customer.deleted for a fenced record: 200, no dunning metric', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      fenceRejection();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(dunningEmissions()).toHaveLength(0);
+    });
+
+    it('non-conditional DynamoDB errors still fail the webhook (500, retryable)', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      ddbMock.on(UpdateItemCommand).rejects(new Error('throttled'));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
     });
   });
 });

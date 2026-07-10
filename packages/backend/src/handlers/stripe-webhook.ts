@@ -31,6 +31,39 @@ import {
 const dynamo = getDynamoClient();
 
 /**
+ * Fence for FIL-112 account deletion: billing-record updates only apply while
+ * the record exists and no deletion has been requested. Without this, our own
+ * teardown-driven subscriptions.cancel would echo back as webhook events that
+ * upsert zombie records or re-activate a disabled tenant.
+ */
+const DELETION_FENCE = 'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)';
+
+/**
+ * Sends a billing-record UpdateItem guarded by {@link DELETION_FENCE}.
+ * Returns null when the fence rejects the write (record purged or org
+ * mid-deletion) — callers must then skip follow-on tenant status syncs.
+ */
+async function sendFencedBillingUpdate(
+  input: Omit<ConstructorParameters<typeof UpdateItemCommand>[0], 'ConditionExpression'>,
+  context: Record<string, unknown>,
+): Promise<import('@aws-sdk/client-dynamodb').UpdateItemCommandOutput | null> {
+  try {
+    return await dynamo.send(
+      new UpdateItemCommand({ ...input, ConditionExpression: DELETION_FENCE }),
+    );
+  } catch (err) {
+    if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+      console.warn(
+        '[stripe-webhook] Billing record missing or org mid-deletion; skipping update',
+        context,
+      );
+      return null;
+    }
+    throw err;
+  }
+}
+
+/**
  * Stripe webhook handler — NO auth middleware.
  * Verifies Stripe signature, processes billing events, and writes to billing table.
  */
@@ -209,8 +242,8 @@ async function updatePaymentMethod(
   userId: string,
   pm: Stripe.PaymentMethod,
 ): Promise<void> {
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendFencedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -226,8 +259,8 @@ async function updatePaymentMethod(
         ':expYear': { N: String(pm.card?.exp_year ?? 0) },
         ':now': { S: new Date().toISOString() },
       },
-      ConditionExpression: 'attribute_exists(pk)',
-    }),
+    },
+    { userId, event: 'customer.updated' },
   );
 }
 
@@ -261,8 +294,8 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
   }
 
   const now = new Date();
-  await dynamo.send(
-    new UpdateItemCommand({
+  const applied = await sendFencedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -274,8 +307,10 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
         ':status': { S: SubscriptionStatus.Canceled },
         ':now': { S: now.toISOString() },
       },
-    }),
+    },
+    { userId, event: 'customer.deleted' },
   );
+  if (!applied) return;
 
   emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
@@ -325,8 +360,8 @@ async function updateBillingRecord(
   subscription: Stripe.Subscription,
   mappedStatus: SubscriptionStatus,
 ): Promise<void> {
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendFencedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -345,7 +380,8 @@ async function updateBillingRecord(
         },
         ':now': { S: new Date().toISOString() },
       },
-    }),
+    },
+    { userId, subscriptionId: subscription.id, event: 'subscription.created/updated' },
   );
 }
 
@@ -366,8 +402,8 @@ async function handleSubscriptionDeleted(
   const now = new Date();
   const gracePeriodEndsAt = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
 
-  await dynamo.send(
-    new UpdateItemCommand({
+  const applied = await sendFencedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -380,8 +416,10 @@ async function handleSubscriptionDeleted(
         ':now': { S: now.toISOString() },
         ':grace': { S: gracePeriodEndsAt },
       },
-    }),
+    },
+    { userId, subscriptionId: subscription.id, event: 'subscription.deleted' },
   );
+  if (!applied) return;
 
   const latestInvoice = subscription.latest_invoice;
   const attemptCount =
@@ -423,8 +461,10 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   const userId = customer.metadata?.userId;
   if (!userId) return;
 
-  const updateResult = await dynamo.send(
-    new UpdateItemCommand({
+  // The fence is load-bearing here: after self-serve deletion, the final
+  // invoice's payment_succeeded must not re-activate a disabled tenant.
+  const updateResult = await sendFencedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -437,8 +477,10 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
         ':now': { S: new Date().toISOString() },
       },
       ReturnValues: 'ALL_OLD',
-    }),
+    },
+    { userId, event: 'invoice.payment_succeeded' },
   );
+  if (!updateResult) return;
 
   const priorStatus = updateResult.Attributes?.subscriptionStatus?.S;
   if (
@@ -484,8 +526,8 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
   // continue attempting payment. Grace period only begins when Stripe cancels
   // the subscription after all retries are exhausted.
   const now = new Date().toISOString();
-  await dynamo.send(
-    new UpdateItemCommand({
+  const applied = await sendFencedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -498,8 +540,10 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
         ':failedAt': { S: now },
         ':now': { S: now },
       },
-    }),
+    },
+    { userId, event: 'invoice.payment_failed' },
   );
+  if (!applied) return;
 
   const attemptCount = invoice.attempt_count ?? 0;
   emitDunningEscalation({

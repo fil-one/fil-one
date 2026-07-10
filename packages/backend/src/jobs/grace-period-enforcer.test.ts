@@ -105,6 +105,15 @@ describe('grace-period-enforcer', () => {
     expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
   });
 
+  it('scan excludes records fenced by account deletion (deletionRequestedAt)', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [] });
+
+    await handler();
+
+    const scanInput = ddbMock.commandCalls(ScanCommand)[0].args[0].input;
+    expect(scanInput.FilterExpression).toContain('attribute_not_exists(deletionRequestedAt)');
+  });
+
   // -----------------------------------------------------------------------
   // Expired grace_period → canceled + disabled
   // -----------------------------------------------------------------------
