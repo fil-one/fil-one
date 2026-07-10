@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fetch</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #1f2328;
+        --muted: #57606a;
+        --bg: #ffffff;
+        --bg-muted: #f6f8fa;
+        --border: #d0d7de;
+        --accent: #0969da;
+        --ok: #1a7f37;
+        --err: #cf222e;
+        --warn: #9a6700;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #e6edf3;
+          --muted: #8b949e;
+          --bg: #0d1117;
+          --bg-muted: #161b22;
+          --border: #30363d;
+          --accent: #58a6ff;
+          --ok: #3fb950;
+          --err: #f85149;
+          --warn: #d29922;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+        font-size: 14px;
+        line-height: 1.55;
+        color: var(--fg);
+        background: var(--bg);
+        margin: 0;
+        padding: 24px;
+      }
+      .container {
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.25;
+        margin-top: 1.6em;
+      }
+      h1 {
+        font-size: 1.9rem;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.3em;
+        margin-top: 0;
+      }
+      h2 {
+        font-size: 1.35rem;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.25em;
+      }
+      h3 {
+        font-size: 1.1rem;
+      }
+      p,
+      li {
+        color: var(--fg);
+      }
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+      }
+      code {
+        background: var(--bg-muted);
+        padding: 2px 5px;
+        border-radius: 3px;
+        font-size: 90%;
+      }
+      pre {
+        background: var(--bg-muted);
+        padding: 12px 14px;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-size: 12.5px;
+        line-height: 1.45;
+      }
+      pre code {
+        background: transparent;
+        padding: 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1em 0;
+        font-size: 13.5px;
+      }
+      th,
+      td {
+        border: 1px solid var(--border);
+        padding: 6px 10px;
+        text-align: left;
+        vertical-align: middle;
+      }
+      th {
+        background: var(--bg-muted);
+        font-weight: 600;
+      }
+      tbody tr:nth-child(even) {
+        background: var(--bg-muted);
+      }
+      details {
+        margin: 0.5em 0;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0 12px;
+        background: var(--bg-muted);
+      }
+      details > summary {
+        cursor: pointer;
+        padding: 8px 0;
+        font-weight: 500;
+        list-style: none;
+      }
+      details > summary::-webkit-details-marker {
+        display: none;
+      }
+      details > summary::before {
+        content: '▸ ';
+        color: var(--muted);
+      }
+      details[open] > summary::before {
+        content: '▾ ';
+      }
+      details[open] {
+        background: var(--bg);
+      }
+      hr {
+        border: 0;
+        border-top: 1px solid var(--border);
+        margin: 2em 0;
+      }
+      a {
+        color: var(--accent);
+      }
+      .report-banner {
+        border: 2px solid var(--warn);
+        background: color-mix(in srgb, var(--warn) 12%, var(--bg));
+        color: var(--fg);
+        border-radius: 6px;
+        padding: 12px 18px;
+        margin: 1.2em 0;
+        font-size: 1rem;
+      }
+      .report-banner > *:first-child {
+        margin-top: 0;
+      }
+      .report-banner > *:last-child {
+        margin-bottom: 0;
+      }
+      /* Pygments — light (default) */
+      pre {
+        line-height: 125%;
+      }
+      td.linenos .normal {
+        color: inherit;
+        background-color: transparent;
+        padding-left: 5px;
+        padding-right: 5px;
+      }
+      span.linenos {
+        color: inherit;
+        background-color: transparent;
+        padding-left: 5px;
+        padding-right: 5px;
+      }
+      td.linenos .special {
+        color: #000000;
+        background-color: #ffffc0;
+        padding-left: 5px;
+        padding-right: 5px;
+      }
+      span.linenos.special {
+        color: #000000;
+        background-color: #ffffc0;
+        padding-left: 5px;
+        padding-right: 5px;
+      }
+      .highlight .hll {
+        background-color: #ffffcc;
+      }
+      .highlight .c {
+        color: #3d7b7b;
+        font-style: italic;
+      } /* Comment */
+      .highlight .err {
+        border: 1px solid #f00;
+      } /* Error */
+      .highlight .k {
+        color: #008000;
+        font-weight: bold;
+      } /* Keyword */
+      .highlight .o {
+        color: #666;
+      } /* Operator */
+      .highlight .ch {
+        color: #3d7b7b;
+        font-style: italic;
+      } /* Comment.Hashbang */
+      .highlight .cm {
+        color: #3d7b7b;
+        font-style: italic;
+      } /* Comment.Multiline */
+      .highlight .cp {
+        color: #9c6500;
+      } /* Comment.Preproc */
+      .highlight .cpf {
+        color: #3d7b7b;
+        font-style: italic;
+      } /* Comment.PreprocFile */
+      .highlight .c1 {
+        color: #3d7b7b;
+        font-style: italic;
+      } /* Comment.Single */
+      .highlight .cs {
+        color: #3d7b7b;
+        font-style: italic;
+      } /* Comment.Special */
+      .highlight .gd {
+        color: #a00000;
+      } /* Generic.Deleted */
+      .highlight .ge {
+        font-style: italic;
+      } /* Generic.Emph */
+      .highlight .ges {
+        font-weight: bold;
+        font-style: italic;
+      } /* Generic.EmphStrong */
+      .highlight .gr {
+        color: #e40000;
+      } /* Generic.Error */
+      .highlight .gh {
+        color: #000080;
+        font-weight: bold;
+      } /* Generic.Heading */
+      .highlight .gi {
+        color: #008400;
+      } /* Generic.Inserted */
+      .highlight .go {
+        color: #717171;
+      } /* Generic.Output */
+      .highlight .gp {
+        color: #000080;
+        font-weight: bold;
+      } /* Generic.Prompt */
+      .highlight .gs {
+        font-weight: bold;
+      } /* Generic.Strong */
+      .highlight .gu {
+        color: #800080;
+        font-weight: bold;
+      } /* Generic.Subheading */
+      .highlight .gt {
+        color: #04d;
+      } /* Generic.Traceback */
+      .highlight .kc {
+        color: #008000;
+        font-weight: bold;
+      } /* Keyword.Constant */
+      .highlight .kd {
+        color: #008000;
+        font-weight: bold;
+      } /* Keyword.Declaration */
+      .highlight .kn {
+        color: #008000;
+        font-weight: bold;
+      } /* Keyword.Namespace */
+      .highlight .kp {
+        color: #008000;
+      } /* Keyword.Pseudo */
+      .highlight .kr {
+        color: #008000;
+        font-weight: bold;
+      } /* Keyword.Reserved */
+      .highlight .kt {
+        color: #b00040;
+      } /* Keyword.Type */
+      .highlight .m {
+        color: #666;
+      } /* Literal.Number */
+      .highlight .s {
+        color: #ba2121;
+      } /* Literal.String */
+      .highlight .na {
+        color: #687822;
+      } /* Name.Attribute */
+      .highlight .nb {
+        color: #008000;
+      } /* Name.Builtin */
+      .highlight .nc {
+        color: #00f;
+        font-weight: bold;
+      } /* Name.Class */
+      .highlight .no {
+        color: #800;
+      } /* Name.Constant */
+      .highlight .nd {
+        color: #a2f;
+      } /* Name.Decorator */
+      .highlight .ni {
+        color: #717171;
+        font-weight: bold;
+      } /* Name.Entity */
+      .highlight .ne {
+        color: #cb3f38;
+        font-weight: bold;
+      } /* Name.Exception */
+      .highlight .nf {
+        color: #00f;
+      } /* Name.Function */
+      .highlight .nl {
+        color: #767600;
+      } /* Name.Label */
+      .highlight .nn {
+        color: #00f;
+        font-weight: bold;
+      } /* Name.Namespace */
+      .highlight .nt {
+        color: #008000;
+        font-weight: bold;
+      } /* Name.Tag */
+      .highlight .nv {
+        color: #19177c;
+      } /* Name.Variable */
+      .highlight .ow {
+        color: #a2f;
+        font-weight: bold;
+      } /* Operator.Word */
+      .highlight .w {
+        color: #bbb;
+      } /* Text.Whitespace */
+      .highlight .mb {
+        color: #666;
+      } /* Literal.Number.Bin */
+      .highlight .mf {
+        color: #666;
+      } /* Literal.Number.Float */
+      .highlight .mh {
+        color: #666;
+      } /* Literal.Number.Hex */
+      .highlight .mi {
+        color: #666;
+      } /* Literal.Number.Integer */
+      .highlight .mo {
+        color: #666;
+      } /* Literal.Number.Oct */
+      .highlight .sa {
+        color: #ba2121;
+      } /* Literal.String.Affix */
+      .highlight .sb {
+        color: #ba2121;
+      } /* Literal.String.Backtick */
+      .highlight .sc {
+        color: #ba2121;
+      } /* Literal.String.Char */
+      .highlight .dl {
+        color: #ba2121;
+      } /* Literal.String.Delimiter */
+      .highlight .sd {
+        color: #ba2121;
+        font-style: italic;
+      } /* Literal.String.Doc */
+      .highlight .s2 {
+        color: #ba2121;
+      } /* Literal.String.Double */
+      .highlight .se {
+        color: #aa5d1f;
+        font-weight: bold;
+      } /* Literal.String.Escape */
+      .highlight .sh {
+        color: #ba2121;
+      } /* Literal.String.Heredoc */
+      .highlight .si {
+        color: #a45a77;
+        font-weight: bold;
+      } /* Literal.String.Interpol */
+      .highlight .sx {
+        color: #008000;
+      } /* Literal.String.Other */
+      .highlight .sr {
+        color: #a45a77;
+      } /* Literal.String.Regex */
+      .highlight .s1 {
+        color: #ba2121;
+      } /* Literal.String.Single */
+      .highlight .ss {
+        color: #19177c;
+      } /* Literal.String.Symbol */
+      .highlight .bp {
+        color: #008000;
+      } /* Name.Builtin.Pseudo */
+      .highlight .fm {
+        color: #00f;
+      } /* Name.Function.Magic */
+      .highlight .vc {
+        color: #19177c;
+      } /* Name.Variable.Class */
+      .highlight .vg {
+        color: #19177c;
+      } /* Name.Variable.Global */
+      .highlight .vi {
+        color: #19177c;
+      } /* Name.Variable.Instance */
+      .highlight .vm {
+        color: #19177c;
+      } /* Name.Variable.Magic */
+      .highlight .il {
+        color: #666;
+      } /* Literal.Number.Integer.Long */
+      @media (prefers-color-scheme: dark) {
+        pre {
+          line-height: 125%;
+        }
+        td.linenos .normal {
+          color: #6e7681;
+          background-color: #0d1117;
+          padding-left: 5px;
+          padding-right: 5px;
+        }
+        span.linenos {
+          color: #6e7681;
+          background-color: #0d1117;
+          padding-left: 5px;
+          padding-right: 5px;
+        }
+        td.linenos .special {
+          color: #e6edf3;
+          background-color: #6e7681;
+          padding-left: 5px;
+          padding-right: 5px;
+        }
+        span.linenos.special {
+          color: #e6edf3;
+          background-color: #6e7681;
+          padding-left: 5px;
+          padding-right: 5px;
+        }
+        .highlight .hll {
+          background-color: #6e7681;
+        }
+        .highlight .c {
+          color: #8b949e;
+          font-style: italic;
+        } /* Comment */
+        .highlight .err {
+          color: #f85149;
+        } /* Error */
+        .highlight .esc {
+          color: #e6edf3;
+        } /* Escape */
+        .highlight .g {
+          color: #e6edf3;
+        } /* Generic */
+        .highlight .k {
+          color: #ff7b72;
+        } /* Keyword */
+        .highlight .l {
+          color: #a5d6ff;
+        } /* Literal */
+        .highlight .n {
+          color: #e6edf3;
+        } /* Name */
+        .highlight .o {
+          color: #ff7b72;
+          font-weight: bold;
+        } /* Operator */
+        .highlight .x {
+          color: #e6edf3;
+        } /* Other */
+        .highlight .p {
+          color: #e6edf3;
+        } /* Punctuation */
+        .highlight .ch {
+          color: #8b949e;
+          font-style: italic;
+        } /* Comment.Hashbang */
+        .highlight .cm {
+          color: #8b949e;
+          font-style: italic;
+        } /* Comment.Multiline */
+        .highlight .cp {
+          color: #8b949e;
+          font-weight: bold;
+          font-style: italic;
+        } /* Comment.Preproc */
+        .highlight .cpf {
+          color: #8b949e;
+          font-style: italic;
+        } /* Comment.PreprocFile */
+        .highlight .c1 {
+          color: #8b949e;
+          font-style: italic;
+        } /* Comment.Single */
+        .highlight .cs {
+          color: #8b949e;
+          font-weight: bold;
+          font-style: italic;
+        } /* Comment.Special */
+        .highlight .gd {
+          color: #ffa198;
+          background-color: #490202;
+        } /* Generic.Deleted */
+        .highlight .ge {
+          color: #e6edf3;
+          font-style: italic;
+        } /* Generic.Emph */
+        .highlight .ges {
+          color: #e6edf3;
+          font-weight: bold;
+          font-style: italic;
+        } /* Generic.EmphStrong */
+        .highlight .gr {
+          color: #ffa198;
+        } /* Generic.Error */
+        .highlight .gh {
+          color: #79c0ff;
+          font-weight: bold;
+        } /* Generic.Heading */
+        .highlight .gi {
+          color: #56d364;
+          background-color: #0f5323;
+        } /* Generic.Inserted */
+        .highlight .go {
+          color: #8b949e;
+        } /* Generic.Output */
+        .highlight .gp {
+          color: #8b949e;
+        } /* Generic.Prompt */
+        .highlight .gs {
+          color: #e6edf3;
+          font-weight: bold;
+        } /* Generic.Strong */
+        .highlight .gu {
+          color: #79c0ff;
+        } /* Generic.Subheading */
+        .highlight .gt {
+          color: #ff7b72;
+        } /* Generic.Traceback */
+        .highlight .g-Underline {
+          color: #e6edf3;
+          text-decoration: underline;
+        } /* Generic.Underline */
+        .highlight .kc {
+          color: #79c0ff;
+        } /* Keyword.Constant */
+        .highlight .kd {
+          color: #ff7b72;
+        } /* Keyword.Declaration */
+        .highlight .kn {
+          color: #ff7b72;
+        } /* Keyword.Namespace */
+        .highlight .kp {
+          color: #79c0ff;
+        } /* Keyword.Pseudo */
+        .highlight .kr {
+          color: #ff7b72;
+        } /* Keyword.Reserved */
+        .highlight .kt {
+          color: #ff7b72;
+        } /* Keyword.Type */
+        .highlight .ld {
+          color: #79c0ff;
+        } /* Literal.Date */
+        .highlight .m {
+          color: #a5d6ff;
+        } /* Literal.Number */
+        .highlight .s {
+          color: #a5d6ff;
+        } /* Literal.String */
+        .highlight .na {
+          color: #e6edf3;
+        } /* Name.Attribute */
+        .highlight .nb {
+          color: #e6edf3;
+        } /* Name.Builtin */
+        .highlight .nc {
+          color: #f0883e;
+          font-weight: bold;
+        } /* Name.Class */
+        .highlight .no {
+          color: #79c0ff;
+          font-weight: bold;
+        } /* Name.Constant */
+        .highlight .nd {
+          color: #d2a8ff;
+          font-weight: bold;
+        } /* Name.Decorator */
+        .highlight .ni {
+          color: #ffa657;
+        } /* Name.Entity */
+        .highlight .ne {
+          color: #f0883e;
+          font-weight: bold;
+        } /* Name.Exception */
+        .highlight .nf {
+          color: #d2a8ff;
+          font-weight: bold;
+        } /* Name.Function */
+        .highlight .nl {
+          color: #79c0ff;
+          font-weight: bold;
+        } /* Name.Label */
+        .highlight .nn {
+          color: #ff7b72;
+        } /* Name.Namespace */
+        .highlight .nx {
+          color: #e6edf3;
+        } /* Name.Other */
+        .highlight .py {
+          color: #79c0ff;
+        } /* Name.Property */
+        .highlight .nt {
+          color: #7ee787;
+        } /* Name.Tag */
+        .highlight .nv {
+          color: #79c0ff;
+        } /* Name.Variable */
+        .highlight .ow {
+          color: #ff7b72;
+          font-weight: bold;
+        } /* Operator.Word */
+        .highlight .pm {
+          color: #e6edf3;
+        } /* Punctuation.Marker */
+        .highlight .w {
+          color: #6e7681;
+        } /* Text.Whitespace */
+        .highlight .mb {
+          color: #a5d6ff;
+        } /* Literal.Number.Bin */
+        .highlight .mf {
+          color: #a5d6ff;
+        } /* Literal.Number.Float */
+        .highlight .mh {
+          color: #a5d6ff;
+        } /* Literal.Number.Hex */
+        .highlight .mi {
+          color: #a5d6ff;
+        } /* Literal.Number.Integer */
+        .highlight .mo {
+          color: #a5d6ff;
+        } /* Literal.Number.Oct */
+        .highlight .sa {
+          color: #79c0ff;
+        } /* Literal.String.Affix */
+        .highlight .sb {
+          color: #a5d6ff;
+        } /* Literal.String.Backtick */
+        .highlight .sc {
+          color: #a5d6ff;
+        } /* Literal.String.Char */
+        .highlight .dl {
+          color: #79c0ff;
+        } /* Literal.String.Delimiter */
+        .highlight .sd {
+          color: #a5d6ff;
+        } /* Literal.String.Doc */
+        .highlight .s2 {
+          color: #a5d6ff;
+        } /* Literal.String.Double */
+        .highlight .se {
+          color: #79c0ff;
+        } /* Literal.String.Escape */
+        .highlight .sh {
+          color: #79c0ff;
+        } /* Literal.String.Heredoc */
+        .highlight .si {
+          color: #a5d6ff;
+        } /* Literal.String.Interpol */
+        .highlight .sx {
+          color: #a5d6ff;
+        } /* Literal.String.Other */
+        .highlight .sr {
+          color: #79c0ff;
+        } /* Literal.String.Regex */
+        .highlight .s1 {
+          color: #a5d6ff;
+        } /* Literal.String.Single */
+        .highlight .ss {
+          color: #a5d6ff;
+        } /* Literal.String.Symbol */
+        .highlight .bp {
+          color: #e6edf3;
+        } /* Name.Builtin.Pseudo */
+        .highlight .fm {
+          color: #d2a8ff;
+          font-weight: bold;
+        } /* Name.Function.Magic */
+        .highlight .vc {
+          color: #79c0ff;
+        } /* Name.Variable.Class */
+        .highlight .vg {
+          color: #79c0ff;
+        } /* Name.Variable.Global */
+        .highlight .vi {
+          color: #79c0ff;
+        } /* Name.Variable.Instance */
+        .highlight .vm {
+          color: #79c0ff;
+        } /* Name.Variable.Magic */
+        .highlight .il {
+          color: #a5d6ff;
+        } /* Literal.Number.Integer.Long */
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1 id="fetch">Fetch</h1>
+      <table>
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Script</td>
+            <td><code>fetch</code></td>
+          </tr>
+          <tr>
+            <td>Run</td>
+            <td><code>20260708_141414</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <h2 id="summary">Summary</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Total</th>
+            <th>OK</th>
+            <th>Failed</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>6</td>
+            <td>6</td>
+            <td>0</td>
+            <td><strong>PASS</strong></td>
+          </tr>
+        </tbody>
+      </table>
+      <h2 id="by-operation">BY OPERATION</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Operation</th>
+            <th>OK</th>
+            <th>Failed</th>
+            <th>Total</th>
+            <th>Avg</th>
+            <th>Stddev</th>
+            <th>Min</th>
+            <th>Max</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>get_object_preview</code></td>
+            <td>2</td>
+            <td>0</td>
+            <td>2</td>
+            <td>0.211s</td>
+            <td>0.020s</td>
+            <td>0.191s</td>
+            <td>0.230s</td>
+          </tr>
+          <tr>
+            <td><code>head_object</code></td>
+            <td>2</td>
+            <td>0</td>
+            <td>2</td>
+            <td>0.370s</td>
+            <td>0.201s</td>
+            <td>0.169s</td>
+            <td>0.571s</td>
+          </tr>
+          <tr>
+            <td><code>list_versions</code></td>
+            <td>2</td>
+            <td>0</td>
+            <td>2</td>
+            <td>0.164s</td>
+            <td>0.001s</td>
+            <td>0.163s</td>
+            <td>0.164s</td>
+          </tr>
+        </tbody>
+      </table>
+      <h2 id="successes">Successes</h2>
+      <div class="highlight">
+        <pre><span></span><code><span class="p">{</span><span class="nt">&quot;ts&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-08T12:14:15.299614+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;op&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;head_object&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gov-data/README.md&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;elapsed_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.571</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content_length&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5555</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;application/octet-stream&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;last_modified&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-08 12:02:11+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;etag&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1256826d336c6689c73c3e1a52e34b19&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;version_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{}}</span>
+<span class="p">{</span><span class="nt">&quot;ts&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-08T12:14:15.491199+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;op&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;get_object_preview&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gov-data/README.md&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;elapsed_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.191</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content_length&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1024</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;application/octet-stream&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;etag&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1256826d336c6689c73c3e1a52e34b19&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;version_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;preview_bytes_read&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1024</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;preview_hex_sample&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;3c696d67207372633d2268747470733a2f2f646174612e736f757263652e636f6f702f686172766172642d6c696c2f676f762d646174612f646f63732f4c494c&quot;</span><span class="p">}</span>
+<span class="p">{</span><span class="nt">&quot;ts&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-08T12:14:15.654298+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;op&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;list_versions&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gov-data/README.md&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;version_count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;versions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">&quot;version_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;null&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;last_modified&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-08 12:02:11+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;etag&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1256826d336c6689c73c3e1a52e34b19&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;size&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5555</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;is_latest&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}],</span><span class="w"> </span><span class="nt">&quot;elapsed_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.163</span><span class="p">}</span>
+<span class="p">{</span><span class="nt">&quot;ts&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-08T12:14:15.823711+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;op&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;head_object&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;elapsed_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.169</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content_length&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">740853</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;application/octet-stream&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;last_modified&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-08 12:02:14+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;etag&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;e23c5682f81e05aa47b7885ef44fc7b1&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;version_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{}}</span>
+<span class="p">{</span><span class="nt">&quot;ts&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-08T12:14:16.054814+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;op&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;get_object_preview&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;elapsed_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.23</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content_length&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1024</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;application/octet-stream&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;etag&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;e23c5682f81e05aa47b7885ef44fc7b1&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;version_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;preview_bytes_read&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1024</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;preview_hex_sample&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;504b03041400000008008066915990fa58cb39000000370000000900000062616769742e747874734a4cf72cd10d4b2d2acecccfb35230d0b334e70a494cd775&quot;</span><span class="p">}</span>
+<span class="p">{</span><span class="nt">&quot;ts&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-08T12:14:16.219226+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;op&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;list_versions&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;version_count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;versions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">&quot;version_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;null&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;last_modified&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-07-08 12:02:14+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;etag&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;e23c5682f81e05aa47b7885ef44fc7b1&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;size&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">740853</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;is_latest&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}],</span><span class="w"> </span><span class="nt">&quot;elapsed_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.164</span><span class="p">}</span>
+</code></pre>
+      </div>
+
+      <h2 id="log-files">Log files</h2>
+      <ul>
+        <li>Success: <code>../logs/20260708_141414_fetch_success.jsonl</code></li>
+        <li>Errors: <code>../logs/20260708_141414_fetch_errors.jsonl</code></li>
+      </ul>
+    </div>
+  </body>
+</html>
