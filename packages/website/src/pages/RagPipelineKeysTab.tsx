@@ -224,9 +224,8 @@ function RagKeyCreatedModal({
   const [showToken, setShowToken] = useState(false);
 
   return (
-    <Modal open onClose={() => {}} size="md" testId="rag-key-created-modal">
-      <ModalHeader>Save your API key</ModalHeader>
-      <ModalBody>
+    <Modal open onClose={onDone} size="md" testId="rag-key-created-modal">
+      <ModalHeader onClose={onDone}>Save your API key</ModalHeader>
         <div className="mb-4">
           <Alert
             variant="amber"
