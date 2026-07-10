@@ -123,7 +123,7 @@ function CreateRagKeyModal({
         description="The key authorizes the Query API only — it cannot read or write bucket contents."
         onClose={onClose}
       >
-        Create RAG API key
+        Create API key
       </ModalHeader>
       <ModalBody>
         <div className="flex flex-col gap-5">
@@ -298,7 +298,7 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
           size="lg"
           description="Bearer tokens for the Query API. Not to be confused with S3 access keys — these cannot read or write bucket contents."
         >
-          RAG API keys
+          API Keys
         </Heading>
         <Button
           variant="primary"

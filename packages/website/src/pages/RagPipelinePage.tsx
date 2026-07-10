@@ -14,6 +14,7 @@ import {
   listBucketsForRag,
   setBucketRagEnabled,
 } from '../lib/rag-bucket-api.js';
+import { listRagApiKeys } from '../lib/rag-api-keys-api.js';
 import { queryKeys } from '../lib/query-client.js';
 import { useRagAccess } from '../lib/use-rag-access.js';
 import { BucketsTab, type RagBucket } from './RagPipelineBucketsTab.js';
@@ -26,6 +27,7 @@ import { IntegrateTab, ModelsTab } from './RagPipelineTabs.js';
 
 function RagPipelineView({
   buckets,
+  apiKeyCount,
   isLoading,
   isError,
   errorMessage,
@@ -33,6 +35,8 @@ function RagPipelineView({
   onConfirmToggle,
 }: {
   buckets: RagBucket[];
+  /** Org's RAG API key count; undefined while loading/errored. */
+  apiKeyCount: number | undefined;
   isLoading: boolean;
   isError: boolean;
   errorMessage: string | undefined;
@@ -55,9 +59,9 @@ function RagPipelineView({
       sub: anyEnabled ? 'total storage used' : 'Available once enabled',
     },
     {
-      label: 'Pricing',
-      value: '$15 / TB',
-      sub: 'per month · LLM costs included',
+      label: 'API keys',
+      value: apiKeyCount !== undefined ? apiKeyCount.toLocaleString() : '—',
+      sub: 'for the Query API',
     },
   ];
 
@@ -108,7 +112,7 @@ function RagPipelineView({
           <TabList>
             <Tab>Buckets</Tab>
             <Tab>Models</Tab>
-            <Tab>RAG API keys</Tab>
+            <Tab>API Keys</Tab>
             <Tab>Integrate</Tab>
           </TabList>
           <TabPanels>
@@ -173,6 +177,14 @@ export function RagPipelinePage() {
 
   const bucketList: Bucket[] = bucketsData?.buckets ?? [];
 
+  // Same query key as the API Keys tab, so the count and the table stay in
+  // sync (creates/deletes invalidate ['rag-api-keys']).
+  const { data: apiKeysData } = useQuery({
+    queryKey: queryKeys.ragApiKeys,
+    queryFn: () => listRagApiKeys(),
+    enabled: ragAccess,
+  });
+
   const enablementQueries = useQueries({
     queries: bucketList.map((b) => ({
       queryKey: queryKeys.ragBucketEnabledFor(b.bucketName, b.region as S3Region),
@@ -234,6 +246,7 @@ export function RagPipelinePage() {
   return (
     <RagPipelineView
       buckets={buckets}
+      apiKeyCount={apiKeysData?.keys.length}
       isLoading={bucketsPending || (bucketList.length > 0 && enablementLoading)}
       isError={bucketsError}
       errorMessage={bucketsErr instanceof Error ? bucketsErr.message : undefined}

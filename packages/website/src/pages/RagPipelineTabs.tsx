@@ -171,7 +171,7 @@ export function IntegrateTab({ enabled, buckets }: { enabled: boolean; buckets: 
           <div className={`mt-4${!enabled ? ' pointer-events-none select-none blur-md' : ''}`}>
             <CodeBlock code={queryCode} language="bash" />
             <p className="mt-2 text-xs text-zinc-500">
-              Create a key in the RAG API keys tab and export it as{' '}
+              Create a key in the API Keys tab and export it as{' '}
               <code className="font-mono">FILONE_RAG_KEY</code>.
             </p>
           </div>

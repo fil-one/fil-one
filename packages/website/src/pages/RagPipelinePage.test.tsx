@@ -207,9 +207,9 @@ describe('RagPipelinePage — Buckets tab', () => {
     // The disabled bucket exposes an "Index" action.
     fireEvent.click(screen.getByRole('button', { name: 'Index' }));
 
-    // Confirm modal opens with pricing + an Enable button.
+    // Confirm modal opens with an Enable button — and no pricing.
     expect(await screen.findByText('Enable RAG Pipeline?')).toBeInTheDocument();
-    expect(screen.getByText('$15 / TB / month')).toBeInTheDocument();
+    expect(screen.queryByText(/\$15/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
 
     await waitFor(() =>
@@ -338,19 +338,36 @@ describe('RagPipelinePage — Integrate tab', () => {
 });
 
 // ---------------------------------------------------------------------------
-// RAG API keys tab
+// API Keys tab
 // ---------------------------------------------------------------------------
 
-describe('RagPipelinePage — RAG API keys tab', () => {
+describe('RagPipelinePage — API Keys tab', () => {
   it('renders the tab and mounts the keys panel', async () => {
     renderPage();
     await screen.findByText('my-docs-bucket');
 
-    fireEvent.click(screen.getByRole('tab', { name: 'RAG API keys' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'API Keys' }));
 
     expect(await screen.findByTestId('rag-api-keys-tab')).toBeInTheDocument();
     expect(mockListRagApiKeys).toHaveBeenCalled();
     expect(await screen.findByTestId('rag-api-keys-empty')).toBeInTheDocument();
+  });
+
+  it('shows the API key count in the stats grid instead of pricing', async () => {
+    mockListRagApiKeys.mockResolvedValue({
+      keys: [
+        { id: 'k1', keyName: 'a', keyPrefix: 'sk_rag_a', bucketScope: 'all', createdAt: '' },
+        { id: 'k2', keyName: 'b', keyPrefix: 'sk_rag_b', bucketScope: 'all', createdAt: '' },
+      ],
+    });
+    renderPage();
+    await screen.findByText('my-docs-bucket');
+
+    const stats = screen.getByTestId('rag-pipeline-stats');
+    expect(await within(stats).findByText('API keys')).toBeInTheDocument();
+    expect(within(stats).getByText('2')).toBeInTheDocument();
+    expect(within(stats).queryByText('Pricing')).not.toBeInTheDocument();
+    expect(within(stats).queryByText(/\$15/)).not.toBeInTheDocument();
   });
 });
 
