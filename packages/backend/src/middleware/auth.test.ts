@@ -184,6 +184,51 @@ describe('authMiddleware', () => {
       });
     });
 
+    it('returns 401 ACCOUNT_DELETED with cleared cookies for a tombstoned identity and never recreates the user', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${MOCK_SUB}` },
+            sk: { S: 'IDENTITY' },
+            deleted: { BOOL: true },
+            deletedAt: { S: '2026-07-10T00:00:00.000Z' },
+          },
+        });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [
+          `hs_access_token=valid-token`,
+          `hs_id_token=id-token`,
+          `hs_refresh_token=refresh-token`,
+        ],
+      });
+
+      const result = (await before(buildMiddyRequest(event))) as APIGatewayProxyStructuredResultV2;
+
+      expect(result.statusCode).toBe(401);
+      expect(JSON.parse(result.body!)).toEqual({
+        message: 'Account has been deleted',
+        code: ApiErrorCode.ACCOUNT_DELETED,
+      });
+      const cookies = result.cookies ?? [];
+      for (const name of ['hs_access_token', 'hs_id_token', 'hs_refresh_token', 'hs_logged_in']) {
+        expect(cookies).toEqual(expect.arrayContaining([expect.stringContaining(`${name}=;`)]));
+      }
+      // The resurrection hole: a tombstoned identity must never fall through
+      // to createNewUserAndOrg.
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+      // No refresh attempt either — the account is gone, no retry can succeed.
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it('extracts name and picture from ID token claims', async () => {
       const existingUserId = 'existing-user-uuid';
       const existingOrgId = 'existing-org-uuid';

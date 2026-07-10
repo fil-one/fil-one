@@ -93,21 +93,30 @@ export async function ensureTrialEntitlement({
     });
   }
 
-  // Optimization only: skip the re-check on future requests.
+  // Optimization only: skip the re-check on future requests. Conditioned on a
+  // live identity row (FIL-112): an in-flight request racing account deletion
+  // must not upsert a ghost SUB# row or decorate the deletion tombstone.
   try {
     await getDynamoClient().send(
       new UpdateItemCommand({
         TableName: tableName,
         Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
         UpdateExpression: 'SET emailEntitlementClaimed = :t',
+        ConditionExpression: 'attribute_exists(pk) AND attribute_exists(userId)',
         ExpressionAttributeValues: { ':t': { BOOL: true } },
       }),
     );
   } catch (error) {
-    console.error('[trial-entitlement] Failed to set emailEntitlementClaimed flag', {
-      error,
-      userId,
-    });
+    if (error instanceof ConditionalCheckFailedException) {
+      console.info('[trial-entitlement] Identity row gone or tombstoned; flag not set', {
+        userId,
+      });
+    } else {
+      console.error('[trial-entitlement] Failed to set emailEntitlementClaimed flag', {
+        error,
+        userId,
+      });
+    }
   }
 
   return entitled;

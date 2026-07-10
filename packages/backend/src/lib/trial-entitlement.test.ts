@@ -82,6 +82,23 @@ describe('ensureTrialEntitlement', () => {
     expect(updateCalls[0].args[0].input.UpdateExpression).toBe('SET emailEntitlementClaimed = :t');
   });
 
+  it('swallows a conditional failure on the flag update (identity purged mid-flight, FIL-112)', async () => {
+    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
+
+    const result = await ensureTrialEntitlement(BASE);
+
+    // The claim + trial still succeed; only the optimization flag is skipped.
+    expect(result).toBe(true);
+    const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    expect(input.ConditionExpression).toBe('attribute_exists(pk) AND attribute_exists(userId)');
+  });
+
   it('does not create a trial when the key is already claimed by another account', async () => {
     ddbMock.on(PutItemCommand).rejects(
       new ConditionalCheckFailedException({

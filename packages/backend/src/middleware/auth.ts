@@ -14,11 +14,13 @@ import type { ErrorResponse } from '@filone/shared';
 import {
   COOKIE_NAMES,
   TOKEN_MAX_AGE,
+  makeClearAuthCookies,
   makeCookieHeader,
   makeHintCookieHeader,
   ResponseBuilder,
 } from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
+import { AccountDeletedError } from '../lib/errors.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
@@ -90,6 +92,21 @@ import { CSRF_COOKIE_NAME } from '@filone/shared';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
+}
+
+/**
+ * 401 for tombstoned identities (FIL-112): the session's cookies are cleared
+ * so the client stops presenting tokens for an account that no longer exists.
+ */
+function accountDeletedResponse(): APIGatewayProxyStructuredResultV2 {
+  const builder = new ResponseBuilder().status(401).body<ErrorResponse>({
+    message: 'Account has been deleted',
+    code: ApiErrorCode.ACCOUNT_DELETED,
+  });
+  for (const cookie of makeClearAuthCookies(CSRF_COOKIE_NAME)) {
+    builder.addCookie(cookie);
+  }
+  return builder.build();
 }
 
 function emailNotVerifiedResponse(): APIGatewayProxyStructuredResultV2 {
@@ -273,6 +290,14 @@ async function resolveUserAndOrg(
     }),
   );
 
+  // Tombstoned identity (FIL-112 account deletion): reject before the
+  // userId/orgId check so a deleted user's still-valid tokens can neither
+  // operate on remnants nor fall through to createNewUserAndOrg below and
+  // resurrect the account as a fresh org.
+  if (result.Item?.deleted?.BOOL === true) {
+    throw new AccountDeletedError();
+  }
+
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
     const userId = result.Item.userId.S;
     const orgId = result.Item.orgId.S;
@@ -439,6 +464,9 @@ async function tryValidateAccessToken({
     });
     return true;
   } catch (err) {
+    // Not a token problem — the identity is tombstoned. Let it surface so the
+    // before hook returns 401 ACCOUNT_DELETED instead of trying a refresh.
+    if (err instanceof AccountDeletedError) throw err;
     console.warn(failureLabel, { error: err });
     return false;
   }
@@ -473,6 +501,19 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
   const { requireVerifiedEmail = true } = options;
 
   const before = async (
+    request: AuthMiddlewareRequest,
+  ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
+    try {
+      return await authenticate(request);
+    } catch (err) {
+      // Any auth path (access token, refresh exchange, fallback) that reaches
+      // a tombstoned identity ends the session here — no retry can succeed.
+      if (err instanceof AccountDeletedError) return accountDeletedResponse();
+      throw err;
+    }
+  };
+
+  const authenticate = async (
     request: AuthMiddlewareRequest,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
     const { event } = request;
