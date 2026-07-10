@@ -17,6 +17,7 @@ import {
 import { queryKeys } from '../lib/query-client.js';
 import { useRagAccess } from '../lib/use-rag-access.js';
 import { BucketsTab, type RagBucket } from './RagPipelineBucketsTab.js';
+import { RagApiKeysTab } from './RagPipelineKeysTab.js';
 import { IntegrateTab, ModelsTab } from './RagPipelineTabs.js';
 
 // ---------------------------------------------------------------------------
@@ -107,6 +108,7 @@ function RagPipelineView({
           <TabList>
             <Tab>Buckets</Tab>
             <Tab>Models</Tab>
+            <Tab>RAG API keys</Tab>
             <Tab>Integrate</Tab>
           </TabList>
           <TabPanels>
@@ -122,6 +124,9 @@ function RagPipelineView({
             </TabPanel>
             <TabPanel>
               <ModelsTab enabled={anyEnabled} />
+            </TabPanel>
+            <TabPanel>
+              <RagApiKeysTab buckets={buckets} />
             </TabPanel>
             <TabPanel>
               <IntegrateTab enabled={anyEnabled} buckets={buckets} />

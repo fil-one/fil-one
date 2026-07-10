@@ -15,7 +15,7 @@ import {
 } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
+import { ragQueryAuthMiddleware } from '../middleware/rag-query-auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { ragAccessMiddleware } from '../lib/rag-access.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
@@ -201,7 +201,8 @@ function sourcesFromChunks(chunks: VectorQueryResult[]): string[] {
 
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
-  .use(authMiddleware())
+  // Cookie session OR RAG API key bearer token — see ragQueryAuthMiddleware.
+  .use(ragQueryAuthMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Read))
   .use(ragAccessMiddleware())
   .use(errorHandlerMiddleware());

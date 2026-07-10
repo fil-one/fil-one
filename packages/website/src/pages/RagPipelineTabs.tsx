@@ -12,6 +12,7 @@ import { Card } from '../components/Card.js';
 import { CodeBlock } from '../components/CodeBlock.js';
 import { Heading } from '../components/Heading/Heading.js';
 import { Select } from '../components/Select.js';
+import { API_URL } from '../env.js';
 import { bucketKey, type RagBucket } from './RagPipelineBucketsTab.js';
 
 const ALL_BUCKETS_VALUE = '__all__';
@@ -115,7 +116,18 @@ export function IntegrateTab({ enabled, buckets }: { enabled: boolean; buckets: 
     2,
   );
 
-  const queryCode = `POST /api/buckets/${arg}/query?region=${region}\n${JSON.stringify({ query: 'What are the retention policies?', top_k: 5 }, null, 2)}`;
+  // Full URL so the sample is copy-paste runnable outside the browser. In prod
+  // API_URL is empty (same-origin behind CloudFront), so fall back to the
+  // page's own origin. Computed in-component so jsdom tests get a value.
+  const baseUrl = API_URL || window.location.origin;
+  // $FILONE_RAG_KEY (an env var, not a literal token) keeps real keys out of
+  // shell history when users copy-paste-edit the sample.
+  const queryCode = [
+    `curl -X POST "${baseUrl}/api/buckets/${arg}/query?region=${region}" \\`,
+    `  -H "Authorization: Bearer $FILONE_RAG_KEY" \\`,
+    `  -H "Content-Type: application/json" \\`,
+    `  -d '${JSON.stringify({ query: 'What are the retention policies?', top_k: 5 })}'`,
+  ].join('\n');
 
   return (
     <div data-testid="integrate-tab" className="space-y-6">
@@ -158,6 +170,10 @@ export function IntegrateTab({ enabled, buckets }: { enabled: boolean; buckets: 
           <p className="mt-1 text-xs text-zinc-500">Call directly from your app or agent.</p>
           <div className={`mt-4${!enabled ? ' pointer-events-none select-none blur-md' : ''}`}>
             <CodeBlock code={queryCode} language="bash" />
+            <p className="mt-2 text-xs text-zinc-500">
+              Create a key in the RAG API keys tab and export it as{' '}
+              <code className="font-mono">FILONE_RAG_KEY</code>.
+            </p>
           </div>
         </div>
         <div data-testid="integrate-mcp" className="pl-6">

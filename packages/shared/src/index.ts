@@ -150,6 +150,23 @@ export type {
   DeleteAccessKeyRequest,
 } from './api/access-keys.js';
 
+export {
+  RAG_KEY_TOKEN_PREFIX,
+  RAG_KEY_DISPLAY_PREFIX_LENGTH,
+  RAG_KEY_MAX_BUCKETS,
+  RAG_KEY_BUCKET_SCOPES,
+  RagKeyBucketRefSchema,
+  CreateRagApiKeySchema,
+} from './api/rag-api-keys.js';
+export type {
+  RagKeyBucketScope,
+  RagKeyBucketRef,
+  RagApiKey,
+  ListRagApiKeysResponse,
+  CreateRagApiKeyRequest,
+  CreateRagApiKeyResponse,
+} from './api/rag-api-keys.js';
+
 export type {
   UsageDataPoint,
   UsageTrendsRequest,

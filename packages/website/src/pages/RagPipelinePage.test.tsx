@@ -33,6 +33,13 @@ vi.mock('../lib/rag-bucket-api.js', async (importOriginal) => ({
   queryBucket: (...a: unknown[]) => mockQueryBucket(...a),
 }));
 
+const mockListRagApiKeys = vi.fn();
+
+vi.mock('../lib/rag-api-keys-api.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/rag-api-keys-api.js')>()),
+  listRagApiKeys: (...a: unknown[]) => mockListRagApiKeys(...a),
+}));
+
 import { RagPipelinePage } from './RagPipelinePage.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -123,6 +130,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockListBuckets.mockResolvedValue(BUCKETS);
   mockGetEnabled.mockImplementation(async (name: string) => ENABLEMENT[name]);
+  mockListRagApiKeys.mockResolvedValue({ keys: [] });
   mockQueryBucket.mockResolvedValue({
     answer: 'The default retention period is 90 days for standard objects.',
     sources: ['policies/data-retention.pdf', 'governance-whitepaper.pdf'],
@@ -318,10 +326,31 @@ describe('RagPipelinePage — Integrate tab', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Integrate' }));
 
     expect(await screen.findByText('Query API')).toBeInTheDocument();
-    expect(screen.getByText(/POST \/api\/buckets\/.+\/query\?region=/)).toBeInTheDocument();
+    // Full-URL curl sample with bearer auth (jsdom origin = http://localhost:3000).
+    expect(
+      screen.getByText(/curl -X POST "http:\/\/localhost:3000\/api\/buckets\/.+\/query\?region=/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Authorization: Bearer \$FILONE_RAG_KEY/)).toBeInTheDocument();
 
     expect(screen.getByText('MCP endpoint')).toBeInTheDocument();
     expect(screen.getByText('Coming later')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RAG API keys tab
+// ---------------------------------------------------------------------------
+
+describe('RagPipelinePage — RAG API keys tab', () => {
+  it('renders the tab and mounts the keys panel', async () => {
+    renderPage();
+    await screen.findByText('my-docs-bucket');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'RAG API keys' }));
+
+    expect(await screen.findByTestId('rag-api-keys-tab')).toBeInTheDocument();
+    expect(mockListRagApiKeys).toHaveBeenCalled();
+    expect(await screen.findByTestId('rag-api-keys-empty')).toBeInTheDocument();
   });
 });
 
