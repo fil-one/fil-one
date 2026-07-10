@@ -82,7 +82,10 @@ async function bearerAuth(
   // region values fall through to the handler's isSupportedRegion 400.
   const bucketName = event.pathParameters?.name;
   const region = event.queryStringParameters?.region ?? S3Region.EuWest1;
-  if (!bucketName || !ragKeyAllowsBucket(record, region, bucketName)) {
+
+  // Only enforce bucket scope for known regions; otherwise let the handler return its 400.
+  const isKnownRegion = Object.values(S3Region).includes(region as S3Region);
+  if (!bucketName || (isKnownRegion && !ragKeyAllowsBucket(record, region, bucketName))) {
     return bucketNotFoundResponse();
   }
 
