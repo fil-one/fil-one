@@ -226,6 +226,7 @@ function RagKeyCreatedModal({
   return (
     <Modal open onClose={onDone} size="md" testId="rag-key-created-modal">
       <ModalHeader onClose={onDone}>Save your API key</ModalHeader>
+      <ModalBody>
         <div className="mb-4">
           <Alert
             variant="amber"
