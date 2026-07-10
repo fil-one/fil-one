@@ -23,6 +23,20 @@ vi.mock('../lib/org-profile.js', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
+// The queryability gate reads the bucket's enablement row (RagIndexerTable).
+// Defaulted per describe-block to an org-1 record with a completed first sync.
+const mockGetEnablement = vi.fn();
+
+vi.mock('../lib/bucket-rag-enablement.js', () => ({
+  getBucketRagEnablement: (...args: unknown[]) => mockGetEnablement(...args),
+}));
+
+const SYNCED_ENABLEMENT = {
+  orgId: 'org-1',
+  status: 'active',
+  lastSyncedAt: '2026-07-01T00:00:00Z',
+};
+
 const mockEmbed = vi.fn();
 const mockComplete = vi.fn();
 const mockQuery = vi.fn();
@@ -109,6 +123,7 @@ describe('query-bucket baseHandler', () => {
     mockEmbed.mockResolvedValue([0.1, 0.2, 0.3]);
     mockComplete.mockResolvedValue('grounded answer');
     mockQuery.mockResolvedValue([vector('doc.pdf#0', 'doc.pdf'), vector('doc.pdf#1', 'doc.pdf')]);
+    mockGetEnablement.mockResolvedValue(SYNCED_ENABLEMENT);
   });
 
   it('returns 200 with a grounded answer and deduplicated sources (happy path)', async () => {
@@ -425,6 +440,34 @@ describe('query-bucket baseHandler', () => {
     const result = await baseHandler(queryEvent({ query: 'hello' }));
     expect(JSON.parse(result.body!).sources).toStrictEqual(['orphan#0']);
   });
+
+  describe('first-indexing-pass gate', () => {
+    it.each([
+      ['RAG was never enabled (no enablement record)', undefined],
+      ['the first indexing pass has not completed', { orgId: 'org-1', status: 'active' }],
+      [
+        'the enablement record belongs to another org',
+        { orgId: 'org-other', status: 'active', lastSyncedAt: '2026-07-01T00:00:00Z' },
+      ],
+    ])('returns 409 BUCKET_NOT_INDEXED when %s', async (_label, enablement) => {
+      mockGetEnablement.mockResolvedValue(enablement);
+
+      const result = await baseHandler(queryEvent({ query: 'hello' }));
+
+      expect(result.statusCode).toBe(409);
+      const body = JSON.parse(result.body!);
+      expect(body.code).toBe('BUCKET_NOT_INDEXED');
+      expect(body.message).toMatch(/not been indexed yet/);
+      // Rejected before any RAG work.
+      expect(mockEmbed).not.toHaveBeenCalled();
+      expect(mockComplete).not.toHaveBeenCalled();
+    });
+
+    it('reads the enablement row for the caller org, region, and bucket', async () => {
+      await baseHandler(queryEvent({ query: 'hello' }));
+      expect(mockGetEnablement).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'my-bucket');
+    });
+  });
 });
 
 describe('query-bucket handler (RAG access gate)', () => {
@@ -451,6 +494,7 @@ describe('query-bucket handler (RAG access gate)', () => {
     mockEmbed.mockResolvedValue([0.1]);
     mockComplete.mockResolvedValue('answer');
     mockQuery.mockResolvedValue([vector('a.pdf#0', 'a.pdf')]);
+    mockGetEnablement.mockResolvedValue(SYNCED_ENABLEMENT);
   });
 
   it('returns 403 when the caller is not foundation and not allowlisted', async () => {
@@ -530,6 +574,7 @@ describe('query-bucket handler (RAG API key bearer auth)', () => {
     mockEmbed.mockResolvedValue([0.1]);
     mockComplete.mockResolvedValue('answer');
     mockQuery.mockResolvedValue([vector('a.pdf#0', 'a.pdf')]);
+    mockGetEnablement.mockResolvedValue(SYNCED_ENABLEMENT);
   });
 
   it('answers a query for a bucket owned by the key org (200)', async () => {

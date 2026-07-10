@@ -3,10 +3,11 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { Resource } from 'sst';
 import type { ErrorResponse, QueryBucketResponse } from '@filone/shared';
-import { QueryBucketSchema, S3Region, isSupportedRegion } from '@filone/shared';
+import { ApiErrorCode, QueryBucketSchema, S3Region, isSupportedRegion } from '@filone/shared';
 import { S3VectorsStore, complete, embed } from '@filone/rag-shared';
 import type { VectorQueryResult } from '@filone/rag-shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { getBucketRagEnablement } from '../lib/bucket-rag-enablement.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import {
   ResponseBuilder,
@@ -95,6 +96,26 @@ export async function baseHandler(
     return new ResponseBuilder()
       .status(404)
       .body<ErrorResponse>({ message: 'Bucket not found' })
+      .build();
+  }
+
+  // A bucket that has never completed its first indexing pass has nothing to
+  // answer from — fail with an explicit, actionable error instead of the
+  // misleading "no relevant content" empty answer. `lastSyncedAt` is written by
+  // the indexer only when a pass completes, so it doubles as the
+  // "queryable yet?" signal here and in the UI (disabled Ask-questions button).
+  const enablement = await getBucketRagEnablement(orgId, region, bucketName);
+  // Defense in depth: ignore a record whose stamped org somehow differs
+  // (mirrors get-bucket-rag-enablement).
+  const owned = enablement && enablement.orgId === orgId ? enablement : undefined;
+  if (!owned?.lastSyncedAt) {
+    return new ResponseBuilder()
+      .status(409)
+      .body<ErrorResponse>({
+        message:
+          'This bucket has not been indexed yet. Queries become available after the first indexing pass completes.',
+        code: ApiErrorCode.BUCKET_NOT_INDEXED,
+      })
       .build();
   }
 

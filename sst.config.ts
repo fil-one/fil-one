@@ -717,6 +717,9 @@ export default $config({
       routePath: '/api/buckets/{name}/query',
       handler: 'query-bucket',
       rag: true,
+      // Reads the bucket's enablement row to reject queries before the first
+      // indexing pass completes (BUCKET_NOT_INDEXED).
+      extraLink: [ragIndexerTable],
       extraEnv: orchestratorEnv,
       permissions: [
         ...bucketReadPermissions,
