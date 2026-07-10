@@ -222,6 +222,52 @@ export async function regenerateRecoveryCode(
   }
 }
 
+// ── Account deletion (FIL-112) ───────────────────────────────────────────
+
+import type {
+  DeleteAccountRequest,
+  DeleteAccountResponse,
+  DeletionChallengeResponse,
+} from '@filone/shared';
+
+export const DELETE_ACCOUNT_STEP_UP_ACTION = 'delete-account';
+
+/**
+ * Request the account-deletion email verification code. MFA-enrolled users
+ * are bounced through the step-up round-trip first (same pattern as
+ * deletePasskey) — the redirect navigates the page away, so the returned
+ * promise never resolves on that path.
+ */
+export async function requestDeletionChallenge(): Promise<DeletionChallengeResponse> {
+  try {
+    return await apiRequest<DeletionChallengeResponse>('/account/delete-challenge', {
+      method: 'POST',
+    });
+  } catch (err) {
+    if (err instanceof StepUpRequiredError) {
+      redirectToStepUp(DELETE_ACCOUNT_STEP_UP_ACTION);
+      return new Promise<DeletionChallengeResponse>(() => {});
+    }
+    throw err;
+  }
+}
+
+/** Confirm account deletion with the typed org name and the emailed code. */
+export async function deleteAccount(req: DeleteAccountRequest): Promise<DeleteAccountResponse> {
+  try {
+    return await apiRequest<DeleteAccountResponse>('/account/delete', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  } catch (err) {
+    if (err instanceof StepUpRequiredError) {
+      redirectToStepUp(DELETE_ACCOUNT_STEP_UP_ACTION);
+      return new Promise<DeleteAccountResponse>(() => {});
+    }
+    throw err;
+  }
+}
+
 // ── Usage API ────────────────────────────────────────────────────────────
 
 import type { UsageResponse, ActivityResponse } from '@filone/shared';
