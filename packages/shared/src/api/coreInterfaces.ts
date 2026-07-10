@@ -14,6 +14,14 @@ export enum ApiErrorCode {
   EMAIL_NOT_VERIFIED = 'EMAIL_NOT_VERIFIED',
   /** The email domain is a known disposable/temporary address provider. */
   DISPOSABLE_EMAIL_BLOCKED = 'DISPOSABLE_EMAIL_BLOCKED',
+  /** The submitted account-deletion verification code does not match. */
+  DELETION_CODE_INVALID = 'DELETION_CODE_INVALID',
+  /** The deletion code expired or too many attempts were made — request a new one. */
+  DELETION_CODE_EXPIRED_OR_LOCKED = 'DELETION_CODE_EXPIRED_OR_LOCKED',
+  /** Too many deletion codes requested — wait for the cooldown. */
+  DELETION_RATE_LIMITED = 'DELETION_RATE_LIMITED',
+  /** The authenticated account has been deleted. */
+  ACCOUNT_DELETED = 'ACCOUNT_DELETED',
 }
 
 export interface ErrorResponse {

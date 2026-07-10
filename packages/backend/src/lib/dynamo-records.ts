@@ -174,6 +174,102 @@ export interface RagIndexerCheckpointRecord {
 }
 
 /**
+ * Short-lived email verification challenge for account deletion (FIL-112).
+ * One live challenge per org; re-issuing replaces the code. Lives in
+ * BillingTable because that table has DynamoDB TTL enabled (UserInfoTable
+ * deliberately does not — a stray `ttl` attribute on an identity row would
+ * silently hard-delete account data).
+ *
+ * BillingTable — pk: DELETION_CHALLENGE#{orgId}, sk: CHALLENGE
+ */
+export interface DeletionChallengeRecord {
+  pk: string;
+  sk: string;
+  /** hex sha256 of `${orgId}:${salt}:${code}` — never the code itself. */
+  codeHash: string;
+  /** 16 random bytes, hex. */
+  salt: string;
+  /** Verify attempts consumed; the record locks at the max. */
+  attempts: number;
+  /** Codes issued against this row within its TTL window. */
+  sendCount: number;
+  lastSentAt: string; // ISO-8601 — resend cooldown anchor
+  expiresAt: string; // ISO-8601 — code validity, checked in ConditionExpressions
+  createdAt: string; // ISO-8601
+  ttl: number; // epoch seconds; DynamoDB TTL janitor (~1h)
+}
+
+/** Teardown progress states for {@link OrgDeletionRecord}, in execution order. */
+export const OrgDeletionStatus = {
+  Pending: 'PENDING',
+  KeysRevoked: 'KEYS_REVOKED',
+  TenantsDisabled: 'TENANTS_DISABLED',
+  StripeCanceled: 'STRIPE_CANCELED',
+  Auth0Deleted: 'AUTH0_DELETED',
+  RagPurged: 'RAG_PURGED',
+  RecordsPurged: 'RECORDS_PURGED',
+  Done: 'DONE',
+} as const;
+
+export type OrgDeletionStatusValue = (typeof OrgDeletionStatus)[keyof typeof OrgDeletionStatus];
+
+/** Snapshot of an org member captured when deletion is confirmed. */
+export interface OrgDeletionMember {
+  userId: string;
+  /** Auth0 sub; stripped from the record when teardown reaches DONE. */
+  sub?: string;
+}
+
+/**
+ * Resumable state record for the account-deletion worker (FIL-112). Written by
+ * the delete-account handler at confirm time; snapshots everything the worker
+ * needs (tenant ids, member subs, Stripe ids) so teardown can finish even
+ * after the source rows are purged. Survives the purge as the audit record.
+ *
+ * UserInfoTable — pk: ORG#{orgId}, sk: DELETION
+ */
+export interface OrgDeletionRecord {
+  pk: string;
+  sk: string;
+  status: OrgDeletionStatusValue;
+  requestedAt: string; // ISO-8601
+  requestedByUserId: string;
+  members: OrgDeletionMember[];
+  auroraTenantId?: string;
+  fthTenantId?: string;
+  stripeCustomerId?: string;
+  subscriptionId?: string;
+  /** Worker invocations so far; the reconciler alerts past a threshold. */
+  attemptCount: number;
+  updatedAt: string; // ISO-8601
+}
+
+/**
+ * Permanent, PII-free marker that an org was deleted, retaining the Stripe
+ * customer reference for finance/audit (the Stripe customer is kept, only the
+ * subscription is canceled). No `ttl` attribute — never expires.
+ *
+ * BillingTable — pk: ORG_TOMBSTONE#{orgId}, sk: TOMBSTONE
+ */
+export interface OrgTombstoneRecord {
+  pk: string;
+  sk: string;
+  orgId: string;
+  stripeCustomerId?: string;
+  deletedAt: string; // ISO-8601
+}
+
+/** Key builders for the account-deletion records above. */
+export const DeletionKeys = {
+  challengePk: (orgId: string): string => `DELETION_CHALLENGE#${orgId}`,
+  challengeSk: (): string => 'CHALLENGE',
+  deletionPk: (orgId: string): string => `ORG#${orgId}`,
+  deletionSk: (): string => 'DELETION',
+  tombstonePk: (orgId: string): string => `ORG_TOMBSTONE#${orgId}`,
+  tombstoneSk: (): string => 'TOMBSTONE',
+} as const;
+
+/**
  * Key builders for the RAG records above. Centralizing the pk/sk shapes keeps
  * the partition design (and the per-bucket `begins_with MANIFEST#` query)
  * consistent across handlers and jobs.

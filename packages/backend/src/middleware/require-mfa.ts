@@ -6,7 +6,9 @@ import type {
   Context,
 } from 'aws-lambda';
 import type { StepUpRequiredResponse } from '@filone/shared';
+import { getMfaEnrollments, MFA_GUARDIAN_TYPES } from '../lib/auth0-management.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
+import { getUserInfo, type AuthenticatedEvent } from '../lib/user-context.js';
 import { getVerifiedIdTokenClaims } from './auth.js';
 
 /**
@@ -36,6 +38,34 @@ export function requireMfa() {
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
     const { amr } = getVerifiedIdTokenClaims(request);
     if (!amr.includes('mfa') && !amr.includes('phr')) return stepUpResponse();
+  };
+
+  return { before } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;
+}
+
+/**
+ * Step-up gate only for users who actually have MFA enrolled (FIL-112
+ * account deletion). A strong-auth session (`amr` contains 'mfa'/'phr')
+ * passes immediately with no Management API call. Otherwise Auth0 is
+ * consulted: any confirmed MFA enrollment demands step-up; none passes —
+ * for MFA-less users the caller's email challenge is the sole second
+ * factor, and they must not be blocked by an unsatisfiable amr check.
+ *
+ * Fails closed: a Management API error propagates to
+ * `errorHandlerMiddleware` as a 5xx rather than skipping the gate.
+ *
+ * Must be installed AFTER `authMiddleware` (verified claims + userInfo).
+ */
+export function requireMfaIfEnrolled() {
+  const before = async (
+    request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
+  ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
+    const { amr } = getVerifiedIdTokenClaims(request);
+    if (amr.includes('mfa') || amr.includes('phr')) return;
+
+    const { sub } = getUserInfo(request.event as AuthenticatedEvent);
+    const enrollments = await getMfaEnrollments(sub);
+    if (enrollments.some((e) => MFA_GUARDIAN_TYPES.has(e.type))) return stepUpResponse();
   };
 
   return { before } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;

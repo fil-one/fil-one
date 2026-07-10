@@ -29,6 +29,21 @@ export function makeClearCookieHeader(name: string): string {
   return `${name}=; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 }
 
+/**
+ * The full set of clear-cookie headers that ends a session: all auth tokens,
+ * the JS-readable logged-in hint, and the CSRF token. `csrfCookieName` is
+ * passed in (from `@filone/shared`) to keep this module dependency-light.
+ */
+export function makeClearAuthCookies(csrfCookieName: string): string[] {
+  return [
+    makeClearCookieHeader(COOKIE_NAMES.ACCESS_TOKEN),
+    makeClearCookieHeader(COOKIE_NAMES.ID_TOKEN),
+    makeClearCookieHeader(COOKIE_NAMES.REFRESH_TOKEN),
+    makeClearCookieHeader(COOKIE_NAMES.LOGGED_IN),
+    makeClearCookieHeader(csrfCookieName),
+  ];
+}
+
 // CORS headers are injected by API Gateway for all responses based on the
 // corsPreflight configuration in the CDK stack — no need to set them here.
 export class ResponseBuilder {
