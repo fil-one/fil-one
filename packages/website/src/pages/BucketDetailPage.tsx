@@ -11,13 +11,14 @@ import { Alert } from '../components/Alert';
 import { Spinner } from '../components/Spinner';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { BucketPropertyCards } from '../components/BucketPropertiesCard';
-import { ObjectBrowser } from '../components/ObjectBrowser';
+import { ObjectBrowser, countObjects } from '../components/ObjectBrowser';
 import { BucketAccessTab } from '../components/BucketAccessTab';
-import type { S3Region } from '@filone/shared';
+import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { getS3Endpoint, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 
 import type {
+  Bucket,
   ListObjectVersionsResponse,
   GetBucketResponse,
   ListAccessKeysResponse,
@@ -28,11 +29,88 @@ import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { queryKeys } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
-import { parseListObjectVersionsResponse, executePresignedUrl } from '../lib/aurora-s3.js';
+import {
+  parseListObjectVersionsResponse,
+  parseListObjectsResponse,
+  executePresignedUrl,
+} from '../lib/aurora-s3.js';
 
 function formatStorage(bytesUsed: number | undefined): string {
   if (bytesUsed === undefined) return '—';
   return formatBytes(bytesUsed);
+}
+
+// Analytics has the full-bucket count; the listing is a single page (max 1000
+// entries) so counting it undercounts large buckets. Fall back to the listing
+// count only while analytics is loading (or if it fails).
+function displayObjectCount(
+  analytics: BucketAnalyticsResponse | undefined,
+  versions: S3ObjectVersion[],
+): number {
+  return analytics?.objectCount ?? countObjects(versions);
+}
+
+// Fetch the object listing via presigned URL. Versioned buckets use
+// ListObjectVersions so version history is available inline; non-versioned
+// buckets use ListObjectsV2, which only ever returns live objects (never delete
+// markers). Both paths are normalized to the ListObjectVersionsResponse shape so
+// the cache and invalidation logic stay identical.
+async function fetchObjectListing(
+  region: S3Region,
+  bucketName: string,
+  bucket: Bucket | null,
+): Promise<ListObjectVersionsResponse> {
+  if (bucket?.versioning) {
+    const { items } = await batchPresign(region, [
+      { op: 'listObjectVersions', bucket: bucketName },
+    ]);
+    const response = await executePresignedUrl(items[0].url, items[0].method);
+    return parseListObjectVersionsResponse(await response.text());
+  }
+
+  const { items } = await batchPresign(region, [{ op: 'listObjects', bucket: bucketName }]);
+  const response = await executePresignedUrl(items[0].url, items[0].method);
+  const { objects, isTruncated } = parseListObjectsResponse(await response.text());
+  return {
+    versions: objects.map((obj) => ({
+      ...obj,
+      versionId: '',
+      isLatest: true,
+      isDeleteMarker: false,
+    })),
+    isTruncated,
+  };
+}
+
+function removeVersionFromListing(
+  old: ListObjectVersionsResponse | undefined,
+  key: string,
+  versionId: string,
+): ListObjectVersionsResponse | undefined {
+  if (!old) return old;
+  return {
+    ...old,
+    versions: old.versions.filter((v) => !(v.key === key && v.versionId === versionId)),
+  };
+}
+
+function BucketErrorState({
+  bucketName,
+  error,
+  fallback,
+}: {
+  bucketName: string;
+  error: Error | null;
+  fallback: string;
+}) {
+  return (
+    <div className="px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
+      <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
+      <div className="mt-4">
+        <Alert variant="red" description={error?.message ?? fallback} />
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +142,11 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   );
 
   // Bucket metadata
-  const { data: bucketData } = useQuery({
+  const {
+    data: bucketData,
+    isError: bucketIsError,
+    error: bucketError,
+  } = useQuery({
     queryKey: queryKeys.bucket(bucketName, region),
     queryFn: () => {
       const params = new URLSearchParams({ region });
@@ -75,21 +157,17 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   });
   const bucket = bucketData?.bucket ?? null;
 
-  // Objects (via presigned URL — versioned listing)
+  // Objects. Gated on the bucket metadata so the versioning state is known
+  // before choosing the listing op.
   const {
     data: objectsData,
     isPending: objectsLoading,
     isError: objectsIsError,
     error: objectsError,
   } = useQuery({
-    queryKey: queryKeys.objects(bucketName),
-    queryFn: async (): Promise<ListObjectVersionsResponse> => {
-      const { items } = await batchPresign(region, [
-        { op: 'listObjectVersions', bucket: bucketName },
-      ]);
-      const response = await executePresignedUrl(items[0].url, items[0].method);
-      return parseListObjectVersionsResponse(await response.text());
-    },
+    queryKey: queryKeys.objects(bucketName, region),
+    enabled: bucketData !== undefined,
+    queryFn: () => fetchObjectListing(region, bucketName, bucket),
   });
   const versions = objectsData?.versions ?? [];
 
@@ -117,18 +195,17 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const invalidateObjectsCache = useCallback(
     (key: string, versionId?: string) => {
       if (versionId) {
-        queryClient.setQueryData<ListObjectVersionsResponse>(queryKeys.objects(bucketName), (old) =>
-          old
-            ? {
-                ...old,
-                versions: old.versions.filter((v) => !(v.key === key && v.versionId === versionId)),
-              }
-            : old,
+        queryClient.setQueryData<ListObjectVersionsResponse>(
+          queryKeys.objects(bucketName, region),
+          (old) => removeVersionFromListing(old, key, versionId),
         );
       }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.bucketAnalytics(bucketName, region),
+      });
     },
-    [queryClient, bucketName],
+    [queryClient, bucketName, region],
   );
 
   const objectActions = useObjectActions({
@@ -142,6 +219,18 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
   }, [queryClient]);
 
+  // The objects query is gated on bucket metadata, so a metadata failure must be
+  // surfaced here — otherwise the disabled objects query stays pending forever.
+  if (bucketIsError) {
+    return (
+      <BucketErrorState
+        bucketName={bucketName}
+        error={bucketError}
+        fallback="Failed to load bucket"
+      />
+    );
+  }
+
   if (objectsLoading) {
     return (
       <div className="flex items-center justify-center p-16">
@@ -152,12 +241,11 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
   if (objectsIsError) {
     return (
-      <div className="px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
-        <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
-        <div className="mt-4">
-          <Alert variant="red" description={objectsError?.message ?? 'Failed to load objects'} />
-        </div>
-      </div>
+      <BucketErrorState
+        bucketName={bucketName}
+        error={objectsError}
+        fallback="Failed to load objects"
+      />
     );
   }
 
@@ -207,7 +295,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
       <Tabs>
         <TabList>
-          <Tab testId="bucket-objects-tab">Objects ({versions.length.toLocaleString()})</Tab>
+          <Tab testId="bucket-objects-tab">
+            Objects ({displayObjectCount(analyticsData, versions).toLocaleString()})
+          </Tab>
           <Tab testId="bucket-keys-tab">
             API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}
           </Tab>
