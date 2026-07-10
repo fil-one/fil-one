@@ -1,0 +1,26 @@
+======================================================================
+  Upload
+  Script : upload
+  Run    : 20260708_140206
+======================================================================
+
+SUMMARY
+  Total  : 5
+  OK     : 2
+  Failed : 3
+
+BY OPERATION
+  upload                             2 ok     3 failed  (   5 total)  avg 138.052s  stddev 113.092s  min 2.048s  max 260.078s
+
+SUCCESSES
+  {"ts": "2026-07-08T12:02:11.737868+00:00", "op": "upload", "status": "ok", "key": "gov-data/README.md", "size": 5555, "elapsed_s": 2.048, "target_bucket": "us-ceph-bucket-1", "etag": "1256826d336c6689c73c3e1a52e34b19", "version_id": null}
+  {"ts": "2026-07-08T12:02:15.262656+00:00", "op": "upload", "status": "ok", "key": "gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip", "size": 740853, "elapsed_s": 3.523, "target_bucket": "us-ceph-bucket-1", "etag": "e23c5682f81e05aa47b7885ef44fc7b1", "version_id": null}
+
+ERRORS
+  {"ts": "2026-07-08T12:06:35.342731+00:00", "op": "upload", "status": "err", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-0397e/v1.zip", "size": 21037826, "elapsed_s": 260.078, "source_bucket": "harvard-lil", "target_bucket": "us-ceph-bucket-1", "status_code": 400, "error_code": "BadDigest", "error_message": "BadDigest", "request_id": "1783512358156261707-551e30365edefaf1", "host_id": "1783512358156261707-551e30365edefaf1", "response_body": {"Error": {"Code": "BadDigest", "Message": "BadDigest"}, "ResponseMetadata": {"RequestId": "1783512358156261707-551e30365edefaf1", "HostId": "1783512358156261707-551e30365edefaf1", "HTTPStatusCode": 400, "HTTPHeaders": {"content-length": "216", "content-type": "application/xml", "date": "Wed, 08 Jul 2026 12:06:34 GMT", "via": "1.1 Caddy", "x-amz-id-2": "1783512358156261707-551e30365edefaf1", "x-amz-request-id": "1783512358156261707-551e30365edefaf1"}, "MaxAttemptsReached": true, "RetryAttempts": 4}}}
+  {"ts": "2026-07-08T12:10:34.450610+00:00", "op": "upload", "status": "err", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-54c47/v1.zip", "size": 21082117, "elapsed_s": 239.105, "source_bucket": "harvard-lil", "target_bucket": "us-ceph-bucket-1", "status_code": 400, "error_code": "BadDigest", "error_message": "BadDigest", "request_id": "1783512589517933891-aaaf9087c84d9d43", "host_id": "1783512589517933891-aaaf9087c84d9d43", "response_body": {"Error": {"Code": "BadDigest", "Message": "BadDigest"}, "ResponseMetadata": {"RequestId": "1783512589517933891-aaaf9087c84d9d43", "HostId": "1783512589517933891-aaaf9087c84d9d43", "HTTPStatusCode": 400, "HTTPHeaders": {"content-length": "216", "content-type": "application/xml", "date": "Wed, 08 Jul 2026 12:10:33 GMT", "via": "1.1 Caddy", "x-amz-id-2": "1783512589517933891-aaaf9087c84d9d43", "x-amz-request-id": "1783512589517933891-aaaf9087c84d9d43"}, "MaxAttemptsReached": true, "RetryAttempts": 4}}}
+  {"ts": "2026-07-08T12:13:39.961098+00:00", "op": "upload", "status": "err", "key": "gov-data/collections/data_gov/0-2-second-spectral-response-acceleration-5-of-critical-damping-with-a-1-probability-of-ex-aa506/v1.zip", "size": 21079670, "elapsed_s": 185.506, "source_bucket": "harvard-lil", "target_bucket": "us-ceph-bucket-1", "status_code": 400, "error_code": "BadDigest", "error_message": "BadDigest", "request_id": "1783512786934075579-6870cb8864d273c3", "host_id": "1783512786934075579-6870cb8864d273c3", "response_body": {"Error": {"Code": "BadDigest", "Message": "BadDigest"}, "ResponseMetadata": {"RequestId": "1783512786934075579-6870cb8864d273c3", "HostId": "1783512786934075579-6870cb8864d273c3", "HTTPStatusCode": 400, "HTTPHeaders": {"content-length": "216", "content-type": "application/xml", "date": "Wed, 08 Jul 2026 12:13:39 GMT", "via": "1.1 Caddy", "x-amz-id-2": "1783512786934075579-6870cb8864d273c3", "x-amz-request-id": "1783512786934075579-6870cb8864d273c3"}, "MaxAttemptsReached": true, "RetryAttempts": 4}}}
+
+Log files:
+  Success : ../logs/20260708_140206_upload_success.jsonl
+  Errors  : ../logs/20260708_140206_upload_errors.jsonl
