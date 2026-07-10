@@ -13,7 +13,7 @@ import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { ObjectBrowser, countObjects } from '../components/ObjectBrowser';
 import { BucketAccessTab } from '../components/BucketAccessTab';
-import type { S3Region } from '@filone/shared';
+import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { getS3Endpoint, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 
@@ -38,6 +38,16 @@ import {
 function formatStorage(bytesUsed: number | undefined): string {
   if (bytesUsed === undefined) return '—';
   return formatBytes(bytesUsed);
+}
+
+// Analytics has the full-bucket count; the listing is a single page (max 1000
+// entries) so counting it undercounts large buckets. Fall back to the listing
+// count only while analytics is loading (or if it fails).
+function displayObjectCount(
+  analytics: BucketAnalyticsResponse | undefined,
+  versions: S3ObjectVersion[],
+): number {
+  return analytics?.objectCount ?? countObjects(versions);
 }
 
 // Fetch the object listing via presigned URL. Versioned buckets use
@@ -191,6 +201,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         );
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.bucketAnalytics(bucketName, region),
+      });
     },
     [queryClient, bucketName, region],
   );
@@ -282,7 +295,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
       <Tabs>
         <TabList>
-          <Tab testId="bucket-objects-tab">Objects ({countObjects(versions).toLocaleString()})</Tab>
+          <Tab testId="bucket-objects-tab">
+            Objects ({displayObjectCount(analyticsData, versions).toLocaleString()})
+          </Tab>
           <Tab testId="bucket-keys-tab">
             API Keys{!accessKeysLoading && ` (${accessKeys.length.toLocaleString()})`}
           </Tab>
