@@ -1,0 +1,38 @@
+# Drop this into any consumer repo as .github/workflows/ai-review.yml
+# Requires the ANTHROPIC_API_KEY organization secret to be visible to the repo.
+name: AI Code Review
+
+on:
+  pull_request:
+    branches: [ai-code-review]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # Option A — reusable workflow (recommended: permissions pre-wired)
+  review:
+    if: ${{ !github.event.pull_request.draft }}
+    uses: filecoin-project/ff-sec-actions/.github/workflows/ai-code-review.yml@v1
+    with:
+      domain: filecoin
+      fail-on-severity: none       # set to `critical` once the team trusts the signal
+    secrets:
+      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  # Option B — composite action inside your own job (e.g. alongside other checks)
+  # review:
+  #   if: ${{ !github.event.pull_request.draft }}
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: read
+  #     pull-requests: write
+  #   steps:
+  #     - uses: filecoin-project/ff-sec-actions/actions/ai-code-review@v1
+  #       id: ai
+  #       with:
+  #         anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+  #         domain: filecoin
+  #     - run: echo "Findings: ${{ steps.ai.outputs.findings-count }} (max ${{ steps.ai.outputs.highest-severity }})"
