@@ -997,6 +997,83 @@ export default $config({
       function: ragIndexerOrchestrator.arn,
     });
 
+    // ── Account deletion (FIL-112): worker + reconciler ─────────────
+    // Async teardown for self-serve account deletion. The delete-account
+    // route Event-invokes the worker; the reconciler cron re-drives records
+    // whose worker died mid-teardown and emits StuckAccountDeletionCount.
+    const accountDeletionWorker = createFn('AccountDeletionWorker', {
+      handler: 'packages/backend/src/jobs/account-deletion-worker.handler',
+      link: [
+        billingTable,
+        userInfoTable,
+        ragIndexerTable,
+        ragVectorBucket,
+        stripeSecretKey,
+        auroraBackofficeToken,
+        fthManagementApiToken,
+        ...mgmtRuntimeResources,
+      ],
+      environment: { ...orchestratorEnv, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      timeout: '900 seconds',
+      memory: '512 MB',
+      permissions: [
+        ...ragPermissions,
+        {
+          actions: ['ssm:GetParameter', 'ssm:DeleteParameter'],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
+        },
+      ],
+    });
+
+    const accountDeletionReconciler = createFn('AccountDeletionReconciler', {
+      handler: 'packages/backend/src/jobs/account-deletion-reconciler.handler',
+      link: [userInfoTable],
+      environment: {
+        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
+      },
+      timeout: '300 seconds',
+      memory: '256 MB',
+      permissions: [
+        {
+          actions: ['lambda:InvokeFunction'],
+          resources: [accountDeletionWorker.arn],
+        },
+      ],
+    });
+
+    new sst.aws.CronV2('AccountDeletionReconcilerCron', {
+      // run every 12 hours, offset from the usage (07/19), grace (08/20),
+      // drift (10/22), and RAG (03/09/15/21) crons.
+      schedule: 'cron(0 5/12 * * ? *)',
+      function: accountDeletionReconciler.arn,
+    });
+
+    addRoute({
+      method: 'POST',
+      routePath: '/api/account/delete-challenge',
+      handler: 'create-deletion-challenge',
+      extraLink: [...mgmtRuntimeResources, ...(sendGridApiKey ? [sendGridApiKey] : [])],
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+
+    addRoute({
+      method: 'POST',
+      routePath: '/api/account/delete',
+      handler: 'delete-account',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: {
+        AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
+        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
+      },
+      permissions: [
+        {
+          actions: ['lambda:InvokeFunction'],
+          resources: [accountDeletionWorker.arn],
+        },
+      ],
+      timeout: '30 seconds',
+    });
+
     // ── Subscription drift checker (cron-based, observe-only) ───────
     const subscriptionDriftChecker = createFn('SubscriptionDriftChecker', {
       handler: 'packages/backend/src/jobs/subscription-drift-checker.handler',
