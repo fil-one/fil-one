@@ -383,7 +383,7 @@ function DangerSection({ me }: { me: MeResponse }) {
           size="sm"
           onClick={() => setModalOpen(true)}
         >
-          Delete account…
+          Delete account
         </Button>
       </div>
       <DeleteAccountModal
