@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 
 vi.mock('sst', () => ({
@@ -9,10 +9,20 @@ vi.mock('sst', () => ({
   },
 }));
 
+// Full-chain gate tests exercise the REAL ragAccessMiddleware (allowlist check);
+// auth/subscription are stubbed to pass-through so the gate is tested in isolation.
+vi.mock('../middleware/auth.js', () => ({
+  authMiddleware: () => ({ before: () => undefined }),
+}));
+vi.mock('../middleware/subscription-guard.js', () => ({
+  AccessLevel: { Read: 'read', Write: 'write' },
+  subscriptionGuardMiddleware: () => ({ before: () => undefined }),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
-import { baseHandler } from './list-rag-api-keys.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { baseHandler, handler } from './list-rag-api-keys.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1', emailVerified: true };
 
@@ -90,5 +100,46 @@ describe('list-rag-api-keys baseHandler', () => {
 
     expect(result.statusCode).toBe(200);
     expect(JSON.parse(result.body ?? '{}')).toEqual({ keys: [] });
+  });
+});
+
+describe('list-rag-api-keys handler (allowlist gate)', () => {
+  const nonFoundationEvent = () =>
+    buildEvent({
+      userInfo: {
+        userId: 'user-1',
+        orgId: 'org-1',
+        email: 'outsider@example.com',
+        emailVerified: true,
+      },
+    });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+  });
+
+  it('returns 403 when the caller is not foundation and not allowlisted', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+
+    const result = await handler(nonFoundationEvent(), buildContext());
+
+    expect(result.statusCode).toBe(403);
+    // The org's keys are never queried once the gate denies.
+    expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(0);
+  });
+
+  it('allows an allowlisted caller to list keys', async () => {
+    ddbMock
+      .on(GetItemCommand, {
+        Key: { pk: { S: 'ALLOWLIST#outsider@example.com' }, sk: { S: 'RAG' } },
+      })
+      .resolves({ Item: marshall({ pk: 'ALLOWLIST#outsider@example.com', sk: 'RAG' }) });
+
+    const result = await handler(nonFoundationEvent(), buildContext());
+
+    expect(result.statusCode).toBe(200);
+    expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(1);
   });
 });
