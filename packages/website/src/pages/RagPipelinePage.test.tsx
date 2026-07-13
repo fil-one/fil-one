@@ -200,7 +200,7 @@ describe('RagPipelinePage — Buckets tab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Index' }));
 
     // Confirm modal opens with pricing + an Enable button.
-    expect(await screen.findByText('Enable RAG Pipeline?')).toBeInTheDocument();
+    expect(await screen.findByText('Enable Bucket Intelligence?')).toBeInTheDocument();
     expect(screen.getByText('$15 / TB / month')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
 
@@ -225,7 +225,7 @@ describe('RagPipelinePage — Buckets tab', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Disable' }));
 
     // Confirm modal opens; confirm the disable.
-    expect(await screen.findByText('Disable RAG Pipeline?')).toBeInTheDocument();
+    expect(await screen.findByText('Disable Bucket Intelligence?')).toBeInTheDocument();
     const dialog = screen.getByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Disable' }));
 
@@ -349,7 +349,7 @@ describe('RagPipelinePage — access gate', () => {
     );
 
     expect(
-      await screen.findByText('RAG Pipeline is not available for your account.'),
+      await screen.findByText('Bucket Intelligence is not available for your account.'),
     ).toBeInTheDocument();
     expect(mockListBuckets).not.toHaveBeenCalled();
   });
