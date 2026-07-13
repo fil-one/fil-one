@@ -61,9 +61,22 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     const body = (await response
       .clone()
       .json()
-      .catch(() => ({}))) as Partial<StepUpRequiredResponse>;
+      .catch(() => ({}))) as Partial<StepUpRequiredResponse> & { code?: string };
     if (body.error === 'step_up_required') {
       throw new StepUpRequiredError();
+    }
+    // FIL-112: a deleted account must land on the static confirmation page.
+    // Redirecting to /login instead would loop forever while the Auth0 SSO
+    // session silently re-authenticates the tombstoned identity.
+    if (body.code === ApiErrorCode.ACCOUNT_DELETED) {
+      if (!isRedirecting) {
+        isRedirecting = true;
+        window.location.href = '/account-deleted';
+      }
+      throw Object.assign(new Error('Account has been deleted'), {
+        status: 401,
+        code: ApiErrorCode.ACCOUNT_DELETED,
+      });
     }
     redirectToLogin();
     // Throw so the caller's promise chain stops — the page is navigating away
