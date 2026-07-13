@@ -6,7 +6,7 @@ import type {
   Context,
 } from 'aws-lambda';
 import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
-import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
@@ -25,16 +25,15 @@ import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
+import {
+  exchangeAndVerifyRefreshToken,
+  exchangeRefreshToken,
+  type NewTokens,
+} from '../lib/token-refresh.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface NewTokens {
-  access_token: string;
-  id_token: string;
-  refresh_token: string;
-}
 
 export interface AuthInternal extends Record<string, unknown> {
   newTokens?: NewTokens;
@@ -117,45 +116,6 @@ function emailNotVerifiedResponse(): APIGatewayProxyStructuredResultV2 {
       code: ApiErrorCode.EMAIL_NOT_VERIFIED,
     })
     .build();
-}
-
-/**
- * Exchange a refresh token for fresh access/id/refresh tokens.
- * Returns null if the refresh fails for any reason.
- */
-async function exchangeRefreshToken(refreshToken: string): Promise<NewTokens | null> {
-  const domain = process.env.AUTH0_DOMAIN!;
-  const secrets = getAuthSecrets();
-  try {
-    const res = await fetch(`https://${domain}/oauth/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: secrets.AUTH0_CLIENT_ID,
-        client_secret: secrets.AUTH0_CLIENT_SECRET,
-        refresh_token: refreshToken,
-      }).toString(),
-    });
-
-    if (res.ok) {
-      const tokens = (await res.json()) as {
-        access_token: string;
-        id_token: string;
-        refresh_token?: string;
-      };
-      return {
-        access_token: tokens.access_token,
-        id_token: tokens.id_token,
-        refresh_token: tokens.refresh_token ?? refreshToken,
-      };
-    }
-    const body = await res.text().catch(() => '');
-    console.warn('[auth] Token refresh failed', { status: res.status, body });
-  } catch (err) {
-    console.warn('[auth] Token refresh threw', { error: err });
-  }
-  return null;
 }
 
 function setCookiesFromTokens(
@@ -556,14 +516,17 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
 
     // Step 2: Attempt token refresh (always runs when forceRefresh=1)
     if (refreshToken) {
-      const tokens = await exchangeRefreshToken(refreshToken);
-      if (tokens) {
-        request.internal.newTokens = tokens;
-        request.internal.refreshToken = tokens.refresh_token;
-        const refreshedPayload = decodeJwt(tokens.access_token);
-        const refreshedSub = refreshedPayload.sub!;
+      const refreshed = await exchangeAndVerifyRefreshToken({
+        refreshToken,
+        jwks,
+        audience,
+        issuer,
+      });
+      if (refreshed) {
+        request.internal.newTokens = refreshed.tokens;
+        request.internal.refreshToken = refreshed.tokens.refresh_token;
         const refreshedClaims = await extractIdTokenClaims({
-          idToken: tokens.id_token,
+          idToken: refreshed.tokens.id_token,
           jwks,
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
@@ -571,7 +534,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
         request.internal.idTokenClaims = refreshedClaims;
         await attachIdentity({
           event,
-          sub: refreshedSub,
+          sub: refreshed.sub,
           email: refreshedClaims.email,
           emailVerified: refreshedClaims.emailVerified,
           name: refreshedClaims.name,
