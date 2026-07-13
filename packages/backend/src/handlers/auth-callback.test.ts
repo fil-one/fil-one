@@ -23,6 +23,12 @@ vi.mock('../lib/auth-secrets.js', () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
+const mockJwtVerify = vi.fn();
+vi.mock('jose', () => ({
+  jwtVerify: (token: unknown, jwks: unknown, opts: unknown) => mockJwtVerify(token, jwks, opts),
+  createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
+}));
+
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 
@@ -283,11 +289,6 @@ describe('auth-callback handler', () => {
 
   describe('when the sub belongs to a deleted account', () => {
     const SUB = 'auth0|deleted-user';
-    // decodeJwt only needs a valid base64url JSON payload.
-    const idTokenFor = (sub: string) =>
-      `${Buffer.from(JSON.stringify({ alg: 'RS256' })).toString('base64url')}.${Buffer.from(
-        JSON.stringify({ sub }),
-      ).toString('base64url')}.sig`;
 
     const validStateEvent = () =>
       buildEvent({
@@ -300,10 +301,29 @@ describe('auth-callback handler', () => {
         ok: true,
         json: async () => ({
           access_token: 'new-access-token',
-          id_token: idTokenFor(SUB),
+          id_token: 'signed-id-token',
           refresh_token: 'new-refresh-token',
         }),
       });
+      // The tombstone check verifies the id_token signature before trusting sub.
+      mockJwtVerify.mockResolvedValue({ payload: { sub: SUB } });
+    });
+
+    it('verifies the id_token against the tenant JWKS with the client audience', async () => {
+      await handler(validStateEvent(), stubContext);
+
+      expect(mockJwtVerify).toHaveBeenCalledWith('signed-id-token', 'mock-jwks', {
+        audience: 'test-client-id',
+        issuer: 'https://test.auth0.com/',
+      });
+    });
+
+    it('fails open when signature verification fails', async () => {
+      mockJwtVerify.mockRejectedValue(new Error('signature verification failed'));
+
+      const result = await handler(validStateEvent(), stubContext);
+
+      expect(result.headers!['Location']).toBe('https://app.example.com/dashboard');
     });
 
     it('redirects to /account-deleted without minting session cookies', async () => {

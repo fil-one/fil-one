@@ -2,7 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { decodeJwt } from 'jose';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from '@filone/shared';
 import { Resource } from 'sst';
 import {
@@ -88,7 +88,7 @@ async function baseHandler(
   // session cookies for a tombstoned identity — without this the SPA loops
   // forever: /me returns 401 ACCOUNT_DELETED, the client redirects to /login,
   // SSO re-issues tokens, and the callback lands it back in the app.
-  if (await isTombstonedIdentity(id_token)) {
+  if (await isTombstonedIdentity(id_token, domain, secrets.AUTH0_CLIENT_ID)) {
     return redirect(`${origin}/account-deleted`, [
       makeClearCookieHeader(OAUTH_STATE_COOKIE),
       ...makeClearAuthCookies(CSRF_COOKIE_NAME),
@@ -110,16 +110,34 @@ async function baseHandler(
   return redirect(`${origin}/dashboard`, responseCookies);
 }
 
+// Module-level JWKS cache — reused across Lambda warm starts (same pattern
+// as middleware/auth.ts).
+let cachedJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
+  if (cachedJWKS) return cachedJWKS;
+  cachedJWKS = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
+  return cachedJWKS;
+}
+
 /**
  * True when the token's sub maps to a tombstoned (deleted) identity row.
- * The id_token came straight from Auth0's token endpoint over TLS, so a
- * decode without signature verification is safe for this check. Fails open
- * on decode/DynamoDB errors: login must not gain a hard dependency here —
- * the auth middleware's own tombstone gate still backstops this path.
+ * The signature is verified against the tenant JWKS before the sub is
+ * trusted. Fails open on verification/DynamoDB errors: login must not gain
+ * a hard dependency here — the check only ever adds a restriction, and the
+ * auth middleware's own tombstone gate still backstops this path.
  */
-async function isTombstonedIdentity(idToken: string): Promise<boolean> {
+async function isTombstonedIdentity(
+  idToken: string,
+  domain: string,
+  clientId: string,
+): Promise<boolean> {
   try {
-    const sub = decodeJwt(idToken).sub;
+    const { payload } = await jwtVerify(idToken, getJWKS(domain), {
+      audience: clientId,
+      issuer: `https://${domain}/`,
+    });
+    const sub = payload.sub;
     if (!sub) return false;
     const { Item } = await getDynamoClient().send(
       new GetItemCommand({

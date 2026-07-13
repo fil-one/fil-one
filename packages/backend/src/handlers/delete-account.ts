@@ -211,11 +211,13 @@ async function applyFences(orgId: string, members: OrgDeletionMember[]): Promise
     }
 
     if (member.sub) {
+      // if_not_exists keeps the original deletion timestamp stable across
+      // idempotent re-confirms (and matches the worker's purge step).
       await dynamo.send(
         new UpdateItemCommand({
           TableName: Resource.UserInfoTable.name,
           Key: marshall({ pk: `SUB#${member.sub}`, sk: 'IDENTITY' }),
-          UpdateExpression: 'SET deleted = :true, deletedAt = :now',
+          UpdateExpression: 'SET deleted = :true, deletedAt = if_not_exists(deletedAt, :now)',
           ExpressionAttributeValues: marshall({ ':true': true, ':now': now }),
         }),
       );
