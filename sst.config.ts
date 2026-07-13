@@ -1008,7 +1008,10 @@ export default $config({
         userInfoTable,
         ragIndexerTable,
         ragVectorBucket,
+        // getBillingSecrets reads both Stripe secrets even though the worker
+        // only cancels subscriptions (same pairing as UsageReportingWorker).
         stripeSecretKey,
+        stripePriceId,
         auroraBackofficeToken,
         fthManagementApiToken,
         ...mgmtRuntimeResources,
