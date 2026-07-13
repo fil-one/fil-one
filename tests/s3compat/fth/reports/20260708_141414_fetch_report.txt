@@ -1,0 +1,27 @@
+======================================================================
+  Fetch
+  Script : fetch
+  Run    : 20260708_141414
+======================================================================
+
+SUMMARY
+  Total  : 6
+  OK     : 6
+  Failed : 0
+
+BY OPERATION
+  get_object_preview                 2 ok     0 failed  (   2 total)  avg 0.211s  stddev 0.020s  min 0.191s  max 0.230s
+  head_object                        2 ok     0 failed  (   2 total)  avg 0.370s  stddev 0.201s  min 0.169s  max 0.571s
+  list_versions                      2 ok     0 failed  (   2 total)  avg 0.164s  stddev 0.001s  min 0.163s  max 0.164s
+
+SUCCESSES
+  {"ts": "2026-07-08T12:14:15.299614+00:00", "op": "head_object", "status": "ok", "key": "gov-data/README.md", "elapsed_s": 0.571, "content_length": 5555, "content_type": "application/octet-stream", "last_modified": "2026-07-08 12:02:11+00:00", "etag": "1256826d336c6689c73c3e1a52e34b19", "version_id": null, "metadata": {}}
+  {"ts": "2026-07-08T12:14:15.491199+00:00", "op": "get_object_preview", "status": "ok", "key": "gov-data/README.md", "elapsed_s": 0.191, "content_length": 1024, "content_type": "application/octet-stream", "etag": "1256826d336c6689c73c3e1a52e34b19", "version_id": null, "preview_bytes_read": 1024, "preview_hex_sample": "3c696d67207372633d2268747470733a2f2f646174612e736f757263652e636f6f702f686172766172642d6c696c2f676f762d646174612f646f63732f4c494c"}
+  {"ts": "2026-07-08T12:14:15.654298+00:00", "op": "list_versions", "status": "ok", "key": "gov-data/README.md", "version_count": 1, "versions": [{"version_id": "null", "last_modified": "2026-07-08 12:02:11+00:00", "etag": "1256826d336c6689c73c3e1a52e34b19", "size": 5555, "is_latest": true}], "elapsed_s": 0.163}
+  {"ts": "2026-07-08T12:14:15.823711+00:00", "op": "head_object", "status": "ok", "key": "gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip", "elapsed_s": 0.169, "content_length": 740853, "content_type": "application/octet-stream", "last_modified": "2026-07-08 12:02:14+00:00", "etag": "e23c5682f81e05aa47b7885ef44fc7b1", "version_id": null, "metadata": {}}
+  {"ts": "2026-07-08T12:14:16.054814+00:00", "op": "get_object_preview", "status": "ok", "key": "gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip", "elapsed_s": 0.23, "content_length": 1024, "content_type": "application/octet-stream", "etag": "e23c5682f81e05aa47b7885ef44fc7b1", "version_id": null, "preview_bytes_read": 1024, "preview_hex_sample": "504b03041400000008008066915990fa58cb39000000370000000900000062616769742e747874734a4cf72cd10d4b2d2acecccfb35230d0b334e70a494cd775"}
+  {"ts": "2026-07-08T12:14:16.219226+00:00", "op": "list_versions", "status": "ok", "key": "gov-data/collections/data_gov/-511-event-extents-6f436/v1.zip", "version_count": 1, "versions": [{"version_id": "null", "last_modified": "2026-07-08 12:02:14+00:00", "etag": "e23c5682f81e05aa47b7885ef44fc7b1", "size": 740853, "is_latest": true}], "elapsed_s": 0.164}
+
+Log files:
+  Success : ../logs/20260708_141414_fetch_success.jsonl
+  Errors  : ../logs/20260708_141414_fetch_errors.jsonl
