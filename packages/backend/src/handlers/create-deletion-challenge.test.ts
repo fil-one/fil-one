@@ -10,7 +10,7 @@ vi.mock('sst', () => ({
 }));
 
 const mockReadDeletionRecord = vi.fn();
-vi.mock('../lib/account-deletion.js', () => ({
+vi.mock('../lib/deletion-record.js', () => ({
   readDeletionRecord: (orgId: string) => mockReadDeletionRecord(orgId),
 }));
 

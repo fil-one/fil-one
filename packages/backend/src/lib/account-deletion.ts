@@ -2,7 +2,6 @@ import {
   BatchWriteItemCommand,
   ConditionalCheckFailedException,
   DeleteItemCommand,
-  GetItemCommand,
   PutItemCommand,
   QueryCommand,
   ScanCommand,
@@ -16,6 +15,7 @@ import { Resource } from 'sst';
 import { deleteAuth0User } from './auth0-management.js';
 import { getDynamoClient } from './ddb-client.js';
 import { deleteDeletionChallenge } from './deletion-challenge.js';
+import { readDeletionRecord } from './deletion-record.js';
 import {
   DeletionKeys,
   OrgDeletionStatus,
@@ -339,17 +339,6 @@ async function finalize(
 // ---------------------------------------------------------------------------
 // Record + Dynamo helpers
 // ---------------------------------------------------------------------------
-
-export async function readDeletionRecord(orgId: string): Promise<OrgDeletionRecord | undefined> {
-  const { Item } = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
-      ConsistentRead: true,
-    }),
-  );
-  return Item ? (unmarshall(Item) as OrgDeletionRecord) : undefined;
-}
 
 async function bumpAttemptCount(orgId: string): Promise<void> {
   await dynamo.send(
