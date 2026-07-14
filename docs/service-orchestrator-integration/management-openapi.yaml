@@ -493,15 +493,7 @@ components:
     Tenant:
       type: object
       required:
-        [
-          tenantId,
-          status,
-          bucketCount,
-          bucketLimit,
-          accessKeyCount,
-          accessKeyLimit,
-          createdAt,
-        ]
+        [tenantId, status, bucketCount, bucketLimit, accessKeyCount, accessKeyLimit, createdAt]
       properties:
         tenantId:
           $ref: '#/components/schemas/TenantId'
