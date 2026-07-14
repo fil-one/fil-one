@@ -15,7 +15,7 @@ import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { email, emailVerified } = getUserInfo(event);
+  const { email } = getUserInfo(event);
 
   let body: unknown;
   try {
@@ -35,10 +35,10 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  if (!email || !emailVerified) {
+  if (!email) {
     return new ResponseBuilder()
       .status(400)
-      .body<ErrorResponse>({ message: 'Email missing or not verified' })
+      .body<ErrorResponse>({ message: 'Email missing' })
       .build();
   }
 
