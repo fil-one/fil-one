@@ -164,16 +164,6 @@ describe('getMarketingPreference', () => {
     await expect(getMarketingPreference('user@example.com')).resolves.toBe(false);
   });
 
-  it('falls back to the boolean `subscribed` field when present', async () => {
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        subscriptionStatuses: [{ id: 2233676376, subscribed: true }],
-      }),
-    );
-
-    await expect(getMarketingPreference('user@example.com')).resolves.toBe(true);
-  });
-
   it('throws on non-404 non-2xx responses', async () => {
     mockFetch.mockResolvedValueOnce(fail(500, 'boom'));
 

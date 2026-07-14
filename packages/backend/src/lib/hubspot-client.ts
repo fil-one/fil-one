@@ -80,8 +80,5 @@ export async function getMarketingPreference(email: string): Promise<boolean> {
   );
   if (!status) return false;
 
-  // 2026-03 returns a `status` string ("SUBSCRIBED"/"UNSUBSCRIBED"/"NOT_OPTED");
-  // older payloads use a boolean `subscribed`. Support both defensively.
-  if (typeof status.subscribed === 'boolean') return status.subscribed;
   return status.status === 'SUBSCRIBED';
 }
