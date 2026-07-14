@@ -14,7 +14,7 @@ import {
 import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { IconBox } from '../components/IconBox';
-import { Heading } from '../components/Heading/Heading';
+import { PageLayout } from '../components/PageLayout.js';
 import { ProgressBar } from '../components/ProgressBar';
 import { useToast } from '../components/Toast';
 import { formatBytes } from '@filone/shared';
@@ -28,6 +28,7 @@ import { ChoosePlanDialog } from '../components/billing/ChoosePlanDialog.js';
 import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
 import { ContactSalesDialog } from '../components/billing/ContactSalesDialog.js';
 import { queryKeys } from '../lib/query-client.js';
+import { Overline } from '../components/Overline';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -162,6 +163,14 @@ export function BillingPage() {
     }
   }
 
+  async function refreshSetupIntent(): Promise<string> {
+    const { clientSecret: cs } = await apiRequest<CreateSetupIntentResponse>(
+      '/billing/setup-intent',
+      { method: 'POST' },
+    );
+    return cs;
+  }
+
   async function handleSelectPayAsYouGo() {
     setPlanOpen(false);
 
@@ -213,12 +222,7 @@ export function BillingPage() {
 
   if (loading && !billing) {
     return (
-      <div className="px-10 pt-10">
-        <div className="mb-6">
-          <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
-            Billing
-          </Heading>
-        </div>
+      <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
         <div className="flex gap-6">
           <div className="flex-1 flex flex-col gap-4">
             <SkeletonCard height="h-40" />
@@ -229,35 +233,28 @@ export function BillingPage() {
             <SkeletonCard height="h-80" />
           </div>
         </div>
-      </div>
+      </PageLayout>
     );
   }
 
   if (error && !billing) {
     return (
-      <div className="px-10 pt-10">
-        <div className="mb-6">
-          <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
-            Billing
-          </Heading>
-        </div>
+      <PageLayout title="Billing" description="Manage your plan, usage, and payment methods">
         <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
           Failed to load billing information: {error}
         </div>
-      </div>
+      </PageLayout>
     );
   }
 
   // ── Render ───────────────────────────────────────────────────────
 
   return (
-    <div className="px-10 pt-10">
-      <div className="mb-6">
-        <Heading tag="h1" size="xl" description="Manage your plan, usage, and payment methods">
-          Billing
-        </Heading>
-      </div>
-
+    <PageLayout
+      title="Billing"
+      headingId="billing-heading"
+      description="Manage your plan, usage, and payment methods"
+    >
       {/* Past due warning banner */}
       {isPastDue && (
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
@@ -272,17 +269,16 @@ export function BillingPage() {
         </div>
       )}
 
-      {/* Grace period warning banner */}
-      {isGracePeriod && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <WarningIcon size={20} className="text-amber-600 flex-shrink-0" weight="fill" />
-          <span className="text-sm text-amber-800">
-            {isTrialExpiredGrace
-              ? `Your free trial has expired.${graceDays !== null ? ` ${graceDays} days remaining` : ''} to upgrade or download your data.`
-              : `Subscription canceled.${graceDays !== null ? ` ${graceDays} days remaining` : ''} to reactivate or download your data.`}{' '}
+      {/* Canceled banner */}
+      {isCanceled && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <WarningIcon size={20} className="text-red-600 flex-shrink-0" weight="fill" />
+          <span className="text-sm text-red-800">
+            Your account has been canceled.{' '}
             <button type="button" onClick={handleUpgradeClick} className="font-semibold underline">
-              {isTrialExpiredGrace ? 'Upgrade now' : 'Reactivate'}
-            </button>
+              Reactivate
+            </button>{' '}
+            to regain access.
           </span>
         </div>
       )}
@@ -295,9 +291,11 @@ export function BillingPage() {
             className={`rounded-lg border bg-white flex flex-col gap-4 py-4 px-5 shadow-sm ${
               isActive || isPastDue
                 ? 'border-green-200'
-                : isCanceled
-                  ? 'border-red-200'
-                  : 'border-brand-200'
+                : isGracePeriod
+                  ? 'border-amber-200'
+                  : isCanceled
+                    ? 'border-red-200'
+                    : 'border-brand-200'
             }`}
           >
             <div className="flex items-center justify-between">
@@ -321,7 +319,11 @@ export function BillingPage() {
               </div>
 
               {/* Status badge */}
-              <div className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-2"
+                data-testid="subscription-status"
+                data-status={billing?.subscription.status}
+              >
                 {isTrialing && (
                   <Badge color="blue" size="sm" weight="medium" dot>
                     Active
@@ -351,7 +353,12 @@ export function BillingPage() {
                 <p className="text-[13px] font-medium text-zinc-900">
                   Ready to unlock unlimited storage?
                 </p>
-                <Button variant="ghost" size="sm" onClick={handleUpgradeClick}>
+                <Button
+                  id="billing-upgrade-button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleUpgradeClick}
+                >
                   Upgrade
                 </Button>
               </div>
@@ -361,7 +368,12 @@ export function BillingPage() {
             {(isActive || isPastDue) && (
               <div className="flex items-center justify-between border-t border-zinc-100 pt-3">
                 <span className="text-[12px] text-zinc-500">Billed monthly</span>
-                <Button variant="ghost" size="sm" onClick={handleUpdatePayment}>
+                <Button
+                  id="billing-manage-plan-button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleUpdatePayment}
+                >
                   Manage plan
                 </Button>
               </div>
@@ -377,7 +389,7 @@ export function BillingPage() {
                 }`}
               >
                 <p
-                  className={`text-[13px] font-medium ${isCanceled ? 'text-red-800' : 'text-zinc-900'}`}
+                  className={`text-[13px] font-medium ${isCanceled ? 'text-red-800' : isGracePeriod ? 'text-amber-800' : 'text-zinc-900'}`}
                 >
                   {isCanceled
                     ? 'Reactivate your subscription to regain full access'
@@ -386,7 +398,8 @@ export function BillingPage() {
                       : 'Reactivate your subscription to restore full access'}
                 </p>
                 <Button
-                  variant={isCanceled ? 'destructive' : 'primary'}
+                  id="billing-reactivate-button"
+                  variant={isCanceled ? 'destructive' : 'warning'}
                   size="sm"
                   icon={ArrowRightIcon}
                   iconPosition="right"
@@ -485,7 +498,12 @@ export function BillingPage() {
                     {String(billing.paymentMethod.expYear).slice(-2)}
                   </p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={handleUpdatePayment}>
+                <Button
+                  id="billing-update-payment-button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleUpdatePayment}
+                >
                   Update
                 </Button>
               </div>
@@ -494,6 +512,7 @@ export function BillingPage() {
                 <IconBox icon={CreditCardIcon} color="grey" size="sm" />
                 <span className="flex-1 text-[13px] text-zinc-500">No payment method added</span>
                 <Button
+                  id="billing-add-payment-button"
                   variant="ghost"
                   size="sm"
                   icon={CreditCardIcon}
@@ -542,6 +561,8 @@ export function BillingPage() {
                   {invoices.invoices.map((inv, idx) => (
                     <div
                       key={inv.id}
+                      data-testid="invoice-row"
+                      data-invoice-id={inv.id}
                       className={`flex items-center justify-between py-3 ${
                         idx > 0 ? 'border-t border-zinc-200' : ''
                       }`}
@@ -582,9 +603,7 @@ export function BillingPage() {
           <div className="rounded-lg border border-zinc-200 bg-white shadow-sm overflow-hidden p-px">
             {/* Header */}
             <div className="flex flex-col gap-[6px] px-4 pt-4 pb-[13px] border-b border-zinc-200/50 bg-zinc-50">
-              <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-zinc-500">
-                Pay-as-you-go
-              </p>
+              <Overline>Pay-as-you-go</Overline>
               <div className="flex items-baseline gap-1">
                 <span className="text-3xl font-bold leading-9 text-zinc-900">$4.99</span>
                 <span className="text-[12px] leading-[18px] text-zinc-500">/ TB / month</span>
@@ -613,6 +632,7 @@ export function BillingPage() {
               {/* CTA for trial / grace / canceled users */}
               {(isTrialing || isGracePeriod || isCanceled) && (
                 <Button
+                  id="billing-plan-cta-button"
                   variant="primary"
                   icon={LightningIcon}
                   onClick={handleUpgradeClick}
@@ -626,9 +646,7 @@ export function BillingPage() {
 
           {/* Need more? section */}
           <div className="flex flex-col gap-1 mt-5 px-1">
-            <p className="text-[11px] font-medium uppercase tracking-[0.55px] leading-[16.5px] text-zinc-500">
-              Need more?
-            </p>
+            <Overline>Need more?</Overline>
             <p className="text-[12px] leading-[19.5px] text-zinc-500">
               The <strong className="font-medium text-zinc-900">Business plan</strong> offers volume
               discounts, SLA guarantees, and dedicated support.
@@ -661,9 +679,10 @@ export function BillingPage() {
         onClose={() => setPaymentOpen(false)}
         onBack={handlePaymentBack}
         onSuccess={handlePaymentSuccess}
+        onRefreshSetupIntent={refreshSetupIntent}
       />
 
       <ContactSalesDialog open={contactSalesOpen} onClose={() => setContactSalesOpen(false)} />
-    </div>
+    </PageLayout>
   );
 }

@@ -2,24 +2,30 @@ import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { Resource } from 'sst';
-import { GB_BYTES, TRIAL_STORAGE_LIMIT, TRIAL_EGRESS_LIMIT, formatBytes } from '@filone/shared';
-import { getStripeClient, updateCustomerMetadata } from '../lib/stripe-client.js';
 import {
-  getStorageSamples,
-  getOperationsSamples,
-  getTenantInfo,
-  updateTenantStatus,
-} from '../lib/aurora-backoffice.js';
-import type { ModelsTenantStatus } from '../lib/aurora-backoffice.js';
-import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
+  GB_BYTES,
+  TRIAL_STORAGE_LIMIT,
+  TRIAL_EGRESS_LIMIT,
+  formatBytes,
+  TenantStatus,
+} from '@filone/shared';
+import { getStripeClient, updateCustomerMetadata } from '../lib/stripe-client.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
-import { calculateAverageUsage } from '../lib/usage-calculator.js';
+import {
+  calculateAverageUsage,
+  mergeStorageSamples,
+  sortStorageSamplesByTimestamp,
+} from '../lib/usage-calculator.js';
+import type { TenantUsageMetrics } from '../lib/service-orchestrator.js';
+import {
+  getProvisionedRegions,
+  syncTenantStatusInProvisionedRegions,
+} from '../lib/region-helpers.js';
 
 const dynamo = getDynamoClient();
 
 export interface UsageReportingWorkerPayload {
   orgId: string;
-  auroraTenantId: string;
   orgName?: string;
   subscriptionId: string;
   stripeCustomerId: string;
@@ -28,48 +34,58 @@ export interface UsageReportingWorkerPayload {
   reportDate: string;
 }
 
+interface AggregateUsage {
+  averageStorageBytesUsed: number;
+  currentStorageBytes: number;
+  totalEgressBytes: number;
+  sampleCount: number;
+}
+
 async function enforceTenantLocks({
-  tenantId,
   orgId,
-  currentStatus,
   currentStorageBytes,
   totalEgressBytes,
 }: {
-  tenantId: string;
   orgId: string;
-  currentStatus: ModelsTenantStatus | undefined;
   currentStorageBytes: number;
   totalEgressBytes: number;
-}): Promise<ModelsTenantStatus> {
-  // Determine desired status (DISABLED > WRITE_LOCKED > ACTIVE)
-  let desiredStatus: ModelsTenantStatus;
+}): Promise<string> {
+  // Determine desired status (disabled > write-locked > active).
+  let desired: TenantStatus;
   if (totalEgressBytes >= TRIAL_EGRESS_LIMIT) {
-    desiredStatus = 'DISABLED';
+    desired = 'disabled';
   } else if (currentStorageBytes >= TRIAL_STORAGE_LIMIT) {
-    desiredStatus = 'WRITE_LOCKED';
+    desired = 'write-locked';
   } else {
-    desiredStatus = 'ACTIVE';
+    desired = 'active';
   }
 
-  if (desiredStatus !== currentStatus) {
-    console.log('[usage-worker] Updating tenant status', {
-      tenantId,
-      from: currentStatus,
-      to: desiredStatus,
+  const outcomes = await syncTenantStatusInProvisionedRegions(orgId, desired);
+
+  const updated = outcomes.filter((o) => o.outcome === 'updated');
+  if (updated.length > 0) {
+    console.log('[usage-worker] Updated tenant status', {
+      orgId,
+      to: desired,
+      regions: updated.map((o) => o.orchestratorId),
       currentStorageBytes,
       totalEgressBytes,
     });
-    await updateTenantStatus({ tenantId, status: desiredStatus });
-    await setOrgAuroraTenantStatus(orgId, desiredStatus);
   }
 
-  return desiredStatus;
+  const failed = outcomes.filter((o) => o.outcome === 'error');
+  if (failed.length > 0) {
+    // Per-region details were already logged by the sync helper. A failed
+    // region still differs from the desired status, so the next run retries it.
+    return `error:sync-failed:${failed.map((o) => o.orchestratorId).join(',')}`;
+  }
+
+  return desired;
 }
 
 export async function handler(event: UsageReportingWorkerPayload): Promise<void> {
   const {
     orgId,
-    auroraTenantId,
     orgName,
     subscriptionId,
     stripeCustomerId,
@@ -86,31 +102,33 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const now = new Date().toISOString();
   const isTrial = subscriptionStatus === 'trialing';
 
-  // Fetch storage, egress, and (for trials) tenant info in parallel
-  let storageSamples: Awaited<ReturnType<typeof getStorageSamples>>;
-  let operationsSamples: Awaited<ReturnType<typeof getOperationsSamples>>;
-  let tenantInfo: Awaited<ReturnType<typeof getTenantInfo>> | null;
+  // Resolve which regions this org is provisioned in by asking each
+  // stage-available orchestrator to resolve its tenant id (side-effect-free).
+  // Each region is then fetched independently, aggregated, and reported on the
+  // org-level.
+  const orgRegions = await getProvisionedRegions(orgId);
+
+  if (orgRegions.length === 0) {
+    console.warn('[usage-worker] Org not provisioned in any available region, skipping', { orgId });
+    return;
+  }
+
+  let usageMetrics: TenantUsageMetrics[];
   try {
-    [storageSamples, operationsSamples, tenantInfo] = await Promise.all([
-      getStorageSamples({
-        tenantId: auroraTenantId,
-        from: currentPeriodStart,
-        to: now,
-        window: '1h',
-      }),
-      getOperationsSamples({
-        tenantId: auroraTenantId,
-        from: currentPeriodStart,
-        to: now,
-        window: '24h',
-      }),
-      isTrial ? getTenantInfo({ tenantId: auroraTenantId }) : null,
-    ]);
+    usageMetrics = await Promise.all(
+      orgRegions.map((t) =>
+        t.orchestrator.getTenantUsageMetrics(t.tenantId, {
+          from: currentPeriodStart,
+          to: now,
+          interval: '1d',
+        }),
+      ),
+    );
   } catch (error) {
     const e = error as Error & { cause?: unknown };
-    console.error('[usage-worker] Aurora fetch failed', {
+    console.error('[usage-worker] Usage metrics fetch failed', {
       orgId,
-      auroraTenantId,
+      regions: orgRegions.map((r) => ({ region: r.orchestrator.region, tenantId: r.tenantId })),
       subscriptionId,
       message: e.message,
       cause: e.cause,
@@ -119,13 +137,8 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     throw error;
   }
 
-  const usage = calculateAverageUsage(storageSamples);
-  const averageStorageGbUsed = usage.averageStorageBytesUsed / GB_BYTES;
-  const currentStorageBytes = storageSamples.at(-1)?.bytesUsed ?? 0;
-  const totalEgressBytes = operationsSamples.reduce(
-    (sum, sample) => sum + (sample.txBytes ?? 0),
-    0,
-  );
+  const aggregate = aggregateUsageMetrics(usageMetrics);
+  const averageStorageGbUsed = aggregate.averageStorageBytesUsed / GB_BYTES;
 
   const { reported } = await reportStorageToStripe({
     orgId,
@@ -138,18 +151,15 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const orgSyncAction = await syncOrgMetadata({
     stripeCustomerId,
     orgName,
-    currentStorageBytes,
+    currentStorageBytes: aggregate.currentStorageBytes,
   });
 
-  const lockAction = isTrial
-    ? await safeEnforceTrialLocks({
-        tenantId: auroraTenantId,
-        orgId,
-        currentStatus: tenantInfo!.status,
-        currentStorageBytes,
-        totalEgressBytes,
-      })
-    : 'skipped:paid';
+  const lockAction = await resolveLockAction({
+    isTrial,
+    orgId,
+    currentStorageBytes: aggregate.currentStorageBytes,
+    totalEgressBytes: aggregate.totalEgressBytes,
+  });
 
   await writeUsageAuditRecord({
     orgId,
@@ -158,14 +168,56 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     currentPeriodStart,
     subscriptionStatus,
     reportDate,
-    averageStorageBytesUsed: usage.averageStorageBytesUsed,
+    averageStorageBytesUsed: aggregate.averageStorageBytesUsed,
     averageStorageGbUsed,
-    totalEgressBytes,
-    sampleCount: usage.sampleCount,
+    totalEgressBytes: aggregate.totalEgressBytes,
+    sampleCount: aggregate.sampleCount,
     lockAction,
     reportedToStripe: reported,
     orgSyncAction,
   });
+}
+
+/**
+ * Aggregates per-region data into org-level totals. The storage average is
+ * computed by merging the regions' time series (carrying forward each region's
+ * last value) and averaging once — summing per-region means skews billing when
+ * series are misaligned.
+ */
+function aggregateUsageMetrics(usageMetrics: TenantUsageMetrics[]): AggregateUsage {
+  const sortedStorageMetrics = usageMetrics.map((r) => sortStorageSamplesByTimestamp(r.storage));
+  const averageUsage = calculateAverageUsage(mergeStorageSamples(sortedStorageMetrics));
+  const currentStorageBytes = sortedStorageMetrics.reduce(
+    (sum, r) => sum + (r.at(-1)?.bytesUsed ?? 0),
+    0,
+  );
+  const totalEgressBytes = usageMetrics.reduce(
+    (sum, r) => sum + r.egress.reduce((s, e) => s + (e.bytesUsed ?? 0), 0),
+    0,
+  );
+  return {
+    averageStorageBytesUsed: averageUsage.averageStorageBytesUsed,
+    currentStorageBytes,
+    totalEgressBytes,
+    // Number of distinct timestamps the org-level average is computed over.
+    sampleCount: averageUsage.sampleCount,
+  };
+}
+
+/**
+ * Trial lock enforcement applies to every provisioned region. Each region's
+ * live status is probed via its own orchestrator and reconciled with the
+ * desired status (syncTenantStatusInProvisionedRegions), so partial failures
+ * self-heal on the next run.
+ */
+async function resolveLockAction(params: {
+  isTrial: boolean;
+  orgId: string;
+  currentStorageBytes: number;
+  totalEgressBytes: number;
+}): Promise<string> {
+  if (!params.isTrial) return 'skipped:paid';
+  return safeEnforceTrialLocks(params);
 }
 
 // Stripe SDK errors expose `code` on the error object; matches StripeInvalidRequestError 404s.
@@ -213,9 +265,7 @@ async function reportStorageToStripe(params: {
 }
 
 async function safeEnforceTrialLocks(params: {
-  tenantId: string;
   orgId: string;
-  currentStatus: ModelsTenantStatus | undefined;
   currentStorageBytes: number;
   totalEgressBytes: number;
 }): Promise<string> {

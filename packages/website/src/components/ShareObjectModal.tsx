@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowClockwiseIcon, LinkIcon } from '@phosphor-icons/react/dist/ssr';
 import { clsx } from 'clsx';
+import type { S3Region } from '@filone/shared';
 
 import { Button } from './Button';
 import { CopyButton } from './CopyButton';
@@ -21,6 +22,7 @@ export type ShareObjectModalProps = {
   open: boolean;
   onClose: () => void;
   bucketName: string;
+  region: S3Region;
   objectKey: string;
   versionId?: string;
 };
@@ -39,13 +41,14 @@ export function ShareObjectModal({
   open,
   onClose,
   bucketName,
+  region,
   objectKey,
   versionId,
 }: ShareObjectModalProps) {
   const [selected, setSelected] = useState<ExpiryOption>(DEFAULT_OPTION);
   const [generated, setGenerated] = useState<{ url: string; expiresAt: string } | null>(null);
 
-  const { generatePresignedUrl, generatingUrl } = useObjectActions({ bucketName });
+  const { generatePresignedUrl, generatingUrl } = useObjectActions({ bucketName, region });
 
   useEffect(() => {
     if (!open) {
@@ -92,7 +95,7 @@ export function ShareObjectModal({
   }
 
   return (
-    <Modal open={open} onClose={onClose} size="sm">
+    <Modal open={open} onClose={onClose} size="sm" testId="share-object-modal">
       <ModalHeader description={description} onClose={onClose}>
         Share object
       </ModalHeader>
@@ -101,10 +104,16 @@ export function ShareObjectModal({
         <ExpirySelector selected={selected} onSelect={setSelected} disabled={generatingUrl} />
       </ModalBody>
       <ModalFooter fullWidth>
-        <Button variant="ghost" onClick={onClose} disabled={generatingUrl}>
+        <Button
+          id="share-object-cancel-button"
+          variant="ghost"
+          onClick={onClose}
+          disabled={generatingUrl}
+        >
           Cancel
         </Button>
         <Button
+          id="share-object-generate-button"
           variant="primary"
           icon={LinkIcon}
           onClick={() => void handleGenerate(selected)}

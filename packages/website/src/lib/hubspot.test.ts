@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { submitContactSalesForm, submitSupportForm } from './hubspot.js';
+import {
+  submitAgentToolkitWaitlistForm,
+  submitContactSalesForm,
+  submitSupportForm,
+  submitWaitlistForm,
+} from './hubspot.js';
 
 // ---------------------------------------------------------------------------
 // Setup — mock fetch to prevent real API calls
@@ -255,5 +260,152 @@ describe('submitContactSalesForm', () => {
         email: 'jane@acme.com',
       }),
     ).rejects.toThrow('HubSpot submission failed (422)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Waitlist forms (read document.cookie for the HubSpot tracking cookie)
+// ---------------------------------------------------------------------------
+
+const WAITLIST_FORM_ID = '39527548-1773-4541-beed-eee6225ae3b2';
+const TOOLKIT_FORM_ID = '4857a0c6-a4a5-459c-bf37-a56d452c7442';
+
+describe('submitWaitlistForm (Bucket Intelligence)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('document', { cookie: '' });
+  });
+
+  it('sends the correct RAG payload with all fields in order', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitWaitlistForm({
+      formId: WAITLIST_FORM_ID,
+      firstName: 'Jane',
+      lastName: 'Doe',
+      email: 'jane@acme.com',
+      primaryUseCase: 'Document Q&A',
+      ragProvider: 'LangChain',
+      timeline: 'Actively building now',
+      teamSize: '2-10 people',
+      storageAmount: '25 - 50 TB',
+      notes: 'Some notes',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(hubspotUrl(WAITLIST_FORM_ID), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: [
+          { name: 'firstname', value: 'Jane' },
+          { name: 'lastname', value: 'Doe' },
+          { name: 'email', value: 'jane@acme.com' },
+          { name: 'primary_use_case', value: 'Document Q&A' },
+          { name: 'how_are_you_handling_rag_today', value: 'LangChain' },
+          { name: 'timeline', value: 'Actively building now' },
+          { name: 'team_size', value: '2-10 people' },
+          { name: 'amount_of_storage_rag', value: '25 - 50 TB' },
+          { name: 'notes', value: 'Some notes' },
+        ],
+        context: { pageUri: 'https://app.fil.one/support' },
+      }),
+    });
+  });
+
+  it('throws when the response is not ok', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 400 });
+
+    await expect(
+      submitWaitlistForm({
+        formId: WAITLIST_FORM_ID,
+        firstName: 'Jane',
+        lastName: 'Doe',
+        email: 'jane@acme.com',
+        primaryUseCase: '',
+        ragProvider: '',
+        timeline: '',
+        teamSize: '',
+        storageAmount: '',
+        notes: '',
+      }),
+    ).rejects.toThrow('Waitlist submission failed');
+  });
+});
+
+describe('submitAgentToolkitWaitlistForm', () => {
+  beforeEach(() => {
+    vi.stubGlobal('document', { cookie: '' });
+  });
+
+  it('sends the correct payload, joining tools and including other_tool', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitAgentToolkitWaitlistForm({
+      formId: TOOLKIT_FORM_ID,
+      firstName: 'Jane',
+      lastName: 'Doe',
+      email: 'jane@acme.com',
+      tools: ['Claude', 'Cursor', 'Other'],
+      otherTool: 'Windsurf',
+      timeline: 'Actively building now',
+      teamSize: '2-10 people',
+      notes: 'Building an agent',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(hubspotUrl(TOOLKIT_FORM_ID), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: [
+          { name: 'firstname', value: 'Jane' },
+          { name: 'lastname', value: 'Doe' },
+          { name: 'email', value: 'jane@acme.com' },
+          { name: 'ai_tools', value: 'Claude;Cursor;Other' },
+          { name: 'ai_toolkit_timeline', value: 'Actively building now' },
+          { name: 'team_size', value: '2-10 people' },
+          { name: 'ai_toolkit_notes', value: 'Building an agent' },
+          { name: 'other_tool', value: 'Windsurf' },
+        ],
+        context: { pageUri: 'https://app.fil.one/support' },
+      }),
+    });
+  });
+
+  it('omits other_tool when the value is empty or whitespace', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitAgentToolkitWaitlistForm({
+      formId: TOOLKIT_FORM_ID,
+      firstName: 'Jane',
+      lastName: 'Doe',
+      email: 'jane@acme.com',
+      tools: ['Claude'],
+      otherTool: '   ',
+      timeline: 'Just exploring',
+      teamSize: 'Just me',
+      notes: '',
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const otherToolField = body.fields.find((f: { name: string }) => f.name === 'other_tool');
+
+    expect(otherToolField).toBeUndefined();
+  });
+
+  it('throws when the response is not ok', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 500 });
+
+    await expect(
+      submitAgentToolkitWaitlistForm({
+        formId: TOOLKIT_FORM_ID,
+        firstName: 'Jane',
+        lastName: 'Doe',
+        email: 'jane@acme.com',
+        tools: [],
+        otherTool: '',
+        timeline: '',
+        teamSize: '',
+        notes: '',
+      }),
+    ).rejects.toThrow('Waitlist submission failed');
   });
 });

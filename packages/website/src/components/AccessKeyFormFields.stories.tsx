@@ -13,13 +13,18 @@ import { AccessKeyFormFields } from './AccessKeyFormFields';
 const mockBuckets: ListBucketsResponse = {
   buckets: [
     {
-      name: 'my-bucket',
-      region: 'us-midwest-1',
+      bucketName: 'my-bucket',
+      region: 'us-east-1',
       createdAt: '2026-01-15T00:00:00Z',
       isPublic: false,
     },
-    { name: 'backups', region: 'us-midwest-1', createdAt: '2026-02-20T00:00:00Z', isPublic: false },
-    { name: 'media', region: 'eu-west-1', createdAt: '2026-03-01T00:00:00Z', isPublic: true },
+    {
+      bucketName: 'backups',
+      region: 'us-east-1',
+      createdAt: '2026-02-20T00:00:00Z',
+      isPublic: false,
+    },
+    { bucketName: 'media', region: 'eu-west-1', createdAt: '2026-03-01T00:00:00Z', isPublic: true },
   ],
 };
 

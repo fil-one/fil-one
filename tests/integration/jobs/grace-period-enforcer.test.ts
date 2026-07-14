@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { SubscriptionStatus } from '@filone/shared';
 import { seedBillingRecord, getBillingRecord, deleteBillingRecord } from '../helpers.ts';
-import { invokeEnforcer, seedOrgProfile, getOrgProfile, deleteOrgProfile } from './helpers.ts';
+import { invokeEnforcer, seedOrgProfile, deleteOrgProfile } from './helpers.ts';
 
 function pastDate(daysAgo: number): string {
   return new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
@@ -33,17 +33,13 @@ describe('expired grace period → canceled + DISABLED', () => {
     await deleteOrgProfile(orgId);
   });
 
-  it('transitions to canceled status and sets auroraTenantStatus to DISABLED', async () => {
+  it('transitions an expired grace period to canceled', async () => {
     const result = await invokeEnforcer();
     expect(result.functionError).toBeUndefined();
 
     const record = await getBillingRecord(userId);
     expect(record).not.toBeNull();
     expect(record!.subscriptionStatus?.S).toBe(SubscriptionStatus.Canceled);
-
-    const profile = await getOrgProfile(orgId);
-    expect(profile).not.toBeNull();
-    expect(profile!.auroraTenantStatus?.S).toBe('DISABLED');
   });
 });
 
@@ -69,17 +65,13 @@ describe('active grace period → WRITE_LOCK applied', () => {
     await deleteOrgProfile(orgId);
   });
 
-  it('keeps grace_period status and sets auroraTenantStatus to WRITE_LOCKED', async () => {
+  it('keeps an active grace period in grace_period status', async () => {
     const result = await invokeEnforcer();
     expect(result.functionError).toBeUndefined();
 
     const record = await getBillingRecord(userId);
     expect(record).not.toBeNull();
     expect(record!.subscriptionStatus?.S).toBe(SubscriptionStatus.GracePeriod);
-
-    const profile = await getOrgProfile(orgId);
-    expect(profile).not.toBeNull();
-    expect(profile!.auroraTenantStatus?.S).toBe('WRITE_LOCKED');
   });
 });
 

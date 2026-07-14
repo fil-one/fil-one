@@ -1,16 +1,12 @@
-import {
-  GetItemCommand,
-  ScanCommand,
-  UpdateItemCommand,
-  type AttributeValue,
-} from '@aws-sdk/client-dynamodb';
+import { ScanCommand, UpdateItemCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
-import { updateTenantStatus } from '../lib/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
-import { isOrgSetupComplete } from '../lib/org-setup-status.js';
+import {
+  assertRegionSyncSucceeded,
+  syncTenantStatusInProvisionedRegions,
+} from '../lib/region-helpers.js';
 
 const dynamo = getDynamoClient();
 
@@ -22,12 +18,6 @@ interface Candidate {
   orgId: string;
   subscriptionStatus: string;
   action: Action;
-}
-
-interface TenantRecord {
-  auroraTenantId: string | undefined;
-  setupStatus: string | undefined;
-  currentAuroraStatus: string | undefined;
 }
 
 type CandidateOutcome = 'canceled' | 'write_locked' | 'skipped';
@@ -82,28 +72,12 @@ async function processCandidate(
   billingTableName: string,
   now: Date,
 ): Promise<CandidateOutcome> {
-  // Resolve Aurora tenant for all actions
-  const tenant = await resolveTenantForEnforcement(candidate.orgId);
-  const tenantReady = tenant.auroraTenantId && isOrgSetupComplete(tenant.setupStatus);
-
-  if (!tenantReady) {
-    console.warn('[grace-period-enforcer] Tenant not ready, skipping', {
-      userId: candidate.userId,
-      orgId: candidate.orgId,
-      auroraTenantId: tenant.auroraTenantId,
-      setupStatus: tenant.setupStatus,
-    });
-    return 'skipped';
-  }
-
-  const auroraTenantId = tenant.auroraTenantId!;
-
   if (candidate.action === 'cancel') {
-    await cancelSubscriptionAndDisableTenant(candidate, auroraTenantId, billingTableName, now);
+    await cancelSubscriptionAndDisableTenant(candidate, billingTableName, now);
     return 'canceled';
   }
 
-  return ensureTenantWriteLocked(candidate, auroraTenantId, tenant.currentAuroraStatus);
+  return ensureTenantWriteLocked(candidate);
 }
 
 // Scan for grace_period records
@@ -159,33 +133,21 @@ async function scanGracePeriodCandidates(
   return candidates;
 }
 
-async function resolveTenantForEnforcement(orgId: string): Promise<TenantRecord> {
-  const orgResult = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: {
-        pk: { S: `ORG#${orgId}` },
-        sk: { S: 'PROFILE' },
-      },
-      ProjectionExpression: 'auroraTenantId, setupStatus, auroraTenantStatus',
-    }),
-  );
-
-  return {
-    auroraTenantId: orgResult.Item?.auroraTenantId?.S,
-    setupStatus: orgResult.Item?.setupStatus?.S,
-    currentAuroraStatus: orgResult.Item?.auroraTenantStatus?.S,
-  };
-}
-
+// Grace period expired — disable the tenant on every orchestrator it exists on
+// and cancel the subscription. The disable is a probe-first sync: regions that
+// are already disabled are skipped, so a partially disabled tenant converges
+// on retry. A failed region throws before the cancel write, keeping the record
+// in grace_period so the next run retries only the out-of-sync regions. An org
+// with no provisioned regions still transitions out of grace (empty outcomes,
+// cancel proceeds).
 async function cancelSubscriptionAndDisableTenant(
   candidate: Candidate,
-  auroraTenantId: string,
   billingTableName: string,
   now: Date,
 ): Promise<void> {
-  await updateTenantStatus({ tenantId: auroraTenantId, status: 'DISABLED' });
-  await setOrgAuroraTenantStatus(candidate.orgId, 'DISABLED');
+  assertRegionSyncSucceeded(
+    await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled'),
+  );
   // Transition DynamoDB status to canceled
   await dynamo.send(
     new UpdateItemCommand({
@@ -206,21 +168,34 @@ async function cancelSubscriptionAndDisableTenant(
   });
 }
 
-// Non-expired grace period — ensure Aurora is WRITE_LOCKED
-async function ensureTenantWriteLocked(
-  candidate: Candidate,
-  auroraTenantId: string,
-  currentAuroraStatus: string | undefined,
-): Promise<CandidateOutcome> {
-  if (currentAuroraStatus === 'WRITE_LOCKED' || currentAuroraStatus === 'DISABLED') {
+// Non-expired grace period — ensure every orchestrator tenant is write-locked.
+// The sync helper probes each orchestrator's live status first, so redundant
+// lock calls are skipped and a tenant that is already `disabled` is never
+// downgraded back to `write-locked`.
+async function ensureTenantWriteLocked(candidate: Candidate): Promise<CandidateOutcome> {
+  const outcomes = await syncTenantStatusInProvisionedRegions(candidate.orgId, 'write-locked');
+
+  if (outcomes.length === 0) {
+    console.warn('[grace-period-enforcer] No ready tenant on any orchestrator, skipping', {
+      userId: candidate.userId,
+      orgId: candidate.orgId,
+    });
     return 'skipped';
   }
 
-  await updateTenantStatus({ tenantId: auroraTenantId, status: 'WRITE_LOCKED' });
-  await setOrgAuroraTenantStatus(candidate.orgId, 'WRITE_LOCKED');
-  console.log('[grace-period-enforcer] WRITE_LOCKED (retry)', {
-    userId: candidate.userId,
-    orgId: candidate.orgId,
-  });
-  return 'write_locked';
+  const updated = outcomes.filter((o) => o.outcome === 'updated');
+  for (const o of updated) {
+    console.log('[grace-period-enforcer] Tenant write-locked', {
+      userId: candidate.userId,
+      orgId: candidate.orgId,
+      orchestrator: o.orchestratorId,
+      tenantId: o.tenantId,
+    });
+  }
+
+  // The sync helper never throws; re-raise per-region failures so the
+  // candidate is counted as failed and retried on the next run.
+  assertRegionSyncSucceeded(outcomes);
+
+  return updated.length > 0 ? 'write_locked' : 'skipped';
 }

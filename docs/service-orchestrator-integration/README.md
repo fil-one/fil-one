@@ -125,7 +125,7 @@ The S3 Gateway is a standard S3-compatible endpoint reached at `https://{region}
 - Object operations (put/get/head/list)
 - Server-side encryption of object payloads; must be enabled by default
 - Pre-signed URLs
-- CORS configuration allowing (pre-signed) requests from app.fil.one and staging.fil.one
+- CORS configuration allowing (pre-signed) requests from `app.fil.one`, `staging.fil.one`, and any `*.dev.fil.one` subdomain.
 - Multi-part uploads
 - Path-style addressing
 - AWS Signature V4 authentication

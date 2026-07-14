@@ -9,12 +9,27 @@ export interface MeResponse {
   name?: string;
   connectionType?: string;
   mfaEnrollments: MfaEnrollment[];
+  passkeys?: PasskeyEnrollment[];
   picture?: string;
+  /**
+   * Whether the user may access the RAG feature. Computed server-side from the
+   * verified email via the shared gate predicate (Foundation domain OR runtime
+   * allowlist) so the frontend stays consistent without a second lookup.
+   */
+  ragAccess: boolean;
 }
 
 export interface MfaEnrollment {
   id: string;
   type: 'authenticator' | 'webauthn-roaming' | 'webauthn-platform';
+  name?: string;
+  createdAt?: string;
+}
+
+export const PASSKEY_PER_USER_LIMIT = 20;
+
+export interface PasskeyEnrollment {
+  id: string;
   name?: string;
   createdAt?: string;
 }

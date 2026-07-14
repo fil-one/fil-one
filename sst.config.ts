@@ -51,6 +51,7 @@ export default $config({
     const stripePublishableKey = new sst.Secret('StripePublishableKey');
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
+    const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
     const sendGridApiKey =
@@ -96,8 +97,71 @@ export default $config({
       primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
     });
 
+    // RAG indexer's own store: per-object chunk manifests
+    // (BUCKET#{region}#{bucket} / MANIFEST#{objectKey}) and resumable indexer
+    // checkpoints (INDEXER_CHECKPOINT#{region}#{bucket} / CHECKPOINT). Kept out
+    // of UserInfoTable so this high-churn, indexer-derived state doesn't mix with
+    // user/org data. TTL attribute expires stale checkpoints (see
+    // rag-indexer-manifest.ts).
+    const ragIndexerTable = new sst.aws.Dynamo('RagIndexerTable', {
+      fields: {
+        pk: 'string',
+        sk: 'string',
+      },
+      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
+      ttl: 'ttl',
+    });
+
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
+
+    // ── S3 Vectors bucket for RAG embeddings (FIL-548) ───────────────
+    // One vector bucket hosts one index per RAG-enabled bucket. The
+    // @filone/rag-shared S3VectorsStore reads the bucket name at runtime via
+    // Resource.RagVectorBucket.name.
+    const ragVectorBucketName = `filone-${$app.stage}-rag-vectors`;
+    if (ragVectorBucketName.length > 63) {
+      throw new Error(
+        `RagVectorBucket name too long (${ragVectorBucketName.length} chars): ${ragVectorBucketName}`,
+      );
+    }
+    const ragVectorBucketResource = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
+      vectorBucketName: ragVectorBucketName,
+    });
+
+    // Wrap the raw Pulumi resource so handlers can read it via SST resource
+    // linking (Resource.RagVectorBucket.name).
+    const ragVectorBucket = new sst.Linkable('RagVectorBucket', {
+      properties: {
+        name: ragVectorBucketResource.vectorBucketName,
+        arn: ragVectorBucketResource.vectorBucketArn,
+      },
+    });
+
+    // s3vectors:* scoped to the vector bucket and all of its indexes, plus
+    // bedrock:InvokeModel for the Titan embeddings model (FIL-552). Granted only
+    // to handlers that opt in via addRoute({ rag: true }) — i.e. those that use
+    // @filone/rag-shared.
+    const ragPermissions: sst.aws.FunctionPermissionArgs[] = [
+      {
+        actions: [
+          's3vectors:CreateIndex',
+          's3vectors:DeleteIndex',
+          's3vectors:PutVectors',
+          's3vectors:QueryVectors',
+          's3vectors:GetVectors',
+          's3vectors:DeleteVectors',
+        ],
+        resources: [
+          ragVectorBucketResource.vectorBucketArn,
+          $interpolate`${ragVectorBucketResource.vectorBucketArn}/index/*`,
+        ],
+      },
+      {
+        actions: ['bedrock:InvokeModel'],
+        resources: [$interpolate`arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0`],
+      },
+    ];
 
     // ── Stage-aware domain config ────────────────────────────────────
     const stage = $app.stage;
@@ -105,28 +169,36 @@ export default $config({
     const isStaging = stage === 'staging';
     const isEphemeralStage = !isProduction && !isStaging;
 
-    let domainName = 'staging.fil.one';
-    let certArn: string | undefined;
-
-    if (isProduction || isStaging) {
-      domainName = isProduction ? 'app.fil.one' : 'staging.fil.one';
-      // ACM cert must be in us-east-1 for CloudFront
-      const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
-      const cert = await aws.acm.getCertificate(
-        {
-          domain: domainName,
-          statuses: ['ISSUED'],
-        },
-        { provider: usEast1 },
+    // Ephemeral stages become subdomains of dev.fil.one — enforce DNS label rules.
+    if (isEphemeralStage && !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(stage)) {
+      throw new Error(
+        `Invalid stage name "${stage}": must be a valid DNS label ` +
+          `(lowercase a-z, 0-9, hyphens; 1-63 chars; no leading/trailing hyphen).`,
       );
-
-      certArn = cert.arn;
     }
+
+    const domainName = isProduction
+      ? 'app.fil.one'
+      : isStaging
+        ? 'staging.fil.one'
+        : `${stage}.dev.fil.one`;
+
+    // ACM cert must be in us-east-1 for CloudFront. Ephemeral stages share a
+    // wildcard cert for *.dev.fil.one provisioned in the fil-one/infrastructure repo.
+    const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
+    const cert = await aws.acm.getCertificate(
+      {
+        domain: isEphemeralStage ? '*.dev.fil.one' : domainName,
+        statuses: ['ISSUED'],
+      },
+      { provider: usEast1 },
+    );
+    const certArn = cert.arn;
 
     // ── API Gateway ──────────────────────────────────────────────────
     // While we stick to a same origin for both website and API,
     // we want to make sure to lock down to just our origin.
-    const allowedOrigins = domainName ? [`https://${domainName}`] : [];
+    const allowedOrigins = [`https://${domainName}`];
     if (stage !== 'production') {
       allowedOrigins.push('https://localhost:5173');
     }
@@ -152,11 +224,18 @@ export default $config({
       },
     });
 
-    const { getAuth0Domain, getS3Endpoint, S3_REGION, Stage } = await import('@filone/shared');
-    const auroraS3GatewayUrl = getS3Endpoint(
-      S3_REGION,
-      isProduction ? Stage.Production : Stage.Staging,
-    );
+    const { getAuth0Domain, getS3Endpoint, S3Region, Stage, SUPPORTED_COMPLETION_MODELS } =
+      await import('@filone/shared');
+    const stageForEndpoints = isProduction ? Stage.Production : Stage.Staging;
+    // The browser hits the S3 endpoint of every region directly — list-objects,
+    // uploads, downloads, etc. — so each one needs to be in `connect-src` or the
+    // browser blocks the request with a CSP violation before it ever leaves.
+    // CSP is a single static document header that cannot vary per user, so it
+    // must list every regional S3 endpoint any user could reach — not just the
+    // email-gated subset returned by getAvailableRegions().
+    const s3GatewayUrls = Object.values(S3Region)
+      .map((r) => getS3Endpoint(r, stageForEndpoints))
+      .join(' ');
 
     // ── CloudFront security headers (CSP applied to the HTML document) ──
     const sentryCspEndpoint =
@@ -170,7 +249,7 @@ export default $config({
         securityHeadersConfig: {
           contentSecurityPolicy: {
             // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://plausible.io https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io/api https://fil-one.instatus.com ${auroraS3GatewayUrl}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://fil-one.instatus.com ${s3GatewayUrls}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
@@ -228,7 +307,14 @@ export default $config({
           cachePolicy: AWS_CACHING_DISABLED_POLICY,
         },
       },
-      ...(domainName && certArn ? { domain: { name: domainName, dns: false, cert: certArn } } : {}),
+      domain: {
+        name: domainName,
+        // Ephemeral stages: SST creates the Route 53 alias in the delegated
+        // dev.fil.one zone. Staging/prod: records are managed in Cloudflare
+        // by the fil-one/infrastructure Terraform.
+        dns: isEphemeralStage ? sst.aws.dns({ override: true }) : false,
+        cert: certArn,
+      },
       transform: {
         cdn: (args) => {
           args.defaultRootObject = 'index.html';
@@ -312,7 +398,7 @@ export default $config({
               ServiceToken: setupFn.arn,
               SiteUrl: siteUrl,
               Stage: $app.stage,
-              Version: '2.9',
+              Version: '2.11',
             },
           },
         },
@@ -346,12 +432,14 @@ export default $config({
       billingTable,
       userInfoTable,
       userFilesBucket,
+      ragVectorBucket,
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
       stripePublishableKey,
       stripePriceId,
       auroraBackofficeToken,
+      fthManagementApiToken,
     ];
     // Management API runtime credentials — linked only to handlers that call the Auth0 Management API
     const mgmtRuntimeResources = [auth0MgmtRuntimeClientId, auth0MgmtRuntimeClientSecret];
@@ -377,12 +465,35 @@ export default $config({
       AURORA_REGION_ID: 'ff',
     };
 
+    const fthEnv = {
+      FTH_MANAGEMENT_API_URL: 'https://api.fortilyx.com',
+    };
+
+    // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
+    // drives region/orchestrator selection, and instantiating the orchestrator
+    // registry eagerly loads both the Aurora and FTH clients, so each backend's
+    // endpoint config must be present. FILONE_STAGE is intentionally also in
+    // sharedEnv (the partial-bundle route handlers read it); it's repeated here
+    // so cron jobs, which bypass sharedEnv, receive it too.
+    const orchestratorEnv = { FILONE_STAGE: $app.stage, ...auroraEnv, ...fthEnv };
+
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
-    const auroraS3GatewayPermissions: sst.aws.FunctionPermissionArgs[] = [
+    const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
+    // Per-tenant console S3 access keys (getConsoleS3Credentials), needed by
+    // handlers that talk to the S3 data plane directly (presign, indexing, …).
+    const s3DataPlanePermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
-        resources: [auroraS3KeySsmArn],
+        resources: [auroraS3KeySsmArn, fthS3KeySsmArn],
+      },
+    ];
+    // Per-tenant credentials for the bucket read path (getBucket/listBuckets):
+    // Aurora resolves its portal API key from SSM, FTH its console S3 key.
+    const bucketReadPermissions: sst.aws.FunctionPermissionArgs[] = [
+      {
+        actions: ['ssm:GetParameter'],
+        resources: [auroraApiKeySsmArn, fthS3KeySsmArn],
       },
     ];
 
@@ -418,6 +529,11 @@ export default $config({
       provisionedConcurrency?: number;
       memory?: sst.aws.FunctionArgs['memory'];
       timeout?: sst.aws.FunctionArgs['timeout'];
+      /**
+       * Grant s3vectors:* (scoped to the RAG vector bucket + indexes) and
+       * bedrock:InvokeModel for handlers that use @filone/rag-shared.
+       */
+      rag?: boolean;
     }
 
     function addRoute({
@@ -430,6 +546,7 @@ export default $config({
       provisionedConcurrency,
       memory,
       timeout,
+      rag,
     }: AddRouteProps) {
       // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
       const fnName = handler
@@ -444,7 +561,7 @@ export default $config({
           ...sharedEnv,
           ...extraEnv,
         },
-        permissions,
+        permissions: rag ? [...(permissions ?? []), ...ragPermissions] : permissions,
         timeout: timeout ?? '10 seconds',
         ...(memory ? { memory } : {}),
         ...(provisionedConcurrency && provisionedConcurrency > 0
@@ -479,8 +596,11 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets',
       handler: 'list-buckets',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        ...fthEnv,
+      },
+      permissions: bucketReadPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
@@ -488,11 +608,11 @@ export default $config({
       method: 'POST',
       routePath: '/api/buckets',
       handler: 'create-bucket',
-      extraEnv: auroraEnv,
+      extraEnv: orchestratorEnv,
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
         },
       ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
@@ -502,8 +622,11 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}',
       handler: 'get-bucket',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        ...fthEnv,
+      },
+      permissions: bucketReadPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
@@ -511,7 +634,8 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
-      permissions: auroraS3GatewayPermissions,
+      extraEnv: { ...fthEnv },
+      permissions: s3DataPlanePermissions,
     });
     addRoute({
       method: 'GET',
@@ -523,11 +647,11 @@ export default $config({
       method: 'POST',
       routePath: '/api/access-keys',
       handler: 'create-access-key',
-      extraEnv: auroraEnv,
+      extraEnv: orchestratorEnv,
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
         },
       ],
       timeout: '30 seconds',
@@ -536,14 +660,23 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/access-keys/{keyId}',
       handler: 'delete-access-key',
-      extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL },
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+      extraEnv: {
+        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+        ...fthEnv,
+      },
+      permissions: [
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [auroraApiKeySsmArn],
+        },
+      ],
     });
     addRoute({
       method: 'POST',
       routePath: '/api/presign',
       handler: 'presign',
-      permissions: auroraS3GatewayPermissions,
+      extraEnv: { ...fthEnv },
+      permissions: s3DataPlanePermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '512 MB',
     });
@@ -551,8 +684,58 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}/analytics',
       handler: 'get-bucket-analytics',
-      permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
-      extraEnv: auroraEnv,
+      permissions: bucketReadPermissions,
+      extraEnv: orchestratorEnv,
+    });
+    // RAG query playground (FIL-554): embed the question, vector-search the
+    // bucket's index, and ground a Bedrock completion on the retrieved chunks.
+    // `rag: true` grants s3vectors:QueryVectors + bedrock:InvokeModel on the
+    // Titan embeddings model; the extra permission below covers the Claude
+    // completion model — both its cross-region inference profile and the
+    // underlying foundation model. Higher timeout/memory for the Bedrock calls.
+    addRoute({
+      method: 'POST',
+      routePath: '/api/buckets/{name}/query',
+      handler: 'query-bucket',
+      rag: true,
+      extraEnv: orchestratorEnv,
+      permissions: [
+        ...bucketReadPermissions,
+        {
+          actions: ['bedrock:InvokeModel'],
+          // Built from the shared allowlist so the grant and QueryBucketSchema's
+          // accepted `model` ids stay in sync — a model added there is invokable here.
+          resources: SUPPORTED_COMPLETION_MODELS.flatMap((m) => [
+            m.inferenceProfileArn,
+            m.foundationModelArn,
+          ]),
+        },
+      ],
+      timeout: '30 seconds',
+      memory: '512 MB',
+    });
+    // RAG per-bucket enablement (FIL-555): read/write the BUCKET#{name}/RAG
+    // enablement row + sync telemetry for the caller's tenant. Both are gated by
+    // auth + subscriptionGuard + ragAccessMiddleware. The enablement row lives in
+    // ragIndexerTable (extraLink below); they also read UserInfoTable (already
+    // linked via allResources) for tenant/org profile, and resolve tenant
+    // ownership via the orchestrator (SSM-backed S3 keys), so they need the SSM
+    // read grant but not `rag: true` (no s3vectors/bedrock).
+    addRoute({
+      method: 'GET',
+      routePath: '/api/buckets/{name}/rag/enabled',
+      handler: 'get-bucket-rag-enablement',
+      extraEnv: orchestratorEnv,
+      extraLink: [ragIndexerTable],
+      permissions: bucketReadPermissions,
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/buckets/{name}/rag/enabled',
+      handler: 'set-bucket-rag-enablement',
+      extraEnv: orchestratorEnv,
+      extraLink: [ragIndexerTable],
+      permissions: bucketReadPermissions,
     });
 
     // ── Auth routes ──────────────────────────────────────────────────
@@ -644,21 +827,29 @@ export default $config({
       extraLink: mgmtRuntimeResources,
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/mfa/passkeys/{methodId}',
+      handler: 'delete-passkey',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
 
     // ── Usage + Dashboard routes ─────────────────────────────────────
     addRoute({
       method: 'GET',
       routePath: '/api/usage',
       handler: 'get-usage',
-      extraEnv: auroraEnv,
+      extraEnv: orchestratorEnv,
+      permissions: s3DataPlanePermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
       method: 'GET',
       routePath: '/api/activity',
       handler: 'get-activity',
-      extraEnv: auroraEnv,
-      permissions: auroraS3GatewayPermissions,
+      extraEnv: orchestratorEnv,
+      permissions: bucketReadPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
@@ -679,7 +870,7 @@ export default $config({
       method: 'POST',
       routePath: '/api/billing/activate',
       handler: 'activate-subscription',
-      extraEnv: auroraEnv,
+      extraEnv: orchestratorEnv,
     });
     addRoute({ method: 'GET', routePath: '/api/billing/invoices', handler: 'list-invoices' });
     addRoute({
@@ -693,7 +884,7 @@ export default $config({
       routePath: '/api/stripe/webhook',
       handler: 'stripe-webhook',
       extraEnv: {
-        ...auroraEnv,
+        ...orchestratorEnv,
         STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
       },
       permissions: [
@@ -709,8 +900,18 @@ export default $config({
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
-      link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, auroraBackofficeToken],
-      environment: { ...auroraEnv, STRIPE_METER_EVENT_NAME: 'gb_month_meter' },
+      link: [
+        billingTable,
+        userInfoTable,
+        stripeSecretKey,
+        stripePriceId,
+        auroraBackofficeToken,
+        fthManagementApiToken,
+      ],
+      environment: {
+        ...orchestratorEnv,
+        STRIPE_METER_EVENT_NAME: 'gb_month_meter',
+      },
       timeout: '60 seconds',
       memory: '256 MB',
     });
@@ -741,8 +942,8 @@ export default $config({
     // ── Grace period enforcement ────────────────────────────────────
     const gracePeriodEnforcer = createFn('GracePeriodEnforcer', {
       handler: 'packages/backend/src/jobs/grace-period-enforcer.handler',
-      link: [billingTable, userInfoTable, auroraBackofficeToken],
-      environment: auroraEnv,
+      link: [billingTable, userInfoTable, auroraBackofficeToken, fthManagementApiToken],
+      environment: orchestratorEnv,
       timeout: '300 seconds',
       memory: '256 MB',
     });
@@ -753,11 +954,67 @@ export default $config({
       function: gracePeriodEnforcer.arn,
     });
 
+    // ── RAG indexer (cron → orchestrator → per-org worker) ──────────
+    // Keeps each RAG-enabled bucket's vector index in sync with S3 contents via
+    // object-level ETag diffing. The worker reads per-tenant S3 keys (SSM +
+    // KMS) and uses @filone/rag-shared to extract/chunk/embed/upsert, so it
+    // gets the RAG permission set plus a large timeout/memory budget; large
+    // buckets are resumed across runs via a persisted continuation checkpoint.
+    const ragIndexerWorker = createFn('RagIndexerWorker', {
+      handler: 'packages/backend/src/jobs/rag-indexer-worker.handler',
+      link: [
+        billingTable,
+        userInfoTable,
+        ragIndexerTable,
+        ragVectorBucket,
+        auroraBackofficeToken,
+        fthManagementApiToken,
+      ],
+      environment: orchestratorEnv,
+      timeout: '900 seconds',
+      memory: '512 MB',
+      permissions: [
+        ...s3DataPlanePermissions,
+        ...ragPermissions,
+        {
+          // PDF extraction (@filone/rag-shared pdf-extractor). Textract has no
+          // resource-level permissions — actions require Resource: '*'.
+          actions: ['textract:StartDocumentTextDetection', 'textract:GetDocumentTextDetection'],
+          resources: ['*'],
+        },
+      ],
+    });
+
+    const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
+      handler: 'packages/backend/src/jobs/rag-indexer-orchestrator.handler',
+      // Scans the enablement rows, now in ragIndexerTable (its only table dependency).
+      link: [ragIndexerTable],
+      environment: {
+        RAG_INDEXER_WORKER_FUNCTION_NAME: ragIndexerWorker.name,
+      },
+      timeout: '60 seconds',
+      memory: '256 MB',
+      permissions: [
+        {
+          actions: ['lambda:InvokeFunction'],
+          resources: [ragIndexerWorker.arn],
+        },
+      ],
+    });
+
+    new sst.aws.CronV2('RagIndexerCron', {
+      // Run every 6 hours (03:00, 09:00, 15:00, 21:00 UTC). Deliberately offset
+      // from the usage-reporting (07/19) and grace-period (08/20) crons so the
+      // indexer never collides with billing reconciliation.
+      schedule: 'cron(0 3/6 * * ? *)',
+      function: ragIndexerOrchestrator.arn,
+    });
+
     // ── Subscription drift checker (cron-based, observe-only) ───────
     const subscriptionDriftChecker = createFn('SubscriptionDriftChecker', {
       handler: 'packages/backend/src/jobs/subscription-drift-checker.handler',
-      link: [billingTable, userInfoTable, auroraBackofficeToken],
-      environment: auroraEnv,
+      link: [billingTable, userInfoTable, auroraBackofficeToken, fthManagementApiToken],
+      environment: orchestratorEnv,
       timeout: '300 seconds',
       memory: '256 MB',
     });

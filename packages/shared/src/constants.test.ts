@@ -9,6 +9,8 @@ import {
   getAuth0Domain,
   getStageFromHostname,
   getAvailableRegions,
+  supportsBucketManagement,
+  isFoundationEmail,
   formatRegion,
   getRegionLabel,
   REGION_LABELS,
@@ -123,15 +125,63 @@ describe('getAvailableRegions', () => {
   });
 
   it('returns both regions in staging', () => {
-    expect(getAvailableRegions(Stage.Staging)).toEqual([S3Region.EuWest1, S3Region.UsMidwest1]);
+    expect(getAvailableRegions(Stage.Staging)).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
   });
 
   const nonProductionStages = ['dev', 'pr-42', ''];
   for (const stage of nonProductionStages) {
     it(`returns both regions for non-production stage "${stage}"`, () => {
-      expect(getAvailableRegions(stage)).toEqual([S3Region.EuWest1, S3Region.UsMidwest1]);
+      expect(getAvailableRegions(stage)).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
     });
   }
+
+  it('returns both regions in production for a Foundation email', () => {
+    expect(getAvailableRegions(Stage.Production, 'someone@fil.org')).toEqual([
+      S3Region.EuWest1,
+      S3Region.UsEast1,
+    ]);
+  });
+
+  it('returns only eu-west-1 in production for a non-Foundation email', () => {
+    expect(getAvailableRegions(Stage.Production, 'someone@example.com')).toEqual([
+      S3Region.EuWest1,
+    ]);
+  });
+
+  it('returns only eu-west-1 in production when no email is provided', () => {
+    expect(getAvailableRegions(Stage.Production, undefined)).toEqual([S3Region.EuWest1]);
+  });
+});
+
+describe('supportsBucketManagement', () => {
+  it('returns false for the Aurora region (eu-west-1)', () => {
+    expect(supportsBucketManagement(S3Region.EuWest1)).toBe(false);
+  });
+
+  it('returns true for non-Aurora regions', () => {
+    expect(supportsBucketManagement(S3Region.UsEast1)).toBe(true);
+  });
+});
+
+describe('isFoundationEmail', () => {
+  it('matches @fil.org addresses', () => {
+    expect(isFoundationEmail('alice@fil.org')).toBe(true);
+  });
+
+  it('matches case-insensitively', () => {
+    expect(isFoundationEmail('Alice@FIL.ORG')).toBe(true);
+  });
+
+  it('rejects other domains', () => {
+    expect(isFoundationEmail('alice@fil.one')).toBe(false);
+    expect(isFoundationEmail('alice@notfil.org')).toBe(false);
+    expect(isFoundationEmail('fil.org@example.com')).toBe(false);
+  });
+
+  it('rejects undefined and empty', () => {
+    expect(isFoundationEmail(undefined)).toBe(false);
+    expect(isFoundationEmail('')).toBe(false);
+  });
 });
 
 describe('formatRegion', () => {
@@ -139,10 +189,8 @@ describe('formatRegion', () => {
     expect(formatRegion(S3Region.EuWest1)).toBe(`${REGION_LABELS[S3Region.EuWest1]} eu-west-1`);
   });
 
-  it('formats us-midwest-1 as "<label> <code>"', () => {
-    expect(formatRegion(S3Region.UsMidwest1)).toBe(
-      `${REGION_LABELS[S3Region.UsMidwest1]} us-midwest-1`,
-    );
+  it('formats us-east-1 as "<label> <code>"', () => {
+    expect(formatRegion(S3Region.UsEast1)).toBe(`${REGION_LABELS[S3Region.UsEast1]} us-east-1`);
   });
 
   it('returns the raw region for unknown values', () => {
@@ -153,7 +201,7 @@ describe('formatRegion', () => {
 describe('getRegionLabel', () => {
   it('returns the label for a known region', () => {
     expect(getRegionLabel(S3Region.EuWest1)).toBe(REGION_LABELS[S3Region.EuWest1]);
-    expect(getRegionLabel(S3Region.UsMidwest1)).toBe(REGION_LABELS[S3Region.UsMidwest1]);
+    expect(getRegionLabel(S3Region.UsEast1)).toBe(REGION_LABELS[S3Region.UsEast1]);
   });
 
   it('returns the default region label for undefined', () => {

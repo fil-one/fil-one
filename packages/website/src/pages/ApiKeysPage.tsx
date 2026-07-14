@@ -7,15 +7,17 @@ import { CopySimpleIcon, DatabaseIcon, PlusIcon } from '@phosphor-icons/react/di
 import { AccessKeysTable } from '../components/AccessKeysTable';
 import { Button } from '../components/Button';
 import { Heading } from '../components/Heading/Heading';
+import { PageLayout } from '../components/PageLayout.js';
 import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Spinner } from '../components/Spinner';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
 import { useToast } from '../components/Toast';
 
-import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
+import type { AccessKey, ListAccessKeysResponse, S3Region } from '@filone/shared';
 
 import { getS3Endpoint, S3_REGION, DOCS_URL } from '@filone/shared';
+import { RegionSelect } from '../components/RegionSelect';
 import { FILONE_STAGE } from '../env';
 import { apiRequest } from '../lib/api.js';
 import { useCopyToClipboard } from '../lib/use-copy-to-clipboard.js';
@@ -80,7 +82,8 @@ function CopyButton({ value }: { value: string }) {
 
 // eslint-disable-next-line max-lines-per-function
 function ConnectionDetailsTab() {
-  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
+  const [region, setRegion] = useState<S3Region>(S3_REGION);
+  const s3Endpoint = getS3Endpoint(region, FILONE_STAGE);
   const [sdkTab, setSdkTab] = useState<'python' | 'nodejs' | 'go'>('python');
 
   const pythonInstall = `pip install boto3`;
@@ -91,7 +94,7 @@ s3 = boto3.client(
     endpoint_url="${s3Endpoint}",
     aws_access_key_id="YOUR_ACCESS_KEY",
     aws_secret_access_key="YOUR_SECRET_KEY",
-    region_name="${S3_REGION}",
+    region_name="${region}",
 )
 
 # Upload
@@ -110,7 +113,7 @@ import { createReadStream } from "fs";
 
 const s3 = new S3Client({
   endpoint: "${s3Endpoint}",
-  region: "${S3_REGION}",
+  region: "${region}",
   credentials: {
     accessKeyId: "YOUR_ACCESS_KEY",
     secretAccessKey: "YOUR_SECRET_KEY",
@@ -132,7 +135,7 @@ await s3.send(new PutObjectCommand({
 )
 
 cfg, _ := config.LoadDefaultConfig(context.TODO(),
-    config.WithRegion("${S3_REGION}"),
+    config.WithRegion("${region}"),
     config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
         "YOUR_ACCESS_KEY", "YOUR_SECRET_KEY", "",
     )),
@@ -171,6 +174,14 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 
   return (
     <div className="mt-4 flex flex-col gap-8">
+      {/* Region selector */}
+      <div className="flex items-center gap-3">
+        <label htmlFor="connection-region" className="text-sm font-medium text-zinc-700">
+          Region
+        </label>
+        <RegionSelect id="connection-region" value={region} onChange={setRegion} />
+      </div>
+
       {/* Endpoint + Region card */}
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
         <div className="flex items-center border-b border-zinc-100 px-4 py-3">
@@ -180,8 +191,8 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
         </div>
         <div className="flex items-center px-4 py-3">
           <span className="w-28 shrink-0 text-sm text-zinc-500">Region</span>
-          <span className="flex-1 font-mono text-sm text-zinc-900">{S3_REGION}</span>
-          <CopyButton value={S3_REGION} />
+          <span className="flex-1 font-mono text-sm text-zinc-900">{region}</span>
+          <CopyButton value={region} />
         </div>
       </div>
 
@@ -205,7 +216,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
             {
               n: 1,
               title: 'Configure your S3 client',
-              code: `aws configure set aws_access_key_id YOUR_ACCESS_KEY\naws configure set aws_secret_access_key YOUR_SECRET_KEY\naws configure set default.region ${S3_REGION}`,
+              code: `aws configure set aws_access_key_id YOUR_ACCESS_KEY\naws configure set aws_secret_access_key YOUR_SECRET_KEY\naws configure set default.region ${region}`,
             },
             {
               n: 2,
@@ -315,7 +326,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
                   fil: 'Fil One key + secret',
                   highlight: true,
                 },
-                { label: 'Region', aws: 'Any AWS region', fil: S3_REGION, highlight: false },
+                { label: 'Region', aws: 'Any AWS region', fil: region, highlight: false },
                 {
                   label: 'Path style',
                   aws: 'Optional',
@@ -410,25 +421,25 @@ export function ApiKeysPage() {
 
   if (isError) {
     return (
-      <div className="px-10 pt-10">
+      <PageLayout
+        title="API Keys"
+        description="Manage credentials and connect via S3-compatible API"
+      >
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error?.message ?? 'Failed to load access keys'}
         </div>
-      </div>
+      </PageLayout>
     );
   }
 
   return (
-    <div className="px-10 pt-10">
-      <div className="mb-6 flex items-center justify-between">
-        <Heading
-          tag="h1"
-          size="xl"
-          description="Manage credentials and connect via S3-compatible API"
-        >
-          API Keys
-        </Heading>
+    <PageLayout
+      title="API Keys"
+      headingId="api-keys-heading"
+      description="Manage credentials and connect via S3-compatible API"
+      action={
         <Button
+          id="api-keys-create-button"
           variant="ghost"
           size="sm"
           icon={PlusIcon}
@@ -436,12 +447,12 @@ export function ApiKeysPage() {
         >
           Create new key
         </Button>
-      </div>
-
+      }
+    >
       <Tabs>
         <TabList>
-          <Tab>API keys {keys.length > 0 && `(${keys.length})`}</Tab>
-          <Tab>Connection details</Tab>
+          <Tab testId="api-keys-tab">API keys {keys.length > 0 && `(${keys.length})`}</Tab>
+          <Tab testId="connection-details-tab">Connection details</Tab>
         </TabList>
 
         <TabPanels>
@@ -466,6 +477,6 @@ export function ApiKeysPage() {
         description="This access key will be permanently revoked. Any applications using it will lose access immediately."
         confirmLabel="Delete key"
       />
-    </div>
+    </PageLayout>
   );
 }

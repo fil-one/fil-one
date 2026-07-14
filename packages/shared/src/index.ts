@@ -7,9 +7,13 @@ export {
   S3_REGION,
   S3Region,
   REGION_LABELS,
+  FOUNDATION_EMAIL_DOMAIN,
+  isFoundationEmail,
   formatRegion,
   getRegionLabel,
   getAvailableRegions,
+  isSupportedRegion,
+  supportsBucketManagement,
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
@@ -29,12 +33,13 @@ export { formatBytes, formatBytesShort } from './formatBytes.js';
 export type {
   MeResponse,
   MfaEnrollment,
+  PasskeyEnrollment,
   UpdateProfileRequest,
   UpdateProfileResponse,
   RegenerateRecoveryCodeResponse,
   StepUpRequiredResponse,
 } from './api/me.js';
-export { UpdateProfileSchema } from './api/me.js';
+export { PASSKEY_PER_USER_LIMIT, UpdateProfileSchema } from './api/me.js';
 
 export type { PreferencesResponse, UpdatePreferencesRequest } from './api/preferences.js';
 export { UpdatePreferencesSchema } from './api/preferences.js';
@@ -97,11 +102,38 @@ export type {
 export { PresignOpSchema, PresignRequestSchema } from './api/presign.js';
 
 export {
+  QueryBucketSchema,
+  QUERY_DEFAULT_TOP_K,
+  QUERY_MAX_TOP_K,
+  SUPPORTED_COMPLETION_MODELS,
+  SUPPORTED_COMPLETION_MODEL_IDS,
+  SetBucketRagEnabledSchema,
+} from './api/rag.js';
+
+export type {
+  QueryBucketRequest,
+  QueryBucketResponse,
+  CompletionModel,
+  BucketRagStatus,
+  BucketRagSyncState,
+  SetBucketRagEnabledRequest,
+  BucketRagEnablementResponse,
+} from './api/rag.js';
+
+export {
   ACCESS_KEY_PERMISSIONS,
   ACCESS_KEY_BUCKET_SCOPES,
+  OBJECT_PERMISSIONS,
+  BUCKET_PERMISSIONS,
+  BUCKET_INFO_PERMISSIONS,
+  isBucketPermission,
+  isBucketInfoPermission,
+  isObjectPermission,
   GRANULAR_PERMISSIONS,
   GRANULAR_PERMISSION_MAP,
   GRANULAR_PERMISSION_LABELS,
+  BUCKET_PERMISSION_LABELS,
+  BUCKET_INFO_PERMISSION_LABELS,
   KEY_NAME_MAX_LENGTH,
   KEY_NAME_PATTERN,
   CreateAccessKeySchema,
@@ -110,6 +142,9 @@ export type {
   AccessKeyStatus,
   AccessKeyPermission,
   AccessKeyBucketScope,
+  ObjectPermission,
+  BucketPermission,
+  BucketInfoPermission,
   GranularPermission,
   AccessKey,
   ListAccessKeysResponse,
@@ -150,3 +185,4 @@ export type {
   Invoice,
   ListInvoicesResponse,
 } from './api/billing.js';
+export type { TenantStatus } from './api/tenants.js';

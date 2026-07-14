@@ -90,6 +90,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "DeletePasskey": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "DisableMfa": {
       "name": string
       "type": "sst.aws.Function"
@@ -97,6 +101,10 @@ declare module "sst" {
     "EnrollMfa": {
       "name": string
       "type": "sst.aws.Function"
+    }
+    "FthManagementApiToken": {
+      "type": "sst.sst.Secret"
+      "value": string
     }
     "GetActivity": {
       "name": string
@@ -157,6 +165,23 @@ declare module "sst" {
     "Presign": {
       "name": string
       "type": "sst.aws.Function"
+    }
+    "RagIndexerTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
+    "RagIndexerOrchestrator": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "RagIndexerWorker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "RagVectorBucket": {
+      "arn": string
+      "name": string
+      "type": "sst.sst.Linkable"
     }
     "RegenerateRecoveryCode": {
       "name": string

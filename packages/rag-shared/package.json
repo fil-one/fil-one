@@ -1,0 +1,26 @@
+{
+  "name": "@filone/rag-shared",
+  "version": "0.0.1",
+  "private": true,
+  "license": "(Apache-2.0 OR MIT)",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1031.0",
+    "@aws-sdk/client-s3vectors": "^3.1031.0",
+    "@aws-sdk/client-textract": "^3.1031.0",
+    "@smithy/types": "^4.13.1",
+    "fast-xml-parser": "^5.7.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@smithy/util-stream": "^4.5.23",
+    "aws-sdk-client-mock": "^4.1.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

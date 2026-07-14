@@ -40,7 +40,7 @@ export function CreateApiKeyPage() {
 
   return (
     <>
-      <div className="mx-auto max-w-4xl px-10 pt-10">
+      <div className="mx-auto max-w-4xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
         {/* Header */}
         <div className="mb-8 flex items-center gap-3">
           <IconButton
@@ -49,7 +49,9 @@ export function CreateApiKeyPage() {
             onClick={() => void navigate({ to: '/api-keys' })}
           />
           <div>
-            <Heading tag="h1">Create API key</Heading>
+            <Heading id="create-api-key-heading" tag="h1">
+              Create API key
+            </Heading>
             <p className="text-sm text-zinc-500">
               Generate credentials for S3-compatible API access
             </p>
@@ -64,7 +66,12 @@ export function CreateApiKeyPage() {
               <AccessKeyFormFields form={form} region={region} onRegionChange={setRegion} />
             </div>
 
-            <Button type="submit" variant="primary" disabled={!form.canSubmit}>
+            <Button
+              id="create-api-key-submit-button"
+              type="submit"
+              variant="primary"
+              disabled={!form.canSubmit}
+            >
               {form.creating ? 'Creating...' : 'Create API key'}
             </Button>
             <SlowOperationIndicator isLoading={form.creating} operation="Creating access key" />

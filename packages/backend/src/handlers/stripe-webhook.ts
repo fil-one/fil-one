@@ -14,10 +14,12 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import { updateTenantStatus } from '../lib/aurora-backoffice.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { setOrgAuroraTenantStatus } from '../lib/org-profile.js';
-import { isOrgSetupComplete } from '../lib/org-setup-status.js';
+import {
+  assertRegionSyncSucceeded,
+  syncTenantStatusInProvisionedRegions,
+  WEBHOOK_STATUS_SYNC_RETRY,
+} from '../lib/region-helpers.js';
 import { getStripeClient, getWebhookSecret } from '../lib/stripe-client.js';
 import {
   emitDunningEscalation,
@@ -124,6 +126,11 @@ async function processStripeEvent(tableName: string, stripeEvent: Stripe.Event):
       await handleCustomerUpdated(tableName, customer);
       return;
     }
+    case 'customer.deleted': {
+      const customer = stripeEvent.data.object as Stripe.Customer;
+      await handleCustomerDeleted(tableName, customer);
+      return;
+    }
     case 'customer.subscription.trial_will_end': {
       const subscription = stripeEvent.data.object as Stripe.Subscription;
       console.log('[stripe-webhook] Trial ending soon for customer:', subscription.customer);
@@ -157,11 +164,7 @@ function getCustomerIdString(customer: string | Stripe.Customer | Stripe.Deleted
   return typeof customer === 'string' ? customer : customer.id;
 }
 
-async function resolveAuroraTenantId(
-  userId: string,
-  tableName: string,
-): Promise<{ orgId: string; auroraTenantId: string } | null> {
-  // 1. Get orgId from billing record
+async function resolveOrgId(userId: string, tableName: string): Promise<string | null> {
   const billingResult = await dynamo.send(
     new GetItemCommand({
       TableName: tableName,
@@ -177,26 +180,7 @@ async function resolveAuroraTenantId(
     console.warn('[stripe-webhook] No orgId on billing record for user:', userId);
     return null;
   }
-
-  // 2. Get auroraTenantId from org profile
-  const orgResult = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: {
-        pk: { S: `ORG#${orgId}` },
-        sk: { S: 'PROFILE' },
-      },
-      ProjectionExpression: 'auroraTenantId, setupStatus',
-    }),
-  );
-  const auroraTenantId = orgResult.Item?.auroraTenantId?.S;
-  const setupStatus = orgResult.Item?.setupStatus?.S;
-  if (!auroraTenantId || !isOrgSetupComplete(setupStatus)) {
-    console.warn('[stripe-webhook] Aurora tenant not ready for org:', orgId);
-    return null;
-  }
-
-  return { orgId, auroraTenantId };
+  return orgId;
 }
 
 async function handleCustomerUpdated(tableName: string, customer: Stripe.Customer): Promise<void> {
@@ -245,6 +229,55 @@ async function updatePaymentMethod(
       ConditionExpression: 'attribute_exists(pk)',
     }),
   );
+}
+
+async function handleCustomerDeleted(tableName: string, customer: Stripe.Customer): Promise<void> {
+  // The customer.deleted payload carries the full pre-deletion Customer, including metadata.
+  // We do NOT retrieve from Stripe — the customer no longer exists there.
+  const userId = customer.metadata?.userId;
+  if (!userId) {
+    throw new Error(
+      `[stripe-webhook] customer.deleted missing metadata.userId; cannot disable customer ${customer.id}`,
+    );
+  }
+
+  // Disable immediately — no grace period. Tenants first; a failed region throws so the
+  // webhook returns 500 and Stripe retries (there is no cron fallback for canceled records).
+  // The sync is probe-first, so a retry skips regions that are already disabled.
+  const orgId = await resolveOrgId(userId, tableName);
+  if (orgId) {
+    assertRegionSyncSucceeded(
+      await syncTenantStatusInProvisionedRegions(orgId, 'disabled', WEBHOOK_STATUS_SYNC_RETRY),
+    );
+    console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
+      userId,
+      orgId,
+    });
+  } else {
+    console.warn('[stripe-webhook] customer.deleted: no tenant to disable', {
+      userId,
+      customerId: customer.id,
+    });
+  }
+
+  const now = new Date();
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: tableName,
+      Key: {
+        pk: { S: `CUSTOMER#${userId}` },
+        sk: { S: 'SUBSCRIPTION' },
+      },
+      UpdateExpression:
+        'SET subscriptionStatus = :status, canceledAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt',
+      ExpressionAttributeValues: {
+        ':status': { S: SubscriptionStatus.Canceled },
+        ':now': { S: now.toISOString() },
+      },
+    }),
+  );
+
+  emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
 
 async function handleSubscriptionUpdate(
@@ -359,22 +392,24 @@ async function handleSubscriptionDeleted(
     attemptCount: attemptCount ?? 0,
   });
 
-  // Best-effort: set Aurora tenant to WRITE_LOCKED during grace period.
-  // If this fails, the daily grace-period-enforcer cron will also attempt
-  // WRITE_LOCK for active grace periods missing it.
+  // Best-effort: write-lock the tenant on every orchestrator during grace
+  // period. If this fails, the daily grace-period-enforcer cron will also
+  // attempt WRITE_LOCK for active grace periods missing it. The sync never
+  // downgrades a tenant that is already disabled.
   try {
-    const resolved = await resolveAuroraTenantId(userId, tableName);
-    if (resolved) {
-      await updateTenantStatus({ tenantId: resolved.auroraTenantId, status: 'WRITE_LOCKED' });
-      await setOrgAuroraTenantStatus(resolved.orgId, 'WRITE_LOCKED');
-      console.log('[stripe-webhook] Aurora tenant WRITE_LOCKED', {
-        userId,
-        orgId: resolved.orgId,
-        auroraTenantId: resolved.auroraTenantId,
-      });
+    const orgId = await resolveOrgId(userId, tableName);
+    if (orgId) {
+      assertRegionSyncSucceeded(
+        await syncTenantStatusInProvisionedRegions(
+          orgId,
+          'write-locked',
+          WEBHOOK_STATUS_SYNC_RETRY,
+        ),
+      );
+      console.log('[stripe-webhook] Tenant write-locked', { userId, orgId });
     }
   } catch (error) {
-    console.error('[stripe-webhook] Failed to WRITE_LOCK Aurora tenant', { userId, error });
+    console.error('[stripe-webhook] Failed to write-lock tenant', { userId, error });
   }
 }
 
@@ -419,21 +454,19 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
 
   emitInvoicePaid();
 
-  // Best-effort: re-enable Aurora tenant if recovering from PastDue/GracePeriod.
-  // If this fails, the tenant may remain locked until manual intervention.
+  // Best-effort: re-enable the tenant on every orchestrator if recovering from
+  // PastDue/GracePeriod. If this fails, the tenant may remain locked until
+  // manual intervention.
   try {
-    const resolved = await resolveAuroraTenantId(userId, tableName);
-    if (resolved) {
-      await updateTenantStatus({ tenantId: resolved.auroraTenantId, status: 'ACTIVE' });
-      await setOrgAuroraTenantStatus(resolved.orgId, 'ACTIVE');
-      console.log('[stripe-webhook] Aurora tenant re-activated', {
-        userId,
-        orgId: resolved.orgId,
-        auroraTenantId: resolved.auroraTenantId,
-      });
+    const orgId = await resolveOrgId(userId, tableName);
+    if (orgId) {
+      assertRegionSyncSucceeded(
+        await syncTenantStatusInProvisionedRegions(orgId, 'active', WEBHOOK_STATUS_SYNC_RETRY),
+      );
+      console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
     }
   } catch (error) {
-    console.error('[stripe-webhook] Failed to re-activate Aurora tenant', { userId, error });
+    console.error('[stripe-webhook] Failed to re-activate tenant', { userId, error });
   }
 }
 

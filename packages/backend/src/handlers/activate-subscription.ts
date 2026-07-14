@@ -14,7 +14,7 @@ import type { ActivateSubscriptionResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.js';
-import { saveBillingRecord, unlockAuroraTenant } from '../lib/billing-activation.js';
+import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -100,14 +100,14 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   }
 
   // 5. Create or update subscription
-  const subscription = await createOrUpdateSubscription(
+  const subscription = await createOrUpdateSubscription({
     stripe,
     record,
     paymentMethodId,
     secrets,
     userId,
     promotionCodeId,
-  );
+  });
 
   // Guard: reject if subscription is not in a usable state after activation.
   // e.g. Stripe returns 'incomplete' when 3DS challenge is required but not completed.
@@ -127,9 +127,9 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  // 6. Persist billing record and unlock Aurora tenant
+  // 6. Persist billing record and unlock the tenant on every orchestrator
   await saveBillingRecord(userId, subscription, paymentMethodId, mappedStatus);
-  await unlockAuroraTenant(orgId);
+  await unlockAllProvisionedRegions(orgId);
 
   const response: ActivateSubscriptionResponse = {
     subscription: {
@@ -160,14 +160,23 @@ async function getCustomerBillingRecord(
   return result.Item ? unmarshall(result.Item) : undefined;
 }
 
-async function createOrUpdateSubscription(
-  stripe: ReturnType<typeof getStripeClient>,
-  record: Record<string, unknown>,
-  paymentMethodId: string,
-  secrets: ReturnType<typeof getBillingSecrets>,
-  userId: string,
-  promotionCodeId?: string,
-) {
+interface CreateOrUpdateSubscriptionParams {
+  stripe: ReturnType<typeof getStripeClient>;
+  record: Record<string, unknown>;
+  paymentMethodId: string;
+  secrets: ReturnType<typeof getBillingSecrets>;
+  userId: string;
+  promotionCodeId?: string;
+}
+
+async function createOrUpdateSubscription({
+  stripe,
+  record,
+  paymentMethodId,
+  secrets,
+  userId,
+  promotionCodeId,
+}: CreateOrUpdateSubscriptionParams) {
   // Canceled subscriptions are terminal in Stripe and cannot be updated; reactivation
   // must create a fresh subscription even though the stale subscriptionId still sits in DDB.
   const isCanceled =

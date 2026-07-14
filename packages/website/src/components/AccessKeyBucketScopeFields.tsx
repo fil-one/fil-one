@@ -38,7 +38,7 @@ export function AccessKeyBucketScopeFields({
   // https://linear.app/filecoin-foundation/issue/FIL-324/move-filtering-bucket-regions-to-backend
   const buckets = (data?.buckets ?? [])
     .filter((b) => !region || b.region === region)
-    .map((b) => b.name);
+    .map((b) => b.bucketName);
   const loading = isPending && bucketScope === 'specific';
 
   function toggleBucket(name: string) {
@@ -105,7 +105,7 @@ export function AccessKeyBucketScopeFields({
                       checked={selectedBuckets.includes(name)}
                       onChange={() => toggleBucket(name)}
                     />
-                    <span className="text-sm font-normal text-zinc-900">{name}</span>
+                    <span className="text-xs font-normal text-zinc-900">{name}</span>
                   </label>
                 ))}
               </div>

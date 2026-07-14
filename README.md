@@ -14,11 +14,8 @@ hyperspace/
 │   ├── aurora-backoffice-client/ # Generated TS client for Aurora Back Office API
 │   ├── aurora-portal-client/    # Generated TS client for Aurora Portal API
 │   ├── backend/    # Lambda handlers (upload → DynamoDB)
-│   ├── ui/         # UI component library (git submodule → joemocode-business/ui-hyperspace)
 │   └── website/    # Vite + React 19 + TanStack Router SPA + Tailwind v4
 ```
-
-> `packages/ui` is a git submodule — a standalone fork of `@filecoin-foundation/ui-filecoin` adapted for React/Vite. The upstream fork lives at `joemocode-business/filecoin-foundation` for tracking upstream changes. This package does not build on its own! We import the UI components we use and build through Website package. TODO Move this to something more official and not my Github, probably.
 
 ## AWS account
 
@@ -110,7 +107,7 @@ pnpx sst secret set GrafanaLokiAuth '<instanceId>:<apiKey>' [--stage <stage>]
 
 Omit `--stage` to set for your personal dev stage (defaults to OS username).
 
-There are two Auth0 M2M credentials with different scopes — see the [Auth0 M2M Setup](#auth0-machine-to-machine-m2m-application) section below. The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below. The `GrafanaLokiAuth` secret is from Grafana Cloud — see the [Observability](#observability) section below.
+There are two Auth0 M2M credentials with different scopes — see [`docs/Auth0OneTimeSetup.md`](./docs/Auth0OneTimeSetup.md). The `AuroraBackofficeToken` is from the Aurora Back Office dashboard — see the [API token](#api-token) section below. The `GrafanaLokiAuth` secret is from Grafana Cloud — see the [Observability](#observability) section below.
 
 ## Commands
 
@@ -152,6 +149,10 @@ pnpm exec playwright install --with-deps
 | `E2E_TRIAL_EMAIL` / `E2E_TRIAL_PASSWORD` / `E2E_TRIAL_USER_ID`    | Trial test user                                       |
 
 In CI, all nine credential vars come from GitHub repository secrets (see [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)). Both workflows also configure AWS via OIDC (using `vars.AWS_ROLE_ARN`) so the billing-state reset can write to the staging `BillingTable`.
+
+#### Seeded buckets per region
+
+The bucket/upload tests in `tests/e2e/destructive/buckets.spec.ts` run once per S3 region (`eu-west-1` and `us-east-1`, see `tests/e2e/destructive/regions.util.ts`) and reuse existing buckets rather than creating them (the account-wide bucket limit is 100 and buckets are not yet deletable). Each test account — paid, unpaid, and trial — must therefore have at least one bucket in **each** region on the target stage; otherwise the test fails with a `No <region> bucket found` error. Seeding is manual: log in as each test user and create one bucket per region via the UI. The unpaid account cannot create buckets in its `past_due` state, so seed its buckets while its billing state permits (or temporarily reset it via the `BillingTable`).
 
 #### Running locally
 
@@ -222,7 +223,7 @@ Tests run inside `sst shell` so that SST resource bindings (table names, Stripe 
 pnpm deploy:dev
 ```
 
-Uses your OS username as the stage name. No custom domain — outputs a CloudFront URL.
+Uses your OS username as the stage name. Serves the app at `https://{username}.dev.fil.one` (the SST stack creates the Route 53 record in the delegated `dev.fil.one` zone — see [`docs/architectural-decisions/2026-05-dev-subdomain.md`](docs/architectural-decisions/2026-05-dev-subdomain.md)). Stage names must be valid DNS labels: lowercase `a-z`, `0-9`, `-`; 1–63 chars; no leading or trailing hyphen.
 
 If you are having trouble deploying after SST changes (e.g., a version bump of SST or drift on components from manual actions), you may need to refresh the stack:
 
@@ -291,24 +292,23 @@ For MFA-specific troubleshooting, see [`docs/architectural-decisions/2026-03-mfa
 
 ## ACM Certificate Provisioning & DNS Setup
 
-Custom domains require an ACM certificate in **us-east-1** (CloudFront requirement):
+Custom domains require an ACM certificate in **us-east-1** (CloudFront requirement). Managed in [`fil-one/infrastructure`](https://github.com/fil-one/infrastructure) via HCP Terraform.
 
-We manage this in another repo: https://github.com/FilecoinFoundationWeb/FilHyperspace-Infrastructure
-
-Example PR To add `staging.fil.one`: https://github.com/FilecoinFoundationWeb/FilHyperspace-Infrastructure/pull/3
+- **`app.fil.one` / `staging.fil.one`** — one ACM cert per domain, DNS-validated through Cloudflare.
+- **`*.dev.fil.one`** — single wildcard cert shared by every ephemeral stage (PR previews and personal dev stacks). `dev.fil.one` is delegated from Cloudflare to a Route 53 hosted zone in the staging AWS account, so SST creates per-stage A/AAAA records without needing a Cloudflare API token. See [`docs/architectural-decisions/2026-05-dev-subdomain.md`](docs/architectural-decisions/2026-05-dev-subdomain.md).
 
 ## Auth0
 
-Two Auth0 tenants are used:
+Auth0 powers authentication: Universal Login, two M2M applications per tenant (deploy-time and runtime), MFA, and passkeys as primary authentication. Most of this is automated by the deploy-time setup Lambda — but a handful of dashboard toggles must be configured manually once per tenant before the first deploy.
 
-| Environment | Tenant        | Domain                              | Dashboard                                                                                                                      |
-| ----------- | ------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Staging/dev | **FilOneDev** | `dev-oar2nhqh58xf5pwf.us.auth0.com` | [Dashboard](https://manage.auth0.com/dashboard/us/dev-oar2nhqh58xf5pwf/applications/hAHMVzFTsFMrtxHDfzOvQCLHgaAf3bPQ/settings) |
-| Production  | **fil-one**   | `fil-one.us.auth0.com`              | [Dashboard](https://manage.auth0.com/dashboard/us/fil-one)                                                                     |
+The full operator runbook (tenant settings, application settings, MFA, passkeys, and both M2M apps) is in [`docs/Auth0OneTimeSetup.md`](./docs/Auth0OneTimeSetup.md). For the design rationale, see the ADRs under `docs/architectural-decisions/`:
+
+- `2026-03-mfa-enrollment.md` — MFA factor selection + Post-Login Action
+- `2026-05-passkey-primary-authentication.md` — passkeys as primary authentication
 
 Auth0 credentials are managed as SST secrets (`Auth0ClientId`, `Auth0ClientSecret`). See the "Set SST secrets" step above.
 
-**Callback and logout URLs are configured automatically during deploy** — no manual Dashboard edits needed. The deploy-time setup Lambda adds the correct URLs for the deployed domain (custom domain or CloudFront).
+**Callback and logout URLs are configured automatically during deploy** — no manual Dashboard edits needed. The deploy-time setup Lambda adds the correct URLs for the deployed domain.
 
 **Application settings** (Applications > your app > Settings):
 
@@ -490,40 +490,11 @@ pnpm lint:fix
 pnpm generate:api-clients
 ```
 
-## UI submodule (`packages/ui`)
+## UI components (`packages/website/src/components/`)
 
-`packages/ui` is a git submodule pointing to `joemocode-business/ui-hyperspace` — a fork of `@filecoin-foundation/ui-filecoin` adapted for Vite/React. It is consumed from source by the website (no separate build step in dev).
+UI components live directly in the website package under `packages/website/src/components/`. There is no separate design-system package or git submodule.
 
-**Importing components in the website**
-
-```tsx
-import { Button } from '@hyperspace/ui/Button';
-import { Section } from '@hyperspace/ui/Section/Section';
-import { Heading } from '@hyperspace/ui/Heading';
-```
-
-Styles are loaded globally via `packages/website/src/styles.css` which imports `@hyperspace/ui/styles` (Tailwind v4 theme + component CSS).
-
-**Updating the submodule to a new commit**
-
-```bash
-cd packages/ui
-git pull origin main
-cd ../..
-git add packages/ui
-git commit -m "chore: bump ui submodule"
-```
-
-**Pulling upstream changes from the original library**
-
-The full fork at `joemocode-business/filecoin-foundation` tracks the upstream `FilecoinFoundationWeb/filecoin-foundation`. To bring in upstream changes:
-
-```bash
-# In the filecoin-foundation fork, sync upstream then cherry-pick or copy
-# changed files from packages/ui-filecoin/ into the ui-hyperspace repo manually.
-```
-
-> **Note**: Several components in `packages/ui` use Next.js-specific APIs (`next/navigation`, `next/image`) or `nuqs` and are not usable as-is in this Vite app. These include `Navigation/*`, `Network/*`, and `Search/Search`. They will be adapted for React Router as needed.
+The visual design draws on `@filecoin-foundation/ui-filecoin` as the original inspiration, but all components have been adapted for this Vite/React app and are maintained in-tree.
 
 ## Observability
 

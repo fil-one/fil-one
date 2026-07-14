@@ -24,11 +24,13 @@ vi.mock('../lib/auth-secrets.js', () => ({
 }));
 
 const mockGetMfaEnrollments = vi.fn();
+const mockGetPasskeyAuthenticators = vi.fn();
 vi.mock('../lib/auth0-management.js', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
+    getPasskeyAuthenticators: (...args: unknown[]) => mockGetPasskeyAuthenticators(...args),
   };
 });
 
@@ -78,6 +80,7 @@ describe('GET /api/me handler', () => {
     });
 
     mockGetMfaEnrollments.mockResolvedValue([]);
+    mockGetPasskeyAuthenticators.mockResolvedValue([]);
 
     // Auth middleware: resolve existing user
     ddbMock
@@ -94,6 +97,15 @@ describe('GET /api/me handler', () => {
           email: { S: MOCK_EMAIL },
         },
       });
+
+    // Default: the test user's email is not on the RAG allowlist.
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ALLOWLIST#${MOCK_EMAIL}` }, sk: { S: 'RAG' } },
+        ConsistentRead: true,
+      })
+      .resolves({ Item: undefined });
   });
 
   it('returns the org profile', async () => {
@@ -107,7 +119,7 @@ describe('GET /api/me handler', () => {
           pk: { S: `ORG#${MOCK_ORG_ID}` },
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
-          setupStatus: { S: FINAL_SETUP_STATUS },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 
@@ -122,6 +134,41 @@ describe('GET /api/me handler', () => {
         email: MOCK_EMAIL,
         mfaEnrollments: [],
         connectionType: 'auth0',
+        ragAccess: false,
+      }),
+    });
+  });
+
+  it('returns 200 with emailVerified false for unverified users (verified-email gate opt-out)', async () => {
+    mockJwtVerify.mockResolvedValue({
+      payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+    });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
+        },
+      });
+
+    const result = await handler(authenticatedEvent(), buildContext());
+
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({
+        orgId: MOCK_ORG_ID,
+        orgName: 'Example Corp',
+        emailVerified: false,
+        email: MOCK_EMAIL,
+        mfaEnrollments: [],
+        connectionType: 'auth0',
+        ragAccess: false,
       }),
     });
   });
@@ -145,6 +192,7 @@ describe('GET /api/me handler', () => {
         email: MOCK_EMAIL,
         mfaEnrollments: [],
         connectionType: 'auth0',
+        ragAccess: false,
       }),
     });
   });
@@ -161,7 +209,7 @@ describe('GET /api/me handler', () => {
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
           orgConfirmed: { BOOL: true },
-          setupStatus: { S: FINAL_SETUP_STATUS },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 
@@ -196,7 +244,7 @@ describe('GET /api/me handler', () => {
           sk: { S: 'PROFILE' },
           name: { S: 'Example Corp' },
           orgConfirmed: { BOOL: true },
-          setupStatus: { S: FINAL_SETUP_STATUS },
+          auroraSetupStatus: { S: FINAL_SETUP_STATUS },
         },
       });
 
@@ -218,8 +266,199 @@ describe('GET /api/me handler', () => {
             createdAt: '2026-03-24T00:20:17.000Z',
           },
         ],
+        passkeys: [],
         connectionType: 'auth0',
+        ragAccess: false,
       }),
+    });
+  });
+
+  it('returns passkey enrollments when include=mfa is set and the user has passkeys', async () => {
+    mockGetPasskeyAuthenticators.mockResolvedValue([
+      {
+        id: 'passkey|dev_pk1',
+        name: 'iPhone',
+        created_at: '2026-04-12T13:11:08.000Z',
+      },
+    ]);
+
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          orgConfirmed: { BOOL: true },
+          setupStatus: { S: FINAL_SETUP_STATUS },
+        },
+      });
+
+    const result = await handler(authenticatedEvent({ include: 'mfa' }), buildContext());
+
+    expect(mockGetPasskeyAuthenticators).toHaveBeenCalledWith(MOCK_SUB);
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({
+        orgId: MOCK_ORG_ID,
+        orgName: 'Example Corp',
+        emailVerified: true,
+        email: MOCK_EMAIL,
+        mfaEnrollments: [],
+        passkeys: [
+          {
+            id: 'passkey|dev_pk1',
+            name: 'iPhone',
+            createdAt: '2026-04-12T13:11:08.000Z',
+          },
+        ],
+        connectionType: 'auth0',
+        ragAccess: false,
+      }),
+    });
+  });
+
+  it('skips passkey fetch for social-login users (passkeys are database-connection only)', async () => {
+    const socialSub = 'google-oauth2|xyz789';
+    mockJwtVerify.mockResolvedValue({
+      payload: { sub: socialSub, email: MOCK_EMAIL, email_verified: true },
+    });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `SUB#${socialSub}` }, sk: { S: 'IDENTITY' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `SUB#${socialSub}` },
+          sk: { S: 'IDENTITY' },
+          userId: { S: MOCK_USER_ID },
+          orgId: { S: MOCK_ORG_ID },
+          email: { S: MOCK_EMAIL },
+        },
+      });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `ORG#${MOCK_ORG_ID}` },
+          sk: { S: 'PROFILE' },
+          name: { S: 'Example Corp' },
+          orgConfirmed: { BOOL: true },
+          setupStatus: { S: FINAL_SETUP_STATUS },
+        },
+      });
+
+    const result = await handler(authenticatedEvent({ include: 'mfa' }), buildContext());
+
+    expect(mockGetMfaEnrollments).toHaveBeenCalledWith(socialSub);
+    expect(mockGetPasskeyAuthenticators).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      statusCode: 200,
+      body: JSON.stringify({
+        orgId: MOCK_ORG_ID,
+        orgName: 'Example Corp',
+        emailVerified: true,
+        email: MOCK_EMAIL,
+        mfaEnrollments: [],
+        passkeys: [],
+        connectionType: 'google-oauth2',
+        ragAccess: false,
+      }),
+    });
+  });
+
+  describe('ragAccess', () => {
+    function profileResolves() {
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `ORG#${MOCK_ORG_ID}` },
+            sk: { S: 'PROFILE' },
+            name: { S: 'Example Corp' },
+            auroraSetupStatus: { S: FINAL_SETUP_STATUS },
+          },
+        });
+    }
+
+    function parseBody(result: unknown): { ragAccess: boolean } {
+      return JSON.parse((result as { body: string }).body);
+    }
+
+    it('is true for @fil.org emails (no allowlist lookup needed)', async () => {
+      mockJwtVerify.mockResolvedValue({
+        payload: { sub: MOCK_SUB, email: 'alice@fil.org', email_verified: true },
+      });
+      profileResolves();
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).ragAccess).toBe(true);
+    });
+
+    it('is true for allowlisted emails', async () => {
+      mockJwtVerify.mockResolvedValue({
+        payload: { sub: MOCK_SUB, email: 'bob@example.com', email_verified: true },
+      });
+      profileResolves();
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } },
+          ConsistentRead: true,
+        })
+        .resolves({ Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } } });
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).ragAccess).toBe(true);
+    });
+
+    it('is false for neither @fil.org nor allowlisted', async () => {
+      mockJwtVerify.mockResolvedValue({
+        payload: { sub: MOCK_SUB, email: 'eve@example.com', email_verified: true },
+      });
+      profileResolves();
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: 'ALLOWLIST#eve@example.com' }, sk: { S: 'RAG' } },
+          ConsistentRead: true,
+        })
+        .resolves({ Item: undefined });
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).ragAccess).toBe(false);
+    });
+
+    it('is false when the email is unverified, without an allowlist lookup', async () => {
+      mockJwtVerify.mockResolvedValue({
+        payload: { sub: MOCK_SUB, email: 'bob@example.com', email_verified: false },
+      });
+      profileResolves();
+      // Allowlist row exists, but an unverified email must never be granted access.
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } },
+          ConsistentRead: true,
+        })
+        .resolves({ Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } } });
+
+      const result = await handler(authenticatedEvent(), buildContext());
+
+      expect(parseBody(result).ragAccess).toBe(false);
     });
   });
 });

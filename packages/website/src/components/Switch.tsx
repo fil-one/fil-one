@@ -5,15 +5,17 @@ type SwitchProps = {
   checked: boolean;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
+  id?: string;
+  'data-testid'?: string;
   'aria-label'?: string;
   'aria-labelledby'?: string;
   'aria-describedby'?: string;
 };
 
-export function Switch({ checked, onChange, disabled, ...ariaProps }: SwitchProps) {
+export function Switch({ checked, onChange, disabled, ...passthroughProps }: SwitchProps) {
   return (
     <HeadlessSwitch
-      {...ariaProps}
+      {...passthroughProps}
       checked={checked}
       onChange={onChange}
       disabled={disabled}

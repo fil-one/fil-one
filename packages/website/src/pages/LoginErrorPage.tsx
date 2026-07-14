@@ -17,14 +17,18 @@ export function LoginErrorPage({ error }: LoginErrorPageProps) {
 
       {/* Heading */}
       <div className="flex flex-col gap-1">
-        <Heading tag="h1" size="xl">
+        <Heading id="login-error-heading" tag="h1" size="xl">
           Something went wrong
         </Heading>
         <p className="text-sm text-zinc-500">{error}</p>
       </div>
 
       {/* Login button — uses <a> directly to trigger full navigation to the API endpoint */}
-      <a href="/login" className="button button--filled w-full justify-center">
+      <a
+        id="login-error-retry-button"
+        href="/login"
+        className="button button--filled w-full justify-center"
+      >
         Try signing in again
       </a>
     </div>

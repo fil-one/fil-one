@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { STORAGE_STATE } from './roles.ts';
+import { STORAGE_STATE } from './roles.util.ts';
 
 // Convention: one spec per feature, one describe block per role. Each test name
 // starts with the role being exercised so reports read clearly in CI.
@@ -9,14 +9,9 @@ test.describe('paid user', () => {
 
   test('paid user sees full dashboard', async ({ page }) => {
     await page.goto('/dashboard');
-    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
-    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-    await expect(page.getByText('Active').first()).toBeVisible();
-    await expect(
-      // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-      page.getByRole('navigation').getByRole('link', { name: 'Upgrade', exact: true }),
-    ).not.toBeVisible();
+    await expect(page.locator('#dashboard-heading')).toBeVisible();
+    await expect(page.getByTestId('subscription-status')).toHaveAttribute('data-status', 'active');
+    await expect(page.locator('#sidebar-upgrade-button')).not.toBeVisible();
   });
 });
 
@@ -25,14 +20,12 @@ test.describe('unpaid user', () => {
 
   test('unpaid (past_due) user sees update payment prompt', async ({ page }) => {
     await page.goto('/dashboard');
-    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
-    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-    await expect(page.getByText('Past Due')).toBeVisible();
-    await expect(
-      // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-      page.getByRole('navigation').getByRole('link', { name: 'Update payment', exact: true }),
-    ).toBeVisible();
+    await expect(page.locator('#dashboard-heading')).toBeVisible();
+    await expect(page.getByTestId('subscription-status')).toHaveAttribute(
+      'data-status',
+      'past_due',
+    );
+    await expect(page.locator('#sidebar-update-payment-button')).toBeVisible();
   });
 });
 
@@ -41,13 +34,11 @@ test.describe('trial user', () => {
 
   test('trial user sees trial-days-remaining badge', async ({ page }) => {
     await page.goto('/dashboard');
-    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
-    await expect(
-      // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-      page.getByRole('navigation').getByRole('link', { name: 'Upgrade', exact: true }),
-    ).toBeVisible();
-    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-    await expect(page.getByText('Free trial').first()).toBeVisible();
+    await expect(page.locator('#dashboard-heading')).toBeVisible();
+    await expect(page.locator('#sidebar-upgrade-button')).toBeVisible();
+    await expect(page.getByTestId('subscription-status')).toHaveAttribute(
+      'data-status',
+      'trialing',
+    );
   });
 });

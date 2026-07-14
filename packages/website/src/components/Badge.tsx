@@ -18,6 +18,10 @@ type BadgeProps = {
   dot?: boolean;
   description?: React.ReactNode;
   className?: string;
+  /** Stable identifiers for tests — forwarded to the root span. */
+  id?: string;
+  'data-testid'?: string;
+  'data-status'?: string;
 };
 
 const colorStyles: Record<BadgeStrength, Record<BadgeColor, string>> = {
@@ -95,11 +99,13 @@ export function Badge({
   dot,
   description,
   className,
+  ...rest
 }: BadgeProps) {
   const isSolid = variant === 'solid';
 
   const badge = (
     <span
+      {...rest}
       className={clsx(
         'inline-flex items-center rounded-full',
         isSolid ? solidColorStyles[color] : colorStyles[strength][color],

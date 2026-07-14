@@ -1,7 +1,7 @@
 import { useNavigate } from '@tanstack/react-router';
 import { ClockCounterClockwiseIcon } from '@phosphor-icons/react/dist/ssr';
 import { formatBytes } from '@filone/shared';
-import type { S3ObjectVersion } from '@filone/shared';
+import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { formatDateTime } from '../lib/time.js';
 import { Badge } from './Badge';
 
@@ -44,10 +44,12 @@ function VersionRow({
   version,
   isCurrent,
   bucketName,
+  region,
 }: {
   version: S3ObjectVersion;
   isCurrent: boolean;
   bucketName: string;
+  region: S3Region;
 }) {
   const navigate = useNavigate();
 
@@ -55,7 +57,7 @@ function VersionRow({
     void navigate({
       to: '/buckets/$bucketName/objects',
       params: { bucketName },
-      search: { key: version.key, versionId: version.versionId },
+      search: { key: version.key, region, versionId: version.versionId },
     });
   }
 
@@ -63,6 +65,8 @@ function VersionRow({
 
   return (
     <tr
+      data-testid="version-row"
+      data-version-id={version.versionId}
       className={`border-b border-zinc-100 last:border-0 ${
         isCurrent ? 'bg-brand-50/40' : 'cursor-pointer hover:bg-zinc-50'
       }`}
@@ -106,10 +110,12 @@ export function VersionHistoryCard({
   versions,
   currentVersionId,
   bucketName,
+  region,
 }: {
   versions: S3ObjectVersion[];
   currentVersionId?: string;
   bucketName: string;
+  region: S3Region;
 }) {
   if (versions.length <= 1) return null;
 
@@ -136,6 +142,7 @@ export function VersionHistoryCard({
                 version={v}
                 isCurrent={v.versionId === currentVersionId}
                 bucketName={bucketName}
+                region={region}
               />
             ))}
           </tbody>

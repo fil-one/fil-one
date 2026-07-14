@@ -1,4 +1,8 @@
-import { ConditionalCheckFailedException, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  GetItemCommand,
+  PutItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
@@ -17,6 +21,17 @@ export async function createBillingTrial({
   orgId,
   email,
 }: CreateBillingTrialParams): Promise<void> {
+  // Check if this user already has a billing record.
+  const existing = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: Resource.BillingTable.name,
+      Key: { pk: { S: `CUSTOMER#${userId}` }, sk: { S: 'SUBSCRIPTION' } },
+      ConsistentRead: true,
+      ProjectionExpression: 'pk',
+    }),
+  );
+  if (existing.Item) return;
+
   const now = new Date();
   const trialDurationMs = TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000;
   const trialEndsAt = new Date(now.getTime() + trialDurationMs);

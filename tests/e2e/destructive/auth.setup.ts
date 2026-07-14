@@ -1,8 +1,9 @@
 import { test as setup, expect } from '@playwright/test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { STORAGE_STATE, type Role } from './roles.ts';
-import { resetBillingState } from './billing-reset.ts';
+import { STORAGE_STATE, type Role } from './roles.util.ts';
+import { resetBillingState } from './billing-reset.util.ts';
+import { maybeSkipPasskeyEnrollment } from './passkey.util.ts';
 
 const REQUIRED_CREDENTIAL_VARS = [
   'E2E_PAID_EMAIL',
@@ -58,12 +59,12 @@ for (const role of roles) {
     await resetBillingState(role.name, role.userId);
 
     await page.goto('/');
-    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-    await page.getByRole('textbox', { name: 'Email address' }).fill(role.email);
-    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-    await page.getByRole('textbox', { name: 'Password' }).fill(role.password);
-    // oxlint-disable-next-line @filone/oxlint-rules/no-text-locators
-    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await page.locator('#username').fill(role.email);
+    await page.locator('button[data-action-button-primary="true"]').click();
+    await page.locator('#password').fill(role.password);
+    await page.locator('button[data-action-button-primary="true"]').click();
+
+    await maybeSkipPasskeyEnrollment(page);
 
     await expect(page).toHaveURL(/\/dashboard$/);
 
