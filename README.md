@@ -102,6 +102,7 @@ pnpx sst secret set StripeSecretKey <value> [--stage <stage>]
 pnpx sst secret set StripePriceId <value> [--stage <stage>]
 pnpx sst secret set AuroraBackofficeToken <value> [--stage <stage>]
 pnpx sst secret set SendGridApiKey <value> [--stage <stage>]
+pnpx sst secret set HubSpotServiceKey <value> [--stage <stage>]
 pnpx sst secret set GrafanaLokiAuth '<instanceId>:<apiKey>' [--stage <stage>]
 ```
 
