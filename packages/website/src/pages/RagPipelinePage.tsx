@@ -75,7 +75,7 @@ function RagPipelineView({
             description="Turn any bucket into a queryable knowledge base."
           >
             <span className="inline-flex items-center gap-2.5">
-              RAG Pipeline
+              Bucket Intelligence
               {anyEnabled ? (
                 <Badge color="green" size="sm" strength="strong" dot>
                   Active
@@ -149,7 +149,7 @@ function RagPipelineView({
 function NotAvailable() {
   return (
     <div data-testid="rag-pipeline-not-available" className="px-10 py-12">
-      <Alert variant="grey" description="RAG Pipeline is not available for your account." />
+      <Alert variant="grey" description="Bucket Intelligence is not available for your account." />
     </div>
   );
 }

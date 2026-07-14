@@ -20,7 +20,7 @@ export function ToggleConfirmModal({
   return (
     <Modal open={open} onClose={onClose} size="sm" testId="toggle-confirm-modal">
       <ModalHeader onClose={onClose}>
-        {enabled ? 'Disable RAG Pipeline?' : 'Enable RAG Pipeline?'}
+        {enabled ? 'Disable Bucket Intelligence?' : 'Enable Bucket Intelligence?'}
       </ModalHeader>
       <ModalBody>
         {enabled ? (
