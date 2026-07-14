@@ -16,13 +16,13 @@ import { RagPipelinePage } from './RagPipelinePage.js';
  * the waitlist before `/me` resolves.
  */
 export function BucketIntelligencePage() {
-  const { data: me, isPending } = useQuery({
+  const { data: me, isPending, isError } = useQuery({
     queryKey: queryKeys.me,
     queryFn: () => getMe(),
     staleTime: ME_STALE_TIME,
   });
 
-  if (isPending) {
+  if (isPending || isError) {
     return (
       <div className="flex items-center justify-center p-16">
         <Spinner ariaLabel="Loading" size={32} />
