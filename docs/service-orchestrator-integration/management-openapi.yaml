@@ -478,20 +478,23 @@ components:
 
     CreateTenantRequest:
       type: object
-      required: [displayName]
+      required: [region]
       properties:
-        displayName:
+        region:
           type: string
           minLength: 1
-          maxLength: 200
-          description: Human-readable name shown in the Service Orchestrator's tooling.
+          description: |
+            Region identifier the tenant's data is provisioned in — the
+            same region name used in the S3 Gateway hostname
+            (`https://{region}.s3.fil.one`), e.g. `us-east-1`. A Service
+            Orchestrator may manage more than one region; it must reject
+            (422) region values it does not serve.
 
     Tenant:
       type: object
       required:
         [
           tenantId,
-          displayName,
           status,
           bucketCount,
           bucketLimit,
@@ -502,8 +505,6 @@ components:
       properties:
         tenantId:
           $ref: '#/components/schemas/TenantId'
-        displayName:
-          type: string
         status:
           $ref: '#/components/schemas/TenantStatus'
         bucketCount:
