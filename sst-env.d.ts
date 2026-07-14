@@ -126,6 +126,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "GetPreferences": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "GetUsage": {
       "name": string
       "type": "sst.aws.Function"
@@ -135,6 +139,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "GrafanaLokiAuth": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "HubSpotServiceKey": {
       "type": "sst.sst.Secret"
       "value": string
     }
@@ -204,6 +212,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "SubscriptionDriftChecker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "UpdatePreferences": {
       "name": string
       "type": "sst.aws.Function"
     }

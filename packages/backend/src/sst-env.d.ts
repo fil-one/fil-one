@@ -64,5 +64,9 @@ declare module "sst" {
       url: string;
       type: "sst.aws.Queue";
     };
+    HubSpotServiceKey: {
+      value: string;
+      type: "sst.Secret";
+    };
   }
 }
