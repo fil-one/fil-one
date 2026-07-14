@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { ToggleConfirmModal } from './ToggleConfirmModal';
 
 describe('ToggleConfirmModal', () => {
-  it('renders the enable copy with pricing when disabled', () => {
+  it('renders the enable copy without pricing when disabled', () => {
     render(
       <ToggleConfirmModal
         enabled={false}
@@ -14,7 +14,8 @@ describe('ToggleConfirmModal', () => {
       />,
     );
     expect(screen.getByText('Enable Bucket Intelligence?')).toBeInTheDocument();
-    expect(screen.getByText('$15 / TB / month')).toBeInTheDocument();
+    expect(screen.queryByText(/\$15/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Pricing')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Enable' })).toBeInTheDocument();
   });
 
@@ -22,8 +23,8 @@ describe('ToggleConfirmModal', () => {
     render(
       <ToggleConfirmModal enabled pending={false} open onClose={() => {}} onConfirm={() => {}} />,
     );
-    expect(screen.getByText('Disable Bucket Intelligence?')).toBeInTheDocument();
     expect(screen.queryByText('$15 / TB / month')).not.toBeInTheDocument();
+    expect(screen.getByText('Disable RAG Pipeline?')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Disable' })).toBeInTheDocument();
   });
 

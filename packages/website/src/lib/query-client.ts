@@ -41,6 +41,7 @@ export const queryKeys = {
   bucketAnalytics: (bucketName: string, region: S3Region) =>
     ['bucket-analytics', bucketName, region] as const,
   instatusSummary: ['instatus-summary'] as const,
+  preferences: ['preferences'] as const,
   // RAG Pipeline (FIL-555). Distinct from `buckets` so the RAG surface can be
   // refetched/invalidated independently of the storage buckets list.
   ragBuckets: ['rag-buckets'] as const,
@@ -49,4 +50,6 @@ export const queryKeys = {
   ragBucketEnabled: ['rag-bucket-enabled'] as const,
   ragBucketEnabledFor: (bucketName: string, region: S3Region) =>
     ['rag-bucket-enabled', bucketName, region] as const,
+  // RAG API keys (query-endpoint bearer tokens) — distinct from `accessKeys`.
+  ragApiKeys: ['rag-api-keys'] as const,
 };

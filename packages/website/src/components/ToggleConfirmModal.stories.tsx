@@ -15,7 +15,7 @@ const meta: Meta<typeof ToggleConfirmModal> = {
 export default meta;
 type Story = StoryObj<typeof ToggleConfirmModal>;
 
-/** Enabling a bucket — shows pricing and an Enable action. */
+/** Enabling a bucket — explains indexing and shows an Enable action. */
 export const Enable: Story = {
   args: { enabled: false, pending: false },
 };

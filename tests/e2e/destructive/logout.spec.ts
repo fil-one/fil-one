@@ -18,8 +18,10 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
   await page.locator('#user-menu-logout-button').click();
 
   // Wait for the full /logout -> Auth0 /v2/logout -> returnTo chain to settle.
-  await page.waitForURL(/^https:\/\/fil\.one\/?$/, { timeout: 30_000 });
-  await expect(page).toHaveURL(/^https:\/\/fil\.one\/?$/);
+  // Accept either the apex (https://fil.one) or the www subdomain, since the
+  // returnTo target may resolve to www.fil.one.
+  await page.waitForURL(/^https:\/\/(www\.)?fil\.one\/?$/, { timeout: 30_000 });
+  await expect(page).toHaveURL(/^https:\/\/(www\.)?fil\.one\/?$/);
 
   const cookies = await context.cookies();
   for (const name of AUTH_COOKIES) {

@@ -23,6 +23,20 @@ vi.mock('../lib/org-profile.js', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
+// The queryability gate reads the bucket's enablement row (RagIndexerTable).
+// Defaulted per describe-block to an org-1 record with a completed first sync.
+const mockGetEnablement = vi.fn();
+
+vi.mock('../lib/bucket-rag-enablement.js', () => ({
+  getBucketRagEnablement: (...args: unknown[]) => mockGetEnablement(...args),
+}));
+
+const SYNCED_ENABLEMENT = {
+  orgId: 'org-1',
+  status: 'active',
+  lastSyncedAt: '2026-07-01T00:00:00Z',
+};
+
 const mockEmbed = vi.fn();
 const mockComplete = vi.fn();
 const mockQuery = vi.fn();
@@ -42,7 +56,8 @@ vi.mock('@filone/rag-shared', () => ({
 // with aws-sdk-client-mock so the *real* gate runs end-to-end. A non-foundation
 // email is used so the decision hinges on the (mocked) allowlist lookup.
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -61,6 +76,7 @@ vi.mock('../middleware/subscription-guard.js', () => ({
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler, handler } from './query-bucket.js';
+import { hashRagKeyToken, RagApiKeyKeys } from '../lib/rag-api-keys.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
 import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
 import { S3Region } from '@filone/shared';
@@ -107,6 +123,7 @@ describe('query-bucket baseHandler', () => {
     mockEmbed.mockResolvedValue([0.1, 0.2, 0.3]);
     mockComplete.mockResolvedValue('grounded answer');
     mockQuery.mockResolvedValue([vector('doc.pdf#0', 'doc.pdf'), vector('doc.pdf#1', 'doc.pdf')]);
+    mockGetEnablement.mockResolvedValue(SYNCED_ENABLEMENT);
   });
 
   it('returns 200 with a grounded answer and deduplicated sources (happy path)', async () => {
@@ -423,6 +440,34 @@ describe('query-bucket baseHandler', () => {
     const result = await baseHandler(queryEvent({ query: 'hello' }));
     expect(JSON.parse(result.body!).sources).toStrictEqual(['orphan#0']);
   });
+
+  describe('first-indexing-pass gate', () => {
+    it.each([
+      ['RAG was never enabled (no enablement record)', undefined],
+      ['the first indexing pass has not completed', { orgId: 'org-1', status: 'active' }],
+      [
+        'the enablement record belongs to another org',
+        { orgId: 'org-other', status: 'active', lastSyncedAt: '2026-07-01T00:00:00Z' },
+      ],
+    ])('returns 409 BUCKET_NOT_INDEXED when %s', async (_label, enablement) => {
+      mockGetEnablement.mockResolvedValue(enablement);
+
+      const result = await baseHandler(queryEvent({ query: 'hello' }));
+
+      expect(result.statusCode).toBe(409);
+      const body = JSON.parse(result.body!);
+      expect(body.code).toBe('BUCKET_NOT_INDEXED');
+      expect(body.message).toMatch(/not been indexed yet/);
+      // Rejected before any RAG work.
+      expect(mockEmbed).not.toHaveBeenCalled();
+      expect(mockComplete).not.toHaveBeenCalled();
+    });
+
+    it('reads the enablement row for the caller org, region, and bucket', async () => {
+      await baseHandler(queryEvent({ query: 'hello' }));
+      expect(mockGetEnablement).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'my-bucket');
+    });
+  });
 });
 
 describe('query-bucket handler (RAG access gate)', () => {
@@ -449,6 +494,7 @@ describe('query-bucket handler (RAG access gate)', () => {
     mockEmbed.mockResolvedValue([0.1]);
     mockComplete.mockResolvedValue('answer');
     mockQuery.mockResolvedValue([vector('a.pdf#0', 'a.pdf')]);
+    mockGetEnablement.mockResolvedValue(SYNCED_ENABLEMENT);
   });
 
   it('returns 403 when the caller is not foundation and not allowlisted', async () => {
@@ -470,5 +516,121 @@ describe('query-bucket handler (RAG access gate)', () => {
 
     expect(result.statusCode).toBe(200);
     expect(mockEmbed).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Full chain — RAG API key bearer auth (ragQueryAuthMiddleware)
+// ---------------------------------------------------------------------------
+
+describe('query-bucket handler (RAG API key bearer auth)', () => {
+  const TOKEN = 'sk_rag_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';
+  const TOKEN_HASH = hashRagKeyToken(TOKEN);
+
+  // The key's creator identity drives the downstream gates: a foundation email
+  // passes the RAG access gate without an allowlist row.
+  const KEY_RECORD = {
+    pk: RagApiKeyKeys.orgPk('org-1'),
+    sk: RagApiKeyKeys.orgSk('key-1'),
+    keyName: 'agent key',
+    keyPrefix: TOKEN.slice(0, 12),
+    tokenHash: TOKEN_HASH,
+    bucketScope: 'all',
+    createdBy: 'user-1',
+    creatorEmail: 'dev@fil.org',
+    createdAt: '2026-07-01T00:00:00Z',
+  };
+
+  function stubKey(overrides: Record<string, unknown> = {}) {
+    // Default GetItem miss (e.g. the RAG allowlist lookup for the creator email).
+    ddbMock.on(GetItemCommand).resolves({});
+    ddbMock
+      .on(GetItemCommand, {
+        Key: { pk: { S: RagApiKeyKeys.lookupPk(TOKEN_HASH) }, sk: { S: RagApiKeyKeys.lookupSk() } },
+      })
+      .resolves({ Item: marshall({ orgId: 'org-1', keyId: 'key-1' }) });
+    ddbMock
+      .on(GetItemCommand, {
+        Key: { pk: { S: RagApiKeyKeys.orgPk('org-1') }, sk: { S: RagApiKeyKeys.orgSk('key-1') } },
+      })
+      .resolves({ Item: marshall({ ...KEY_RECORD, ...overrides }) });
+    ddbMock.on(UpdateItemCommand).resolves({});
+  }
+
+  // No userInfo up front — on the bearer path the middleware attaches it from
+  // the key record, so the cast reflects what the chain guarantees at runtime.
+  function bearerEvent(authorization: string, bucketName = 'my-bucket'): AuthenticatedEvent {
+    const event = buildEvent({ body: JSON.stringify({ query: 'hello' }) });
+    event.headers.authorization = authorization;
+    event.pathParameters = { name: bucketName };
+    return event as unknown as AuthenticatedEvent;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    orch = fakeOrchestrator('aurora', { bucket: BUCKET });
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
+    mockEmbed.mockResolvedValue([0.1]);
+    mockComplete.mockResolvedValue('answer');
+    mockQuery.mockResolvedValue([vector('a.pdf#0', 'a.pdf')]);
+    mockGetEnablement.mockResolvedValue(SYNCED_ENABLEMENT);
+  });
+
+  it('answers a query for a bucket owned by the key org (200)', async () => {
+    stubKey();
+
+    const result = await handler(bearerEvent(`Bearer ${TOKEN}`), buildContext());
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body!).answer).toBe('answer');
+    // The vector search runs under the key record's org, not anything request-supplied.
+    expect(mockQuery).toHaveBeenCalledWith(
+      'org-1',
+      S3Region.EuWest1,
+      'my-bucket',
+      expect.anything(),
+    );
+  });
+
+  it('returns 404 for a bucket name the key org does not own', async () => {
+    stubKey();
+    orch.getBucket.mockResolvedValue(null);
+
+    const result = await handler(
+      bearerEvent(`Bearer ${TOKEN}`, 'other-orgs-bucket'),
+      buildContext(),
+    );
+
+    expect(result.statusCode).toBe(404);
+    expect(mockEmbed).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for a bucket outside a specific scope without doing RAG work', async () => {
+    stubKey({ bucketScope: 'specific', buckets: [{ region: 'eu-west-1', name: 'scoped-bucket' }] });
+
+    const result = await handler(bearerEvent(`Bearer ${TOKEN}`), buildContext());
+
+    expect(result.statusCode).toBe(404);
+    expect(mockEmbed).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 for a deleted/unknown key', async () => {
+    ddbMock.on(GetItemCommand).resolves({});
+
+    const result = await handler(bearerEvent(`Bearer ${TOKEN}`), buildContext());
+
+    expect(result.statusCode).toBe(401);
+    expect(mockEmbed).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when the key creator is not foundation and not allowlisted', async () => {
+    stubKey({ creatorEmail: 'outsider@example.com' });
+    // Allowlist lookup misses (only the key rows are stubbed above).
+
+    const result = await handler(bearerEvent(`Bearer ${TOKEN}`), buildContext());
+
+    expect(result.statusCode).toBe(403);
+    expect(mockEmbed).not.toHaveBeenCalled();
   });
 });

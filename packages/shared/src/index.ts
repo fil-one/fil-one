@@ -41,6 +41,9 @@ export type {
 } from './api/me.js';
 export { PASSKEY_PER_USER_LIMIT, UpdateProfileSchema } from './api/me.js';
 
+export type { PreferencesResponse, UpdatePreferencesRequest } from './api/preferences.js';
+export { UpdatePreferencesSchema } from './api/preferences.js';
+
 export { getProvider, isSocialConnection } from './connection-providers.js';
 export type { ConnectionProvider } from './connection-providers.js';
 export {
@@ -149,6 +152,23 @@ export type {
   CreateAccessKeyResponse,
   DeleteAccessKeyRequest,
 } from './api/access-keys.js';
+
+export {
+  RAG_KEY_TOKEN_PREFIX,
+  RAG_KEY_DISPLAY_PREFIX_LENGTH,
+  RAG_KEY_MAX_BUCKETS,
+  RAG_KEY_BUCKET_SCOPES,
+  RagKeyBucketRefSchema,
+  CreateRagApiKeySchema,
+} from './api/rag-api-keys.js';
+export type {
+  RagKeyBucketScope,
+  RagKeyBucketRef,
+  RagApiKey,
+  ListRagApiKeysResponse,
+  CreateRagApiKeyRequest,
+  CreateRagApiKeyResponse,
+} from './api/rag-api-keys.js';
 
 export type {
   UsageDataPoint,

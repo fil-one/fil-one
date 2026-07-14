@@ -30,25 +30,10 @@ export function ToggleConfirmModal({
           </p>
         ) : (
           <div className="space-y-4">
-            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-              <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
-                Pricing
-              </p>
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between gap-6">
-                  <span className="text-sm text-zinc-600">Per TB stored (with indexing)</span>
-                  <span className="flex-shrink-0 text-sm font-semibold text-zinc-900">
-                    $15 / TB / month
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-6">
-                  <span className="text-sm text-zinc-600">LLM / embedding costs</span>
-                  <span className="flex-shrink-0 text-sm font-semibold text-zinc-900">
-                    Included
-                  </span>
-                </div>
-              </div>
-            </div>
+            <p className="text-sm text-zinc-600">
+              Files in this bucket will be indexed and become queryable via the API. New uploads are
+              indexed automatically.
+            </p>
             <p className="text-xs text-zinc-500">Disable at any time.</p>
           </div>
         )}
