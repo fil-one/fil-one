@@ -18,7 +18,7 @@ import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { ragQueryAuthMiddleware } from '../middleware/rag-query-auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { ragAccessMiddleware } from '../lib/rag-access.js';
+import { ragAccessMiddleware } from '../middleware/rag-access.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
 /**

@@ -3,7 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { MeResponse } from '@filone/shared';
 import { getOrgProfile } from '../lib/org-profile.js';
-import { hasRagAccess } from '../lib/rag-access.js';
+import { hasRagAccess } from '../middleware/rag-access.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import {
   getConnectionType,
