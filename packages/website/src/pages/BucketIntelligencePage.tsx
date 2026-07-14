@@ -16,7 +16,11 @@ import { RagPipelinePage } from './RagPipelinePage.js';
  * the waitlist before `/me` resolves.
  */
 export function BucketIntelligencePage() {
-  const { data: me, isPending, isError } = useQuery({
+  const {
+    data: me,
+    isPending,
+    isError,
+  } = useQuery({
     queryKey: queryKeys.me,
     queryFn: () => getMe(),
     staleTime: ME_STALE_TIME,
