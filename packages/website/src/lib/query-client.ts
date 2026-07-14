@@ -50,4 +50,6 @@ export const queryKeys = {
   ragBucketEnabled: ['rag-bucket-enabled'] as const,
   ragBucketEnabledFor: (bucketName: string, region: S3Region) =>
     ['rag-bucket-enabled', bucketName, region] as const,
+  // RAG API keys (query-endpoint bearer tokens) — distinct from `accessKeys`.
+  ragApiKeys: ['rag-api-keys'] as const,
 };

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { S3Region } from '@filone/shared';
 
 import { BucketsTab, type RagBucket } from './RagPipelineBucketsTab.js';
@@ -135,5 +135,31 @@ describe('BucketsTab — sync telemetry display', () => {
     expect(statusOf('beta')).toBe('error');
     expect(statusOf('gamma')).toBe('synced');
     expect(statusOf('delta')).toBe('not-indexed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// First-indexing-pass gate — Ask questions availability
+// ---------------------------------------------------------------------------
+
+describe('BucketsTab — Ask questions before the first indexing pass', () => {
+  it('disables the button with an explanatory tooltip until the first sync completes', () => {
+    renderTab([bucket({ enabled: true, syncState: 'syncing' })]);
+
+    const ask = screen.getByRole('button', { name: 'Ask questions' });
+    expect(ask).toBeDisabled();
+
+    // The tooltip trigger is the wrapper around the (disabled) button.
+    fireEvent.mouseEnter(ask.parentElement!);
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/after the first indexing pass/);
+  });
+
+  it('enables the button once the bucket has a completed sync', () => {
+    renderTab([bucket({ enabled: true, lastSyncedAt: '2026-06-22T11:59:00Z' })]);
+
+    const ask = screen.getByRole('button', { name: 'Ask questions' });
+    expect(ask).toBeEnabled();
+    fireEvent.mouseEnter(ask.parentElement!);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
 });

@@ -208,7 +208,9 @@ export default $config({
       cors: {
         allowOrigins: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        allowHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Requested-With'],
+        // Authorization carries RAG API key bearer tokens (query endpoint);
+        // origins stay locked to our own domain above.
+        allowHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Requested-With', 'Authorization'],
         allowCredentials: true,
         maxAge: '1 day',
       },
@@ -671,6 +673,24 @@ export default $config({
         },
       ],
     });
+    // RAG API keys: named bearer tokens scoped to the RAG query endpoint only
+    // (distinct from S3 access keys). DDB-only handlers — UserInfoTable is
+    // already linked via allResources, so no extra env/permissions needed.
+    addRoute({
+      method: 'GET',
+      routePath: '/api/rag-api-keys',
+      handler: 'list-rag-api-keys',
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/rag-api-keys',
+      handler: 'create-rag-api-key',
+    });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/rag-api-keys/{keyId}',
+      handler: 'delete-rag-api-key',
+    });
     addRoute({
       method: 'POST',
       routePath: '/api/presign',
@@ -698,6 +718,9 @@ export default $config({
       routePath: '/api/buckets/{name}/query',
       handler: 'query-bucket',
       rag: true,
+      // Reads the bucket's enablement row to reject queries before the first
+      // indexing pass completes (BUCKET_NOT_INDEXED).
+      extraLink: [ragIndexerTable],
       extraEnv: orchestratorEnv,
       permissions: [
         ...bucketReadPermissions,

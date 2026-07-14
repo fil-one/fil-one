@@ -312,3 +312,4 @@ export {
   setBucketRagEnabled,
   queryBucket,
 } from './rag-bucket-api.js';
+export { listRagApiKeys, createRagApiKey, deleteRagApiKey } from './rag-api-keys-api.js';
