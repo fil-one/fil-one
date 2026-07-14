@@ -24,7 +24,7 @@ describe('ToggleConfirmModal', () => {
       <ToggleConfirmModal enabled pending={false} open onClose={() => {}} onConfirm={() => {}} />,
     );
     expect(screen.queryByText('$15 / TB / month')).not.toBeInTheDocument();
-    expect(screen.getByText('Disable RAG Pipeline?')).toBeInTheDocument();
+    expect(screen.getByText('Disable Bucket Intelligence?')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Disable' })).toBeInTheDocument();
   });
 
