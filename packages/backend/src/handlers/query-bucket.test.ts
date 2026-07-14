@@ -31,7 +31,13 @@ vi.mock('../lib/bucket-rag-enablement.js', () => ({
   getBucketRagEnablement: (...args: unknown[]) => mockGetEnablement(...args),
 }));
 
+// pk encodes org, region, and bucket name (BUCKET#{orgId}#{region}#{bucketName}).
+// The queryability gate decodes it to reject a record stamped for a different
+// region or bucket, so the fixture carries the pk the real DDB item always has.
+const BUCKET_PK = 'BUCKET#org-1#eu-west-1#my-bucket';
+
 const SYNCED_ENABLEMENT = {
+  pk: BUCKET_PK,
   orgId: 'org-1',
   status: 'active',
   lastSyncedAt: '2026-07-01T00:00:00Z',
@@ -444,10 +450,45 @@ describe('query-bucket baseHandler', () => {
   describe('first-indexing-pass gate', () => {
     it.each([
       ['RAG was never enabled (no enablement record)', undefined],
-      ['the first indexing pass has not completed', { orgId: 'org-1', status: 'active' }],
+      [
+        'the first indexing pass has not completed',
+        { pk: BUCKET_PK, orgId: 'org-1', status: 'active' },
+      ],
       [
         'the enablement record belongs to another org',
-        { orgId: 'org-other', status: 'active', lastSyncedAt: '2026-07-01T00:00:00Z' },
+        {
+          pk: 'BUCKET#org-other#eu-west-1#my-bucket',
+          orgId: 'org-other',
+          status: 'active',
+          lastSyncedAt: '2026-07-01T00:00:00Z',
+        },
+      ],
+      [
+        'the record pk is stamped for another region',
+        {
+          pk: 'BUCKET#org-1#us-east-1#my-bucket',
+          orgId: 'org-1',
+          status: 'active',
+          lastSyncedAt: '2026-07-01T00:00:00Z',
+        },
+      ],
+      [
+        'the record pk is stamped for another bucket name',
+        {
+          pk: 'BUCKET#org-1#eu-west-1#other-bucket',
+          orgId: 'org-1',
+          status: 'active',
+          lastSyncedAt: '2026-07-01T00:00:00Z',
+        },
+      ],
+      [
+        'the record pk is malformed / unparseable',
+        {
+          pk: 'not-a-bucket-pk',
+          orgId: 'org-1',
+          status: 'active',
+          lastSyncedAt: '2026-07-01T00:00:00Z',
+        },
       ],
     ])('returns 409 BUCKET_NOT_INDEXED when %s', async (_label, enablement) => {
       mockGetEnablement.mockResolvedValue(enablement);
@@ -466,6 +507,23 @@ describe('query-bucket baseHandler', () => {
     it('reads the enablement row for the caller org, region, and bucket', async () => {
       await baseHandler(queryEvent({ query: 'hello' }));
       expect(mockGetEnablement).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'my-bucket');
+    });
+
+    it('answers when the record pk matches a non-default requested region', async () => {
+      // Proves the region segment is matched against the request, not hardcoded
+      // to the default eu-west-1.
+      mockGetEnablement.mockResolvedValue({
+        pk: 'BUCKET#org-1#us-east-1#my-bucket',
+        orgId: 'org-1',
+        status: 'active',
+        lastSyncedAt: '2026-07-01T00:00:00Z',
+      });
+
+      const result = await baseHandler(
+        queryEvent({ query: 'hello' }, { region: S3Region.UsEast1 }),
+      );
+
+      expect(result.statusCode).toBe(200);
     });
   });
 });
