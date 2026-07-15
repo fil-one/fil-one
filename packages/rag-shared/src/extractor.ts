@@ -1,6 +1,6 @@
 import { extractTextFromHtml } from './html-extractor.js';
 import { extractTextFromDocx, extractTextFromPptx } from './ooxml-extractor.js';
-import { extractTextFromPdf, type PdfExtractionOptions } from './pdf-extractor.js';
+import { extractTextFromPdf } from './pdf-extractor.js';
 
 /**
  * Content types understood by {@link extractText}. Any `text/*` type not listed
@@ -14,14 +14,6 @@ const CONTENT_TYPE = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 } as const;
-
-/**
- * Options accepted by {@link extractText}.
- */
-export interface ExtractOptions {
-  /** Options forwarded to the PDF/Textract extractor when `contentType` is a PDF. */
-  pdf?: PdfExtractionOptions;
-}
 
 /**
  * Decode bytes as UTF-8 text. Uses a fatal decoder so invalid UTF-8 is rejected
@@ -46,29 +38,20 @@ function normalizeContentType(contentType: string): string {
 /**
  * Extract readable, normalized plain text from uploaded document bytes.
  *
- * Supported content types: PDF (via Textract), plain text, Markdown, HTML, Word
- * (.docx) and PowerPoint (.pptx). Plain text and Markdown are UTF-8 decoded as
- * is; HTML has its markup stripped; OOXML archives are unzipped and their text
- * runs flattened; PDFs are sent through Amazon Textract. Output is deterministic
- * for identical input bytes.
+ * Supported content types: PDF, plain text, Markdown, HTML, Word (.docx) and
+ * PowerPoint (.pptx). Plain text and Markdown are UTF-8 decoded as is; HTML has
+ * its markup stripped; OOXML archives are unzipped and their text runs
+ * flattened; PDFs are parsed in-process with unpdf. Output is deterministic for
+ * identical input bytes.
  *
  * @throws if `contentType` is unsupported or the underlying extraction fails.
  */
-export async function extractText(
-  bytes: Uint8Array,
-  contentType: string,
-  options: ExtractOptions = {},
-): Promise<string> {
+export async function extractText(bytes: Uint8Array, contentType: string): Promise<string> {
   const type = normalizeContentType(contentType);
 
   switch (type) {
     case CONTENT_TYPE.pdf:
-      if (!options.pdf) {
-        throw new Error(
-          'PDF extraction requires options.pdf with documentLocation or stageDocument to reach Textract',
-        );
-      }
-      return extractTextFromPdf(bytes, options.pdf);
+      return extractTextFromPdf(bytes);
     case CONTENT_TYPE.plain:
     case CONTENT_TYPE.markdown:
       return decodeUtf8(bytes);

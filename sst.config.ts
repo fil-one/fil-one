@@ -996,16 +996,7 @@ export default $config({
       environment: orchestratorEnv,
       timeout: '900 seconds',
       memory: '512 MB',
-      permissions: [
-        ...s3DataPlanePermissions,
-        ...ragPermissions,
-        {
-          // PDF extraction (@filone/rag-shared pdf-extractor). Textract has no
-          // resource-level permissions — actions require Resource: '*'.
-          actions: ['textract:StartDocumentTextDetection', 'textract:GetDocumentTextDetection'],
-          resources: ['*'],
-        },
-      ],
+      permissions: [...s3DataPlanePermissions, ...ragPermissions],
     });
 
     const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
