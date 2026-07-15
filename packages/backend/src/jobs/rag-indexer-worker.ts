@@ -1,9 +1,11 @@
-// RAG indexer worker: keeps one org's RAG-enabled bucket indices in sync with
-// S3. The orchestrator fans out one async invoke per org, handing this worker
-// the authoritative list of buckets to index (each tagged with its region).
-// The worker resolves the org's provisioned regions (for per-region tenant
-// credentials), builds an S3 client per region, and reconciles each bucket's
-// vector index (object-level ETag diffing).
+// RAG indexer worker: keeps one org's RAG-enabled bucket companion indices in
+// sync with S3, and tears them down when RAG is disabled. The orchestrator fans
+// out one async invoke per org (per mode), handing this worker the authoritative
+// list of buckets (each tagged with its region). The worker resolves the org's
+// provisioned regions (for per-region tenant credentials), builds an S3 client
+// per region, and either reconciles each bucket's companion index (object-level
+// ETag diffing, `mode: 'index'`) or empties it and drops its manifest/checkpoint
+// (`mode: 'teardown'`).
 //
 // Failures are isolated at the region and bucket level: one failing region or
 // bucket is logged and does not abort the rest of the org's work.
@@ -14,8 +16,13 @@ import { getProvisionedRegions } from '../lib/region-helpers.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { createS3Client } from '../lib/s3-client.js';
 import { BucketAlreadyExistsError } from '../lib/errors.js';
-import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.js';
+import {
+  clearTeardownPending,
+  getBucketRagEnablement,
+  updateBucketTelemetry,
+} from '../lib/bucket-rag-enablement.js';
 import { indexBucket } from './rag-indexer-helpers.js';
+import { clearCheckpoint, deleteAllManifestEntries } from './rag-indexer-manifest.js';
 import { reportMetric } from '../lib/metrics.js';
 import { S3Region } from '@filone/shared';
 
@@ -35,10 +42,18 @@ export interface RagIndexerBucketRef {
   bucketName: string;
 }
 
+/**
+ * What the worker should do with the buckets in the payload. Absent means
+ * `'index'` so orchestrator invocations that predate teardown stay valid.
+ */
+export type RagIndexerWorkerMode = 'index' | 'teardown';
+
 export interface RagIndexerWorkerPayload {
   orgId: string;
-  /** The authoritative set of buckets to index, supplied by the orchestrator. */
+  /** The authoritative set of buckets to act on, supplied by the caller. */
   buckets: RagIndexerBucketRef[];
+  /** `'index'` (default) reconciles the companion index; `'teardown'` empties it. */
+  mode?: RagIndexerWorkerMode;
 }
 
 /**
@@ -54,13 +69,13 @@ export async function handler(
   getRemainingTimeInMillis: RemainingTimeFn = () => context.getRemainingTimeInMillis(),
 ): Promise<void> {
   const start = Date.now();
-  const { orgId, buckets } = event;
+  const { orgId, buckets, mode = 'index' } = event;
   const deadlineEpochMs = computeDeadline(getRemainingTimeInMillis);
 
   // Declared before the try so the failure path can still report how far the
   // invocation got before it threw.
   let regionsProcessed = 0;
-  let bucketsIndexed = 0;
+  let bucketsProcessed = 0;
   let regionFailures = 0;
 
   try {
@@ -72,7 +87,7 @@ export async function handler(
     }
 
     // tenantId is required to build each region's S3 client; a region the org is
-    // not provisioned in has no tenant and its buckets cannot be indexed.
+    // not provisioned in has no tenant and its buckets cannot be processed.
     const tenantByRegion = new Map<S3Region, string>(
       regions.map(({ orchestrator, tenantId }) => [orchestrator.region, tenantId]),
     );
@@ -90,39 +105,49 @@ export async function handler(
       }
 
       try {
-        const stats = await indexRegion({
-          orgId,
-          region,
-          tenantId,
-          bucketNames,
-          deadlineEpochMs,
-        });
-        bucketsIndexed += stats.bucketsIndexed;
+        // Only indexing has per-region counts to report; a teardown run moves no
+        // objects, so it emits no RagIndexer* region metrics (zeros there would
+        // read as an idle indexer rather than a teardown).
+        if (mode === 'teardown') {
+          bucketsProcessed += await teardownRegion({ orgId, region, tenantId, bucketNames });
+        } else {
+          const stats = await indexRegion({
+            orgId,
+            region,
+            tenantId,
+            bucketNames,
+            deadlineEpochMs,
+          });
+          bucketsProcessed += stats.bucketsIndexed;
+          emitRegionMetrics({ region, ...stats });
+        }
         regionsProcessed++;
-        emitRegionMetrics({ region, ...stats });
       } catch (error) {
         regionFailures++;
         // A region that failed before indexing any bucket reports all of its
         // buckets as failed.
-        emitRegionMetrics({
-          region,
-          bucketsIndexed: 0,
-          bucketsCheckpointed: 0,
-          bucketFailures: bucketNames.length,
-          objectsAdded: 0,
-          objectsUpdated: 0,
-          objectsRemoved: 0,
-          objectsFailed: 0,
-        });
-        console.error(`${LOG} Region failed, continuing`, { orgId, region, tenantId, error });
+        if (mode !== 'teardown') {
+          emitRegionMetrics({
+            region,
+            bucketsIndexed: 0,
+            bucketsCheckpointed: 0,
+            bucketFailures: bucketNames.length,
+            objectsAdded: 0,
+            objectsUpdated: 0,
+            objectsRemoved: 0,
+            objectsFailed: 0,
+          });
+        }
+        console.error(`${LOG} Region failed, continuing`, { orgId, mode, region, tenantId, error });
       }
     }
 
     console.log(`${LOG} Complete`, {
       orgId,
+      mode,
       regionsProcessed,
       regionFailures,
-      bucketsIndexed,
+      bucketsProcessed,
     });
 
     emitWorkerInvocation('success', Date.now() - start, { regionsProcessed, regionFailures });
@@ -331,4 +356,64 @@ function emitWorkerInvocation(
     RagIndexerRegionsProcessed: summary.regionsProcessed,
     RagIndexerRegionFailures: summary.regionFailures,
   });
+}
+
+interface TeardownRegionArgs {
+  orgId: string;
+  region: S3Region;
+  tenantId: string;
+  bucketNames: string[];
+}
+
+/**
+ * Tear down the given buckets' companion indices in a single region: empty the
+ * companion bucket, delete every manifest row, drop the checkpoint, and clear
+ * the `teardownPendingAt` marker. Returns the number of buckets torn down.
+ *
+ * Each bucket first re-reads its enablement row and SKIPS teardown if it is
+ * `active` again — the disable→enable race guard, so a bucket re-enabled after a
+ * teardown was queued keeps its (re-)indexed data. The companion bucket itself
+ * is left in place (deleteBucket is unsupported on both providers); only its
+ * contents are removed. Per-bucket failures are isolated so one bad bucket does
+ * not abort the region — the orchestrator backstop retries via the still-present
+ * `teardownPendingAt` marker.
+ */
+async function teardownRegion(args: TeardownRegionArgs): Promise<number> {
+  const { orgId, region, tenantId, bucketNames } = args;
+
+  const orchestrator = getOrchestratorForRegion(region);
+  const ctx = await orchestrator.getS3ClientContext(tenantId);
+  const s3 = createS3Client(ctx);
+  // No ensureBucket: teardown never creates a companion (dropIndex tolerates a
+  // missing bucket).
+  const vectorStore = new BucketObjectVectorStore(s3);
+
+  let tornDown = 0;
+  for (const bucketName of bucketNames) {
+    try {
+      const enablement = await getBucketRagEnablement(orgId, region, bucketName);
+      if (enablement?.status === 'active') {
+        console.log(`${LOG} Teardown skipped: bucket re-enabled since queued`, {
+          region,
+          bucketName,
+        });
+        continue;
+      }
+
+      await vectorStore.dropIndex(orgId, region, bucketName);
+      await deleteAllManifestEntries(orgId, region, bucketName);
+      await clearCheckpoint(orgId, region, bucketName);
+      await clearTeardownPending(orgId, region, bucketName);
+      tornDown++;
+    } catch (error) {
+      console.error(`${LOG} Teardown failed, continuing`, {
+        orgId,
+        orchestrator: orchestrator.id,
+        region,
+        bucketName,
+        error,
+      });
+    }
+  }
+  return tornDown;
 }

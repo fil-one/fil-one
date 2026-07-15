@@ -119,6 +119,14 @@ export interface BucketRAGEnablementRecord {
    * `syncState === 'error'` and cleared (removed) when a later sync succeeds.
    */
   lastSyncError?: string;
+  /**
+   * ISO-8601 marker set when RAG is disabled and companion teardown is pending.
+   * The enablement handler async-invokes the worker to tear down, and the
+   * indexer orchestrator also selects rows carrying this attribute as a backstop
+   * (a lost invoke retries every 6h). The worker removes it once teardown
+   * completes; a re-enable clears it (the row is rewritten without it).
+   */
+  teardownPendingAt?: string;
   settings?: Record<string, unknown>; // future extensibility
   createdAt: string; // ISO-8601
   updatedAt: string; // ISO-8601
