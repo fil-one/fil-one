@@ -414,6 +414,33 @@ describe('rag-indexer-worker', () => {
     });
   });
 
+  it('counts a checkpointed (incomplete) bucket separately, not as indexed, while still counting its objects', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+    // b1 hit the deadline and checkpointed mid-way; b2 fully reconciled.
+    mockIndexBucket
+      .mockResolvedValueOnce({ added: 5, updated: 0, removed: 0, failed: 0, completed: false })
+      .mockResolvedValue({ added: 1, updated: 0, removed: 0, failed: 0, completed: true });
+
+    await handler(
+      payload([
+        { region: S3Region.EuWest1, bucketName: 'b1' },
+        { region: S3Region.EuWest1, bucketName: 'b2' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    const regionEvent = reportedMetrics().find((e) => e.region === S3Region.EuWest1);
+    expect(regionEvent).toMatchObject({
+      // Only the fully reconciled bucket counts as indexed.
+      RagIndexerBucketsIndexed: 1,
+      RagIndexerBucketsCheckpointed: 1,
+      RagIndexerBucketFailures: 0,
+      // Objects added this run include the checkpointed bucket's work (5 + 1).
+      RagIndexerObjectsAdded: 6,
+    });
+  });
+
   it('reports all of a failed region as bucket failures with nothing indexed', async () => {
     const failing = makeOrchestrator('aurora', S3Region.EuWest1);
     failing.getS3ClientContext.mockRejectedValue(new Error('creds unavailable'));

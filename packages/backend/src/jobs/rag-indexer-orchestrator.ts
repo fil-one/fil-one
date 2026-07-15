@@ -31,30 +31,36 @@ export async function handler(): Promise<void> {
 
   console.log(`${LOG} Starting RAG index reconciliation`);
 
-  const { buckets, skipped } = await scanEnabledBuckets();
-  console.log(`${LOG} Found RAG-enabled buckets`, { count: buckets.length });
-  if (buckets.length === 0) {
-    emitOrchestratorMetrics({
-      outcome: 'success',
-      durationMs: Date.now() - start,
-      dispatchSuccess: 0,
-      dispatchFailure: 0,
-      totalBuckets: 0,
-      uniqueOrgs: 0,
-      skippedRows: skipped,
-    });
-    return;
-  }
-
-  const bucketsByOrg = groupByOrg(buckets);
-
-  // Declared outside the try so the catch can report whatever counts are known
-  // so far if an invocation loop throws.
+  // Declared before the try so the failure path can report whatever counts are
+  // known so far; they stay zero if the scan itself throws.
+  let skippedRows = 0;
+  let totalBuckets = 0;
+  let uniqueOrgs = 0;
   let invoked = 0;
   let failed = 0;
   try {
-    for (const [orgId, buckets] of bucketsByOrg) {
-      if (await invokeWorker(workerFunctionName, { orgId, buckets })) {
+    const { buckets, skipped } = await scanEnabledBuckets();
+    skippedRows = skipped;
+    totalBuckets = buckets.length;
+    console.log(`${LOG} Found RAG-enabled buckets`, { count: buckets.length });
+    if (buckets.length === 0) {
+      emitOrchestratorMetrics({
+        outcome: 'success',
+        durationMs: Date.now() - start,
+        dispatchSuccess: 0,
+        dispatchFailure: 0,
+        totalBuckets: 0,
+        uniqueOrgs: 0,
+        skippedRows,
+      });
+      return;
+    }
+
+    const bucketsByOrg = groupByOrg(buckets);
+    uniqueOrgs = bucketsByOrg.size;
+
+    for (const [orgId, orgBuckets] of bucketsByOrg) {
+      if (await invokeWorker(workerFunctionName, { orgId, buckets: orgBuckets })) {
         invoked++;
       } else {
         failed++;
@@ -66,9 +72,16 @@ export async function handler(): Promise<void> {
       durationMs: Date.now() - start,
       dispatchSuccess: invoked,
       dispatchFailure: failed,
-      totalBuckets: buckets.length,
-      uniqueOrgs: bucketsByOrg.size,
-      skippedRows: skipped,
+      totalBuckets,
+      uniqueOrgs,
+      skippedRows,
+    });
+
+    console.log(`${LOG} Complete`, {
+      totalBuckets,
+      uniqueOrgs,
+      invoked,
+      failed,
     });
   } catch (error) {
     emitOrchestratorMetrics({
@@ -76,19 +89,12 @@ export async function handler(): Promise<void> {
       durationMs: Date.now() - start,
       dispatchSuccess: invoked,
       dispatchFailure: failed,
-      totalBuckets: buckets.length,
-      uniqueOrgs: bucketsByOrg.size,
-      skippedRows: skipped,
+      totalBuckets,
+      uniqueOrgs,
+      skippedRows,
     });
     throw error;
   }
-
-  console.log(`${LOG} Complete`, {
-    totalBuckets: buckets.length,
-    uniqueOrgs: bucketsByOrg.size,
-    invoked,
-    failed,
-  });
 }
 
 /**

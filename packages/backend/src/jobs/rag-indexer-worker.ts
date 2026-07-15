@@ -110,6 +110,7 @@ export async function handler(
         emitRegionMetrics({
           region,
           bucketsIndexed: 0,
+          bucketsCheckpointed: 0,
           bucketFailures: bucketNames.length,
           objectsAdded: 0,
           objectsUpdated: 0,
@@ -171,7 +172,10 @@ interface IndexRegionArgs {
 
 /** Aggregated indexing outcome for a single region, emitted as CloudWatch metrics. */
 interface RegionIndexStats {
+  /** Buckets fully reconciled this run (`indexBucket` returned `completed: true`). */
   bucketsIndexed: number;
+  /** Buckets that hit the deadline and checkpointed mid-way (`completed: false`). */
+  bucketsCheckpointed: number;
   bucketFailures: number;
   objectsAdded: number;
   objectsUpdated: number;
@@ -195,6 +199,7 @@ async function indexRegion(args: IndexRegionArgs): Promise<RegionIndexStats> {
 
   const stats: RegionIndexStats = {
     bucketsIndexed: 0,
+    bucketsCheckpointed: 0,
     bucketFailures: 0,
     objectsAdded: 0,
     objectsUpdated: 0,
@@ -207,7 +212,13 @@ async function indexRegion(args: IndexRegionArgs): Promise<RegionIndexStats> {
         { orgId, s3, region, bucketName, vectorStore },
         { deadlineEpochMs },
       );
-      stats.bucketsIndexed++;
+      // Only fully reconciled buckets count as "indexed"; a bucket that hit the
+      // deadline and checkpointed mid-way is tracked separately so throughput is
+      // not inflated during timeouts (the next run resumes and completes it).
+      if (result.completed) stats.bucketsIndexed++;
+      else stats.bucketsCheckpointed++;
+      // Object counts reflect work actually done this run, so they accumulate
+      // regardless of whether the bucket completed or checkpointed.
       stats.objectsAdded += result.added;
       stats.objectsUpdated += result.updated;
       stats.objectsRemoved += result.removed;
@@ -241,15 +252,7 @@ async function indexRegion(args: IndexRegionArgs): Promise<RegionIndexStats> {
  * Emit per-region indexing counts (buckets + objects) as a single CloudWatch
  * metric event dimensioned by region.
  */
-function emitRegionMetrics(stats: {
-  region: S3Region;
-  bucketsIndexed: number;
-  bucketFailures: number;
-  objectsAdded: number;
-  objectsUpdated: number;
-  objectsRemoved: number;
-  objectsFailed: number;
-}): void {
+function emitRegionMetrics(stats: RegionIndexStats & { region: S3Region }): void {
   reportMetric({
     _aws: {
       Timestamp: Date.now(),
@@ -259,6 +262,7 @@ function emitRegionMetrics(stats: {
           Dimensions: [['region']],
           Metrics: [
             { Name: 'RagIndexerBucketsIndexed', Unit: 'Count' },
+            { Name: 'RagIndexerBucketsCheckpointed', Unit: 'Count' },
             { Name: 'RagIndexerBucketFailures', Unit: 'Count' },
             { Name: 'RagIndexerObjectsAdded', Unit: 'Count' },
             { Name: 'RagIndexerObjectsUpdated', Unit: 'Count' },
@@ -270,6 +274,7 @@ function emitRegionMetrics(stats: {
     },
     region: stats.region,
     RagIndexerBucketsIndexed: stats.bucketsIndexed,
+    RagIndexerBucketsCheckpointed: stats.bucketsCheckpointed,
     RagIndexerBucketFailures: stats.bucketFailures,
     RagIndexerObjectsAdded: stats.objectsAdded,
     RagIndexerObjectsUpdated: stats.objectsUpdated,

@@ -295,6 +295,29 @@ describe('rag-indexer-orchestrator', () => {
     });
   });
 
+  it('emits a failure metric and rethrows when the enablement scan throws', async () => {
+    ddbMock.on(ScanCommand).rejects(new Error('dynamo unavailable'));
+
+    await expect(handler()).rejects.toThrow('dynamo unavailable');
+
+    const events = reportedMetrics();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      _aws: {
+        CloudWatchMetrics: [{ Namespace: 'FilOne', Dimensions: [[]] }],
+      },
+      RagIndexerOrchestratorInvocationFailure: 1,
+      RagIndexerWorkerDispatchSuccess: 0,
+      RagIndexerWorkerDispatchFailure: 0,
+      RagIndexerTotalBuckets: 0,
+      RagIndexerUniqueOrgs: 0,
+      RagIndexerSkippedRows: 0,
+      RagIndexerOrchestratorDuration: expect.any(Number),
+    });
+    // No success metric should have been emitted on the failure path.
+    expect(events[0].RagIndexerOrchestratorInvocationSuccess).toBeUndefined();
+  });
+
   it('counts rows skipped by both scan skip branches', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
