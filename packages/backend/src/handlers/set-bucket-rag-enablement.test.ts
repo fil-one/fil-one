@@ -111,6 +111,18 @@ describe('set-bucket-rag-enablement baseHandler', () => {
     );
   });
 
+  it('returns 400 for a reserved RAG companion bucket name', async () => {
+    const e = event({ enabled: true });
+    e.pathParameters = { name: 'filone-rag-deadbeef' };
+    const result = await baseHandler(e);
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      message: 'Cannot enable indexing on an index bucket',
+    });
+    expect(mockSetEnablement).not.toHaveBeenCalled();
+  });
+
   it('enables RAG and returns 200 with the active enablement state', async () => {
     const result = await baseHandler(event({ enabled: true }));
 

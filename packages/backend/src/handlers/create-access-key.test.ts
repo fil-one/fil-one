@@ -75,6 +75,26 @@ describe('create-access-key baseHandler', () => {
     mockEnsureTenantReady.mockResolvedValue('aurora-t-1');
   });
 
+  it('returns 400 when a specific bucket scope includes a reserved companion bucket', async () => {
+    const event = buildEvent({
+      body: JSON.stringify({
+        keyName: 'My Key',
+        permissions: ['read', 'write', 'list', 'delete'],
+        bucketScope: 'specific',
+        buckets: ['my-bucket', 'filone-rag-deadbeef'],
+        region: 'eu-west-1',
+      }),
+      userInfo: USER_INFO,
+    });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      message: 'Bucket scope cannot include a reserved bucket name',
+    });
+    expect(mockIssueAccessKey).not.toHaveBeenCalled();
+  });
+
   it('returns 201 with keyName, accessKeyId, and secretAccessKey on success', async () => {
     ddbMock.on(PutItemCommand).resolves({});
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());

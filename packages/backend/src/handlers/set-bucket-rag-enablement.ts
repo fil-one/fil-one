@@ -2,7 +2,12 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
-import { S3_REGION, SetBucketRagEnabledSchema, isSupportedRegion } from '@filone/shared';
+import {
+  S3_REGION,
+  SetBucketRagEnabledSchema,
+  isReservedBucketName,
+  isSupportedRegion,
+} from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import {
@@ -40,6 +45,16 @@ export async function baseHandler(
     return new ResponseBuilder()
       .status(400)
       .body<ErrorResponse>({ message: 'Bucket name is required' })
+      .build();
+  }
+
+  // A RAG companion index bucket (`filone-rag-*`) holds the index itself — you
+  // cannot turn indexing on for it. Reject explicitly rather than 404 so the
+  // reason is clear if one is ever addressed directly.
+  if (isReservedBucketName(bucketName)) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({ message: 'Cannot enable indexing on an index bucket' })
       .build();
   }
 
