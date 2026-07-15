@@ -127,6 +127,14 @@ export default $config({
     }
     const ragVectorBucketResource = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
       vectorBucketName: ragVectorBucketName,
+      // Indexes are created at runtime by the RAG indexer (one opaque
+      // rag-<hash> index per RAG-enabled bucket), so Pulumi has no knowledge of
+      // them. Without forceDestroy, `sst remove` of a preview/staging stage
+      // fails with a 409 ConflictException ("vector bucket is not empty") on
+      // DeleteVectorBucket. forceDestroy makes the provider delete all indexes
+      // and vectors first. Gated off production, which is removal:'retain' and
+      // never torn down anyway.
+      forceDestroy: $app.stage !== 'production',
     });
 
     // Wrap the raw Pulumi resource so handlers can read it via SST resource
