@@ -23,7 +23,10 @@ export { extractTextFromPdf } from './pdf-extractor.js';
 
 export { S3VectorsStore } from './s3-vectors-store.js';
 
-export type { EnsureIndexOptions, VectorStore } from './vector-store.js';
+export { BucketObjectVectorStore, companionBucketName } from './bucket-object-vector-store.js';
+export type { BucketObjectVectorStoreOptions } from './bucket-object-vector-store.js';
+
+export type { EnsureIndexOptions, QueryOptions, VectorStore } from './vector-store.js';
 
 export { VectorQueryResultSchema, VectorStoreChunkSchema } from './schemas.js';
 export type { VectorQueryResult, VectorStoreChunk } from './schemas.js';
