@@ -3,10 +3,12 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { Resource } from 'sst';
 import type { ErrorResponse, QueryBucketResponse } from '@filone/shared';
-import { QueryBucketSchema, S3Region, isSupportedRegion } from '@filone/shared';
+import { ApiErrorCode, QueryBucketSchema, S3Region, isSupportedRegion } from '@filone/shared';
 import { S3VectorsStore, complete, embed } from '@filone/rag-shared';
 import type { VectorQueryResult } from '@filone/rag-shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { getBucketRagEnablement } from '../lib/bucket-rag-enablement.js';
+import { RAGKeys } from '../lib/dynamo-records.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import {
   ResponseBuilder,
@@ -15,9 +17,9 @@ import {
 } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
-import { authMiddleware } from '../middleware/auth.js';
+import { ragQueryAuthMiddleware } from '../middleware/rag-query-auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { ragAccessMiddleware } from '../lib/rag-access.js';
+import { ragAccessMiddleware } from '../middleware/rag-access.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
 /**
@@ -95,6 +97,36 @@ export async function baseHandler(
     return new ResponseBuilder()
       .status(404)
       .body<ErrorResponse>({ message: 'Bucket not found' })
+      .build();
+  }
+
+  // A bucket that has never completed its first indexing pass has nothing to
+  // answer from — fail with an explicit, actionable error instead of the
+  // misleading "no relevant content" empty answer. `lastSyncedAt` is written by
+  // the indexer only when a pass completes, so it doubles as the
+  // "queryable yet?" signal here and in the UI (disabled Ask-questions button).
+  const enablement = await getBucketRagEnablement(orgId, region, bucketName);
+  // Defense in depth: ignore a record whose stamped org, region, or bucket name
+  // somehow differs from what we queried. `orgId` is denormalized onto the row;
+  // region and bucket name are decoded from the pk (mirrors
+  // get-bucket-rag-enablement, which checks org only).
+  const parsedPk = enablement ? RAGKeys.parseBucketPk(enablement.pk) : undefined;
+  const owned =
+    enablement &&
+    enablement.orgId === orgId &&
+    parsedPk?.orgId === orgId &&
+    parsedPk.region === region &&
+    parsedPk.bucketName === bucketName
+      ? enablement
+      : undefined;
+  if (!owned?.lastSyncedAt) {
+    return new ResponseBuilder()
+      .status(409)
+      .body<ErrorResponse>({
+        message:
+          'This bucket has not been indexed yet. Queries become available after the first indexing pass completes.',
+        code: ApiErrorCode.BUCKET_NOT_INDEXED,
+      })
       .build();
   }
 
@@ -201,7 +233,8 @@ function sourcesFromChunks(chunks: VectorQueryResult[]): string[] {
 
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
-  .use(authMiddleware())
+  // Cookie session OR RAG API key bearer token — see ragQueryAuthMiddleware.
+  .use(ragQueryAuthMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Read))
   .use(ragAccessMiddleware())
   .use(errorHandlerMiddleware());

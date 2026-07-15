@@ -102,6 +102,7 @@ pnpx sst secret set StripeSecretKey <value> [--stage <stage>]
 pnpx sst secret set StripePriceId <value> [--stage <stage>]
 pnpx sst secret set AuroraBackofficeToken <value> [--stage <stage>]
 pnpx sst secret set SendGridApiKey <value> [--stage <stage>]
+pnpx sst secret set HubSpotServiceKey <value> [--stage <stage>]
 pnpx sst secret set GrafanaLokiAuth '<instanceId>:<apiKey>' [--stage <stage>]
 ```
 
@@ -149,6 +150,10 @@ pnpm exec playwright install --with-deps
 | `E2E_TRIAL_EMAIL` / `E2E_TRIAL_PASSWORD` / `E2E_TRIAL_USER_ID`    | Trial test user                                       |
 
 In CI, all nine credential vars come from GitHub repository secrets (see [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)). Both workflows also configure AWS via OIDC (using `vars.AWS_ROLE_ARN`) so the billing-state reset can write to the staging `BillingTable`.
+
+#### Seeded buckets per region
+
+The bucket/upload tests in `tests/e2e/destructive/buckets.spec.ts` run once per S3 region (`eu-west-1` and `us-east-1`, see `tests/e2e/destructive/regions.util.ts`) and reuse existing buckets rather than creating them (the account-wide bucket limit is 100 and buckets are not yet deletable). Each test account — paid, unpaid, and trial — must therefore have at least one bucket in **each** region on the target stage; otherwise the test fails with a `No <region> bucket found` error. Seeding is manual: log in as each test user and create one bucket per region via the UI. The unpaid account cannot create buckets in its `past_due` state, so seed its buckets while its billing state permits (or temporarily reset it via the `BillingTable`).
 
 #### Running locally
 

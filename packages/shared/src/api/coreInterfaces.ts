@@ -22,6 +22,8 @@ export enum ApiErrorCode {
   DELETION_RATE_LIMITED = 'DELETION_RATE_LIMITED',
   /** The authenticated account has been deleted. */
   ACCOUNT_DELETED = 'ACCOUNT_DELETED',
+  /** The bucket's first indexing pass has not completed — RAG queries are unavailable. */
+  BUCKET_NOT_INDEXED = 'BUCKET_NOT_INDEXED',
 }
 
 export interface ErrorResponse {
