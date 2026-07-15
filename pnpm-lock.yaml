@@ -212,12 +212,18 @@ importers:
       '@aws-sdk/client-bedrock-runtime':
         specifier: ^3.1031.0
         version: 3.1073.0
+      '@aws-sdk/client-s3':
+        specifier: ^3.1031.0
+        version: 3.1031.0
       '@aws-sdk/client-s3vectors':
         specifier: ^3.1031.0
         version: 3.1073.0
       '@aws-sdk/client-textract':
         specifier: ^3.1031.0
         version: 3.1075.0
+      '@filone/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@smithy/types':
         specifier: 4.13.1
         version: 4.13.1
