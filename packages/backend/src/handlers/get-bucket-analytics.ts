@@ -2,7 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketAnalyticsResponse } from '@filone/shared';
-import { S3Region, isSupportedRegion } from '@filone/shared';
+import { S3Region, isReservedBucketName, isSupportedRegion } from '@filone/shared';
 import { BucketNotFoundError } from '../lib/errors.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import {
@@ -25,6 +25,11 @@ export async function baseHandler(
 
   if (!bucketName) {
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
+  }
+
+  // Reserved RAG companion index buckets (`filone-rag-*`) are not user buckets.
+  if (isReservedBucketName(bucketName)) {
+    return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
   }
 
   const region = event.queryStringParameters?.region ?? S3Region.EuWest1;

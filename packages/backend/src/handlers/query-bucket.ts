@@ -3,7 +3,13 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { Resource } from 'sst';
 import type { ErrorResponse, QueryBucketResponse } from '@filone/shared';
-import { ApiErrorCode, QueryBucketSchema, S3Region, isSupportedRegion } from '@filone/shared';
+import {
+  ApiErrorCode,
+  QueryBucketSchema,
+  S3Region,
+  isReservedBucketName,
+  isSupportedRegion,
+} from '@filone/shared';
 import { S3VectorsStore, complete, embed } from '@filone/rag-shared';
 import type { VectorQueryResult } from '@filone/rag-shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
@@ -58,6 +64,15 @@ export async function baseHandler(
     return new ResponseBuilder()
       .status(400)
       .body<ErrorResponse>({ message: 'Bucket name is required' })
+      .build();
+  }
+
+  // Reserved RAG companion index buckets (`filone-rag-*`) are not queryable user
+  // buckets — 404 rather than leak the internal index's existence.
+  if (isReservedBucketName(bucketName)) {
+    return new ResponseBuilder()
+      .status(404)
+      .body<ErrorResponse>({ message: 'Bucket not found' })
       .build();
   }
 

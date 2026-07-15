@@ -1,7 +1,7 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { S3_REGION } from '@filone/shared';
+import { S3_REGION, isReservedBucketName } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getOrgProfile } from '../lib/org-profile.js';
@@ -22,6 +22,16 @@ export async function baseHandler(
     return new ResponseBuilder()
       .status(400)
       .body<ErrorResponse>({ message: 'Missing bucket name in path' })
+      .build();
+  }
+
+  // Defense in depth for when bucket deletion ships (FIL-204): a RAG companion
+  // index bucket (`filone-rag-*`) must never be deletable through the user path;
+  // its lifecycle is owned by RAG enablement/teardown. 404 so we don't leak it.
+  if (isReservedBucketName(bucketName)) {
+    return new ResponseBuilder()
+      .status(404)
+      .body<ErrorResponse>({ message: 'Bucket not found' })
       .build();
   }
 

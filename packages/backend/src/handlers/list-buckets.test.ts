@@ -206,6 +206,36 @@ describe('list-buckets baseHandler (single-region)', () => {
     expect(aurora.listBuckets).not.toHaveBeenCalled();
   });
 
+  it('filters out reserved RAG companion buckets from the listing', async () => {
+    aurora.listBuckets.mockResolvedValue([
+      {
+        bucketName: 'my-bucket',
+        region: S3_REGION,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
+      },
+      {
+        bucketName: 'filone-rag-deadbeef',
+        region: S3_REGION,
+        createdAt: '2026-01-02T00:00:00.000Z',
+        isPublic: false,
+        versioning: false,
+        encrypted: true,
+      },
+    ]);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(result.body as string);
+    expect(body.buckets.map((bucket: { bucketName: string }) => bucket.bucketName)).toStrictEqual([
+      'my-bucket',
+    ]);
+  });
+
   it('returns 200 with empty array when no buckets exist', async () => {
     aurora.listBuckets.mockResolvedValue([]);
 

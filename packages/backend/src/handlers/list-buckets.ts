@@ -2,6 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ListBucketsResponse } from '@filone/shared';
+import { isReservedBucketName } from '@filone/shared';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -28,7 +29,13 @@ export async function baseHandler(
       return orchestrator.listBuckets(tenantId);
     }),
   );
-  const buckets = results.flat().sort((a, b) => a.bucketName.localeCompare(b.bucketName));
+  // Hide reserved RAG companion index buckets (`filone-rag-*`) from every UI
+  // listing — they are Fil One internals, not user buckets, and this GET backs
+  // the buckets page, RAG bucket pickers, and key-scope pickers alike.
+  const buckets = results
+    .flat()
+    .filter((bucket) => !isReservedBucketName(bucket.bucketName))
+    .sort((a, b) => a.bucketName.localeCompare(b.bucketName));
   return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets }).build();
 }
 
