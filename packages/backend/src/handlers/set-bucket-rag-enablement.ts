@@ -8,9 +8,11 @@ import {
   isReservedBucketName,
   isSupportedRegion,
 } from '@filone/shared';
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { companionBucketName } from '@filone/rag-shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { BucketAlreadyExistsError } from '../lib/errors.js';
+import type { RagIndexerWorkerPayload } from '../jobs/rag-indexer-worker.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import {
   ResponseBuilder,
@@ -30,6 +32,46 @@ import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { ragAccessMiddleware } from '../middleware/rag-access.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+
+const lambda = new LambdaClient({});
+
+/**
+ * On disable, async-invoke the indexer worker to tear the companion index down
+ * (empty the companion bucket, drop manifest + checkpoint). Best-effort: the
+ * `teardownPendingAt` marker was already persisted, so the indexer orchestrator
+ * backstop retries a lost/failed invoke — never fail the user's disable on it.
+ */
+async function requestTeardown(orgId: string, region: string, bucketName: string): Promise<void> {
+  const functionName = process.env.RAG_INDEXER_WORKER_FUNCTION_NAME;
+  if (!functionName) {
+    console.warn(
+      '[set-bucket-rag-enablement] RAG_INDEXER_WORKER_FUNCTION_NAME unset; relying on the orchestrator backstop for teardown',
+      { region, bucketName },
+    );
+    return;
+  }
+  const payload: RagIndexerWorkerPayload = {
+    orgId,
+    mode: 'teardown',
+    buckets: [
+      { region: region as RagIndexerWorkerPayload['buckets'][number]['region'], bucketName },
+    ],
+  };
+  try {
+    await lambda.send(
+      new InvokeCommand({
+        FunctionName: functionName,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify(payload)),
+      }),
+    );
+  } catch (error) {
+    console.error(
+      '[set-bucket-rag-enablement] Failed to invoke teardown worker; backstop will retry',
+      { region, bucketName, error },
+    );
+  }
+}
 
 /**
  * On enable, idempotently provision the companion index bucket up front so
@@ -162,6 +204,11 @@ export async function baseHandler(
     enabled,
     existing: owned,
   });
+
+  // On disable, hand off companion teardown to the worker (async, best-effort).
+  if (!enabled) {
+    await requestTeardown(orgId, region, bucketName);
+  }
 
   return new ResponseBuilder()
     .status(200)

@@ -37,8 +37,12 @@ vi.mock('../lib/bucket-rag-enablement.js', async () => {
 
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 
 const ddbMock = mockClient(DynamoDBClient);
+const lambdaMock = mockClient(LambdaClient);
+
+process.env.RAG_INDEXER_WORKER_FUNCTION_NAME = 'rag-indexer-worker';
 
 vi.mock('../middleware/auth.js', () => ({
   authMiddleware: () => ({ before: () => undefined }),
@@ -105,12 +109,45 @@ function event(body: unknown): AuthenticatedEvent {
 describe('set-bucket-rag-enablement baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    ddbMock.reset();
+    lambdaMock.reset();
+    lambdaMock.on(InvokeCommand).resolves({});
     orch = fakeOrchestrator('aurora', { bucket: BUCKET });
     mockGetOrchestratorForRegion.mockReturnValue(orch);
     mockGetEnablement.mockResolvedValue(undefined);
     mockSetEnablement.mockImplementation(async (args: { enabled: boolean }) =>
       record({ status: args.enabled ? 'active' : 'disabled' }),
     );
+  });
+
+  it('on disable, async-invokes the worker to tear the companion down', async () => {
+    const result = await baseHandler(event({ enabled: false }));
+
+    expect(result.statusCode).toBe(200);
+    const calls = lambdaMock.commandCalls(InvokeCommand);
+    expect(calls).toHaveLength(1);
+    const input = calls[0]!.args[0]!.input;
+    expect(input.FunctionName).toBe('rag-indexer-worker');
+    expect(input.InvocationType).toBe('Event');
+    const payload = JSON.parse(Buffer.from(input.Payload as Uint8Array).toString());
+    expect(payload).toMatchObject({
+      orgId: 'org-1',
+      mode: 'teardown',
+      buckets: [{ region: S3Region.EuWest1, bucketName: 'my-bucket' }],
+    });
+  });
+
+  it('does not invoke the worker on enable', async () => {
+    await baseHandler(event({ enabled: true }));
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+  });
+
+  it('still returns 200 on disable when the teardown invoke fails (backstop retries)', async () => {
+    lambdaMock.on(InvokeCommand).rejects(new Error('invoke throttled'));
+
+    const result = await baseHandler(event({ enabled: false }));
+
+    expect(result.statusCode).toBe(200);
   });
 
   it('returns 400 for a reserved RAG companion bucket name', async () => {

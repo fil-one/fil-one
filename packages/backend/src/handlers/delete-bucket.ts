@@ -46,6 +46,10 @@ export async function baseHandler(
       .build();
   }
 
+  // FIL-204 (bucket deletion) must, when it ships, also tear down this bucket's
+  // RAG companion index — mirror set-bucket-rag-enablement's disable path
+  // (async-invoke the worker with { mode: 'teardown', ... }) so a deleted bucket
+  // does not leave an orphaned companion + manifest/checkpoint rows behind.
   try {
     await orchestrator.deleteBucket(tenantId, bucketName);
   } catch (err) {

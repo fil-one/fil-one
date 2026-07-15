@@ -84,10 +84,53 @@ describe('rag-indexer-orchestrator', () => {
     const scanInput = ddbMock.commandCalls(ScanCommand)[0].args[0].input;
     expect(scanInput.TableName).toBe('RagIndexerTable');
     expect(scanInput.FilterExpression).toContain('sk = :sk');
+    // Also selects rows pending teardown as the backstop for a lost invoke.
+    expect(scanInput.FilterExpression).toContain('attribute_exists(teardownPendingAt)');
     expect(scanInput.ExpressionAttributeValues).toMatchObject({
       ':sk': { S: 'RAG' },
       ':active': { S: 'active' },
     });
+  });
+
+  it('dispatches a disabled bucket carrying teardownPendingAt as a teardown invocation', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        enablementItem('bucket-1', 'org-1', {
+          status: 'disabled',
+          teardownPendingAt: '2026-07-01T00:00:00Z',
+        }),
+      ],
+    });
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    const payloads = payloadsFrom();
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0].mode).toBe('teardown');
+    expect(payloads[0].buckets).toEqual([{ region: 'eu-west-1', bucketName: 'bucket-1' }]);
+  });
+
+  it('separates active (index) from pending-teardown buckets into per-mode invocations', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        enablementItem('active-1', 'org-1'),
+        enablementItem('gone-1', 'org-1', {
+          status: 'disabled',
+          teardownPendingAt: '2026-07-01T00:00:00Z',
+        }),
+      ],
+    });
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    const payloads = payloadsFrom();
+    expect(payloads).toHaveLength(2);
+    const index = payloads.find((p) => p.mode === 'index');
+    const teardown = payloads.find((p) => p.mode === 'teardown');
+    expect(index?.buckets).toEqual([{ region: 'eu-west-1', bucketName: 'active-1' }]);
+    expect(teardown?.buckets).toEqual([{ region: 'eu-west-1', bucketName: 'gone-1' }]);
   });
 
   it('async-invokes the worker once per org (InvocationType Event)', async () => {

@@ -564,6 +564,31 @@ export default $config({
       });
     }
 
+    // ── RAG indexer worker ──────────────────────────────────────────
+    // Defined ahead of the routes because the set-bucket-rag-enablement route
+    // invokes it (teardown on disable) and so needs its name + invoke ARN. It
+    // keeps each RAG-enabled bucket's companion index in sync with its S3
+    // contents (object-level ETag diffing) and tears it down on disable. The
+    // worker reads per-tenant S3 keys (SSM + KMS), provisions/writes the
+    // companion bucket on the tenant's own provider, and uses @filone/rag-shared
+    // to extract/chunk/embed/upsert — so it needs the S3 data-plane grant plus
+    // bedrock:InvokeModel for Titan embeddings, and a large timeout/memory
+    // budget; large buckets resume across runs via a persisted checkpoint.
+    const ragIndexerWorker = createFn('RagIndexerWorker', {
+      handler: 'packages/backend/src/jobs/rag-indexer-worker.handler',
+      link: [
+        billingTable,
+        userInfoTable,
+        ragIndexerTable,
+        auroraBackofficeToken,
+        fthManagementApiToken,
+      ],
+      environment: orchestratorEnv,
+      timeout: '900 seconds',
+      memory: '1024 MB',
+      permissions: [...s3DataPlanePermissions, ...bedrockEmbedPermissions],
+    });
+
     // ── Provisioned concurrency for critical-path endpoints ────────
     const criticalPathLambdaProvisionedConcurrency = isProduction ? 1 : 0;
 
@@ -737,9 +762,17 @@ export default $config({
       method: 'POST',
       routePath: '/api/buckets/{name}/rag/enabled',
       handler: 'set-bucket-rag-enablement',
-      extraEnv: orchestratorEnv,
+      // On disable, this handler async-invokes the indexer worker to tear the
+      // companion index down, so it needs the worker's name + invoke permission.
+      extraEnv: { ...orchestratorEnv, RAG_INDEXER_WORKER_FUNCTION_NAME: ragIndexerWorker.name },
       extraLink: [ragIndexerTable],
-      permissions: bucketReadPermissions,
+      permissions: [
+        ...bucketReadPermissions,
+        {
+          actions: ['lambda:InvokeFunction'],
+          resources: [ragIndexerWorker.arn],
+        },
+      ],
     });
 
     // ── Auth routes ──────────────────────────────────────────────────
@@ -959,28 +992,8 @@ export default $config({
     });
 
     // ── RAG indexer (cron → orchestrator → per-org worker) ──────────
-    // Keeps each RAG-enabled bucket's companion index in sync with its S3
-    // contents via object-level ETag diffing. The worker reads per-tenant S3
-    // keys (SSM + KMS), provisions/writes the companion bucket on the tenant's
-    // own provider, and uses @filone/rag-shared to extract/chunk/embed/upsert —
-    // so it needs the S3 data-plane grant plus bedrock:InvokeModel for Titan
-    // embeddings, and a large timeout/memory budget; large buckets are resumed
-    // across runs via a persisted continuation checkpoint.
-    const ragIndexerWorker = createFn('RagIndexerWorker', {
-      handler: 'packages/backend/src/jobs/rag-indexer-worker.handler',
-      link: [
-        billingTable,
-        userInfoTable,
-        ragIndexerTable,
-        auroraBackofficeToken,
-        fthManagementApiToken,
-      ],
-      environment: orchestratorEnv,
-      timeout: '900 seconds',
-      memory: '1024 MB',
-      permissions: [...s3DataPlanePermissions, ...bedrockEmbedPermissions],
-    });
-
+    // `ragIndexerWorker` is defined earlier (above the routes) so the
+    // set-bucket-rag-enablement route can invoke it for teardown on disable.
     const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
       handler: 'packages/backend/src/jobs/rag-indexer-orchestrator.handler',
       // Scans the enablement rows, now in ragIndexerTable (its only table dependency).

@@ -67,16 +67,21 @@ export async function setBucketRagEnablement(args: {
   const now = new Date().toISOString();
   const status: BucketRAGStatus = enabled ? 'active' : 'disabled';
 
+  // On disable, mark teardown pending and zero the telemetry counters (the
+  // companion data is about to be removed); the worker clears the marker once
+  // teardown completes. On (re-)enable the row is rewritten WITHOUT the marker,
+  // so a rapid disable→enable naturally cancels a queued teardown.
   const record: BucketRAGEnablementRecord = {
     pk: RAGKeys.bucketPk(orgId, region, bucketName),
     sk: RAGKeys.enablementSk(),
     orgId,
     status,
     ...(existing?.syncState ? { syncState: existing.syncState } : {}),
-    filesIndexed: existing?.filesIndexed ?? 0,
-    indexSize: existing?.indexSize ?? 0,
+    filesIndexed: enabled ? (existing?.filesIndexed ?? 0) : 0,
+    indexSize: enabled ? (existing?.indexSize ?? 0) : 0,
     ...(existing?.lastSyncedAt ? { lastSyncedAt: existing.lastSyncedAt } : {}),
     ...(existing?.lastSyncError ? { lastSyncError: existing.lastSyncError } : {}),
+    ...(enabled ? {} : { teardownPendingAt: now }),
     ...(existing?.settings ? { settings: existing.settings } : {}),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
@@ -90,6 +95,39 @@ export async function setBucketRagEnablement(args: {
   );
 
   return record;
+}
+
+/**
+ * Remove the `teardownPendingAt` marker from a bucket's enablement row once the
+ * worker has finished tearing the companion index down. A `ConditionalCheckFailed`
+ * (row deleted meanwhile) is swallowed so teardown stays best-effort/idempotent.
+ */
+export async function clearTeardownPending(
+  orgId: string,
+  region: S3Region,
+  bucketName: string,
+): Promise<void> {
+  try {
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: Resource.RagIndexerTable.name,
+        Key: {
+          pk: { S: RAGKeys.bucketPk(orgId, region, bucketName) },
+          sk: { S: RAGKeys.enablementSk() },
+        },
+        UpdateExpression: 'REMOVE teardownPendingAt',
+        ConditionExpression: 'attribute_exists(pk)',
+      }),
+    );
+  } catch (error) {
+    if (
+      error instanceof ConditionalCheckFailedException ||
+      (error instanceof Error && error.name === 'ConditionalCheckFailedException')
+    ) {
+      return;
+    }
+    throw error;
+  }
 }
 
 /**

@@ -23,7 +23,12 @@ const {
   mockCreateS3Client,
   mockIndexBucket,
   mockBucketObjectVectorStore,
+  mockDropIndex,
   mockUpdateBucketTelemetry,
+  mockGetBucketRagEnablement,
+  mockClearTeardownPending,
+  mockClearCheckpoint,
+  mockDeleteAllManifestEntries,
   fakeS3Client,
 } = vi.hoisted(() => ({
   mockGetProvisionedRegions: vi.fn(),
@@ -31,7 +36,12 @@ const {
   mockCreateS3Client: vi.fn(),
   mockIndexBucket: vi.fn(),
   mockBucketObjectVectorStore: vi.fn(),
+  mockDropIndex: vi.fn(),
   mockUpdateBucketTelemetry: vi.fn(),
+  mockGetBucketRagEnablement: vi.fn(),
+  mockClearTeardownPending: vi.fn(),
+  mockClearCheckpoint: vi.fn(),
+  mockDeleteAllManifestEntries: vi.fn(),
   fakeS3Client: { tag: 's3-client' },
 }));
 
@@ -49,10 +59,17 @@ vi.mock('../lib/s3-client.js', () => ({
 
 vi.mock('../lib/bucket-rag-enablement.js', () => ({
   updateBucketTelemetry: mockUpdateBucketTelemetry,
+  getBucketRagEnablement: mockGetBucketRagEnablement,
+  clearTeardownPending: mockClearTeardownPending,
 }));
 
 vi.mock('./rag-indexer-helpers.js', () => ({
   indexBucket: mockIndexBucket,
+}));
+
+vi.mock('./rag-indexer-manifest.js', () => ({
+  clearCheckpoint: mockClearCheckpoint,
+  deleteAllManifestEntries: mockDeleteAllManifestEntries,
 }));
 
 vi.mock('@filone/rag-shared', () => ({
@@ -128,6 +145,17 @@ describe('rag-indexer-worker', () => {
       failed: 0,
       completed: true,
     });
+    // `new BucketObjectVectorStore(...)` yields an instance exposing dropIndex.
+    // A regular function (not an arrow) is required so it is constructable.
+    mockBucketObjectVectorStore.mockImplementation(function () {
+      return { dropIndex: mockDropIndex };
+    });
+    mockDropIndex.mockResolvedValue(undefined);
+    mockClearCheckpoint.mockResolvedValue(undefined);
+    mockClearTeardownPending.mockResolvedValue(undefined);
+    mockDeleteAllManifestEntries.mockResolvedValue(undefined);
+    // Default: a disabled row (teardown proceeds). Re-enabled tests override.
+    mockGetBucketRagEnablement.mockResolvedValue({ status: 'disabled' });
   });
 
   it('skips when the org is not provisioned in any region', async () => {
@@ -370,5 +398,56 @@ describe('rag-indexer-worker', () => {
     await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), ctx);
 
     expect(getRemainingTimeInMillis).toHaveBeenCalled();
+  });
+
+  // -----------------------------------------------------------------------
+  // Teardown mode
+  // -----------------------------------------------------------------------
+
+  function teardownPayload(buckets: RagIndexerWorkerPayload['buckets']): RagIndexerWorkerPayload {
+    return { orgId: 'org-1', buckets, mode: 'teardown' };
+  }
+
+  it('tears down a disabled bucket: drops the index, manifest, checkpoint, and marker', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+
+    await handler(teardownPayload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
+
+    expect(mockIndexBucket).not.toHaveBeenCalled();
+    expect(mockDropIndex).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'b1');
+    expect(mockDeleteAllManifestEntries).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'b1');
+    expect(mockClearCheckpoint).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'b1');
+    expect(mockClearTeardownPending).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'b1');
+  });
+
+  it('skips teardown when the bucket has been re-enabled (disable→enable race guard)', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+    mockGetBucketRagEnablement.mockResolvedValue({ status: 'active' });
+
+    await handler(teardownPayload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
+
+    expect(mockDropIndex).not.toHaveBeenCalled();
+    expect(mockDeleteAllManifestEntries).not.toHaveBeenCalled();
+    expect(mockClearTeardownPending).not.toHaveBeenCalled();
+  });
+
+  it('isolates a per-bucket teardown failure: other buckets still tear down', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+    mockDropIndex.mockRejectedValueOnce(new Error('drop failed')).mockResolvedValue(undefined);
+
+    await handler(
+      teardownPayload([
+        { region: S3Region.EuWest1, bucketName: 'b1' },
+        { region: S3Region.EuWest1, bucketName: 'b2' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    expect(mockDropIndex).toHaveBeenCalledTimes(2);
+    // The healthy bucket still completed its full teardown.
+    expect(mockClearTeardownPending).toHaveBeenCalledWith('org-1', S3Region.EuWest1, 'b2');
   });
 });
