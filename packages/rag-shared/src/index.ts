@@ -21,8 +21,6 @@ export { extractText } from './extractor.js';
 
 export { extractTextFromPdf } from './pdf-extractor.js';
 
-export { S3VectorsStore } from './s3-vectors-store.js';
-
 export { BucketObjectVectorStore, companionBucketName } from './bucket-object-vector-store.js';
 export type { BucketObjectVectorStoreOptions } from './bucket-object-vector-store.js';
 

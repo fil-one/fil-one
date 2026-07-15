@@ -31,7 +31,7 @@ export interface ManifestEntry {
 
 /**
  * Load every object's manifest for a bucket into a map keyed by objectKey.
- * One `begins_with MANIFEST#` query (paged) returns the authoritative set of
+ * One `begins_with MANIFEST2#` query (paged) returns the authoritative set of
  * indexed objects and their vector-store keys. Scoped by `orgId` so a reused
  * bucket name can never surface another tenant's manifest.
  */

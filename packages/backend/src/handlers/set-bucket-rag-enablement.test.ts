@@ -53,6 +53,8 @@ process.env.FILONE_STAGE = 'test';
 import { baseHandler, handler } from './set-bucket-rag-enablement.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
 import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
+import { companionBucketName } from '@filone/rag-shared';
+import { BucketAlreadyExistsError } from '../lib/errors.js';
 import { S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.js';
@@ -135,6 +137,36 @@ describe('set-bucket-rag-enablement baseHandler', () => {
       existing: undefined,
       region: S3Region.EuWest1,
     });
+  });
+
+  it('provisions the companion index bucket on enable', async () => {
+    await baseHandler(event({ enabled: true }));
+
+    expect(orch.createBucket).toHaveBeenCalledWith('aurora:org-1', {
+      bucketName: companionBucketName('org-1', S3Region.EuWest1, 'my-bucket'),
+    });
+  });
+
+  it('swallows BucketAlreadyExistsError when the companion already exists', async () => {
+    orch.createBucket.mockRejectedValue(new BucketAlreadyExistsError('filone-rag-x'));
+
+    const result = await baseHandler(event({ enabled: true }));
+
+    expect(result.statusCode).toBe(200);
+    expect(mockSetEnablement).toHaveBeenCalled();
+  });
+
+  it('surfaces a non-already-exists companion creation error (e.g. quota)', async () => {
+    orch.createBucket.mockRejectedValue(new Error('bucketLimit exceeded'));
+
+    await expect(baseHandler(event({ enabled: true }))).rejects.toThrow('bucketLimit exceeded');
+    expect(mockSetEnablement).not.toHaveBeenCalled();
+  });
+
+  it('does not provision a companion bucket on disable', async () => {
+    await baseHandler(event({ enabled: false }));
+
+    expect(orch.createBucket).not.toHaveBeenCalled();
   });
 
   it('forwards the resolved region from the query param into both helpers', async () => {

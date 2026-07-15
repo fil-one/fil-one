@@ -25,7 +25,7 @@ describe('RAGKeys', () => {
   });
 
   it('builds manifest sks sharing a begins_with-able prefix', () => {
-    expect(RAGKeys.manifestSk('file1.pdf')).toBe('MANIFEST#file1.pdf');
+    expect(RAGKeys.manifestSk('file1.pdf')).toBe('MANIFEST2#file1.pdf');
     expect(RAGKeys.manifestSk('file1.pdf').startsWith(RAGKeys.manifestSkPrefix())).toBe(true);
   });
 
@@ -33,7 +33,7 @@ describe('RAGKeys', () => {
     expect(RAGKeys.checkpointPk('org-1', S3Region.EuWest1, 'bucket-1')).toBe(
       'INDEXER_CHECKPOINT#org-1#eu-west-1#bucket-1',
     );
-    expect(RAGKeys.checkpointSk()).toBe('CHECKPOINT');
+    expect(RAGKeys.checkpointSk()).toBe('CHECKPOINT2');
   });
 
   it('round-trips bucketPk through parseBucketPk, recovering orgId/region/bucketName', () => {
@@ -149,7 +149,7 @@ describe('ObjectChunkManifestRecord', () => {
     expect(manifest.updatedAt).toMatch(ISO_8601);
   });
 
-  it("returns all of a bucket's objects via a begins_with MANIFEST# query", () => {
+  it("returns all of a bucket's objects via a begins_with MANIFEST2# query", () => {
     // Simulate a single-table partition for BUCKET#bucket-1 with mixed sks.
     const partition: Array<{ sk: string }> = [
       { sk: RAGKeys.enablementSk() },
@@ -163,9 +163,9 @@ describe('ObjectChunkManifestRecord', () => {
 
     expect(manifests).toHaveLength(3);
     expect(manifests.map((m) => m.sk)).toEqual([
-      'MANIFEST#file1.pdf',
-      'MANIFEST#file2.pdf',
-      'MANIFEST#file3.pdf',
+      'MANIFEST2#file1.pdf',
+      'MANIFEST2#file2.pdf',
+      'MANIFEST2#file3.pdf',
     ]);
   });
 });
@@ -185,7 +185,7 @@ describe('RagIndexerCheckpointRecord', () => {
     };
 
     expect(record.pk).toBe('INDEXER_CHECKPOINT#org-1#eu-west-1#bucket-1');
-    expect(record.sk).toBe('CHECKPOINT');
+    expect(record.sk).toBe('CHECKPOINT2');
     expect(record.bucketName).toBe('bucket-1');
     expect(record.continuationToken).toBe('token-abc');
     expect(record.lastPageStartedAt).toMatch(ISO_8601);

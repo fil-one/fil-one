@@ -120,56 +120,24 @@ export default $config({
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
-    // ── S3 Vectors bucket for RAG embeddings (FIL-548) ───────────────
-    // One vector bucket hosts one index per RAG-enabled bucket. The
-    // @filone/rag-shared S3VectorsStore reads the bucket name at runtime via
-    // Resource.RagVectorBucket.name.
-    const ragVectorBucketName = `filone-${$app.stage}-rag-vectors`;
-    if (ragVectorBucketName.length > 63) {
-      throw new Error(
-        `RagVectorBucket name too long (${ragVectorBucketName.length} chars): ${ragVectorBucketName}`,
-      );
-    }
-    const ragVectorBucketResource = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
-      vectorBucketName: ragVectorBucketName,
-      // Indexes are created at runtime by the RAG indexer (one opaque
-      // rag-<hash> index per RAG-enabled bucket), so Pulumi has no knowledge of
-      // them. Without forceDestroy, `sst remove` of a preview/staging stage
-      // fails with a 409 ConflictException ("vector bucket is not empty") on
-      // DeleteVectorBucket. forceDestroy makes the provider delete all indexes
-      // and vectors first. Gated off production, which is removal:'retain' and
-      // never torn down anyway.
-      forceDestroy: !isProduction,
-    });
+    // CUTOVER RUNBOOK (companion buckets): the central AWS S3 Vectors bucket
+    // `filone-{stage}-rag-vectors` and its RagVectorBucket resource/linkable are
+    // removed as of this change. Non-production stages already carry
+    // forceDestroy: true in state (#504), so Pulumi can delete the populated
+    // bucket on the next deploy. Production is removal:'retain', so its bucket
+    // is orphaned and must be deleted MANUALLY after cutover (FIL-616) — it
+    // holds users' raw chunk text, so deleting it is part of honoring the
+    // "nothing is copied elsewhere" claim. No handler references it anymore;
+    // the RAGKeys MANIFEST2#/CHECKPOINT2 bump forces a full re-index into the
+    // per-tenant companion buckets.
 
-    // Wrap the raw Pulumi resource so handlers can read it via SST resource
-    // linking (Resource.RagVectorBucket.name).
-    const ragVectorBucket = new sst.Linkable('RagVectorBucket', {
-      properties: {
-        name: ragVectorBucketResource.vectorBucketName,
-        arn: ragVectorBucketResource.vectorBucketArn,
-      },
-    });
-
-    // s3vectors:* scoped to the vector bucket and all of its indexes, plus
-    // bedrock:InvokeModel for the Titan embeddings model (FIL-552). Granted only
-    // to handlers that opt in via addRoute({ rag: true }) — i.e. those that use
-    // @filone/rag-shared.
-    const ragPermissions: sst.aws.FunctionPermissionArgs[] = [
-      {
-        actions: [
-          's3vectors:CreateIndex',
-          's3vectors:DeleteIndex',
-          's3vectors:PutVectors',
-          's3vectors:QueryVectors',
-          's3vectors:GetVectors',
-          's3vectors:DeleteVectors',
-        ],
-        resources: [
-          ragVectorBucketResource.vectorBucketArn,
-          $interpolate`${ragVectorBucketResource.vectorBucketArn}/index/*`,
-        ],
-      },
+    // RAG embeddings are stored as plain objects in a per-bucket companion
+    // bucket on the tenant's OWN provider/region (see @filone/rag-shared
+    // BucketObjectVectorStore) — there is no central AWS S3 Vectors bucket, so
+    // the only Bedrock grant the RAG handlers need is InvokeModel for the Titan
+    // embeddings model (FIL-552). Granted to handlers that opt in via
+    // addRoute({ rag: true }).
+    const bedrockEmbedPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['bedrock:InvokeModel'],
         resources: [$interpolate`arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0`],
@@ -441,7 +409,6 @@ export default $config({
       billingTable,
       userInfoTable,
       userFilesBucket,
-      ragVectorBucket,
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
@@ -539,8 +506,10 @@ export default $config({
       memory?: sst.aws.FunctionArgs['memory'];
       timeout?: sst.aws.FunctionArgs['timeout'];
       /**
-       * Grant s3vectors:* (scoped to the RAG vector bucket + indexes) and
-       * bedrock:InvokeModel for handlers that use @filone/rag-shared.
+       * Grant bedrock:InvokeModel for the Titan embeddings model, for handlers
+       * that use @filone/rag-shared. (RAG vectors live in per-tenant companion
+       * buckets reached via the S3 data plane, not a central store, so no
+       * s3vectors grant is needed — see s3DataPlanePermissions.)
        */
       rag?: boolean;
     }
@@ -570,7 +539,7 @@ export default $config({
           ...sharedEnv,
           ...extraEnv,
         },
-        permissions: rag ? [...(permissions ?? []), ...ragPermissions] : permissions,
+        permissions: rag ? [...(permissions ?? []), ...bedrockEmbedPermissions] : permissions,
         timeout: timeout ?? '10 seconds',
         ...(memory ? { memory } : {}),
         ...(provisionedConcurrency && provisionedConcurrency > 0
@@ -714,12 +683,15 @@ export default $config({
       permissions: bucketReadPermissions,
       extraEnv: orchestratorEnv,
     });
-    // RAG query playground (FIL-554): embed the question, vector-search the
-    // bucket's index, and ground a Bedrock completion on the retrieved chunks.
-    // `rag: true` grants s3vectors:QueryVectors + bedrock:InvokeModel on the
-    // Titan embeddings model; the extra permission below covers the Claude
-    // completion model — both its cross-region inference profile and the
-    // underlying foundation model. Higher timeout/memory for the Bedrock calls.
+    // RAG query playground (FIL-554): embed the question, search the bucket's
+    // companion index (downloaded from the tenant's own storage), and ground a
+    // Bedrock completion on the retrieved chunks. `rag: true` grants
+    // bedrock:InvokeModel on the Titan embeddings model; the extra permission
+    // below covers the Claude completion model — both its cross-region inference
+    // profile and the underlying foundation model. It resolves the tenant's S3
+    // credentials to read the companion bucket, so it needs the S3 data-plane
+    // SSM grant (aurora-s3/* + fth-s3) on top of the bucket read grant. Higher
+    // timeout/memory for the whole-index download + Bedrock calls.
     addRoute({
       method: 'POST',
       routePath: '/api/buckets/{name}/query',
@@ -731,6 +703,7 @@ export default $config({
       extraEnv: orchestratorEnv,
       permissions: [
         ...bucketReadPermissions,
+        ...s3DataPlanePermissions,
         {
           actions: ['bedrock:InvokeModel'],
           // Built from the shared allowlist so the grant and QueryBucketSchema's
@@ -742,15 +715,18 @@ export default $config({
         },
       ],
       timeout: '30 seconds',
-      memory: '512 MB',
+      memory: '1024 MB',
     });
     // RAG per-bucket enablement (FIL-555): read/write the BUCKET#{name}/RAG
     // enablement row + sync telemetry for the caller's tenant. Both are gated by
     // auth + subscriptionGuard + ragAccessMiddleware. The enablement row lives in
     // ragIndexerTable (extraLink below); they also read UserInfoTable (already
     // linked via allResources) for tenant/org profile, and resolve tenant
-    // ownership via the orchestrator (SSM-backed S3 keys), so they need the SSM
-    // read grant but not `rag: true` (no s3vectors/bedrock).
+    // ownership via the orchestrator (SSM-backed S3/API keys). On enable, the
+    // POST handler also provisions the companion index bucket via the
+    // orchestrator, which the bucket read grant already covers; neither needs
+    // `rag: true` (no Bedrock — embedding/querying happens in the indexer/query
+    // handlers).
     addRoute({
       method: 'GET',
       routePath: '/api/buckets/{name}/rag/enabled',
@@ -985,18 +961,19 @@ export default $config({
     });
 
     // ── RAG indexer (cron → orchestrator → per-org worker) ──────────
-    // Keeps each RAG-enabled bucket's vector index in sync with S3 contents via
-    // object-level ETag diffing. The worker reads per-tenant S3 keys (SSM +
-    // KMS) and uses @filone/rag-shared to extract/chunk/embed/upsert, so it
-    // gets the RAG permission set plus a large timeout/memory budget; large
-    // buckets are resumed across runs via a persisted continuation checkpoint.
+    // Keeps each RAG-enabled bucket's companion index in sync with its S3
+    // contents via object-level ETag diffing. The worker reads per-tenant S3
+    // keys (SSM + KMS), provisions/writes the companion bucket on the tenant's
+    // own provider, and uses @filone/rag-shared to extract/chunk/embed/upsert —
+    // so it needs the S3 data-plane grant plus bedrock:InvokeModel for Titan
+    // embeddings, and a large timeout/memory budget; large buckets are resumed
+    // across runs via a persisted continuation checkpoint.
     const ragIndexerWorker = createFn('RagIndexerWorker', {
       handler: 'packages/backend/src/jobs/rag-indexer-worker.handler',
       link: [
         billingTable,
         userInfoTable,
         ragIndexerTable,
-        ragVectorBucket,
         auroraBackofficeToken,
         fthManagementApiToken,
       ],
@@ -1005,7 +982,7 @@ export default $config({
       // 1024 MB: PDF text extraction runs in-process (pdf.js), which is
       // CPU- and heap-hungry on large documents.
       memory: '1024 MB',
-      permissions: [...s3DataPlanePermissions, ...ragPermissions],
+      permissions: [...s3DataPlanePermissions, ...bedrockEmbedPermissions],
     });
 
     const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {

@@ -64,7 +64,7 @@ interface ObjectBlob {
 
 /**
  * Compose the companion index bucket name for a RAG-enabled bucket, isolated per
- * tenant. Mirrors {@link S3VectorsStore}'s index-name derivation (FIL-596): the
+ * tenant. Mirrors the former S3 Vectors index-name derivation (FIL-596): the
  * `(orgId, region, bucketName)` triple is joined on `#` — a delimiter that
  * cannot appear in any component (orgId is a UUID, region an enum, bucket names
  * are `[a-z0-9-]`) — and hashed so a bucket name reused across tenants never
@@ -520,8 +520,7 @@ function groupKeysByObjectKey(keys: string[]): Map<string, string[]> {
 
 /**
  * Recover the `objectKey` portion of a `${objectKey}#${chunkIndex}` vector key.
- * Object keys may themselves contain `#`, so we split on the final separator
- * (mirrors {@link S3VectorsStore}).
+ * Object keys may themselves contain `#`, so we split on the final separator.
  */
 function objectKeyFromChunkKey(key: string): string {
   const lastHash = key.lastIndexOf('#');

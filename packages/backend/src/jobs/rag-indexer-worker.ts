@@ -9,11 +9,11 @@
 // bucket is logged and does not abort the rest of the org's work.
 
 import type { Context } from 'aws-lambda';
-import { Resource } from 'sst';
-import { S3VectorsStore, type VectorStore } from '@filone/rag-shared';
+import { BucketObjectVectorStore } from '@filone/rag-shared';
 import { getProvisionedRegions } from '../lib/region-helpers.js';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { createS3Client } from '../lib/s3-client.js';
+import { BucketAlreadyExistsError } from '../lib/errors.js';
 import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.js';
 import { indexBucket } from './rag-indexer-helpers.js';
 import { reportMetric } from '../lib/metrics.js';
@@ -78,8 +78,6 @@ export async function handler(
     );
     const bucketsByRegion = groupBucketsByRegion(buckets);
 
-    const vectorStore = new S3VectorsStore(Resource.RagVectorBucket.name);
-
     for (const [region, bucketNames] of bucketsByRegion) {
       const tenantId = tenantByRegion.get(region);
       if (!tenantId) {
@@ -97,7 +95,6 @@ export async function handler(
           region,
           tenantId,
           bucketNames,
-          vectorStore,
           deadlineEpochMs,
         });
         bucketsIndexed += stats.bucketsIndexed;
@@ -166,7 +163,6 @@ interface IndexRegionArgs {
   region: S3Region;
   tenantId: string;
   bucketNames: string[];
-  vectorStore: VectorStore;
   deadlineEpochMs: number;
 }
 
@@ -186,16 +182,33 @@ interface RegionIndexStats {
 /**
  * Reconcile the given buckets in a single region. Resolves the region's
  * orchestrator, builds the S3 client from its tenant credentials, and indexes
- * each requested bucket's vector index. Returns aggregated stats (buckets and
+ * each requested bucket into its companion index bucket — on the SAME provider
+ * as the source bucket, so vectors never leave the tenant's storage. The
+ * companion store is built per region (its S3 client and bucket-provisioning
+ * callback are region/tenant-specific). Returns aggregated stats (buckets and
  * objects reconciled/failed). Per-bucket failures are isolated (logged,
  * counted, and skipped) so they do not abort the region.
  */
 async function indexRegion(args: IndexRegionArgs): Promise<RegionIndexStats> {
-  const { orgId, region, tenantId, bucketNames, vectorStore, deadlineEpochMs } = args;
+  const { orgId, region, tenantId, bucketNames, deadlineEpochMs } = args;
 
   const orchestrator = getOrchestratorForRegion(region);
   const ctx = await orchestrator.getS3ClientContext(tenantId);
   const s3 = createS3Client(ctx);
+
+  // The store provisions each companion bucket via the orchestrator (Aurora
+  // buckets exist only through the Portal API), idempotently — this is the
+  // backstop; enablement creates it up front so quota/name errors surface to
+  // the user immediately. BucketAlreadyExistsError is the expected steady state.
+  const vectorStore = new BucketObjectVectorStore(s3, {
+    ensureBucket: async (companionBucket) => {
+      try {
+        await orchestrator.createBucket(tenantId, { bucketName: companionBucket });
+      } catch (error) {
+        if (!(error instanceof BucketAlreadyExistsError)) throw error;
+      }
+    },
+  });
 
   const stats: RegionIndexStats = {
     bucketsIndexed: 0,

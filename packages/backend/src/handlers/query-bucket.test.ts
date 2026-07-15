@@ -7,8 +7,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
-    RagVectorBucket: { name: 'RagVectorBucket' },
   },
+}));
+
+// query-bucket builds the tenant S3 client to reach the companion index bucket.
+const mockCreateS3Client = vi.fn((..._args: unknown[]) => ({ tag: 's3-client' }));
+vi.mock('../lib/s3-client.js', () => ({
+  createS3Client: (...args: unknown[]) => mockCreateS3Client(...args),
 }));
 
 const mockGetOrchestratorForRegion = vi.fn();
@@ -50,7 +55,7 @@ const mockQuery = vi.fn();
 vi.mock('@filone/rag-shared', () => ({
   embed: (...args: unknown[]) => mockEmbed(...args),
   complete: (...args: unknown[]) => mockComplete(...args),
-  S3VectorsStore: class {
+  BucketObjectVectorStore: class {
     query(...args: unknown[]) {
       return mockQuery(...args);
     }
@@ -355,9 +360,9 @@ describe('query-bucket baseHandler', () => {
     expect(mockComplete).not.toHaveBeenCalled();
   });
 
-  it('returns a graceful 200 when the bucket has no index (NotFoundException)', async () => {
-    const err = new Error('index does not exist');
-    err.name = 'NotFoundException';
+  it('returns a graceful 200 when the companion index bucket does not exist (NoSuchBucket)', async () => {
+    const err = new Error('bucket does not exist');
+    err.name = 'NoSuchBucket';
     mockQuery.mockRejectedValue(err);
 
     const result = await baseHandler(queryEvent({ query: 'hello' }));
