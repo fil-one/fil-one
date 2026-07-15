@@ -520,7 +520,7 @@ describe('indexBucket', () => {
   it('resumes from a persisted continuation token', async () => {
     mockLoadCheckpoint.mockResolvedValue({
       pk: 'INDEXER_CHECKPOINT#bucket-1',
-      sk: 'CHECKPOINT',
+      sk: 'CHECKPOINT2',
       bucketId: 'bucket-1',
 
       continuationToken: 'resume-tok',
@@ -553,7 +553,7 @@ describe('indexBucket', () => {
     // skips removal reconciliation entirely on a resumed (partial) pass.
     mockLoadCheckpoint.mockResolvedValue({
       pk: 'INDEXER_CHECKPOINT#bucket-1',
-      sk: 'CHECKPOINT',
+      sk: 'CHECKPOINT2',
       bucketId: 'bucket-1',
 
       continuationToken: 'page-2-tok',
@@ -735,7 +735,7 @@ describe('indexBucket', () => {
     it('does NOT write a success snapshot on a resumed (partial) run', async () => {
       mockLoadCheckpoint.mockResolvedValue({
         pk: 'INDEXER_CHECKPOINT#bucket-1',
-        sk: 'CHECKPOINT',
+        sk: 'CHECKPOINT2',
         bucketName: 'bucket-1',
         continuationToken: 'resume-tok',
         lastPageStartedAt: '2024-01-01T00:00:00.000Z',

@@ -4,6 +4,7 @@ import type { S3ClientContext } from '../lib/s3-client.js';
 import type { ProvisionedRegion } from '../lib/region-helpers.js';
 import { buildContext } from '../test/lambda-test-utilities.js';
 import { S3Region } from '@filone/shared';
+import { BucketAlreadyExistsError } from '../lib/errors.js';
 import type { RagIndexerWorkerPayload } from './rag-indexer-worker.js';
 
 // ---------------------------------------------------------------------------
@@ -13,7 +14,6 @@ import type { RagIndexerWorkerPayload } from './rag-indexer-worker.js';
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
-    RagVectorBucket: { name: 'rag-vectors' },
   },
 }));
 
@@ -22,7 +22,7 @@ const {
   mockGetOrchestratorForRegion,
   mockCreateS3Client,
   mockIndexBucket,
-  mockS3VectorsStore,
+  mockBucketObjectVectorStore,
   mockUpdateBucketTelemetry,
   fakeS3Client,
 } = vi.hoisted(() => ({
@@ -30,7 +30,7 @@ const {
   mockGetOrchestratorForRegion: vi.fn(),
   mockCreateS3Client: vi.fn(),
   mockIndexBucket: vi.fn(),
-  mockS3VectorsStore: vi.fn(),
+  mockBucketObjectVectorStore: vi.fn(),
   mockUpdateBucketTelemetry: vi.fn(),
   fakeS3Client: { tag: 's3-client' },
 }));
@@ -56,7 +56,7 @@ vi.mock('./rag-indexer-helpers.js', () => ({
 }));
 
 vi.mock('@filone/rag-shared', () => ({
-  S3VectorsStore: mockS3VectorsStore,
+  BucketObjectVectorStore: mockBucketObjectVectorStore,
 }));
 
 import { handler } from './rag-indexer-worker.js';
@@ -77,6 +77,7 @@ function makeOrchestrator(id: string, region: S3Region) {
     id,
     region,
     getS3ClientContext: vi.fn().mockResolvedValue(S3_CTX),
+    createBucket: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -280,13 +281,40 @@ describe('rag-indexer-worker', () => {
     expect(mockIndexBucket).toHaveBeenCalledTimes(2);
   });
 
-  it('instantiates the vector store from the RAG vector bucket resource', async () => {
+  it('builds the companion store per region on the tenant S3 client with an ensureBucket callback', async () => {
     const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
     useRegions([provisioned(aurora, 'tenant-a')]);
 
     await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
 
-    expect(mockS3VectorsStore).toHaveBeenCalledWith('rag-vectors');
+    expect(mockBucketObjectVectorStore).toHaveBeenCalledWith(
+      fakeS3Client,
+      expect.objectContaining({ ensureBucket: expect.any(Function) }),
+    );
+  });
+
+  it('ensureBucket provisions the companion via the orchestrator and swallows BucketAlreadyExistsError', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+
+    await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
+    const ensureBucket = mockBucketObjectVectorStore.mock.calls[0][1].ensureBucket as (
+      name: string,
+    ) => Promise<void>;
+
+    // Normal provisioning goes through the region's orchestrator + tenant.
+    await ensureBucket('filone-rag-companion');
+    expect(aurora.createBucket).toHaveBeenCalledWith('tenant-a', {
+      bucketName: 'filone-rag-companion',
+    });
+
+    // An already-existing companion is the idempotent steady state (swallowed);
+    // any other failure (e.g. quota) propagates.
+    aurora.createBucket.mockRejectedValueOnce(new BucketAlreadyExistsError('filone-rag-companion'));
+    await expect(ensureBucket('filone-rag-companion')).resolves.toBeUndefined();
+
+    aurora.createBucket.mockRejectedValueOnce(new Error('bucketLimit exceeded'));
+    await expect(ensureBucket('filone-rag-companion')).rejects.toThrow('bucketLimit exceeded');
   });
 
   // -----------------------------------------------------------------------

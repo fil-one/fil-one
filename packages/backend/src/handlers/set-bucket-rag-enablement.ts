@@ -8,7 +8,9 @@ import {
   isReservedBucketName,
   isSupportedRegion,
 } from '@filone/shared';
+import { companionBucketName } from '@filone/rag-shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
+import { BucketAlreadyExistsError } from '../lib/errors.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import {
   ResponseBuilder,
@@ -21,6 +23,7 @@ import {
   toEnablementResponse,
 } from '../lib/bucket-rag-enablement.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
+import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.js';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
@@ -29,13 +32,55 @@ import { ragAccessMiddleware } from '../middleware/rag-access.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
 /**
+ * On enable, idempotently provision the companion index bucket up front so
+ * quota/name errors — e.g. the Aurora Portal `bucketLimit` — surface to the user
+ * immediately rather than only later in the indexer. BucketAlreadyExistsError is
+ * the expected steady state (swallowed); anything else propagates. The indexer's
+ * ensureBucket remains the backstop.
+ */
+async function ensureCompanionBucket(
+  orchestrator: ReturnType<typeof getOrchestratorForRegion>,
+  tenantId: string,
+  companionBucket: string,
+): Promise<void> {
+  try {
+    await orchestrator.createBucket(tenantId, { bucketName: companionBucket });
+  } catch (error) {
+    if (!(error instanceof BucketAlreadyExistsError)) throw error;
+  }
+}
+
+/**
+ * Return the existing enablement record only when it belongs to the caller's
+ * org. getBucket already proved tenant ownership, so an org mismatch here is a
+ * data anomaly (stale/reused row) — logged for triage, then treated as no prior
+ * record so setBucketRagEnablement re-stamps it with the correct org.
+ */
+function resolveOwnedRecord(
+  existing: BucketRAGEnablementRecord | undefined,
+  orgId: string,
+  region: string,
+  bucketName: string,
+): BucketRAGEnablementRecord | undefined {
+  const owned = existing && existing.orgId === orgId ? existing : undefined;
+  if (existing && !owned) {
+    console.warn(
+      '[set-bucket-rag-enablement] RAG enablement row org mismatch; re-stamping with caller org',
+      { region, bucketName, recordOrgId: existing.orgId, callerOrgId: orgId },
+    );
+  }
+  return owned;
+}
+
+/**
  * POST /api/buckets/{name}/rag/enabled — toggle a bucket's RAG indexing on/off
  * for the caller's tenant (FIL-555).
  *
  * Body: `{ enabled: boolean }`. Creates/updates the `BUCKET#{region}#{name}` / `RAG`
  * enablement row, flipping `status` to `active`/`disabled` while preserving
- * telemetry and the original `createdAt`. Tenant-scoped (404 for buckets the
- * tenant does not own), RAG-gated, and Write-gated by the subscription guard.
+ * telemetry and the original `createdAt`. On enable it also provisions the
+ * per-bucket companion index bucket. Tenant-scoped (404 for buckets the tenant
+ * does not own), RAG-gated, and Write-gated by the subscription guard.
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -97,18 +142,18 @@ export async function baseHandler(
       .build();
   }
 
-  const existing = await getBucketRagEnablement(orgId, region, bucketName);
-  // Defense in depth: never carry over a record stamped with a different org.
-  // getBucket already proved tenant ownership, so a mismatch here is a data
-  // anomaly (stale/reused row), not a client error — re-stamp the row with the
-  // correct org rather than rejecting the caller, but surface it for triage.
-  const owned = existing && existing.orgId === orgId ? existing : undefined;
-  if (existing && !owned) {
-    console.warn(
-      '[set-bucket-rag-enablement] RAG enablement row org mismatch; re-stamping with caller org',
-      { region, bucketName, recordOrgId: existing.orgId, callerOrgId: orgId },
+  // On enable, provision the companion index bucket up front so quota/name
+  // errors surface immediately (see ensureCompanionBucket).
+  if (enabled) {
+    await ensureCompanionBucket(
+      orchestrator,
+      tenantId,
+      companionBucketName(orgId, region, bucketName),
     );
   }
+
+  const existing = await getBucketRagEnablement(orgId, region, bucketName);
+  const owned = resolveOwnedRecord(existing, orgId, region, bucketName);
 
   const record = await setBucketRagEnablement({
     region,
