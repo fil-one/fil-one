@@ -174,6 +174,17 @@ describe('get-bucket baseHandler', () => {
     );
   });
 
+  it('returns 404 for a reserved RAG companion bucket name without hitting the orchestrator', async () => {
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'filone-rag-deadbeef' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(404);
+    expect(JSON.parse(result.body!)).toStrictEqual({ message: 'Bucket not found' });
+    expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
+    expect(orch.getBucket).not.toHaveBeenCalled();
+  });
+
   it('returns 400 when bucket name is missing', async () => {
     const event = buildEvent({ userInfo: USER_INFO });
     const result = await baseHandler(event);

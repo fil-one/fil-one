@@ -18,6 +18,7 @@ vi.mock('sst', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import {
+  clearTeardownPending,
   getBucketRagEnablement,
   setBucketRagEnablement,
   toEnablementResponse,
@@ -87,7 +88,7 @@ describe('setBucketRagEnablement', () => {
     expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
   });
 
-  it('flips status to disabled while preserving telemetry + createdAt', async () => {
+  it('flips status to disabled, zeroes telemetry counters, and marks teardown pending', async () => {
     ddbMock.on(PutItemCommand).resolves({});
     const existing = record({ filesIndexed: 99, indexSize: 5000 });
 
@@ -100,11 +101,33 @@ describe('setBucketRagEnablement', () => {
     });
 
     expect(result.status).toBe('disabled');
-    expect(result.filesIndexed).toBe(99);
-    expect(result.indexSize).toBe(5000);
-    expect(result.lastSyncedAt).toBe('2026-06-22T12:00:00Z');
+    // Counters are zeroed because the companion data is about to be torn down.
+    expect(result.filesIndexed).toBe(0);
+    expect(result.indexSize).toBe(0);
+    // A teardown marker is set (the worker/orchestrator backstop consumes it).
+    expect(result.teardownPendingAt).toBe(result.updatedAt);
     expect(result.createdAt).toBe('2026-06-01T00:00:00Z');
     expect(result.updatedAt).not.toBe('2026-06-01T00:00:00Z');
+  });
+
+  it('on re-enable rewrites the row without a teardown marker (cancels a queued teardown)', async () => {
+    ddbMock.on(PutItemCommand).resolves({});
+    const existing = record({
+      filesIndexed: 0,
+      indexSize: 0,
+      teardownPendingAt: '2026-06-22T12:00:00Z',
+    });
+
+    const result = await setBucketRagEnablement({
+      region: S3Region.EuWest1,
+      bucketName: 'bucket-1',
+      orgId: 'org-1',
+      enabled: true,
+      existing,
+    });
+
+    expect(result.status).toBe('active');
+    expect(result.teardownPendingAt).toBeUndefined();
   });
 });
 
@@ -326,5 +349,38 @@ describe('updateBucketTelemetry', () => {
     await expect(
       updateBucketTelemetry('org-1', S3Region.EuWest1, 'bucket-1', { syncState: 'syncing' }),
     ).rejects.toThrow('throttled');
+  });
+});
+
+describe('clearTeardownPending', () => {
+  beforeEach(() => ddbMock.reset());
+
+  it('removes the teardownPendingAt marker from the enablement row', async () => {
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    await clearTeardownPending('org-1', S3Region.EuWest1, 'bucket-1');
+
+    const input = ddbMock.commandCalls(UpdateItemCommand)[0]!.args[0].input;
+    expect(input.Key).toEqual({ pk: { S: 'BUCKET#org-1#eu-west-1#bucket-1' }, sk: { S: 'RAG' } });
+    expect(input.UpdateExpression).toContain('REMOVE teardownPendingAt');
+    expect(input.ConditionExpression).toBe('attribute_exists(pk)');
+  });
+
+  it('swallows ConditionalCheckFailedException when the row is gone', async () => {
+    ddbMock
+      .on(UpdateItemCommand)
+      .rejects(new ConditionalCheckFailedException({ message: 'missing', $metadata: {} }));
+
+    await expect(
+      clearTeardownPending('org-1', S3Region.EuWest1, 'bucket-1'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rethrows other DynamoDB failures', async () => {
+    ddbMock.on(UpdateItemCommand).rejects(new Error('throttled'));
+
+    await expect(clearTeardownPending('org-1', S3Region.EuWest1, 'bucket-1')).rejects.toThrow(
+      'throttled',
+    );
   });
 });

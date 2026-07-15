@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { CreateBucketSchema } from './buckets.js';
+import {
+  CreateBucketSchema,
+  RAG_COMPANION_BUCKET_PREFIX,
+  isReservedBucketName,
+} from './buckets.js';
 
 const validRetention = (
   overrides: Partial<{
@@ -136,6 +140,44 @@ describe('CreateBucketSchema', () => {
         const retentionError = result.error.issues.find((i) => i.path.includes('retention'));
         expect(retentionError?.message).toBe('Object Lock must be enabled to use Retention');
       }
+    });
+  });
+
+  describe('reserved bucket names', () => {
+    it('rejects a name using the reserved RAG companion prefix', () => {
+      const result = CreateBucketSchema.safeParse({
+        bucketName: `${RAG_COMPANION_BUCKET_PREFIX}abcdef`,
+        region: 'eu-west-1',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find((i) => i.path.includes('bucketName'));
+        expect(issue?.message).toContain('reserved');
+      }
+    });
+
+    it('reserved check is exposed via the field schema (client validation path)', () => {
+      const fieldResult = CreateBucketSchema.shape.bucketName.safeParse(
+        `${RAG_COMPANION_BUCKET_PREFIX}xyz`,
+      );
+      expect(fieldResult.success).toBe(false);
+    });
+
+    it('allows an ordinary name that merely contains the token elsewhere', () => {
+      const result = CreateBucketSchema.safeParse({
+        bucketName: 'my-filone-rag-bucket',
+        region: 'eu-west-1',
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('isReservedBucketName', () => {
+    it('is true only for the reserved prefix at the start', () => {
+      expect(isReservedBucketName('filone-rag-abc')).toBe(true);
+      expect(isReservedBucketName('filone-rag-')).toBe(true);
+      expect(isReservedBucketName('my-bucket')).toBe(false);
+      expect(isReservedBucketName('x-filone-rag-abc')).toBe(false);
     });
   });
 

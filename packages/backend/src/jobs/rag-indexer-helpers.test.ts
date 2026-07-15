@@ -191,11 +191,11 @@ describe('indexBucket', () => {
   });
 
   // -----------------------------------------------------------------------
-  // PDF objects: extraction is routed through Textract, which reads the object
-  // straight from S3, so the object's own location is handed in as `documentLocation`.
+  // PDF objects: extraction runs in-process (unpdf), so the object's bytes are
+  // handed straight to extractText with no extra options.
   // -----------------------------------------------------------------------
 
-  it('indexes a PDF object, handing Textract the object S3 location as documentLocation', async () => {
+  it('indexes a PDF object, handing its bytes to extractText', async () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'doc.pdf', etag: 'e1' }]));
     const bytes = new Uint8Array([1, 2, 3]);
@@ -210,9 +210,7 @@ describe('indexBucket', () => {
       vectorStore,
     });
 
-    expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf', {
-      pdf: { documentLocation: { Bucket: 'bucket-1', Name: 'doc.pdf' } },
-    });
+    expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf');
     expect(vectorStore.upsertChunks).toHaveBeenCalledOnce();
     expect(mockSaveManifestEntry).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1', {
       objectKey: 'doc.pdf',
@@ -237,12 +235,10 @@ describe('indexBucket', () => {
       vectorStore,
     });
 
-    expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf', {
-      pdf: { documentLocation: { Bucket: 'bucket-1', Name: 'report.pdf' } },
-    });
+    expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf');
   });
 
-  it('forwards no PDF options for a non-PDF object', async () => {
+  it('extracts a non-PDF object by content type', async () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
@@ -254,17 +250,17 @@ describe('indexBucket', () => {
       vectorStore,
     });
 
-    expect(mockExtractText).toHaveBeenCalledWith(new Uint8Array([1]), 'text/plain', {});
+    expect(mockExtractText).toHaveBeenCalledWith(new Uint8Array([1]), 'text/plain');
   });
 
-  it('counts a PDF as failed (isolated) when Textract extraction throws', async () => {
+  it('counts a PDF as failed (isolated) when extraction throws', async () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'doc.pdf', etag: 'e1' }]));
     mockGetObjectBytes.mockResolvedValue({
       bytes: new Uint8Array([1]),
       contentType: 'application/pdf',
     });
-    mockExtractText.mockRejectedValue(new Error('Textract job failed'));
+    mockExtractText.mockRejectedValue(new Error('PDF parse failed'));
 
     const result = await indexBucket({
       orgId: ORG,
@@ -524,7 +520,7 @@ describe('indexBucket', () => {
   it('resumes from a persisted continuation token', async () => {
     mockLoadCheckpoint.mockResolvedValue({
       pk: 'INDEXER_CHECKPOINT#bucket-1',
-      sk: 'CHECKPOINT',
+      sk: 'CHECKPOINT2',
       bucketId: 'bucket-1',
 
       continuationToken: 'resume-tok',
@@ -557,7 +553,7 @@ describe('indexBucket', () => {
     // skips removal reconciliation entirely on a resumed (partial) pass.
     mockLoadCheckpoint.mockResolvedValue({
       pk: 'INDEXER_CHECKPOINT#bucket-1',
-      sk: 'CHECKPOINT',
+      sk: 'CHECKPOINT2',
       bucketId: 'bucket-1',
 
       continuationToken: 'page-2-tok',
@@ -739,7 +735,7 @@ describe('indexBucket', () => {
     it('does NOT write a success snapshot on a resumed (partial) run', async () => {
       mockLoadCheckpoint.mockResolvedValue({
         pk: 'INDEXER_CHECKPOINT#bucket-1',
-        sk: 'CHECKPOINT',
+        sk: 'CHECKPOINT2',
         bucketName: 'bucket-1',
         continuationToken: 'resume-tok',
         lastPageStartedAt: '2024-01-01T00:00:00.000Z',

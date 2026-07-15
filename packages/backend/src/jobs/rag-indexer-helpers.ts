@@ -32,9 +32,6 @@ import {
 
 const LOG = '[rag-indexer-helpers]';
 
-/** Content type whose extraction is routed through Textract and needs PDF options. */
-const PDF_CONTENT_TYPE = 'application/pdf';
-
 /**
  * The core values that travel together through the whole bucket-indexing call
  * chain. Bundled into one object so each helper stays under the param limit and
@@ -296,13 +293,7 @@ async function indexObject(
     return null;
   }
 
-  const text = await extractText(
-    bytes,
-    contentType,
-    contentType === PDF_CONTENT_TYPE
-      ? { pdf: { documentLocation: { Bucket: bucketName, Name: objectKey } } }
-      : {},
-  );
+  const text = await extractText(bytes, contentType);
   if (!text || text.trim().length === 0) {
     console.warn(`${LOG} No extractable text, skipping`, { region, bucketName, key: objectKey });
     return null;

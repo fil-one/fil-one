@@ -2,7 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
-import { S3_REGION, isSupportedRegion } from '@filone/shared';
+import { S3_REGION, isReservedBucketName, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import {
@@ -35,6 +35,14 @@ export async function baseHandler(
     return new ResponseBuilder()
       .status(400)
       .body<ErrorResponse>({ message: 'Bucket name is required' })
+      .build();
+  }
+
+  // Reserved RAG companion index buckets (`filone-rag-*`) are Fil One internals.
+  if (isReservedBucketName(bucketName)) {
+    return new ResponseBuilder()
+      .status(404)
+      .body<ErrorResponse>({ message: 'Bucket not found' })
       .build();
   }
 

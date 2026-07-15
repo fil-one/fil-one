@@ -5,6 +5,7 @@ import {
   ApiErrorCode,
   PresignRequestSchema,
   SubscriptionStatus,
+  isReservedBucketName,
   isSupportedRegion,
 } from '@filone/shared';
 import type {
@@ -149,6 +150,57 @@ async function presignOp(op: PresignOp, ctx: S3ClientContext): Promise<PresignRe
   }
 }
 
+/**
+ * Enforce request-level policy over the batch of presign ops. Returns an error
+ * response to send, or `null` to proceed:
+ *   - reserved RAG companion index buckets (`filone-rag-*`) are never presignable
+ *     — otherwise the console UI could read/corrupt the tenant's own index blobs
+ *     (which hold raw chunk text) via presigned S3 ops;
+ *   - trial accounts (and users with no billing record yet) cannot generate
+ *     shareable getObject URLs (custom `expiresIn`);
+ *   - grace-period / past-due accounts cannot presign write ops (put/delete).
+ */
+function checkOpsPolicy(
+  ops: PresignOp[],
+  status: string | undefined,
+): APIGatewayProxyStructuredResultV2 | null {
+  if (ops.some((op) => isReservedBucketName(op.bucket))) {
+    return new ResponseBuilder()
+      .status(403)
+      .body<ErrorResponse>({ message: 'This bucket is reserved and cannot be accessed' })
+      .build();
+  }
+
+  const isTrial = !status || status === SubscriptionStatus.Trialing;
+  const hasShareableUrl = ops.some((op) => op.op === 'getObject' && op.expiresIn !== undefined);
+  if (isTrial && hasShareableUrl) {
+    return new ResponseBuilder()
+      .status(402)
+      .body<ErrorResponse>({
+        message:
+          'Generating shareable links is not available on trial accounts. Please upgrade to a paid plan.',
+        code: ApiErrorCode.TRIAL_PRESIGN_BLOCKED,
+      })
+      .build();
+  }
+
+  const hasWriteOps = ops.some((op) => WRITE_OPS.has(op.op));
+  const isGraceOrPastDue =
+    status === SubscriptionStatus.GracePeriod || status === SubscriptionStatus.PastDue;
+  if (hasWriteOps && isGraceOrPastDue) {
+    return new ResponseBuilder()
+      .status(403)
+      .body<ErrorResponse>({
+        message:
+          'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
+        code: ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED,
+      })
+      .build();
+  }
+
+  return null;
+}
+
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -184,42 +236,10 @@ export async function baseHandler(
   const ops = parsed.data;
   const { orgId } = getUserInfo(event);
 
-  // Trial accounts (and users with no billing record yet) cannot generate
-  // shareable presigned URLs (getObject with custom expiresIn). All other
-  // presign operations remain available so trial users can browse and interact
-  // with bucket contents normally.
-  const status = event.requestContext.subscriptionStatus;
-  const isTrial = !status || status === SubscriptionStatus.Trialing;
-  const hasShareableUrl = ops.some((op) => op.op === 'getObject' && op.expiresIn !== undefined);
-  if (isTrial && hasShareableUrl) {
-    return new ResponseBuilder()
-      .status(402)
-      .body<ErrorResponse>({
-        message:
-          'Generating shareable links is not available on trial accounts. Please upgrade to a paid plan.',
-        code: ApiErrorCode.TRIAL_PRESIGN_BLOCKED,
-      })
-      .build();
-  }
-
-  // The subscription guard middleware uses Read access level so that listing
-  // and viewing objects still works during a grace period. The middleware stores
-  // the resolved subscription status on the event, so we can check it here
-  // without a second DynamoDB query. If the batch contains write ops
-  // (putObject, deleteObject), block during grace period.
-  const hasWriteOps = ops.some((op) => WRITE_OPS.has(op.op));
-  const isGraceOrPastDue =
-    status === SubscriptionStatus.GracePeriod || status === SubscriptionStatus.PastDue;
-  if (hasWriteOps && isGraceOrPastDue) {
-    return new ResponseBuilder()
-      .status(403)
-      .body<ErrorResponse>({
-        message:
-          'Your account is in a grace period. Read-only access is available. Please reactivate your subscription to make changes.',
-        code: ApiErrorCode.GRACE_PERIOD_WRITE_BLOCKED,
-      })
-      .build();
-  }
+  // Reserved-bucket and subscription-state policy over the requested ops, kept
+  // in one helper so baseHandler stays under the cognitive-complexity budget.
+  const policyError = checkOpsPolicy(ops, event.requestContext.subscriptionStatus);
+  if (policyError) return policyError;
 
   const orchestrator = getOrchestratorForRegion(region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));

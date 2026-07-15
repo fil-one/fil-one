@@ -123,6 +123,17 @@ describe('presign baseHandler', () => {
     });
   });
 
+  it('returns 403 when any op targets a reserved RAG companion bucket', async () => {
+    const event = buildPresignEvent([{ op: 'listObjects', bucket: 'filone-rag-deadbeef' }]);
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      message: 'This bucket is reserved and cannot be accessed',
+    });
+    expect(mockGetS3ClientContext).not.toHaveBeenCalled();
+  });
+
   it('returns 400 for empty array', async () => {
     const event = buildPresignEvent([]);
     const result = await baseHandler(event);

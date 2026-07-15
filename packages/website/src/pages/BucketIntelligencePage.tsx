@@ -76,9 +76,9 @@ function BucketIntelligenceWaitlist() {
             'No vector database to provision, no embedding workers to run, no retrieval service to scale. Fil One handles the full pipeline, you just upload files and query.',
         },
         {
-          title: 'Data stays in your bucket',
+          title: 'Data stays in your storage',
           description:
-            'The index is built from your data and stored alongside it in your Fil One bucket. Nothing is copied elsewhere.',
+            'The index lives in a dedicated companion bucket on the same provider and in the same region as your data — never in a third-party vector database. Embeddings are computed with Amazon Bedrock at indexing time and written straight back to your storage; nothing is persisted outside it.',
         },
         {
           title: 'Efficient re-indexing',

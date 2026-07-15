@@ -57,6 +57,16 @@ describe('delete-bucket baseHandler', () => {
     expect(result.statusCode).toBe(400);
   });
 
+  it('returns 404 for a reserved RAG companion bucket name without calling the orchestrator', async () => {
+    const event = buildEvent({ userInfo: USER_INFO });
+    event.pathParameters = { name: 'filone-rag-deadbeef' };
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(404);
+    expect(JSON.parse(result.body!)).toStrictEqual({ message: 'Bucket not found' });
+    expect(mockOrchestratorDeleteBucket).not.toHaveBeenCalled();
+  });
+
   it('returns 503 when tenant is not ready', async () => {
     mockIsTenantReady.mockReturnValue(null);
 

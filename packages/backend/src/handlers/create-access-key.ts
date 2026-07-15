@@ -3,7 +3,12 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CreateAccessKeySchema, S3Region, isSupportedRegion } from '@filone/shared';
+import {
+  CreateAccessKeySchema,
+  S3Region,
+  isReservedBucketName,
+  isSupportedRegion,
+} from '@filone/shared';
 import type { CreateAccessKeyResponse, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
@@ -21,6 +26,35 @@ import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
+
+interface ResolvedBucketScope {
+  buckets: string[] | undefined;
+  expiresAt: string | null;
+}
+
+/**
+ * Resolve the requested bucket scope and expiry from the validated body. A
+ * `specific` scope naming a reserved RAG companion index bucket (`filone-rag-*`)
+ * is rejected with a ready-to-send 400 response — hardening only: a tenant-wide
+ * key can still reach the companion, which holds the user's own data, so the
+ * query-path skip-unparseable-blobs behaviour is the real mitigation.
+ */
+function resolveBucketScope(data: {
+  bucketScope: string;
+  buckets?: string[];
+  expiresAt?: string | null;
+}): { response: APIGatewayProxyStructuredResultV2 } | ResolvedBucketScope {
+  const buckets = data.bucketScope === 'specific' ? (data.buckets ?? []) : undefined;
+  if (buckets?.some(isReservedBucketName)) {
+    return {
+      response: new ResponseBuilder()
+        .status(400)
+        .body<ErrorResponse>({ message: 'Bucket scope cannot include a reserved bucket name' })
+        .build(),
+    };
+  }
+  return { buckets, expiresAt: data.expiresAt ?? null };
+}
 
 // TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
@@ -46,8 +80,12 @@ export async function baseHandler(
   }
 
   const { keyName, permissions, granularPermissions, bucketScope, region } = parsed.data;
-  const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
-  const expiresAt = parsed.data.expiresAt ?? null;
+
+  // Resolve the key's bucket scope + expiry, rejecting a `specific` scope that
+  // names a reserved RAG companion index bucket (`filone-rag-*`).
+  const scope = resolveBucketScope(parsed.data);
+  if ('response' in scope) return scope.response;
+  const { buckets, expiresAt } = scope;
 
   const { orgId } = getUserInfo(event);
 
