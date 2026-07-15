@@ -8,6 +8,7 @@ import { S3VectorsStore, complete, embed } from '@filone/rag-shared';
 import type { VectorQueryResult } from '@filone/rag-shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getBucketRagEnablement } from '../lib/bucket-rag-enablement.js';
+import { RAGKeys } from '../lib/dynamo-records.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import {
   ResponseBuilder,
@@ -105,9 +106,19 @@ export async function baseHandler(
   // the indexer only when a pass completes, so it doubles as the
   // "queryable yet?" signal here and in the UI (disabled Ask-questions button).
   const enablement = await getBucketRagEnablement(orgId, region, bucketName);
-  // Defense in depth: ignore a record whose stamped org somehow differs
-  // (mirrors get-bucket-rag-enablement).
-  const owned = enablement && enablement.orgId === orgId ? enablement : undefined;
+  // Defense in depth: ignore a record whose stamped org, region, or bucket name
+  // somehow differs from what we queried. `orgId` is denormalized onto the row;
+  // region and bucket name are decoded from the pk (mirrors
+  // get-bucket-rag-enablement, which checks org only).
+  const parsedPk = enablement ? RAGKeys.parseBucketPk(enablement.pk) : undefined;
+  const owned =
+    enablement &&
+    enablement.orgId === orgId &&
+    parsedPk?.orgId === orgId &&
+    parsedPk.region === region &&
+    parsedPk.bucketName === bucketName
+      ? enablement
+      : undefined;
   if (!owned?.lastSyncedAt) {
     return new ResponseBuilder()
       .status(409)

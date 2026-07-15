@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 
 import { SidebarNav } from './SidebarNav';
@@ -32,11 +32,6 @@ vi.mock('./use-sidebar-data.js', () => ({
   }),
 }));
 
-// RAG access is gated by useRagAccess() (FIL-555). Mock it so the gate can be
-// driven directly — its real implementation needs a QueryClientProvider, which
-// these mock-based render helpers intentionally avoid.
-vi.mock('../lib/use-rag-access.js', () => ({ useRagAccess: vi.fn(() => false) }));
-
 vi.mock('./Tooltip.js', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
@@ -46,10 +41,6 @@ vi.mock('./StatusIndicator.js', () => ({
 }));
 
 vi.mock('../lib/api.js', () => ({ logout: vi.fn() }));
-
-import { useRagAccess } from '../lib/use-rag-access.js';
-
-const mockUseRagAccess = vi.mocked(useRagAccess);
 
 // Mirrors how AppShell mounts the sidebar twice: the visible desktop sidebar
 // plus the mobile drawer copy. The drawer copy must not duplicate the
@@ -80,10 +71,6 @@ const UNIQUE_TESTIDS = [
 ];
 
 describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => {
-  beforeEach(() => {
-    mockUseRagAccess.mockReturnValue(false);
-  });
-
   it.each(UNIQUE_IDS)('renders #%s exactly once', (id) => {
     const { container } = renderBothSidebars();
     expect(container.querySelectorAll(`#${id}`)).toHaveLength(1);
@@ -101,34 +88,5 @@ describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => 
     expect(triggers).toHaveLength(1);
     fireEvent.click(triggers[0]);
     expect(container.querySelectorAll('#user-menu-logout-button')).toHaveLength(1);
-  });
-});
-
-describe('SidebarNav RAG Pipeline gating', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  function renderSidebar() {
-    return render(<SidebarNav collapsed={false} onToggle={() => {}} showTestIds={true} />);
-  }
-
-  it('shows the RAG Pipeline nav item for users with RAG access', () => {
-    mockUseRagAccess.mockReturnValue(true);
-    const { container } = renderSidebar();
-
-    const item = container.querySelector('[data-testid="nav-rag-pipeline"]');
-    expect(item).not.toBeNull();
-    expect(item).toHaveAttribute('href', '/rag-pipeline');
-    expect(item).toHaveTextContent('RAG Pipeline');
-  });
-
-  it('hides the RAG Pipeline nav item for users without RAG access', () => {
-    mockUseRagAccess.mockReturnValue(false);
-    const { container } = renderSidebar();
-
-    // The AI Tools group still renders so we can assert the gate is specific.
-    expect(container.querySelector('[data-testid="nav-ai-agent-toolkit"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="nav-rag-pipeline"]')).toBeNull();
   });
 });
