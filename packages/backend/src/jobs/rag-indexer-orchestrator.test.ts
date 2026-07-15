@@ -15,12 +15,18 @@ vi.mock('sst', () => ({
   },
 }));
 
+vi.mock('../lib/metrics.js', () => ({ reportMetric: vi.fn() }));
+
 vi.stubEnv('RAG_INDEXER_WORKER_FUNCTION_NAME', 'rag-indexer-worker-fn');
 
 const ddbMock = mockClient(DynamoDBClient);
 const lambdaMock = mockClient(LambdaClient);
 
 import { handler } from './rag-indexer-orchestrator.js';
+import { reportMetric, type MetricEvent } from '../lib/metrics.js';
+
+const reportMetricMock = vi.mocked(reportMetric);
+const reportedMetrics = (): MetricEvent[] => reportMetricMock.mock.calls.map(([e]) => e);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -219,5 +225,98 @@ describe('rag-indexer-orchestrator', () => {
     await handler();
 
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(2);
+  });
+
+  it('emits one success metric event summarising a normal run', async () => {
+    // 3 buckets across 2 orgs, all worker invokes succeed.
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        enablementItem('bucket-1', 'org-1'),
+        enablementItem('bucket-2', 'org-1'),
+        enablementItem('bucket-3', 'org-2'),
+      ],
+    });
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    const events = reportedMetrics();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      _aws: {
+        CloudWatchMetrics: [{ Namespace: 'FilOne', Dimensions: [[]] }],
+      },
+      RagIndexerOrchestratorInvocationSuccess: 1,
+      RagIndexerWorkerDispatchSuccess: 2,
+      RagIndexerWorkerDispatchFailure: 0,
+      RagIndexerTotalBuckets: 3,
+      RagIndexerUniqueOrgs: 2,
+      RagIndexerSkippedRows: 0,
+      RagIndexerOrchestratorDuration: expect.any(Number),
+    });
+  });
+
+  it('counts a failed worker dispatch in the metric event', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [enablementItem('bucket-1', 'org-1'), enablementItem('bucket-2', 'org-2')],
+    });
+    lambdaMock.on(InvokeCommand).rejectsOnce(new Error('invoke failed')).resolves({});
+
+    await handler();
+
+    const events = reportedMetrics();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      RagIndexerOrchestratorInvocationSuccess: 1,
+      RagIndexerWorkerDispatchSuccess: 1,
+      RagIndexerWorkerDispatchFailure: 1,
+      RagIndexerTotalBuckets: 2,
+      RagIndexerUniqueOrgs: 2,
+    });
+  });
+
+  it('emits a zero-bucket success metric on the early return', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [] });
+
+    await handler();
+
+    const events = reportedMetrics();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      _aws: {
+        CloudWatchMetrics: [{ Namespace: 'FilOne', Dimensions: [[]] }],
+      },
+      RagIndexerOrchestratorInvocationSuccess: 1,
+      RagIndexerWorkerDispatchSuccess: 0,
+      RagIndexerWorkerDispatchFailure: 0,
+      RagIndexerTotalBuckets: 0,
+      RagIndexerUniqueOrgs: 0,
+      RagIndexerSkippedRows: 0,
+    });
+  });
+
+  it('counts rows skipped by both scan skip branches', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        // Unparseable pk (unknown region).
+        enablementItem('bucket-1', 'org-1', {}, 'mars-1'),
+        // Valid pk but missing orgId (removeUndefinedValues drops the field).
+        enablementItem('bucket-2', 'org-2', { orgId: undefined }),
+        // Valid row that dispatches normally.
+        enablementItem('bucket-3', 'org-3'),
+      ],
+    });
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    const events = reportedMetrics();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      RagIndexerSkippedRows: 2,
+      RagIndexerTotalBuckets: 1,
+      RagIndexerUniqueOrgs: 1,
+      RagIndexerWorkerDispatchSuccess: 1,
+    });
   });
 });
