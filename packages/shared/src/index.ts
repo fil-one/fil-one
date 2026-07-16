@@ -129,6 +129,7 @@ export {
   isBucketPermission,
   isBucketInfoPermission,
   isObjectPermission,
+  accessKeyMatchesRegion,
   GRANULAR_PERMISSIONS,
   GRANULAR_PERMISSION_MAP,
   GRANULAR_PERMISSION_LABELS,

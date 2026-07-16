@@ -6,6 +6,7 @@ import {
   BUCKET_PERMISSIONS,
   CreateAccessKeySchema,
   GRANULAR_PERMISSIONS,
+  accessKeyMatchesRegion,
   isBucketInfoPermission,
   isBucketPermission,
   isObjectPermission,
@@ -88,6 +89,21 @@ describe('isObjectPermission', () => {
 
   it('returns false for bucket-management permissions', () => {
     expect(isObjectPermission('CreateBucket')).toBe(false);
+  });
+});
+
+describe('accessKeyMatchesRegion', () => {
+  it('matches when the key region equals the bucket region', () => {
+    expect(accessKeyMatchesRegion({ region: S3Region.UsEast1 }, S3Region.UsEast1)).toBe(true);
+  });
+
+  it('does not match a key from another region, even an all-buckets key', () => {
+    expect(accessKeyMatchesRegion({ region: S3Region.EuWest1 }, S3Region.UsEast1)).toBe(false);
+  });
+
+  it('treats a key without a region as belonging to the default region', () => {
+    expect(accessKeyMatchesRegion({ region: undefined }, S3Region.EuWest1)).toBe(true);
+    expect(accessKeyMatchesRegion({ region: undefined }, S3Region.UsEast1)).toBe(false);
   });
 });
 

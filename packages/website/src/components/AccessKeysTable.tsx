@@ -9,6 +9,7 @@ import {
   BUCKET_INFO_PERMISSION_LABELS,
   BUCKET_PERMISSION_LABELS,
   GRANULAR_PERMISSION_LABELS,
+  getRegionLabel,
   isBucketInfoPermission,
   isBucketPermission,
   isObjectPermission,
@@ -190,6 +191,7 @@ export type AccessKeysTableProps = {
   keys: AccessKey[];
   showBuckets?: boolean;
   showPermissions?: boolean;
+  showRegion?: boolean;
   onDelete?: (id: string) => Promise<void>;
   onCreateOpen?: () => void;
   emptyTitle?: string;
@@ -200,6 +202,7 @@ export function AccessKeysTable({
   keys,
   showBuckets = false,
   showPermissions = false,
+  showRegion = false,
   onDelete,
   onCreateOpen,
   emptyTitle = 'No API keys yet',
@@ -225,6 +228,7 @@ export function AccessKeysTable({
       <Table.Header>
         <Table.Row>
           <Table.Head>Name</Table.Head>
+          {showRegion && <Table.Head className="hidden md:table-cell">Region</Table.Head>}
           {showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
           {showPermissions && <Table.Head className="hidden md:table-cell">Permissions</Table.Head>}
           <Table.Head className="hidden sm:table-cell">Status</Table.Head>
@@ -251,6 +255,19 @@ export function AccessKeysTable({
                 <StatusBadge status={key.status} />
               </div>
             </Table.Cell>
+
+            {/* Region — access keys are region-scoped */}
+            {showRegion && (
+              <Table.Cell className="hidden md:table-cell">
+                {key.region ? (
+                  <Badge color="grey" size="sm" description={getRegionLabel(key.region)}>
+                    {key.region}
+                  </Badge>
+                ) : (
+                  <span className="text-xs text-zinc-400">—</span>
+                )}
+              </Table.Cell>
+            )}
 
             {/* Buckets */}
             {showBuckets && (

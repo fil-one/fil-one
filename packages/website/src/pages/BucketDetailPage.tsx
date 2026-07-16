@@ -14,10 +14,11 @@ import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { ObjectBrowser, countObjects } from '../components/ObjectBrowser';
 import { BucketAccessTab } from '../components/BucketAccessTab';
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
-import { getS3Endpoint, formatBytes } from '@filone/shared';
+import { getS3Endpoint, formatBytes, accessKeyMatchesRegion } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 
 import type {
+  AccessKey,
   Bucket,
   ListObjectVersionsResponse,
   GetBucketResponse,
@@ -80,6 +81,13 @@ async function fetchObjectListing(
     })),
     isTruncated,
   };
+}
+
+// Access keys are region-scoped, so a key from another region — even one scoped
+// to all buckets — cannot operate on this bucket. The list endpoint filters only
+// by bucket, so drop cross-region keys here.
+function keysForRegion(data: ListAccessKeysResponse | undefined, region: S3Region): AccessKey[] {
+  return (data?.keys ?? []).filter((key) => accessKeyMatchesRegion(key, region));
 }
 
 function removeVersionFromListing(
@@ -188,7 +196,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     queryFn: () =>
       apiRequest<ListAccessKeysResponse>(`/access-keys?bucket=${encodeURIComponent(bucketName)}`),
   });
-  const accessKeys = accessKeysData?.keys ?? [];
+  const accessKeys = keysForRegion(accessKeysData, region);
 
   const [addKeyOpen, setAddKeyOpen] = useState(false);
 

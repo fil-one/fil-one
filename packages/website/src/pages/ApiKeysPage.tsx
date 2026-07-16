@@ -44,6 +44,7 @@ function AccessKeysTab({ keys, onCreateOpen, onDelete }: AccessKeysTabProps) {
 
       <AccessKeysTable
         keys={keys}
+        showRegion
         showBuckets
         showPermissions
         onDelete={onDelete}
