@@ -472,7 +472,7 @@ describe('create-access-key baseHandler', () => {
       expect(result.statusCode).toBe(201);
     });
 
-    it('accepts us-east-1 in non-production stage and routes to FTH', async () => {
+    it('accepts us-east-1 and routes to FTH', async () => {
       const event = buildEvent({
         body: validBody({ keyName: 'My Key', region: 'us-east-1' }),
         userInfo: USER_INFO,
@@ -485,7 +485,7 @@ describe('create-access-key baseHandler', () => {
       expect(item.region.S).toBe('us-east-1');
     });
 
-    it('rejects us-east-1 in production stage', async () => {
+    it('accepts us-east-1 in production for any user (soft-launched region)', async () => {
       const previous = process.env.FILONE_STAGE;
       process.env.FILONE_STAGE = 'production';
       try {
@@ -495,45 +495,8 @@ describe('create-access-key baseHandler', () => {
         });
         const result = await baseHandler(event);
 
-        expect(result.statusCode).toBe(400);
-        const body = JSON.parse(result.body!);
-        expect(body.message).toContain('Unsupported region');
-        expect(mockIssueAccessKey).not.toHaveBeenCalled();
-      } finally {
-        process.env.FILONE_STAGE = previous;
-      }
-    });
-
-    it('accepts us-east-1 in production for a verified Foundation email and routes to FTH', async () => {
-      const previous = process.env.FILONE_STAGE;
-      process.env.FILONE_STAGE = 'production';
-      try {
-        const event = buildEvent({
-          body: validBody({ keyName: 'My Key', region: 'us-east-1' }),
-          userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: true },
-        });
-        const result = await baseHandler(event);
-
         expect(result.statusCode).toBe(201);
         expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
-      } finally {
-        process.env.FILONE_STAGE = previous;
-      }
-    });
-
-    it('rejects us-east-1 in production for an unverified Foundation email', async () => {
-      const previous = process.env.FILONE_STAGE;
-      process.env.FILONE_STAGE = 'production';
-      try {
-        const event = buildEvent({
-          body: validBody({ keyName: 'My Key', region: 'us-east-1' }),
-          userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: false },
-        });
-        const result = await baseHandler(event);
-
-        expect(result.statusCode).toBe(400);
-        const body = JSON.parse(result.body!);
-        expect(body.message).toContain('Unsupported region');
       } finally {
         process.env.FILONE_STAGE = previous;
       }

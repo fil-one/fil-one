@@ -547,42 +547,16 @@ describe('presign baseHandler', () => {
       expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
     });
 
-    it('rejects us-east-1 when stage is production', async () => {
-      vi.stubEnv('FILONE_STAGE', 'production');
-      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
-        region: 'us-east-1',
-      });
-      const result = await baseHandler(event);
-
-      expect(result.statusCode).toBe(400);
-      expect(result.body).toEqual(expect.stringContaining('us-east-1'));
-      expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
-    });
-
-    it('accepts us-east-1 in production for a verified Foundation email', async () => {
+    it('accepts us-east-1 in production for any user (soft-launched region)', async () => {
       vi.stubEnv('FILONE_STAGE', 'production');
       mockGetPresignedListObjectsUrl.mockResolvedValue('https://s3.example.com/list?signed');
       const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
         region: 'us-east-1',
-        userInfo: { email: 'dogfood@fil.org', emailVerified: true },
       });
       const result = await baseHandler(event);
 
       expect(result.statusCode).toBe(200);
       expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
-    });
-
-    it('rejects us-east-1 in production for an unverified Foundation email', async () => {
-      vi.stubEnv('FILONE_STAGE', 'production');
-      const event = buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], {
-        region: 'us-east-1',
-        userInfo: { email: 'dogfood@fil.org', emailVerified: false },
-      });
-      const result = await baseHandler(event);
-
-      expect(result.statusCode).toBe(400);
-      expect(result.body).toEqual(expect.stringContaining('us-east-1'));
-      expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
     });
 
     it('routes the request to the orchestrator for the supplied region', async () => {

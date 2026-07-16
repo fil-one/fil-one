@@ -120,36 +120,8 @@ describe('getStageFromHostname', () => {
 });
 
 describe('getAvailableRegions', () => {
-  it('returns only eu-west-1 in production', () => {
-    expect(getAvailableRegions(Stage.Production)).toEqual([S3Region.EuWest1]);
-  });
-
-  it('returns both regions in staging', () => {
-    expect(getAvailableRegions(Stage.Staging)).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
-  });
-
-  const nonProductionStages = ['dev', 'pr-42', ''];
-  for (const stage of nonProductionStages) {
-    it(`returns both regions for non-production stage "${stage}"`, () => {
-      expect(getAvailableRegions(stage)).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
-    });
-  }
-
-  it('returns both regions in production for a Foundation email', () => {
-    expect(getAvailableRegions(Stage.Production, 'someone@fil.org')).toEqual([
-      S3Region.EuWest1,
-      S3Region.UsEast1,
-    ]);
-  });
-
-  it('returns only eu-west-1 in production for a non-Foundation email', () => {
-    expect(getAvailableRegions(Stage.Production, 'someone@example.com')).toEqual([
-      S3Region.EuWest1,
-    ]);
-  });
-
-  it('returns only eu-west-1 in production when no email is provided', () => {
-    expect(getAvailableRegions(Stage.Production, undefined)).toEqual([S3Region.EuWest1]);
+  it('returns both regions for all users', () => {
+    expect(getAvailableRegions()).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
   });
 });
 
