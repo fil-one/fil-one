@@ -179,7 +179,6 @@ export type {
   KeyActivity,
   RecentActivity,
   RecentActivityResponse,
-  ActivityResponse,
 } from './api/dashboard.js';
 
 export type { UsageResponse } from './api/usage.js';

@@ -1,13 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
 import { SubscriptionStatus, getUsageLimits } from '@filone/shared';
 import { getBilling, getMe, getUsage } from '../lib/api.js';
-import { queryKeys } from '../lib/query-client.js';
+import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { daysUntil, formatDateTime } from '../lib/time.js';
 
 export function useSidebarData() {
   const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
   const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
-  const { data: usage } = useQuery({ queryKey: queryKeys.usage, queryFn: getUsage });
+  const { data: usage } = useQuery({
+    queryKey: queryKeys.usage,
+    queryFn: getUsage,
+    staleTime: USAGE_STALE_TIME,
+  });
 
   const displayName = me?.name || me?.email || 'User';
   const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;

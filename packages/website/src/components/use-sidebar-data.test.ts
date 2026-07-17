@@ -10,6 +10,7 @@ const queryData: { me?: unknown; billing?: unknown; usage?: unknown } = {};
 
 vi.mock('../lib/query-client.js', () => ({
   queryKeys: { me: ['me'], billing: ['billing'], usage: ['usage'] },
+  USAGE_STALE_TIME: 5 * 60_000,
 }));
 
 vi.mock('@tanstack/react-query', () => ({

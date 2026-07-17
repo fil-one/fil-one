@@ -3,6 +3,11 @@ import { type S3Region } from '@filone/shared';
 
 export const ME_STALE_TIME = 10 * 60_000;
 
+// Usage counters are daily-resolution upstream, and every usage-changing
+// mutation invalidates the ['usage'] key prefix — so a staleTime only trims
+// redundant refetches on remount/refocus, never delays user-triggered updates.
+export const USAGE_STALE_TIME = 5 * 60_000;
+
 const NO_RETRY_STATUSES = new Set([401, 403]);
 
 export function defaultRetry(failureCount: number, error: unknown): boolean {
@@ -28,7 +33,9 @@ export const queryKeys = {
   billing: ['billing'] as const,
   invoices: ['invoices'] as const,
   activityRecent: (limit: number) => ['activity', 'recent', limit] as const,
-  activityTrends: (period: '7d' | '30d') => ['activity', 'trends', period] as const,
+  // Shares the ['usage'] prefix so invalidateQueries({ queryKey: queryKeys.usage })
+  // also invalidates the trends charts.
+  usageTrends: (period: '7d' | '30d') => ['usage', 'trends', period] as const,
   buckets: ['buckets'] as const,
   bucket: (bucketName: string, region: S3Region) => ['bucket', bucketName, region] as const,
   objects: (bucketName: string, region: S3Region) => ['objects', bucketName, region] as const,

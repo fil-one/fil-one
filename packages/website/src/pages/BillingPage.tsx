@@ -27,7 +27,7 @@ import { daysUntil, formatDate } from '../lib/time.js';
 import { ChoosePlanDialog } from '../components/billing/ChoosePlanDialog.js';
 import { AddPaymentDialog } from '../components/billing/AddPaymentDialog.js';
 import { ContactSalesDialog } from '../components/billing/ContactSalesDialog.js';
-import { queryKeys } from '../lib/query-client.js';
+import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { Overline } from '../components/Overline';
 
 // ---------------------------------------------------------------------------
@@ -76,6 +76,7 @@ export function BillingPage() {
   const { data: usage, isPending: usagePending } = useQuery({
     queryKey: queryKeys.usage,
     queryFn: getUsage,
+    staleTime: USAGE_STALE_TIME,
   });
 
   const {
