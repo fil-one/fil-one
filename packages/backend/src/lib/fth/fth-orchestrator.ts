@@ -28,6 +28,7 @@ import type {
   GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
+  ListBucketsOptions,
   ServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
@@ -153,7 +154,10 @@ export const fthOrchestrator = {
     throw new NotImplementedError('Bucket deletion is not implemented in this region yet');
   },
 
-  async listBuckets(tenantId: string): Promise<BucketSummary[]> {
+  async listBuckets(tenantId: string, opts: ListBucketsOptions = {}): Promise<BucketSummary[]> {
+    // Loading versioning costs one GetBucketVersioning call per bucket (an N+1),
+    // so callers that don't surface it opt out via includeVersioning: false.
+    const includeVersioning = opts.includeVersioning ?? true;
     const ctx = await fthOrchestrator.getS3ClientContext(tenantId);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3);
@@ -163,7 +167,7 @@ export const fthOrchestrator = {
         region: fthOrchestrator.region,
         createdAt: b.createdAt,
         isPublic: false,
-        versioning: await getBucketVersioning(s3, b.name),
+        versioning: includeVersioning ? await getBucketVersioning(s3, b.name) : false,
         encrypted: true,
       })),
     );
