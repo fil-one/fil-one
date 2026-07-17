@@ -29,23 +29,8 @@ describe('service-orchestrator registry', () => {
 });
 
 describe('getAvailableOrchestrators', () => {
-  it('returns only the Aurora orchestrator in production', () => {
-    const orchestrators = getAvailableOrchestrators('production');
-    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora']);
-  });
-
-  it('returns Aurora and FTH orchestrators in non-production stages', () => {
-    const orchestrators = getAvailableOrchestrators('staging');
+  it('returns the Aurora and FTH orchestrators', () => {
+    const orchestrators = getAvailableOrchestrators();
     expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth']);
-  });
-
-  it('returns Aurora and FTH orchestrators in production for a Foundation email', () => {
-    const orchestrators = getAvailableOrchestrators('production', 'dogfood@fil.org');
-    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth']);
-  });
-
-  it('returns only the Aurora orchestrator in production for a non-Foundation email', () => {
-    const orchestrators = getAvailableOrchestrators('production', 'someone@example.com');
-    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora']);
   });
 });

@@ -26,7 +26,7 @@ interface OrchestratorStats {
 export async function handler(): Promise<void> {
   console.log('[subscription-drift-checker] start');
 
-  const orchestrators = getAvailableOrchestrators(process.env.FILONE_STAGE!);
+  const orchestrators = getAvailableOrchestrators();
   const candidates = await scanActiveSubscriptions(Resource.BillingTable.name);
   const uniqueCandidates = dedupeByOrgId(candidates);
 

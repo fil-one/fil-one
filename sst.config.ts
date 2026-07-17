@@ -233,8 +233,7 @@ export default $config({
     // uploads, downloads, etc. — so each one needs to be in `connect-src` or the
     // browser blocks the request with a CSP violation before it ever leaves.
     // CSP is a single static document header that cannot vary per user, so it
-    // must list every regional S3 endpoint any user could reach — not just the
-    // email-gated subset returned by getAvailableRegions().
+    // must list every regional S3 endpoint any user could reach.
     const s3GatewayUrls = Object.values(S3Region)
       .map((r) => getS3Endpoint(r, stageForEndpoints))
       .join(' ');

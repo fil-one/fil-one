@@ -10,7 +10,7 @@ export interface ProvisionedRegion {
 }
 
 export async function getProvisionedRegions(orgId: string): Promise<ProvisionedRegion[]> {
-  const orchestrators = getAvailableOrchestrators(process.env.FILONE_STAGE!);
+  const orchestrators = getAvailableOrchestrators();
   if (orchestrators.length === 0) return [];
   const orgProfile = await getOrgProfile(orgId);
   return orchestrators
