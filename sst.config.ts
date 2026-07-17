@@ -871,7 +871,8 @@ export default $config({
       routePath: '/api/usage/trends',
       handler: 'get-usage-trends',
       extraEnv: orchestratorEnv,
-      permissions: s3DataPlanePermissions,
+      // No `permissions`: metrics calls authenticate with the linked
+      // AuroraBackofficeToken / FthManagementApiToken resources, never SSM.
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
