@@ -92,6 +92,9 @@ describe('usage-reporting-orchestrator', () => {
       Buffer.from(invokeCalls[0].args[0].input.Payload as Uint8Array).toString(),
     );
     expect(payload.orgId).toBe('org-1');
+    // userId comes from the record pk (CUSTOMER#<userId>) — the worker needs it
+    // to close out the billing record when self-healing a deleted customer.
+    expect(payload.userId).toBe('user-for-org-1');
     expect(payload.orgName).toBe('Org org-1');
     expect(payload.subscriptionId).toBe('sub_org-1');
     // Tenant resolution moved to the worker — no tenant ids in the payload.

@@ -1,6 +1,6 @@
 # Plan: Self-healing for deleted Stripe customers
 
-**Status:** Proposed
+**Status:** Implemented (this branch)
 **Created:** 2026-07-21
 **Related incident:** `cus_Ufz9bakVAlrQOR` / org `1b20adb4-87c2-4522-be5c-1ed3a7b3b86a`
 
@@ -14,7 +14,7 @@ resource re-runs, which requires a manual `Version` bump in `sst.config.ts` —
 and the next bump landed on 2026-06-23 (#448). The deletion fell into that gap.
 
 The `customer.subscription.deleted` event (fired because deleting a customer
-cancels its subscriptions) *was* delivered, but `handleSubscriptionDeleted`
+cancels its subscriptions) _was_ delivered, but `handleSubscriptionDeleted`
 silently returns when the customer is already deleted, so the billing record
 was never closed out.
 
@@ -65,8 +65,8 @@ re-enter); otherwise mark the record canceled. That lives in one new module,
 export async function closeOutDeletedCustomer(params: {
   tableName: string;
   userId: string;
-  orgId: string | null;   // null → nothing to disable, still cancel the record
-  retry: RetryOptions;    // WEBHOOK_STATUS_SYNC_RETRY vs worker default budget
+  orgId: string | null; // null → nothing to disable, still cancel the record
+  retry: RetryOptions; // WEBHOOK_STATUS_SYNC_RETRY vs worker default budget
 }): Promise<RegionSyncOutcome[]> {
   // 1. syncTenantStatusInProvisionedRegions(orgId, 'disabled', retry)
   // 2. any 'error' outcome → return outcomes WITHOUT updating the record
@@ -129,10 +129,10 @@ trial-lock enforcement).
 
 `resource_missing` alone is ambiguous, and the distinction matters:
 
-| `stripe.customers.retrieve(id)` result | Meaning | Action |
-| --- | --- | --- |
-| Stub with `deleted: true` | Customer existed in this account and was deleted | Heal |
-| Throws `resource_missing` | Customer never existed in this account/mode — likely a Stripe key/account misconfiguration | **Do not heal.** Log at error level, keep the record untouched; counts as out of sync (see Fix 3) |
+| `stripe.customers.retrieve(id)` result | Meaning                                                                                    | Action                                                                                            |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Stub with `deleted: true`              | Customer existed in this account and was deleted                                           | Heal                                                                                              |
+| Throws `resource_missing`              | Customer never existed in this account/mode — likely a Stripe key/account misconfiguration | **Do not heal.** Log at error level, keep the record untouched; counts as out of sync (see Fix 3) |
 
 This guard is load-bearing: if the deployment were ever pointed at the wrong
 Stripe account, every customer would 404, and healing without verification
@@ -221,7 +221,7 @@ closure; leave them (Fix 1 covers any residue).
 
 ## Fix 3 — Observability
 
-Since the system self-heals, alerting on individual heal *events* is noise:
+Since the system self-heals, alerting on individual heal _events_ is noise:
 a `not-in-account` blip or a one-off `heal-failed` that succeeds on the next
 run needs no human. What warrants an alarm is out-of-sync **state that
 persists** — a customer the worker keeps finding missing without managing to
@@ -232,7 +232,7 @@ heal.
   - `1` when the run detected a missing customer and did **not** finish
     healing it — region sync failure (`heal-failed`), verification guard hit
     (`not-in-account`), or heal skipped for a payload without `userId`;
-  - `0` otherwise — including a run that detected *and successfully healed*
+  - `0` otherwise — including a run that detected _and successfully healed_
     the customer, since the state is back in sync by the end of the run.
 
   Each org is dispatched once per daily orchestrator run, so **`Sum` over a
@@ -242,9 +242,10 @@ heal.
   state persists. No outcome dimension; per-outcome detail goes into the
   structured heal log line and the audit record, where the investigation
   actually happens.
+
 - **Alarm** (infra follow-up): `Sum(StripeCustomersOutOfSync) >= 1` with a
   1-day period and **2 evaluation periods**, `TreatMissingData:
-  notBreaching`. A single-day blip (detected today, healed or resolved
+notBreaching`. A single-day blip (detected today, healed or resolved
   tomorrow) never fires; anything still out of sync on the second daily run
   does. A key/account misconfiguration would spike the metric to the full
   org count — prominent on a dashboard immediately, alarming after the same
@@ -275,16 +276,16 @@ only cover their own policy on the returned outcomes.
 Unit tests (existing patterns: `usage-reporting-worker.test.ts`,
 `stripe-webhook.test.ts` with `aws-sdk-client-mock` + mocked Stripe client):
 
-| Case | Expected |
-| --- | --- |
+| Case                                                                               | Expected                                                                                                                    |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Meter event or metadata sync throws `resource_missing`; retrieve → `deleted: true` | Regions synced to `disabled`, record updated to `canceled`, audit `healed:customer-deleted`, `StripeCustomersOutOfSync = 0` |
-| `resource_missing`; retrieve → throws `resource_missing` | No writes; error log; audit `error:...`; `StripeCustomersOutOfSync = 1` |
-| Heal with one region `error` | No record update; audit `heal-failed:<region>`; `StripeCustomersOutOfSync = 1`; next-run retry still possible |
-| Payload without `userId` | No heal; warn log; normal error audit; `StripeCustomersOutOfSync = 1` |
-| Normal run, customer exists | `StripeCustomersOutOfSync = 0` |
-| Non-`resource_missing` Stripe error | Propagates (unchanged behavior) |
-| `subscription.deleted`, customer deleted, `metadata.userId` present | Tenants disabled, record `canceled`, dunning metric |
-| `subscription.deleted`, customer deleted, no `metadata.userId` | 500 (Stripe retries) |
+| `resource_missing`; retrieve → throws `resource_missing`                           | No writes; error log; audit `error:...`; `StripeCustomersOutOfSync = 1`                                                     |
+| Heal with one region `error`                                                       | No record update; audit `heal-failed:<region>`; `StripeCustomersOutOfSync = 1`; next-run retry still possible               |
+| Payload without `userId`                                                           | No heal; warn log; normal error audit; `StripeCustomersOutOfSync = 1`                                                       |
+| Normal run, customer exists                                                        | `StripeCustomersOutOfSync = 0`                                                                                              |
+| Non-`resource_missing` Stripe error                                                | Propagates (unchanged behavior)                                                                                             |
+| `subscription.deleted`, customer deleted, `metadata.userId` present                | Tenants disabled, record `canceled`, dunning metric                                                                         |
+| `subscription.deleted`, customer deleted, no `metadata.userId`                     | 500 (Stripe retries)                                                                                                        |
 
 Integration test (optional, `tests/integration/jobs/usage-reporting-worker.test.ts`
 harness): seed billing record, create + delete a real test-mode customer,
