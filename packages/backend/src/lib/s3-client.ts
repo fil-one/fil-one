@@ -9,10 +9,14 @@ export interface S3ClientContext {
   region: string;
   credentials: { accessKeyId: string; secretAccessKey: string };
   forcePathStyle: boolean;
+  /** Which orchestrator issued this context — for error decoration only. */
+  orchestratorId: string;
+  /** Whose credentials the client acts with — for error decoration only. */
+  tenantId: string;
 }
 
 export function createS3Client(ctx: S3ClientContext): S3Client {
-  return new S3Client({
+  const client = new S3Client({
     endpoint: ctx.endpointUrl,
     region: ctx.region,
     credentials: ctx.credentials,
@@ -25,4 +29,41 @@ export function createS3Client(ctx: S3ClientContext): S3Client {
     requestChecksumCalculation: 'WHEN_REQUIRED',
     responseChecksumValidation: 'WHEN_REQUIRED',
   });
+
+  // Decorate every S3 failure with the operation, bucket, and tenant context,
+  // so an error escaping to the top-level handler still tells us which
+  // provider/tenant/bucket it came from.
+  client.middlewareStack.add(
+    (next, handlerContext) => async (args) => {
+      try {
+        return await next(args);
+      } catch (err) {
+        throw decorateS3Error(err, ctx, handlerContext.commandName, args.input);
+      }
+    },
+    { step: 'initialize', name: 's3ErrorContextMiddleware' },
+  );
+
+  return client;
+}
+
+// Decorates the error in place (rather than wrapping it in a new Error) so
+// callers' `err.name` and `instanceof` checks keep working.
+function decorateS3Error(
+  err: unknown,
+  ctx: S3ClientContext,
+  commandName: string | undefined,
+  input: unknown,
+): unknown {
+  if (!(err instanceof Error)) return err;
+
+  const operation = commandName?.replace(/Command$/, '') ?? 'unknown';
+  const bucketName = (input as { Bucket?: string } | undefined)?.Bucket;
+  const context =
+    `(operation=${operation}, ${bucketName ? `bucket=${bucketName}, ` : ''}` +
+    `tenant=${ctx.tenantId}, orchestrator=${ctx.orchestratorId}, ` +
+    `region=${ctx.region}, endpoint=${ctx.endpointUrl})`;
+
+  err.message = `${err.message}\n${context}`;
+  return err;
 }
