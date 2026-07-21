@@ -51,9 +51,7 @@ interface Auth0Trigger {
 // IMPORTANT: changing this list has NO effect on existing stages until the
 // SetupStack custom resource re-runs, which requires bumping the `Version`
 // property in sst.config.ts. A forgotten bump means the Stripe endpoint keeps
-// its old enabled_events and new event types are silently never delivered
-// (this caused the June 2026 missed-customer.deleted incident — see
-// docs/plans/2026-07-stripe-deleted-customer-self-healing.md).
+// its old enabled_events and new event types are silently never delivered.
 const WEBHOOK_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
   'customer.updated',
   'customer.deleted',

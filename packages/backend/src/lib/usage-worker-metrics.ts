@@ -7,8 +7,7 @@ import { reportMetric } from './metrics.js';
  * sync by the end of the run). Each org is dispatched once per daily
  * orchestrator run, so Sum over a 1-day period equals the number of customers
  * currently out of sync. Alarm on >= 1 for two consecutive daily periods so
- * single-day blips never fire (see
- * docs/plans/2026-07-stripe-deleted-customer-self-healing.md).
+ * single-day blips never fire.
  */
 export function emitStripeCustomersOutOfSync(value: 0 | 1): void {
   reportMetric({
