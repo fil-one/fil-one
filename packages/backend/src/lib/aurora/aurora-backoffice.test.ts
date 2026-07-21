@@ -517,8 +517,12 @@ describe('getOperationsSamples', () => {
     expect(result).toEqual([]);
   });
 
-  it('throws when the Aurora API returns an error', async () => {
-    mockGetOperations.mockResolvedValue({ data: undefined, error: { message: 'Not found' } });
+  it('throws with the HTTP status when the Aurora API returns an error', async () => {
+    mockGetOperations.mockResolvedValue({
+      data: undefined,
+      error: { message: 'Not found' },
+      response: { status: 500 },
+    });
 
     await expect(
       getOperationsSamples({
@@ -526,7 +530,7 @@ describe('getOperationsSamples', () => {
         from: '2024-01-01T00:00:00Z',
         to: '2024-01-02T00:00:00Z',
       }),
-    ).rejects.toThrow('Aurora operations API failed for tenant tenant-1');
+    ).rejects.toThrow('Aurora operations API failed for tenant tenant-1 (status=500');
   });
 
   it('splits 62-day spans into two contiguous ranges', async () => {
@@ -647,10 +651,11 @@ describe('getBucketStorageSamples', () => {
     expect(result).toEqual([]);
   });
 
-  it('throws when the Aurora API returns an error', async () => {
+  it('throws with the HTTP status when the Aurora API returns an error', async () => {
     mockGetBucketStorageMetrics.mockResolvedValue({
       data: undefined,
       error: { message: 'Not found' },
+      response: { status: 403 },
     });
 
     await expect(
@@ -659,7 +664,7 @@ describe('getBucketStorageSamples', () => {
         from: '2024-01-01T00:00:00Z',
         to: '2024-01-02T00:00:00Z',
       }),
-    ).rejects.toThrow('Aurora bucket storage API failed for bucket my-bucket');
+    ).rejects.toThrow('Aurora bucket storage API failed for bucket my-bucket (status=403)');
   });
 });
 
