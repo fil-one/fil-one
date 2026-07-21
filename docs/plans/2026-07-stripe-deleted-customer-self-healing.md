@@ -132,7 +132,7 @@ trial-lock enforcement).
 | `stripe.customers.retrieve(id)` result | Meaning | Action |
 | --- | --- | --- |
 | Stub with `deleted: true` | Customer existed in this account and was deleted | Heal |
-| Throws `resource_missing` | Customer never existed in this account/mode — likely a Stripe key/account misconfiguration | **Do not heal.** Log at error level, emit metric, keep the record untouched |
+| Throws `resource_missing` | Customer never existed in this account/mode — likely a Stripe key/account misconfiguration | **Do not heal.** Log at error level, keep the record untouched; counts as out of sync (see Fix 3) |
 
 This guard is load-bearing: if the deployment were ever pointed at the wrong
 Stripe account, every customer would 404, and healing without verification
@@ -146,15 +146,16 @@ the worker's default `STATUS_SYNC_RETRY` budget, then applies worker-specific
 policy to the returned outcomes:
 
 1. **Any region `error`** → the helper has left the record untouched. Write
-   the audit record with `orgSyncAction: 'heal-failed:<regions>'`. Because
-   the record stays non-canceled, tomorrow's run re-enters the heal path and
-   retries the failed region (same self-healing property the webhook handler
-   relies on).
+   the audit record with `orgSyncAction: 'heal-failed:<regions>'` and emit
+   `StripeCustomersOutOfSync = 1` (see Fix 3). Because the record stays
+   non-canceled, tomorrow's run re-enters the heal path and retries the
+   failed region (same self-healing property the webhook handler relies on).
 2. **All regions succeeded** → the helper has marked the record `canceled`.
    Write the daily usage audit record with
    `orgSyncAction: 'healed:customer-deleted'` and `reportedToStripe: false`;
-   emit an EMF metric (see Fix 3) and a structured log line containing
-   `orgId`, `userId`, `stripeCustomerId`, and per-region outcomes.
+   emit `StripeCustomersOutOfSync = 0` (state is back in sync) and a
+   structured log line containing `orgId`, `userId`, `stripeCustomerId`, and
+   per-region outcomes.
 
 After a successful heal the record is `canceled`, so
 `scanActiveSubscriptionRecords` (`usage-reporting-orchestrator.ts`) excludes
@@ -220,15 +221,39 @@ closure; leave them (Fix 1 covers any residue).
 
 ## Fix 3 — Observability
 
-- **New EMF metric** from the worker heal path (pattern:
-  `lib/stripe-webhook-metrics.ts`), e.g. `StripeCustomerMissing` with a
-  dimension for the outcome: `healed`, `heal-failed`, `not-in-account`
-  (verification-guard hit). Alert on any non-zero `not-in-account` and on
-  repeated `heal-failed`.
-- **Recommended alarm** (infra follow-up): alert on `UsageReportingWorker`
-  ERROR-level logs. The incident ran 37 days without anyone noticing; the
-  audit trail (`orgSyncAction != 'ok'`) made it trivially visible in
-  hindsight but nothing watched it.
+Since the system self-heals, alerting on individual heal *events* is noise:
+a `not-in-account` blip or a one-off `heal-failed` that succeeds on the next
+run needs no human. What warrants an alarm is out-of-sync **state that
+persists** — a customer the worker keeps finding missing without managing to
+heal.
+
+- **New EMF metric `StripeCustomersOutOfSync`** (pattern:
+  `lib/stripe-webhook-metrics.ts`), emitted by every worker run:
+  - `1` when the run detected a missing customer and did **not** finish
+    healing it — region sync failure (`heal-failed`), verification guard hit
+    (`not-in-account`), or heal skipped for a payload without `userId`;
+  - `0` otherwise — including a run that detected *and successfully healed*
+    the customer, since the state is back in sync by the end of the run.
+
+  Each org is dispatched once per daily orchestrator run, so **`Sum` over a
+  1-day period = number of customers currently out of sync**. An org whose
+  heal keeps failing stays non-canceled, is re-dispatched tomorrow, and
+  contributes 1 again — the metric stays elevated exactly as long as the
+  state persists. No outcome dimension; per-outcome detail goes into the
+  structured heal log line and the audit record, where the investigation
+  actually happens.
+- **Alarm** (infra follow-up): `Sum(StripeCustomersOutOfSync) >= 1` with a
+  1-day period and **2 evaluation periods**, `TreatMissingData:
+  notBreaching`. A single-day blip (detected today, healed or resolved
+  tomorrow) never fires; anything still out of sync on the second daily run
+  does. A key/account misconfiguration would spike the metric to the full
+  org count — prominent on a dashboard immediately, alarming after the same
+  one-day grace.
+- **Recommended second alarm** (infra follow-up): ERROR-level logs from
+  `UsageReportingWorker`, catching failure modes outside the heal path. The
+  incident ran 37 days without anyone noticing; the audit trail
+  (`orgSyncAction != 'ok'`) made it trivially visible in hindsight but
+  nothing watched it.
 - **Log hygiene:** add `customerId`/`subscriptionId` to the
   `"Customer deleted, skipping subscription update"` log line (and audit the
   other skip-paths in `stripe-webhook.ts` for missing IDs). The June 15
@@ -252,10 +277,11 @@ Unit tests (existing patterns: `usage-reporting-worker.test.ts`,
 
 | Case | Expected |
 | --- | --- |
-| Meter event or metadata sync throws `resource_missing`; retrieve → `deleted: true` | Regions synced to `disabled`, record updated to `canceled`, audit `healed:customer-deleted`, metric emitted |
-| `resource_missing`; retrieve → throws `resource_missing` | No writes; error log + `not-in-account` metric; audit `error:...` |
-| Heal with one region `error` | No record update; audit `heal-failed:<region>`; next-run retry still possible |
-| Payload without `userId` | No heal; warn log; normal error audit |
+| Meter event or metadata sync throws `resource_missing`; retrieve → `deleted: true` | Regions synced to `disabled`, record updated to `canceled`, audit `healed:customer-deleted`, `StripeCustomersOutOfSync = 0` |
+| `resource_missing`; retrieve → throws `resource_missing` | No writes; error log; audit `error:...`; `StripeCustomersOutOfSync = 1` |
+| Heal with one region `error` | No record update; audit `heal-failed:<region>`; `StripeCustomersOutOfSync = 1`; next-run retry still possible |
+| Payload without `userId` | No heal; warn log; normal error audit; `StripeCustomersOutOfSync = 1` |
+| Normal run, customer exists | `StripeCustomersOutOfSync = 0` |
 | Non-`resource_missing` Stripe error | Propagates (unchanged behavior) |
 | `subscription.deleted`, customer deleted, `metadata.userId` present | Tenants disabled, record `canceled`, dunning metric |
 | `subscription.deleted`, customer deleted, no `metadata.userId` | 500 (Stripe retries) |
