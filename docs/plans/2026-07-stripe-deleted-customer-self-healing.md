@@ -51,6 +51,64 @@ daily — becomes the reconciliation loop.
 
 ---
 
+## Shared foundation — `closeOutDeletedCustomer` helper
+
+After Fixes 1 and 2 there are three call sites running the same core sequence:
+`handleCustomerDeleted`, the fixed `handleSubscriptionDeleted`, and the worker
+heal path. The sequence and its critical invariant are identical everywhere:
+disable tenants in all provisioned regions first; if any region failed, do
+**not** touch the billing record (so the caller's retry mechanism can
+re-enter); otherwise mark the record canceled. That lives in one new module,
+`packages/backend/src/lib/deleted-customer-cleanup.ts`:
+
+```ts
+export async function closeOutDeletedCustomer(params: {
+  tableName: string;
+  userId: string;
+  orgId: string | null;   // null → nothing to disable, still cancel the record
+  retry: RetryOptions;    // WEBHOOK_STATUS_SYNC_RETRY vs worker default budget
+}): Promise<RegionSyncOutcome[]> {
+  // 1. syncTenantStatusInProvisionedRegions(orgId, 'disabled', retry)
+  // 2. any 'error' outcome → return outcomes WITHOUT updating the record
+  // 3. UpdateItem: status=canceled, canceledAt, updatedAt,
+  //    REMOVE gracePeriodEndsAt (condition: attribute_exists(pk))
+  // 4. return outcomes
+}
+```
+
+What stays **outside** the helper is exactly what genuinely differs per
+caller:
+
+- **Failure semantics.** Webhook callers pass the returned outcomes through
+  `assertRegionSyncSucceeded` → throw → 500 → Stripe retries. The worker
+  writes the `heal-failed:<regions>` audit record and waits for tomorrow's
+  run. Same guard, two escalation styles — caller policy, not helper logic.
+- **Retry budget.** `WEBHOOK_STATUS_SYNC_RETRY` (Stripe's ~2s response
+  window) vs the worker's default `STATUS_SYNC_RETRY` (60s Lambda budget) —
+  already parameterized in `lib/region-helpers.ts`, passed through.
+- **Telemetry.** `emitDunningEscalation` for the webhook paths; the heal
+  audit record + `StripeCustomerMissing` metric for the worker.
+
+Deliberately **not** unified: the entry points. The webhook handlers start
+from an event payload with the customer object in hand, while the worker
+starts from an error signal and must do the verification retrieve as its
+safety guard. Forcing both into one signature would make the helper's
+contract murkier than the small duplication it saves.
+
+Supporting lib refactors:
+
+- Move `resolveOrgId` from `stripe-webhook.ts` into a lib module — it is a
+  generic billing-record lookup needed by the webhook callers of the helper;
+  handler files shouldn't be imported for it. (The worker doesn't need it:
+  it has `orgId` in the payload.)
+- Move `isStripeResourceMissing` (currently private in
+  `usage-reporting-worker.ts`) next to the Stripe client utilities, and add
+  `verifyCustomerDeleted(id): 'deleted' | 'not-in-account'` there — the
+  deleted-vs-never-existed distinction gets one tested implementation instead
+  of ad-hoc `'deleted' in customer` checks.
+
+---
+
 ## Fix 1 — UsageReportingWorker self-healing (primary)
 
 ### Detection
@@ -81,24 +139,19 @@ Stripe account, every customer would 404, and healing without verification
 would disable every tenant in production. With the guard, a misconfiguration
 produces loud errors and no writes.
 
-### Heal steps (ordering mirrors `handleCustomerDeleted`)
+### Heal steps
 
-1. **Disable tenants first:** `syncTenantStatusInProvisionedRegions(orgId,
-   'disabled', STATUS_SYNC_RETRY)` (`lib/region-helpers.ts`). The sync is
-   probe-first and idempotent, and never downgrades semantics we care about
-   (`disabled` is the strongest lock).
-2. **If any region reports `error`, stop.** Do *not* mark the record canceled —
-   a canceled record is filtered out by the orchestrator scan and would never
-   be retried. Leaving it live means tomorrow's run re-enters the heal path
-   and retries the failed region (same self-healing property the webhook
-   handler relies on). Write the audit record with
-   `orgSyncAction: 'heal-failed:<regions>'`.
-3. **Mark the billing record canceled:** `UpdateItem` on
-   `pk = CUSTOMER#<userId>, sk = SUBSCRIPTION`: set
-   `subscriptionStatus = 'canceled'` (`SubscriptionStatus.Canceled`),
-   `canceledAt`, `updatedAt`; `REMOVE gracePeriodEndsAt`. Condition on
-   `attribute_exists(pk)`.
-4. **Audit + telemetry:** write the daily usage audit record with
+The heal path calls `closeOutDeletedCustomer` (see "Shared foundation") with
+the worker's default `STATUS_SYNC_RETRY` budget, then applies worker-specific
+policy to the returned outcomes:
+
+1. **Any region `error`** → the helper has left the record untouched. Write
+   the audit record with `orgSyncAction: 'heal-failed:<regions>'`. Because
+   the record stays non-canceled, tomorrow's run re-enters the heal path and
+   retries the failed region (same self-healing property the webhook handler
+   relies on).
+2. **All regions succeeded** → the helper has marked the record `canceled`.
+   Write the daily usage audit record with
    `orgSyncAction: 'healed:customer-deleted'` and `reportedToStripe: false`;
    emit an EMF metric (see Fix 3) and a structured log line containing
    `orgId`, `userId`, `stripeCustomerId`, and per-region outcomes.
@@ -146,16 +199,18 @@ exactly the case where the record must be closed out.
 
 Changes:
 
-- Extract the body of `handleCustomerDeleted` (tenant disable → record update →
-  `emitDunningEscalation`) into a shared helper, e.g.
-  `closeOutDeletedCustomer(tableName, userId)`.
+- Rewrite `handleCustomerDeleted` on top of `closeOutDeletedCustomer` (see
+  "Shared foundation") — its body today is exactly that sequence plus
+  `resolveOrgId` and `emitDunningEscalation`, which stay in the handler.
 - In `handleSubscriptionDeleted`, when the retrieved customer is deleted:
   resolve `userId` from `subscription.metadata.userId` (both creation paths
-  set it) and call the helper instead of returning. If `userId` is absent,
-  throw — a 500 lets Stripe retry, matching `handleCustomerDeleted` semantics.
-- Region-sync failures keep webhook semantics: `WEBHOOK_STATUS_SYNC_RETRY` +
-  `assertRegionSyncSucceeded` (throw → 500 → Stripe retries; tenants before
-  record so retries resume the incomplete part).
+  set it) and call the same helper instead of returning. If `userId` is
+  absent, throw — a 500 lets Stripe retry, matching `handleCustomerDeleted`
+  semantics.
+- Both call sites keep webhook failure semantics: pass the helper's outcomes
+  through `assertRegionSyncSucceeded` with `WEBHOOK_STATUS_SYNC_RETRY`
+  (throw → 500 → Stripe retries; the helper's tenants-before-record ordering
+  means a retry resumes the incomplete part).
 
 Out of scope: `handlePaymentSucceeded` / `handlePaymentFailed` also
 early-return on deleted customers, but those events don't gate record
@@ -185,6 +240,12 @@ closure; leave them (Fix 1 covers any residue).
 ---
 
 ## Testing
+
+The invariant "no record update when any region fails" is tested once, at the
+`closeOutDeletedCustomer` level (`deleted-customer-cleanup.test.ts`): all
+regions ok → record canceled; one region `error` → no `UpdateItem` issued;
+`orgId: null` → record canceled with no sync attempted. Caller tests then
+only cover their own policy on the returned outcomes.
 
 Unit tests (existing patterns: `usage-reporting-worker.test.ts`,
 `stripe-webhook.test.ts` with `aws-sdk-client-mock` + mocked Stripe client):
