@@ -68,17 +68,31 @@ describe('createS3Client', () => {
   });
 
   describe('error decoration', () => {
-    it('appends operation, bucket, and client context to the error message', async () => {
+    it('attaches operation, bucket, and client context as an s3Context property', async () => {
       const client = createS3Client(ctx);
       failRequestsWith(client, accessDeniedError());
 
       await expect(
         client.send(new GetBucketVersioningCommand({ Bucket: 'my-bucket' })),
-      ).rejects.toThrow(
-        'Access Denied\n' +
-          '(operation=GetBucketVersioning, bucket=my-bucket, tenant=t-123, ' +
-          'orchestrator=fth, region=us-east-1, endpoint=https://s3.example.com)',
-      );
+      ).rejects.toMatchObject({
+        s3Context: {
+          operation: 'GetBucketVersioning',
+          bucketName: 'my-bucket',
+          tenantId: 't-123',
+          orchestratorId: 'fth',
+          region: 'us-east-1',
+          endpointUrl: 'https://s3.example.com',
+        },
+      });
+    });
+
+    it('leaves the error message unchanged so persisted/user-facing text cannot leak the context', async () => {
+      const client = createS3Client(ctx);
+      failRequestsWith(client, accessDeniedError());
+
+      await expect(
+        client.send(new GetBucketVersioningCommand({ Bucket: 'my-bucket' })),
+      ).rejects.toMatchObject({ message: 'Access Denied' });
     });
 
     it('preserves the original error name so callers can keep matching on it', async () => {
