@@ -319,7 +319,23 @@ describe('getStorageSamples', () => {
     expect(result).toEqual([]);
   });
 
-  it('throws when the Aurora API returns an error', async () => {
+  it('throws with the HTTP status when the Aurora API returns an error', async () => {
+    mockGetStorage.mockResolvedValue({
+      data: undefined,
+      error: { message: 'failed to fetch storage metrics' },
+      response: { status: 500 },
+    });
+
+    await expect(
+      getStorageSamples({
+        tenantId: 'tenant-1',
+        from: '2024-01-01T00:00:00Z',
+        to: '2024-01-02T00:00:00Z',
+      }),
+    ).rejects.toThrow('Aurora storage API failed for tenant tenant-1 (status=500');
+  });
+
+  it('throws with status=unknown when the error has no response', async () => {
     mockGetStorage.mockResolvedValue({ data: undefined, error: { message: 'Not found' } });
 
     await expect(
@@ -328,7 +344,7 @@ describe('getStorageSamples', () => {
         from: '2024-01-01T00:00:00Z',
         to: '2024-01-02T00:00:00Z',
       }),
-    ).rejects.toThrow('Aurora storage API failed for tenant tenant-1');
+    ).rejects.toThrow('Aurora storage API failed for tenant tenant-1 (status=unknown');
   });
 
   // Aurora rejects single queries whose (to − from) span exceeds ~40 days. The
