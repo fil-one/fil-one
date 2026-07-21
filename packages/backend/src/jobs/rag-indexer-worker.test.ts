@@ -70,6 +70,8 @@ const S3_CTX: S3ClientContext = {
   region: 'eu-west-1',
   credentials: { accessKeyId: 'AK', secretAccessKey: 'SK' },
   forcePathStyle: true,
+  orchestratorId: 'test',
+  tenantId: 't-1',
 };
 
 function makeOrchestrator(id: string, region: S3Region) {
