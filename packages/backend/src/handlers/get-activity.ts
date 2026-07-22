@@ -76,7 +76,9 @@ async function listBucketActivities(
 ): Promise<RecentActivity[]> {
   // Swallow per-orchestrator errors so one region's outage still renders the rest.
   try {
-    const buckets = await orchestrator.listBuckets(tenantId);
+    // This feed only reads bucketName/createdAt, so skip the per-bucket
+    // versioning lookups (an N+1 on FTH) that would otherwise dominate latency.
+    const buckets = await orchestrator.listBuckets(tenantId, { includeVersioning: false });
     return buckets.map((bucket) => ({
       id: `bucket-${bucket.bucketName}`,
       action: 'bucket.created' as const,
