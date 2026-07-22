@@ -236,6 +236,7 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
     console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
       userId,
       orgId,
+      customerId: customer.id,
     });
   }
 

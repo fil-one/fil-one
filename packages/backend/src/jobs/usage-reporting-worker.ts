@@ -183,7 +183,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     // Stripe's — trial lock enforcement is moot for a tenant being disabled.
     const heal = await healDeletedCustomer({ orgId, userId, stripeCustomerId });
     orgSyncAction = heal.orgSyncAction;
-    lockAction = 'skipped:customer-missing';
+    lockAction = heal.lockAction;
     emitStripeCustomersOutOfSync(heal.outOfSync);
   } else {
     lockAction = await resolveLockAction({
@@ -354,7 +354,7 @@ async function healDeletedCustomer(params: {
   orgId: string;
   userId: string | undefined;
   stripeCustomerId: string;
-}): Promise<{ orgSyncAction: string; outOfSync: 0 | 1 }> {
+}): Promise<{ orgSyncAction: string; lockAction: string; outOfSync: 0 | 1 }> {
   const { orgId, userId, stripeCustomerId } = params;
 
   const verdict = await verifyCustomerDeleted(stripeCustomerId);
@@ -363,7 +363,11 @@ async function healDeletedCustomer(params: {
       '[usage-worker] Stripe customer not found in this account — refusing to self-heal; check the configured Stripe key/account',
       { orgId, userId, stripeCustomerId },
     );
-    return { orgSyncAction: 'error:customer-not-in-account', outOfSync: 1 };
+    return {
+      orgSyncAction: 'error:customer-not-in-account',
+      lockAction: 'skipped:customer-missing',
+      outOfSync: 1,
+    };
   }
   if (verdict === 'exists') {
     // The resource_missing that got us here was transient/anomalous; the
@@ -376,7 +380,11 @@ async function healDeletedCustomer(params: {
         stripeCustomerId,
       },
     );
-    return { orgSyncAction: 'error:customer-missing-but-exists', outOfSync: 0 };
+    return {
+      orgSyncAction: 'error:customer-missing-but-exists',
+      lockAction: 'skipped:customer-missing',
+      outOfSync: 0,
+    };
   }
 
   if (!userId) {
@@ -384,7 +392,11 @@ async function healDeletedCustomer(params: {
       '[usage-worker] Customer deleted but payload has no userId — heal deferred to the next run',
       { orgId, stripeCustomerId },
     );
-    return { orgSyncAction: 'error:heal-skipped-no-user-id', outOfSync: 1 };
+    return {
+      orgSyncAction: 'error:heal-skipped-no-user-id',
+      lockAction: 'skipped:customer-missing',
+      outOfSync: 1,
+    };
   }
 
   const outcomes = await closeOutDeletedCustomer({
@@ -396,8 +408,10 @@ async function healDeletedCustomer(params: {
   if (failed.length > 0) {
     // Record left non-canceled on purpose: tomorrow's run re-enters this path
     // and retries the failed regions.
+    const failedRegions = failed.map((o) => o.orchestratorId).join(',');
     return {
-      orgSyncAction: `heal-failed:${failed.map((o) => o.orchestratorId).join(',')}`,
+      orgSyncAction: `heal-failed:${failedRegions}`,
+      lockAction: `error:sync-failed:${failedRegions}`,
       outOfSync: 1,
     };
   }
@@ -408,7 +422,8 @@ async function healDeletedCustomer(params: {
     stripeCustomerId,
     regions: outcomes.map((o) => ({ orchestratorId: o.orchestratorId, outcome: o.outcome })),
   });
-  return { orgSyncAction: 'healed:customer-deleted', outOfSync: 0 };
+  // The heal disabled the tenant in every provisioned region.
+  return { orgSyncAction: 'healed:customer-deleted', lockAction: 'disabled', outOfSync: 0 };
 }
 
 async function writeUsageAuditRecord(params: {

@@ -438,7 +438,7 @@ describe('usage-reporting-worker', () => {
       warnSpy.mockRestore();
     });
 
-    it('skips trial lock enforcement and heals instead when meter event hits resource_missing', async () => {
+    it('marks the subscription canceled and disables the tenant in all regions instead of enforcing trial locks when meter event hits resource_missing', async () => {
       const trialPayload: UsageReportingWorkerPayload = {
         ...basePayload,
         subscriptionStatus: 'trialing',
@@ -458,8 +458,12 @@ describe('usage-reporting-worker', () => {
         'write-locked',
       );
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-      expect(item.lockAction).toEqual({ S: 'skipped:customer-missing' });
-      expect(item.reportedToStripe).toEqual({ BOOL: false });
+      expect(item).toEqual(
+        expect.objectContaining({
+          lockAction: { S: 'disabled' },
+          reportedToStripe: { BOOL: false },
+        }),
+      );
     });
 
     it('still propagates non-resource_missing Stripe errors', async () => {
@@ -518,10 +522,14 @@ describe('usage-reporting-worker', () => {
       });
       expect(input.ConditionExpression).toBe('attribute_exists(pk)');
 
-      const item = auditItem();
-      expect(item.orgSyncAction).toEqual({ S: 'healed:customer-deleted' });
-      expect(item.lockAction).toEqual({ S: 'skipped:customer-missing' });
-      expect(item.reportedToStripe).toEqual({ BOOL: false });
+      expect(auditItem()).toEqual(
+        expect.objectContaining({
+          orgSyncAction: { S: 'healed:customer-deleted' },
+          // The heal disabled the tenant in all provisioned regions.
+          lockAction: { S: 'disabled' },
+          reportedToStripe: { BOOL: false },
+        }),
+      );
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
     });
 
@@ -533,10 +541,14 @@ describe('usage-reporting-worker', () => {
       await handler(basePayload);
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
-      const item = auditItem();
-      expect(item.orgSyncAction).toEqual({ S: 'healed:customer-deleted' });
-      // The meter event succeeded before the metadata sync failed.
-      expect(item.reportedToStripe).toEqual({ BOOL: true });
+      expect(auditItem()).toEqual(
+        expect.objectContaining({
+          orgSyncAction: { S: 'healed:customer-deleted' },
+          lockAction: { S: 'disabled' },
+          // The meter event succeeded before the metadata sync failed.
+          reportedToStripe: { BOOL: true },
+        }),
+      );
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
     });
 
@@ -602,8 +614,12 @@ describe('usage-reporting-worker', () => {
       await run;
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      const item = auditItem();
-      expect(item.orgSyncAction).toEqual({ S: 'heal-failed:aurora' });
+      expect(auditItem()).toEqual(
+        expect.objectContaining({
+          orgSyncAction: { S: 'heal-failed:aurora' },
+          lockAction: { S: 'error:sync-failed:aurora' },
+        }),
+      );
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(1);
     });
 
