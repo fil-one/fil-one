@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { PlusIcon } from '@phosphor-icons/react/dist/ssr';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
+import type { AccessKey, ListAccessKeysResponse, S3Region } from '@filone/shared';
+import { accessKeyMatchesRegion } from '@filone/shared';
 
 import { apiRequest } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -16,7 +17,7 @@ import { Spinner } from './Spinner';
 export type BucketAccessTabProps = {
   bucketName: string;
   s3Endpoint: string;
-  region: string;
+  region: S3Region;
   accessKeys: AccessKey[];
   accessKeysLoading: boolean;
   onCreateOpen: () => void;
@@ -33,6 +34,11 @@ export function BucketAccessTab({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
+
+  // Access keys are region-scoped, so a key from another region — even one
+  // scoped to all buckets — cannot operate on this bucket. The list endpoint
+  // filters only by bucket, so drop cross-region keys here.
+  const regionKeys = accessKeys.filter((key) => accessKeyMatchesRegion(key, region));
 
   const deleteKeyMutation = useMutation({
     mutationFn: (id: string) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }),
@@ -78,7 +84,7 @@ export function BucketAccessTab({
         </div>
       ) : (
         <AccessKeysTable
-          keys={accessKeys}
+          keys={regionKeys}
           showPermissions
           onDelete={async (id) => setConfirmDeleteKey(id)}
           onCreateOpen={onCreateOpen}

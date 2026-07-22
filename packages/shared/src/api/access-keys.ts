@@ -213,6 +213,17 @@ export interface AccessKey {
   expiresAt?: string | null;
 }
 
+/**
+ * Whether an access key can operate on buckets in `region`. Access keys are
+ * region-scoped: a key created in one region cannot perform operations on
+ * buckets in another region — not even a key scoped to all buckets, since
+ * "all buckets" only spans the key's own region. Keys persisted before regions
+ * existed default to {@link S3Region.EuWest1}, matching the list-access-keys handler.
+ */
+export function accessKeyMatchesRegion(key: Pick<AccessKey, 'region'>, region: S3Region): boolean {
+  return (key.region ?? S3Region.EuWest1) === region;
+}
+
 export interface ListAccessKeysResponse {
   keys: AccessKey[];
 }
