@@ -43,6 +43,7 @@ import type {
   GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
+  ListBucketsOptions,
   ServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
@@ -122,7 +123,11 @@ export const auroraOrchestrator = {
     throw new NotImplementedError('Aurora bucket deletion is not yet supported. See FIL-204.');
   },
 
-  async listBuckets(tenantId: string): Promise<BucketSummary[]> {
+  async listBuckets(tenantId: string, opts: ListBucketsOptions = {}): Promise<BucketSummary[]> {
+    // Aurora returns versioning inline via `flags`, so there's no per-bucket
+    // cost to skip; the option is honored only to keep the contract uniform
+    // with FTH (see ListBucketsOptions).
+    const includeVersioning = opts.includeVersioning ?? true;
     const client = await createPortalReadClient(tenantId);
     const { data, error } = await listBuckets({
       client,
@@ -143,7 +148,7 @@ export const auroraOrchestrator = {
         region: auroraOrchestrator.region,
         createdAt: b.createdAt,
         isPublic: false,
-        versioning: b.flags?.includes('versioned') ?? false,
+        versioning: includeVersioning ? (b.flags?.includes('versioned') ?? false) : false,
         encrypted: b.flags?.includes('encrypted') ?? true,
       }));
   },
