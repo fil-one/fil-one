@@ -12,8 +12,8 @@ export interface FthRequestContext {
 export class FthApiError extends Error {
   readonly status: number;
   readonly responseBody: unknown;
-  readonly method?: string;
-  readonly path?: string;
+  readonly requestMethod?: string;
+  readonly requestPath?: string;
 
   constructor(status: number, message: string, responseBody: unknown, request?: FthRequestContext) {
     const target = request ? ` [${request.method} ${request.path}]` : '';
@@ -21,8 +21,8 @@ export class FthApiError extends Error {
     this.name = 'FthApiError';
     this.status = status;
     this.responseBody = responseBody;
-    this.method = request?.method;
-    this.path = request?.path;
+    this.requestMethod = request?.method;
+    this.requestPath = request?.path;
   }
 }
 

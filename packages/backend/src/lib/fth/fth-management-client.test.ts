@@ -147,8 +147,8 @@ describe('FthClient error handling', () => {
     } catch (err) {
       expect(err).toBeInstanceOf(FthApiError);
       const apiError = err as FthApiError;
-      expect(apiError.method).toBe('GET');
-      expect(apiError.path).toBe('/management/v1/clients/tenant-abc/metrics/timeseries');
+      expect(apiError.requestMethod).toBe('GET');
+      expect(apiError.requestPath).toBe('/management/v1/clients/tenant-abc/metrics/timeseries');
       expect(apiError.message).toBe(
         'FTH API request failed (403) [GET /management/v1/clients/tenant-abc/metrics/timeseries]: client out of scope',
       );
