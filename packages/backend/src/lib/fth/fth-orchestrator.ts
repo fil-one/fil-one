@@ -117,6 +117,8 @@ export const fthOrchestrator = {
       region: 'us-east-1',
       credentials,
       forcePathStyle: true,
+      orchestratorId: fthOrchestrator.id,
+      tenantId,
     };
   },
 

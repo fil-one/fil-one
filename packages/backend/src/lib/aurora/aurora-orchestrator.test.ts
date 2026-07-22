@@ -558,6 +558,8 @@ describe('auroraOrchestrator', () => {
         region: 'auto',
         credentials: { accessKeyId: 'AK', secretAccessKey: 'SK' },
         forcePathStyle: true,
+        orchestratorId: 'aurora',
+        tenantId: 'aurora-t-1',
       });
     });
   });

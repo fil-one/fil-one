@@ -223,6 +223,8 @@ describe('fthOrchestrator.getS3ClientContext', () => {
       region: 'us-east-1',
       credentials: { accessKeyId: 'AK1', secretAccessKey: 'SK1' },
       forcePathStyle: true,
+      orchestratorId: 'fth',
+      tenantId: fthClientId,
     });
   });
 
