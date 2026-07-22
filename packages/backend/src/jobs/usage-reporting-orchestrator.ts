@@ -124,7 +124,7 @@ async function scanActiveSubscriptionRecords(
 
       records.push({
         orgId: record.orgId,
-        userId: extractUserId(record.pk),
+        userId: extractUserIdFromBillingRecordPK(record.pk),
         subscriptionId: record.subscriptionId,
         stripeCustomerId: record.stripeCustomerId,
         currentPeriodStart: record.currentPeriodStart,
@@ -139,7 +139,7 @@ async function scanActiveSubscriptionRecords(
 }
 
 /** userId from a billing record pk (CUSTOMER#<userId>); undefined for unexpected shapes. */
-function extractUserId(pk: unknown): string | undefined {
+function extractUserIdFromBillingRecordPK(pk: unknown): string | undefined {
   if (typeof pk !== 'string' || !pk.startsWith('CUSTOMER#')) {
     console.warn('[usage-orchestrator] Unexpected billing record pk shape', { pk });
     return undefined;
