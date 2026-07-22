@@ -13,14 +13,14 @@ import type {
   RetentionMode,
   S3Region as S3RegionType,
 } from '@filone/shared';
-import { createClient, getBucketInfo, listBuckets } from '@filone/aurora-portal-client';
+import { getBucketInfo, listBuckets } from '@filone/aurora-portal-client';
 import { ensureTenantReady as ensureAuroraTenantReady } from '../aurora/aurora-tenant-setup.js';
 import {
   createAuroraAccessKey,
   createAuroraBucket,
+  createPortalClient,
   deleteAuroraAccessKey,
   findAuroraAccessKeyByName,
-  getAuroraPortalApiKey,
 } from '../aurora/aurora-portal.js';
 import {
   getOperationsSamples,
@@ -55,18 +55,6 @@ export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting
 
 function getStage(): string {
   return process.env.FILONE_STAGE!;
-}
-
-function getPortalBaseUrl(): string {
-  return process.env.AURORA_PORTAL_URL!;
-}
-
-async function createPortalReadClient(tenantId: string) {
-  const apiKey = await getAuroraPortalApiKey(getStage(), tenantId);
-  return createClient({
-    baseUrl: getPortalBaseUrl(),
-    headers: { 'X-Api-Key': apiKey },
-  });
 }
 
 export const auroraOrchestrator = {
@@ -123,7 +111,7 @@ export const auroraOrchestrator = {
   },
 
   async listBuckets(tenantId: string): Promise<BucketSummary[]> {
-    const client = await createPortalReadClient(tenantId);
+    const client = await createPortalClient(tenantId);
     const { data, error } = await listBuckets({
       client,
       path: { tenantId },
@@ -149,7 +137,7 @@ export const auroraOrchestrator = {
   },
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
-    const client = await createPortalReadClient(tenantId);
+    const client = await createPortalClient(tenantId);
     const { data, error, response } = await getBucketInfo({
       client,
       path: { tenantId, bucketName },
