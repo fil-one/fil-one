@@ -135,6 +135,26 @@ describe('FthClient error handling', () => {
     });
   });
 
+  it('includes the request method and path (with client ref) on the thrown error', async () => {
+    const client = buildClient({ fetch: mockFetch(403, { message: 'client out of scope' }) });
+
+    try {
+      await client.getClientMetricsTimeseries('tenant-abc', {
+        from: '2024-01-01T00:00:00Z',
+        to: '2024-01-02T00:00:00Z',
+      });
+      expect.fail('expected to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(FthApiError);
+      const apiError = err as FthApiError;
+      expect(apiError.method).toBe('GET');
+      expect(apiError.path).toBe('/management/v1/clients/tenant-abc/metrics/timeseries');
+      expect(apiError.message).toBe(
+        'FTH API request failed (403) [GET /management/v1/clients/tenant-abc/metrics/timeseries]: client out of scope',
+      );
+    }
+  });
+
   it('exposes the parsed error envelope on the thrown error', async () => {
     const client = buildClient({ fetch: mockFetch(400, { message: 'bad request' }) });
 

@@ -194,6 +194,20 @@ describe('usage-reporting-worker', () => {
     await expect(handler(basePayload)).rejects.toThrow('Aurora timeout');
   });
 
+  it('annotates usage metrics failures with org, region, and tenantId', async () => {
+    const cause = new Error('FTH API request failed (403): client out of scope');
+    mockGetTenantUsageMetrics.mockRejectedValue(cause);
+    mockAuroraIsTenantReady.mockReturnValue(null);
+    mockFthIsTenantReady.mockReturnValue('fth-tenant-456');
+
+    await expect(handler(basePayload)).rejects.toMatchObject({
+      message:
+        'Usage metrics fetch failed for org org-1 (region us-east-1, tenantId fth-tenant-456): ' +
+        'FTH API request failed (403): client out of scope',
+      cause,
+    });
+  });
+
   it('writes correct audit record fields', async () => {
     mockGetTenantUsageMetrics.mockResolvedValue({
       storage: [

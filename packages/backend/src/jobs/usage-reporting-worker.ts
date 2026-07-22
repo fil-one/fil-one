@@ -116,13 +116,24 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   let usageMetrics: TenantUsageMetrics[];
   try {
     usageMetrics = await Promise.all(
-      orgRegions.map((t) =>
-        t.orchestrator.getTenantUsageMetrics(t.tenantId, {
-          from: currentPeriodStart,
-          to: now,
-          interval: '1d',
-        }),
-      ),
+      orgRegions.map(async (t) => {
+        try {
+          return await t.orchestrator.getTenantUsageMetrics(t.tenantId, {
+            from: currentPeriodStart,
+            to: now,
+            interval: '1d',
+          });
+        } catch (error) {
+          // Re-throw with the failing region/tenant attached — Promise.all only
+          // surfaces an index, and the escaping error is what the runtime logs.
+          // The underlying message is inlined because the runtime's error log
+          // doesn't reliably serialize `cause`.
+          throw new Error(
+            `Usage metrics fetch failed for org ${orgId} (region ${t.orchestrator.region}, tenantId ${t.tenantId}): ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error },
+          );
+        }
+      }),
     );
   } catch (error) {
     const e = error as Error & { cause?: unknown };
