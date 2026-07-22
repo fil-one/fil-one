@@ -267,6 +267,10 @@ describe('get-activity baseHandler', () => {
         objects: flatTrend(7, expect.any(Number)),
       },
     });
+
+    // The feed never surfaces versioning, so it must opt out of the per-bucket
+    // versioning lookups to avoid the FTH N+1.
+    expect(mockListBuckets).toHaveBeenCalledWith(AURORA_TENANT_ID, { includeVersioning: false });
   });
 
   it('respects the limit query parameter', async () => {
