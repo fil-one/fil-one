@@ -226,6 +226,8 @@ export const auroraOrchestrator = {
       region: 'auto',
       credentials,
       forcePathStyle: true,
+      orchestratorId: auroraOrchestrator.id,
+      tenantId,
     };
   },
 
