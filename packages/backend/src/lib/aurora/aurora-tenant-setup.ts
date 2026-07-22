@@ -102,6 +102,12 @@ export async function processTenantSetup(orgId: string): Promise<{ auroraTenantI
     throw new Error(`Org profile not found for org ${orgId}`);
   }
 
+  // Account deletion in progress (FIL-112): never provision against an org
+  // being torn down — a setup racing teardown would orphan a live tenant.
+  if (orgProfile.deleting?.BOOL === true) {
+    throw new Error(`Org ${orgId} is being deleted; refusing tenant setup`);
+  }
+
   const orgName = orgProfile.name?.S ?? '';
   const auroraSetupStatus = orgProfile.auroraSetupStatus?.S;
 

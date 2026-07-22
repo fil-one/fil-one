@@ -9,6 +9,7 @@ vi.mock('sst', () => ({
   Resource: {
     Auth0ClientId: { value: 'test-client-id' },
     Auth0ClientSecret: { value: 'test-client-secret' },
+    UserInfoTable: { name: 'UserInfoTable' },
   },
 }));
 
@@ -21,6 +22,17 @@ vi.mock('../lib/auth-secrets.js', () => ({
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
+
+const mockJwtVerify = vi.fn();
+vi.mock('jose', () => ({
+  jwtVerify: (token: unknown, jwks: unknown, opts: unknown) => mockJwtVerify(token, jwks, opts),
+  createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
+}));
+
+import { mockClient } from 'aws-sdk-client-mock';
+import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+
+const ddbMock = mockClient(DynamoDBClient);
 
 process.env.WEBSITE_URL = 'https://app.example.com';
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
@@ -42,6 +54,8 @@ const stubContext = buildContext({ functionName: 'auth-callback' });
 describe('auth-callback handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    ddbMock.reset();
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
   });
 
   // -------------------------------------------------------------------------
@@ -266,6 +280,96 @@ describe('auth-callback handler', () => {
         /^hs_csrf_token=[a-f0-9-]+; Secure; SameSite=Lax; Path=\/; Max-Age=3600$/,
       );
       expect(cookies[4]).toBe('hs_oauth_state=; Secure; SameSite=Lax; Path=/; Max-Age=0');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Tombstoned identity (deleted account, FIL-112)
+  // -------------------------------------------------------------------------
+
+  describe('when the sub belongs to a deleted account', () => {
+    const SUB = 'auth0|deleted-user';
+
+    const validStateEvent = () =>
+      buildEvent({
+        queryStringParameters: { code: 'auth-code-123', state: 'valid-state' },
+        cookies: ['hs_oauth_state=valid-state'],
+      });
+
+    beforeEach(() => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: 'new-access-token',
+          id_token: 'signed-id-token',
+          refresh_token: 'new-refresh-token',
+        }),
+      });
+      // The tombstone check verifies the id_token signature before trusting sub.
+      mockJwtVerify.mockResolvedValue({ payload: { sub: SUB } });
+    });
+
+    it('verifies the id_token against the tenant JWKS with the client audience', async () => {
+      await handler(validStateEvent(), stubContext);
+
+      expect(mockJwtVerify).toHaveBeenCalledWith('signed-id-token', 'mock-jwks', {
+        audience: 'test-client-id',
+        issuer: 'https://test.auth0.com/',
+      });
+    });
+
+    it('fails open when signature verification fails', async () => {
+      mockJwtVerify.mockRejectedValue(new Error('signature verification failed'));
+
+      const result = await handler(validStateEvent(), stubContext);
+
+      expect(result.headers!['Location']).toBe('https://app.example.com/dashboard');
+    });
+
+    it('redirects to /account-deleted without minting session cookies', async () => {
+      ddbMock
+        .on(GetItemCommand, { Key: { pk: { S: `SUB#${SUB}` }, sk: { S: 'IDENTITY' } } })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${SUB}` },
+            sk: { S: 'IDENTITY' },
+            deleted: { BOOL: true },
+          },
+        });
+
+      const result = await handler(validStateEvent(), stubContext);
+
+      expect(result.statusCode).toBe(302);
+      expect(result.headers!['Location']).toBe('https://app.example.com/account-deleted');
+      const cookies = result.cookies ?? [];
+      // No session is established — every auth cookie is a clear, not a set.
+      expect(cookies.every((c) => c.includes('Max-Age=0'))).toBe(true);
+      expect(cookies.some((c) => c.startsWith('hs_logged_in='))).toBe(true);
+    });
+
+    it('proceeds to /dashboard for a live identity', async () => {
+      ddbMock
+        .on(GetItemCommand, { Key: { pk: { S: `SUB#${SUB}` }, sk: { S: 'IDENTITY' } } })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${SUB}` },
+            sk: { S: 'IDENTITY' },
+            userId: { S: 'user-1' },
+            orgId: { S: 'org-1' },
+          },
+        });
+
+      const result = await handler(validStateEvent(), stubContext);
+
+      expect(result.headers!['Location']).toBe('https://app.example.com/dashboard');
+    });
+
+    it('fails open when the tombstone check errors (login must not depend on it)', async () => {
+      ddbMock.on(GetItemCommand).rejects(new Error('DynamoDB unavailable'));
+
+      const result = await handler(validStateEvent(), stubContext);
+
+      expect(result.headers!['Location']).toBe('https://app.example.com/dashboard');
     });
   });
 });

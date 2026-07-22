@@ -1,6 +1,6 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 import { UserIcon, BellIcon, ShieldCheckIcon } from '@phosphor-icons/react/dist/ssr';
@@ -23,7 +23,9 @@ import {
   getPreferences,
   updatePreferences,
   updateProfile,
+  DELETE_ACCOUNT_STEP_UP_ACTION,
 } from '../lib/api.js';
+import { DeleteAccountModal } from '../components/DeleteAccountModal';
 import { getProvider, isSocialConnection, UpdateProfileSchema } from '@filone/shared';
 import type { ConnectionProvider, MeResponse, PreferencesResponse } from '@filone/shared';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
@@ -439,16 +441,45 @@ function SecuritySection({ me }: { me: MeResponse }) {
 // Danger zone
 // ---------------------------------------------------------------------------
 
-function DangerSection() {
+function DangerSection({ me }: { me: MeResponse }) {
+  const [modalOpen, setModalOpen] = useState(false);
+
+  // Resume after a step-up redirect: the app root reads sessionStorage and
+  // bounces here with ?action=delete-account — reopen the modal so the user
+  // continues where they left off.
+  const search = useSearch({ strict: false }) as { action?: string };
+  const navigate = useNavigate();
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (resumed.current || search.action !== DELETE_ACCOUNT_STEP_UP_ACTION) return;
+    resumed.current = true;
+    void navigate({ to: '/settings', replace: true });
+    setModalOpen(true);
+  }, [search.action, navigate]);
+
   return (
     <Card>
-      <p className="text-sm font-medium text-zinc-900">Delete account</p>
-      <p className="text-xs text-zinc-500 mt-1">
-        To permanently delete your account and all data, email{' '}
-        <Link href="mailto:support@fil.one" variant="accent">
-          support@fil.one
-        </Link>
-      </p>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-zinc-900">Delete account</p>
+          <p className="text-xs text-zinc-500 mt-1">
+            Permanently delete your account, organization, and all data. This cannot be undone.
+          </p>
+        </div>
+        <Button
+          id="settings-delete-account-button"
+          variant="destructive"
+          size="sm"
+          onClick={() => setModalOpen(true)}
+        >
+          Delete account
+        </Button>
+      </div>
+      <DeleteAccountModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        orgName={me.orgName}
+      />
     </Card>
   );
 }
@@ -482,7 +513,7 @@ export function SettingsPage() {
         <ProfileSection me={me} />
         <NotificationsSection />
         <SecuritySection me={me} />
-        <DangerSection />
+        <DangerSection me={me} />
       </div>
     </PageLayout>
   );

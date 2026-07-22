@@ -62,9 +62,22 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     const body = (await response
       .clone()
       .json()
-      .catch(() => ({}))) as Partial<StepUpRequiredResponse>;
+      .catch(() => ({}))) as Partial<StepUpRequiredResponse> & { code?: string };
     if (body.error === 'step_up_required') {
       throw new StepUpRequiredError();
+    }
+    // FIL-112: a deleted account must land on the static confirmation page.
+    // Redirecting to /login instead would loop forever while the Auth0 SSO
+    // session silently re-authenticates the tombstoned identity.
+    if (body.code === ApiErrorCode.ACCOUNT_DELETED) {
+      if (!isRedirecting) {
+        isRedirecting = true;
+        window.location.href = '/account-deleted';
+      }
+      throw Object.assign(new Error('Account has been deleted'), {
+        status: 401,
+        code: ApiErrorCode.ACCOUNT_DELETED,
+      });
     }
     redirectToLogin();
     // Throw so the caller's promise chain stops — the page is navigating away
@@ -231,6 +244,52 @@ export async function regenerateRecoveryCode(
       redirectToStepUp(options.stepUpAction ?? 'regenerate-recovery-code');
       // Hold the promise — the page is navigating away.
       return new Promise<RegenerateRecoveryCodeResponse>(() => {});
+    }
+    throw err;
+  }
+}
+
+// ── Account deletion (FIL-112) ───────────────────────────────────────────
+
+import type {
+  DeleteAccountRequest,
+  DeleteAccountResponse,
+  DeletionChallengeResponse,
+} from '@filone/shared';
+
+export const DELETE_ACCOUNT_STEP_UP_ACTION = 'delete-account';
+
+/**
+ * Request the account-deletion email verification code. MFA-enrolled users
+ * are bounced through the step-up round-trip first (same pattern as
+ * deletePasskey) — the redirect navigates the page away, so the returned
+ * promise never resolves on that path.
+ */
+export async function requestDeletionChallenge(): Promise<DeletionChallengeResponse> {
+  try {
+    return await apiRequest<DeletionChallengeResponse>('/account/delete-challenge', {
+      method: 'POST',
+    });
+  } catch (err) {
+    if (err instanceof StepUpRequiredError) {
+      redirectToStepUp(DELETE_ACCOUNT_STEP_UP_ACTION);
+      return new Promise<DeletionChallengeResponse>(() => {});
+    }
+    throw err;
+  }
+}
+
+/** Confirm account deletion with the typed org name and the emailed code. */
+export async function deleteAccount(req: DeleteAccountRequest): Promise<DeleteAccountResponse> {
+  try {
+    return await apiRequest<DeleteAccountResponse>('/account/delete', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  } catch (err) {
+    if (err instanceof StepUpRequiredError) {
+      redirectToStepUp(DELETE_ACCOUNT_STEP_UP_ACTION);
+      return new Promise<DeleteAccountResponse>(() => {});
     }
     throw err;
   }
