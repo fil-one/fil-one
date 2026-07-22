@@ -8,6 +8,12 @@ import { SubscriptionStatus } from '@filone/shared';
 // Mocks
 // ---------------------------------------------------------------------------
 
+vi.mock('sst', () => ({
+  Resource: {
+    BillingTable: { name: 'BillingTable' },
+  },
+}));
+
 const mockSyncTenantStatusInProvisionedRegions = vi.hoisted(() => vi.fn());
 vi.mock('./region-helpers.js', () => ({
   syncTenantStatusInProvisionedRegions: (...args: unknown[]) =>
@@ -16,7 +22,10 @@ vi.mock('./region-helpers.js', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { closeOutDeletedCustomer, resolveOrgId } from './deleted-customer-cleanup.js';
+import {
+  closeOutDeletedCustomer,
+  resolveOrgIdFromSubscription,
+} from './deleted-customer-cleanup.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,7 +62,6 @@ describe('closeOutDeletedCustomer', () => {
 
   it('disables tenants, then marks the billing record canceled', async () => {
     const outcomes = await closeOutDeletedCustomer({
-      tableName: TABLE_NAME,
       userId: USER_ID,
       orgId: ORG_ID,
     });
@@ -88,7 +96,6 @@ describe('closeOutDeletedCustomer', () => {
     const retry = { retries: 1, minTimeout: 200 };
 
     await closeOutDeletedCustomer({
-      tableName: TABLE_NAME,
       userId: USER_ID,
       orgId: ORG_ID,
       retry,
@@ -108,7 +115,6 @@ describe('closeOutDeletedCustomer', () => {
     ]);
 
     const outcomes = await closeOutDeletedCustomer({
-      tableName: TABLE_NAME,
       userId: USER_ID,
       orgId: ORG_ID,
     });
@@ -117,9 +123,10 @@ describe('closeOutDeletedCustomer', () => {
     expect(outcomes).toEqual([okOutcome('aurora'), errorOutcome('fth')]);
   });
 
-  it('cancels the record without any region sync when orgId is null', async () => {
+  it('cancels the record without any region sync when orgId is null, with a warning', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
     const outcomes = await closeOutDeletedCustomer({
-      tableName: TABLE_NAME,
       userId: USER_ID,
       orgId: null,
     });
@@ -127,6 +134,11 @@ describe('closeOutDeletedCustomer', () => {
     expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
     expect(outcomes).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('No orgId — skipping tenant status sync'),
+      expect.objectContaining({ userId: USER_ID }),
+    );
+    warnSpy.mockRestore();
   });
 
   it('tolerates a missing billing record (conditional check failure)', async () => {
@@ -135,9 +147,9 @@ describe('closeOutDeletedCustomer', () => {
     conditionalFailure.name = 'ConditionalCheckFailedException';
     ddbMock.on(UpdateItemCommand).rejects(conditionalFailure);
 
-    await expect(
-      closeOutDeletedCustomer({ tableName: TABLE_NAME, userId: USER_ID, orgId: ORG_ID }),
-    ).resolves.toEqual([okOutcome('aurora')]);
+    await expect(closeOutDeletedCustomer({ userId: USER_ID, orgId: ORG_ID })).resolves.toEqual([
+      okOutcome('aurora'),
+    ]);
 
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('No billing record to cancel'),
@@ -149,13 +161,13 @@ describe('closeOutDeletedCustomer', () => {
   it('propagates other DynamoDB errors', async () => {
     ddbMock.on(UpdateItemCommand).rejects(new Error('throttled'));
 
-    await expect(
-      closeOutDeletedCustomer({ tableName: TABLE_NAME, userId: USER_ID, orgId: ORG_ID }),
-    ).rejects.toThrow('throttled');
+    await expect(closeOutDeletedCustomer({ userId: USER_ID, orgId: ORG_ID })).rejects.toThrow(
+      'throttled',
+    );
   });
 });
 
-describe('resolveOrgId', () => {
+describe('resolveOrgIdFromSubscription', () => {
   beforeEach(() => {
     ddbMock.reset();
   });
@@ -165,7 +177,7 @@ describe('resolveOrgId', () => {
       Item: marshall({ pk: `CUSTOMER#${USER_ID}`, sk: 'SUBSCRIPTION', orgId: ORG_ID }),
     });
 
-    await expect(resolveOrgId(USER_ID, TABLE_NAME)).resolves.toBe(ORG_ID);
+    await expect(resolveOrgIdFromSubscription(USER_ID)).resolves.toBe(ORG_ID);
 
     const getCalls = ddbMock.commandCalls(GetItemCommand);
     expect(getCalls).toHaveLength(1);
@@ -179,7 +191,7 @@ describe('resolveOrgId', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
 
-    await expect(resolveOrgId(USER_ID, TABLE_NAME)).resolves.toBeNull();
+    await expect(resolveOrgIdFromSubscription(USER_ID)).resolves.toBeNull();
     warnSpy.mockRestore();
   });
 });

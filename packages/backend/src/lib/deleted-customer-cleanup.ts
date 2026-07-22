@@ -1,16 +1,21 @@
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import type { Options as RetryOptions } from 'p-retry';
 import { SubscriptionStatus } from '@filone/shared';
+import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 import { syncTenantStatusInProvisionedRegions, type RegionSyncOutcome } from './region-helpers.js';
 
 const dynamo = getDynamoClient();
 
-/** orgId from the user's billing record, or null when the record/field is missing. */
-export async function resolveOrgId(userId: string, tableName: string): Promise<string | null> {
+/**
+ * Maps a user to their org via the billing SUBSCRIPTION record (BillingTable
+ * pk CUSTOMER#<userId>) — not the UserInfo-table user→org mapping used by API
+ * auth. Returns null when the record or its orgId field is missing.
+ */
+export async function resolveOrgIdFromSubscription(userId: string): Promise<string | null> {
   const billingResult = await dynamo.send(
     new GetItemCommand({
-      TableName: tableName,
+      TableName: Resource.BillingTable.name,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
         sk: { S: 'SUBSCRIPTION' },
@@ -39,13 +44,18 @@ export async function resolveOrgId(userId: string, tableName: string): Promise<s
  * audit → retried on the next daily run).
  */
 export async function closeOutDeletedCustomer(params: {
-  tableName: string;
   userId: string;
   orgId: string | null;
   retry?: RetryOptions;
 }): Promise<RegionSyncOutcome[]> {
-  const { tableName, userId, orgId, retry } = params;
+  const { userId, orgId, retry } = params;
 
+  // No orgId means the billing record is missing or predates the orgId field
+  // (customer created outside the app, or record already removed) — there is
+  // no tenant to look up, so only the record cancelation below applies.
+  if (!orgId) {
+    console.warn('[deleted-customer-cleanup] No orgId — skipping tenant status sync', { userId });
+  }
   const outcomes = orgId
     ? await syncTenantStatusInProvisionedRegions(orgId, 'disabled', retry)
     : [];
@@ -55,7 +65,7 @@ export async function closeOutDeletedCustomer(params: {
   try {
     await dynamo.send(
       new UpdateItemCommand({
-        TableName: tableName,
+        TableName: Resource.BillingTable.name,
         Key: {
           pk: { S: `CUSTOMER#${userId}` },
           sk: { S: 'SUBSCRIPTION' },

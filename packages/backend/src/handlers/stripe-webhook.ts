@@ -10,7 +10,10 @@ import {
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import { closeOutDeletedCustomer, resolveOrgId } from '../lib/deleted-customer-cleanup.js';
+import {
+  closeOutDeletedCustomer,
+  resolveOrgIdFromSubscription,
+} from '../lib/deleted-customer-cleanup.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
@@ -221,7 +224,7 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
   // Disable immediately — no grace period. Tenants first; a failed region throws so the
   // webhook returns 500 and Stripe retries (there is no cron fallback for canceled records).
   // The sync is probe-first, so a retry skips regions that are already disabled.
-  const orgId = await resolveOrgId(userId, tableName);
+  const orgId = await resolveOrgIdFromSubscription(userId);
   if (!orgId) {
     console.warn('[stripe-webhook] customer.deleted: no tenant to disable', {
       userId,
@@ -230,7 +233,7 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
   }
 
   assertRegionSyncSucceeded(
-    await closeOutDeletedCustomer({ tableName, userId, orgId, retry: WEBHOOK_STATUS_SYNC_RETRY }),
+    await closeOutDeletedCustomer({ userId, orgId, retry: WEBHOOK_STATUS_SYNC_RETRY }),
   );
   if (orgId) {
     console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
@@ -334,9 +337,9 @@ async function handleSubscriptionDeleted(
         `[stripe-webhook] subscription.deleted for deleted customer ${customerId} has no metadata.userId; cannot close out billing record`,
       );
     }
-    const orgId = await resolveOrgId(userId, tableName);
+    const orgId = await resolveOrgIdFromSubscription(userId);
     assertRegionSyncSucceeded(
-      await closeOutDeletedCustomer({ tableName, userId, orgId, retry: WEBHOOK_STATUS_SYNC_RETRY }),
+      await closeOutDeletedCustomer({ userId, orgId, retry: WEBHOOK_STATUS_SYNC_RETRY }),
     );
     console.log(
       '[stripe-webhook] Billing record closed out (subscription.deleted, customer deleted)',
@@ -390,7 +393,7 @@ async function handleSubscriptionDeleted(
   // attempt WRITE_LOCK for active grace periods missing it. The sync never
   // downgrades a tenant that is already disabled.
   try {
-    const orgId = await resolveOrgId(userId, tableName);
+    const orgId = await resolveOrgIdFromSubscription(userId);
     if (orgId) {
       assertRegionSyncSucceeded(
         await syncTenantStatusInProvisionedRegions(
@@ -451,7 +454,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   // PastDue/GracePeriod. If this fails, the tenant may remain locked until
   // manual intervention.
   try {
-    const orgId = await resolveOrgId(userId, tableName);
+    const orgId = await resolveOrgIdFromSubscription(userId);
     if (orgId) {
       assertRegionSyncSucceeded(
         await syncTenantStatusInProvisionedRegions(orgId, 'active', WEBHOOK_STATUS_SYNC_RETRY),
