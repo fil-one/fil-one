@@ -25,6 +25,7 @@ vi.mock('../lib/api', () => ({
 
 vi.mock('../lib/query-client.js', () => ({
   queryKeys: { usage: ['usage'], billing: ['billing'], me: ['me'] },
+  USAGE_STALE_TIME: 5 * 60_000,
 }));
 
 vi.mock('../lib/time.js', () => ({

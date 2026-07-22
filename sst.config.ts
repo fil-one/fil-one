@@ -868,6 +868,13 @@ export default $config({
     });
     addRoute({
       method: 'GET',
+      routePath: '/api/usage/trends',
+      handler: 'get-usage-trends',
+      extraEnv: orchestratorEnv,
+      provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
+    });
+    addRoute({
+      method: 'GET',
       routePath: '/api/activity',
       handler: 'get-activity',
       extraEnv: orchestratorEnv,

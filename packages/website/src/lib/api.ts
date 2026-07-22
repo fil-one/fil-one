@@ -238,20 +238,21 @@ export async function regenerateRecoveryCode(
 
 // ── Usage API ────────────────────────────────────────────────────────────
 
-import type { UsageResponse, ActivityResponse } from '@filone/shared';
+import type { UsageResponse, RecentActivityResponse, UsageTrendsResponse } from '@filone/shared';
 
 export function getUsage(): Promise<UsageResponse> {
   return apiRequest<UsageResponse>('/usage');
 }
 
-export function getActivity(
-  options: { limit?: number; period?: '7d' | '30d' } = {},
-): Promise<ActivityResponse> {
+export function getUsageTrends(period: '7d' | '30d'): Promise<UsageTrendsResponse> {
+  return apiRequest<UsageTrendsResponse>(`/usage/trends?period=${period}`);
+}
+
+export function getActivity(options: { limit?: number } = {}): Promise<RecentActivityResponse> {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
-  if (options.period) params.set('period', options.period);
   const qs = params.toString();
-  return apiRequest<ActivityResponse>(`/activity${qs ? `?${qs}` : ''}`);
+  return apiRequest<RecentActivityResponse>(`/activity${qs ? `?${qs}` : ''}`);
 }
 
 // ── Billing API ─────────────────────────────────────────────────────────

@@ -27,7 +27,7 @@ import type { RecentActivity } from '@filone/shared';
 
 import { getUsage, getBilling, getActivity } from '../lib/api.js';
 import { daysUntil, formatDateTime, timeAgo } from '../lib/time.js';
-import { queryKeys } from '../lib/query-client.js';
+import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -98,6 +98,7 @@ export function DashboardPage() {
   const { data: usage, isPending: usagePending } = useQuery({
     queryKey: queryKeys.usage,
     queryFn: getUsage,
+    staleTime: USAGE_STALE_TIME,
   });
 
   const { data: billing, isPending: billingPending } = useQuery({
