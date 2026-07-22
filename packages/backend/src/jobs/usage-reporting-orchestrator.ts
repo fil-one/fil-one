@@ -140,11 +140,13 @@ async function scanActiveSubscriptionRecords(
 
 /** userId from a billing record pk (CUSTOMER#<userId>); undefined for unexpected shapes. */
 function extractUserIdFromBillingRecordPK(pk: unknown): string | undefined {
-  if (typeof pk !== 'string' || !pk.startsWith('CUSTOMER#')) {
+  const userId =
+    typeof pk === 'string' && pk.startsWith('CUSTOMER#') ? pk.slice('CUSTOMER#'.length) : '';
+  if (!userId) {
     console.warn('[usage-orchestrator] Unexpected billing record pk shape', { pk });
     return undefined;
   }
-  return pk.slice('CUSTOMER#'.length);
+  return userId;
 }
 
 /** Best-effort org name for Stripe metadata sync; `undefined` if the org has no profile/name. */

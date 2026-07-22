@@ -162,38 +162,15 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     meterEventName,
   });
 
-  let customerMissing = meterResult.customerMissing;
-  let orgSyncAction: string;
-  if (customerMissing) {
-    orgSyncAction = 'skipped:customer-missing';
-  } else {
-    const syncResult = await syncOrgMetadata({
-      stripeCustomerId,
-      orgName,
-      currentStorageBytes: aggregate.currentStorageBytes,
-    });
-    orgSyncAction = syncResult.action;
-    customerMissing = syncResult.customerMissing;
-  }
-
-  let lockAction: string;
-  if (customerMissing) {
-    // The Stripe customer appears to be gone. Instead of the normal steps,
-    // try to reconcile our state (billing record + tenant status) with
-    // Stripe's — trial lock enforcement is moot for a tenant being disabled.
-    const heal = await healDeletedCustomer({ orgId, userId, stripeCustomerId });
-    orgSyncAction = heal.orgSyncAction;
-    lockAction = heal.lockAction;
-    emitStripeCustomersOutOfSync(heal.outOfSync);
-  } else {
-    lockAction = await resolveLockAction({
-      isTrial,
-      orgId,
-      currentStorageBytes: aggregate.currentStorageBytes,
-      totalEgressBytes: aggregate.totalEgressBytes,
-    });
-    emitStripeCustomersOutOfSync(0);
-  }
+  const { orgSyncAction, lockAction } = await resolveOrgSyncAndLockActions({
+    orgId,
+    userId,
+    orgName,
+    stripeCustomerId,
+    isTrial,
+    aggregate,
+    meterCustomerMissing: meterResult.customerMissing,
+  });
 
   await writeUsageAuditRecord({
     orgId,
@@ -235,6 +212,63 @@ function aggregateUsageMetrics(usageMetrics: TenantUsageMetrics[]): AggregateUsa
     totalEgressBytes,
     // Number of distinct timestamps the org-level average is computed over.
     sampleCount: averageUsage.sampleCount,
+  };
+}
+
+/**
+ * Runs the org metadata sync, deleted-customer healing, and trial-lock steps,
+ * returning the audit actions. When Stripe reports the customer missing, the
+ * heal path replaces the normal steps; a customer verified alive falls back
+ * to normal lock enforcement. Also emits the StripeCustomersOutOfSync metric.
+ */
+async function resolveOrgSyncAndLockActions(params: {
+  orgId: string;
+  userId: string | undefined;
+  orgName: string | undefined;
+  stripeCustomerId: string;
+  isTrial: boolean;
+  aggregate: AggregateUsage;
+  meterCustomerMissing: boolean;
+}): Promise<{ orgSyncAction: string; lockAction: string }> {
+  const { orgId, userId, orgName, stripeCustomerId, isTrial, aggregate } = params;
+
+  let customerMissing = params.meterCustomerMissing;
+  let orgSyncAction: string;
+  if (customerMissing) {
+    orgSyncAction = 'skipped:customer-missing';
+  } else {
+    const syncResult = await syncOrgMetadata({
+      stripeCustomerId,
+      orgName,
+      currentStorageBytes: aggregate.currentStorageBytes,
+    });
+    orgSyncAction = syncResult.action;
+    customerMissing = syncResult.customerMissing;
+  }
+
+  const enforceLocks = () =>
+    resolveLockAction({
+      isTrial,
+      orgId,
+      currentStorageBytes: aggregate.currentStorageBytes,
+      totalEgressBytes: aggregate.totalEgressBytes,
+    });
+
+  if (!customerMissing) {
+    emitStripeCustomersOutOfSync(0);
+    return { orgSyncAction, lockAction: await enforceLocks() };
+  }
+
+  // The Stripe customer appears to be gone. Instead of the normal steps, try
+  // to reconcile our state (billing record + tenant status) with Stripe's —
+  // trial lock enforcement is moot for a tenant being disabled.
+  const heal = await healDeletedCustomer({ orgId, userId, stripeCustomerId });
+  emitStripeCustomersOutOfSync(heal.outOfSync);
+  // A null heal lockAction means the customer is alive (transient
+  // resource_missing), so this run must still enforce trial locks normally.
+  return {
+    orgSyncAction: heal.orgSyncAction,
+    lockAction: heal.lockAction ?? (await enforceLocks()),
   };
 }
 
@@ -354,7 +388,12 @@ async function healDeletedCustomer(params: {
   orgId: string;
   userId: string | undefined;
   stripeCustomerId: string;
-}): Promise<{ orgSyncAction: string; lockAction: string; outOfSync: 0 | 1 }> {
+}): Promise<{
+  orgSyncAction: string;
+  /** null → the customer turned out to be alive; run normal lock enforcement. */
+  lockAction: string | null;
+  outOfSync: 0 | 1;
+}> {
   const { orgId, userId, stripeCustomerId } = params;
 
   const verdict = await verifyCustomerDeleted(stripeCustomerId);
@@ -382,7 +421,7 @@ async function healDeletedCustomer(params: {
     );
     return {
       orgSyncAction: 'error:customer-missing-but-exists',
-      lockAction: 'skipped:customer-missing',
+      lockAction: null,
       outOfSync: 0,
     };
   }

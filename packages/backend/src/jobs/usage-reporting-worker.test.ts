@@ -581,9 +581,41 @@ describe('usage-reporting-worker', () => {
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
-      const item = auditItem();
-      expect(item.orgSyncAction).toEqual({ S: 'error:customer-missing-but-exists' });
+      expect(auditItem()).toEqual(
+        expect.objectContaining({
+          orgSyncAction: { S: 'error:customer-missing-but-exists' },
+          // Normal lock enforcement ran (paid subscription → skipped).
+          lockAction: { S: 'skipped:paid' },
+        }),
+      );
       // The customer is alive — nothing is out of sync.
+      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
+    });
+
+    it('still enforces trial locks when the customer exists despite a transient resource_missing', async () => {
+      const trialPayload: UsageReportingWorkerPayload = {
+        ...basePayload,
+        subscriptionStatus: 'trialing',
+      };
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }], // over limit
+        egress: [],
+      });
+      mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
+      mockVerifyCustomerDeleted.mockResolvedValue('exists');
+
+      await handler(trialPayload);
+
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith(
+        'aurora-tenant-123',
+        'write-locked',
+      );
+      expect(auditItem()).toEqual(
+        expect.objectContaining({
+          orgSyncAction: { S: 'error:customer-missing-but-exists' },
+          lockAction: { S: 'write-locked' },
+        }),
+      );
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
     });
 

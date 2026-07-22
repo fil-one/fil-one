@@ -197,6 +197,23 @@ describe('usage-reporting-orchestrator', () => {
     expect(payload.orgName).toBe('Org shared-org');
   });
 
+  it('omits userId when the record pk has an empty suffix (bare CUSTOMER#)', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [subscriptionItem('org-1', { pk: 'CUSTOMER#' })],
+    });
+    mockOrgNames(['org-1']);
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    const invokeCalls = lambdaMock.commandCalls(InvokeCommand);
+    expect(invokeCalls).toHaveLength(1);
+    const payload = JSON.parse(
+      Buffer.from(invokeCalls[0].args[0].input.Payload as Uint8Array).toString(),
+    );
+    expect(payload.userId).toBeUndefined();
+  });
+
   it('invokes worker even when the org has no profile (orgName undefined)', async () => {
     // Tenant resolution moved to the worker, so the orchestrator no longer
     // gates on provisioning state — every active org is handed off.
