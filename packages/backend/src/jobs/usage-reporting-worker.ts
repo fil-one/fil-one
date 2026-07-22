@@ -124,14 +124,13 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
             interval: '1d',
           });
         } catch (error) {
-          // Re-throw with the failing region/tenant attached — Promise.all only
-          // surfaces an index, and the escaping error is what the runtime logs.
-          // The underlying message is inlined because the runtime's error log
-          // doesn't reliably serialize `cause`.
-          throw new Error(
-            `Usage metrics fetch failed for org ${orgId} (region ${t.orchestrator.region}, tenantId ${t.tenantId}): ${error instanceof Error ? error.message : String(error)}`,
-            { cause: error },
-          );
+          // Attach the failing region/tenant to the error itself — Promise.all
+          // only surfaces an index, and the escaping error is what the runtime
+          // logs (enumerable own properties included).
+          if (error instanceof Error) {
+            Object.assign(error, { orgId, region: t.orchestrator.region, tenantId: t.tenantId });
+          }
+          throw error;
         }
       }),
     );
