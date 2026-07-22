@@ -281,7 +281,7 @@ async function reportStorageToStripe(params: {
         subscriptionId,
         stripeCustomerId,
         averageStorageGbUsed,
-        code: 'resource_missing',
+        code: (error as { code?: string }).code,
       });
       return { reported: false, customerMissing: true };
     }
@@ -329,7 +329,7 @@ async function syncOrgMetadata(params: {
     if (isStripeResourceMissing(error)) {
       console.warn('[usage-worker] Stripe customer missing — skipping org metadata sync', {
         stripeCustomerId: params.stripeCustomerId,
-        code: 'resource_missing',
+        code: (error as { code?: string }).code,
       });
       return { action: 'skipped:customer-missing', customerMissing: true };
     }
