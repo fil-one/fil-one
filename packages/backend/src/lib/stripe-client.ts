@@ -57,6 +57,8 @@ export function isStripeResourceMissing(err: unknown): boolean {
   );
 }
 
+export type CustomerExistence = 'deleted' | 'exists' | 'not-in-account';
+
 /**
  * Distinguishes a customer that existed and was deleted from an id this
  * Stripe account has never seen (wrong key/account/mode). Deleted customers
@@ -64,9 +66,7 @@ export function isStripeResourceMissing(err: unknown): boolean {
  * Returns 'exists' when the customer is alive — a resource_missing observed
  * elsewhere for it was transient/anomalous.
  */
-export async function verifyCustomerDeleted(
-  customerId: string,
-): Promise<'deleted' | 'exists' | 'not-in-account'> {
+export async function getCustomerExistence(customerId: string): Promise<CustomerExistence> {
   const stripe = getStripeClient();
   try {
     const customer = await stripe.customers.retrieve(customerId);

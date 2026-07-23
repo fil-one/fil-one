@@ -10,10 +10,10 @@ import {
   TenantStatus,
 } from '@filone/shared';
 import {
+  getCustomerExistence,
   getStripeClient,
   isStripeResourceMissing,
   updateCustomerMetadata,
-  verifyCustomerDeleted,
 } from '../lib/stripe-client.js';
 import { closeOutDeletedCustomer } from '../lib/deleted-customer-cleanup.js';
 import { emitStripeCustomersOutOfSync } from '../lib/usage-worker-metrics.js';
@@ -36,7 +36,7 @@ export interface UsageReportingWorkerPayload {
   /**
    * Key of the org's billing record (CUSTOMER#<userId>). Optional only for
    * payloads dispatched by a pre-upgrade orchestrator; without it the
-   * deleted-customer heal is skipped until the next daily run.
+   * deleted-customer reconciliation is skipped until the next daily run.
    */
   userId?: string;
   orgName?: string;
@@ -216,10 +216,11 @@ function aggregateUsageMetrics(usageMetrics: TenantUsageMetrics[]): AggregateUsa
 }
 
 /**
- * Runs the org metadata sync, deleted-customer healing, and trial-lock steps,
+ * Runs the org metadata sync, deleted-customer reconciliation, and trial-lock steps,
  * returning the audit actions. When Stripe reports the customer missing, the
- * heal path replaces the normal steps; a customer verified alive falls back
- * to normal lock enforcement. Also emits the StripeCustomersOutOfSync metric.
+ * reconciliation path replaces the normal steps; a customer verified alive
+ * falls back to normal lock enforcement. Also emits the
+ * StripeCustomersOutOfSync metric.
  */
 async function resolveOrgSyncAndLockActions(params: {
   orgId: string;
@@ -262,13 +263,13 @@ async function resolveOrgSyncAndLockActions(params: {
   // The Stripe customer appears to be gone. Instead of the normal steps, try
   // to reconcile our state (billing record + tenant status) with Stripe's —
   // trial lock enforcement is moot for a tenant being disabled.
-  const heal = await healDeletedCustomer({ orgId, userId, stripeCustomerId });
-  emitStripeCustomersOutOfSync(heal.outOfSync);
-  // A null heal lockAction means the customer is alive (transient
+  const reconciliation = await reconcileDeletedCustomer({ orgId, userId, stripeCustomerId });
+  emitStripeCustomersOutOfSync(reconciliation.outOfSync ? 1 : 0);
+  // A null lockAction means the customer is alive (transient
   // resource_missing), so this run must still enforce trial locks normally.
   return {
-    orgSyncAction: heal.orgSyncAction,
-    lockAction: heal.lockAction ?? (await enforceLocks()),
+    orgSyncAction: reconciliation.orgSyncAction,
+    lockAction: reconciliation.lockAction ?? (await enforceLocks()),
   };
 }
 
@@ -379,12 +380,12 @@ async function syncOrgMetadata(params: {
  * Reconciles our state with Stripe after a resource_missing signal: when the
  * customer is confirmed deleted, disables the tenant in every provisioned
  * region and marks the billing record canceled, taking the org out of future
- * usage-reporting runs. The customers.retrieve verification is load-bearing:
+ * usage-reporting runs. The getCustomerExistence verification is load-bearing:
  * a customer this account has never seen (plain 404 instead of a
- * deleted-stub) points at a key/account misconfiguration where mass-healing
- * would wrongly disable every tenant — refuse and alert instead.
+ * deleted-stub) points at a key/account misconfiguration where blindly
+ * reconciling would wrongly disable every tenant — refuse and alert instead.
  */
-async function healDeletedCustomer(params: {
+async function reconcileDeletedCustomer(params: {
   orgId: string;
   userId: string | undefined;
   stripeCustomerId: string;
@@ -392,27 +393,29 @@ async function healDeletedCustomer(params: {
   orgSyncAction: string;
   /** null → the customer turned out to be alive; run normal lock enforcement. */
   lockAction: string | null;
-  outOfSync: 0 | 1;
+  /** true when the customer is still missing and its state was NOT reconciled this run. */
+  outOfSync: boolean;
 }> {
   const { orgId, userId, stripeCustomerId } = params;
 
-  const verdict = await verifyCustomerDeleted(stripeCustomerId);
-  if (verdict === 'not-in-account') {
+  const existence = await getCustomerExistence(stripeCustomerId);
+  if (existence === 'not-in-account') {
     console.error(
-      '[usage-worker] Stripe customer not found in this account — refusing to self-heal; check the configured Stripe key/account',
+      '[usage-worker] Stripe customer not found in this account — refusing to reconcile; check the configured Stripe key/account',
       { orgId, userId, stripeCustomerId },
     );
     return {
       orgSyncAction: 'error:customer-not-in-account',
       lockAction: 'skipped:customer-missing',
-      outOfSync: 1,
+      outOfSync: true,
     };
   }
-  if (verdict === 'exists') {
+  if (existence === 'exists') {
     // The resource_missing that got us here was transient/anomalous; the
-    // customer is alive, so there is nothing to heal and nothing out of sync.
+    // customer is alive, so there is nothing to reconcile and nothing out of
+    // sync.
     console.warn(
-      '[usage-worker] Stripe reported the customer missing but it exists — not healing',
+      '[usage-worker] Stripe reported the customer missing but it exists — skipping reconciliation',
       {
         orgId,
         userId,
@@ -422,19 +425,19 @@ async function healDeletedCustomer(params: {
     return {
       orgSyncAction: 'error:customer-missing-but-exists',
       lockAction: null,
-      outOfSync: 0,
+      outOfSync: false,
     };
   }
 
   if (!userId) {
     console.warn(
-      '[usage-worker] Customer deleted but payload has no userId — heal deferred to the next run',
+      '[usage-worker] Customer deleted but payload has no userId — reconciliation deferred to the next run',
       { orgId, stripeCustomerId },
     );
     return {
-      orgSyncAction: 'error:heal-skipped-no-user-id',
+      orgSyncAction: 'error:reconcile-skipped-no-user-id',
       lockAction: 'skipped:customer-missing',
-      outOfSync: 1,
+      outOfSync: true,
     };
   }
 
@@ -445,20 +448,20 @@ async function healDeletedCustomer(params: {
     // and retries the failed regions.
     const failedRegions = failed.map((o) => o.orchestratorId).join(',');
     return {
-      orgSyncAction: `heal-failed:${failedRegions}`,
+      orgSyncAction: `reconcile-failed:${failedRegions}`,
       lockAction: `error:sync-failed:${failedRegions}`,
-      outOfSync: 1,
+      outOfSync: true,
     };
   }
 
-  console.log('[usage-worker] Healed deleted Stripe customer', {
+  console.log('[usage-worker] Reconciled deleted Stripe customer', {
     orgId,
     userId,
     stripeCustomerId,
     regions: outcomes.map((o) => ({ orchestratorId: o.orchestratorId, outcome: o.outcome })),
   });
-  // The heal disabled the tenant in every provisioned region.
-  return { orgSyncAction: 'healed:customer-deleted', lockAction: 'disabled', outOfSync: 0 };
+  // The reconciliation disabled the tenant in every provisioned region.
+  return { orgSyncAction: 'reconciled:customer-deleted', lockAction: 'disabled', outOfSync: false };
 }
 
 async function writeUsageAuditRecord(params: {

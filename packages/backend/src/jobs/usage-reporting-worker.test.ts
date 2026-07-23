@@ -18,7 +18,7 @@ vi.mock('sst', () => ({
 
 const mockMeterEventsCreate = vi.fn().mockResolvedValue({});
 const mockCustomersUpdate = vi.fn().mockResolvedValue({});
-const mockVerifyCustomerDeleted = vi.hoisted(() => vi.fn());
+const mockGetCustomerExistence = vi.hoisted(() => vi.fn());
 vi.mock('../lib/stripe-client.js', () => ({
   getStripeClient: () => ({
     billing: {
@@ -32,7 +32,7 @@ vi.mock('../lib/stripe-client.js', () => ({
     typeof err === 'object' &&
     err !== null &&
     (err as { code?: string }).code === 'resource_missing',
-  verifyCustomerDeleted: (...args: unknown[]) => mockVerifyCustomerDeleted(...args),
+  getCustomerExistence: (...args: unknown[]) => mockGetCustomerExistence(...args),
 }));
 
 const mockEmitStripeCustomersOutOfSync = vi.hoisted(() => vi.fn());
@@ -126,7 +126,7 @@ describe('usage-reporting-worker', () => {
     vi.clearAllMocks();
     ddbMock.on(PutItemCommand).resolves({});
     ddbMock.on(UpdateItemCommand).resolves({});
-    mockVerifyCustomerDeleted.mockResolvedValue('deleted');
+    mockGetCustomerExistence.mockResolvedValue('deleted');
     mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
     // Default: org provisioned in Aurora only (mirrors the previous Aurora-only basePayload).
     mockAuroraIsTenantReady.mockReturnValue('aurora-tenant-123');
@@ -451,7 +451,7 @@ describe('usage-reporting-worker', () => {
 
       await handler(trialPayload);
 
-      // The heal path disables the tenant outright — never the trial write-lock.
+      // The reconciliation path disables the tenant outright — never the trial write-lock.
       expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
       expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalledWith(
         'aurora-tenant-123',
@@ -480,9 +480,9 @@ describe('usage-reporting-worker', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Self-healing — customer deleted in Stripe but our records still live
+  // Reconciliation — customer deleted in Stripe but our records still live
   // -----------------------------------------------------------------------
-  describe('self-healing when the Stripe customer was deleted', () => {
+  describe('reconciliation when the Stripe customer was deleted', () => {
     const oneTbUsage = {
       storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
       egress: [],
@@ -500,14 +500,14 @@ describe('usage-reporting-worker', () => {
       return putCalls[0].args[0].input.Item!;
     }
 
-    it('verifies deletion, disables tenants, cancels the record, audits healed', async () => {
+    it('verifies deletion, disables tenants, cancels the record, audits reconciled', async () => {
       mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
-      mockVerifyCustomerDeleted.mockResolvedValue('deleted');
+      mockGetCustomerExistence.mockResolvedValue('deleted');
 
       await handler(basePayload);
 
-      expect(mockVerifyCustomerDeleted).toHaveBeenCalledWith('cus_123');
+      expect(mockGetCustomerExistence).toHaveBeenCalledWith('cus_123');
       expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -524,8 +524,8 @@ describe('usage-reporting-worker', () => {
 
       expect(auditItem()).toEqual(
         expect.objectContaining({
-          orgSyncAction: { S: 'healed:customer-deleted' },
-          // The heal disabled the tenant in all provisioned regions.
+          orgSyncAction: { S: 'reconciled:customer-deleted' },
+          // The reconciliation disabled the tenant in all provisioned regions.
           lockAction: { S: 'disabled' },
           reportedToStripe: { BOOL: false },
         }),
@@ -533,17 +533,17 @@ describe('usage-reporting-worker', () => {
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
     });
 
-    it('heals when the metadata sync (not the meter event) reports the customer missing', async () => {
+    it('reconciles when the metadata sync (not the meter event) reports the customer missing', async () => {
       mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
       mockCustomersUpdate.mockRejectedValueOnce(makeResourceMissingError());
-      mockVerifyCustomerDeleted.mockResolvedValue('deleted');
+      mockGetCustomerExistence.mockResolvedValue('deleted');
 
       await handler(basePayload);
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
       expect(auditItem()).toEqual(
         expect.objectContaining({
-          orgSyncAction: { S: 'healed:customer-deleted' },
+          orgSyncAction: { S: 'reconciled:customer-deleted' },
           lockAction: { S: 'disabled' },
           // The meter event succeeded before the metadata sync failed.
           reportedToStripe: { BOOL: true },
@@ -552,11 +552,11 @@ describe('usage-reporting-worker', () => {
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
     });
 
-    it('refuses to heal when the customer never existed in this account', async () => {
+    it('refuses to reconcile when the customer never existed in this account', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
-      mockVerifyCustomerDeleted.mockResolvedValue('not-in-account');
+      mockGetCustomerExistence.mockResolvedValue('not-in-account');
 
       await handler(basePayload);
 
@@ -566,16 +566,16 @@ describe('usage-reporting-worker', () => {
       expect(item.orgSyncAction).toEqual({ S: 'error:customer-not-in-account' });
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(1);
       expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('refusing to self-heal'),
+        expect.stringContaining('refusing to reconcile'),
         expect.objectContaining({ orgId: 'org-1', stripeCustomerId: 'cus_123' }),
       );
       errorSpy.mockRestore();
     });
 
-    it('does not heal when the customer actually exists (transient resource_missing)', async () => {
+    it('does not reconcile when the customer actually exists (transient resource_missing)', async () => {
       mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
-      mockVerifyCustomerDeleted.mockResolvedValue('exists');
+      mockGetCustomerExistence.mockResolvedValue('exists');
 
       await handler(basePayload);
 
@@ -602,7 +602,7 @@ describe('usage-reporting-worker', () => {
         egress: [],
       });
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
-      mockVerifyCustomerDeleted.mockResolvedValue('exists');
+      mockGetCustomerExistence.mockResolvedValue('exists');
 
       await handler(trialPayload);
 
@@ -619,25 +619,25 @@ describe('usage-reporting-worker', () => {
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
     });
 
-    it('defers the heal when the payload has no userId (pre-upgrade orchestrator)', async () => {
+    it('defers the reconciliation when the payload has no userId (pre-upgrade orchestrator)', async () => {
       mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
-      mockVerifyCustomerDeleted.mockResolvedValue('deleted');
+      mockGetCustomerExistence.mockResolvedValue('deleted');
 
       await handler({ ...basePayload, userId: undefined });
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
       const item = auditItem();
-      expect(item.orgSyncAction).toEqual({ S: 'error:heal-skipped-no-user-id' });
+      expect(item.orgSyncAction).toEqual({ S: 'error:reconcile-skipped-no-user-id' });
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(1);
     });
 
-    it('records heal-failed and leaves the record intact when a region fails to disable', async () => {
+    it('records reconcile-failed and leaves the record intact when a region fails to disable', async () => {
       vi.useFakeTimers();
       mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
       mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
-      mockVerifyCustomerDeleted.mockResolvedValue('deleted');
+      mockGetCustomerExistence.mockResolvedValue('deleted');
       // Fail every retry so the status-sync retry budget is exhausted.
       mockAuroraUpdateTenantStatus.mockRejectedValue(new Error('Aurora down'));
 
@@ -648,7 +648,7 @@ describe('usage-reporting-worker', () => {
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(auditItem()).toEqual(
         expect.objectContaining({
-          orgSyncAction: { S: 'heal-failed:aurora' },
+          orgSyncAction: { S: 'reconcile-failed:aurora' },
           lockAction: { S: 'error:sync-failed:aurora' },
         }),
       );
@@ -660,7 +660,7 @@ describe('usage-reporting-worker', () => {
 
       await handler(basePayload);
 
-      expect(mockVerifyCustomerDeleted).not.toHaveBeenCalled();
+      expect(mockGetCustomerExistence).not.toHaveBeenCalled();
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledTimes(1);
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
     });
