@@ -1,9 +1,4 @@
-import {
-  DeleteItemCommand,
-  GetItemCommand,
-  PutItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { DeleteItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
@@ -15,6 +10,10 @@ import {
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import {
+  closeOutDeletedCustomer,
+  resolveOrgIdFromSubscription,
+} from '../lib/deleted-customer-cleanup.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
@@ -164,25 +163,6 @@ function getCustomerIdString(customer: string | Stripe.Customer | Stripe.Deleted
   return typeof customer === 'string' ? customer : customer.id;
 }
 
-async function resolveOrgId(userId: string, tableName: string): Promise<string | null> {
-  const billingResult = await dynamo.send(
-    new GetItemCommand({
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-      ProjectionExpression: 'orgId',
-    }),
-  );
-  const orgId = billingResult.Item?.orgId?.S;
-  if (!orgId) {
-    console.warn('[stripe-webhook] No orgId on billing record for user:', userId);
-    return null;
-  }
-  return orgId;
-}
-
 async function handleCustomerUpdated(tableName: string, customer: Stripe.Customer): Promise<void> {
   const userId = customer.metadata?.userId;
   if (!userId) {
@@ -244,38 +224,24 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
   // Disable immediately — no grace period. Tenants first; a failed region throws so the
   // webhook returns 500 and Stripe retries (there is no cron fallback for canceled records).
   // The sync is probe-first, so a retry skips regions that are already disabled.
-  const orgId = await resolveOrgId(userId, tableName);
-  if (orgId) {
-    assertRegionSyncSucceeded(
-      await syncTenantStatusInProvisionedRegions(orgId, 'disabled', WEBHOOK_STATUS_SYNC_RETRY),
-    );
-    console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
-      userId,
-      orgId,
-    });
-  } else {
+  const orgId = await resolveOrgIdFromSubscription(userId);
+  if (!orgId) {
     console.warn('[stripe-webhook] customer.deleted: no tenant to disable', {
       userId,
       customerId: customer.id,
     });
   }
 
-  const now = new Date();
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: tableName,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-      UpdateExpression:
-        'SET subscriptionStatus = :status, canceledAt = :now, updatedAt = :now REMOVE gracePeriodEndsAt',
-      ExpressionAttributeValues: {
-        ':status': { S: SubscriptionStatus.Canceled },
-        ':now': { S: now.toISOString() },
-      },
-    }),
+  assertRegionSyncSucceeded(
+    await closeOutDeletedCustomer({ userId, orgId, retry: WEBHOOK_STATUS_SYNC_RETRY }),
   );
+  if (orgId) {
+    console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
+      userId,
+      orgId,
+      customerId: customer.id,
+    });
+  }
 
   emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
@@ -304,7 +270,10 @@ async function handleSubscriptionUpdate(
     const stripe = getStripeClient();
     const customer = await stripe.customers.retrieve(customerId);
     if ('deleted' in customer && customer.deleted) {
-      console.warn('[stripe-webhook] Customer deleted, skipping subscription update');
+      console.warn('[stripe-webhook] Customer deleted, skipping subscription update', {
+        customerId,
+        subscriptionId: subscription.id,
+      });
       return;
     }
     const metaUserId = customer.metadata?.userId;
@@ -356,7 +325,34 @@ async function handleSubscriptionDeleted(
   const stripe = getStripeClient();
   const customerId = getCustomerIdString(subscription.customer);
   const customer = await stripe.customers.retrieve(customerId);
-  if ('deleted' in customer && customer.deleted) return;
+  if ('deleted' in customer && customer.deleted) {
+    // The customer is gone (deleted before/with this cancellation), so there
+    // is no grace period to grant — close out the record the same way
+    // customer.deleted does. This is the fallback when the customer.deleted
+    // event itself was never delivered (e.g. the endpoint was not subscribed
+    // to it at the time).
+    const userId = subscription.metadata?.userId;
+    if (!userId) {
+      throw new Error(
+        `[stripe-webhook] subscription.deleted for deleted customer ${customerId} has no metadata.userId; cannot close out billing record`,
+      );
+    }
+    const orgId = await resolveOrgIdFromSubscription(userId);
+    assertRegionSyncSucceeded(
+      await closeOutDeletedCustomer({ userId, orgId, retry: WEBHOOK_STATUS_SYNC_RETRY }),
+    );
+    console.log(
+      '[stripe-webhook] Billing record closed out (subscription.deleted, customer deleted)',
+      {
+        userId,
+        orgId,
+        customerId,
+        subscriptionId: subscription.id,
+      },
+    );
+    emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
+    return;
+  }
 
   const userId = customer.metadata?.userId;
   if (!userId) return;
@@ -397,7 +393,7 @@ async function handleSubscriptionDeleted(
   // attempt WRITE_LOCK for active grace periods missing it. The sync never
   // downgrades a tenant that is already disabled.
   try {
-    const orgId = await resolveOrgId(userId, tableName);
+    const orgId = await resolveOrgIdFromSubscription(userId);
     if (orgId) {
       assertRegionSyncSucceeded(
         await syncTenantStatusInProvisionedRegions(
@@ -458,7 +454,7 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   // PastDue/GracePeriod. If this fails, the tenant may remain locked until
   // manual intervention.
   try {
-    const orgId = await resolveOrgId(userId, tableName);
+    const orgId = await resolveOrgIdFromSubscription(userId);
     if (orgId) {
       assertRegionSyncSucceeded(
         await syncTenantStatusInProvisionedRegions(orgId, 'active', WEBHOOK_STATUS_SYNC_RETRY),

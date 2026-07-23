@@ -11,6 +11,8 @@ const lambda = new LambdaClient({});
 
 interface SubscriptionRecord {
   orgId: string;
+  /** From the record pk (CUSTOMER#<userId>); lets the worker close out the record when self-healing. */
+  userId?: string;
   subscriptionId: string;
   stripeCustomerId: string;
   currentPeriodStart: string;
@@ -53,6 +55,7 @@ export async function handler(): Promise<void> {
 
     const payload: UsageReportingWorkerPayload = {
       orgId: record.orgId,
+      userId: record.userId,
       orgName,
       subscriptionId: record.subscriptionId,
       stripeCustomerId: record.stripeCustomerId,
@@ -121,6 +124,7 @@ async function scanActiveSubscriptionRecords(
 
       records.push({
         orgId: record.orgId,
+        userId: extractUserIdFromBillingRecordPK(record.pk),
         subscriptionId: record.subscriptionId,
         stripeCustomerId: record.stripeCustomerId,
         currentPeriodStart: record.currentPeriodStart,
@@ -132,6 +136,17 @@ async function scanActiveSubscriptionRecords(
   } while (lastEvaluatedKey);
 
   return records;
+}
+
+/** userId from a billing record pk (CUSTOMER#<userId>); undefined for unexpected shapes. */
+function extractUserIdFromBillingRecordPK(pk: unknown): string | undefined {
+  const userId =
+    typeof pk === 'string' && pk.startsWith('CUSTOMER#') ? pk.slice('CUSTOMER#'.length) : '';
+  if (!userId) {
+    console.warn('[usage-orchestrator] Unexpected billing record pk shape', { pk });
+    return undefined;
+  }
+  return userId;
 }
 
 /** Best-effort org name for Stripe metadata sync; `undefined` if the org has no profile/name. */

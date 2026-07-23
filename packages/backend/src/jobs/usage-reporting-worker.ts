@@ -9,7 +9,14 @@ import {
   formatBytes,
   TenantStatus,
 } from '@filone/shared';
-import { getStripeClient, updateCustomerMetadata } from '../lib/stripe-client.js';
+import {
+  getCustomerExistence,
+  getStripeClient,
+  isStripeResourceMissing,
+  updateCustomerMetadata,
+} from '../lib/stripe-client.js';
+import { closeOutDeletedCustomer } from '../lib/deleted-customer-cleanup.js';
+import { emitStripeCustomersOutOfSync } from '../lib/usage-worker-metrics.js';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.js';
 import {
   calculateAverageUsage,
@@ -26,6 +33,12 @@ const dynamo = getDynamoClient();
 
 export interface UsageReportingWorkerPayload {
   orgId: string;
+  /**
+   * Key of the org's billing record (CUSTOMER#<userId>). Optional only for
+   * payloads dispatched by a pre-upgrade orchestrator; without it the
+   * deleted-customer reconciliation is skipped until the next daily run.
+   */
+  userId?: string;
   orgName?: string;
   subscriptionId: string;
   stripeCustomerId: string;
@@ -86,6 +99,7 @@ async function enforceTenantLocks({
 export async function handler(event: UsageReportingWorkerPayload): Promise<void> {
   const {
     orgId,
+    userId,
     orgName,
     subscriptionId,
     stripeCustomerId,
@@ -150,7 +164,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   const aggregate = aggregateUsageMetrics(usageMetrics);
   const averageStorageGbUsed = aggregate.averageStorageBytesUsed / GB_BYTES;
 
-  const { reported } = await reportStorageToStripe({
+  const meterResult = await reportStorageToStripe({
     orgId,
     subscriptionId,
     stripeCustomerId,
@@ -158,17 +172,14 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     meterEventName,
   });
 
-  const orgSyncAction = await syncOrgMetadata({
-    stripeCustomerId,
-    orgName,
-    currentStorageBytes: aggregate.currentStorageBytes,
-  });
-
-  const lockAction = await resolveLockAction({
-    isTrial,
+  const { orgSyncAction, lockAction } = await resolveOrgSyncAndLockActions({
     orgId,
-    currentStorageBytes: aggregate.currentStorageBytes,
-    totalEgressBytes: aggregate.totalEgressBytes,
+    userId,
+    orgName,
+    stripeCustomerId,
+    isTrial,
+    aggregate,
+    meterCustomerMissing: meterResult.customerMissing,
   });
 
   await writeUsageAuditRecord({
@@ -183,7 +194,7 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
     totalEgressBytes: aggregate.totalEgressBytes,
     sampleCount: aggregate.sampleCount,
     lockAction,
-    reportedToStripe: reported,
+    reportedToStripe: meterResult.reported,
     orgSyncAction,
   });
 }
@@ -215,6 +226,64 @@ function aggregateUsageMetrics(usageMetrics: TenantUsageMetrics[]): AggregateUsa
 }
 
 /**
+ * Runs the org metadata sync, deleted-customer reconciliation, and trial-lock steps,
+ * returning the audit actions. When Stripe reports the customer missing, the
+ * reconciliation path replaces the normal steps; a customer verified alive
+ * falls back to normal lock enforcement. Also emits the
+ * StripeCustomersOutOfSync metric.
+ */
+async function resolveOrgSyncAndLockActions(params: {
+  orgId: string;
+  userId: string | undefined;
+  orgName: string | undefined;
+  stripeCustomerId: string;
+  isTrial: boolean;
+  aggregate: AggregateUsage;
+  meterCustomerMissing: boolean;
+}): Promise<{ orgSyncAction: string; lockAction: string }> {
+  const { orgId, userId, orgName, stripeCustomerId, isTrial, aggregate } = params;
+
+  let customerMissing = params.meterCustomerMissing;
+  let orgSyncAction: string;
+  if (customerMissing) {
+    orgSyncAction = 'skipped:customer-missing';
+  } else {
+    const syncResult = await syncOrgMetadata({
+      stripeCustomerId,
+      orgName,
+      currentStorageBytes: aggregate.currentStorageBytes,
+    });
+    orgSyncAction = syncResult.action;
+    customerMissing = syncResult.customerMissing;
+  }
+
+  const enforceLocks = () =>
+    resolveLockAction({
+      isTrial,
+      orgId,
+      currentStorageBytes: aggregate.currentStorageBytes,
+      totalEgressBytes: aggregate.totalEgressBytes,
+    });
+
+  if (!customerMissing) {
+    emitStripeCustomersOutOfSync(0);
+    return { orgSyncAction, lockAction: await enforceLocks() };
+  }
+
+  // The Stripe customer appears to be gone. Instead of the normal steps, try
+  // to reconcile our state (billing record + tenant status) with Stripe's —
+  // trial lock enforcement is moot for a tenant being disabled.
+  const reconciliation = await reconcileDeletedCustomer({ orgId, userId, stripeCustomerId });
+  emitStripeCustomersOutOfSync(reconciliation.outOfSync ? 1 : 0);
+  // A null lockAction means the customer is alive (transient
+  // resource_missing), so this run must still enforce trial locks normally.
+  return {
+    orgSyncAction: reconciliation.orgSyncAction,
+    lockAction: reconciliation.lockAction ?? (await enforceLocks()),
+  };
+}
+
+/**
  * Trial lock enforcement applies to every provisioned region. Each region's
  * live status is probed via its own orchestrator and reconciled with the
  * desired status (syncTenantStatusInProvisionedRegions), so partial failures
@@ -230,19 +299,15 @@ async function resolveLockAction(params: {
   return safeEnforceTrialLocks(params);
 }
 
-// Stripe SDK errors expose `code` on the error object; matches StripeInvalidRequestError 404s.
-const isStripeResourceMissing = (err: unknown): boolean =>
-  typeof err === 'object' && err !== null && (err as { code?: string }).code === 'resource_missing';
-
 async function reportStorageToStripe(params: {
   orgId: string;
   subscriptionId: string;
   stripeCustomerId: string;
   averageStorageGbUsed: number;
   meterEventName: string;
-}): Promise<{ reported: boolean }> {
+}): Promise<{ reported: boolean; customerMissing: boolean }> {
   const { orgId, subscriptionId, stripeCustomerId, averageStorageGbUsed, meterEventName } = params;
-  if (averageStorageGbUsed <= 0) return { reported: false };
+  if (averageStorageGbUsed <= 0) return { reported: false, customerMissing: false };
 
   const stripe = getStripeClient();
   try {
@@ -261,9 +326,9 @@ async function reportStorageToStripe(params: {
         subscriptionId,
         stripeCustomerId,
         averageStorageGbUsed,
-        code: 'resource_missing',
+        code: (error as { code?: string }).code,
       });
-      return { reported: false };
+      return { reported: false, customerMissing: true };
     }
     throw error;
   }
@@ -271,7 +336,7 @@ async function reportStorageToStripe(params: {
     stripeCustomerId,
     averageStorageGbUsed,
   });
-  return { reported: true };
+  return { reported: true, customerMissing: false };
 }
 
 async function safeEnforceTrialLocks(params: {
@@ -294,22 +359,119 @@ async function syncOrgMetadata(params: {
   stripeCustomerId: string;
   orgName: string | undefined;
   currentStorageBytes: number;
-}): Promise<string> {
-  if (!params.orgName && params.currentStorageBytes === 0) return 'skipped:nothing-to-sync';
+}): Promise<{ action: string; customerMissing: boolean }> {
+  if (!params.orgName && params.currentStorageBytes === 0) {
+    return { action: 'skipped:nothing-to-sync', customerMissing: false };
+  }
   try {
     const metadata: Record<string, string> = {
       [STRIPE_METADATA_KEYS.storageUsed]: formatBytes(params.currentStorageBytes),
     };
     if (params.orgName) metadata[STRIPE_METADATA_KEYS.organizationName] = params.orgName;
     await updateCustomerMetadata(params.stripeCustomerId, metadata);
-    return 'ok';
+    return { action: 'ok', customerMissing: false };
   } catch (error) {
+    if (isStripeResourceMissing(error)) {
+      console.warn('[usage-worker] Stripe customer missing — skipping org metadata sync', {
+        stripeCustomerId: params.stripeCustomerId,
+        code: (error as { code?: string }).code,
+      });
+      return { action: 'skipped:customer-missing', customerMissing: true };
+    }
     console.error('[usage-worker] Failed to sync org metadata', {
       stripeCustomerId: params.stripeCustomerId,
       error,
     });
-    return `error:${(error as Error).message}`;
+    return { action: `error:${(error as Error).message}`, customerMissing: false };
   }
+}
+
+/**
+ * Reconciles our state with Stripe after a resource_missing signal: when the
+ * customer is confirmed deleted, disables the tenant in every provisioned
+ * region and marks the billing record canceled, taking the org out of future
+ * usage-reporting runs. The getCustomerExistence verification is load-bearing:
+ * a customer this account has never seen (plain 404 instead of a
+ * deleted-stub) points at a key/account misconfiguration where blindly
+ * reconciling would wrongly disable every tenant — refuse and alert instead.
+ */
+async function reconcileDeletedCustomer(params: {
+  orgId: string;
+  userId: string | undefined;
+  stripeCustomerId: string;
+}): Promise<{
+  orgSyncAction: string;
+  /** null → the customer turned out to be alive; run normal lock enforcement. */
+  lockAction: string | null;
+  /** true when the customer is still missing and its state was NOT reconciled this run. */
+  outOfSync: boolean;
+}> {
+  const { orgId, userId, stripeCustomerId } = params;
+
+  const existence = await getCustomerExistence(stripeCustomerId);
+  if (existence === 'not-in-account') {
+    console.error(
+      '[usage-worker] Stripe customer not found in this account — refusing to reconcile; check the configured Stripe key/account',
+      { orgId, userId, stripeCustomerId },
+    );
+    return {
+      orgSyncAction: 'error:customer-not-in-account',
+      lockAction: 'skipped:customer-missing',
+      outOfSync: true,
+    };
+  }
+  if (existence === 'exists') {
+    // The resource_missing that got us here was transient/anomalous; the
+    // customer is alive, so there is nothing to reconcile and nothing out of
+    // sync.
+    console.warn(
+      '[usage-worker] Stripe reported the customer missing but it exists — skipping reconciliation',
+      {
+        orgId,
+        userId,
+        stripeCustomerId,
+      },
+    );
+    return {
+      orgSyncAction: 'error:customer-missing-but-exists',
+      lockAction: null,
+      outOfSync: false,
+    };
+  }
+
+  if (!userId) {
+    console.warn(
+      '[usage-worker] Customer deleted but payload has no userId — reconciliation deferred to the next run',
+      { orgId, stripeCustomerId },
+    );
+    return {
+      orgSyncAction: 'error:reconcile-skipped-no-user-id',
+      lockAction: 'skipped:customer-missing',
+      outOfSync: true,
+    };
+  }
+
+  const outcomes = await closeOutDeletedCustomer({ userId, orgId });
+  const failed = outcomes.filter((o) => o.outcome === 'error');
+  if (failed.length > 0) {
+    // Record left non-canceled on purpose: tomorrow's run re-enters this path
+    // and retries the failed regions.
+    const failedRegions = failed.map((o) => o.orchestratorId).join(',');
+    return {
+      orgSyncAction: `reconcile-failed:${failedRegions}`,
+      lockAction: `error:sync-failed:${failedRegions}`,
+      outOfSync: true,
+    };
+  }
+
+  console.log('[usage-worker] Reconciled deleted Stripe customer', {
+    orgId,
+    userId,
+    stripeCustomerId,
+    regions: outcomes.map((o) => ({ orchestratorId: o.orchestratorId, outcome: o.outcome })),
+  });
+  // The reconciliation disabled the tenant in every provisioned region.
+  return { orgSyncAction: 'reconciled:customer-deleted', lockAction: 'disabled', outOfSync: false };
 }
 
 async function writeUsageAuditRecord(params: {
