@@ -155,7 +155,7 @@ export function ObjectDetailPage({
 
   // Pull version history from the bucket object listing cache (no extra fetch)
   const cachedVersions = queryClient.getQueryData<ListObjectVersionsResponse>(
-    queryKeys.objects(bucketName),
+    queryKeys.objects(bucketName, region),
   );
   const objectVersions = (cachedVersions?.versions ?? []).filter((v) => v.key === objectKey);
 

@@ -46,6 +46,14 @@ function groupVersionsByKey(versions: S3ObjectVersion[]): VersionGroup[] {
   });
 }
 
+/**
+ * Count distinct object keys in a flat list of versions. Shares grouping logic
+ * with the browser so the count always matches the rendered rows.
+ */
+export function countObjects(versions: S3ObjectVersion[]): number {
+  return groupVersionsByKey(versions).length;
+}
+
 type BrowseEntry =
   | { kind: 'folder'; name: string; prefix: string }
   | { kind: 'object'; name: string; group: VersionGroup };

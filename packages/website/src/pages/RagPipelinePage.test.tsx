@@ -33,6 +33,13 @@ vi.mock('../lib/rag-bucket-api.js', async (importOriginal) => ({
   queryBucket: (...a: unknown[]) => mockQueryBucket(...a),
 }));
 
+const mockListRagApiKeys = vi.fn();
+
+vi.mock('../lib/rag-api-keys-api.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/rag-api-keys-api.js')>()),
+  listRagApiKeys: (...a: unknown[]) => mockListRagApiKeys(...a),
+}));
+
 import { RagPipelinePage } from './RagPipelinePage.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -123,6 +130,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockListBuckets.mockResolvedValue(BUCKETS);
   mockGetEnabled.mockImplementation(async (name: string) => ENABLEMENT[name]);
+  mockListRagApiKeys.mockResolvedValue({ keys: [] });
   mockQueryBucket.mockResolvedValue({
     answer: 'The default retention period is 90 days for standard objects.',
     sources: ['policies/data-retention.pdf', 'governance-whitepaper.pdf'],
@@ -198,10 +206,9 @@ describe('RagPipelinePage — Buckets tab', () => {
     await screen.findByText('marketing-assets');
     // The disabled bucket exposes an "Index" action.
     fireEvent.click(screen.getByRole('button', { name: 'Index' }));
-
-    // Confirm modal opens with pricing + an Enable button.
-    expect(await screen.findByText('Enable RAG Pipeline?')).toBeInTheDocument();
-    expect(screen.getByText('$15 / TB / month')).toBeInTheDocument();
+    // Confirm modal opens with an Enable button — and no pricing.
+    expect(await screen.findByText('Enable Bucket Intelligence?')).toBeInTheDocument();
+    expect(screen.queryByText(/\$15/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
 
     await waitFor(() =>
@@ -225,7 +232,7 @@ describe('RagPipelinePage — Buckets tab', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Disable' }));
 
     // Confirm modal opens; confirm the disable.
-    expect(await screen.findByText('Disable RAG Pipeline?')).toBeInTheDocument();
+    expect(await screen.findByText('Disable Bucket Intelligence?')).toBeInTheDocument();
     const dialog = screen.getByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Disable' }));
 
@@ -318,10 +325,48 @@ describe('RagPipelinePage — Integrate tab', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Integrate' }));
 
     expect(await screen.findByText('Query API')).toBeInTheDocument();
-    expect(screen.getByText(/POST \/api\/buckets\/.+\/query\?region=/)).toBeInTheDocument();
+    // Full-URL curl sample with bearer auth (jsdom origin = http://localhost:3000).
+    expect(
+      screen.getByText(/curl -X POST "http:\/\/localhost:3000\/api\/buckets\/.+\/query\?region=/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Authorization: Bearer \$FILONE_RAG_KEY/)).toBeInTheDocument();
 
     expect(screen.getByText('MCP endpoint')).toBeInTheDocument();
     expect(screen.getByText('Coming later')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// API Keys tab
+// ---------------------------------------------------------------------------
+
+describe('RagPipelinePage — API Keys tab', () => {
+  it('renders the tab and mounts the keys panel', async () => {
+    renderPage();
+    await screen.findByText('my-docs-bucket');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'API Keys' }));
+
+    expect(await screen.findByTestId('rag-api-keys-tab')).toBeInTheDocument();
+    expect(mockListRagApiKeys).toHaveBeenCalled();
+    expect(await screen.findByTestId('rag-api-keys-empty')).toBeInTheDocument();
+  });
+
+  it('shows the API key count in the stats grid instead of pricing', async () => {
+    mockListRagApiKeys.mockResolvedValue({
+      keys: [
+        { id: 'k1', keyName: 'a', keyPrefix: 'sk_rag_a', bucketScope: 'all', createdAt: '' },
+        { id: 'k2', keyName: 'b', keyPrefix: 'sk_rag_b', bucketScope: 'all', createdAt: '' },
+      ],
+    });
+    renderPage();
+    await screen.findByText('my-docs-bucket');
+
+    const stats = screen.getByTestId('rag-pipeline-stats');
+    expect(await within(stats).findByText('API keys')).toBeInTheDocument();
+    expect(within(stats).getByText('2')).toBeInTheDocument();
+    expect(within(stats).queryByText('Pricing')).not.toBeInTheDocument();
+    expect(within(stats).queryByText(/\$15/)).not.toBeInTheDocument();
   });
 });
 
@@ -349,7 +394,7 @@ describe('RagPipelinePage — access gate', () => {
     );
 
     expect(
-      await screen.findByText('RAG Pipeline is not available for your account.'),
+      await screen.findByText('Bucket Intelligence is not available for your account.'),
     ).toBeInTheDocument();
     expect(mockListBuckets).not.toHaveBeenCalled();
   });

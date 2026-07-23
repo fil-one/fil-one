@@ -1,6 +1,43 @@
-import { ComingSoonPage } from '../components/ComingSoonPage.js';
+import { useQuery } from '@tanstack/react-query';
 
+import { ComingSoonPage } from '../components/ComingSoonPage.js';
+import { Spinner } from '../components/Spinner.js';
+import { getMe } from '../lib/api.js';
+import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
+import { RagPipelinePage } from './RagPipelinePage.js';
+
+/**
+ * Bucket Intelligence entry point.
+ *
+ * Allowlisted users (`ragAccess` — Foundation email OR the DynamoDB allowlist,
+ * computed server-side in `/me`) get the functional feature; everyone else sees
+ * the marketing waitlist. Reads the same cached `/me` query as `useRagAccess`,
+ * but also gates on its loading state so an allowlisted user never briefly sees
+ * the waitlist before `/me` resolves.
+ */
 export function BucketIntelligencePage() {
+  const {
+    data: me,
+    isPending,
+    isError,
+  } = useQuery({
+    queryKey: queryKeys.me,
+    queryFn: () => getMe(),
+    staleTime: ME_STALE_TIME,
+  });
+
+  if (isPending || isError) {
+    return (
+      <div className="flex items-center justify-center p-16">
+        <Spinner ariaLabel="Loading" size={32} />
+      </div>
+    );
+  }
+
+  return me?.ragAccess ? <RagPipelinePage /> : <BucketIntelligenceWaitlist />;
+}
+
+function BucketIntelligenceWaitlist() {
   return (
     <ComingSoonPage
       hubspotFormGuid={import.meta.env.VITE_HUBSPOT_BUCKET_INTELLIGENCE_WAITLIST_FORM_GUID}

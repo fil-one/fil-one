@@ -10,6 +10,7 @@ import { Card } from '../components/Card.js';
 import { Heading } from '../components/Heading/Heading.js';
 import { Spinner } from '../components/Spinner.js';
 import { ToggleConfirmModal } from '../components/ToggleConfirmModal.js';
+import { Tooltip } from '../components/Tooltip.js';
 import { bucketKey, type RagBucket } from '../lib/rag-bucket-api.js';
 import { timeAgo } from '../lib/time.js';
 
@@ -119,9 +120,23 @@ function BucketRow({
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
           {bucket.enabled ? (
             <>
-              <Button data-testid="bucket-row-ask" variant="ghost" size="sm" onClick={onAsk}>
-                Ask questions
-              </Button>
+              {/* `lastSyncedAt` is written by the indexer when a pass completes,
+                  so its absence means the bucket has nothing to answer from yet
+                  (the API rejects such queries with BUCKET_NOT_INDEXED). */}
+              {bucket.lastSyncedAt ? (
+                <Button data-testid="bucket-row-ask" variant="ghost" size="sm" onClick={onAsk}>
+                  Ask questions
+                </Button>
+              ) : (
+                <Tooltip
+                  content="You can ask questions after the first indexing pass completes and files from this bucket are indexed."
+                  side="top"
+                >
+                  <Button data-testid="bucket-row-ask" variant="ghost" size="sm" disabled>
+                    Ask questions
+                  </Button>
+                </Tooltip>
+              )}
               <BucketActionMenu onDisable={onToggle} />
             </>
           ) : (

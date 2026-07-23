@@ -16,11 +16,11 @@ import {
   toEnablementResponse,
 } from '../lib/bucket-rag-enablement.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
+import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { csrfMiddleware } from '../middleware/csrf.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import { ragAccessMiddleware } from '../lib/rag-access.js';
+import { ragAccessMiddleware } from '../middleware/rag-access.js';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.js';
 
 /**
@@ -65,7 +65,7 @@ export async function baseHandler(
   const { orgId } = getUserInfo(event);
 
   const region = event.queryStringParameters?.region ?? S3_REGION;
-  if (!isSupportedRegion(process.env.FILONE_STAGE!, region, getVerifiedEmail(event))) {
+  if (!isSupportedRegion(region)) {
     return unsupportedRegionResponse(region);
   }
 

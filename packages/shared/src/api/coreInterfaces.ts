@@ -14,6 +14,8 @@ export enum ApiErrorCode {
   EMAIL_NOT_VERIFIED = 'EMAIL_NOT_VERIFIED',
   /** The email domain is a known disposable/temporary address provider. */
   DISPOSABLE_EMAIL_BLOCKED = 'DISPOSABLE_EMAIL_BLOCKED',
+  /** The bucket's first indexing pass has not completed — RAG queries are unavailable. */
+  BUCKET_NOT_INDEXED = 'BUCKET_NOT_INDEXED',
 }
 
 export interface ErrorResponse {

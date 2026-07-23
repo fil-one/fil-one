@@ -53,6 +53,7 @@ export default $config({
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
+    const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
     const sendGridApiKey =
       $app.stage === 'staging' || $app.stage === 'production'
         ? new sst.Secret('SendGridApiKey')
@@ -148,6 +149,7 @@ export default $config({
           's3vectors:DeleteIndex',
           's3vectors:PutVectors',
           's3vectors:QueryVectors',
+          's3vectors:GetVectors',
           's3vectors:DeleteVectors',
         ],
         resources: [
@@ -206,7 +208,9 @@ export default $config({
       cors: {
         allowOrigins: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        allowHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Requested-With'],
+        // Authorization carries RAG API key bearer tokens (query endpoint);
+        // origins stay locked to our own domain above.
+        allowHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Requested-With', 'Authorization'],
         allowCredentials: true,
         maxAge: '1 day',
       },
@@ -229,8 +233,7 @@ export default $config({
     // uploads, downloads, etc. — so each one needs to be in `connect-src` or the
     // browser blocks the request with a CSP violation before it ever leaves.
     // CSP is a single static document header that cannot vary per user, so it
-    // must list every regional S3 endpoint any user could reach — not just the
-    // email-gated subset returned by getAvailableRegions().
+    // must list every regional S3 endpoint any user could reach.
     const s3GatewayUrls = Object.values(S3Region)
       .map((r) => getS3Endpoint(r, stageForEndpoints))
       .join(' ');
@@ -478,10 +481,20 @@ export default $config({
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
-    const consoleS3KeysPermissions: sst.aws.FunctionPermissionArgs[] = [
+    // Per-tenant console S3 access keys (getConsoleS3Credentials), needed by
+    // handlers that talk to the S3 data plane directly (presign, indexing, …).
+    const s3DataPlanePermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
         resources: [auroraS3KeySsmArn, fthS3KeySsmArn],
+      },
+    ];
+    // Per-tenant credentials for the bucket read path (getBucket/listBuckets):
+    // Aurora resolves its portal API key from SSM, FTH its console S3 key.
+    const bucketReadPermissions: sst.aws.FunctionPermissionArgs[] = [
+      {
+        actions: ['ssm:GetParameter'],
+        resources: [auroraApiKeySsmArn, fthS3KeySsmArn],
       },
     ];
 
@@ -588,9 +601,7 @@ export default $config({
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         ...fthEnv,
       },
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: bucketReadPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
@@ -616,9 +627,7 @@ export default $config({
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         ...fthEnv,
       },
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: bucketReadPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
@@ -627,7 +636,7 @@ export default $config({
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
       extraEnv: { ...fthEnv },
-      permissions: consoleS3KeysPermissions,
+      permissions: s3DataPlanePermissions,
     });
     addRoute({
       method: 'GET',
@@ -643,7 +652,7 @@ export default $config({
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn],
+          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
         },
       ],
       timeout: '30 seconds',
@@ -663,12 +672,30 @@ export default $config({
         },
       ],
     });
+    // RAG API keys: named bearer tokens scoped to the RAG query endpoint only
+    // (distinct from S3 access keys). DDB-only handlers — UserInfoTable is
+    // already linked via allResources, so no extra env/permissions needed.
+    addRoute({
+      method: 'GET',
+      routePath: '/api/rag-api-keys',
+      handler: 'list-rag-api-keys',
+    });
+    addRoute({
+      method: 'POST',
+      routePath: '/api/rag-api-keys',
+      handler: 'create-rag-api-key',
+    });
+    addRoute({
+      method: 'DELETE',
+      routePath: '/api/rag-api-keys/{keyId}',
+      handler: 'delete-rag-api-key',
+    });
     addRoute({
       method: 'POST',
       routePath: '/api/presign',
       handler: 'presign',
       extraEnv: { ...fthEnv },
-      permissions: consoleS3KeysPermissions,
+      permissions: s3DataPlanePermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '512 MB',
     });
@@ -676,7 +703,7 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}/analytics',
       handler: 'get-bucket-analytics',
-      permissions: consoleS3KeysPermissions,
+      permissions: bucketReadPermissions,
       extraEnv: orchestratorEnv,
     });
     // RAG query playground (FIL-554): embed the question, vector-search the
@@ -690,7 +717,12 @@ export default $config({
       routePath: '/api/buckets/{name}/query',
       handler: 'query-bucket',
       rag: true,
+      // Reads the bucket's enablement row to reject queries before the first
+      // indexing pass completes (BUCKET_NOT_INDEXED).
+      extraLink: [ragIndexerTable],
+      extraEnv: orchestratorEnv,
       permissions: [
+        ...bucketReadPermissions,
         {
           actions: ['bedrock:InvokeModel'],
           // Built from the shared allowlist so the grant and QueryBucketSchema's
@@ -715,27 +747,17 @@ export default $config({
       method: 'GET',
       routePath: '/api/buckets/{name}/rag/enabled',
       handler: 'get-bucket-rag-enablement',
-      extraEnv: {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        ...fthEnv,
-      },
+      extraEnv: orchestratorEnv,
       extraLink: [ragIndexerTable],
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: bucketReadPermissions,
     });
     addRoute({
       method: 'POST',
       routePath: '/api/buckets/{name}/rag/enabled',
       handler: 'set-bucket-rag-enablement',
-      extraEnv: {
-        AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-        ...fthEnv,
-      },
+      extraEnv: orchestratorEnv,
       extraLink: [ragIndexerTable],
-      permissions: [
-        { actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn, fthS3KeySsmArn] },
-      ],
+      permissions: bucketReadPermissions,
     });
 
     // ── Auth routes ──────────────────────────────────────────────────
@@ -778,6 +800,18 @@ export default $config({
       extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
     });
     addRoute({ method: 'POST', routePath: '/api/me/change-password', handler: 'change-password' });
+    addRoute({
+      method: 'GET',
+      routePath: '/api/me/preferences',
+      handler: 'get-preferences',
+      extraLink: [hubSpotServiceKey],
+    });
+    addRoute({
+      method: 'PATCH',
+      routePath: '/api/me/preferences',
+      handler: 'update-preferences',
+      extraLink: [hubSpotServiceKey],
+    });
     addRoute({
       method: 'POST',
       routePath: '/api/me/resend-verification',
@@ -829,7 +863,7 @@ export default $config({
       routePath: '/api/usage',
       handler: 'get-usage',
       extraEnv: orchestratorEnv,
-      permissions: consoleS3KeysPermissions,
+      permissions: s3DataPlanePermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
     });
     addRoute({
@@ -837,7 +871,7 @@ export default $config({
       routePath: '/api/activity',
       handler: 'get-activity',
       extraEnv: orchestratorEnv,
-      permissions: consoleS3KeysPermissions,
+      permissions: bucketReadPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '1024 MB',
     });
@@ -961,7 +995,16 @@ export default $config({
       environment: orchestratorEnv,
       timeout: '900 seconds',
       memory: '512 MB',
-      permissions: [...consoleS3KeysPermissions, ...ragPermissions],
+      permissions: [
+        ...s3DataPlanePermissions,
+        ...ragPermissions,
+        {
+          // PDF extraction (@filone/rag-shared pdf-extractor). Textract has no
+          // resource-level permissions — actions require Resource: '*'.
+          actions: ['textract:StartDocumentTextDetection', 'textract:GetDocumentTextDetection'],
+          resources: ['*'],
+        },
+      ],
     });
 
     const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
