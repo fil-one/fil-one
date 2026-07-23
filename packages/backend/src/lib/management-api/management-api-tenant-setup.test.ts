@@ -2,8 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
-import type { ManagementApiClient } from './management-api-client.js';
-import { ManagementApiConflictError } from './management-api-errors.js';
+import type { Client } from '@filone/management-api-client';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -11,17 +10,27 @@ vi.mock('sst', () => ({
   },
 }));
 
+// The generated SDK functions are mocked at the module boundary; each returns
+// the hey-api result shape `{ data, error, response }` the setup code branches on.
+const mockPutTenant = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockCreateAccessKey = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockListAccessKeys = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockDeleteAccessKey = vi.fn((_options: Record<string, unknown>) => ({}));
+
+vi.mock('@filone/management-api-client', () => ({
+  putTenantsByTenantId: (options: Record<string, unknown>) => mockPutTenant(options),
+  postTenantsByTenantIdAccessKeys: (options: Record<string, unknown>) =>
+    mockCreateAccessKey(options),
+  getTenantsByTenantIdAccessKeys: (options: Record<string, unknown>) => mockListAccessKeys(options),
+  deleteTenantsByTenantIdAccessKeysByAccessKeyId: (options: Record<string, unknown>) =>
+    mockDeleteAccessKey(options),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
 
-const mockApiClient = {
-  putTenant: vi.fn(),
-  createAccessKey: vi.fn(),
-  listAccessKeys: vi.fn(),
-  deleteAccessKey: vi.fn(),
-};
-
-const client = mockApiClient as unknown as ManagementApiClient;
+// SDK calls are module-mocked, so the client value is just forwarded — a sentinel is enough.
+const client = 'mock-management-client' as unknown as Client;
 
 import { ensureTenantReady, CONSOLE_KEY_NAME } from './management-api-tenant-setup.js';
 
@@ -37,22 +46,30 @@ function stubHappyPath() {
   ddbMock.on(GetItemCommand).resolves({ Item: profileItem({}) });
   ddbMock.on(UpdateItemCommand).resolves({});
   ssmMock.on(PutParameterCommand).resolves({});
-  mockApiClient.putTenant.mockResolvedValue({
-    tenantId: orgId,
-    status: 'active',
-    bucketCount: 0,
-    bucketLimit: 100,
-    accessKeyCount: 0,
-    accessKeyLimit: 300,
-    createdAt: '2026-01-01T00:00:00Z',
+  mockPutTenant.mockResolvedValue({
+    data: {
+      tenantId: orgId,
+      status: 'active',
+      bucketCount: 0,
+      bucketLimit: 100,
+      accessKeyCount: 0,
+      accessKeyLimit: 300,
+      createdAt: '2026-01-01T00:00:00Z',
+    },
+    error: undefined,
+    response: { status: 201 },
   });
-  mockApiClient.createAccessKey.mockResolvedValue({
-    accessKeyId: 'AKIATEST',
-    secretAccessKey: 'SKTEST',
-    name: CONSOLE_KEY_NAME,
-    permissions: [],
-    buckets: [],
-    createdAt: '2026-01-01T00:00:00Z',
+  mockCreateAccessKey.mockResolvedValue({
+    data: {
+      accessKeyId: 'AKIATEST',
+      secretAccessKey: 'SKTEST',
+      name: CONSOLE_KEY_NAME,
+      permissions: [],
+      buckets: [],
+      createdAt: '2026-01-01T00:00:00Z',
+    },
+    error: undefined,
+    response: { status: 201 },
   });
 }
 
@@ -69,7 +86,7 @@ describe('ensureTenantReady', () => {
     const result = await ensureTenantReady(deps, orgId);
 
     expect(result).toBe(orgId);
-    expect(mockApiClient.putTenant).not.toHaveBeenCalled();
+    expect(mockPutTenant).not.toHaveBeenCalled();
     // The read must be strongly consistent so a just-finished setup is seen.
     expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input.ConsistentRead).toBe(true);
   });
@@ -81,13 +98,27 @@ describe('ensureTenantReady', () => {
 
     expect(result).toBe(orgId);
     // tenantId is the orgId verbatim (client-supplied UUID).
-    expect(mockApiClient.putTenant).toHaveBeenCalledWith(orgId, { region: 'us-east-1' });
-    expect(mockApiClient.createAccessKey).toHaveBeenCalledWith(orgId, {
-      name: CONSOLE_KEY_NAME,
-      permissions: expect.arrayContaining(['s3:CreateBucket', 's3:GetObject', 's3:PutObject']),
-      buckets: [],
-      expiresAt: null,
-    });
+    expect(mockPutTenant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client,
+        path: { tenantId: orgId },
+        body: { region: 'us-east-1' },
+        throwOnError: false,
+      }),
+    );
+    expect(mockCreateAccessKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client,
+        path: { tenantId: orgId },
+        body: expect.objectContaining({
+          name: CONSOLE_KEY_NAME,
+          permissions: expect.arrayContaining(['s3:CreateBucket', 's3:GetObject', 's3:PutObject']),
+          buckets: [],
+          expiresAt: null,
+        }),
+        throwOnError: false,
+      }),
+    );
 
     const putCalls = ssmMock.commandCalls(PutParameterCommand);
     expect(putCalls).toHaveLength(1);
@@ -111,7 +142,7 @@ describe('ensureTenantReady', () => {
 
     await ensureTenantReady(deps, orgId);
 
-    const { permissions } = mockApiClient.createAccessKey.mock.calls[0][1];
+    const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
     expect(permissions).toHaveLength(14);
     // The contract enum (unlike FTH) has no bucket-config actions.
     expect(permissions).not.toContain('s3:GetBucketVersioning');
@@ -123,29 +154,45 @@ describe('ensureTenantReady', () => {
   describe('409 recovery (crash between key creation and SSM write)', () => {
     function stubConflictThenList(existingAccessKeyId: string | null) {
       stubHappyPath();
-      mockApiClient.createAccessKey
-        .mockRejectedValueOnce(new ManagementApiConflictError('duplicate', undefined))
+      mockCreateAccessKey
+        .mockResolvedValueOnce({
+          data: undefined,
+          error: { message: 'duplicate' },
+          response: { status: 409 },
+        })
         .mockResolvedValue({
-          accessKeyId: 'AKIAFRESH',
-          secretAccessKey: 'SKFRESH',
-          name: CONSOLE_KEY_NAME,
-          permissions: [],
-          buckets: [],
-          createdAt: '2026-01-02T00:00:00Z',
+          data: {
+            accessKeyId: 'AKIAFRESH',
+            secretAccessKey: 'SKFRESH',
+            name: CONSOLE_KEY_NAME,
+            permissions: [],
+            buckets: [],
+            createdAt: '2026-01-02T00:00:00Z',
+          },
+          error: undefined,
+          response: { status: 201 },
         });
-      mockApiClient.listAccessKeys.mockResolvedValue(
-        existingAccessKeyId
-          ? [
-              {
-                accessKeyId: existingAccessKeyId,
-                name: CONSOLE_KEY_NAME,
-                permissions: [],
-                createdAt: '2026-01-01T00:00:00Z',
-              },
-            ]
-          : [],
-      );
-      mockApiClient.deleteAccessKey.mockResolvedValue(undefined);
+      mockListAccessKeys.mockResolvedValue({
+        data: {
+          items: existingAccessKeyId
+            ? [
+                {
+                  accessKeyId: existingAccessKeyId,
+                  name: CONSOLE_KEY_NAME,
+                  permissions: [],
+                  createdAt: '2026-01-01T00:00:00Z',
+                },
+              ]
+            : [],
+        },
+        error: undefined,
+        response: { status: 200 },
+      });
+      mockDeleteAccessKey.mockResolvedValue({
+        data: undefined,
+        error: undefined,
+        response: { status: 204 },
+      });
     }
 
     it('reuses the existing key when SSM already holds its credentials', async () => {
@@ -157,8 +204,8 @@ describe('ensureTenantReady', () => {
       const result = await ensureTenantReady(deps, orgId);
 
       expect(result).toBe(orgId);
-      expect(mockApiClient.deleteAccessKey).not.toHaveBeenCalled();
-      expect(mockApiClient.createAccessKey).toHaveBeenCalledTimes(1);
+      expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+      expect(mockCreateAccessKey).toHaveBeenCalledTimes(1);
       // Nothing to restock: the previous run completed the SSM write.
       expect(ssmMock.commandCalls(PutParameterCommand)).toHaveLength(0);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
@@ -174,8 +221,10 @@ describe('ensureTenantReady', () => {
       const result = await ensureTenantReady(deps, orgId);
 
       expect(result).toBe(orgId);
-      expect(mockApiClient.deleteAccessKey).toHaveBeenCalledWith(orgId, 'AKIAOLD');
-      expect(mockApiClient.createAccessKey).toHaveBeenCalledTimes(2);
+      expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+        expect.objectContaining({ path: { tenantId: orgId, accessKeyId: 'AKIAOLD' } }),
+      );
+      expect(mockCreateAccessKey).toHaveBeenCalledTimes(2);
       const putCalls = ssmMock.commandCalls(PutParameterCommand);
       expect(putCalls).toHaveLength(1);
       expect(putCalls[0].args[0].input.Value).toBe(
@@ -195,8 +244,10 @@ describe('ensureTenantReady', () => {
       const result = await ensureTenantReady(deps, orgId);
 
       expect(result).toBe(orgId);
-      expect(mockApiClient.deleteAccessKey).toHaveBeenCalledWith(orgId, 'AKIAOLD');
-      expect(mockApiClient.createAccessKey).toHaveBeenCalledTimes(2);
+      expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+        expect.objectContaining({ path: { tenantId: orgId, accessKeyId: 'AKIAOLD' } }),
+      );
+      expect(mockCreateAccessKey).toHaveBeenCalledTimes(2);
     });
 
     it('fails (returns null) when the 409 name is absent from the key listing', async () => {
@@ -206,7 +257,7 @@ describe('ensureTenantReady', () => {
       const result = await ensureTenantReady(deps, orgId);
 
       expect(result).toBeNull();
-      expect(mockApiClient.deleteAccessKey).not.toHaveBeenCalled();
+      expect(mockDeleteAccessKey).not.toHaveBeenCalled();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
   });

@@ -15,8 +15,15 @@ import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
-import { ManagementApiConflictError } from './management-api-errors.js';
-import type { ManagementApiClient, ManagementCreatedAccessKey } from './management-api-client.js';
+import {
+  deleteTenantsByTenantIdAccessKeysByAccessKeyId,
+  getTenantsByTenantIdAccessKeys,
+  postTenantsByTenantIdAccessKeys,
+  putTenantsByTenantId,
+  type Client,
+  type CreateAccessKeyRequest,
+  type CreatedAccessKey,
+} from '@filone/management-api-client';
 
 export const CONSOLE_KEY_NAME = 'filone-console';
 
@@ -47,7 +54,7 @@ const dynamo = getDynamoClient();
 const ssm = new SSMClient({});
 
 export interface TenantSetupDeps {
-  client: ManagementApiClient;
+  client: Client;
   /** Orchestrator id — drives the SSM path (`${id}-s3`) and PROFILE attribute (`${id}TenantId`). */
   id: string;
   stage: string;
@@ -96,7 +103,15 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
 
   // Idempotent on the client-supplied tenantId (= orgId): a retry after a
   // crash gets a 200 with the existing tenant instead of an error.
-  await client.putTenant(orgId, { region });
+  const { error: putError } = await putTenantsByTenantId({
+    client,
+    path: { tenantId: orgId },
+    body: { region },
+    throwOnError: false,
+  });
+  if (putError) {
+    throw new Error(`Failed to provision tenant ${orgId}`, { cause: putError });
+  }
 
   const consoleKey = await createConsoleAccessKey(deps, orgId);
   if (consoleKey) {
@@ -147,41 +162,86 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
 async function createConsoleAccessKey(
   deps: TenantSetupDeps,
   orgId: string,
-): Promise<ManagementCreatedAccessKey | null> {
+): Promise<CreatedAccessKey | null> {
   const { client } = deps;
-  const createArgs = {
+  const createArgs: CreateAccessKeyRequest = {
     name: CONSOLE_KEY_NAME,
     permissions: [...CONSOLE_KEY_PERMISSIONS],
     buckets: [],
     expiresAt: null,
   };
 
-  try {
-    return await client.createAccessKey(orgId, createArgs);
-  } catch (err) {
-    if (!(err instanceof ManagementApiConflictError)) throw err;
-
-    const keys = await client.listAccessKeys(orgId);
-    const existing = keys.find((k) => k.name === CONSOLE_KEY_NAME);
-    if (!existing) {
-      // 409 for a name that doesn't appear in the listing — upstream is
-      // inconsistent; surface the original conflict rather than guessing.
-      throw err;
-    }
-
-    const stashed = await readStashedAccessKeyId(deps, orgId);
-    if (stashed === existing.accessKeyId) {
-      // The previous run completed the SSM write; nothing left to stock.
-      return null;
-    }
-
-    console.log(
-      `[management-api-tenant-setup] console key "${CONSOLE_KEY_NAME}" exists for tenant ${orgId} ` +
-        `but SSM holds ${stashed ? 'stale' : 'no'} credentials; rotating the key`,
-    );
-    await client.deleteAccessKey(orgId, existing.accessKeyId);
-    return client.createAccessKey(orgId, createArgs);
+  const created = await postTenantsByTenantIdAccessKeys({
+    client,
+    path: { tenantId: orgId },
+    body: createArgs,
+    throwOnError: false,
+  });
+  if (!created.error && created.data) {
+    return created.data;
   }
+  if (created.response?.status !== 409) {
+    throw new Error(`Failed to create console access key for tenant ${orgId}`, {
+      cause: created.error,
+    });
+  }
+
+  // 409: a previous run already created the key. Recover by inspecting the
+  // listing and SSM (the contract has no Idempotency-Key header, so a crash
+  // between key creation and the SSM write leaves an unrecoverable secret).
+  const { data: listData, error: listError } = await getTenantsByTenantIdAccessKeys({
+    client,
+    path: { tenantId: orgId },
+    throwOnError: false,
+  });
+  if (listError) {
+    throw new Error(`Failed to list access keys for tenant ${orgId} during console-key recovery`, {
+      cause: listError,
+    });
+  }
+  const existing = (listData?.items ?? []).find((k) => k.name === CONSOLE_KEY_NAME);
+  if (!existing) {
+    // 409 for a name that doesn't appear in the listing — upstream is
+    // inconsistent; surface the conflict rather than guessing.
+    throw new Error(
+      `Console key "${CONSOLE_KEY_NAME}" conflicted for tenant ${orgId} but is absent from the key listing`,
+      { cause: created.error },
+    );
+  }
+
+  const stashed = await readStashedAccessKeyId(deps, orgId);
+  if (stashed === existing.accessKeyId) {
+    // The previous run completed the SSM write; nothing left to stock.
+    return null;
+  }
+
+  console.log(
+    `[management-api-tenant-setup] console key "${CONSOLE_KEY_NAME}" exists for tenant ${orgId} ` +
+      `but SSM holds ${stashed ? 'stale' : 'no'} credentials; rotating the key`,
+  );
+  const { error: deleteError } = await deleteTenantsByTenantIdAccessKeysByAccessKeyId({
+    client,
+    path: { tenantId: orgId, accessKeyId: existing.accessKeyId },
+    throwOnError: false,
+  });
+  if (deleteError) {
+    throw new Error(`Failed to delete stale console access key for tenant ${orgId}`, {
+      cause: deleteError,
+    });
+  }
+
+  const recreated = await postTenantsByTenantIdAccessKeys({
+    client,
+    path: { tenantId: orgId },
+    body: createArgs,
+    throwOnError: false,
+  });
+  if (recreated.error || !recreated.data) {
+    throw new Error(`Failed to re-create console access key for tenant ${orgId}`, {
+      cause: recreated.error,
+    });
+  }
+  return recreated.data;
 }
 
 async function readStashedAccessKeyId(

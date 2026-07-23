@@ -53,13 +53,18 @@ import {
 } from '../s3-bucket-operations.js';
 import { getConsoleS3Credentials } from '../s3-credentials.js';
 import {
-  createManagementApiClient,
-  ManagementApiConflictError,
-  ManagementApiNotFoundError,
-  ManagementApiValidationError,
-  type ManagementApiClient,
-  type ManagementMetrics,
-} from './management-api-client.js';
+  createClient,
+  deleteTenantsByTenantIdAccessKeysByAccessKeyId,
+  getTenantsByTenantId,
+  getTenantsByTenantIdAccessKeys,
+  getTenantsByTenantIdBucketsByBucketNameMetrics,
+  getTenantsByTenantIdMetrics,
+  postTenantsByTenantIdAccessKeys,
+  postTenantsByTenantIdStatus,
+  type Client,
+  type CreateAccessKeyRequest,
+  type Metrics,
+} from '@filone/management-api-client';
 import { instrumentClient } from './management-api-metrics.js';
 
 export interface ManagementApiOrchestratorConfig {
@@ -83,7 +88,7 @@ export interface ManagementApiOrchestratorConfig {
    * factory builds and instruments a client) or a pre-built client (used by
    * tests and advanced callers; NOT auto-instrumented).
    */
-  api: { client: ManagementApiClient } | { baseUrl: string; token: string; fetch?: typeof fetch };
+  api: { client: Client } | { baseUrl: string; token: string; fetch?: typeof fetch };
 }
 
 // Versioning / object-lock are applied as separate, idempotent S3 calls after the
@@ -114,6 +119,8 @@ export function createManagementApiOrchestrator(
       region: config.s3SigningRegion ?? config.region,
       credentials,
       forcePathStyle: true,
+      orchestratorId: config.id,
+      tenantId,
     };
   };
 
@@ -135,15 +142,35 @@ export function createManagementApiOrchestrator(
       // The contract uses the same lowercase-dashed status values, so no
       // mapping is needed. Setting the same status twice is a no-op upstream;
       // transient failures are retried by the caller (region-helpers).
-      await client.setTenantStatus(tenantId, { status });
+      const { error } = await postTenantsByTenantIdStatus({
+        client,
+        path: { tenantId },
+        body: { status },
+        throwOnError: false,
+      });
+      if (error) {
+        throw new Error(`Failed to set tenant ${tenantId} status to "${status}"`, { cause: error });
+      }
     },
 
     async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
       try {
-        const tenant = await client.getTenant(tenantId);
-        return { kind: 'ok', status: normalizeStatus(tenant.status) };
+        const { data, error, response } = await getTenantsByTenantId({
+          client,
+          path: { tenantId },
+          throwOnError: false,
+        });
+        if (error || !data) {
+          if (response?.status === 404) return { kind: 'not_found' };
+          return {
+            kind: 'error',
+            cause: error ?? new Error(`Empty tenant response for ${tenantId}`),
+          };
+        }
+        return { kind: 'ok', status: normalizeStatus(data.status) };
       } catch (cause) {
-        if (cause instanceof ManagementApiNotFoundError) return { kind: 'not_found' };
+        // Transport/network failure — the SDK throws rather than returning an
+        // `error` field in that case.
         return { kind: 'error', cause };
       }
     },
@@ -155,12 +182,15 @@ export function createManagementApiOrchestrator(
   } satisfies ServiceOrchestrator;
 }
 
-function resolveClient(config: ManagementApiOrchestratorConfig): ManagementApiClient {
+function resolveClient(config: ManagementApiOrchestratorConfig): Client {
   if ('client' in config.api) return config.api.client;
-  const client = createManagementApiClient({
-    baseUrl: config.api.baseUrl,
-    token: config.api.token,
-    ...(config.api.fetch && { fetch: config.api.fetch }),
+  const { baseUrl, token, fetch } = config.api;
+  const client = createClient({
+    baseUrl,
+    // Resolve the bearer credential lazily so the token isn't captured into a
+    // long-lived config object; the SDK sends it as `Authorization: Bearer …`.
+    auth: () => token,
+    ...(fetch && { fetch }),
   });
   instrumentClient(client, { apiName: `${config.id}-management` });
   return client;
@@ -255,7 +285,7 @@ function buildBucketMethods(
 }
 
 function buildAccessKeyMethods(
-  client: ManagementApiClient,
+  client: Client,
   orchestratorId: string,
 ): Pick<ServiceOrchestrator, 'issueAccessKey' | 'findAccessKeyByName' | 'deleteAccessKey'> {
   return {
@@ -268,42 +298,57 @@ function buildAccessKeyMethods(
           `[${permissions.join(', ')}] and bucket scopes [${buckets.join(', ')}]`,
       );
 
-      try {
-        const accessKey = await client.createAccessKey(tenantId, {
+      const { data, error, response } = await postTenantsByTenantIdAccessKeys({
+        client,
+        path: { tenantId },
+        body: {
           name: opts.keyName,
-          permissions,
+          // buildPermissions only emits actions from the contract's enum.
+          permissions: permissions as CreateAccessKeyRequest['permissions'],
           buckets,
           expiresAt: opts.expiresAt ?? null,
-        });
+        },
+        throwOnError: false,
+      });
 
-        return {
-          // The contract has no identifier separate from the accessKeyId.
-          id: accessKey.accessKeyId,
-          accessKeyId: accessKey.accessKeyId,
-          accessKeySecret: accessKey.secretAccessKey,
-          createdAt: accessKey.createdAt,
-        };
-      } catch (err) {
-        if (err instanceof ManagementApiConflictError) {
-          throw new AccessKeyAlreadyExistsError({ cause: err });
+      if (error || !data) {
+        if (response?.status === 409) {
+          throw new AccessKeyAlreadyExistsError({ cause: error });
         }
-        if (err instanceof ManagementApiValidationError) {
+        if (response?.status === 400 || response?.status === 422) {
           throw new AccessKeyValidationError(
-            extractApiMessage(err) ??
+            extractApiMessage(error) ??
               'Invalid access key request. Check the key name and try again.',
-            { cause: err },
+            { cause: error },
           );
         }
         throw new Error(
           `Failed to create ${orchestratorId} access key "${opts.keyName}" for tenant ${tenantId}`,
-          { cause: err },
+          { cause: error },
         );
       }
+
+      return {
+        // The contract has no identifier separate from the accessKeyId.
+        id: data.accessKeyId,
+        accessKeyId: data.accessKeyId,
+        accessKeySecret: data.secretAccessKey,
+        createdAt: data.createdAt,
+      };
     },
 
     async findAccessKeyByName(tenantId: string, keyName: string) {
-      const keys = await client.listAccessKeys(tenantId);
-      const match = keys.find((k) => k.name === keyName);
+      const { data, error } = await getTenantsByTenantIdAccessKeys({
+        client,
+        path: { tenantId },
+        throwOnError: false,
+      });
+      if (error) {
+        throw new Error(`Failed to list ${orchestratorId} access keys for tenant ${tenantId}`, {
+          cause: error,
+        });
+      }
+      const match = (data?.items ?? []).find((k) => k.name === keyName);
       if (!match) return undefined;
       return {
         id: match.accessKeyId,
@@ -313,10 +358,13 @@ function buildAccessKeyMethods(
     },
 
     async deleteAccessKey(tenantId: string, keyId: string): Promise<void> {
-      try {
-        await client.deleteAccessKey(tenantId, keyId);
-      } catch (err) {
-        if (err instanceof ManagementApiNotFoundError) {
+      const { error, response } = await deleteTenantsByTenantIdAccessKeysByAccessKeyId({
+        client,
+        path: { tenantId, accessKeyId: keyId },
+        throwOnError: false,
+      });
+      if (error) {
+        if (response?.status === 404) {
           // The contract 404s only when the tenant is missing (key-level
           // deletes are 204 even when already gone) — either way the key no
           // longer exists, which is what the interface's idempotency needs.
@@ -327,7 +375,7 @@ function buildAccessKeyMethods(
         }
         throw new Error(
           `Failed to delete ${orchestratorId} access key "${keyId}" for tenant ${tenantId}`,
-          { cause: err },
+          { cause: error },
         );
       }
     },
@@ -335,21 +383,29 @@ function buildAccessKeyMethods(
 }
 
 function buildMetricsMethods(
-  client: ManagementApiClient,
+  client: Client,
 ): Pick<ServiceOrchestrator, 'getTenantUsageMetrics' | 'getTenantInfo' | 'getBucketUsageMetrics'> {
   return {
     async getTenantUsageMetrics(
       tenantId: string,
       opts: GetTenantUsageMetricsOptions,
     ): Promise<TenantUsageMetrics> {
-      const metrics = await client.getTenantMetrics(tenantId, {
-        from: opts.from,
-        to: opts.to,
-        window: mapIntervalToWindow(opts.interval ?? '1d'),
+      const { data, error } = await getTenantsByTenantIdMetrics({
+        client,
+        path: { tenantId },
+        query: {
+          from: opts.from,
+          to: opts.to,
+          window: mapIntervalToWindow(opts.interval ?? '1d'),
+        },
+        throwOnError: false,
       });
+      if (error || !data) {
+        throw new Error(`Failed to fetch usage metrics for tenant ${tenantId}`, { cause: error });
+      }
       return {
-        storage: mapStorageSamples(metrics),
-        egress: metrics.egress.samples.map((s) => ({
+        storage: mapStorageSamples(data),
+        egress: data.egress.samples.map((s) => ({
           timestamp: new Date(s.timestamp).toISOString(),
           bytesUsed: s.bytesEgressed,
         })),
@@ -358,13 +414,20 @@ function buildMetricsMethods(
     },
 
     async getTenantInfo(tenantId: string): Promise<TenantInfo> {
-      const tenant = await client.getTenant(tenantId);
+      const { data, error } = await getTenantsByTenantId({
+        client,
+        path: { tenantId },
+        throwOnError: false,
+      });
+      if (error || !data) {
+        throw new Error(`Failed to fetch tenant info for ${tenantId}`, { cause: error });
+      }
       return {
-        bucketCount: tenant.bucketCount ?? 0,
-        bucketLimit: tenant.bucketLimit ?? 0,
-        keyCount: tenant.accessKeyCount ?? 0,
-        accessKeyLimit: tenant.accessKeyLimit ?? 0,
-        status: normalizeStatus(tenant.status),
+        bucketCount: data.bucketCount ?? 0,
+        bucketLimit: data.bucketLimit ?? 0,
+        keyCount: data.accessKeyCount ?? 0,
+        accessKeyLimit: data.accessKeyLimit ?? 0,
+        status: normalizeStatus(data.status),
       };
     },
 
@@ -376,19 +439,26 @@ function buildMetricsMethods(
       // Unlike aurora/fth, no client-side ownership gate is needed: the
       // contract obliges the orchestrator to verify the bucket belongs to the
       // tenant and return 404 otherwise.
-      try {
-        const metrics = await client.getBucketMetrics(tenantId, bucketName, {
+      const { data, error, response } = await getTenantsByTenantIdBucketsByBucketNameMetrics({
+        client,
+        path: { tenantId, bucketName },
+        query: {
           from: opts.from,
           to: opts.to,
           window: mapIntervalToWindow(opts.interval ?? '1d'),
-        });
-        return mapStorageSamples(metrics);
-      } catch (err) {
-        if (err instanceof ManagementApiNotFoundError) {
-          throw new BucketNotFoundError(bucketName, { cause: err });
+        },
+        throwOnError: false,
+      });
+      if (error || !data) {
+        if (response?.status === 404) {
+          throw new BucketNotFoundError(bucketName, { cause: error });
         }
-        throw err;
+        throw new Error(
+          `Failed to fetch usage metrics for bucket "${bucketName}" (tenant ${tenantId})`,
+          { cause: error },
+        );
       }
+      return mapStorageSamples(data);
     },
   };
 }
@@ -462,7 +532,7 @@ function mapIntervalToWindow(interval: string): string {
   return interval;
 }
 
-function mapStorageSamples(metrics: ManagementMetrics): StorageUsageSample[] {
+function mapStorageSamples(metrics: Metrics): StorageUsageSample[] {
   return metrics.storage.samples.map((s) => ({
     timestamp: new Date(s.timestamp).toISOString(),
     bytesUsed: s.bytesUsed,
@@ -470,8 +540,9 @@ function mapStorageSamples(metrics: ManagementMetrics): StorageUsageSample[] {
   }));
 }
 
-function extractApiMessage(err: ManagementApiValidationError): string | undefined {
-  const body = err.responseBody;
+// Pulls the human-readable message out of the contract's error body
+// (`{ message, code? }`) returned in the SDK result's `error` field.
+function extractApiMessage(body: unknown): string | undefined {
   if (body && typeof body === 'object' && 'message' in body) {
     const message = (body as { message?: unknown }).message;
     if (typeof message === 'string') return message;

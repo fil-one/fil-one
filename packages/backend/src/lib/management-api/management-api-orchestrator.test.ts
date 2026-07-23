@@ -12,11 +12,38 @@ import {
   GetObjectLockConfigurationCommand,
 } from '@aws-sdk/client-s3';
 import { S3Region } from '@filone/shared';
+import type { Client } from '@filone/management-api-client';
 
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
   },
+}));
+
+// The generated SDK is mocked at the module boundary. `createClient` returns a
+// sentinel that must appear as the `client` field on every SDK call; each
+// operation returns the hey-api `{ data, error, response }` result shape.
+const MOCK_CLIENT = 'mock-management-client';
+const mockCreateClient = vi.fn((_config: Record<string, unknown>) => MOCK_CLIENT);
+const mockSetStatus = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockGetTenant = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockCreateAccessKey = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockListAccessKeys = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockDeleteAccessKey = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockGetTenantMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockGetBucketMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
+
+vi.mock('@filone/management-api-client', () => ({
+  createClient: (config: Record<string, unknown>) => mockCreateClient(config),
+  postTenantsByTenantIdStatus: (o: Record<string, unknown>) => mockSetStatus(o),
+  getTenantsByTenantId: (o: Record<string, unknown>) => mockGetTenant(o),
+  postTenantsByTenantIdAccessKeys: (o: Record<string, unknown>) => mockCreateAccessKey(o),
+  getTenantsByTenantIdAccessKeys: (o: Record<string, unknown>) => mockListAccessKeys(o),
+  deleteTenantsByTenantIdAccessKeysByAccessKeyId: (o: Record<string, unknown>) =>
+    mockDeleteAccessKey(o),
+  getTenantsByTenantIdMetrics: (o: Record<string, unknown>) => mockGetTenantMetrics(o),
+  getTenantsByTenantIdBucketsByBucketNameMetrics: (o: Record<string, unknown>) =>
+    mockGetBucketMetrics(o),
 }));
 
 vi.mock('./management-api-metrics.js', () => ({
@@ -36,42 +63,38 @@ import {
   NotImplementedError,
 } from '../errors.js';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
-import {
-  ManagementApiConflictError,
-  ManagementApiError,
-  ManagementApiNotFoundError,
-  ManagementApiValidationError,
-  type ManagementApiClient,
-  type ManagementMetrics,
-} from './management-api-client.js';
 import { instrumentClient } from './management-api-metrics.js';
-import { createManagementApiOrchestrator } from './management-api-orchestrator.js';
+import {
+  createManagementApiOrchestrator,
+  type ManagementApiOrchestratorConfig,
+} from './management-api-orchestrator.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 // tenantId === orgId for Management API orchestrators (client-supplied UUID).
 const tenantId = orgId;
 
-const fakeClient = {
-  putTenant: vi.fn(),
-  getTenant: vi.fn(),
-  deleteTenant: vi.fn(),
-  setTenantStatus: vi.fn(),
-  createAccessKey: vi.fn(),
-  listAccessKeys: vi.fn(),
-  getAccessKey: vi.fn(),
-  deleteAccessKey: vi.fn(),
-  getTenantMetrics: vi.fn(),
-  getBucketMetrics: vi.fn(),
-};
+// hey-api result-shape helpers.
+function ok<T>(data: T, status = 200) {
+  return { data, error: undefined, response: { status } };
+}
+function noContent(status = 204) {
+  return { data: undefined, error: undefined, response: { status } };
+}
+function fail(status: number, message = 'error') {
+  return { data: undefined, error: { message }, response: { status } };
+}
 
-function buildOrchestrator(overrides?: { s3SigningRegion?: string }) {
+function buildOrchestrator(overrides?: {
+  s3SigningRegion?: string;
+  api?: ManagementApiOrchestratorConfig['api'];
+}) {
   return createManagementApiOrchestrator({
     id: 'forge',
     region: S3Region.UsEast1,
     stage: 'test',
     s3EndpointUrl: 'https://us-east-1.s3.test.example.com',
     ...(overrides?.s3SigningRegion && { s3SigningRegion: overrides.s3SigningRegion }),
-    api: { client: fakeClient as unknown as ManagementApiClient },
+    api: overrides?.api ?? { baseUrl: 'https://api.example.com', token: 'partner-key' },
   });
 }
 
@@ -87,7 +110,7 @@ function stubS3Credentials() {
   });
 }
 
-const emptyMetrics: ManagementMetrics = {
+const emptyMetrics = {
   storage: { samples: [] },
   egress: { samples: [] },
   ingress: { samples: [] },
@@ -108,23 +131,21 @@ describe('createManagementApiOrchestrator config', () => {
   });
 
   it('does not instrument an injected client', () => {
-    buildOrchestrator();
+    buildOrchestrator({ api: { client: MOCK_CLIENT as unknown as Client } });
     expect(instrumentClient).not.toHaveBeenCalled();
   });
 
   it('builds and instruments a client from baseUrl + token settings', () => {
-    createManagementApiOrchestrator({
-      id: 'forge',
-      region: S3Region.UsEast1,
-      stage: 'test',
-      s3EndpointUrl: 'https://us-east-1.s3.test.example.com',
-      api: { baseUrl: 'https://api.example.com', token: 'partner-key' },
-    });
+    buildOrchestrator({ api: { baseUrl: 'https://api.example.com', token: 'partner-key' } });
 
-    expect(instrumentClient).toHaveBeenCalledWith(
-      expect.objectContaining({ interceptors: expect.anything() }),
-      { apiName: 'forge-management' },
-    );
+    // Bearer credential is supplied as a lazy callback, never a literal.
+    const config = mockCreateClient.mock.calls[0][0] as {
+      baseUrl: string;
+      auth: () => string;
+    };
+    expect(config.baseUrl).toBe('https://api.example.com');
+    expect(config.auth()).toBe('partner-key');
+    expect(instrumentClient).toHaveBeenCalledWith(MOCK_CLIENT, { apiName: 'forge-management' });
   });
 });
 
@@ -135,7 +156,8 @@ describe('ensureTenantReady', () => {
     const result = await orchestrator.ensureTenantReady(orgId);
 
     expect(result).toBe(tenantId);
-    expect(fakeClient.putTenant).not.toHaveBeenCalled();
+    // putTenant is issued by tenant-setup; short-circuit means no create call.
+    expect(mockCreateAccessKey).not.toHaveBeenCalled();
   });
 });
 
@@ -163,56 +185,72 @@ describe('isTenantReady', () => {
 
 describe('updateTenantStatus', () => {
   for (const status of ['active', 'write-locked', 'disabled'] as const) {
-    it(`passes "${status}" straight through to setTenantStatus`, async () => {
-      fakeClient.setTenantStatus.mockResolvedValue(undefined);
+    it(`passes "${status}" straight through to the status endpoint`, async () => {
+      mockSetStatus.mockResolvedValue(noContent());
 
       await orchestrator.updateTenantStatus(tenantId, status);
 
-      expect(fakeClient.setTenantStatus).toHaveBeenCalledWith(tenantId, { status });
+      expect(mockSetStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client: MOCK_CLIENT,
+          path: { tenantId },
+          body: { status },
+          throwOnError: false,
+        }),
+      );
     });
   }
 
-  it('propagates the error when setTenantStatus fails', async () => {
-    fakeClient.setTenantStatus.mockRejectedValue(new Error('upstream error'));
+  it('throws when the status update fails', async () => {
+    mockSetStatus.mockResolvedValue(fail(500, 'upstream error'));
 
     await expect(orchestrator.updateTenantStatus(tenantId, 'write-locked')).rejects.toThrow(
-      'upstream error',
+      `Failed to set tenant ${tenantId} status to "write-locked"`,
     );
   });
 });
 
 describe('getTenantStatus', () => {
-  it('returns the status from getTenant', async () => {
-    fakeClient.getTenant.mockResolvedValue({ tenantId, status: 'write-locked' });
+  it('returns the status from the tenant record', async () => {
+    mockGetTenant.mockResolvedValue(ok({ tenantId, status: 'write-locked' }));
 
     const result = await orchestrator.getTenantStatus(tenantId);
 
     expect(result).toEqual({ kind: 'ok', status: 'write-locked' });
-    expect(fakeClient.getTenant).toHaveBeenCalledWith(tenantId);
+    expect(mockGetTenant).toHaveBeenCalledWith(
+      expect.objectContaining({ client: MOCK_CLIENT, path: { tenantId }, throwOnError: false }),
+    );
   });
 
   it('returns status undefined for an unmodeled upstream status', async () => {
-    fakeClient.getTenant.mockResolvedValue({ tenantId, status: 'provisioning' });
+    mockGetTenant.mockResolvedValue(ok({ tenantId, status: 'provisioning' }));
 
     const result = await orchestrator.getTenantStatus(tenantId);
 
     expect(result).toEqual({ kind: 'ok', status: undefined });
   });
 
-  it('maps ManagementApiNotFoundError to not_found', async () => {
-    fakeClient.getTenant.mockRejectedValue(new ManagementApiNotFoundError('nope', undefined));
+  it('maps a 404 to not_found', async () => {
+    mockGetTenant.mockResolvedValue(fail(404, 'nope'));
 
     await expect(orchestrator.getTenantStatus(tenantId)).resolves.toEqual({ kind: 'not_found' });
   });
 
-  it('never throws: any other error becomes an error result', async () => {
-    const cause = new ManagementApiError(500, 'boom', undefined);
-    fakeClient.getTenant.mockRejectedValue(cause);
+  it('never throws: any other error result becomes an error probe', async () => {
+    const result = fail(500, 'boom');
+    mockGetTenant.mockResolvedValue(result);
 
     await expect(orchestrator.getTenantStatus(tenantId)).resolves.toEqual({
       kind: 'error',
-      cause,
+      cause: result.error,
     });
+  });
+
+  it('never throws: a transport failure becomes an error probe', async () => {
+    const cause = new Error('network down');
+    mockGetTenant.mockRejectedValue(cause);
+
+    await expect(orchestrator.getTenantStatus(tenantId)).resolves.toEqual({ kind: 'error', cause });
   });
 });
 
@@ -227,6 +265,8 @@ describe('getS3ClientContext', () => {
       region: 'us-east-1',
       credentials: { accessKeyId: 'AK1', secretAccessKey: 'SK1' },
       forcePathStyle: true,
+      orchestratorId: 'forge',
+      tenantId,
     });
     const [call] = ssmMock.commandCalls(GetParameterCommand);
     expect(call.args[0].input.Name).toBe(`/filone/test/forge-s3/access-key/${tenantId}`);
@@ -407,7 +447,7 @@ describe('issueAccessKey', () => {
   };
 
   it('maps permissions to s3 actions and returns the credential with id = accessKeyId', async () => {
-    fakeClient.createAccessKey.mockResolvedValue(createdKey);
+    mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
 
     const result = await orchestrator.issueAccessKey(tenantId, {
       keyName: 'My Key',
@@ -420,21 +460,28 @@ describe('issueAccessKey', () => {
       accessKeySecret: 'sk-secret',
       createdAt: '2026-03-10T00:00:00Z',
     });
-    expect(fakeClient.createAccessKey).toHaveBeenCalledWith(tenantId, {
-      name: 'My Key',
-      permissions: expect.arrayContaining([
-        's3:ListAllMyBuckets',
-        's3:GetObject',
-        's3:ListBucket',
-        's3:PutObject',
-      ]),
-      buckets: [],
-      expiresAt: null,
-    });
+    expect(mockCreateAccessKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client: MOCK_CLIENT,
+        path: { tenantId },
+        body: expect.objectContaining({
+          name: 'My Key',
+          permissions: expect.arrayContaining([
+            's3:ListAllMyBuckets',
+            's3:GetObject',
+            's3:ListBucket',
+            's3:PutObject',
+          ]),
+          buckets: [],
+          expiresAt: null,
+        }),
+        throwOnError: false,
+      }),
+    );
   });
 
   it('maps granular permissions and bucket scopes', async () => {
-    fakeClient.createAccessKey.mockResolvedValue(createdKey);
+    mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
 
     await orchestrator.issueAccessKey(tenantId, {
       keyName: 'My Key',
@@ -444,49 +491,49 @@ describe('issueAccessKey', () => {
       expiresAt: '2027-01-01T00:00:00Z',
     });
 
-    expect(fakeClient.createAccessKey).toHaveBeenCalledWith(tenantId, {
-      name: 'My Key',
-      permissions: expect.arrayContaining([
-        's3:DeleteObject',
-        's3:CreateBucket',
-        's3:DeleteBucket',
-        's3:GetObjectVersion',
-        's3:PutObjectRetention',
-      ]),
-      buckets: ['bucket-a'],
-      expiresAt: '2027-01-01T00:00:00Z',
-    });
+    expect(mockCreateAccessKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          name: 'My Key',
+          permissions: expect.arrayContaining([
+            's3:DeleteObject',
+            's3:CreateBucket',
+            's3:DeleteBucket',
+            's3:GetObjectVersion',
+            's3:PutObjectRetention',
+          ]),
+          buckets: ['bucket-a'],
+          expiresAt: '2027-01-01T00:00:00Z',
+        }),
+      }),
+    );
   });
 
   it('drops bucket-info permissions the contract enum lacks, with a warning', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    fakeClient.createAccessKey.mockResolvedValue(createdKey);
+    mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
 
     await orchestrator.issueAccessKey(tenantId, {
       keyName: 'My Key',
       permissions: ['read', 'GetBucketVersioning', 'GetBucketObjectLockConfiguration'],
     });
 
-    const { permissions } = fakeClient.createAccessKey.mock.calls[0][1];
+    const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
     expect(permissions).not.toContain('s3:GetBucketVersioning');
     expect(permissions).not.toContain('s3:GetBucketObjectLockConfiguration');
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('GetBucketVersioning'));
   });
 
-  it('maps ManagementApiConflictError to AccessKeyAlreadyExistsError', async () => {
-    fakeClient.createAccessKey.mockRejectedValue(
-      new ManagementApiConflictError('duplicate', { message: 'duplicate' }),
-    );
+  it('maps a 409 to AccessKeyAlreadyExistsError', async () => {
+    mockCreateAccessKey.mockResolvedValue(fail(409, 'duplicate'));
 
     await expect(
       orchestrator.issueAccessKey(tenantId, { keyName: 'My Key', permissions: ['read'] }),
     ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
   });
 
-  it('maps ManagementApiValidationError to AccessKeyValidationError with the upstream message', async () => {
-    fakeClient.createAccessKey.mockRejectedValue(
-      new ManagementApiValidationError(422, 'invalid', { message: 'Key name invalid' }),
-    );
+  it('maps a 422 to AccessKeyValidationError with the upstream message', async () => {
+    mockCreateAccessKey.mockResolvedValue(fail(422, 'Key name invalid'));
 
     const err: unknown = await orchestrator
       .issueAccessKey(tenantId, { keyName: 'My Key', permissions: ['read'] })
@@ -496,7 +543,7 @@ describe('issueAccessKey', () => {
   });
 
   it('wraps other errors with context', async () => {
-    fakeClient.createAccessKey.mockRejectedValue(new ManagementApiError(500, 'boom', undefined));
+    mockCreateAccessKey.mockResolvedValue(fail(500, 'boom'));
 
     await expect(
       orchestrator.issueAccessKey(tenantId, { keyName: 'My Key', permissions: ['read'] }),
@@ -505,7 +552,7 @@ describe('issueAccessKey', () => {
 
   it('never logs the secret', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    fakeClient.createAccessKey.mockResolvedValue(createdKey);
+    mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
 
     await orchestrator.issueAccessKey(tenantId, { keyName: 'My Key', permissions: ['read'] });
 
@@ -517,10 +564,19 @@ describe('issueAccessKey', () => {
 
 describe('findAccessKeyByName', () => {
   it('returns the matching key metadata', async () => {
-    fakeClient.listAccessKeys.mockResolvedValue([
-      { accessKeyId: 'AK1', name: 'other', createdAt: '2026-01-01T00:00:00Z', permissions: [] },
-      { accessKeyId: 'AK2', name: 'target', createdAt: '2026-01-02T00:00:00Z', permissions: [] },
-    ]);
+    mockListAccessKeys.mockResolvedValue(
+      ok({
+        items: [
+          { accessKeyId: 'AK1', name: 'other', createdAt: '2026-01-01T00:00:00Z', permissions: [] },
+          {
+            accessKeyId: 'AK2',
+            name: 'target',
+            createdAt: '2026-01-02T00:00:00Z',
+            permissions: [],
+          },
+        ],
+      }),
+    );
 
     await expect(orchestrator.findAccessKeyByName(tenantId, 'target')).resolves.toEqual({
       id: 'AK2',
@@ -530,32 +586,36 @@ describe('findAccessKeyByName', () => {
   });
 
   it('returns undefined when no key matches', async () => {
-    fakeClient.listAccessKeys.mockResolvedValue([]);
+    mockListAccessKeys.mockResolvedValue(ok({ items: [] }));
 
     await expect(orchestrator.findAccessKeyByName(tenantId, 'target')).resolves.toBeUndefined();
   });
 });
 
 describe('deleteAccessKey', () => {
-  it('deletes via the client', async () => {
-    fakeClient.deleteAccessKey.mockResolvedValue(undefined);
+  it('deletes via the SDK', async () => {
+    mockDeleteAccessKey.mockResolvedValue(noContent());
 
     await orchestrator.deleteAccessKey(tenantId, 'AK1');
 
-    expect(fakeClient.deleteAccessKey).toHaveBeenCalledWith(tenantId, 'AK1');
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client: MOCK_CLIENT,
+        path: { tenantId, accessKeyId: 'AK1' },
+        throwOnError: false,
+      }),
+    );
   });
 
-  it('treats ManagementApiNotFoundError as already deleted', async () => {
+  it('treats a 404 as already deleted', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    fakeClient.deleteAccessKey.mockRejectedValue(
-      new ManagementApiNotFoundError('tenant gone', undefined),
-    );
+    mockDeleteAccessKey.mockResolvedValue(fail(404, 'tenant gone'));
 
     await expect(orchestrator.deleteAccessKey(tenantId, 'AK1')).resolves.toBeUndefined();
   });
 
   it('wraps and rethrows other errors so callers keep the DDB row', async () => {
-    fakeClient.deleteAccessKey.mockRejectedValue(new ManagementApiError(500, 'boom', undefined));
+    mockDeleteAccessKey.mockResolvedValue(fail(500, 'boom'));
 
     await expect(orchestrator.deleteAccessKey(tenantId, 'AK1')).rejects.toThrow(
       `Failed to delete forge access key "AK1" for tenant ${tenantId}`,
@@ -565,24 +625,29 @@ describe('deleteAccessKey', () => {
 
 describe('getTenantUsageMetrics', () => {
   it('maps the default 1d interval to a 24h window and maps both series', async () => {
-    fakeClient.getTenantMetrics.mockResolvedValue({
-      storage: {
-        samples: [{ timestamp: '2026-01-01T01:00:00Z', bytesUsed: 100, objectCount: 3 }],
-      },
-      egress: { samples: [{ timestamp: '2026-01-01T01:00:00Z', bytesEgressed: 55 }] },
-      ingress: { samples: [{ timestamp: '2026-01-01T01:00:00Z', bytesIngested: 77 }] },
-    } satisfies ManagementMetrics);
+    mockGetTenantMetrics.mockResolvedValue(
+      ok({
+        storage: {
+          samples: [{ timestamp: '2026-01-01T01:00:00Z', bytesUsed: 100, objectCount: 3 }],
+        },
+        egress: { samples: [{ timestamp: '2026-01-01T01:00:00Z', bytesEgressed: 55 }] },
+        ingress: { samples: [{ timestamp: '2026-01-01T01:00:00Z', bytesIngested: 77 }] },
+      }),
+    );
 
     const result = await orchestrator.getTenantUsageMetrics(tenantId, {
       from: '2026-01-01T00:00:00Z',
       to: '2026-01-08T00:00:00Z',
     });
 
-    expect(fakeClient.getTenantMetrics).toHaveBeenCalledWith(tenantId, {
-      from: '2026-01-01T00:00:00Z',
-      to: '2026-01-08T00:00:00Z',
-      window: '24h',
-    });
+    expect(mockGetTenantMetrics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client: MOCK_CLIENT,
+        path: { tenantId },
+        query: { from: '2026-01-01T00:00:00Z', to: '2026-01-08T00:00:00Z', window: '24h' },
+        throwOnError: false,
+      }),
+    );
     expect(result).toEqual({
       storage: [{ timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 100, objectCount: 3 }],
       egress: [{ timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 55 }],
@@ -598,7 +663,7 @@ describe('getTenantUsageMetrics', () => {
 
   for (const [interval, window] of Object.entries(windowCases)) {
     it(`maps interval "${interval}" to window "${window}"`, async () => {
-      fakeClient.getTenantMetrics.mockResolvedValue(emptyMetrics);
+      mockGetTenantMetrics.mockResolvedValue(ok(emptyMetrics));
 
       await orchestrator.getTenantUsageMetrics(tenantId, {
         from: '2026-01-01T00:00:00Z',
@@ -606,9 +671,8 @@ describe('getTenantUsageMetrics', () => {
         interval,
       });
 
-      expect(fakeClient.getTenantMetrics).toHaveBeenCalledWith(
-        tenantId,
-        expect.objectContaining({ window }),
+      expect(mockGetTenantMetrics).toHaveBeenCalledWith(
+        expect.objectContaining({ query: expect.objectContaining({ window }) }),
       );
     });
   }
@@ -616,15 +680,17 @@ describe('getTenantUsageMetrics', () => {
 
 describe('getTenantInfo', () => {
   it('maps the tenant record to the quota snapshot', async () => {
-    fakeClient.getTenant.mockResolvedValue({
-      tenantId,
-      status: 'active',
-      bucketCount: 3,
-      bucketLimit: 100,
-      accessKeyCount: 5,
-      accessKeyLimit: 300,
-      createdAt: '2026-01-01T00:00:00Z',
-    });
+    mockGetTenant.mockResolvedValue(
+      ok({
+        tenantId,
+        status: 'active',
+        bucketCount: 3,
+        bucketLimit: 100,
+        accessKeyCount: 5,
+        accessKeyLimit: 300,
+        createdAt: '2026-01-01T00:00:00Z',
+      }),
+    );
 
     await expect(orchestrator.getTenantInfo(tenantId)).resolves.toEqual({
       bucketCount: 3,
@@ -638,13 +704,15 @@ describe('getTenantInfo', () => {
 
 describe('getBucketUsageMetrics', () => {
   it('returns mapped storage samples without a client-side ownership pre-check', async () => {
-    fakeClient.getBucketMetrics.mockResolvedValue({
-      storage: {
-        samples: [{ timestamp: '2026-01-01T01:00:00Z', bytesUsed: 42, objectCount: 2 }],
-      },
-      egress: { samples: [] },
-      ingress: { samples: [] },
-    } satisfies ManagementMetrics);
+    mockGetBucketMetrics.mockResolvedValue(
+      ok({
+        storage: {
+          samples: [{ timestamp: '2026-01-01T01:00:00Z', bytesUsed: 42, objectCount: 2 }],
+        },
+        egress: { samples: [] },
+        ingress: { samples: [] },
+      }),
+    );
 
     const result = await orchestrator.getBucketUsageMetrics(tenantId, 'bucket-a', {
       from: '2026-01-01T00:00:00Z',
@@ -655,19 +723,20 @@ describe('getBucketUsageMetrics', () => {
     expect(result).toEqual([
       { timestamp: '2026-01-01T01:00:00.000Z', bytesUsed: 42, objectCount: 2 },
     ]);
-    expect(fakeClient.getBucketMetrics).toHaveBeenCalledWith(tenantId, 'bucket-a', {
-      from: '2026-01-01T00:00:00Z',
-      to: '2026-01-02T00:00:00Z',
-      window: '1h',
-    });
+    expect(mockGetBucketMetrics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client: MOCK_CLIENT,
+        path: { tenantId, bucketName: 'bucket-a' },
+        query: { from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z', window: '1h' },
+        throwOnError: false,
+      }),
+    );
     // Ownership is enforced upstream (404), so no S3 listing happens here.
     expect(s3Mock.commandCalls(ListBucketsCommand)).toHaveLength(0);
   });
 
   it('maps an upstream 404 to BucketNotFoundError', async () => {
-    fakeClient.getBucketMetrics.mockRejectedValue(
-      new ManagementApiNotFoundError('bucket not owned', undefined),
-    );
+    mockGetBucketMetrics.mockResolvedValue(fail(404, 'bucket not owned'));
 
     await expect(
       orchestrator.getBucketUsageMetrics(tenantId, 'bucket-a', {
@@ -678,7 +747,7 @@ describe('getBucketUsageMetrics', () => {
   });
 
   it('returns an empty array for an owned bucket with no series yet', async () => {
-    fakeClient.getBucketMetrics.mockResolvedValue(emptyMetrics);
+    mockGetBucketMetrics.mockResolvedValue(ok(emptyMetrics));
 
     await expect(
       orchestrator.getBucketUsageMetrics(tenantId, 'bucket-a', {
@@ -688,15 +757,14 @@ describe('getBucketUsageMetrics', () => {
     ).resolves.toEqual([]);
   });
 
-  it('rethrows non-404 errors unchanged', async () => {
-    const cause = new ManagementApiError(500, 'boom', undefined);
-    fakeClient.getBucketMetrics.mockRejectedValue(cause);
+  it('wraps non-404 errors with context', async () => {
+    mockGetBucketMetrics.mockResolvedValue(fail(500, 'boom'));
 
     await expect(
       orchestrator.getBucketUsageMetrics(tenantId, 'bucket-a', {
         from: '2026-01-01T00:00:00Z',
         to: '2026-01-02T00:00:00Z',
       }),
-    ).rejects.toBe(cause);
+    ).rejects.toThrow('Failed to fetch usage metrics for bucket "bucket-a"');
   });
 });
