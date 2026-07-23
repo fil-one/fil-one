@@ -9,6 +9,7 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { reportMetric } from '../lib/metrics.js';
 import { RAGKeys } from '../lib/dynamo-records.js';
 import type { RagIndexerBucketRef, RagIndexerWorkerPayload } from './rag-indexer-worker.js';
 import type { S3Region } from '@filone/shared';
@@ -25,31 +26,128 @@ interface EnabledBucket {
 }
 
 export async function handler(): Promise<void> {
-  const workerFunctionName = process.env.RAG_INDEXER_WORKER_FUNCTION_NAME!;
+  const start = Date.now();
 
   console.log(`${LOG} Starting RAG index reconciliation`);
 
-  const buckets = await scanEnabledBuckets();
-  console.log(`${LOG} Found RAG-enabled buckets`, { count: buckets.length });
-  if (buckets.length === 0) return;
-
-  const bucketsByOrg = groupByOrg(buckets);
-
+  // Declared before the try so the failure path can report whatever counts are
+  // known so far; they stay zero if the scan itself throws.
+  let skippedRows = 0;
+  let totalBuckets = 0;
+  let uniqueOrgs = 0;
   let invoked = 0;
   let failed = 0;
-  for (const [orgId, buckets] of bucketsByOrg) {
-    if (await invokeWorker(workerFunctionName, { orgId, buckets })) {
-      invoked++;
-    } else {
-      failed++;
+  try {
+    // Validated inside the try: without it every dispatch would fail silently
+    // (invokeWorker swallows the error) and the run would still count as a success.
+    const workerFunctionName = process.env.RAG_INDEXER_WORKER_FUNCTION_NAME;
+    if (!workerFunctionName) {
+      throw new Error('RAG_INDEXER_WORKER_FUNCTION_NAME environment variable is not set');
     }
-  }
 
-  console.log(`${LOG} Complete`, {
-    totalBuckets: buckets.length,
-    uniqueOrgs: bucketsByOrg.size,
-    invoked,
-    failed,
+    const { buckets, skipped } = await scanEnabledBuckets();
+    skippedRows = skipped;
+    totalBuckets = buckets.length;
+    console.log(`${LOG} Found RAG-enabled buckets`, { count: buckets.length });
+    if (buckets.length === 0) {
+      emitOrchestratorMetrics({
+        outcome: 'success',
+        durationMs: Date.now() - start,
+        dispatchSuccess: 0,
+        dispatchFailure: 0,
+        totalBuckets: 0,
+        uniqueOrgs: 0,
+        skippedRows,
+      });
+      return;
+    }
+
+    const bucketsByOrg = groupByOrg(buckets);
+    uniqueOrgs = bucketsByOrg.size;
+
+    for (const [orgId, orgBuckets] of bucketsByOrg) {
+      if (await invokeWorker(workerFunctionName, { orgId, buckets: orgBuckets })) {
+        invoked++;
+      } else {
+        failed++;
+      }
+    }
+
+    emitOrchestratorMetrics({
+      outcome: 'success',
+      durationMs: Date.now() - start,
+      dispatchSuccess: invoked,
+      dispatchFailure: failed,
+      totalBuckets,
+      uniqueOrgs,
+      skippedRows,
+    });
+
+    console.log(`${LOG} Complete`, {
+      totalBuckets,
+      uniqueOrgs,
+      invoked,
+      failed,
+    });
+  } catch (error) {
+    emitOrchestratorMetrics({
+      outcome: 'failure',
+      durationMs: Date.now() - start,
+      dispatchSuccess: invoked,
+      dispatchFailure: failed,
+      totalBuckets,
+      uniqueOrgs,
+      skippedRows,
+    });
+    throw error;
+  }
+}
+
+/**
+ * Emit a single CloudWatch EMF event summarising one orchestrator run. Emitted
+ * on every path (zero buckets, normal completion, and failure) so the run-count
+ * and duration series stay complete.
+ */
+function emitOrchestratorMetrics(data: {
+  outcome: 'success' | 'failure';
+  durationMs: number;
+  dispatchSuccess: number;
+  dispatchFailure: number;
+  totalBuckets: number;
+  uniqueOrgs: number;
+  skippedRows: number;
+}): void {
+  const invocationMetricName =
+    data.outcome === 'success'
+      ? 'RagIndexerOrchestratorInvocationSuccess'
+      : 'RagIndexerOrchestratorInvocationFailure';
+
+  reportMetric({
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [[]],
+          Metrics: [
+            { Name: invocationMetricName, Unit: 'Count' },
+            { Name: 'RagIndexerOrchestratorDuration', Unit: 'Milliseconds' },
+            { Name: 'RagIndexerWorkerDispatchSuccess', Unit: 'Count' },
+            { Name: 'RagIndexerWorkerDispatchFailure', Unit: 'Count' },
+            { Name: 'RagIndexerTotalBuckets', Unit: 'Count' },
+            { Name: 'RagIndexerUniqueOrgs', Unit: 'Count' },
+            { Name: 'RagIndexerSkippedRows', Unit: 'Count' },
+          ],
+        },
+      ],
+    },
+    [invocationMetricName]: 1,
+    RagIndexerOrchestratorDuration: data.durationMs,
+    RagIndexerWorkerDispatchSuccess: data.dispatchSuccess,
+    RagIndexerWorkerDispatchFailure: data.dispatchFailure,
+    RagIndexerTotalBuckets: data.totalBuckets,
+    RagIndexerUniqueOrgs: data.uniqueOrgs,
+    RagIndexerSkippedRows: data.skippedRows,
   });
 }
 
@@ -58,8 +156,9 @@ export async function handler(): Promise<void> {
  * `active` status so paused/disabled buckets are left alone. Rows missing an
  * `orgId` (which the worker cannot route) are logged and skipped.
  */
-async function scanEnabledBuckets(): Promise<EnabledBucket[]> {
+async function scanEnabledBuckets(): Promise<{ buckets: EnabledBucket[]; skipped: number }> {
   const buckets: EnabledBucket[] = [];
+  let skipped = 0;
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
 
   do {
@@ -81,12 +180,14 @@ async function scanEnabledBuckets(): Promise<EnabledBucket[]> {
       const record = unmarshall(item);
       const parsed = typeof record.pk === 'string' ? RAGKeys.parseBucketPk(record.pk) : undefined;
       if (!parsed) {
+        skipped++;
         console.warn(`${LOG} Enablement row has an unparseable bucket pk, skipping`, {
           pk: record.pk,
         });
         continue;
       }
       if (!record.orgId) {
+        skipped++;
         console.warn(`${LOG} Enablement row missing orgId, skipping`, {
           bucketName: parsed.bucketName,
         });
@@ -98,7 +199,7 @@ async function scanEnabledBuckets(): Promise<EnabledBucket[]> {
     lastEvaluatedKey = result.LastEvaluatedKey;
   } while (lastEvaluatedKey);
 
-  return buckets;
+  return { buckets, skipped };
 }
 
 function groupByOrg(buckets: EnabledBucket[]): Map<string, RagIndexerBucketRef[]> {

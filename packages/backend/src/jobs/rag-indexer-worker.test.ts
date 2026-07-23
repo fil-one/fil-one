@@ -4,6 +4,7 @@ import type { S3ClientContext } from '../lib/s3-client.js';
 import type { ProvisionedRegion } from '../lib/region-helpers.js';
 import { buildContext } from '../test/lambda-test-utilities.js';
 import { S3Region } from '@filone/shared';
+import { reportMetric, type MetricEvent } from '../lib/metrics.js';
 import type { RagIndexerWorkerPayload } from './rag-indexer-worker.js';
 
 // ---------------------------------------------------------------------------
@@ -59,7 +60,11 @@ vi.mock('@filone/rag-shared', () => ({
   S3VectorsStore: mockS3VectorsStore,
 }));
 
+vi.mock('../lib/metrics.js', () => ({ reportMetric: vi.fn() }));
+
 import { handler } from './rag-indexer-worker.js';
+
+const reportMetricMock = vi.mocked(reportMetric);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -70,6 +75,8 @@ const S3_CTX: S3ClientContext = {
   region: 'eu-west-1',
   credentials: { accessKeyId: 'AK', secretAccessKey: 'SK' },
   forcePathStyle: true,
+  orchestratorId: 'test',
+  tenantId: 't-1',
 };
 
 function makeOrchestrator(id: string, region: S3Region) {
@@ -110,6 +117,9 @@ const AMPLE_CONTEXT = contextWithRemaining(15 * 60 * 1000);
 function payload(buckets: RagIndexerWorkerPayload['buckets']): RagIndexerWorkerPayload {
   return { orgId: 'org-1', buckets };
 }
+
+/** Every metric event emitted so far, in emission order. */
+const reportedMetrics = (): MetricEvent[] => reportMetricMock.mock.calls.map(([e]) => e);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -342,5 +352,162 @@ describe('rag-indexer-worker', () => {
     await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), ctx);
 
     expect(getRemainingTimeInMillis).toHaveBeenCalled();
+  });
+
+  // -----------------------------------------------------------------------
+  // CloudWatch metrics emission
+  // -----------------------------------------------------------------------
+
+  it('emits per-region metrics aggregating bucket and object counts for a clean run', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+    mockIndexBucket.mockResolvedValue({
+      added: 2,
+      updated: 1,
+      removed: 0,
+      failed: 1,
+      completed: true,
+    });
+
+    await handler(
+      payload([
+        { region: S3Region.EuWest1, bucketName: 'b1' },
+        { region: S3Region.EuWest1, bucketName: 'b2' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    const regionEvent = reportedMetrics().find((e) => e.region === S3Region.EuWest1);
+    expect(regionEvent).toBeDefined();
+    expect(regionEvent).toMatchObject({
+      _aws: {
+        CloudWatchMetrics: [{ Namespace: 'FilOne', Dimensions: [['region']] }],
+      },
+      region: S3Region.EuWest1,
+      RagIndexerBucketsIndexed: 2,
+      RagIndexerBucketFailures: 0,
+      RagIndexerObjectsAdded: 4,
+      RagIndexerObjectsUpdated: 2,
+      RagIndexerObjectsRemoved: 0,
+      RagIndexerObjectsFailed: 2,
+    });
+  });
+
+  it('counts a failed bucket under RagIndexerBucketFailures, the rest as indexed', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+    mockIndexBucket
+      .mockRejectedValueOnce(new Error('index failed'))
+      .mockResolvedValue({ added: 3, updated: 0, removed: 0, failed: 0, completed: true });
+
+    await handler(
+      payload([
+        { region: S3Region.EuWest1, bucketName: 'b1' },
+        { region: S3Region.EuWest1, bucketName: 'b2' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    const regionEvent = reportedMetrics().find((e) => e.region === S3Region.EuWest1);
+    expect(regionEvent).toMatchObject({
+      RagIndexerBucketsIndexed: 1,
+      RagIndexerBucketFailures: 1,
+      RagIndexerObjectsAdded: 3,
+    });
+  });
+
+  it('counts a checkpointed (incomplete) bucket separately, not as indexed, while still counting its objects', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    useRegions([provisioned(aurora, 'tenant-a')]);
+    // b1 hit the deadline and checkpointed mid-way; b2 fully reconciled.
+    mockIndexBucket
+      .mockResolvedValueOnce({ added: 5, updated: 0, removed: 0, failed: 0, completed: false })
+      .mockResolvedValue({ added: 1, updated: 0, removed: 0, failed: 0, completed: true });
+
+    await handler(
+      payload([
+        { region: S3Region.EuWest1, bucketName: 'b1' },
+        { region: S3Region.EuWest1, bucketName: 'b2' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    const regionEvent = reportedMetrics().find((e) => e.region === S3Region.EuWest1);
+    expect(regionEvent).toMatchObject({
+      // Only the fully reconciled bucket counts as indexed.
+      RagIndexerBucketsIndexed: 1,
+      RagIndexerBucketsCheckpointed: 1,
+      RagIndexerBucketFailures: 0,
+      // Objects added this run include the checkpointed bucket's work (5 + 1).
+      RagIndexerObjectsAdded: 6,
+    });
+  });
+
+  it('reports all of a failed region as bucket failures with nothing indexed', async () => {
+    const failing = makeOrchestrator('aurora', S3Region.EuWest1);
+    failing.getS3ClientContext.mockRejectedValue(new Error('creds unavailable'));
+    useRegions([provisioned(failing, 'tenant-a')]);
+
+    await handler(
+      payload([
+        { region: S3Region.EuWest1, bucketName: 'b1' },
+        { region: S3Region.EuWest1, bucketName: 'b2' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    const regionEvent = reportedMetrics().find((e) => e.region === S3Region.EuWest1);
+    expect(regionEvent).toMatchObject({
+      RagIndexerBucketsIndexed: 0,
+      RagIndexerBucketFailures: 2,
+    });
+  });
+
+  it('emits a worker-invocation success metric with duration and region tally', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    const fth = makeOrchestrator('fth', S3Region.UsEast1);
+    useRegions([provisioned(aurora, 'tenant-a'), provisioned(fth, 'tenant-f')]);
+
+    await handler(
+      payload([
+        { region: S3Region.EuWest1, bucketName: 'b1' },
+        { region: S3Region.UsEast1, bucketName: 'b2' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    const invocationEvent = reportedMetrics().find(
+      (e) => e.RagIndexerWorkerInvocationSuccess !== undefined,
+    );
+    expect(invocationEvent).toBeDefined();
+    expect(invocationEvent).toMatchObject({
+      _aws: {
+        CloudWatchMetrics: [{ Namespace: 'FilOne', Dimensions: [[]] }],
+      },
+      RagIndexerWorkerInvocationSuccess: 1,
+      RagIndexerWorkerDuration: expect.any(Number),
+      RagIndexerRegionsProcessed: 2,
+      RagIndexerRegionFailures: 0,
+    });
+  });
+
+  it('emits a worker-invocation failure metric and rethrows when the handler throws', async () => {
+    mockGetProvisionedRegions.mockRejectedValue(new Error('region lookup failed'));
+
+    await expect(
+      handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT),
+    ).rejects.toThrow('region lookup failed');
+
+    const invocationEvent = reportedMetrics().find(
+      (e) => e.RagIndexerWorkerInvocationFailure !== undefined,
+    );
+    expect(invocationEvent).toBeDefined();
+    expect(invocationEvent).toMatchObject({
+      _aws: {
+        CloudWatchMetrics: [{ Namespace: 'FilOne', Dimensions: [[]] }],
+      },
+      RagIndexerWorkerInvocationFailure: 1,
+      RagIndexerWorkerDuration: expect.any(Number),
+    });
   });
 });

@@ -31,10 +31,10 @@ const fth: MockOrchestrator = {
   listBuckets: vi.fn(),
 };
 
-const stageOrchestrators = vi.fn<(stage: string, email?: string) => MockOrchestrator[]>();
+const availableOrchestrators = vi.fn<() => MockOrchestrator[]>();
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getAvailableOrchestrators: (stage: string, email?: string) => stageOrchestrators(stage, email),
+  getAvailableOrchestrators: () => availableOrchestrators(),
 }));
 
 vi.mock('../lib/org-profile.js', () => ({
@@ -60,7 +60,7 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 describe('list-buckets baseHandler (single-region)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    stageOrchestrators.mockReturnValue([aurora]);
+    availableOrchestrators.mockReturnValue([aurora]);
     aurora.isTenantReady.mockReturnValue('aurora-t-1');
   });
 
@@ -151,35 +151,13 @@ describe('list-buckets baseHandler (single-region)', () => {
     expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
   });
 
-  it('selects orchestrators using the current FILONE_STAGE and no allowlist email by default', async () => {
+  it('consults the orchestrator registry to fan out across available regions', async () => {
     aurora.listBuckets.mockResolvedValue([]);
 
     const event = buildEvent({ userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(stageOrchestrators).toHaveBeenCalledWith('test', undefined);
-  });
-
-  it('passes the verified email to the orchestrator registry for allowlist fan-out', async () => {
-    aurora.listBuckets.mockResolvedValue([]);
-
-    const event = buildEvent({
-      userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: true },
-    });
-    await baseHandler(event);
-
-    expect(stageOrchestrators).toHaveBeenCalledWith('test', 'dogfood@fil.org');
-  });
-
-  it('does not pass an unverified email to the orchestrator registry', async () => {
-    aurora.listBuckets.mockResolvedValue([]);
-
-    const event = buildEvent({
-      userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: false },
-    });
-    await baseHandler(event);
-
-    expect(stageOrchestrators).toHaveBeenCalledWith('test', undefined);
+    expect(availableOrchestrators).toHaveBeenCalledWith();
   });
 
   it('throws when the orchestrator returns an error', async () => {
@@ -221,7 +199,7 @@ describe('list-buckets baseHandler (single-region)', () => {
 describe('list-buckets baseHandler (multi-region fan-out)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    stageOrchestrators.mockReturnValue([aurora, fth]);
+    availableOrchestrators.mockReturnValue([aurora, fth]);
     aurora.isTenantReady.mockReturnValue('aurora-t-1');
     fth.isTenantReady.mockReturnValue('fth-t-9');
   });

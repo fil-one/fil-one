@@ -76,6 +76,16 @@ export interface TenantUsageMetrics {
   egress: EgressUsageSample[];
 }
 
+export interface ListBucketsOptions {
+  /**
+   * When false, skip loading each bucket's versioning state and return
+   * `versioning: false`. Lets read paths that don't surface versioning
+   * (e.g. get-activity) avoid FTH's per-bucket GetBucketVersioning N+1.
+   * Defaults to true.
+   */
+  includeVersioning?: boolean;
+}
+
 export interface GetTenantUsageMetricsOptions {
   /** Inclusive start timestamp, RFC3339 UTC. */
   from: string;
@@ -176,7 +186,7 @@ export interface ServiceOrchestrator {
 
   createBucket(tenantId: string, args: CreateBucketArgs): Promise<void>;
   deleteBucket(tenantId: string, bucketName: string): Promise<void>;
-  listBuckets(tenantId: string): Promise<BucketSummary[]>;
+  listBuckets(tenantId: string, opts?: ListBucketsOptions): Promise<BucketSummary[]>;
   getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null>;
 
   /**

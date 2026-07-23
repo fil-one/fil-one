@@ -23,6 +23,7 @@ const mockCreateAuroraBucket = vi.fn();
 const mockCreateAuroraAccessKey = vi.fn();
 const mockFindAuroraAccessKeyByName = vi.fn();
 const mockGetAuroraPortalApiKey = vi.fn();
+const mockCreatePortalClient = vi.fn().mockResolvedValue('instrumented-portal-client');
 
 vi.mock('./aurora-portal.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../aurora/aurora-portal.js')>();
@@ -32,6 +33,7 @@ vi.mock('./aurora-portal.js', async (importOriginal) => {
     createAuroraAccessKey: (...args: unknown[]) => mockCreateAuroraAccessKey(...args),
     findAuroraAccessKeyByName: (...args: unknown[]) => mockFindAuroraAccessKeyByName(...args),
     getAuroraPortalApiKey: (...args: unknown[]) => mockGetAuroraPortalApiKey(...args),
+    createPortalClient: (...args: unknown[]) => mockCreatePortalClient(...args),
   };
 });
 
@@ -201,6 +203,18 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('listBuckets', () => {
+    it('calls the Aurora Portal with the shared instrumented client', async () => {
+      mockPortalListBuckets.mockResolvedValue({ data: { items: [] }, error: undefined });
+
+      await auroraOrchestrator.listBuckets('aurora-t-1');
+
+      expect(mockPortalListBuckets).toHaveBeenCalledWith({
+        client: 'instrumented-portal-client',
+        path: { tenantId: 'aurora-t-1' },
+        throwOnError: false,
+      });
+    });
+
     it('maps Aurora Portal response items to BucketSummary objects', async () => {
       mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
       mockPortalListBuckets.mockResolvedValue({
@@ -239,6 +253,30 @@ describe('auroraOrchestrator', () => {
       ]);
     });
 
+    it('returns versioning:false when includeVersioning is false, even for versioned buckets', async () => {
+      mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
+      mockPortalListBuckets.mockResolvedValue({
+        data: {
+          items: [
+            {
+              name: 'b',
+              createdAt: '2026-01-02T00:00:00Z',
+              flags: ['versioned', 'encrypted'],
+            },
+          ],
+        },
+        error: undefined,
+      });
+
+      const result = await auroraOrchestrator.listBuckets('aurora-t-1', {
+        includeVersioning: false,
+      });
+
+      expect(result[0]?.versioning).toBe(false);
+      // encrypted is independent of the versioning option.
+      expect(result[0]?.encrypted).toBe(true);
+    });
+
     it('drops items missing name or createdAt', async () => {
       mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
       mockPortalListBuckets.mockResolvedValue({
@@ -272,6 +310,22 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('getBucket', () => {
+    it('calls the Aurora Portal with the shared instrumented client', async () => {
+      mockPortalGetBucketInfo.mockResolvedValue({
+        data: { name: 'b', createdAt: '2026-01-01T00:00:00Z' },
+        error: undefined,
+        response: { status: 200 },
+      });
+
+      await auroraOrchestrator.getBucket('aurora-t-1', 'b');
+
+      expect(mockPortalGetBucketInfo).toHaveBeenCalledWith({
+        client: 'instrumented-portal-client',
+        path: { tenantId: 'aurora-t-1', bucketName: 'b' },
+        throwOnError: false,
+      });
+    });
+
     it('returns mapped bucket details', async () => {
       mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
       mockPortalGetBucketInfo.mockResolvedValue({
@@ -534,6 +588,8 @@ describe('auroraOrchestrator', () => {
         region: 'auto',
         credentials: { accessKeyId: 'AK', secretAccessKey: 'SK' },
         forcePathStyle: true,
+        orchestratorId: 'aurora',
+        tenantId: 'aurora-t-1',
       });
     });
   });

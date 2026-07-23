@@ -29,7 +29,7 @@ const ssm = new SSMClient({});
 const ssmCache = new QuickLRU<string, string>({ maxSize: 500 });
 export const _resetSsmCacheForTesting = () => ssmCache.clear();
 
-async function createPortalClient(tenantId: string) {
+export async function createPortalClient(tenantId: string) {
   const baseUrl = process.env.AURORA_PORTAL_URL!;
   const stage = process.env.FILONE_STAGE!;
   const apiKey = await getAuroraPortalApiKey(stage, tenantId);

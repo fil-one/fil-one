@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Created:** 2026-03-24
-**Last Modified:** 2026-04-14
+**Last Modified:** 2026-07-21
 
 ---
 
@@ -84,7 +84,31 @@ API Gateway V2 setup.
    quick operational access). All contextual information needed for debugging
    should be logged explicitly. This is a tradeoff: we lose trace-based
    visualization and TraceQL queries, but gain zero telemetry overhead on every
-   request.
+   request. Two mechanisms attach that context to unhandled errors:
+   - `errorHandlerMiddleware` logs the caller's `orgId`, `userId`, and the API
+     Gateway request id (`apiRequestId`, which correlates with the API Gateway
+     access logs — the Lambda-injected `requestId` is a different id) next to
+     every unhandled handler error.
+   - `createS3Client` installs an SDK middleware that decorates every failed
+     S3 call with an enumerable `s3Context` property carrying the operation,
+     bucket, tenant id, orchestrator, region, and endpoint. `console.error`
+     prints enumerable error properties (like the SDK's `$metadata`), so the
+     context shows up in the logged error dump:
+
+     ```
+     AccessDenied: Access Denied {
+       ...
+       s3Context: { operation: 'GetBucketVersioning', bucketName: 'b',
+         tenantId: 't-1', orchestratorId: 'fth', region: 'us-east-1',
+         endpointUrl: '…' }
+     }
+     ```
+
+     The original error is decorated in place (not wrapped) so
+     `err.name`/`instanceof` checks keep working, and `err.message` is left
+     unchanged because it escapes to end users in some paths (e.g. the RAG
+     indexer persists it as `lastSyncError`, which the enablement API
+     returns). Access key ids are deliberately not logged.
 
 ### Metrics pipeline
 
