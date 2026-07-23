@@ -39,6 +39,11 @@ export default $config({
     // ⚠️  All Lambda functions MUST be created via createFn() to ensure
     //     log forwarding is set up. Never use `new sst.aws.Function()` directly.
 
+    const stage = $app.stage;
+    const isProduction = stage === 'production';
+    const isStaging = stage === 'staging';
+    const isEphemeralStage = !isProduction && !isStaging;
+
     // ── Secrets (set via: pnpx sst secret set <Name> <value>) ─────────
     const auth0ClientId = new sst.Secret('Auth0ClientId');
     const auth0ClientSecret = new sst.Secret('Auth0ClientSecret');
@@ -127,6 +132,14 @@ export default $config({
     }
     const ragVectorBucketResource = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
       vectorBucketName: ragVectorBucketName,
+      // Indexes are created at runtime by the RAG indexer (one opaque
+      // rag-<hash> index per RAG-enabled bucket), so Pulumi has no knowledge of
+      // them. Without forceDestroy, `sst remove` of a preview/staging stage
+      // fails with a 409 ConflictException ("vector bucket is not empty") on
+      // DeleteVectorBucket. forceDestroy makes the provider delete all indexes
+      // and vectors first. Gated off production, which is removal:'retain' and
+      // never torn down anyway.
+      forceDestroy: !isProduction,
     });
 
     // Wrap the raw Pulumi resource so handlers can read it via SST resource
@@ -164,11 +177,6 @@ export default $config({
     ];
 
     // ── Stage-aware domain config ────────────────────────────────────
-    const stage = $app.stage;
-    const isProduction = stage === 'production';
-    const isStaging = stage === 'staging';
-    const isEphemeralStage = !isProduction && !isStaging;
-
     // Ephemeral stages become subdomains of dev.fil.one — enforce DNS label rules.
     if (isEphemeralStage && !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(stage)) {
       throw new Error(
