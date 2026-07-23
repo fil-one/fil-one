@@ -27,7 +27,6 @@ interface EnabledBucket {
 
 export async function handler(): Promise<void> {
   const start = Date.now();
-  const workerFunctionName = process.env.RAG_INDEXER_WORKER_FUNCTION_NAME!;
 
   console.log(`${LOG} Starting RAG index reconciliation`);
 
@@ -39,6 +38,13 @@ export async function handler(): Promise<void> {
   let invoked = 0;
   let failed = 0;
   try {
+    // Validated inside the try: without it every dispatch would fail silently
+    // (invokeWorker swallows the error) and the run would still count as a success.
+    const workerFunctionName = process.env.RAG_INDEXER_WORKER_FUNCTION_NAME;
+    if (!workerFunctionName) {
+      throw new Error('RAG_INDEXER_WORKER_FUNCTION_NAME environment variable is not set');
+    }
+
     const { buckets, skipped } = await scanEnabledBuckets();
     skippedRows = skipped;
     totalBuckets = buckets.length;

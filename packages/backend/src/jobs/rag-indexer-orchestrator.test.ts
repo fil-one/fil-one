@@ -318,6 +318,33 @@ describe('rag-indexer-orchestrator', () => {
     expect(events[0].RagIndexerOrchestratorInvocationSuccess).toBeUndefined();
   });
 
+  it('emits a failure metric and throws when the worker function name env var is missing', async () => {
+    vi.stubEnv('RAG_INDEXER_WORKER_FUNCTION_NAME', '');
+    try {
+      ddbMock.on(ScanCommand).resolves({ Items: [enablementItem('bucket-1', 'org-1')] });
+
+      await expect(handler()).rejects.toThrow('RAG_INDEXER_WORKER_FUNCTION_NAME');
+
+      // Fails fast: nothing scanned, nothing dispatched.
+      expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(0);
+      expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+
+      const events = reportedMetrics();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        RagIndexerOrchestratorInvocationFailure: 1,
+        RagIndexerWorkerDispatchSuccess: 0,
+        RagIndexerWorkerDispatchFailure: 0,
+        RagIndexerTotalBuckets: 0,
+        RagIndexerUniqueOrgs: 0,
+        RagIndexerSkippedRows: 0,
+      });
+      expect(events[0].RagIndexerOrchestratorInvocationSuccess).toBeUndefined();
+    } finally {
+      vi.stubEnv('RAG_INDEXER_WORKER_FUNCTION_NAME', 'rag-indexer-worker-fn');
+    }
+  });
+
   it('counts rows skipped by both scan skip branches', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
