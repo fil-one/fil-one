@@ -5,6 +5,15 @@ minimumReleaseAge: 4320 # 3 days
 # Fail if a package's trust level has decreased
 trustPolicy: no-downgrade
 
+# Dependencies allowed to run postinstall/build scripts
+onlyBuiltDependencies:
+  - esbuild
+  - '@pulumi/command'
+  - protobufjs
+
+overrides:
+  '@smithy/types': 4.13.1
+
 packages:
   - 'bin'
   - 'infra'
