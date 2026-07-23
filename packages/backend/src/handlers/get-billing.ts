@@ -39,8 +39,12 @@ export async function baseHandler(
     ? (unmarshall(billingResult.Item) as SubscriptionRecord)
     : null;
 
-  // 2. If no billing record → trial state
-  if (!billingRecord || !billingRecord.stripeCustomerId) {
+  // 2. No billing record, or a "bare" record with a Stripe customer but no
+  // subscriptionStatus yet → trial state. The bare record is healed into a real
+  // Trialing record by the subscription guard / login retry on the next request;
+  // here we present it as the trial it is about to become rather than relying on
+  // the silent `?? Trialing` default further down. (FIL-546)
+  if (!billingRecord || !billingRecord.stripeCustomerId || !billingRecord.subscriptionStatus) {
     return buildTrialResponse(billingRecord, userId, billingTableName);
   }
 
@@ -157,6 +161,8 @@ async function evaluateStatusTransitions(
   userId: string,
   billingTableName: string,
 ): Promise<SubscriptionStatus> {
+  // Records reaching here always carry a subscriptionStatus (bare records are
+  // handled at the trial-state guard above); the fallback is defensive only.
   let currentStatus = billingRecord.subscriptionStatus ?? SubscriptionStatus.Trialing;
 
   // Lazy eval: trial expired → grace_period

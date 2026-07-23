@@ -4,6 +4,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
+  UpdateItemCommand,
   ConditionalCheckFailedException,
 } from '@aws-sdk/client-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
@@ -144,9 +145,14 @@ describe('createBillingTrial', () => {
     expect(mockSubscriptionsCreate).toHaveBeenCalledOnce();
   });
 
-  it('returns early without touching Stripe when a billing record already exists', async () => {
+  it('returns early without touching Stripe when a fully-provisioned billing record already exists', async () => {
     ddbMock.on(GetItemCommand).resolves({
-      Item: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } },
+      Item: {
+        pk: { S: 'CUSTOMER#user-1' },
+        sk: { S: 'SUBSCRIPTION' },
+        subscriptionStatus: { S: 'trialing' },
+        stripeCustomerId: { S: 'cus_existing' },
+      },
     });
 
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
@@ -156,6 +162,7 @@ describe('createBillingTrial', () => {
     expect(mockCustomersCreate).not.toHaveBeenCalled();
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
 
     const getCalls = ddbMock.commandCalls(GetItemCommand);
     expect(getCalls).toHaveLength(1);
@@ -164,6 +171,105 @@ describe('createBillingTrial', () => {
       Key: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } },
       ConsistentRead: true,
     });
+  });
+
+  it('heals a bare record (stripeCustomerId, no subscriptionStatus): reuses customer, issues UpdateItemCommand', async () => {
+    ddbMock.on(GetItemCommand).resolves({
+      Item: {
+        pk: { S: 'CUSTOMER#user-1' },
+        sk: { S: 'SUBSCRIPTION' },
+        stripeCustomerId: { S: 'cus_bare_existing' },
+      },
+    });
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
+
+    // Must NOT create a new Stripe customer (reuses the bare record's customerId)
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+
+    // Must still create the Stripe subscription (using the reused customer)
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: 'cus_bare_existing' }),
+      { idempotencyKey: 'billing-trial-sub-user-1' },
+    );
+
+    // Must use UpdateItemCommand, not PutItemCommand
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updateCalls).toHaveLength(1);
+
+    const input = updateCalls[0].args[0].input;
+    expect(input.TableName).toBe('BillingTable');
+    expect(input.Key).toEqual({ pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } });
+    expect(input.ConditionExpression).toBe('attribute_not_exists(subscriptionStatus)');
+    expect(input.ExpressionAttributeValues?.[':status']).toEqual({ S: 'trialing' });
+    expect(input.ExpressionAttributeValues?.[':subId']).toEqual({ S: 'sub_test_123' });
+    expect(input.ExpressionAttributeValues?.[':ts']).toBeDefined();
+    expect(input.ExpressionAttributeValues?.[':te']).toBeDefined();
+    expect(input.ExpressionAttributeValues?.[':cps']).toBeDefined();
+    expect(input.ExpressionAttributeValues?.[':cpe']).toBeDefined();
+    expect(input.ExpressionAttributeValues?.[':now']).toBeDefined();
+  });
+
+  it('heals a status-less record with no stripeCustomerId: creates a customer and backfills via UpdateItem (not Put)', async () => {
+    // A record that exists without stripeCustomerId AND without subscriptionStatus.
+    // The write must branch on record presence, not on customer presence — a PutItem
+    // guarded on attribute_not_exists(pk) would always fail here and be swallowed,
+    // leaving the record unhealed after Stripe side effects already happened.
+    ddbMock.on(GetItemCommand).resolves({
+      Item: {
+        pk: { S: 'CUSTOMER#user-1' },
+        sk: { S: 'SUBSCRIPTION' },
+      },
+    });
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
+
+    // No existing customer on the record → a new Stripe customer is created.
+    expect(mockCustomersCreate).toHaveBeenCalledOnce();
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: 'cus_test_123' }),
+      { idempotencyKey: 'billing-trial-sub-user-1' },
+    );
+
+    // Heals via UpdateItem, never PutItem.
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updateCalls).toHaveLength(1);
+
+    const input = updateCalls[0].args[0].input;
+    expect(input.ConditionExpression).toBe('attribute_not_exists(subscriptionStatus)');
+    // Backfills stripeCustomerId/orgId without clobbering (if_not_exists).
+    expect(input.UpdateExpression).toContain(
+      'stripeCustomerId = if_not_exists(stripeCustomerId, :cid)',
+    );
+    expect(input.UpdateExpression).toContain('orgId = if_not_exists(orgId, :orgId)');
+    expect(input.ExpressionAttributeValues?.[':cid']).toEqual({ S: 'cus_test_123' });
+    expect(input.ExpressionAttributeValues?.[':orgId']).toEqual({ S: 'org-1' });
+  });
+
+  it('heals a bare record: no-ops when a concurrent writer already set subscriptionStatus (ConditionalCheckFailedException)', async () => {
+    ddbMock.on(GetItemCommand).resolves({
+      Item: {
+        pk: { S: 'CUSTOMER#user-1' },
+        sk: { S: 'SUBSCRIPTION' },
+        stripeCustomerId: { S: 'cus_bare_existing' },
+      },
+    });
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
+
+    // Should not throw
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCreate).toHaveBeenCalledOnce();
   });
 
   it('propagates Stripe customer creation errors', async () => {
