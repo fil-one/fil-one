@@ -116,13 +116,23 @@ export async function handler(event: UsageReportingWorkerPayload): Promise<void>
   let usageMetrics: TenantUsageMetrics[];
   try {
     usageMetrics = await Promise.all(
-      orgRegions.map((t) =>
-        t.orchestrator.getTenantUsageMetrics(t.tenantId, {
-          from: currentPeriodStart,
-          to: now,
-          interval: '1d',
-        }),
-      ),
+      orgRegions.map(async (t) => {
+        try {
+          return await t.orchestrator.getTenantUsageMetrics(t.tenantId, {
+            from: currentPeriodStart,
+            to: now,
+            interval: '1d',
+          });
+        } catch (error) {
+          // Attach the failing region/tenant to the error itself — Promise.all
+          // only surfaces an index, and the escaping error is what the runtime
+          // logs (enumerable own properties included).
+          if (error instanceof Error) {
+            Object.assign(error, { orgId, region: t.orchestrator.region, tenantId: t.tenantId });
+          }
+          throw error;
+        }
+      }),
     );
   } catch (error) {
     const e = error as Error & { cause?: unknown };

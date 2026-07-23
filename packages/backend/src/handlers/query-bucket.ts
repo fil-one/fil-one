@@ -16,7 +16,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.js';
+import { getUserInfo } from '../lib/user-context.js';
 import { ragQueryAuthMiddleware } from '../middleware/rag-query-auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { ragAccessMiddleware } from '../middleware/rag-access.js';
@@ -83,7 +83,7 @@ export async function baseHandler(
   const { orgId } = getUserInfo(event);
 
   const region = event.queryStringParameters?.region ?? S3Region.EuWest1;
-  if (!isSupportedRegion(process.env.FILONE_STAGE!, region, getVerifiedEmail(event))) {
+  if (!isSupportedRegion(region)) {
     return unsupportedRegionResponse(region);
   }
 

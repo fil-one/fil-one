@@ -1,4 +1,4 @@
-import { getAvailableRegions, S3Region, type Stage } from '@filone/shared';
+import { getAvailableRegions, S3Region } from '@filone/shared';
 import { auroraOrchestrator } from './aurora/aurora-orchestrator.js';
 import { fthOrchestrator } from './fth/fth-orchestrator.js';
 import type { ServiceOrchestrator } from './service-orchestrator.js';
@@ -14,9 +14,6 @@ export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator 
   }
 }
 
-export function getAvailableOrchestrators(
-  stage: Stage | string,
-  email?: string,
-): ServiceOrchestrator[] {
-  return getAvailableRegions(stage, email).map(getOrchestratorForRegion);
+export function getAvailableOrchestrators(): ServiceOrchestrator[] {
+  return getAvailableRegions().map(getOrchestratorForRegion);
 }

@@ -239,6 +239,30 @@ describe('auroraOrchestrator', () => {
       ]);
     });
 
+    it('returns versioning:false when includeVersioning is false, even for versioned buckets', async () => {
+      mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
+      mockPortalListBuckets.mockResolvedValue({
+        data: {
+          items: [
+            {
+              name: 'b',
+              createdAt: '2026-01-02T00:00:00Z',
+              flags: ['versioned', 'encrypted'],
+            },
+          ],
+        },
+        error: undefined,
+      });
+
+      const result = await auroraOrchestrator.listBuckets('aurora-t-1', {
+        includeVersioning: false,
+      });
+
+      expect(result[0]?.versioning).toBe(false);
+      // encrypted is independent of the versioning option.
+      expect(result[0]?.encrypted).toBe(true);
+    });
+
     it('drops items missing name or createdAt', async () => {
       mockGetAuroraPortalApiKey.mockResolvedValue('api-key');
       mockPortalListBuckets.mockResolvedValue({
@@ -534,6 +558,8 @@ describe('auroraOrchestrator', () => {
         region: 'auto',
         credentials: { accessKeyId: 'AK', secretAccessKey: 'SK' },
         forcePathStyle: true,
+        orchestratorId: 'aurora',
+        tenantId: 'aurora-t-1',
       });
     });
   });

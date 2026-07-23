@@ -262,12 +262,12 @@ describe('getProvisionedRegions', () => {
     vi.clearAllMocks();
   });
 
-  it('reads the available orchestrators for the current stage', async () => {
+  it('reads the available orchestrators', async () => {
     mockGetAvailableOrchestrators.mockReturnValue([]);
 
     await getProvisionedRegions('org-1');
 
-    expect(mockGetAvailableOrchestrators).toHaveBeenCalledWith('test');
+    expect(mockGetAvailableOrchestrators).toHaveBeenCalledWith();
   });
 
   it('returns each provisioned region as an orchestrator paired with its tenant', async () => {

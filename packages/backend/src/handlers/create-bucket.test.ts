@@ -215,32 +215,14 @@ describe('create-bucket baseHandler', () => {
     expect(mockCreateBucket).not.toHaveBeenCalled();
   });
 
-  it('rejects us-east-1 in production for a non-Foundation user', async () => {
-    const previous = process.env.FILONE_STAGE;
-    process.env.FILONE_STAGE = 'production';
-    try {
-      const event = buildEvent({
-        body: JSON.stringify({ bucketName: 'my-bucket', region: S3Region.UsEast1 }),
-        userInfo: USER_INFO,
-      });
-      const result = await baseHandler(event);
-
-      expect(result.statusCode).toBe(400);
-      expect(JSON.parse(result.body as string).message).toContain('Unsupported region');
-      expect(mockCreateBucket).not.toHaveBeenCalled();
-    } finally {
-      process.env.FILONE_STAGE = previous;
-    }
-  });
-
-  it('accepts us-east-1 in production for a verified Foundation email', async () => {
+  it('accepts us-east-1 in production for any user (soft-launched region)', async () => {
     const previous = process.env.FILONE_STAGE;
     process.env.FILONE_STAGE = 'production';
     mockCreateBucket.mockResolvedValue(undefined);
     try {
       const event = buildEvent({
         body: JSON.stringify({ bucketName: 'my-bucket', region: S3Region.UsEast1 }),
-        userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: true },
+        userInfo: USER_INFO,
       });
       await baseHandler(event);
 

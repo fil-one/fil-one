@@ -247,26 +247,7 @@ describe('get-bucket baseHandler', () => {
     expect(orch.getBucket).not.toHaveBeenCalled();
   });
 
-  it('rejects us-east-1 in production for a non-Foundation user', async () => {
-    const previous = process.env.FILONE_STAGE;
-    process.env.FILONE_STAGE = 'production';
-    try {
-      const event = buildEvent({
-        userInfo: USER_INFO,
-        queryStringParameters: { region: S3Region.UsEast1 },
-      });
-      event.pathParameters = { name: 'my-bucket' };
-      const result = await baseHandler(event);
-
-      expect(result.statusCode).toBe(400);
-      expect(JSON.parse(result.body!).message).toContain('Unsupported region');
-      expect(mockGetOrchestratorForRegion).not.toHaveBeenCalled();
-    } finally {
-      process.env.FILONE_STAGE = previous;
-    }
-  });
-
-  it('accepts us-east-1 in production for a verified Foundation email', async () => {
+  it('accepts us-east-1 in production for any user (soft-launched region)', async () => {
     const previous = process.env.FILONE_STAGE;
     process.env.FILONE_STAGE = 'production';
     orch.getBucket.mockResolvedValue({
@@ -279,7 +260,7 @@ describe('get-bucket baseHandler', () => {
     });
     try {
       const event = buildEvent({
-        userInfo: { ...USER_INFO, email: 'dogfood@fil.org', emailVerified: true },
+        userInfo: USER_INFO,
         queryStringParameters: { region: S3Region.UsEast1 },
       });
       event.pathParameters = { name: 'my-bucket' };
