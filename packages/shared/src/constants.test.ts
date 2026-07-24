@@ -162,7 +162,7 @@ describe('isSupportedRegion', () => {
 
 describe('REGION_LABELS', () => {
   it('has a label for every region including eu-central-3', () => {
-    expect(REGION_LABELS[S3Region.EuCentral3]).toBe('Europe (Central)');
+    expect(REGION_LABELS[S3Region.EuCentral3]).toBe('Europe (Amsterdam)');
   });
 });
 
