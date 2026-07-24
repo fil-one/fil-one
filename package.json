@@ -14,7 +14,7 @@
     "deploy:production": "pnpm run build && sst deploy --stage production",
     "deploy:infra:staging": "cd infra && sst deploy --stage staging",
     "deploy:infra:production": "cd infra && sst deploy --stage production",
-    "generate:api-clients": "pnpm --filter @filone/aurora-backoffice-client --filter @filone/aurora-portal-client --filter @filone/management-api-client generate",
+    "generate:api-clients": "pnpm --filter @filone/aurora-backoffice-client --filter @filone/aurora-portal-client --filter @filone/orchestrator-client generate",
     "remove": "sst remove",
     "prelint": "[ -f .sst/platform/config.d.ts ] || pnpm exec sst install",
     "lint": "oxlint --report-unused-disable-directives && oxfmt --check",

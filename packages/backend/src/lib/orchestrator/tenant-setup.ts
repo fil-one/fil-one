@@ -1,5 +1,5 @@
 // Tenant setup for Management API backed orchestrators. Owned by
-// createManagementApiOrchestrator().ensureTenantReady but kept in a separate
+// createFilOneOrchestrator().ensureTenantReady but kept in a separate
 // module, mirroring fth-tenant-setup.ts / aurora-tenant-setup.ts.
 //
 // The Management API contract makes this much simpler than Aurora's state
@@ -23,7 +23,7 @@ import {
   type Client,
   type CreateAccessKeyRequest,
   type CreatedAccessKey,
-} from '@filone/management-api-client';
+} from '@filone/orchestrator-client';
 
 export const CONSOLE_KEY_NAME = 'filone-console';
 
@@ -73,7 +73,7 @@ export async function ensureTenantReady(
   try {
     return await processTenantSetup(deps, orgId);
   } catch (err) {
-    console.error('[management-api-tenant-setup] setup failed', {
+    console.error('[tenant-setup] setup failed', {
       orchestratorId: deps.id,
       orgId,
       error: format(err),
@@ -132,7 +132,10 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
     new UpdateItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: key,
-      UpdateExpression: `SET ${tenantIdAttribute} = :tenantId, updatedAt = :now`,
+      UpdateExpression: 'SET #tenantIdAttr = :tenantId, updatedAt = :now',
+      ExpressionAttributeNames: {
+        '#tenantIdAttr': tenantIdAttribute,
+      },
       ExpressionAttributeValues: {
         ':tenantId': { S: orgId },
         ':now': { S: new Date().toISOString() },
@@ -216,7 +219,7 @@ async function createConsoleAccessKey(
   }
 
   console.log(
-    `[management-api-tenant-setup] console key "${CONSOLE_KEY_NAME}" exists for tenant ${orgId} ` +
+    `[tenant-setup] console key "${CONSOLE_KEY_NAME}" exists for tenant ${orgId} ` +
       `but SSM holds ${stashed ? 'stale' : 'no'} credentials; rotating the key`,
   );
   const { error: deleteError } = await deleteTenantsByTenantIdAccessKeysByAccessKeyId({

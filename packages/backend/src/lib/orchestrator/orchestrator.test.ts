@@ -12,7 +12,7 @@ import {
   GetObjectLockConfigurationCommand,
 } from '@aws-sdk/client-s3';
 import { S3Region } from '@filone/shared';
-import type { Client } from '@filone/management-api-client';
+import type { Client } from '@filone/orchestrator-client';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -33,7 +33,7 @@ const mockDeleteAccessKey = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetTenantMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetBucketMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 
-vi.mock('@filone/management-api-client', () => ({
+vi.mock('@filone/orchestrator-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
   postTenantsByTenantIdStatus: (o: Record<string, unknown>) => mockSetStatus(o),
   getTenantsByTenantId: (o: Record<string, unknown>) => mockGetTenant(o),
@@ -46,7 +46,7 @@ vi.mock('@filone/management-api-client', () => ({
     mockGetBucketMetrics(o),
 }));
 
-vi.mock('./management-api-metrics.js', () => ({
+vi.mock('./metrics.js', () => ({
   instrumentClient: vi.fn(),
 }));
 
@@ -63,11 +63,8 @@ import {
   NotImplementedError,
 } from '../errors.js';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
-import { instrumentClient } from './management-api-metrics.js';
-import {
-  createManagementApiOrchestrator,
-  type ManagementApiOrchestratorConfig,
-} from './management-api-orchestrator.js';
+import { instrumentClient } from './metrics.js';
+import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 // tenantId === orgId for Management API orchestrators (client-supplied UUID).
@@ -84,8 +81,8 @@ function fail(status: number, message = 'error') {
   return { data: undefined, error: { message }, response: { status } };
 }
 
-function buildOrchestrator(overrides?: { api?: ManagementApiOrchestratorConfig['api'] }) {
-  return createManagementApiOrchestrator({
+function buildOrchestrator(overrides?: { api?: FilOneOrchestratorConfig['api'] }) {
+  return createFilOneOrchestrator({
     id: 'forge',
     region: S3Region.UsEast1,
     stage: 'test',
@@ -120,7 +117,7 @@ beforeEach(() => {
   _resetS3CredentialsCacheForTesting();
 });
 
-describe('createManagementApiOrchestrator config', () => {
+describe('createFilOneOrchestrator config', () => {
   it('exposes the configured id and region', () => {
     expect(orchestrator.id).toBe('forge');
     expect(orchestrator.region).toBe(S3Region.UsEast1);

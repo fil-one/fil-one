@@ -2,7 +2,7 @@
 // Management API contract (docs/service-orchestrator-integration/
 // management-openapi.yaml). Any orchestrator implementing that contract (the
 // Forge network's Hilt is the first) is onboarded by calling
-// createManagementApiOrchestrator with its config rather than writing a new
+// createFilOneOrchestrator with its config rather than writing a new
 // module.
 //
 // The interface methods are intentionally split into two layers (same shape
@@ -19,7 +19,7 @@ import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
 import {
   ensureTenantReady as ensureManagementTenantReady,
   type TenantSetupDeps,
-} from './management-api-tenant-setup.js';
+} from './tenant-setup.js';
 import {
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
@@ -64,10 +64,10 @@ import {
   type Client,
   type CreateAccessKeyRequest,
   type Metrics,
-} from '@filone/management-api-client';
-import { instrumentClient } from './management-api-metrics.js';
+} from '@filone/orchestrator-client';
+import { instrumentClient } from './metrics.js';
 
-export interface ManagementApiOrchestratorConfig {
+export interface FilOneOrchestratorConfig {
   /**
    * Orchestrator id (e.g. 'forge'). Must be stable: it drives the PROFILE
    * attribute the tenant id is stored under (`${id}TenantId`), the SSM path
@@ -94,9 +94,7 @@ export interface ManagementApiOrchestratorConfig {
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
-export function createManagementApiOrchestrator(
-  config: ManagementApiOrchestratorConfig,
-): ServiceOrchestrator {
+export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): ServiceOrchestrator {
   const client = resolveClient(config);
   const setupDeps: TenantSetupDeps = {
     client,
@@ -132,7 +130,7 @@ export function createManagementApiOrchestrator(
 
     isTenantReady(orgProfile: OrgProfileItem | undefined): string | null {
       // The attribute is written last in setup, so its presence means the
-      // tenant is fully provisioned (see management-api-tenant-setup.ts).
+      // tenant is fully provisioned (see tenant-setup.ts).
       return orgProfile?.[tenantIdAttribute]?.S ?? null;
     },
 
@@ -180,7 +178,7 @@ export function createManagementApiOrchestrator(
   } satisfies ServiceOrchestrator;
 }
 
-function resolveClient(config: ManagementApiOrchestratorConfig): Client {
+function resolveClient(config: FilOneOrchestratorConfig): Client {
   if ('client' in config.api) return config.api.client;
   const { baseUrl, accessToken: token, fetch } = config.api;
   const client = createClient({
@@ -196,7 +194,7 @@ function resolveClient(config: ManagementApiOrchestratorConfig): Client {
 
 // Data-plane bucket operations against the S3 gateway with the console key.
 function buildBucketMethods(
-  config: ManagementApiOrchestratorConfig,
+  config: FilOneOrchestratorConfig,
   getS3ClientContext: (tenantId: string) => Promise<S3ClientContext>,
 ): Pick<ServiceOrchestrator, 'createBucket' | 'deleteBucket' | 'listBuckets' | 'getBucket'> {
   return {

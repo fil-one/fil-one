@@ -1,5 +1,5 @@
 {
-  "name": "@filone/management-api-client",
+  "name": "@filone/orchestrator-client",
   "version": "0.0.1",
   "private": true,
   "license": "Apache-2.0 OR MIT",

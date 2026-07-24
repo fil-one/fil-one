@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
-import type { Client } from '@filone/management-api-client';
+import type { Client } from '@filone/orchestrator-client';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -17,7 +17,7 @@ const mockCreateAccessKey = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockListAccessKeys = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockDeleteAccessKey = vi.fn((_options: Record<string, unknown>) => ({}));
 
-vi.mock('@filone/management-api-client', () => ({
+vi.mock('@filone/orchestrator-client', () => ({
   putTenantsByTenantId: (options: Record<string, unknown>) => mockPutTenant(options),
   postTenantsByTenantIdAccessKeys: (options: Record<string, unknown>) =>
     mockCreateAccessKey(options),
@@ -32,7 +32,7 @@ const ssmMock = mockClient(SSMClient);
 // SDK calls are module-mocked, so the client value is just forwarded — a sentinel is enough.
 const client = 'mock-management-client' as unknown as Client;
 
-import { ensureTenantReady, CONSOLE_KEY_NAME } from './management-api-tenant-setup.js';
+import { ensureTenantReady, CONSOLE_KEY_NAME } from './tenant-setup.js';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const deps = { client, id: 'forge', stage: 'test', region: 'us-east-1' };
@@ -131,7 +131,11 @@ describe('ensureTenantReady', () => {
 
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(1);
-    expect(updateCalls[0].args[0].input.UpdateExpression).toContain('forgeTenantId');
+    expect(updateCalls[0].args[0].input.UpdateExpression).toContain('#tenantIdAttr');
+    expect(updateCalls[0].args[0].input.UpdateExpression).toContain(':tenantId');
+    expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({
+      '#tenantIdAttr': { S: 'forgeTenantId' },
+    });
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({
       ':tenantId': { S: orgId },
     });
@@ -282,7 +286,7 @@ describe('ensureTenantReady', () => {
     await ensureTenantReady(deps, orgId);
 
     expect(errorSpy).toHaveBeenCalledWith(
-      '[management-api-tenant-setup] setup failed',
+      '[tenant-setup] setup failed',
       expect.objectContaining({
         orchestratorId: 'forge',
         orgId,
