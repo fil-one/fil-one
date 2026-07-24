@@ -52,10 +52,7 @@ export default $config({
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
-    // Forge is not yet GA — the shared Management API token is only declared and
-    // linked on non-production stages (mirrors sendGridApiKey below).
-    const forgeManagementApiToken =
-      $app.stage !== 'production' ? new sst.Secret('ForgeManagementApiToken') : undefined;
+    const forgeManagementApiToken = new sst.Secret('ForgeManagementApiToken');
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
     const sendGridApiKey =
@@ -492,9 +489,7 @@ export default $config({
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
-    // Forge console S3 keys — one namespace per region-specific id (`forge-<region>-s3`).
-    // Wildcard covers all present/future Forge regions; only granted on non-prod.
-    const forgeS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forge-*-s3/*`;
+    const forgeS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forge-s3/*`;
     // Per-tenant console S3 access keys (getConsoleS3Credentials), needed by
     // handlers that talk to the S3 data plane directly (presign, indexing, …).
     const s3DataPlanePermissions: sst.aws.FunctionPermissionArgs[] = [
