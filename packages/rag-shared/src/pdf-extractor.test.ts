@@ -36,6 +36,19 @@ describe('extractTextFromPdf', () => {
     await expect(extractTextFromPdf(bytes)).rejects.toThrow(/Invalid PDF/i);
   });
 
+  // pdf.js may detach the buffer it is handed. The caller's bytes must survive
+  // extraction: the indexer reads the object once and would otherwise be left
+  // holding an empty buffer.
+  it('leaves the caller-provided buffer intact', async () => {
+    const bytes = buildPdf([['Keep me intact']]);
+    const byteLength = bytes.byteLength;
+
+    await extractTextFromPdf(bytes);
+
+    expect(bytes.byteLength).toBe(byteLength);
+    expect(bytes[0]).toBe('%'.charCodeAt(0));
+  });
+
   it('extracts a many-page document without holding every page at once', async () => {
     const pages = Array.from({ length: 300 }, (_, i) => [`page ${i}`]);
     const text = await extractTextFromPdf(buildPdf(pages));
