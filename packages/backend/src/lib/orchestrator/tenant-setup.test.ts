@@ -134,7 +134,7 @@ describe('ensureTenantReady', () => {
     expect(updateCalls[0].args[0].input.UpdateExpression).toContain('#tenantIdAttr');
     expect(updateCalls[0].args[0].input.UpdateExpression).toContain(':tenantId');
     expect(updateCalls[0].args[0].input.ExpressionAttributeNames).toMatchObject({
-      '#tenantIdAttr': { S: 'forgeTenantId' },
+      '#tenantIdAttr': 'forgeTenantId',
     });
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({
       ':tenantId': { S: orgId },
