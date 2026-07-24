@@ -159,7 +159,7 @@ export async function baseHandler(
       .body<ErrorResponse>({ message: 'region query parameter is required' })
       .build();
   }
-  if (!isSupportedRegion(region)) {
+  if (!isSupportedRegion(region, process.env.FILONE_STAGE)) {
     return unsupportedRegionResponse(region);
   }
 

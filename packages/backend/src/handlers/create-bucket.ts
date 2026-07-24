@@ -43,7 +43,7 @@ export async function baseHandler(
 
   const { orgId } = getUserInfo(event);
 
-  if (!isSupportedRegion(region)) {
+  if (!isSupportedRegion(region, process.env.FILONE_STAGE)) {
     return unsupportedRegionResponse(region);
   }
 

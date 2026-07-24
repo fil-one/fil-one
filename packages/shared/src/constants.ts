@@ -10,6 +10,8 @@ export const DOCS_URL = 'https://docs.fil.one';
 export enum S3Region {
   EuWest1 = 'eu-west-1',
   UsEast1 = 'us-east-1',
+  /** Forge-backed. Not yet GA — non-production stages only (see getAvailableRegions). */
+  EuCentral3 = 'eu-central-3',
 }
 
 /** Default S3 region for Fil One. */
@@ -19,6 +21,7 @@ export const S3_REGION = S3Region.EuWest1 satisfies S3Region;
 export const REGION_LABELS: Record<S3Region, string> = {
   [S3Region.EuWest1]: 'Europe (France)',
   [S3Region.UsEast1]: 'US East (Michigan)',
+  [S3Region.EuCentral3]: 'Europe (Central)',
 };
 
 /** Format a region as `"Europe (France) eu-west-1"`. */
@@ -51,21 +54,28 @@ export function isFoundationEmail(email: string | undefined): boolean {
 }
 
 /**
- * Regions available to all users. Both `eu-west-1` and `us-east-1` are
- * generally available in every stage; the per-region S3 endpoints still vary
- * by stage — see {@link getS3Endpoint}.
+ * Regions available to users. `eu-west-1` and `us-east-1` are generally
+ * available in every stage; `eu-central-3` (Forge) is not yet GA and is only
+ * offered on non-production stages. Pass the deployment `stage` to opt into the
+ * non-GA regions; omitting it (or passing `production`) returns only the GA set.
+ * The per-region S3 endpoints still vary by stage — see {@link getS3Endpoint}.
  */
-export function getAvailableRegions(): S3Region[] {
-  return [S3Region.EuWest1, S3Region.UsEast1];
+export function getAvailableRegions(stage?: Stage | string): S3Region[] {
+  const regions: S3Region[] = [S3Region.EuWest1, S3Region.UsEast1];
+  if (stage !== undefined && stage !== Stage.Production) {
+    regions.push(S3Region.EuCentral3);
+  }
+  return regions;
 }
 
 /**
- * Checks if the region is one Fil One supports. Provides type-narrowing
- * information to TypeScript, changing `region` from `string` to `S3Region`
- * when the function returns `true`.
+ * Checks if the region is one Fil One supports for the given stage. Provides
+ * type-narrowing information to TypeScript, changing `region` from `string` to
+ * `S3Region` when the function returns `true`. Pass `stage` so non-GA regions
+ * (e.g. `eu-central-3`) validate on non-production stages.
  */
-export function isSupportedRegion(region: string): region is S3Region {
-  return getAvailableRegions().includes(region as S3Region);
+export function isSupportedRegion(region: string, stage?: Stage | string): region is S3Region {
+  return getAvailableRegions(stage).includes(region as S3Region);
 }
 
 /**
@@ -89,6 +99,8 @@ export function getS3Endpoint(region: S3Region, stage: Stage | string): string {
         return 'https://s3.dev.aur.lu';
       case S3Region.UsEast1:
         return 'https://us-east-1.fortilyx.com';
+      case S3Region.EuCentral3:
+        return 'https://ingot.staging.fil.one';
     }
   }
   const base = 's3.fil.one';

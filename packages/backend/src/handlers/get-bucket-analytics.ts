@@ -28,7 +28,7 @@ export async function baseHandler(
   }
 
   const region = event.queryStringParameters?.region ?? S3Region.EuWest1;
-  if (!isSupportedRegion(region)) {
+  if (!isSupportedRegion(region, process.env.FILONE_STAGE)) {
     return unsupportedRegionResponse(region);
   }
   const orchestrator = getOrchestratorForRegion(region);
