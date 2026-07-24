@@ -136,6 +136,72 @@ export function buildPptx(slideBodies: string[]): Uint8Array {
 }
 
 /**
+ * Escape the characters that are special inside a PDF literal string.
+ */
+function escapePdfText(text: string): string {
+  return text.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+}
+
+/**
+ * Build a minimal but valid PDF from the given pages, so the PDF extractor can
+ * be exercised against real bytes without committing binary fixtures. Each page
+ * is given as its text lines; an empty array produces a page with no text
+ * operators at all, which is how a scanned (image-only) page looks to a text
+ * extractor. Objects are emitted uncompressed with a correctly computed xref
+ * table, which is the subset of PDF that pdf.js needs to parse text.
+ */
+export function buildPdf(pages: string[][]): Uint8Array {
+  const FONT_OBJ = 3;
+  // Object layout: 1 = catalog, 2 = page tree, 3 = shared font, then one
+  // page/content object pair per page.
+  const objects: (string | { stream: string })[] = [];
+  objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+  const pageObjNums = pages.map((_, i) => 4 + 2 * i);
+  objects[2] =
+    `<< /Type /Pages /Kids [${pageObjNums.map((n) => `${n} 0 R`).join(' ')}] ` +
+    `/Count ${pages.length} >>`;
+  objects[FONT_OBJ] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+
+  pages.forEach((lines, i) => {
+    const pageNum = 4 + 2 * i;
+    const contentNum = pageNum + 1;
+    objects[pageNum] =
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] ` +
+      `/Resources << /Font << /F1 ${FONT_OBJ} 0 R >> >> /Contents ${contentNum} 0 R >>`;
+    // One Tj per line; T* advances to the next line using the 14pt leading.
+    const stream =
+      lines.length === 0
+        ? ''
+        : `BT /F1 12 Tf 14 TL 72 720 Td ${lines
+            .map((line, j) => `${j > 0 ? 'T* ' : ''}(${escapePdfText(line)}) Tj `)
+            .join('')}ET`;
+    objects[contentNum] = { stream };
+  });
+
+  // Serialize, recording each object's byte offset for the xref table. The
+  // fixture is pure ASCII, so string length equals byte offset.
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  for (let n = 1; n < objects.length; n++) {
+    offsets[n] = out.length;
+    const body = objects[n]!;
+    if (typeof body === 'string') {
+      out += `${n} 0 obj\n${body}\nendobj\n`;
+    } else {
+      out += `${n} 0 obj\n<< /Length ${body.stream.length} >>\nstream\n${body.stream}\nendstream\nendobj\n`;
+    }
+  }
+  const xrefOffset = out.length;
+  const count = objects.length; // includes the always-free object 0
+  out += `xref\n0 ${count}\n0000000000 65535 f \n`;
+  for (let n = 1; n < objects.length; n++) {
+    out += `${String(offsets[n]).padStart(10, '0')} 00000 n \n`;
+  }
+  out += `trailer\n<< /Size ${count} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(out, 'ascii'));
+}
+
+/**
  * Convenience: wrap plain text into a single-run Word paragraph.
  */
 export function docxParagraph(text: string): string {
