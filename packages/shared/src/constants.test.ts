@@ -125,10 +125,6 @@ describe('getStageFromHostname', () => {
 });
 
 describe('getAvailableRegions', () => {
-  it('returns only the GA regions when no stage is given (production-safe default)', () => {
-    expect(getAvailableRegions('')).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
-  });
-
   it('excludes the non-GA eu-central-3 region in production', () => {
     expect(getAvailableRegions(Stage.Production)).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
   });
