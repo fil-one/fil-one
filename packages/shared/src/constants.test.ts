@@ -126,7 +126,7 @@ describe('getStageFromHostname', () => {
 
 describe('getAvailableRegions', () => {
   it('returns only the GA regions when no stage is given (production-safe default)', () => {
-    expect(getAvailableRegions()).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
+    expect(getAvailableRegions('')).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
   });
 
   it('excludes the non-GA eu-central-3 region in production', () => {
@@ -145,12 +145,12 @@ describe('getAvailableRegions', () => {
 
 describe('isSupportedRegion', () => {
   it('accepts GA regions regardless of stage', () => {
-    expect(isSupportedRegion('eu-west-1')).toBe(true);
+    expect(isSupportedRegion('eu-west-1', 'unknown')).toBe(true);
     expect(isSupportedRegion('us-east-1', Stage.Production)).toBe(true);
   });
 
   it('gates eu-central-3 to non-production stages', () => {
-    expect(isSupportedRegion('eu-central-3')).toBe(false);
+    expect(isSupportedRegion('eu-central-3', 'unknown')).toBe(false);
     expect(isSupportedRegion('eu-central-3', Stage.Production)).toBe(false);
     expect(isSupportedRegion('eu-central-3', Stage.Staging)).toBe(true);
   });

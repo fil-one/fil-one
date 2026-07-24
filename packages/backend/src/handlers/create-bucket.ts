@@ -42,12 +42,13 @@ export async function baseHandler(
   const { bucketName, region, versioning, lock, retention } = parsed.data;
 
   const { orgId } = getUserInfo(event);
+  const stage = process.env.FILONE_STAGE!;
 
-  if (!isSupportedRegion(region, process.env.FILONE_STAGE)) {
+  if (!isSupportedRegion(region, stage)) {
     return unsupportedRegionResponse(region);
   }
 
-  const orchestrator = getOrchestratorForRegion(region);
+  const orchestrator = getOrchestratorForRegion(region, stage);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 

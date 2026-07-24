@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { S3Region } from '@filone/shared';
+import { S3Region, Stage } from '@filone/shared';
 
 // fth-orchestrator builds its FTH management client at import time, so satisfy
 // both inputs createInstrumentedFthClient() touches before the registry import
@@ -28,43 +28,30 @@ afterEach(() => {
 
 describe('service-orchestrator registry', () => {
   it('routes eu-west-1 to the Aurora orchestrator', () => {
-    const orchestrator = getOrchestratorForRegion(S3Region.EuWest1);
+    const orchestrator = getOrchestratorForRegion(S3Region.EuWest1, Stage.Production);
     expect(orchestrator.id).toBe('aurora');
   });
 
   it('routes us-east-1 to the FTH orchestrator', () => {
-    const orchestrator = getOrchestratorForRegion(S3Region.UsEast1);
+    const orchestrator = getOrchestratorForRegion(S3Region.UsEast1, Stage.Production);
     expect(orchestrator.id).toBe('fth');
   });
 
-  it('routes eu-central-3 to a region-specific Forge orchestrator', () => {
-    const orchestrator = getOrchestratorForRegion(S3Region.EuCentral3);
-    expect(orchestrator.id).toBe('forge-eu-central-3');
+  it('routes eu-central-3 to Forge Staging orchestrator', () => {
+    const orchestrator = getOrchestratorForRegion(S3Region.EuCentral3, Stage.Staging);
+    expect(orchestrator.id).toBe('forge');
     expect(orchestrator.region).toBe(S3Region.EuCentral3);
-  });
-
-  it('memoizes the Forge orchestrator per region', () => {
-    expect(getOrchestratorForRegion(S3Region.EuCentral3)).toBe(
-      getOrchestratorForRegion(S3Region.EuCentral3),
-    );
   });
 });
 
 describe('getAvailableOrchestrators', () => {
-  it('returns only Aurora and FTH when the stage is unset (production-safe default)', () => {
-    const orchestrators = getAvailableOrchestrators();
-    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth']);
-  });
-
   it('excludes Forge in production', () => {
-    process.env.FILONE_STAGE = 'production';
-    const orchestrators = getAvailableOrchestrators();
+    const orchestrators = getAvailableOrchestrators(Stage.Production);
     expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth']);
   });
 
   it('includes the Forge orchestrator on non-production stages', () => {
-    process.env.FILONE_STAGE = 'staging';
-    const orchestrators = getAvailableOrchestrators();
-    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth', 'forge-eu-central-3']);
+    const orchestrators = getAvailableOrchestrators(Stage.Staging);
+    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth', 'forge']);
   });
 });

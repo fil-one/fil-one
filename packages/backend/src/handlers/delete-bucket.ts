@@ -26,8 +26,9 @@ export async function baseHandler(
   }
 
   const { orgId } = getUserInfo(event);
+  const stage = process.env.FILONE_STAGE!;
 
-  const orchestrator = getOrchestratorForRegion(S3_REGION);
+  const orchestrator = getOrchestratorForRegion(S3_REGION, stage);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) {
     return new ResponseBuilder()
