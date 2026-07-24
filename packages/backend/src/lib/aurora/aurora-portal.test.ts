@@ -37,10 +37,12 @@ import {
   buildAuroraAccessArray,
   createAuroraAccessKey,
   createAuroraBucket,
+  createPortalClient,
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
   _resetSsmCacheForTesting,
 } from './aurora-portal.js';
+import { instrumentClient } from './aurora-api-metrics.js';
 import { AccessKeyAlreadyExistsError } from '../errors.js';
 import { ACCESS_KEY_PERMISSIONS } from '@filone/shared';
 
@@ -223,6 +225,32 @@ describe('createAuroraBucket', () => {
     expect(body).not.toHaveProperty('versioning');
     expect(body).not.toHaveProperty('lock');
     expect(body).not.toHaveProperty('defaultRetention');
+  });
+});
+
+describe('createPortalClient', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ssmMock.reset();
+    _resetSsmCacheForTesting();
+    setupSsmMock();
+  });
+
+  it('creates a client with the portal base URL and tenant API key header', async () => {
+    await createPortalClient('tenant-1');
+
+    expect(mockCreateClient).toHaveBeenCalledWith({
+      baseUrl: 'https://api.portal.test.example.com/api',
+      headers: { 'X-Api-Key': 'test-portal-api-key' },
+    });
+  });
+
+  it('instruments the client with apiName "aurora-portal"', async () => {
+    const client = await createPortalClient('tenant-1');
+
+    expect(vi.mocked(instrumentClient)).toHaveBeenCalledWith(client, {
+      apiName: 'aurora-portal',
+    });
   });
 });
 

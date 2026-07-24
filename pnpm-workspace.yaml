@@ -5,6 +5,13 @@ minimumReleaseAge: 4320 # 3 days
 # Fail if a package's trust level has decreased
 trustPolicy: no-downgrade
 
+# False positive: semver@6.3.1 (2023-07-10, ReDoS fix backported to the v6 line)
+# was published after semver 7.5.1-7.5.4, which have provenance attestations.
+# The trust check compares by publish date only, so the v6 backport looks like
+# a downgrade from the v7 line.
+trustPolicyExclude:
+  - 'semver@6.3.1'
+
 packages:
   - 'bin'
   - 'infra'
