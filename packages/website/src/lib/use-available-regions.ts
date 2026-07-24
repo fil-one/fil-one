@@ -1,5 +1,6 @@
 import type { S3Region } from '@filone/shared';
-import { getAvailableRegions, getStageFromHostname } from '@filone/shared';
+import { FILONE_STAGE } from '../env.js';
+import { getAvailableRegions } from '@filone/shared';
 
 /**
  * Regions selectable by the current user. `eu-west-1` and `us-east-1` are
@@ -10,5 +11,5 @@ import { getAvailableRegions, getStageFromHostname } from '@filone/shared';
  * hints, etc.).
  */
 export function useAvailableRegions(): S3Region[] {
-  return getAvailableRegions(getStageFromHostname(window.location.hostname));
+  return getAvailableRegions(FILONE_STAGE);
 }
