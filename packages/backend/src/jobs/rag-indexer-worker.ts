@@ -193,8 +193,7 @@ interface RegionIndexStats {
 async function indexRegion(args: IndexRegionArgs): Promise<RegionIndexStats> {
   const { orgId, region, tenantId, bucketNames, vectorStore, deadlineEpochMs } = args;
 
-  const stage = process.env.FILONE_STAGE!;
-  const orchestrator = getOrchestratorForRegion(region, stage);
+  const orchestrator = getOrchestratorForRegion(region);
   const ctx = await orchestrator.getS3ClientContext(tenantId);
   const s3 = createS3Client(ctx);
 

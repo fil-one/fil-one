@@ -28,17 +28,20 @@ afterEach(() => {
 
 describe('service-orchestrator registry', () => {
   it('routes eu-west-1 to the Aurora orchestrator', () => {
-    const orchestrator = getOrchestratorForRegion(S3Region.EuWest1, Stage.Production);
+    process.env.FILONE_STAGE = Stage.Production;
+    const orchestrator = getOrchestratorForRegion(S3Region.EuWest1);
     expect(orchestrator.id).toBe('aurora');
   });
 
   it('routes us-east-1 to the FTH orchestrator', () => {
-    const orchestrator = getOrchestratorForRegion(S3Region.UsEast1, Stage.Production);
+    process.env.FILONE_STAGE = Stage.Production;
+    const orchestrator = getOrchestratorForRegion(S3Region.UsEast1);
     expect(orchestrator.id).toBe('fth');
   });
 
   it('routes eu-central-3 to Forge Staging orchestrator', () => {
-    const orchestrator = getOrchestratorForRegion(S3Region.EuCentral3, Stage.Staging);
+    process.env.FILONE_STAGE = Stage.Staging;
+    const orchestrator = getOrchestratorForRegion(S3Region.EuCentral3);
     expect(orchestrator.id).toBe('forge');
     expect(orchestrator.region).toBe(S3Region.EuCentral3);
   });
@@ -46,12 +49,14 @@ describe('service-orchestrator registry', () => {
 
 describe('getAvailableOrchestrators', () => {
   it('excludes Forge in production', () => {
-    const orchestrators = getAvailableOrchestrators(Stage.Production);
+    process.env.FILONE_STAGE = Stage.Production;
+    const orchestrators = getAvailableOrchestrators();
     expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth']);
   });
 
   it('includes the Forge orchestrator on non-production stages', () => {
-    const orchestrators = getAvailableOrchestrators(Stage.Staging);
+    process.env.FILONE_STAGE = Stage.Staging;
+    const orchestrators = getAvailableOrchestrators();
     expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth', 'forge']);
   });
 });

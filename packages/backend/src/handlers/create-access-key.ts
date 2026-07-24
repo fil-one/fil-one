@@ -50,13 +50,12 @@ export async function baseHandler(
   const expiresAt = parsed.data.expiresAt ?? null;
 
   const { orgId } = getUserInfo(event);
-  const stage = process.env.FILONE_STAGE!;
 
-  if (!isSupportedRegion(region, stage)) {
+  if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
     return unsupportedRegionResponse(region);
   }
 
-  const orchestrator = getOrchestratorForRegion(region, stage);
+  const orchestrator = getOrchestratorForRegion(region);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 

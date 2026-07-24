@@ -159,8 +159,7 @@ export async function baseHandler(
       .body<ErrorResponse>({ message: 'region query parameter is required' })
       .build();
   }
-  const stage = process.env.FILONE_STAGE!;
-  if (!isSupportedRegion(region, stage)) {
+  if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
     return unsupportedRegionResponse(region);
   }
 
@@ -222,7 +221,7 @@ export async function baseHandler(
       .build();
   }
 
-  const orchestrator = getOrchestratorForRegion(region, stage);
+  const orchestrator = getOrchestratorForRegion(region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 

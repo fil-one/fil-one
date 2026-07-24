@@ -47,8 +47,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // Legacy rows written before multi-region routing don't carry a `region`
   // attribute — those predate FTH, so they belong to Aurora (eu-west-1).
   const region: S3Region = (Item.region?.S as S3Region | undefined) ?? S3Region.EuWest1;
-  const stage = process.env.FILONE_STAGE!;
-  const orchestrator = getOrchestratorForRegion(region, stage);
+  const orchestrator = getOrchestratorForRegion(region);
 
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();

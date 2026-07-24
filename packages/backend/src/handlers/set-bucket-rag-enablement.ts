@@ -65,12 +65,11 @@ export async function baseHandler(
   const { orgId } = getUserInfo(event);
 
   const region = event.queryStringParameters?.region ?? S3_REGION;
-  const stage = process.env.FILONE_STAGE!;
-  if (!isSupportedRegion(region, stage)) {
+  if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
     return unsupportedRegionResponse(region);
   }
 
-  const orchestrator = getOrchestratorForRegion(region, stage);
+  const orchestrator = getOrchestratorForRegion(region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 

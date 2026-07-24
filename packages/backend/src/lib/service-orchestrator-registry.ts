@@ -18,10 +18,8 @@ function getForgeOrchestrator(id: string, region: S3Region): ServiceOrchestrator
   return orchestrator;
 }
 
-export function getOrchestratorForRegion(
-  region: S3Region,
-  stage: Stage | string,
-): ServiceOrchestrator {
+export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator {
+  const stage = process.env.FILONE_STAGE!;
   switch (region) {
     case S3Region.EuWest1:
       return auroraOrchestrator;
@@ -36,6 +34,7 @@ export function getOrchestratorForRegion(
   throw new Error(`Unsupported region "${String(region)}".`);
 }
 
-export function getAvailableOrchestrators(stage: Stage | string): ServiceOrchestrator[] {
-  return getAvailableRegions(stage).map((r) => getOrchestratorForRegion(r, stage));
+export function getAvailableOrchestrators(): ServiceOrchestrator[] {
+  const stage = process.env.FILONE_STAGE!;
+  return getAvailableRegions(stage).map(getOrchestratorForRegion);
 }
