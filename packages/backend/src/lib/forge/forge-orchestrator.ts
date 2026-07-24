@@ -16,12 +16,12 @@
 
 import { getS3Endpoint, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
-import { createManagementApiOrchestrator } from '../management-api/management-api-orchestrator.js';
+import { createFilOneOrchestrator } from '../orchestrator/orchestrator.js';
 import type { ServiceOrchestrator } from '../service-orchestrator.js';
 
 export function createForgeOrchestrator(region: S3Region): ServiceOrchestrator {
   const stage = process.env.FILONE_STAGE!;
-  return createManagementApiOrchestrator({
+  return createFilOneOrchestrator({
     id: `forge-${region}`,
     region,
     stage,
@@ -29,7 +29,7 @@ export function createForgeOrchestrator(region: S3Region): ServiceOrchestrator {
     api: {
       baseUrl: process.env.FORGE_MANAGEMENT_API_URL!,
       // Shared bearer credential, resolved lazily by the factory's auth callback.
-      token: Resource.ForgeManagementApiToken.value,
+      accessToken: Resource.ForgeManagementApiToken.value,
     },
   });
 }
