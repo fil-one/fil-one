@@ -84,17 +84,13 @@ function fail(status: number, message = 'error') {
   return { data: undefined, error: { message }, response: { status } };
 }
 
-function buildOrchestrator(overrides?: {
-  s3SigningRegion?: string;
-  api?: ManagementApiOrchestratorConfig['api'];
-}) {
+function buildOrchestrator(overrides?: { api?: ManagementApiOrchestratorConfig['api'] }) {
   return createManagementApiOrchestrator({
     id: 'forge',
     region: S3Region.UsEast1,
     stage: 'test',
     s3EndpointUrl: 'https://us-east-1.s3.test.example.com',
-    ...(overrides?.s3SigningRegion && { s3SigningRegion: overrides.s3SigningRegion }),
-    api: overrides?.api ?? { baseUrl: 'https://api.example.com', token: 'partner-key' },
+    api: overrides?.api ?? { baseUrl: 'https://api.example.com', accessToken: 'partner-key' },
   });
 }
 
@@ -136,7 +132,7 @@ describe('createManagementApiOrchestrator config', () => {
   });
 
   it('builds and instruments a client from baseUrl + token settings', () => {
-    buildOrchestrator({ api: { baseUrl: 'https://api.example.com', token: 'partner-key' } });
+    buildOrchestrator({ api: { baseUrl: 'https://api.example.com', accessToken: 'partner-key' } });
 
     // Bearer credential is supplied as a lazy callback, never a literal.
     const config = mockCreateClient.mock.calls[0][0] as {
@@ -272,12 +268,12 @@ describe('getS3ClientContext', () => {
     expect(call.args[0].input.Name).toBe(`/filone/test/forge-s3/access-key/${tenantId}`);
   });
 
-  it('honours an explicit s3SigningRegion override', async () => {
+  it('signs against the orchestrator region', async () => {
     stubS3Credentials();
 
-    const ctx = await buildOrchestrator({ s3SigningRegion: 'auto' }).getS3ClientContext(tenantId);
+    const ctx = await orchestrator.getS3ClientContext(tenantId);
 
-    expect(ctx.region).toBe('auto');
+    expect(ctx.region).toBe('us-east-1');
   });
 });
 

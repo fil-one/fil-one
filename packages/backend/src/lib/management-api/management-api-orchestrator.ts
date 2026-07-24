@@ -81,14 +81,12 @@ export interface ManagementApiOrchestratorConfig {
   stage: string;
   /** S3 gateway endpoint for the data plane, e.g. `https://{region}.s3.fil.one`. */
   s3EndpointUrl: string;
-  /** Sig V4 signing region for the S3 gateway. Defaults to `region`'s string value. */
-  s3SigningRegion?: string;
   /**
    * Control-plane Management API access: either connection settings (the
    * factory builds and instruments a client) or a pre-built client (used by
    * tests and advanced callers; NOT auto-instrumented).
    */
-  api: { client: Client } | { baseUrl: string; token: string; fetch?: typeof fetch };
+  api: { client: Client } | { baseUrl: string; accessToken: string; fetch?: typeof fetch };
 }
 
 // Versioning / object-lock are applied as separate, idempotent S3 calls after the
@@ -116,7 +114,7 @@ export function createManagementApiOrchestrator(
     });
     return {
       endpointUrl: config.s3EndpointUrl,
-      region: config.s3SigningRegion ?? config.region,
+      region: config.region,
       credentials,
       forcePathStyle: true,
       orchestratorId: config.id,
@@ -184,7 +182,7 @@ export function createManagementApiOrchestrator(
 
 function resolveClient(config: ManagementApiOrchestratorConfig): Client {
   if ('client' in config.api) return config.api.client;
-  const { baseUrl, token, fetch } = config.api;
+  const { baseUrl, accessToken: token, fetch } = config.api;
   const client = createClient({
     baseUrl,
     // Resolve the bearer credential lazily so the token isn't captured into a
