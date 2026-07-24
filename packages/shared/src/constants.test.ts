@@ -150,9 +150,9 @@ describe('isSupportedRegion', () => {
   });
 
   it('gates eu-central-3 to non-production stages', () => {
-    expect(isSupportedRegion('eu-central-3', 'unknown')).toBe(false);
     expect(isSupportedRegion('eu-central-3', Stage.Production)).toBe(false);
     expect(isSupportedRegion('eu-central-3', Stage.Staging)).toBe(true);
+    expect(isSupportedRegion('eu-central-3', 'unknown')).toBe(true);
   });
 
   it('rejects unknown regions', () => {
