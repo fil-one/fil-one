@@ -11,6 +11,7 @@ import {
   getAvailableRegions,
   supportsBucketManagement,
   isFoundationEmail,
+  isSupportedRegion,
   formatRegion,
   getRegionLabel,
   REGION_LABELS,
@@ -83,6 +84,10 @@ describe('getS3Endpoint', () => {
   it('returns the dev URL for arbitrary non-production stage strings', () => {
     expect(getS3Endpoint(S3Region.EuWest1, 'dev')).toBe('https://s3.dev.aur.lu');
   });
+
+  it('returns the eu-central-3 staging gateway', () => {
+    expect(getS3Endpoint(S3Region.EuCentral3, Stage.Staging)).toBe('https://ingot.staging.fil.one');
+  });
 });
 
 describe('getAuth0Domain', () => {
@@ -120,8 +125,44 @@ describe('getStageFromHostname', () => {
 });
 
 describe('getAvailableRegions', () => {
-  it('returns both regions for all users', () => {
+  it('returns only the GA regions when no stage is given (production-safe default)', () => {
     expect(getAvailableRegions()).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
+  });
+
+  it('excludes the non-GA eu-central-3 region in production', () => {
+    expect(getAvailableRegions(Stage.Production)).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
+  });
+
+  it('includes eu-central-3 on non-production stages', () => {
+    expect(getAvailableRegions(Stage.Staging)).toEqual([
+      S3Region.EuWest1,
+      S3Region.UsEast1,
+      S3Region.EuCentral3,
+    ]);
+    expect(getAvailableRegions('dev-pr-123')).toContain(S3Region.EuCentral3);
+  });
+});
+
+describe('isSupportedRegion', () => {
+  it('accepts GA regions regardless of stage', () => {
+    expect(isSupportedRegion('eu-west-1')).toBe(true);
+    expect(isSupportedRegion('us-east-1', Stage.Production)).toBe(true);
+  });
+
+  it('gates eu-central-3 to non-production stages', () => {
+    expect(isSupportedRegion('eu-central-3')).toBe(false);
+    expect(isSupportedRegion('eu-central-3', Stage.Production)).toBe(false);
+    expect(isSupportedRegion('eu-central-3', Stage.Staging)).toBe(true);
+  });
+
+  it('rejects unknown regions', () => {
+    expect(isSupportedRegion('mars-1', Stage.Staging)).toBe(false);
+  });
+});
+
+describe('REGION_LABELS', () => {
+  it('has a label for every region including eu-central-3', () => {
+    expect(REGION_LABELS[S3Region.EuCentral3]).toBe('Europe (Central)');
   });
 });
 

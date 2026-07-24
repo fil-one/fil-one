@@ -65,7 +65,7 @@ export async function baseHandler(
   const { orgId } = getUserInfo(event);
 
   const region = event.queryStringParameters?.region ?? S3_REGION;
-  if (!isSupportedRegion(region)) {
+  if (!isSupportedRegion(region, process.env.FILONE_STAGE)) {
     return unsupportedRegionResponse(region);
   }
 

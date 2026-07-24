@@ -57,6 +57,10 @@ export default $config({
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
+    // Forge is not yet GA — the shared Management API token is only declared and
+    // linked on non-production stages (mirrors sendGridApiKey below).
+    const forgeManagementApiToken =
+      $app.stage !== 'production' ? new sst.Secret('ForgeManagementApiToken') : undefined;
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
     const sendGridApiKey =
@@ -449,6 +453,7 @@ export default $config({
       stripePriceId,
       auroraBackofficeToken,
       fthManagementApiToken,
+      ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
     ];
     // Management API runtime credentials — linked only to handlers that call the Auth0 Management API
     const mgmtRuntimeResources = [auth0MgmtRuntimeClientId, auth0MgmtRuntimeClientSecret];
@@ -478,23 +483,32 @@ export default $config({
       FTH_MANAGEMENT_API_URL: 'https://api.fortilyx.com',
     };
 
+    // Forge (Management-API) — non-prod only. One shared endpoint serves every
+    // Forge region; the region is sent per-tenant in the PUT /tenants body.
+    const forgeEnv: Record<string, string> = isProduction
+      ? {}
+      : { FORGE_MANAGEMENT_API_URL: 'https://hilt.staging.fil.one' };
+
     // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
     // drives region/orchestrator selection, and instantiating the orchestrator
     // registry eagerly loads both the Aurora and FTH clients, so each backend's
     // endpoint config must be present. FILONE_STAGE is intentionally also in
     // sharedEnv (the partial-bundle route handlers read it); it's repeated here
     // so cron jobs, which bypass sharedEnv, receive it too.
-    const orchestratorEnv = { FILONE_STAGE: $app.stage, ...auroraEnv, ...fthEnv };
+    const orchestratorEnv = { FILONE_STAGE: $app.stage, ...auroraEnv, ...fthEnv, ...forgeEnv };
 
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
+    // Forge console S3 keys — one namespace per region-specific id (`forge-<region>-s3`).
+    // Wildcard covers all present/future Forge regions; only granted on non-prod.
+    const forgeS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forge-*-s3/*`;
     // Per-tenant console S3 access keys (getConsoleS3Credentials), needed by
     // handlers that talk to the S3 data plane directly (presign, indexing, …).
     const s3DataPlanePermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
-        resources: [auroraS3KeySsmArn, fthS3KeySsmArn],
+        resources: [auroraS3KeySsmArn, fthS3KeySsmArn, ...(isProduction ? [] : [forgeS3KeySsmArn])],
       },
     ];
     // Per-tenant credentials for the bucket read path (getBucket/listBuckets):
@@ -502,7 +516,11 @@ export default $config({
     const bucketReadPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
-        resources: [auroraApiKeySsmArn, fthS3KeySsmArn],
+        resources: [
+          auroraApiKeySsmArn,
+          fthS3KeySsmArn,
+          ...(isProduction ? [] : [forgeS3KeySsmArn]),
+        ],
       },
     ];
 
@@ -608,6 +626,7 @@ export default $config({
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         ...fthEnv,
+        ...forgeEnv,
       },
       permissions: bucketReadPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
@@ -621,7 +640,12 @@ export default $config({
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
+          resources: [
+            auroraApiKeySsmArn,
+            auroraS3KeySsmArn,
+            fthS3KeySsmArn,
+            ...(isProduction ? [] : [forgeS3KeySsmArn]),
+          ],
         },
       ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
@@ -634,6 +658,7 @@ export default $config({
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         ...fthEnv,
+        ...forgeEnv,
       },
       permissions: bucketReadPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
@@ -643,7 +668,7 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
-      extraEnv: { ...fthEnv },
+      extraEnv: { ...fthEnv, ...forgeEnv },
       permissions: s3DataPlanePermissions,
     });
     addRoute({
@@ -660,7 +685,12 @@ export default $config({
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
+          resources: [
+            auroraApiKeySsmArn,
+            auroraS3KeySsmArn,
+            fthS3KeySsmArn,
+            ...(isProduction ? [] : [forgeS3KeySsmArn]),
+          ],
         },
       ],
       timeout: '30 seconds',
@@ -672,6 +702,7 @@ export default $config({
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         ...fthEnv,
+        ...forgeEnv,
       },
       permissions: [
         {
@@ -702,7 +733,7 @@ export default $config({
       method: 'POST',
       routePath: '/api/presign',
       handler: 'presign',
-      extraEnv: { ...fthEnv },
+      extraEnv: { ...fthEnv, ...forgeEnv },
       permissions: s3DataPlanePermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '512 MB',
@@ -937,6 +968,7 @@ export default $config({
         stripePriceId,
         auroraBackofficeToken,
         fthManagementApiToken,
+        ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
       ],
       environment: {
         ...orchestratorEnv,
@@ -972,7 +1004,13 @@ export default $config({
     // ── Grace period enforcement ────────────────────────────────────
     const gracePeriodEnforcer = createFn('GracePeriodEnforcer', {
       handler: 'packages/backend/src/jobs/grace-period-enforcer.handler',
-      link: [billingTable, userInfoTable, auroraBackofficeToken, fthManagementApiToken],
+      link: [
+        billingTable,
+        userInfoTable,
+        auroraBackofficeToken,
+        fthManagementApiToken,
+        ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
+      ],
       environment: orchestratorEnv,
       timeout: '300 seconds',
       memory: '256 MB',
@@ -999,6 +1037,7 @@ export default $config({
         ragVectorBucket,
         auroraBackofficeToken,
         fthManagementApiToken,
+        ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
       ],
       environment: orchestratorEnv,
       timeout: '900 seconds',
@@ -1043,7 +1082,13 @@ export default $config({
     // ── Subscription drift checker (cron-based, observe-only) ───────
     const subscriptionDriftChecker = createFn('SubscriptionDriftChecker', {
       handler: 'packages/backend/src/jobs/subscription-drift-checker.handler',
-      link: [billingTable, userInfoTable, auroraBackofficeToken, fthManagementApiToken],
+      link: [
+        billingTable,
+        userInfoTable,
+        auroraBackofficeToken,
+        fthManagementApiToken,
+        ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
+      ],
       environment: orchestratorEnv,
       timeout: '300 seconds',
       memory: '256 MB',
