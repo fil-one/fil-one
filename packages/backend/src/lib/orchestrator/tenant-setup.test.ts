@@ -141,21 +141,21 @@ describe('ensureTenantReady', () => {
     });
   });
 
-  it('scopes the SSM path and PROFILE attribute per region-specific id', async () => {
+  it('scopes the SSM path and PROFILE attribute per id', async () => {
     // Region-encoded ids (multi-region Forge) must not collide across regions and
     // must produce a valid hyphenated DynamoDB attribute name via ExpressionAttributeNames.
-    const regionDeps = { ...deps, id: 'forge-eu-central-3' };
+    const regionDeps = { ...deps, id: 'forge' };
     stubHappyPath();
 
     const result = await ensureTenantReady(regionDeps, orgId);
 
     expect(result).toBe(orgId);
     expect(ssmMock.commandCalls(PutParameterCommand)[0].args[0].input.Name).toBe(
-      `/filone/test/forge-eu-central-3-s3/access-key/${orgId}`,
+      `/filone/test/forge-s3/access-key/${orgId}`,
     );
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls[0].args[0].input.ExpressionAttributeNames).toMatchObject({
-      '#tenantIdAttr': 'forge-eu-central-3TenantId',
+      '#tenantIdAttr': 'forgeTenantId',
     });
   });
 
