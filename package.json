@@ -63,7 +63,8 @@
       "protobufjs"
     ],
     "overrides": {
-      "@smithy/types": "4.13.1"
+      "@smithy/types": "4.13.1",
+      "@types/node": "^24.12.0"
     }
   }
 }

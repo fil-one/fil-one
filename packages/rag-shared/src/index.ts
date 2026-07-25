@@ -24,6 +24,12 @@ export { extractTextFromPdf } from './pdf-extractor.js';
 export { BucketObjectVectorStore, companionBucketName } from './bucket-object-vector-store.js';
 export type { BucketObjectVectorStoreOptions } from './bucket-object-vector-store.js';
 
+// SPIKE — an alternative backend for the same companion buckets, not yet wired
+// into the indexer or the query path. See
+// docs/architectural-decisions/rag-vector-store-options.md.
+export { LanceVectorStore } from './lance-vector-store.js';
+export type { LanceStorageContext, LanceVectorStoreOptions } from './lance-vector-store.js';
+
 export type { EnsureIndexOptions, QueryOptions, VectorStore } from './vector-store.js';
 
 export { VectorQueryResultSchema, VectorStoreChunkSchema } from './schemas.js';
