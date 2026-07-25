@@ -17,6 +17,8 @@ export interface FakeOrchestrator {
   getTenantInfo: ReturnType<typeof vi.fn>;
   getBucketUsageMetrics: ReturnType<typeof vi.fn>;
   getBucket: ReturnType<typeof vi.fn>;
+  createBucket: ReturnType<typeof vi.fn>;
+  getS3ClientContext: ReturnType<typeof vi.fn>;
 }
 
 export interface FakeOrchestratorOpts {
@@ -77,6 +79,15 @@ export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): F
         ? vi.fn().mockRejectedValue(bucketMetrics)
         : vi.fn().mockResolvedValue(bucketMetrics),
     getBucket: vi.fn().mockResolvedValue(opts.bucket ?? null),
+    // RAG companion provisioning + the tenant S3 client context used by the
+    // query/indexer paths. Default to success; tests override as needed.
+    createBucket: vi.fn().mockResolvedValue(undefined),
+    getS3ClientContext: vi.fn().mockResolvedValue({
+      endpointUrl: 'https://s3.example',
+      region: region as string,
+      credentials: { accessKeyId: 'AK', secretAccessKey: 'SK' },
+      forcePathStyle: true,
+    }),
   };
 }
 

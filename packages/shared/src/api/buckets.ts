@@ -4,6 +4,25 @@ export const BUCKET_NAME_MIN_LENGTH = 3;
 export const BUCKET_NAME_MAX_LENGTH = 63;
 export const BUCKET_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
 
+/**
+ * Bucket-name prefix reserved for Fil One's internal per-bucket RAG companion
+ * index buckets (see `@filone/rag-shared` `companionBucketName`). A companion
+ * bucket holds the tenant's own embeddings + chunk text as plain objects on the
+ * tenant's storage; it must never be creatable, listable, or otherwise operable
+ * through the normal bucket surface, so this prefix is blocked everywhere a
+ * bucket name is accepted or returned.
+ */
+export const RAG_COMPANION_BUCKET_PREFIX = 'filone-rag-';
+
+/**
+ * True when `name` is reserved for Fil One's internal use and must not be
+ * created, listed, presigned, queried, or otherwise operated on by tenants.
+ * Currently this is the `filone-rag-*` RAG companion-bucket namespace.
+ */
+export function isReservedBucketName(name: string): boolean {
+  return name.startsWith(RAG_COMPANION_BUCKET_PREFIX);
+}
+
 export const RETENTION_MODES = ['governance', 'compliance'] as const;
 export type RetentionMode = (typeof RETENTION_MODES)[number];
 
@@ -45,7 +64,10 @@ export const CreateBucketSchema = z
       .regex(
         BUCKET_NAME_PATTERN,
         'Lowercase letters, numbers, and hyphens only. Must start and end with a letter or number.',
-      ),
+      )
+      .refine((name) => !isReservedBucketName(name), {
+        message: `Bucket names starting with "${RAG_COMPANION_BUCKET_PREFIX}" are reserved`,
+      }),
     region: z.string().min(1, 'Region is required'),
     versioning: z.boolean().optional().default(false),
     lock: z.boolean().optional().default(false),

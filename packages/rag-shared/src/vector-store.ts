@@ -32,7 +32,8 @@ export interface QueryOptions {
  * `(orgId, region, bucketName)` triple on every method — never by
  * `(region, bucketName)` alone, which would let a reused name resolve to another
  * tenant's index (FIL-596). Implementations map these operations onto a concrete
- * backend (e.g. Amazon S3 Vectors).
+ * backend (e.g. a per-bucket companion index bucket of plain S3 objects — see
+ * {@link BucketObjectVectorStore}).
  *
  * Conventions enforced by implementations:
  *   - Vector keys are `${objectKey}#${chunkIndex}`.

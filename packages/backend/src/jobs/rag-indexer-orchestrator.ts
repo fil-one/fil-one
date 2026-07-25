@@ -1,8 +1,11 @@
-// RAG indexer orchestrator: a cron-triggered scan that fans out indexing work
-// per org. It scans the per-bucket RAG enablement rows (RagIndexerTable —
-// BUCKET#{orgId}#{region}#{bucketName} / RAG), groups the active ones by their owning
-// org, and async-invokes the worker once per org (InvocationType 'Event'). It has no
-// side effects beyond those invocations; all S3/vector work lives in the worker.
+// RAG indexer orchestrator: a cron-triggered scan that fans out work per org. It
+// scans the per-bucket RAG enablement rows (RagIndexerTable —
+// BUCKET#{orgId}#{region}#{bucketName} / RAG) and selects two sets: `active`
+// buckets (to index) and buckets carrying a `teardownPendingAt` marker (to tear
+// down — the backstop for a set-enablement invoke that was lost or failed). It
+// groups each set by owning org and async-invokes the worker once per (org,
+// mode) with InvocationType 'Event'. It has no side effects beyond those
+// invocations; all S3/vector work lives in the worker.
 
 import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
@@ -11,7 +14,11 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { reportMetric } from '../lib/metrics.js';
 import { RAGKeys } from '../lib/dynamo-records.js';
-import type { RagIndexerBucketRef, RagIndexerWorkerPayload } from './rag-indexer-worker.js';
+import type {
+  RagIndexerBucketRef,
+  RagIndexerWorkerMode,
+  RagIndexerWorkerPayload,
+} from './rag-indexer-worker.js';
 import type { S3Region } from '@filone/shared';
 
 const dynamo = getDynamoClient();
@@ -19,10 +26,11 @@ const lambda = new LambdaClient({});
 
 const LOG = '[rag-indexer-orchestrator]';
 
-interface EnabledBucket {
+interface SelectedBucket {
   region: S3Region;
   bucketName: string;
   orgId: string;
+  mode: RagIndexerWorkerMode;
 }
 
 export async function handler(): Promise<void> {
@@ -45,10 +53,15 @@ export async function handler(): Promise<void> {
       throw new Error('RAG_INDEXER_WORKER_FUNCTION_NAME environment variable is not set');
     }
 
-    const { buckets, skipped } = await scanEnabledBuckets();
+    const { buckets, skipped } = await scanSelectedBuckets();
     skippedRows = skipped;
     totalBuckets = buckets.length;
-    console.log(`${LOG} Found RAG-enabled buckets`, { count: buckets.length });
+    const indexBuckets = buckets.filter((bucket) => bucket.mode === 'index');
+    const teardownBuckets = buckets.filter((bucket) => bucket.mode === 'teardown');
+    console.log(`${LOG} Found buckets`, {
+      index: indexBuckets.length,
+      teardown: teardownBuckets.length,
+    });
     if (buckets.length === 0) {
       emitOrchestratorMetrics({
         outcome: 'success',
@@ -62,15 +75,21 @@ export async function handler(): Promise<void> {
       return;
     }
 
-    const bucketsByOrg = groupByOrg(buckets);
-    uniqueOrgs = bucketsByOrg.size;
+    const byOrgIndex = groupByOrg(indexBuckets);
+    const byOrgTeardown = groupByOrg(teardownBuckets);
+    // An org with both index and teardown work is dispatched twice (once per
+    // mode), so count distinct orgs rather than summing the two maps.
+    uniqueOrgs = new Set([...byOrgIndex.keys(), ...byOrgTeardown.keys()]).size;
 
-    for (const [orgId, orgBuckets] of bucketsByOrg) {
-      if (await invokeWorker(workerFunctionName, { orgId, buckets: orgBuckets })) {
+    for (const [orgId, refs] of byOrgIndex) {
+      if (await invokeWorker(workerFunctionName, { orgId, buckets: refs, mode: 'index' }))
         invoked++;
-      } else {
-        failed++;
-      }
+      else failed++;
+    }
+    for (const [orgId, refs] of byOrgTeardown) {
+      if (await invokeWorker(workerFunctionName, { orgId, buckets: refs, mode: 'teardown' }))
+        invoked++;
+      else failed++;
     }
 
     emitOrchestratorMetrics({
@@ -85,7 +104,8 @@ export async function handler(): Promise<void> {
 
     console.log(`${LOG} Complete`, {
       totalBuckets,
-      uniqueOrgs,
+      indexOrgs: byOrgIndex.size,
+      teardownOrgs: byOrgTeardown.size,
       invoked,
       failed,
     });
@@ -152,12 +172,15 @@ function emitOrchestratorMetrics(data: {
 }
 
 /**
- * Scan every active per-bucket RAG enablement row. Filters on the RAG sk and an
- * `active` status so paused/disabled buckets are left alone. Rows missing an
- * `orgId` (which the worker cannot route) are logged and skipped.
+ * Scan the per-bucket RAG enablement rows and select those needing work: rows
+ * with `status = active` (to index) OR carrying a `teardownPendingAt` marker (to
+ * tear down). Paused/disabled rows with no pending teardown are left alone. A
+ * row is classified `index` when active, else `teardown` — so a re-enabled
+ * bucket (active) is indexed and never torn down even if a stale marker lingers.
+ * Rows missing an `orgId` (which the worker cannot route) are logged and skipped.
  */
-async function scanEnabledBuckets(): Promise<{ buckets: EnabledBucket[]; skipped: number }> {
-  const buckets: EnabledBucket[] = [];
+async function scanSelectedBuckets(): Promise<{ buckets: SelectedBucket[]; skipped: number }> {
+  const buckets: SelectedBucket[] = [];
   let skipped = 0;
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
 
@@ -165,9 +188,9 @@ async function scanEnabledBuckets(): Promise<{ buckets: EnabledBucket[]; skipped
     const result = await dynamo.send(
       new ScanCommand({
         TableName: Resource.RagIndexerTable.name,
-        FilterExpression: 'sk = :sk AND #status = :active',
+        FilterExpression: 'sk = :sk AND (#status = :active OR attribute_exists(teardownPendingAt))',
         ExpressionAttributeNames: { '#status': 'status' },
-        ProjectionExpression: 'pk, orgId',
+        ProjectionExpression: 'pk, orgId, #status, teardownPendingAt',
         ExpressionAttributeValues: {
           ':sk': { S: RAGKeys.enablementSk() },
           ':active': { S: 'active' },
@@ -177,23 +200,9 @@ async function scanEnabledBuckets(): Promise<{ buckets: EnabledBucket[]; skipped
     );
 
     for (const item of result.Items ?? []) {
-      const record = unmarshall(item);
-      const parsed = typeof record.pk === 'string' ? RAGKeys.parseBucketPk(record.pk) : undefined;
-      if (!parsed) {
-        skipped++;
-        console.warn(`${LOG} Enablement row has an unparseable bucket pk, skipping`, {
-          pk: record.pk,
-        });
-        continue;
-      }
-      if (!record.orgId) {
-        skipped++;
-        console.warn(`${LOG} Enablement row missing orgId, skipping`, {
-          bucketName: parsed.bucketName,
-        });
-        continue;
-      }
-      buckets.push({ region: parsed.region, bucketName: parsed.bucketName, orgId: record.orgId });
+      const selected = toSelectedBucket(unmarshall(item));
+      if (selected) buckets.push(selected);
+      else skipped++;
     }
 
     lastEvaluatedKey = result.LastEvaluatedKey;
@@ -202,7 +211,28 @@ async function scanEnabledBuckets(): Promise<{ buckets: EnabledBucket[]; skipped
   return { buckets, skipped };
 }
 
-function groupByOrg(buckets: EnabledBucket[]): Map<string, RagIndexerBucketRef[]> {
+/**
+ * Project one enablement row into a {@link SelectedBucket}, or `null` when it
+ * cannot be routed (unparseable bucket pk, or missing orgId — both logged). A
+ * row is classified `index` when active, else `teardown`.
+ */
+function toSelectedBucket(record: Record<string, unknown>): SelectedBucket | null {
+  const parsed = typeof record.pk === 'string' ? RAGKeys.parseBucketPk(record.pk) : undefined;
+  if (!parsed) {
+    console.warn(`${LOG} Enablement row has an unparseable bucket pk, skipping`, { pk: record.pk });
+    return null;
+  }
+  if (typeof record.orgId !== 'string' || !record.orgId) {
+    console.warn(`${LOG} Enablement row missing orgId, skipping`, {
+      bucketName: parsed.bucketName,
+    });
+    return null;
+  }
+  const mode: RagIndexerWorkerMode = record.status === 'active' ? 'index' : 'teardown';
+  return { region: parsed.region, bucketName: parsed.bucketName, orgId: record.orgId, mode };
+}
+
+function groupByOrg(buckets: SelectedBucket[]): Map<string, RagIndexerBucketRef[]> {
   const byOrg = new Map<string, RagIndexerBucketRef[]>();
   for (const { orgId, region, bucketName } of buckets) {
     const ref: RagIndexerBucketRef = { region, bucketName };
@@ -227,7 +257,11 @@ async function invokeWorker(
     );
     return true;
   } catch (error) {
-    console.error(`${LOG} Failed to invoke worker`, { orgId: payload.orgId, error });
+    console.error(`${LOG} Failed to invoke worker`, {
+      orgId: payload.orgId,
+      mode: payload.mode,
+      error,
+    });
     return false;
   }
 }

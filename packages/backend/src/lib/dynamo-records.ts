@@ -119,6 +119,14 @@ export interface BucketRAGEnablementRecord {
    * `syncState === 'error'` and cleared (removed) when a later sync succeeds.
    */
   lastSyncError?: string;
+  /**
+   * ISO-8601 marker set when RAG is disabled and companion teardown is pending.
+   * The enablement handler async-invokes the worker to tear down, and the
+   * indexer orchestrator also selects rows carrying this attribute as a backstop
+   * (a lost invoke retries every 6h). The worker removes it once teardown
+   * completes; a re-enable clears it (the row is rewritten without it).
+   */
+  teardownPendingAt?: string;
   settings?: Record<string, unknown>; // future extensibility
   createdAt: string; // ISO-8601
   updatedAt: string; // ISO-8601
@@ -128,10 +136,11 @@ export interface BucketRAGEnablementRecord {
  * Object-to-chunk manifest: the authoritative list of vector-store keys for an
  * object, so the system can delete/reindex an object's chunks by explicit key.
  *
- * One query (pk: BUCKET#{orgId}#{region}#{bucketName}, sk begins_with MANIFEST#) returns
- * every object indexed in a bucket.
+ * One query (pk: BUCKET#{orgId}#{region}#{bucketName}, sk begins_with MANIFEST2#) returns
+ * every object indexed in a bucket. (The `2` namespace is the companion-bucket
+ * cutover bump — see {@link RAGKeys.manifestSkPrefix}.)
  *
- * RagIndexerTable — pk: BUCKET#{orgId}#{region}#{bucketName}, sk: MANIFEST#{objectKey}
+ * RagIndexerTable — pk: BUCKET#{orgId}#{region}#{bucketName}, sk: MANIFEST2#{objectKey}
  */
 export interface ObjectChunkManifestRecord {
   pk: string;
@@ -154,7 +163,8 @@ export interface ObjectChunkManifestRecord {
  * (e.g. a worker that died mid-bucket) eventually expires and the bucket is
  * re-scanned from the beginning rather than being wedged indefinitely.
  *
- * RagIndexerTable — pk: INDEXER_CHECKPOINT#{orgId}#{region}#{bucketName}, sk: CHECKPOINT
+ * RagIndexerTable — pk: INDEXER_CHECKPOINT#{orgId}#{region}#{bucketName}, sk: CHECKPOINT2
+ * (the `2` namespace is the companion-bucket cutover bump — see {@link RAGKeys.checkpointSk}).
  */
 export interface RagIndexerCheckpointRecord {
   pk: string;
@@ -203,10 +213,17 @@ export const RAGKeys = {
     return { orgId, region: region as S3Region, bucketName };
   },
   enablementSk: (): string => 'RAG',
-  /** Shared prefix for `begins_with` queries returning a bucket's manifests. */
-  manifestSkPrefix: (): string => 'MANIFEST#',
-  manifestSk: (objectKey: string): string => `MANIFEST#${objectKey}`,
+  /**
+   * Shared prefix for `begins_with` queries returning a bucket's manifests.
+   *
+   * The `2` suffix is a migration namespace bump for the S3-Vectors →
+   * companion-bucket cutover: old `MANIFEST#`/`CHECKPOINT` rows become invisible
+   * to these queries, so the next cron fully re-indexes every bucket into its
+   * companion. Enablement rows (`sk = 'RAG'`) are deliberately left untouched.
+   */
+  manifestSkPrefix: (): string => 'MANIFEST2#',
+  manifestSk: (objectKey: string): string => `MANIFEST2#${objectKey}`,
   checkpointPk: (orgId: string, region: S3Region, bucketName: string): string =>
     `INDEXER_CHECKPOINT#${orgId}#${region}#${bucketName}`,
-  checkpointSk: (): string => 'CHECKPOINT',
+  checkpointSk: (): string => 'CHECKPOINT2',
 } as const;

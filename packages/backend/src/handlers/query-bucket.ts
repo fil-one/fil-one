@@ -1,14 +1,20 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { Resource } from 'sst';
 import type { ErrorResponse, QueryBucketResponse } from '@filone/shared';
-import { ApiErrorCode, QueryBucketSchema, S3Region, isSupportedRegion } from '@filone/shared';
-import { S3VectorsStore, complete, embed } from '@filone/rag-shared';
-import type { VectorQueryResult } from '@filone/rag-shared';
+import {
+  ApiErrorCode,
+  QueryBucketSchema,
+  S3Region,
+  isReservedBucketName,
+  isSupportedRegion,
+} from '@filone/shared';
+import { BucketObjectVectorStore, complete, embed } from '@filone/rag-shared';
+import type { VectorQueryResult, VectorStore } from '@filone/rag-shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.js';
 import { getBucketRagEnablement } from '../lib/bucket-rag-enablement.js';
 import { RAGKeys } from '../lib/dynamo-records.js';
+import { createS3Client } from '../lib/s3-client.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import {
   ResponseBuilder,
@@ -58,6 +64,15 @@ export async function baseHandler(
     return new ResponseBuilder()
       .status(400)
       .body<ErrorResponse>({ message: 'Bucket name is required' })
+      .build();
+  }
+
+  // Reserved RAG companion index buckets (`filone-rag-*`) are not queryable user
+  // buckets — 404 rather than leak the internal index's existence.
+  if (isReservedBucketName(bucketName)) {
+    return new ResponseBuilder()
+      .status(404)
+      .body<ErrorResponse>({ message: 'Bucket not found' })
       .build();
   }
 
@@ -130,8 +145,16 @@ export async function baseHandler(
       .build();
   }
 
+  // Build the companion-bucket vector store on the caller's tenant S3 client, so
+  // retrieval reads the index from the tenant's own provider/region storage.
+  const s3 = createS3Client(await orchestrator.getS3ClientContext(tenantId));
+  const vectorStore = new BucketObjectVectorStore(s3);
+
   const objectKey = event.queryStringParameters?.objectKey;
-  const chunks = await retrieveChunks(orgId, region, bucketName, {
+  const chunks = await retrieveChunks(vectorStore, {
+    orgId,
+    region,
+    bucketName,
     query,
     topK: top_k,
     objectKey,
@@ -156,26 +179,31 @@ export async function baseHandler(
 }
 
 /**
- * Embed the query and run a top-k vector search against the bucket's index,
- * optionally scoped to a single object. A bucket that has never been indexed has
- * no S3 Vectors index; that surfaces as a `NotFoundException` which we treat as
- * "no relevant content" rather than an error.
+ * Embed the query and run a top-k vector search against the bucket's companion
+ * index, optionally scoped to a single object. A bucket that has never been
+ * indexed has no companion bucket; the store maps that to `[]`, and we defend in
+ * depth against `NoSuchBucket`/`NotFound` here too — treated as "no relevant
+ * content" rather than an error.
  */
 async function retrieveChunks(
-  orgId: string,
-  region: S3Region,
-  bucketName: string,
-  options: { query: string; topK: number; objectKey: string | undefined },
+  vectorStore: VectorStore,
+  params: {
+    orgId: string;
+    region: S3Region;
+    bucketName: string;
+    query: string;
+    topK: number;
+    objectKey: string | undefined;
+  },
 ): Promise<VectorQueryResult[]> {
-  const { query, topK, objectKey } = options;
+  const { orgId, region, bucketName, query, topK, objectKey } = params;
   const embedding = await embed(query);
-  const vectorStore = new S3VectorsStore(Resource.RagVectorBucket.name);
   const filters = objectKey ? { objectKey } : undefined;
 
   try {
     return await vectorStore.query(orgId, region, bucketName, { embedding, k: topK, filters });
   } catch (error) {
-    if (error instanceof Error && error.name === 'NotFoundException') {
+    if (error instanceof Error && (error.name === 'NoSuchBucket' || error.name === 'NotFound')) {
       return [];
     }
     throw error;

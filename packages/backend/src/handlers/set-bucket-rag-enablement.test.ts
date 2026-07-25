@@ -37,8 +37,12 @@ vi.mock('../lib/bucket-rag-enablement.js', async () => {
 
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 
 const ddbMock = mockClient(DynamoDBClient);
+const lambdaMock = mockClient(LambdaClient);
+
+process.env.RAG_INDEXER_WORKER_FUNCTION_NAME = 'rag-indexer-worker';
 
 vi.mock('../middleware/auth.js', () => ({
   authMiddleware: () => ({ before: () => undefined }),
@@ -53,6 +57,8 @@ process.env.FILONE_STAGE = 'test';
 import { baseHandler, handler } from './set-bucket-rag-enablement.js';
 import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
 import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.js';
+import { companionBucketName } from '@filone/rag-shared';
+import { BucketAlreadyExistsError } from '../lib/errors.js';
 import { S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.js';
@@ -103,12 +109,57 @@ function event(body: unknown): AuthenticatedEvent {
 describe('set-bucket-rag-enablement baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    ddbMock.reset();
+    lambdaMock.reset();
+    lambdaMock.on(InvokeCommand).resolves({});
     orch = fakeOrchestrator('aurora', { bucket: BUCKET });
     mockGetOrchestratorForRegion.mockReturnValue(orch);
     mockGetEnablement.mockResolvedValue(undefined);
     mockSetEnablement.mockImplementation(async (args: { enabled: boolean }) =>
       record({ status: args.enabled ? 'active' : 'disabled' }),
     );
+  });
+
+  it('on disable, async-invokes the worker to tear the companion down', async () => {
+    const result = await baseHandler(event({ enabled: false }));
+
+    expect(result.statusCode).toBe(200);
+    const calls = lambdaMock.commandCalls(InvokeCommand);
+    expect(calls).toHaveLength(1);
+    const input = calls[0]!.args[0]!.input;
+    expect(input.FunctionName).toBe('rag-indexer-worker');
+    expect(input.InvocationType).toBe('Event');
+    const payload = JSON.parse(Buffer.from(input.Payload as Uint8Array).toString());
+    expect(payload).toMatchObject({
+      orgId: 'org-1',
+      mode: 'teardown',
+      buckets: [{ region: S3Region.EuWest1, bucketName: 'my-bucket' }],
+    });
+  });
+
+  it('does not invoke the worker on enable', async () => {
+    await baseHandler(event({ enabled: true }));
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+  });
+
+  it('still returns 200 on disable when the teardown invoke fails (backstop retries)', async () => {
+    lambdaMock.on(InvokeCommand).rejects(new Error('invoke throttled'));
+
+    const result = await baseHandler(event({ enabled: false }));
+
+    expect(result.statusCode).toBe(200);
+  });
+
+  it('returns 400 for a reserved RAG companion bucket name', async () => {
+    const e = event({ enabled: true });
+    e.pathParameters = { name: 'filone-rag-deadbeef' };
+    const result = await baseHandler(e);
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      message: 'Cannot enable indexing on an index bucket',
+    });
+    expect(mockSetEnablement).not.toHaveBeenCalled();
   });
 
   it('enables RAG and returns 200 with the active enablement state', async () => {
@@ -123,6 +174,36 @@ describe('set-bucket-rag-enablement baseHandler', () => {
       existing: undefined,
       region: S3Region.EuWest1,
     });
+  });
+
+  it('provisions the companion index bucket on enable', async () => {
+    await baseHandler(event({ enabled: true }));
+
+    expect(orch.createBucket).toHaveBeenCalledWith('aurora:org-1', {
+      bucketName: companionBucketName('org-1', S3Region.EuWest1, 'my-bucket'),
+    });
+  });
+
+  it('swallows BucketAlreadyExistsError when the companion already exists', async () => {
+    orch.createBucket.mockRejectedValue(new BucketAlreadyExistsError('filone-rag-x'));
+
+    const result = await baseHandler(event({ enabled: true }));
+
+    expect(result.statusCode).toBe(200);
+    expect(mockSetEnablement).toHaveBeenCalled();
+  });
+
+  it('surfaces a non-already-exists companion creation error (e.g. quota)', async () => {
+    orch.createBucket.mockRejectedValue(new Error('bucketLimit exceeded'));
+
+    await expect(baseHandler(event({ enabled: true }))).rejects.toThrow('bucketLimit exceeded');
+    expect(mockSetEnablement).not.toHaveBeenCalled();
+  });
+
+  it('does not provision a companion bucket on disable', async () => {
+    await baseHandler(event({ enabled: false }));
+
+    expect(orch.createBucket).not.toHaveBeenCalled();
   });
 
   it('forwards the resolved region from the query param into both helpers', async () => {
