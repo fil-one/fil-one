@@ -11,6 +11,10 @@
 //   node bin/rag-access.ts disable <stage> <email>
 //   node bin/rag-access.ts check <stage> <email>
 //
+// `<stage>` is the SST stage name: `production`, `staging`, or the name of an
+// ephemeral dev stage (the `--stage` value it was deployed with, e.g. your
+// personal stage). There is no default.
+//
 // `check` exits 0 when access is enabled, 2 when disabled.
 //
 // Works in production: no `sst shell` (it can't evaluate pulumi providers
