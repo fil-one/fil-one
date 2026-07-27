@@ -55,21 +55,19 @@ describe('subscriptionGuardMiddleware', () => {
 
   it('allows when no billing record exists and the user is entitled to a trial', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-    mockEnsureTrialEntitlement.mockResolvedValue(true);
+    mockEnsureTrialEntitlement.mockResolvedValue(SubscriptionStatus.Trialing);
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
-    const request = buildMiddyRequest(
-      buildEvent({
-        userInfo: {
-          sub: 'auth0|sub-1',
-          userId: USER_ID,
-          orgId: 'test-org-uuid',
-          email: 'test@example.com',
-          emailVerified: true,
-        },
-      }),
-    );
-    const result = await before(request);
+    const event = buildEvent({
+      userInfo: {
+        sub: 'auth0|sub-1',
+        userId: USER_ID,
+        orgId: 'test-org-uuid',
+        email: 'test@example.com',
+        emailVerified: true,
+      },
+    });
+    const result = await before(buildMiddyRequest(event));
 
     expect(result).toBeUndefined();
     expect(mockEnsureTrialEntitlement).toHaveBeenCalledWith({
@@ -79,11 +77,12 @@ describe('subscriptionGuardMiddleware', () => {
       email: 'test@example.com',
       emailVerified: true,
     });
+    expect(event.requestContext.subscriptionStatus).toBe(SubscriptionStatus.Trialing);
   });
 
   it('blocks (inactive) when no billing record exists and the user is not entitled', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-    mockEnsureTrialEntitlement.mockResolvedValue(false);
+    mockEnsureTrialEntitlement.mockResolvedValue(null);
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
     const result = await before(
@@ -274,10 +273,10 @@ describe('subscriptionGuardMiddleware', () => {
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
-  it('blocks when billing record exists but has no subscriptionStatus (fail closed)', async () => {
-    // A customer-mapping-only record (e.g. written by create-setup-intent) has
-    // no status and must NOT grant access — entitlement comes only from
-    // ensureTrialEntitlement.
+  it('heals a bare record (no subscriptionStatus) and allows access when user is entitled', async () => {
+    // A "bare" record written by create-setup-intent has a stripeCustomerId but
+    // no subscriptionStatus. Under FIL-546, the guard now heals via
+    // ensureTrialEntitlement rather than permanently blocking.
     ddbMock.on(GetItemCommand).resolves(
       billingItem({
         pk: `CUSTOMER#${USER_ID}`,
@@ -285,10 +284,57 @@ describe('subscriptionGuardMiddleware', () => {
         stripeCustomerId: 'cus_123',
       }),
     );
+    mockEnsureTrialEntitlement.mockResolvedValue(SubscriptionStatus.Trialing);
+
+    const event = buildEvent({
+      userInfo: {
+        sub: 'auth0|sub-1',
+        userId: USER_ID,
+        orgId: 'test-org-uuid',
+        email: 'test@example.com',
+        emailVerified: true,
+      },
+    });
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+    const result = await before(buildMiddyRequest(event));
+
+    // Entitled user with bare record → allowed (heal path)
+    expect(result).toBeUndefined();
+    expect(mockEnsureTrialEntitlement).toHaveBeenCalledWith({
+      sub: 'auth0|sub-1',
+      userId: USER_ID,
+      orgId: 'test-org-uuid',
+      email: 'test@example.com',
+      emailVerified: true,
+    });
+    // After healing, the resolved status must be written to the request context
+    // so downstream handlers read Trialing rather than an unset value.
+    expect(event.requestContext.subscriptionStatus).toBe(SubscriptionStatus.Trialing);
+  });
+
+  it('blocks a bare record (no subscriptionStatus) when user is not entitled', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      billingItem({
+        pk: `CUSTOMER#${USER_ID}`,
+        sk: 'SUBSCRIPTION',
+        stripeCustomerId: 'cus_123',
+      }),
+    );
+    mockEnsureTrialEntitlement.mockResolvedValue(null);
 
     const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
     const result = await before(
-      buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })),
+      buildMiddyRequest(
+        buildEvent({
+          userInfo: {
+            sub: 'auth0|sub-1',
+            userId: USER_ID,
+            orgId: 'test-org-uuid',
+            email: 'test@example.com',
+            emailVerified: false,
+          },
+        }),
+      ),
     );
 
     expectErrorResponse(result, 403, {
@@ -296,6 +342,42 @@ describe('subscriptionGuardMiddleware', () => {
         'Your subscription is not active. Please contact support or update your payment method.',
       code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
     });
+    expect(mockEnsureTrialEntitlement).toHaveBeenCalledWith({
+      sub: 'auth0|sub-1',
+      userId: USER_ID,
+      orgId: 'test-org-uuid',
+      email: 'test@example.com',
+      emailVerified: false,
+    });
+  });
+
+  it('uses the actual status when a concurrent writer provisioned the record during the heal (Active, not Trialing)', async () => {
+    // The heal can race with e.g. a Stripe webhook that sets a real status. In
+    // that case ensureTrialEntitlement reports the winner's status and the guard
+    // must stamp that on the request context instead of assuming Trialing.
+    ddbMock.on(GetItemCommand).resolves(
+      billingItem({
+        pk: `CUSTOMER#${USER_ID}`,
+        sk: 'SUBSCRIPTION',
+        stripeCustomerId: 'cus_123',
+      }),
+    );
+    mockEnsureTrialEntitlement.mockResolvedValue(SubscriptionStatus.Active);
+
+    const event = buildEvent({
+      userInfo: {
+        sub: 'auth0|sub-1',
+        userId: USER_ID,
+        orgId: 'test-org-uuid',
+        email: 'test@example.com',
+        emailVerified: true,
+      },
+    });
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+    const result = await before(buildMiddyRequest(event));
+
+    expect(result).toBeUndefined();
+    expect(event.requestContext.subscriptionStatus).toBe(SubscriptionStatus.Active);
   });
 
   it.each(['incomplete', 'incomplete_expired', 'unpaid', 'paused', 'some_future_status'])(

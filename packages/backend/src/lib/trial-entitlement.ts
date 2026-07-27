@@ -3,6 +3,7 @@ import {
   PutItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
+import type { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 import { createBillingTrial } from './create-billing-trial.js';
@@ -19,7 +20,10 @@ export interface EnsureTrialEntitlementParams {
 
 /**
  * Claim the normalized-email entitlement key (verified emails only) and grant a
- * trial to the account that wins the claim. Returns true iff a trial was ensured.
+ * trial to the account that wins the claim. Returns the subscription status now
+ * on the billing record (Trialing for a fresh trial, or e.g. Active when a
+ * concurrent flow already provisioned the record) iff a trial was ensured, and
+ * null when the user is not entitled.
  */
 export async function ensureTrialEntitlement({
   sub,
@@ -27,8 +31,8 @@ export async function ensureTrialEntitlement({
   orgId,
   email,
   emailVerified,
-}: EnsureTrialEntitlementParams): Promise<boolean> {
-  if (!emailVerified || !email) return false;
+}: EnsureTrialEntitlementParams): Promise<SubscriptionStatus | null> {
+  if (!emailVerified || !email) return null;
 
   const tableName = Resource.UserInfoTable.name;
   const normalizedEmail = normalizeEmailForEntitlement(email);
@@ -69,11 +73,10 @@ export async function ensureTrialEntitlement({
     }
   }
 
-  let entitled = false;
+  let status: SubscriptionStatus | null = null;
   if (ownerUserId === userId) {
     try {
-      await createBillingTrial({ userId, orgId, email });
-      entitled = true;
+      status = await createBillingTrial({ userId, orgId, email });
     } catch (error) {
       console.error('[trial-entitlement] Failed to create billing trial', {
         error,
@@ -110,5 +113,5 @@ export async function ensureTrialEntitlement({
     });
   }
 
-  return entitled;
+  return status;
 }

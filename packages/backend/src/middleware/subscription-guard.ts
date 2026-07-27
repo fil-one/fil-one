@@ -35,7 +35,8 @@ async function runSubscriptionGuard(
   accessLevel: AccessLevel,
 ): Promise<APIGatewayProxyStructuredResultV2 | void> {
   const event = request.event as AuthenticatedEvent;
-  const { sub, userId, orgId, email, emailVerified } = getUserInfo(event);
+  const userInfo = getUserInfo(event);
+  const { userId } = userInfo;
   const tableName = Resource.BillingTable.name;
 
   // Consistent read so a trial just written by the auth middleware (same request)
@@ -51,24 +52,27 @@ async function runSubscriptionGuard(
     }),
   );
 
-  // No billing record → only entitled (verified, claim-owning) users get a trial.
-  if (!result.Item) {
-    const entitled = await ensureTrialEntitlement({
-      sub,
-      userId,
-      orgId,
-      email: email ?? null,
-      emailVerified,
-    });
-    return entitled ? undefined : buildInactiveResponse();
-  }
-
-  const record = unmarshall(result.Item);
+  const record = result.Item ? unmarshall(result.Item) : {};
   let status = record.subscriptionStatus as string | undefined;
 
-  // No subscription status → no entitlement
-  // A record can exist without a status
-  if (!status) return buildInactiveResponse();
+  // A status can be missing in two shapes: no billing record at all, or a "bare"
+  // record written by create-setup-intent to remember the Stripe customer before
+  // a trial was ever created. Both heal via the entitlement path instead of
+  // blocking permanently; only genuinely un-entitled users are blocked. The heal
+  // reports the record's actual status — Trialing when it wrote the trial, or the
+  // real status (e.g. Active) when a concurrent writer provisioned the record
+  // first — so we never mislabel a paid subscription as Trialing. The status then
+  // falls through to the normal handling below (which sets
+  // event.requestContext.subscriptionStatus and runs the lazy trial-expiry
+  // transition — a no-op for a just-written 30-day trial). (FIL-546)
+  if (!status) {
+    const healedStatus = await checkTrialEntitlement(userInfo);
+    if (healedStatus) {
+      status = healedStatus;
+    } else {
+      return buildInactiveResponse();
+    }
+  }
 
   // Store the resolved status on the event so handlers can read it
   // without a second DynamoDB query (may be updated below by lazy transitions).
@@ -93,6 +97,23 @@ async function runSubscriptionGuard(
 
   // Unknown or unhandled status → block (fail closed)
   return buildInactiveResponse();
+}
+
+/**
+ * Run the trial-entitlement check for a user. Only verified, claim-owning users
+ * are granted a trial. Returns the subscription status now on the billing record
+ * (see ensureTrialEntitlement), or null when the user is not entitled.
+ */
+async function checkTrialEntitlement(
+  user: ReturnType<typeof getUserInfo>,
+): Promise<SubscriptionStatus | null> {
+  return ensureTrialEntitlement({
+    sub: user.sub,
+    userId: user.userId,
+    orgId: user.orgId,
+    email: user.email ?? null,
+    emailVerified: user.emailVerified,
+  });
 }
 
 /**
