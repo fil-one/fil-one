@@ -141,6 +141,24 @@ describe('ensureTenantReady', () => {
     });
   });
 
+  it('scopes the SSM path and PROFILE attribute per id', async () => {
+    // Region-encoded ids (multi-region Forge) must not collide across regions and
+    // must produce a valid hyphenated DynamoDB attribute name via ExpressionAttributeNames.
+    const regionDeps = { ...deps, id: 'forge' };
+    stubHappyPath();
+
+    const result = await ensureTenantReady(regionDeps, orgId);
+
+    expect(result).toBe(orgId);
+    expect(ssmMock.commandCalls(PutParameterCommand)[0].args[0].input.Name).toBe(
+      `/filone/test/forge-s3/access-key/${orgId}`,
+    );
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updateCalls[0].args[0].input.ExpressionAttributeNames).toMatchObject({
+      '#tenantIdAttr': 'forgeTenantId',
+    });
+  });
+
   it('requests only s3:* actions from the contract enum for the console key', async () => {
     stubHappyPath();
 

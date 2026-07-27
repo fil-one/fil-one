@@ -148,6 +148,10 @@ export interface TenantInfo {
  * ensure/isReady first.
  */
 export interface ServiceOrchestrator {
+  /**
+   * The orchestrator's unique identifier (e.g. `aurora`, `fth`, etc.). It
+   * should have the format `^[a-z][a-zA-Z0-9_]*$`.
+   */
   readonly id: string;
   readonly region: S3Region;
 
