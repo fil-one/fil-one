@@ -4,7 +4,7 @@ import { createForgeOrchestrator } from './forge/forge-orchestrator.js';
 import { fthOrchestrator } from './fth/fth-orchestrator.js';
 import type { ServiceOrchestrator } from './service-orchestrator.js';
 
-// Forge orchestrators are built lazily and memoized per region: construction
+// Forge orchestrators are built lazily and memoized per id (unique per region): construction
 // reads the ForgeManagementApiToken secret, which is linked only on non-production
 // stages. Eager construction (as aurora/fth do) would crash production at import.
 const forgeOrchestrators = new Map<string, ServiceOrchestrator>();

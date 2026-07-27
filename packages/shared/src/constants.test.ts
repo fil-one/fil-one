@@ -125,7 +125,7 @@ describe('getStageFromHostname', () => {
 });
 
 describe('getAvailableRegions', () => {
-  it('returns all non-production regions when no stage is given', () => {
+  it('returns all non-production regions when stage is empty', () => {
     expect(getAvailableRegions('')).toEqual([
       S3Region.EuWest1,
       S3Region.UsEast1,
