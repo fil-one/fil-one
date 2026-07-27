@@ -135,7 +135,19 @@ export function BillingPage() {
   const egressLimit = limits.egressLimitBytes;
   const egressPct = egressLimit > 0 ? Math.min(100, (egressUsed / egressLimit) * 100) : 0;
   const PRICE_PER_TB_CENTS = 499;
-  const estimatedCost = Math.round((storageUsed / TB_BYTES) * PRICE_PER_TB_CENTS);
+  // The per-org monthly minimum comes from the backend (driven by the org's
+  // Stripe plan) — 0 for grandfathered accounts that predate the minimum, so a
+  // sub-1 TB grandfathered org is never shown a floor it isn't billed.
+  const monthlyMinimumCents = billing?.subscription.monthlyMinimumCents ?? 0;
+  const hasMinimum = monthlyMinimumCents > 0;
+  const minimumLabel = `$${(monthlyMinimumCents / 100).toFixed(2)}/month minimum`;
+  const estimatedCost = Math.max(
+    monthlyMinimumCents,
+    Math.round((storageUsed / TB_BYTES) * PRICE_PER_TB_CENTS),
+  );
+  const payAsYouGoSubtitle = hasMinimum
+    ? `Unlimited storage, billed for what you use (${minimumLabel})`
+    : 'Unlimited storage, billed for what you use';
 
   // ── Handlers ─────────────────────────────────────────────────────
 
@@ -307,7 +319,7 @@ export function BillingPage() {
                 </h2>
                 <p className="text-[13px] text-zinc-500 leading-[19.5px]">
                   {isActive || isPastDue
-                    ? 'Unlimited storage, pay only for what you use'
+                    ? payAsYouGoSubtitle
                     : isGracePeriod
                       ? `Read-only access${graceDays !== null ? ` — ${graceDays} days remaining` : ''}`
                       : isCanceled
@@ -614,7 +626,7 @@ export function BillingPage() {
             <div className="flex flex-col gap-4 p-4">
               <ul className="flex flex-col gap-[10px]">
                 {[
-                  'Pay only for what you use',
+                  hasMinimum ? minimumLabel : 'Pay for the storage you use',
                   'No egress fees',
                   'No API request fees',
                   'Data integrity guarantees',
