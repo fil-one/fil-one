@@ -6,6 +6,7 @@ import {
   UpdateItemCommand,
   ConditionalCheckFailedException,
 } from '@aws-sdk/client-dynamodb';
+import { SubscriptionStatus } from '@filone/shared';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -35,21 +36,21 @@ describe('ensureTrialEntitlement', () => {
   beforeEach(() => {
     ddbMock.reset();
     vi.clearAllMocks();
-    mockCreateBillingTrial.mockResolvedValue(undefined);
+    mockCreateBillingTrial.mockResolvedValue(SubscriptionStatus.Trialing);
   });
 
-  it('returns false and writes nothing when email is unverified', async () => {
+  it('returns null and writes nothing when email is unverified', async () => {
     const result = await ensureTrialEntitlement({ ...BASE, emailVerified: false });
 
-    expect(result).toBe(false);
+    expect(result).toBeNull();
     expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     expect(mockCreateBillingTrial).not.toHaveBeenCalled();
   });
 
-  it('returns false and writes nothing when email is null', async () => {
+  it('returns null and writes nothing when email is null', async () => {
     const result = await ensureTrialEntitlement({ ...BASE, email: null });
 
-    expect(result).toBe(false);
+    expect(result).toBeNull();
     expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
   });
 
@@ -59,7 +60,7 @@ describe('ensureTrialEntitlement', () => {
 
     const result = await ensureTrialEntitlement(BASE);
 
-    expect(result).toBe(true);
+    expect(result).toBe(SubscriptionStatus.Trialing);
 
     const putCalls = ddbMock.commandCalls(PutItemCommand);
     expect(putCalls).toHaveLength(1);
@@ -94,7 +95,7 @@ describe('ensureTrialEntitlement', () => {
 
     const result = await ensureTrialEntitlement(BASE);
 
-    expect(result).toBe(false);
+    expect(result).toBeNull();
     expect(mockCreateBillingTrial).not.toHaveBeenCalled();
     // Flag is still set so we stop re-checking this identity.
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
@@ -112,8 +113,18 @@ describe('ensureTrialEntitlement', () => {
 
     const result = await ensureTrialEntitlement(BASE);
 
-    expect(result).toBe(true);
+    expect(result).toBe(SubscriptionStatus.Trialing);
     expect(mockCreateBillingTrial).toHaveBeenCalledOnce();
+  });
+
+  it('reports the actual record status when the billing record is already provisioned (e.g. Active)', async () => {
+    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockCreateBillingTrial.mockResolvedValue(SubscriptionStatus.Active);
+
+    const result = await ensureTrialEntitlement(BASE);
+
+    expect(result).toBe(SubscriptionStatus.Active);
   });
 
   it('throws and does not set the flag on a transient claim error', async () => {

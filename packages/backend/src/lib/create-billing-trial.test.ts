@@ -61,9 +61,15 @@ describe('createBillingTrial', () => {
   });
 
   it('creates Stripe customer, subscription, and DynamoDB trial record', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
 
-    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
+    const result = await createBillingTrial({
+      userId: 'user-1',
+      orgId: 'org-1',
+      email: 'test@example.com',
+    });
+
+    expect(result).toBe(SubscriptionStatus.Trialing);
 
     // Verify Stripe customer creation
     expect(mockCustomersCreate).toHaveBeenCalledWith(
@@ -82,30 +88,33 @@ describe('createBillingTrial', () => {
       { idempotencyKey: 'billing-trial-sub-user-1' },
     );
 
-    // Verify DynamoDB put
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(1);
+    // Verify the DynamoDB upsert. A single UpdateItem both creates the record for
+    // a fresh signup and heals an existing status-less record; the condition keeps
+    // it a no-op once a status exists.
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updateCalls).toHaveLength(1);
 
-    const input = putCalls[0].args[0].input;
+    const input = updateCalls[0].args[0].input;
     expect(input.TableName).toBe('BillingTable');
-    expect(input.ConditionExpression).toBe('attribute_not_exists(pk)');
+    expect(input.Key).toEqual({ pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } });
+    expect(input.ConditionExpression).toBe('attribute_not_exists(subscriptionStatus)');
+    expect(input.ReturnValuesOnConditionCheckFailure).toBe('ALL_OLD');
 
-    const item = input.Item!;
-    expect(item.pk).toEqual({ S: 'CUSTOMER#user-1' });
-    expect(item.sk).toEqual({ S: 'SUBSCRIPTION' });
-    expect(item.orgId).toEqual({ S: 'org-1' });
-    expect(item.stripeCustomerId).toEqual({ S: 'cus_test_123' });
-    expect(item.subscriptionId).toEqual({ S: 'sub_test_123' });
-    expect(item.subscriptionStatus).toEqual({ S: SubscriptionStatus.Trialing });
-    expect(item.trialStartedAt).toBeDefined();
-    expect(item.trialEndsAt).toBeDefined();
-    expect(item.currentPeriodStart).toBeDefined();
-    expect(item.currentPeriodEnd).toBeDefined();
-    expect(item.updatedAt).toBeDefined();
+    const values = input.ExpressionAttributeValues!;
+    expect(values[':orgId']).toEqual({ S: 'org-1' });
+    expect(values[':cid']).toEqual({ S: 'cus_test_123' });
+    expect(values[':subId']).toEqual({ S: 'sub_test_123' });
+    expect(values[':status']).toEqual({ S: SubscriptionStatus.Trialing });
+    expect(values[':ts']).toBeDefined();
+    expect(values[':te']).toBeDefined();
+    expect(values[':cps']).toBeDefined();
+    expect(values[':cpe']).toBeDefined();
+    expect(values[':now']).toBeDefined();
   });
 
   it('sets trial_end to 30 days from now', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
 
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
 
@@ -119,7 +128,7 @@ describe('createBillingTrial', () => {
   });
 
   it('passes undefined email when not provided', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
 
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
 
@@ -129,16 +138,19 @@ describe('createBillingTrial', () => {
     );
   });
 
-  it('no-ops when DynamoDB record already exists', async () => {
-    ddbMock.on(PutItemCommand).rejects(
+  it('no-ops and reports the winner status when a concurrent writer provisioned the record first', async () => {
+    ddbMock.on(UpdateItemCommand).rejects(
       new ConditionalCheckFailedException({
         message: 'The conditional request failed',
         $metadata: {},
+        Item: { subscriptionStatus: { S: SubscriptionStatus.Active } },
       }),
     );
 
-    // Should not throw
-    await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+    // Should not throw — and must report the concurrent winner's status
+    // (ALL_OLD on the condition failure), not assume Trialing.
+    const result = await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+    expect(result).toBe(SubscriptionStatus.Active);
 
     // Stripe calls should still have been made (idempotent on Stripe side)
     expect(mockCustomersCreate).toHaveBeenCalledOnce();
@@ -155,7 +167,14 @@ describe('createBillingTrial', () => {
       },
     });
 
-    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
+    const result = await createBillingTrial({
+      userId: 'user-1',
+      orgId: 'org-1',
+      email: 'test@example.com',
+    });
+
+    // Reports the record's actual status rather than assuming Trialing.
+    expect(result).toBe(SubscriptionStatus.Trialing);
 
     // Guarded before any Stripe side effects — this is what prevents duplicate
     // customers/subscriptions on re-invocation past Stripe's idempotency window.
@@ -173,6 +192,24 @@ describe('createBillingTrial', () => {
     });
   });
 
+  it('reports the existing status (e.g. active) when the record is already provisioned', async () => {
+    ddbMock.on(GetItemCommand).resolves({
+      Item: {
+        pk: { S: 'CUSTOMER#user-1' },
+        sk: { S: 'SUBSCRIPTION' },
+        subscriptionStatus: { S: SubscriptionStatus.Active },
+        stripeCustomerId: { S: 'cus_existing' },
+      },
+    });
+
+    const result = await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+
+    expect(result).toBe(SubscriptionStatus.Active);
+    expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
   it('heals a bare record (stripeCustomerId, no subscriptionStatus): reuses customer, issues UpdateItemCommand', async () => {
     ddbMock.on(GetItemCommand).resolves({
       Item: {
@@ -183,7 +220,13 @@ describe('createBillingTrial', () => {
     });
     ddbMock.on(UpdateItemCommand).resolves({});
 
-    await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
+    const result = await createBillingTrial({
+      userId: 'user-1',
+      orgId: 'org-1',
+      email: 'test@example.com',
+    });
+
+    expect(result).toBe(SubscriptionStatus.Trialing);
 
     // Must NOT create a new Stripe customer (reuses the bare record's customerId)
     expect(mockCustomersCreate).not.toHaveBeenCalled();
@@ -212,11 +255,10 @@ describe('createBillingTrial', () => {
     expect(input.ExpressionAttributeValues?.[':now']).toBeDefined();
   });
 
-  it('heals a status-less record with no stripeCustomerId: creates a customer and backfills via UpdateItem (not Put)', async () => {
+  it('heals a status-less record with no stripeCustomerId: creates a customer and backfills via UpdateItem', async () => {
     // A record that exists without stripeCustomerId AND without subscriptionStatus.
-    // The write must branch on record presence, not on customer presence — a PutItem
-    // guarded on attribute_not_exists(pk) would always fail here and be swallowed,
-    // leaving the record unhealed after Stripe side effects already happened.
+    // The upsert must fill in the trial and backfill the customer id without
+    // clobbering, leaving the record canonical.
     ddbMock.on(GetItemCommand).resolves({
       Item: {
         pk: { S: 'CUSTOMER#user-1' },
@@ -250,7 +292,7 @@ describe('createBillingTrial', () => {
     expect(input.ExpressionAttributeValues?.[':orgId']).toEqual({ S: 'org-1' });
   });
 
-  it('heals a bare record: no-ops when a concurrent writer already set subscriptionStatus (ConditionalCheckFailedException)', async () => {
+  it('heals a bare record: no-ops with the winner status when a concurrent writer already set subscriptionStatus', async () => {
     ddbMock.on(GetItemCommand).resolves({
       Item: {
         pk: { S: 'CUSTOMER#user-1' },
@@ -262,11 +304,13 @@ describe('createBillingTrial', () => {
       new ConditionalCheckFailedException({
         message: 'The conditional request failed',
         $metadata: {},
+        Item: { subscriptionStatus: { S: SubscriptionStatus.Trialing } },
       }),
     );
 
     // Should not throw
-    await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+    const result = await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+    expect(result).toBe(SubscriptionStatus.Trialing);
 
     expect(mockCustomersCreate).not.toHaveBeenCalled();
     expect(mockSubscriptionsCreate).toHaveBeenCalledOnce();
@@ -281,7 +325,7 @@ describe('createBillingTrial', () => {
 
     // Should not attempt subscription or DynamoDB
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('propagates Stripe subscription creation errors', async () => {
@@ -293,11 +337,11 @@ describe('createBillingTrial', () => {
 
     // Customer was created but DynamoDB should not have been called
     expect(mockCustomersCreate).toHaveBeenCalledOnce();
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('propagates unexpected DynamoDB errors', async () => {
-    ddbMock.on(PutItemCommand).rejects(new Error('Service unavailable'));
+    ddbMock.on(UpdateItemCommand).rejects(new Error('Service unavailable'));
 
     await expect(createBillingTrial({ userId: 'user-1', orgId: 'org-1' })).rejects.toThrow(
       'Service unavailable',
