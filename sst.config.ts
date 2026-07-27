@@ -1003,17 +1003,10 @@ export default $config({
       link: [billingTable, userInfoTable, ragIndexerTable, ragVectorBucket, ...managementApiTokens],
       environment: orchestratorEnv,
       timeout: '900 seconds',
-      memory: '512 MB',
-      permissions: [
-        ...s3DataPlanePermissions,
-        ...ragPermissions,
-        {
-          // PDF extraction (@filone/rag-shared pdf-extractor). Textract has no
-          // resource-level permissions — actions require Resource: '*'.
-          actions: ['textract:StartDocumentTextDetection', 'textract:GetDocumentTextDetection'],
-          resources: ['*'],
-        },
-      ],
+      // 1024 MB: PDF text extraction runs in-process (pdf.js), which is
+      // CPU- and heap-hungry on large documents.
+      memory: '1024 MB',
+      permissions: [...s3DataPlanePermissions, ...ragPermissions],
     });
 
     const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
