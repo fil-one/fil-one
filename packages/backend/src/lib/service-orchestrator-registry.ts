@@ -1,4 +1,4 @@
-import { getAvailableRegions, S3Region, Stage } from '@filone/shared';
+import { getAvailableRegions, isSupportedRegion, S3Region } from '@filone/shared';
 import { auroraOrchestrator } from './aurora/aurora-orchestrator.js';
 import { createForgeOrchestrator } from './forge/forge-orchestrator.js';
 import { fthOrchestrator } from './fth/fth-orchestrator.js';
@@ -20,16 +20,15 @@ function getForgeOrchestrator(id: string, region: S3Region): ServiceOrchestrator
 
 export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator {
   const stage = process.env.FILONE_STAGE!;
-  switch (region) {
-    case S3Region.EuWest1:
-      return auroraOrchestrator;
-    case S3Region.UsEast1:
-      return fthOrchestrator;
-    case S3Region.EuCentral3:
-      if (stage !== Stage.Production) {
+  if (isSupportedRegion(region, stage)) {
+    switch (region) {
+      case S3Region.EuWest1:
+        return auroraOrchestrator;
+      case S3Region.UsEast1:
+        return fthOrchestrator;
+      case S3Region.EuCentral3:
         return getForgeOrchestrator('forge', region);
-      }
-      break;
+    }
   }
   throw new Error(`Unsupported region "${String(region)}".`);
 }

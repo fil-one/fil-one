@@ -6,8 +6,8 @@
 // Even though each Forge region is orchestrated by the same Hilt instance, the
 // ID is unique so each region's console-key SSM path (`${id}-s3`), PROFILE
 // attribute (`${id}TenantId`), and metrics namespace (`${id}-management`) stay
-// isolated. Adding a new Forge region is: a new S3Region value + a registry
-// case; everything id-derived follows automatically.
+// isolated. Adding a new Forge region is: a unique ID, a new S3Region value and
+// a registry entry; everything id-derived follows automatically.
 //
 // Constructed lazily by the registry (never at import): the ForgeManagementApiToken
 // secret is linked only on non-production stages, so eager construction would
@@ -18,6 +18,13 @@ import { Resource } from 'sst';
 import { createFilOneOrchestrator } from '../orchestrator/orchestrator.js';
 import type { ServiceOrchestrator } from '../service-orchestrator.js';
 
+/**
+ * @param id The unique identifier for the Forge orchestrator. It should have
+ *           the format `^[a-z][a-zA-Z0-9_]*$`.
+ * @param region The S3 region the orchestrator will manage.
+ * @returns A `ServiceOrchestrator` instance configured for the specified Forge
+ *          region.
+ */
 export function createForgeOrchestrator(id: string, region: S3Region): ServiceOrchestrator {
   const stage = process.env.FILONE_STAGE!;
   return createFilOneOrchestrator({
