@@ -56,8 +56,8 @@ export function isFoundationEmail(email: string | undefined): boolean {
 /**
  * Regions available to users. `eu-west-1` and `us-east-1` are generally
  * available in every stage; `eu-central-3` (Forge) is not yet GA and is only
- * offered on non-production stages. Pass the deployment `stage` to opt into the
- * non-GA regions; omitting it (or passing `production`) returns only the GA set.
+ * offered on non-production stages. Pass the deployment `stage`; only
+ * `production` returns the GA-only set.
  * The per-region S3 endpoints still vary by stage — see {@link getS3Endpoint}.
  *
  * Note to developers: do not remove stage argument from this function, even if
