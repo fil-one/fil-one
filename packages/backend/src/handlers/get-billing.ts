@@ -14,7 +14,7 @@ import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import type { CachedStripePrice, SubscriptionRecord } from '../lib/dynamo-records.js';
+import type { StripePriceDetails, SubscriptionRecord } from '../lib/dynamo-records.js';
 import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.js';
 
 const dynamo = getDynamoClient();
@@ -140,7 +140,7 @@ async function resolveStripeSubscriptionDetails(
   billingTableName: string,
 ): Promise<StripeSubscriptionDetails | null> {
   let paymentMethod: BillingInfo['paymentMethod'];
-  let price: CachedStripePrice | undefined;
+  let price: StripePriceDetails | undefined;
 
   if (billingRecord.subscriptionId) {
     const stripe = getStripeClient();
@@ -200,11 +200,11 @@ async function resolveLivePrice(
   billingRecord: SubscriptionRecord,
   userId: string,
   billingTableName: string,
-): Promise<CachedStripePrice | undefined> {
+): Promise<StripePriceDetails | undefined> {
   const livePrice = subscription.items?.data?.at(0)?.price;
   if (!livePrice) return undefined;
 
-  const price = toCachedStripePrice(livePrice);
+  const price = toStripePriceDetails(livePrice);
   if (price.id !== billingRecord.stripePrice?.id) {
     await cacheStripePrice(price, userId, billingTableName);
   }
@@ -221,7 +221,7 @@ async function resolveLivePrice(
  * dropped `expand` or a snapshot cached without them). Throw: reporting "no
  * minimum" would understate what the customer pays.
  */
-function deriveMonthlyMinimumCents(price: CachedStripePrice | undefined): number | undefined {
+function deriveMonthlyMinimumCents(price: StripePriceDetails | undefined): number | undefined {
   if (price?.billing_scheme !== 'tiered' || price.tiers_mode !== 'graduated') return undefined;
   const firstTier = price.tiers?.at(0);
   if (!firstTier) {
@@ -261,7 +261,7 @@ function amountToCents(
  * `metadata`, `lookup_key`) are dropped: we refresh the cache only when the
  * price id changes, which would leave any mutable value we stored stale.
  */
-function toCachedStripePrice(price: Stripe.Price): CachedStripePrice {
+function toStripePriceDetails(price: Stripe.Price): StripePriceDetails {
   return {
     id: price.id,
     product: typeof price.product === 'string' ? price.product : price.product?.id,
@@ -298,7 +298,7 @@ function toDecimalString(value: Stripe.Price['unit_amount_decimal']): string | n
 }
 
 async function cacheStripePrice(
-  price: CachedStripePrice,
+  price: StripePriceDetails,
   userId: string,
   billingTableName: string,
 ): Promise<void> {

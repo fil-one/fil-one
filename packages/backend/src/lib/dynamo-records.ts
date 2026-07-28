@@ -12,13 +12,12 @@ export interface AccessKeyRecord {
 }
 
 /**
- * Snapshot of the Stripe price a subscription is billed on, cached so we can
- * still report what the customer pays when the Stripe API is unavailable.
- * Only fields that are immutable on a Stripe price are kept — mutable ones
- * (`nickname`, `active`, `metadata`, `lookup_key`) are dropped so the snapshot
- * can never drift from Stripe. Field names mirror the Stripe API.
+ * The Stripe price a subscription is billed on. Only fields that are immutable
+ * on a Stripe price are kept — mutable ones (`nickname`, `active`, `metadata`,
+ * `lookup_key`) are dropped, so a copy of this shape can never drift from
+ * Stripe no matter how long we hold it. Field names mirror the Stripe API.
  */
-export interface CachedStripePrice {
+export interface StripePriceDetails {
   id: string;
   product?: string;
   currency?: string;
@@ -59,7 +58,11 @@ export interface SubscriptionRecord {
   paymentMethodBrand?: string;
   paymentMethodExpMonth?: number;
   paymentMethodExpYear?: number;
-  stripePrice?: CachedStripePrice;
+  /**
+   * Cached so we can still report what the customer pays when the Stripe API is
+   * unavailable. Rewritten only when the price id changes.
+   */
+  stripePrice?: StripePriceDetails;
   updatedAt?: string;
 }
 
