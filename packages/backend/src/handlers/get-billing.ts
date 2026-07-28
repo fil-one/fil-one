@@ -1,11 +1,12 @@
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { convertToAttr, unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { PlanId, SubscriptionStatus } from '@filone/shared';
-import type { BillingInfo } from '@filone/shared';
+import type { BillingInfo, ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
+import type Stripe from 'stripe';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { getStripeClient } from '../lib/stripe-client.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -13,7 +14,7 @@ import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
-import type { SubscriptionRecord } from '../lib/dynamo-records.js';
+import type { StripePriceDetails, SubscriptionRecord } from '../lib/dynamo-records.js';
 import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.js';
 
 const dynamo = getDynamoClient();
@@ -44,11 +45,25 @@ export async function baseHandler(
     return buildTrialResponse(billingRecord, userId, billingTableName);
   }
 
-  // 3. Has Stripe customer — fetch subscription + payment method
-  const paymentMethod = await resolvePaymentMethod(billingRecord);
+  // 3. Has Stripe customer — fetch subscription details (payment method + price)
+  const stripeDetails = await resolveStripeSubscriptionDetails(
+    billingRecord,
+    userId,
+    billingTableName,
+  );
+
+  // The billed price is unknown: Stripe is unreachable and we have nothing
+  // cached. Fail loudly rather than understate what the customer pays.
+  if (!stripeDetails) {
+    return new ResponseBuilder()
+      .status(502)
+      .body<ErrorResponse>({ message: 'Unable to load billing details. Please try again.' })
+      .build();
+  }
+
   const currentStatus = await evaluateStatusTransitions(billingRecord, userId, billingTableName);
 
-  const response = buildBillingResponse(billingRecord, currentStatus, paymentMethod);
+  const response = buildBillingResponse(billingRecord, currentStatus, stripeDetails);
   return new ResponseBuilder().status(200).body(response).build();
 }
 
@@ -109,47 +124,198 @@ async function buildTrialResponse(
   return new ResponseBuilder().status(200).body(response).build();
 }
 
-async function resolvePaymentMethod(
+interface StripeSubscriptionDetails {
+  paymentMethod: BillingInfo['paymentMethod'];
+  monthlyMinimumCents: number | undefined;
+}
+
+/**
+ * Resolves the payment method and the billed price from Stripe. Returns null
+ * when the Stripe call fails and no price snapshot is cached — the caller must
+ * then fail the request instead of reporting an unknown minimum as "none".
+ */
+async function resolveStripeSubscriptionDetails(
   billingRecord: SubscriptionRecord,
-): Promise<BillingInfo['paymentMethod']> {
+  userId: string,
+  billingTableName: string,
+): Promise<StripeSubscriptionDetails | null> {
   let paymentMethod: BillingInfo['paymentMethod'];
+  let price: StripePriceDetails | undefined;
 
   if (billingRecord.subscriptionId) {
     const stripe = getStripeClient();
     try {
       const subscription = await stripe.subscriptions.retrieve(billingRecord.subscriptionId, {
-        expand: ['default_payment_method'],
+        // Tiers carry the monthly minimum and are not returned by default.
+        expand: ['default_payment_method', 'items.data.price.tiers'],
       });
 
-      const pm = subscription.default_payment_method;
-      if (pm && typeof pm === 'object' && pm.card) {
-        paymentMethod = {
-          id: pm.id,
-          last4: pm.card.last4,
-          brand: pm.card.brand,
-          expMonth: pm.card.exp_month,
-          expYear: pm.card.exp_year,
-        };
-      }
+      paymentMethod = toPaymentMethod(subscription.default_payment_method);
+      price = await resolveLivePrice(subscription, billingRecord, userId, billingTableName);
     } catch (err) {
       console.warn('[get-billing] Failed to fetch Stripe subscription', {
         error: (err as Error).message,
       });
+      price = billingRecord.stripePrice;
+      if (!price) {
+        return null;
+      }
     }
   }
 
-  // Use cached payment method from DB if Stripe fetch didn't return one
-  if (!paymentMethod && billingRecord.paymentMethodLast4) {
-    paymentMethod = {
-      id: billingRecord.paymentMethodId ?? '',
-      last4: billingRecord.paymentMethodLast4,
-      brand: billingRecord.paymentMethodBrand ?? '',
-      expMonth: billingRecord.paymentMethodExpMonth ?? 0,
-      expYear: billingRecord.paymentMethodExpYear ?? 0,
-    };
-  }
+  return {
+    // Use cached payment method from DB if Stripe fetch didn't return one
+    paymentMethod: paymentMethod ?? cachedPaymentMethod(billingRecord),
+    monthlyMinimumCents: deriveMonthlyMinimumCents(price),
+  };
+}
 
-  return paymentMethod;
+function toPaymentMethod(
+  pm: Stripe.Subscription['default_payment_method'],
+): BillingInfo['paymentMethod'] {
+  if (!pm || typeof pm !== 'object' || !pm.card) return undefined;
+  return {
+    id: pm.id,
+    last4: pm.card.last4,
+    brand: pm.card.brand,
+    expMonth: pm.card.exp_month,
+    expYear: pm.card.exp_year,
+  };
+}
+
+function cachedPaymentMethod(billingRecord: SubscriptionRecord): BillingInfo['paymentMethod'] {
+  if (!billingRecord.paymentMethodLast4) return undefined;
+  return {
+    id: billingRecord.paymentMethodId ?? '',
+    last4: billingRecord.paymentMethodLast4,
+    brand: billingRecord.paymentMethodBrand ?? '',
+    expMonth: billingRecord.paymentMethodExpMonth ?? 0,
+    expYear: billingRecord.paymentMethodExpYear ?? 0,
+  };
+}
+
+/** Returns the price the subscription is billed on, refreshing the cache when it changed. */
+async function resolveLivePrice(
+  subscription: Stripe.Subscription,
+  billingRecord: SubscriptionRecord,
+  userId: string,
+  billingTableName: string,
+): Promise<StripePriceDetails | undefined> {
+  const livePrice = subscription.items?.data?.at(0)?.price;
+  if (!livePrice) return undefined;
+
+  const price = toStripePriceDetails(livePrice);
+  if (price.id !== billingRecord.stripePrice?.id) {
+    await cacheStripePrice(price, userId, billingTableName);
+  }
+  return price;
+}
+
+/**
+ * The monthly minimum is the flat amount of the first tier on a graduated
+ * tiered price. Grandfathered per-unit prices have no tiers, hence no minimum.
+ * Volume tiering picks a single tier by total usage, so its first tier is not a
+ * minimum either — report none rather than a wrong number.
+ *
+ * A graduated price always has tiers, so an empty list means we lost them (a
+ * dropped `expand` or a snapshot cached without them). Throw: reporting "no
+ * minimum" would understate what the customer pays.
+ */
+function deriveMonthlyMinimumCents(price: StripePriceDetails | undefined): number | undefined {
+  if (price?.billing_scheme !== 'tiered' || price.tiers_mode !== 'graduated') return undefined;
+  const firstTier = price.tiers?.at(0);
+  if (!firstTier) {
+    throw new Error(`Graduated price ${price.id} has no tiers to read the monthly minimum from`);
+  }
+  return amountToCents(firstTier.flat_amount, firstTier.flat_amount_decimal);
+}
+
+/**
+ * Stripe returns every amount twice: `*_amount` in whole cents and
+ * `*_amount_decimal` as an exact decimal string of cents. The decimal is the
+ * authoritative one — sub-cent amounts round the integer field down, so our
+ * $0.00499/GB rate arrives as `unit_amount: 0` next to `'0.499'`. Read the
+ * decimal first, fall back to the integer, and round to whole cents. Both
+ * fields are null when the amount does not apply at all (a tier with no flat
+ * fee); return undefined so callers can tell that apart from a zero amount. A
+ * decimal we cannot parse is never silently swapped for the rounded integer —
+ * throw, because the integer may be a sub-cent amount rounded to zero.
+ */
+function amountToCents(
+  amount: number | null | undefined,
+  amountDecimal: string | null | undefined,
+): number | undefined {
+  if (amountDecimal != null) {
+    const parsed = Number(amountDecimal);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`Stripe amount decimal is not a number: ${JSON.stringify(amountDecimal)}`);
+    }
+    return Math.round(parsed);
+  }
+  return amount ?? undefined;
+}
+
+/**
+ * Keeps only the fields that are immutable on a Stripe price, so the cached
+ * snapshot can never drift from Stripe. Mutable fields (`nickname`, `active`,
+ * `metadata`, `lookup_key`) are dropped: we refresh the cache only when the
+ * price id changes, which would leave any mutable value we stored stale.
+ */
+function toStripePriceDetails(price: Stripe.Price): StripePriceDetails {
+  return {
+    id: price.id,
+    product: typeof price.product === 'string' ? price.product : price.product?.id,
+    currency: price.currency,
+    billing_scheme: price.billing_scheme,
+    tiers_mode: price.tiers_mode,
+    unit_amount: price.unit_amount,
+    unit_amount_decimal: toDecimalString(price.unit_amount_decimal),
+    ...(price.tiers
+      ? {
+          tiers: price.tiers.map((tier) => ({
+            up_to: tier.up_to,
+            flat_amount: tier.flat_amount,
+            flat_amount_decimal: toDecimalString(tier.flat_amount_decimal),
+            unit_amount: tier.unit_amount,
+            unit_amount_decimal: toDecimalString(tier.unit_amount_decimal),
+          })),
+        }
+      : {}),
+    recurring: price.recurring
+      ? {
+          interval: price.recurring.interval,
+          interval_count: price.recurring.interval_count,
+          usage_type: price.recurring.usage_type,
+          meter: price.recurring.meter,
+        }
+      : null,
+  };
+}
+
+/** Stripe's `*_decimal` fields are decimal strings on the wire; keep them as strings. */
+function toDecimalString(value: Stripe.Price['unit_amount_decimal']): string | null {
+  return value == null ? null : String(value);
+}
+
+async function cacheStripePrice(
+  price: StripePriceDetails,
+  userId: string,
+  billingTableName: string,
+): Promise<void> {
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: billingTableName,
+      Key: {
+        pk: { S: `CUSTOMER#${userId}` },
+        sk: { S: 'SUBSCRIPTION' },
+      },
+      UpdateExpression: 'SET stripePrice = :price, updatedAt = :now',
+      ExpressionAttributeValues: {
+        ':price': convertToAttr(price, { removeUndefinedValues: true }),
+        ':now': { S: new Date().toISOString() },
+      },
+    }),
+  );
 }
 
 async function evaluateStatusTransitions(
@@ -212,7 +378,7 @@ async function evaluateStatusTransitions(
 function buildBillingResponse(
   billingRecord: SubscriptionRecord,
   currentStatus: SubscriptionStatus,
-  paymentMethod: BillingInfo['paymentMethod'],
+  { paymentMethod, monthlyMinimumCents }: StripeSubscriptionDetails,
 ): BillingInfo {
   const isActivePlan =
     currentStatus === SubscriptionStatus.Active ||
@@ -238,6 +404,7 @@ function buildBillingResponse(
       ...(billingRecord.gracePeriodEndsAt
         ? { gracePeriodEndsAt: billingRecord.gracePeriodEndsAt }
         : {}),
+      ...(monthlyMinimumCents ? { monthlyMinimumCents } : {}),
     },
     paymentMethod,
   };
