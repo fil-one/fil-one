@@ -391,13 +391,24 @@ Use **test mode** first. Switch to live mode for production.
 
 1. **Products > Add product**
    - Name: `Fil.one Storage`
-   - Description: `Decentralized cloud storage — $4.99/TiB/month`
+   - Description: `Decentralized cloud storage — $4.99/TB/month, $4.99/month minimum`
 2. **Add price** on that product:
-   - Pricing model: Standard
+   - Pricing model: **Graduated tiering**
    - Recurring: Monthly
-   - Usage type: **Metered** (sum of usage values during period)
-   - Price: `$4.99` per unit, unit label: `TiB`
+   - Usage type: **Metered** (sum of usage values during period), unit label: `GB`
+   - First tier: up to `1000` GB, flat fee `$4.99` — this flat fee is the monthly minimum
+   - Final tier: `$0.00499` per GB — the same $4.99/TB rate, for usage above the first tier
 3. Note the **Price ID** (`price_xxxxx`)
+
+Usage is metered in decimal GB (`GB_BYTES = 1e9`, see the usage-reporting worker),
+so 1000 GB of included usage is exactly the $4.99 the flat fee covers.
+
+The first tier's flat amount is what the console shows as the monthly minimum:
+`GET /api/billing` reports it as `subscription.monthlyMinimumCents`, read from the
+price the org's subscription is actually billed on. Customers grandfathered on the
+older plain per-unit price have no tiers and therefore no minimum. The price
+snapshot is cached on the billing record so the minimum stays correct while the
+Stripe API is unavailable.
 
 ### 2. Configure Customer Portal
 
