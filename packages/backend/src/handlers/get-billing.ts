@@ -214,9 +214,11 @@ async function resolveLivePrice(
 /**
  * The monthly minimum is the flat amount of the first tier on a graduated
  * tiered price. Grandfathered per-unit prices have no tiers, hence no minimum.
+ * Volume tiering picks a single tier by total usage, so its first tier is not a
+ * minimum either — report none rather than a wrong number.
  */
 function deriveMonthlyMinimumCents(price: CachedStripePrice | undefined): number {
-  if (price?.billing_scheme !== 'tiered') return 0;
+  if (price?.billing_scheme !== 'tiered' || price.tiers_mode !== 'graduated') return 0;
   const firstTier = price.tiers?.at(0);
   return amountToCents(firstTier?.flat_amount, firstTier?.flat_amount_decimal);
 }

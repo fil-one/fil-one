@@ -492,6 +492,22 @@ describe('get-billing baseHandler', () => {
     expect(body.subscription.monthlyMinimumCents).toBeUndefined();
   });
 
+  it('omits the monthly minimum for a volume-tiered price', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsRetrieve.mockResolvedValue(
+      stripeSubscription({ ...TIERED_PRICE, tiers_mode: 'volume' }),
+    );
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription).toStrictEqual({
+      planId: PlanId.PayAsYouGo,
+      status: SubscriptionStatus.Active,
+    });
+  });
+
   it('omits the monthly minimum for a grandfathered per-unit price', async () => {
     ddbMock.on(GetItemCommand).resolves(activeRecordWith());
     ddbMock.on(UpdateItemCommand).resolves({});
