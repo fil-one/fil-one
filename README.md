@@ -410,6 +410,10 @@ older plain per-unit price have no tiers and therefore no minimum. The price
 snapshot is cached on the billing record so the minimum stays correct while the
 Stripe API is unavailable.
 
+The endpoint never guesses the minimum: it fails the request instead of reporting
+"no minimum" when the price is graduated but carries no tiers, or when Stripe's
+exact decimal amount cannot be parsed.
+
 ### 2. Configure Customer Portal
 
 **Settings > Billing > Customer portal** — enable:

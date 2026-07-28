@@ -126,7 +126,7 @@ async function buildTrialResponse(
 
 interface StripeSubscriptionDetails {
   paymentMethod: BillingInfo['paymentMethod'];
-  monthlyMinimumCents: number;
+  monthlyMinimumCents: number | undefined;
 }
 
 /**
@@ -216,11 +216,18 @@ async function resolveLivePrice(
  * tiered price. Grandfathered per-unit prices have no tiers, hence no minimum.
  * Volume tiering picks a single tier by total usage, so its first tier is not a
  * minimum either — report none rather than a wrong number.
+ *
+ * A graduated price always has tiers, so an empty list means we lost them (a
+ * dropped `expand` or a snapshot cached without them). Throw: reporting "no
+ * minimum" would understate what the customer pays.
  */
-function deriveMonthlyMinimumCents(price: CachedStripePrice | undefined): number {
-  if (price?.billing_scheme !== 'tiered' || price.tiers_mode !== 'graduated') return 0;
+function deriveMonthlyMinimumCents(price: CachedStripePrice | undefined): number | undefined {
+  if (price?.billing_scheme !== 'tiered' || price.tiers_mode !== 'graduated') return undefined;
   const firstTier = price.tiers?.at(0);
-  return amountToCents(firstTier?.flat_amount, firstTier?.flat_amount_decimal);
+  if (!firstTier) {
+    throw new Error(`Graduated price ${price.id} has no tiers to read the monthly minimum from`);
+  }
+  return amountToCents(firstTier.flat_amount, firstTier.flat_amount_decimal);
 }
 
 /**
@@ -228,17 +235,24 @@ function deriveMonthlyMinimumCents(price: CachedStripePrice | undefined): number
  * `*_amount_decimal` as an exact decimal string of cents. The decimal is the
  * authoritative one — sub-cent amounts round the integer field down, so our
  * $0.00499/GB rate arrives as `unit_amount: 0` next to `'0.499'`. Read the
- * decimal first, fall back to the integer, and round to whole cents.
+ * decimal first, fall back to the integer, and round to whole cents. Both
+ * fields are null when the amount does not apply at all (a tier with no flat
+ * fee); return undefined so callers can tell that apart from a zero amount. A
+ * decimal we cannot parse is never silently swapped for the rounded integer —
+ * throw, because the integer may be a sub-cent amount rounded to zero.
  */
 function amountToCents(
   amount: number | null | undefined,
   amountDecimal: string | null | undefined,
-): number {
+): number | undefined {
   if (amountDecimal != null) {
     const parsed = Number(amountDecimal);
-    if (Number.isFinite(parsed)) return Math.round(parsed);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`Stripe amount decimal is not a number: ${JSON.stringify(amountDecimal)}`);
+    }
+    return Math.round(parsed);
   }
-  return typeof amount === 'number' ? amount : 0;
+  return amount ?? undefined;
 }
 
 /**
@@ -390,7 +404,7 @@ function buildBillingResponse(
       ...(billingRecord.gracePeriodEndsAt
         ? { gracePeriodEndsAt: billingRecord.gracePeriodEndsAt }
         : {}),
-      ...(monthlyMinimumCents > 0 ? { monthlyMinimumCents } : {}),
+      ...(monthlyMinimumCents ? { monthlyMinimumCents } : {}),
     },
     paymentMethod,
   };

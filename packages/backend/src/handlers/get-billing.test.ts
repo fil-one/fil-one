@@ -508,6 +508,37 @@ describe('get-billing baseHandler', () => {
     });
   });
 
+  const missingTiersCases: Record<string, unknown> = {
+    'the tiers are missing': undefined,
+    'the tiers are empty': [],
+  };
+  for (const [description, tiers] of Object.entries(missingTiersCases)) {
+    it(`fails when a graduated price has no first tier because ${description}`, async () => {
+      ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+      ddbMock.on(UpdateItemCommand).resolves({});
+      mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription({ ...TIERED_PRICE, tiers }));
+
+      await expect(baseHandler(buildEvent({ userInfo: USER_INFO }))).rejects.toThrow(
+        `Graduated price ${TIERED_PRICE.id} has no tiers`,
+      );
+    });
+  }
+
+  it('fails when the first tier flat amount decimal is not a number', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsRetrieve.mockResolvedValue(
+      stripeSubscription({
+        ...TIERED_PRICE,
+        tiers: [{ ...TIERED_PRICE.tiers[0], flat_amount_decimal: 'not-a-number' }],
+      }),
+    );
+
+    await expect(baseHandler(buildEvent({ userInfo: USER_INFO }))).rejects.toThrow(
+      'Stripe amount decimal is not a number: "not-a-number"',
+    );
+  });
+
   it('omits the monthly minimum for a grandfathered per-unit price', async () => {
     ddbMock.on(GetItemCommand).resolves(activeRecordWith());
     ddbMock.on(UpdateItemCommand).resolves({});

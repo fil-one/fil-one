@@ -148,7 +148,10 @@ signups get that price via the `StripePriceId` secret; customers created before 
 switch stay on the old per-unit price ($0.00499/GB with no flat fee) and are
 grandfathered without a minimum.
 `GET /api/billing` derives `subscription.monthlyMinimumCents` from the first tier's
-flat amount of whichever price the org's subscription carries.
+flat amount of whichever price the org's subscription carries. The field is absent
+only when the price genuinely has no minimum (per-unit or volume-tiered); a
+graduated price with no tiers, or an amount Stripe reports as an unparseable
+decimal, fails the request rather than understating what the customer pays.
 
 ### Recommendation
 
