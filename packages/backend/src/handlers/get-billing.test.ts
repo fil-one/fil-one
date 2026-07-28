@@ -167,6 +167,13 @@ function stripeSubscription(price?: Record<string, unknown>, overrides: object =
   };
 }
 
+/** Stripe's 404 for a subscription deleted upstream, as the SDK surfaces it. */
+function stripeResourceMissing() {
+  const err = new Error("No such subscription: 'sub_456'") as Error & { code: string };
+  err.code = 'resource_missing';
+  return err;
+}
+
 function activeRecordWith(overrides: Record<string, unknown> = {}) {
   return subscriptionItem({
     stripeCustomerId: 'cus_123',
@@ -625,6 +632,33 @@ describe('get-billing baseHandler', () => {
     const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
     expect(result.statusCode).toBe(502);
+  });
+
+  it('reports no minimum when the subscription is gone from Stripe', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+    mockSubscriptionsRetrieve.mockRejectedValue(stripeResourceMissing());
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription).toStrictEqual({
+      planId: PlanId.PayAsYouGo,
+      status: SubscriptionStatus.Active,
+    });
+  });
+
+  it('serves the cached minimum when the subscription is gone from Stripe', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith({ stripePrice: CACHED_TIERED_PRICE }));
+    mockSubscriptionsRetrieve.mockRejectedValue(stripeResourceMissing());
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription).toStrictEqual({
+      planId: PlanId.PayAsYouGo,
+      status: SubscriptionStatus.Active,
+      monthlyMinimumCents: 499,
+    });
   });
 
   it('expands the price tiers when retrieving the Stripe subscription', async () => {

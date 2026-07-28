@@ -129,10 +129,19 @@ interface StripeSubscriptionDetails {
   monthlyMinimumCents: number | undefined;
 }
 
+// Stripe SDK errors expose `code` on the error object; matches StripeInvalidRequestError 404s.
+const isStripeResourceMissing = (err: unknown): boolean =>
+  typeof err === 'object' && err !== null && (err as { code?: string }).code === 'resource_missing';
+
 /**
  * Resolves the payment method and the billed price from Stripe. Returns null
  * when the Stripe call fails and no price snapshot is cached — the caller must
  * then fail the request instead of reporting an unknown minimum as "none".
+ *
+ * A `resource_missing` error is the exception: the subscription is gone from
+ * Stripe, so there is no minimum left to understate. Report none and let the
+ * caller serve the status we hold in DynamoDB — the customer still needs the
+ * dashboard to tell them their payment failed.
  */
 async function resolveStripeSubscriptionDetails(
   billingRecord: SubscriptionRecord,
@@ -157,7 +166,7 @@ async function resolveStripeSubscriptionDetails(
         error: (err as Error).message,
       });
       price = billingRecord.stripePrice;
-      if (!price) {
+      if (!price && !isStripeResourceMissing(err)) {
         return null;
       }
     }
