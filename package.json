@@ -55,15 +55,5 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@10.33.0",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "@pulumi/command",
-      "protobufjs"
-    ],
-    "overrides": {
-      "@smithy/types": "4.13.1"
-    }
-  }
+  "packageManager": "pnpm@10.33.0"
 }

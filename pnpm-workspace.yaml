@@ -12,6 +12,15 @@ trustPolicy: no-downgrade
 trustPolicyExclude:
   - 'semver@6.3.1'
 
+# Dependencies allowed to run postinstall/build scripts
+onlyBuiltDependencies:
+  - esbuild
+  - '@pulumi/command'
+  - protobufjs
+
+overrides:
+  '@smithy/types': 4.13.1
+
 packages:
   - 'bin'
   - 'infra'
