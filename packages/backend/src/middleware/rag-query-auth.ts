@@ -113,7 +113,7 @@ async function bearerAuth(
 export function ragQueryAuthMiddleware(options: AuthMiddlewareOptions = {}) {
   const cookieAuth = authMiddleware(options);
 
-  const before = async (
+  const before = (async (
     request: QueryAuthRequest,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
     const authHeader = request.event.headers?.authorization;
@@ -122,14 +122,16 @@ export function ragQueryAuthMiddleware(options: AuthMiddlewareOptions = {}) {
       return cookieAuth.before(request);
     }
     return bearerAuth(request, authHeader);
-  };
+  }) as (
+    r: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2>,
+  ) => Promise<APIGatewayProxyStructuredResultV2 | void>;
 
-  const after = async (request: QueryAuthRequest): Promise<void> => {
+  const after = (async (request: QueryAuthRequest): Promise<void> => {
     // Cookie refresh / re-issue only applies to the cookie path.
     if (request.internal.usedCookieAuth) {
       return cookieAuth.after?.(request);
     }
-  };
+  }) as (r: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2>) => Promise<void>;
 
   return { before, after } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;
 }

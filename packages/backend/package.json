@@ -17,6 +17,7 @@
     "@aws-sdk/util-dynamodb": "^3.996.2",
     "@filone/aurora-backoffice-client": "workspace:*",
     "@filone/aurora-portal-client": "workspace:*",
+    "@filone/orchestrator-client": "workspace:*",
     "@filone/rag-shared": "workspace:*",
     "@filone/shared": "workspace:*",
     "@middy/core": "^7.2.2",
