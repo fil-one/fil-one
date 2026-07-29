@@ -11,6 +11,36 @@ export interface AccessKeyRecord {
   status: string;
 }
 
+/**
+ * The Stripe price a subscription is billed on. Only fields that are immutable
+ * on a Stripe price are kept — mutable ones (`nickname`, `active`, `metadata`,
+ * `lookup_key`) are dropped, so a copy of this shape can never drift from
+ * Stripe no matter how long we hold it. Field names mirror the Stripe API.
+ */
+export interface StripePriceDetails {
+  id: string;
+  product?: string;
+  currency?: string;
+  billing_scheme?: 'per_unit' | 'tiered';
+  tiers_mode?: 'graduated' | 'volume' | null;
+  unit_amount?: number | null;
+  /** Set instead of `unit_amount` for sub-cent rates, e.g. '0.499' per GB. */
+  unit_amount_decimal?: string | null;
+  tiers?: Array<{
+    up_to: number | null;
+    flat_amount: number | null;
+    flat_amount_decimal: string | null;
+    unit_amount: number | null;
+    unit_amount_decimal: string | null;
+  }>;
+  recurring?: {
+    interval?: string;
+    interval_count?: number;
+    usage_type?: string;
+    meter?: string | null;
+  } | null;
+}
+
 /** BillingTable — pk: CUSTOMER#{userId}, sk: SUBSCRIPTION */
 export interface SubscriptionRecord {
   pk: string;
@@ -28,6 +58,11 @@ export interface SubscriptionRecord {
   paymentMethodBrand?: string;
   paymentMethodExpMonth?: number;
   paymentMethodExpYear?: number;
+  /**
+   * Cached so we can still report what the customer pays when the Stripe API is
+   * unavailable. Rewritten only when the price id changes.
+   */
+  stripePrice?: StripePriceDetails;
   updatedAt?: string;
 }
 
