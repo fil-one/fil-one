@@ -140,7 +140,7 @@ export function BillingPage() {
   // sub-1 TB grandfathered org is never shown a floor it isn't billed.
   const monthlyMinimumCents = billing?.subscription.monthlyMinimumCents ?? 0;
   const hasMinimum = monthlyMinimumCents > 0;
-  const minimumLabel = `$${(monthlyMinimumCents / 100).toFixed(2)}/month minimum`;
+const minimumLabel = `${formatCents(monthlyMinimumCents)}/month minimum`;
   const estimatedCost = Math.max(
     monthlyMinimumCents,
     Math.round((storageUsed / TB_BYTES) * PRICE_PER_TB_CENTS),
