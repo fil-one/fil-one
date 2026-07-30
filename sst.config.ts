@@ -307,7 +307,36 @@ export default $config({
 
     const router = new sst.aws.Router('WebsiteRouter', {
       routes: {
-        '/*': { bucket: websiteBucket },
+        '/*': {
+          bucket: websiteBucket,
+          // SPA fallback, scoped to the S3 behavior only — /api/*, /login and
+          // /logout are separate ordered cache behaviors that match before
+          // this one, so their error statuses/bodies reach the browser
+          // unmasked. Anything that isn't a real static file is rewritten to
+          // /index.html at viewer-request time (before cache lookup), so the
+          // private bucket's 403 for unknown keys never surfaces for app
+          // routes. Keep the allowlist in sync with packages/website/public/
+          // and Vite's assetsDir. SPA paths can contain dots (buckets created
+          // out-of-band can be named e.g. my.bucket.com and are deep-linkable
+          // at /buckets/my.bucket.com), so no extension sniffing — exact
+          // allowlist only.
+          edge: {
+            viewerRequest: {
+              injection: `
+                var uri = event.request.uri;
+                if (
+                  uri !== '/index.html' &&
+                  uri !== '/favicon.ico' &&
+                  uri !== '/favicon.png' &&
+                  uri !== '/fil-one-logo.svg' &&
+                  !uri.startsWith('/assets/')
+                ) {
+                  event.request.uri = '/index.html';
+                }
+              `,
+            },
+          },
+        },
         '/api/*': {
           url: api.url,
           cachePolicy: AWS_CACHING_DISABLED_POLICY,
@@ -334,19 +363,15 @@ export default $config({
           args.defaultRootObject = 'index.html';
           // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Pulumi Input wrapper; value is a plain object at transform time
           (args.defaultCacheBehavior as any).responseHeadersPolicyId = responseHeadersPolicy.id;
+          // Never cache error responses — /api/* 403s are per-user but the
+          // API cache key has no auth component. Deliberately NO
+          // responseCode/responsePagePath: custom error responses are
+          // distribution-wide, so rewriting errors here would mask API error
+          // statuses and bodies (SPA fallback lives in the '/*' route's
+          // viewer-request function instead).
           args.customErrorResponses = [
-            {
-              errorCode: 403,
-              responseCode: 200,
-              responsePagePath: '/index.html',
-              errorCachingMinTtl: 0,
-            },
-            {
-              errorCode: 404,
-              responseCode: 200,
-              responsePagePath: '/index.html',
-              errorCachingMinTtl: 0,
-            },
+            { errorCode: 403, errorCachingMinTtl: 0 },
+            { errorCode: 404, errorCachingMinTtl: 0 },
           ];
         },
       },
