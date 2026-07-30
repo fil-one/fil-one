@@ -295,7 +295,7 @@ async function fetchStorageSamplesRange({
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  const { data, error } = await getTenantStorageMetrics({
+  const { data, error, response } = await getTenantStorageMetrics({
     client,
     path: { partnerId, tenantId },
     query: { from, to, window },
@@ -304,7 +304,7 @@ async function fetchStorageSamplesRange({
 
   if (error) {
     throw new Error(
-      `Aurora storage API failed for tenant ${tenantId} (from=${from} to=${to} window=${window})`,
+      `Aurora storage API failed for tenant ${tenantId} (status=${response?.status ?? 'unknown'} from=${from} to=${to} window=${window})`,
       { cause: error },
     );
   }
@@ -352,7 +352,7 @@ export async function getBucketStorageSamples({
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  const { data, error } = await getBucketStorageMetrics({
+  const { data, error, response } = await getBucketStorageMetrics({
     client,
     path: { partnerId, bucketName },
     query: { from, to, window },
@@ -360,9 +360,10 @@ export async function getBucketStorageSamples({
   });
 
   if (error) {
-    throw new Error(`Aurora bucket storage API failed for bucket ${bucketName}`, {
-      cause: error,
-    });
+    throw new Error(
+      `Aurora bucket storage API failed for bucket ${bucketName} (status=${response?.status ?? 'unknown'})`,
+      { cause: error },
+    );
   }
 
   return data?.samples ?? [];
@@ -389,7 +390,7 @@ async function fetchOperationsSamplesRange({
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  const { data, error } = await getTenantOperationMetrics({
+  const { data, error, response } = await getTenantOperationMetrics({
     client,
     path: { partnerId, tenantId },
     query: { from, to, window },
@@ -398,7 +399,7 @@ async function fetchOperationsSamplesRange({
 
   if (error) {
     throw new Error(
-      `Aurora operations API failed for tenant ${tenantId} (from=${from} to=${to} window=${window})`,
+      `Aurora operations API failed for tenant ${tenantId} (status=${response?.status ?? 'unknown'} from=${from} to=${to} window=${window})`,
       { cause: error },
     );
   }

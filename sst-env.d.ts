@@ -74,6 +74,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "CreateRagApiKey": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "CreateSetupIntent": {
       "name": string
       "type": "sst.aws.Function"
@@ -94,6 +98,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "DeleteRagApiKey": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "DisableMfa": {
       "name": string
       "type": "sst.aws.Function"
@@ -101,6 +109,10 @@ declare module "sst" {
     "EnrollMfa": {
       "name": string
       "type": "sst.aws.Function"
+    }
+    "ForgeManagementApiToken": {
+      "type": "sst.sst.Secret"
+      "value": string
     }
     "FthManagementApiToken": {
       "type": "sst.sst.Secret"
@@ -119,6 +131,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "GetBucketAnalytics": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "GetBucketRagEnablement": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -158,6 +174,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "ListRagApiKeys": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "OtelFirehoseBackup": {
       "name": string
       "type": "sst.aws.Bucket"
@@ -166,13 +186,17 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "RagIndexerTable": {
+    "QueryBucket": {
       "name": string
-      "type": "sst.aws.Dynamo"
+      "type": "sst.aws.Function"
     }
     "RagIndexerOrchestrator": {
       "name": string
       "type": "sst.aws.Function"
+    }
+    "RagIndexerTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
     }
     "RagIndexerWorker": {
       "name": string
@@ -188,6 +212,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "ResendVerification": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "SetBucketRagEnablement": {
       "name": string
       "type": "sst.aws.Function"
     }
