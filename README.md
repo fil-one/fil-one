@@ -153,7 +153,13 @@ In CI, all nine credential vars come from GitHub repository secrets (see [.githu
 
 #### Seeded buckets per region
 
-The bucket/upload tests in `tests/e2e/destructive/buckets.spec.ts` run once per S3 region (`eu-west-1` and `us-east-1`, see `tests/e2e/destructive/regions.util.ts`) and reuse existing buckets rather than creating them (the account-wide bucket limit is 100 and buckets are not yet deletable). Each test account — paid, unpaid, and trial — must therefore have at least one bucket in **each** region on the target stage; otherwise the test fails with a `No <region> bucket found` error. Seeding is manual: log in as each test user and create one bucket per region via the UI. The unpaid account cannot create buckets in its `past_due` state, so seed its buckets while its billing state permits (or temporarily reset it via the `BillingTable`).
+The bucket/upload tests in `tests/e2e/destructive/buckets.spec.ts` run once per S3 region (`eu-west-1` and `us-east-1`, see `tests/e2e/destructive/regions.util.ts`) and reuse existing buckets rather than creating them (the account-wide bucket limit is 100 and buckets are not yet deletable). Each test account — paid, unpaid, and trial — must therefore have at least one bucket in **each** region on the target stage; otherwise the test fails with a `No <region> bucket found` error.
+
+Seeding is automatic for all three accounts: the `seed-buckets` Playwright project ([tests/e2e/destructive/buckets.setup.ts](tests/e2e/destructive/buckets.setup.ts)) runs after `setup` and calls `ensureBucketInEachRegion` ([tests/e2e/destructive/buckets.util.ts](tests/e2e/destructive/buckets.util.ts)), which creates a bucket only for regions where the account has none. This keeps the suite working when a stage resets its storage layer and all buckets disappear; creation stays conditional so repeated runs do not leak buckets toward the 100-bucket limit.
+
+The **unpaid** account is `past_due`, and the subscription guard rejects write requests in that state with 403 `GRACE_PERIOD_WRITE_BLOCKED`. For that role the seeding step flips `subscriptionStatus` to `active` in the `BillingTable` (`activateSubscription` in [tests/e2e/destructive/billing-reset.util.ts](tests/e2e/destructive/billing-reset.util.ts)), creates the missing buckets, then restores `past_due` in a `finally` block — before any spec runs, so the dashboard and upload tests still see the write-blocked state.
+
+If the bucket list itself fails (`GET /api/buckets` returning a 5xx, e.g. when a stage's per-tenant S3 credentials in SSM have gone stale), the seeding step fails loudly with the status and response body rather than mistaking the error for an empty account — and because the browser projects depend on it, the whole run stops.
 
 #### Running locally
 
@@ -203,6 +209,7 @@ The `.auth/` directory is gitignored — the JSON files are regenerated on every
 3. Add the role to the `roles` array in [tests/e2e/auth.setup.ts](tests/e2e/auth.setup.ts) (with `email`, `password`, `userId`).
 4. Add `E2E_<ROLE>_EMAIL`, `E2E_<ROLE>_PASSWORD`, `E2E_<ROLE>_USER_ID` to `REQUIRED_CREDENTIAL_VARS` in [playwright.config.ts](playwright.config.ts).
 5. Add the same three vars to the `env:` block in both [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml), and provision the corresponding GitHub secrets.
+6. If the role needs a seeded bucket per region, add it to `SEED_PLAN` in [tests/e2e/destructive/buckets.setup.ts](tests/e2e/destructive/buckets.setup.ts), with `needsActiveSubscription: true` when its desired subscription state blocks writes.
 
 ### Integration Tests
 
