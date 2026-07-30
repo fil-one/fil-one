@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { SubscriptionStatus } from '@filone/shared';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
 
 // ---------------------------------------------------------------------------
@@ -17,6 +18,7 @@ vi.mock('sst', () => ({
 
 const mockMeterEventsCreate = vi.fn().mockResolvedValue({});
 const mockCustomersUpdate = vi.fn().mockResolvedValue({});
+const mockGetCustomerExistence = vi.hoisted(() => vi.fn());
 vi.mock('../lib/stripe-client.js', () => ({
   getStripeClient: () => ({
     billing: {
@@ -26,6 +28,16 @@ vi.mock('../lib/stripe-client.js', () => ({
   }),
   updateCustomerMetadata: (customerId: string, metadata: Record<string, string>) =>
     mockCustomersUpdate(customerId, { metadata }),
+  isStripeResourceMissing: (err: unknown) =>
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: string }).code === 'resource_missing',
+  getCustomerExistence: (...args: unknown[]) => mockGetCustomerExistence(...args),
+}));
+
+const mockEmitStripeCustomersOutOfSync = vi.hoisted(() => vi.fn());
+vi.mock('../lib/usage-worker-metrics.js', () => ({
+  emitStripeCustomersOutOfSync: (...args: unknown[]) => mockEmitStripeCustomersOutOfSync(...args),
 }));
 
 const {
@@ -95,6 +107,7 @@ import { handler } from './usage-reporting-worker.js';
 
 const basePayload: UsageReportingWorkerPayload = {
   orgId: 'org-1',
+  userId: 'user-1',
   orgName: 'Acme Corp',
   subscriptionId: 'sub_123',
   stripeCustomerId: 'cus_123',
@@ -112,6 +125,8 @@ describe('usage-reporting-worker', () => {
     ddbMock.reset();
     vi.clearAllMocks();
     ddbMock.on(PutItemCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockGetCustomerExistence.mockResolvedValue('deleted');
     mockGetTenantUsageMetrics.mockResolvedValue({ storage: [], egress: [] });
     // Default: org provisioned in Aurora only (mirrors the previous Aurora-only basePayload).
     mockAuroraIsTenantReady.mockReturnValue('aurora-tenant-123');
@@ -438,7 +453,7 @@ describe('usage-reporting-worker', () => {
       warnSpy.mockRestore();
     });
 
-    it('continues with trial lock enforcement when meter event hits resource_missing', async () => {
+    it('marks the subscription canceled and disables the tenant in all regions instead of enforcing trial locks when meter event hits resource_missing', async () => {
       const trialPayload: UsageReportingWorkerPayload = {
         ...basePayload,
         subscriptionStatus: 'trialing',
@@ -451,13 +466,19 @@ describe('usage-reporting-worker', () => {
 
       await handler(trialPayload);
 
-      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith(
+      // The reconciliation path disables the tenant outright — never the trial write-lock.
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
+      expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalledWith(
         'aurora-tenant-123',
         'write-locked',
       );
       const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-      expect(item.lockAction).toEqual({ S: 'write-locked' });
-      expect(item.reportedToStripe).toEqual({ BOOL: false });
+      expect(item).toEqual(
+        expect.objectContaining({
+          lockAction: { S: 'disabled' },
+          reportedToStripe: { BOOL: false },
+        }),
+      );
     });
 
     it('still propagates non-resource_missing Stripe errors', async () => {
@@ -470,6 +491,193 @@ describe('usage-reporting-worker', () => {
       mockMeterEventsCreate.mockRejectedValueOnce(err);
 
       await expect(handler(basePayload)).rejects.toThrow('rate limited');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Reconciliation — customer deleted in Stripe but our records still live
+  // -----------------------------------------------------------------------
+  describe('reconciliation when the Stripe customer was deleted', () => {
+    const oneTbUsage = {
+      storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_000_000_000_000 }],
+      egress: [],
+    };
+
+    function makeResourceMissingError(): Error {
+      const err = new Error('No such customer: cus_123') as Error & { code: string };
+      err.code = 'resource_missing';
+      return err;
+    }
+
+    function auditItem() {
+      const putCalls = ddbMock.commandCalls(PutItemCommand);
+      expect(putCalls).toHaveLength(1);
+      return putCalls[0].args[0].input.Item!;
+    }
+
+    it('verifies deletion, disables tenants, cancels the record, audits reconciled', async () => {
+      mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
+      mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
+      mockGetCustomerExistence.mockResolvedValue('deleted');
+
+      await handler(basePayload);
+
+      expect(mockGetCustomerExistence).toHaveBeenCalledWith('cus_123');
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
+
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      const input = updateCalls[0].args[0].input;
+      expect(input.Key).toEqual({
+        pk: { S: 'CUSTOMER#user-1' },
+        sk: { S: 'SUBSCRIPTION' },
+      });
+      expect(input.ExpressionAttributeValues![':status']).toEqual({
+        S: SubscriptionStatus.Canceled,
+      });
+      expect(input.ConditionExpression).toBe('attribute_exists(pk)');
+
+      expect(auditItem()).toEqual(
+        expect.objectContaining({
+          orgSyncAction: { S: 'reconciled:customer-deleted' },
+          // The reconciliation disabled the tenant in all provisioned regions.
+          lockAction: { S: 'disabled' },
+          reportedToStripe: { BOOL: false },
+        }),
+      );
+      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
+    });
+
+    it('reconciles when the metadata sync (not the meter event) reports the customer missing', async () => {
+      mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
+      mockCustomersUpdate.mockRejectedValueOnce(makeResourceMissingError());
+      mockGetCustomerExistence.mockResolvedValue('deleted');
+
+      await handler(basePayload);
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      expect(auditItem()).toEqual(
+        expect.objectContaining({
+          orgSyncAction: { S: 'reconciled:customer-deleted' },
+          lockAction: { S: 'disabled' },
+          // The meter event succeeded before the metadata sync failed.
+          reportedToStripe: { BOOL: true },
+        }),
+      );
+      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
+    });
+
+    it('refuses to reconcile when the customer never existed in this account', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
+      mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
+      mockGetCustomerExistence.mockResolvedValue('not-in-account');
+
+      await handler(basePayload);
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
+      const item = auditItem();
+      expect(item.orgSyncAction).toEqual({ S: 'error:customer-not-in-account' });
+      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('refusing to reconcile'),
+        expect.objectContaining({ orgId: 'org-1', stripeCustomerId: 'cus_123' }),
+      );
+      errorSpy.mockRestore();
+    });
+
+    it('does not reconcile when the customer actually exists (transient resource_missing)', async () => {
+      mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
+      mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
+      mockGetCustomerExistence.mockResolvedValue('exists');
+
+      await handler(basePayload);
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
+      expect(auditItem()).toEqual(
+        expect.objectContaining({
+          orgSyncAction: { S: 'error:customer-missing-but-exists' },
+          // Normal lock enforcement ran (paid subscription → skipped).
+          lockAction: { S: 'skipped:paid' },
+        }),
+      );
+      // The customer is alive — nothing is out of sync.
+      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
+    });
+
+    it('still enforces trial locks when the customer exists despite a transient resource_missing', async () => {
+      const trialPayload: UsageReportingWorkerPayload = {
+        ...basePayload,
+        subscriptionStatus: 'trialing',
+      };
+      mockGetTenantUsageMetrics.mockResolvedValue({
+        storage: [{ timestamp: '2024-01-01T00:00:00Z', bytesUsed: 1_500_000_000_000 }], // over limit
+        egress: [],
+      });
+      mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
+      mockGetCustomerExistence.mockResolvedValue('exists');
+
+      await handler(trialPayload);
+
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith(
+        'aurora-tenant-123',
+        'write-locked',
+      );
+      expect(auditItem()).toEqual(
+        expect.objectContaining({
+          orgSyncAction: { S: 'error:customer-missing-but-exists' },
+          lockAction: { S: 'write-locked' },
+        }),
+      );
+      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
+    });
+
+    it('defers the reconciliation when the payload has no userId (pre-upgrade orchestrator)', async () => {
+      mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
+      mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
+      mockGetCustomerExistence.mockResolvedValue('deleted');
+
+      await handler({ ...basePayload, userId: undefined });
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockAuroraUpdateTenantStatus).not.toHaveBeenCalled();
+      const item = auditItem();
+      expect(item.orgSyncAction).toEqual({ S: 'error:reconcile-skipped-no-user-id' });
+      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(1);
+    });
+
+    it('records reconcile-failed and leaves the record intact when a region fails to disable', async () => {
+      vi.useFakeTimers();
+      mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
+      mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
+      mockGetCustomerExistence.mockResolvedValue('deleted');
+      // Fail every retry so the status-sync retry budget is exhausted.
+      mockAuroraUpdateTenantStatus.mockRejectedValue(new Error('Aurora down'));
+
+      const run = handler(basePayload);
+      await vi.runAllTimersAsync();
+      await run;
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(auditItem()).toEqual(
+        expect.objectContaining({
+          orgSyncAction: { S: 'reconcile-failed:aurora' },
+          lockAction: { S: 'error:sync-failed:aurora' },
+        }),
+      );
+      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(1);
+    });
+
+    it('emits StripeCustomersOutOfSync=0 on a normal run', async () => {
+      mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
+
+      await handler(basePayload);
+
+      expect(mockGetCustomerExistence).not.toHaveBeenCalled();
+      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledTimes(1);
+      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
     });
   });
 
