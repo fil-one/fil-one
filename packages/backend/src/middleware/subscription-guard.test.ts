@@ -298,6 +298,30 @@ describe('subscriptionGuardMiddleware', () => {
     });
   });
 
+  it('blocks when subscriptionStatus is inactive (fail closed)', async () => {
+    // `inactive` is a read-model value that is never persisted; if it ever
+    // reaches a record anyway, the guard must deny it explicitly — the same
+    // answer GET /api/billing reports for accounts without entitlement.
+    ddbMock.on(GetItemCommand).resolves(
+      billingItem({
+        pk: `CUSTOMER#${USER_ID}`,
+        sk: 'SUBSCRIPTION',
+        subscriptionStatus: SubscriptionStatus.Inactive,
+      }),
+    );
+
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+    const result = await before(
+      buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: 'test-org-uuid' } })),
+    );
+
+    expectErrorResponse(result, 403, {
+      message:
+        'Your subscription is not active. Please contact support or update your payment method.',
+      code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
+    });
+  });
+
   it.each(['incomplete', 'incomplete_expired', 'unpaid', 'paused', 'some_future_status'])(
     'blocks access when status is unknown: %s (fail closed)',
     async (unknownStatus) => {

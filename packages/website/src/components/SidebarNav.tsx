@@ -270,6 +270,7 @@ export function SidebarNav({
     initial,
     isTrialing,
     isPastDue,
+    isInactive,
     trialDays,
     trialEndsLabel,
     graceDays,
@@ -425,6 +426,7 @@ export function SidebarNav({
           graceDays={graceDays}
           graceEndsLabel={graceEndsLabel}
           isPastDue={isPastDue}
+          isInactive={isInactive}
         />
 
         {/* Footer: Help + System status */}

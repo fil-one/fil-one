@@ -213,16 +213,21 @@ Could expand on this concept as a way to do more AuthZ based on Auth0 claims or 
 
 States are held on the user's billing record (`BillingTable`, key `CUSTOMER#${userId} / SUBSCRIPTION`) and updated by the Stripe webhook ([`stripe-webhook.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/stripe-webhook.ts)). The middleware also performs _lazy_ transitions on read.
 
-| Stripe state                      | Read                            | Write                                | Notes                                                         |
-| --------------------------------- | ------------------------------- | ------------------------------------ | ------------------------------------------------------------- |
-| (no billing record)               | allow                           | allow                                | Background `createBillingTrial` enqueued in `after` hook      |
-| (record, no `subscriptionStatus`) | allow                           | allow                                | Pre-trial setup window                                        |
-| `Active`                          | allow                           | allow                                |                                                               |
-| `Trialing`                        | allow\*                         | allow\*                              | If `trialEndsAt < now`, lazily transition to `GracePeriod`    |
-| `GracePeriod`                     | allow                           | **403 `GRACE_PERIOD_WRITE_BLOCKED`** | If `gracePeriodEndsAt < now`, lazily transition to `Canceled` |
-| `PastDue`                         | allow                           | **403 `GRACE_PERIOD_WRITE_BLOCKED`** | Same write-block as grace period                              |
-| `Canceled`                        | **403 `SUBSCRIPTION_CANCELED`** | **403 `SUBSCRIPTION_CANCELED`**      |                                                               |
-| Unknown / unhandled               | **403 `SUBSCRIPTION_INACTIVE`** | **403 `SUBSCRIPTION_INACTIVE`**      | Fail closed                                                   |
+| Stripe state                      | Read                            | Write                                | Notes                                                                                                              |
+| --------------------------------- | ------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| (no billing record)               | allow only if entitled\*\*      | allow only if entitled\*\*           | `ensureTrialEntitlement` claims `EMAIL_NORM#<email>/TRIAL_ENTITLEMENT`; losers get **403 `SUBSCRIPTION_INACTIVE`** |
+| (record, no `subscriptionStatus`) | **403 `SUBSCRIPTION_INACTIVE`** | **403 `SUBSCRIPTION_INACTIVE`**      | e.g. the customer-mapping record `create-setup-intent` writes — no status means no entitlement                     |
+| `Active`                          | allow                           | allow                                |                                                                                                                    |
+| `Trialing`                        | allow\*                         | allow\*                              | If `trialEndsAt < now`, lazily transition to `GracePeriod`                                                         |
+| `GracePeriod`                     | allow                           | **403 `GRACE_PERIOD_WRITE_BLOCKED`** | If `gracePeriodEndsAt < now`, lazily transition to `Canceled`                                                      |
+| `PastDue`                         | allow                           | **403 `GRACE_PERIOD_WRITE_BLOCKED`** | Same write-block as grace period                                                                                   |
+| `Canceled`                        | **403 `SUBSCRIPTION_CANCELED`** | **403 `SUBSCRIPTION_CANCELED`**      |                                                                                                                    |
+| `Inactive`                        | **403 `SUBSCRIPTION_INACTIVE`** | **403 `SUBSCRIPTION_INACTIVE`**      | Synthetic read-model status, never persisted; `GET /api/billing` reports it for the two denied rows above          |
+| Unknown / unhandled               | **403 `SUBSCRIPTION_INACTIVE`** | **403 `SUBSCRIPTION_INACTIVE`**      | Fail closed                                                                                                        |
+
+\*\* One trial per normalized email, verified emails only — see [`trial-entitlement.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/lib/trial-entitlement.ts).
+
+`GET /api/billing` reports the same truth as this guard: an account the guard denies is reported as `{planId: 'none', status: 'inactive'}`, never as a synthesized trial.
 
 Grace-period durations live in [`packages/shared/src/constants.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/shared/src/constants.ts) (`TRIAL_GRACE_DAYS`, `PAID_GRACE_DAYS`).
 

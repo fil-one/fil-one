@@ -48,7 +48,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       // Create Stripe customer and update record (without clobbering existing fields)
       const customer = await stripe.customers.create({
         email: email ?? undefined,
-        metadata: { userId },
+        // orgId included so webhook writers can backfill it onto records that
+        // lack one — records without it are skipped by every lifecycle job.
+        metadata: { userId, orgId },
       });
       stripeCustomerId = customer.id;
 
@@ -72,7 +74,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     // mapping. Trial entitlement is granted only by ensureTrialEntitlement.
     const customer = await stripe.customers.create({
       email: email ?? undefined,
-      metadata: { userId },
+      // orgId included so webhook writers can backfill it onto records that
+      // lack one — records without it are skipped by every lifecycle job.
+      metadata: { userId, orgId },
     });
     stripeCustomerId = customer.id;
 
