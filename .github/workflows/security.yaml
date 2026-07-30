@@ -72,14 +72,14 @@ jobs:
 
       - name: Upload custom SARIF to GitHub Security tab
         if: always() && vars.ENABLE_GHAS == 'true' && hashFiles('semgrep-custom.sarif') != ''
-        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           sarif_file: semgrep-custom.sarif
           category: semgrep-custom
 
       - name: Upload community SARIF to GitHub Security tab
         if: always() && vars.ENABLE_GHAS == 'true' && hashFiles('semgrep-community.sarif') != ''
-        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           sarif_file: semgrep-community.sarif
           category: semgrep-community
@@ -103,16 +103,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        uses: github/codeql-action/autobuild@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         with:
           category: /language:${{ matrix.language }}
 
@@ -168,7 +168,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security tab
         if: always() && vars.ENABLE_GHAS == 'true'
-        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           sarif_file: trivy-deps.sarif
           category: trivy-dependencies
@@ -236,7 +236,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security tab
         if: always() && vars.ENABLE_GHAS == 'true'
-        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           sarif_file: trivy-iac.sarif
           category: trivy-iac
@@ -338,7 +338,7 @@ jobs:
           persist-credentials: false
 
       - name: Run OpenSSF Scorecard
-        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
         with:
           results_file: scorecard-results.sarif
           results_format: sarif
@@ -354,7 +354,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security tab
         if: always() && vars.ENABLE_GHAS == 'true' && hashFiles('scorecard-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           sarif_file: scorecard-results.sarif
           category: openssf-scorecard
