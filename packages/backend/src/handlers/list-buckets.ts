@@ -18,14 +18,41 @@ export async function baseHandler(
 
   const orchestrators = getAvailableOrchestrators();
   const orgProfile = await getOrgProfile(orgId);
-  const results = await Promise.all(
+  // `allSettled` rather than `all` so a failing leg can be named in the logs before it is rethrown.
+  // Note: this differs from `Promise.all()` — we wait for every leg to settle so we can log all
+  // failures, then rethrow the first failure in registry order.
+  // The request still fails as a whole.
+  const settled = await Promise.allSettled(
     orchestrators.map(async (orchestrator) => {
       const tenantId = orchestrator.isTenantReady(orgProfile);
       if (!tenantId) return [];
       return orchestrator.listBuckets(tenantId);
     }),
   );
-  const buckets = results.flat().sort((a, b) => a.bucketName.localeCompare(b.bucketName));
+
+  // Pair each rejection with the orchestrator that produced it, in registry order, so the
+  // logging and the rethrow below both work off that one collection.
+  const failures = settled.flatMap((result, index) =>
+    result.status === 'rejected'
+      ? { orchestrator: orchestrators[index], reason: result.reason }
+      : [],
+  );
+
+  if (failures.length > 0) {
+    for (const { orchestrator, reason } of failures) {
+      console.error('[list-buckets] Orchestrator listBuckets failed', {
+        orgId,
+        orchestratorId: orchestrator.id,
+        region: orchestrator.region,
+        error: reason,
+      });
+    }
+    throw failures[0].reason;
+  }
+
+  const buckets = settled
+    .flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+    .sort((a, b) => a.bucketName.localeCompare(b.bucketName));
   return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets }).build();
 }
 

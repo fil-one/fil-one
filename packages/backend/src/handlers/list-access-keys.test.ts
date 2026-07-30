@@ -374,4 +374,49 @@ describe('list-access-keys baseHandler', () => {
       ],
     });
   });
+  it('logs the org and filter context when the query fails, and rethrows', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const failure = new Error('DDB unavailable');
+    ddbMock.on(QueryCommand).rejects(failure);
+
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      queryStringParameters: { bucket: 'target-bucket' },
+    });
+
+    await expect(baseHandler(event)).rejects.toThrow('DDB unavailable');
+    expect(consoleError).toHaveBeenCalledWith('[list-access-keys] Access key query failed', {
+      orgId: 'org-1',
+      bucketFilter: 'target-bucket',
+      filtered: true,
+      error: failure,
+    });
+    consoleError.mockRestore();
+  });
+
+  it('records the unfiltered branch when no bucket filter is supplied', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock.on(QueryCommand).rejects(new Error('DDB unavailable'));
+
+    const event = buildEvent({ userInfo: USER_INFO });
+
+    await expect(baseHandler(event)).rejects.toThrow('DDB unavailable');
+    expect(consoleError).toHaveBeenCalledWith(
+      '[list-access-keys] Access key query failed',
+      expect.objectContaining({ bucketFilter: null, filtered: false }),
+    );
+    consoleError.mockRestore();
+  });
+
+  it('does not log on a successful query', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
 });

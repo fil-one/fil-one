@@ -340,4 +340,39 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
 
     await expect(baseHandler(event)).rejects.toThrow('FTH listBuckets blew up');
   });
+
+  it('logs the orchestrator id and region of every failing leg', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const auroraError = new Error('Aurora listBuckets blew up');
+    aurora.listBuckets.mockRejectedValue(auroraError);
+    fth.listBuckets.mockRejectedValue(new Error('FTH listBuckets blew up'));
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    await expect(baseHandler(event)).rejects.toThrow('Aurora listBuckets blew up');
+
+    expect(consoleError).toHaveBeenCalledWith('[list-buckets] Orchestrator listBuckets failed', {
+      orgId: 'org-1',
+      orchestratorId: 'aurora',
+      region: 'eu-west-1',
+      error: auroraError,
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      '[list-buckets] Orchestrator listBuckets failed',
+      expect.objectContaining({ orchestratorId: 'fth', region: 'us-east-1' }),
+    );
+    consoleError.mockRestore();
+  });
+
+  it('does not log when every orchestrator succeeds', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    aurora.listBuckets.mockResolvedValue([]);
+    fth.listBuckets.mockResolvedValue([]);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
 });
