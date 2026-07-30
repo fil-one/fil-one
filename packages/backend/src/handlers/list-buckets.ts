@@ -34,7 +34,7 @@ export async function baseHandler(
   // logging and the rethrow below both work off that one collection.
   const failures = settled.flatMap((result, index) =>
     result.status === 'rejected'
-      ? [{ orchestrator: orchestrators[index], reason: result.reason }]
+      ? { orchestrator: orchestrators[index], reason: result.reason }
       : [],
   );
 
