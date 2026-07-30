@@ -18,10 +18,10 @@ export async function baseHandler(
 
   const orchestrators = getAvailableOrchestrators();
   const orgProfile = await getOrgProfile(orgId);
-  // `allSettled` rather than `all` purely so a failing leg can be named in the logs before
-  // it is rethrown: `all` discards which orchestrator rejected, which leaves a 500 here
-  // indistinguishable between regions. Behaviour is unchanged — the first rejection still
-  // propagates and the request still fails as a whole.
+  // `allSettled` rather than `all` so a failing leg can be named in the logs before it is rethrown.
+  // Note: this differs from `Promise.all()` — we wait for every leg to settle so we can log all
+  // failures, then rethrow the first failure in registry order.
+  // The request still fails as a whole.
   const settled = await Promise.allSettled(
     orchestrators.map(async (orchestrator) => {
       const tenantId = orchestrator.isTenantReady(orgProfile);
