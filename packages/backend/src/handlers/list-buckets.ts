@@ -2,7 +2,6 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ListBucketsResponse } from '@filone/shared';
-import type { BucketSummary } from '../lib/service-orchestrator.js';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
@@ -31,25 +30,29 @@ export async function baseHandler(
     }),
   );
 
-  const firstRejection = settled.findIndex((result) => result.status === 'rejected');
-  if (firstRejection !== -1) {
-    for (const [index, result] of settled.entries()) {
-      if (result.status !== 'rejected') continue;
-      const orchestrator = orchestrators[index];
+  // Pair each rejection with the orchestrator that produced it, in registry order, so the
+  // logging and the rethrow below both work off that one collection.
+  const failures = settled.flatMap((result, index) =>
+    result.status === 'rejected'
+      ? [{ orchestrator: orchestrators[index], reason: result.reason }]
+      : [],
+  );
+
+  if (failures.length > 0) {
+    for (const { orchestrator, reason } of failures) {
       console.error('[list-buckets] Orchestrator listBuckets failed', {
         orgId,
         orchestratorId: orchestrator.id,
         region: orchestrator.region,
-        error: result.reason,
+        error: reason,
       });
     }
-    throw (settled[firstRejection] as PromiseRejectedResult).reason;
+    throw failures[0].reason;
   }
 
-  const results = settled.map(
-    (result) => (result as PromiseFulfilledResult<BucketSummary[]>).value,
-  );
-  const buckets = results.flat().sort((a, b) => a.bucketName.localeCompare(b.bucketName));
+  const buckets = settled
+    .flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+    .sort((a, b) => a.bucketName.localeCompare(b.bucketName));
   return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets }).build();
 }
 
