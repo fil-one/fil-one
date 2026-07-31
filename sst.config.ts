@@ -363,16 +363,10 @@ export default $config({
           args.defaultRootObject = 'index.html';
           // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Pulumi Input wrapper; value is a plain object at transform time
           (args.defaultCacheBehavior as any).responseHeadersPolicyId = responseHeadersPolicy.id;
-          // Never cache error responses — /api/* 403s are per-user but the
-          // API cache key has no auth component. Deliberately NO
-          // responseCode/responsePagePath: custom error responses are
-          // distribution-wide, so rewriting errors here would mask API error
-          // statuses and bodies (SPA fallback lives in the '/*' route's
-          // viewer-request function instead).
-          args.customErrorResponses = [
-            { errorCode: 403, errorCachingMinTtl: 0 },
-            { errorCode: 404, errorCachingMinTtl: 0 },
-          ];
+          // No customErrorResponses here on purpose: they are distribution-wide
+          // (not scoped to a cache behavior), so any rewrite would mask the
+          // API's error statuses and bodies on /api/*. SPA fallback lives in
+          // the '/*' route's viewer-request function instead.
         },
       },
     });
