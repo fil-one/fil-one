@@ -4,12 +4,18 @@
 // FthTenantSetupStatus) without bloating the orchestrator. See
 // aurora-tenant-setup.ts for the pattern to mirror.
 
+import { randomUUID } from 'node:crypto';
 import { format } from 'node:util';
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
-import type { FthManagementClient } from './fth-management-client.js';
+import { FthConflictError } from './fth-management-client.js';
+import type {
+  CreateAccessKeyArgs,
+  FthAccessKeyWithSecret,
+  FthManagementClient,
+} from './fth-management-client.js';
 
 const FTH_FULL_PERMISSIONS = [
   's3:CreateBucket',
@@ -31,6 +37,8 @@ const FTH_FULL_PERMISSIONS = [
   's3:GetObjectVersion',
   's3:ListObjectVersions',
 ] as const;
+
+const CONSOLE_KEY_NAME = 'filone-console';
 
 const dynamo = getDynamoClient();
 const ssm = new SSMClient({});
@@ -95,13 +103,7 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
     idempotencyKey: `console-${stage}-${tenantId}`,
   });
 
-  const accessKey = await client.createAccessKey(tenantId, String(storageUser.id), {
-    name: 'filone-console',
-    permissions: [...FTH_FULL_PERMISSIONS],
-    buckets: [],
-    expiresAt: null,
-    idempotencyKey: `${orgId}-console-key`,
-  });
+  const accessKey = await createConsoleAccessKey(client, orgId, tenantId, String(storageUser.id));
 
   await ssm.send(
     new PutParameterCommand({
@@ -128,4 +130,70 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
   );
 
   return tenantId;
+}
+
+// Creates the tenant's `filone-console` S3 access key, rotating it when FTH
+// reports a conflict.
+//
+// A 409 means a previous, partially-completed setup run already created a key
+// under this name (or under this idempotency key). Its secret is unrecoverable
+// — FTH returns secrets only on creation — so the stale key is useless to us
+// and cannot be adopted. Rotate instead: list the storage user's keys, delete
+// every `filone-console` one, and re-create under a fresh idempotency key so
+// FTH treats it as a new request rather than replaying the conflict.
+//
+// Two concurrent setups can interleave here (one stocks SSM with a secret for
+// a key the other just revoked). That window is transient and self-heals on
+// the next retry through this same path; a DDB claim lock would close it
+// entirely — future work, matching the state-machine TODO above.
+async function createConsoleAccessKey(
+  client: FthManagementClient,
+  orgId: string,
+  tenantId: string,
+  storageUserId: string,
+): Promise<FthAccessKeyWithSecret> {
+  const createArgs: Omit<CreateAccessKeyArgs, 'idempotencyKey'> = {
+    name: CONSOLE_KEY_NAME,
+    permissions: [...FTH_FULL_PERMISSIONS],
+    buckets: [],
+    expiresAt: null,
+  };
+
+  try {
+    return await client.createAccessKey(tenantId, storageUserId, {
+      ...createArgs,
+      idempotencyKey: `${orgId}-console-key`,
+    });
+  } catch (err) {
+    if (!(err instanceof FthConflictError)) throw err;
+    console.warn('[fth-tenant-setup] console key conflicted; rotating', {
+      orgId,
+      tenantId,
+      error: format(err),
+    });
+  }
+
+  const stale = (await client.listAccessKeys(tenantId)).filter((k) => k.name === CONSOLE_KEY_NAME);
+  if (stale.length === 0) {
+    // Conflict for a name that isn't in the listing — upstream state is
+    // inconsistent, so surface it rather than looping on a create that will
+    // keep conflicting.
+    throw new Error(
+      `Console key "${CONSOLE_KEY_NAME}" conflicted for tenant ${tenantId} ` +
+        `but is absent from the access key listing`,
+    );
+  }
+
+  for (const key of stale) {
+    await client.deleteAccessKey(tenantId, key.accessKeyId, {
+      idempotencyKey: `${orgId}-console-key-delete-${key.accessKeyId}`,
+    });
+  }
+
+  return client.createAccessKey(tenantId, storageUserId, {
+    ...createArgs,
+    // Fresh idempotency key: reusing `${orgId}-console-key` would let FTH
+    // replay the stored conflict instead of minting a new secret.
+    idempotencyKey: `${orgId}-console-key-${randomUUID()}`,
+  });
 }

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
+import { FthConflictError } from './fth-management-client.js';
 import type { FthManagementClient } from './fth-management-client.js';
 
 vi.mock('sst', () => ({
@@ -130,6 +131,129 @@ describe('ensureTenantReady', () => {
     expect(updateCalls).toHaveLength(1);
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({
       ':tenantId': { S: fthClientId },
+    });
+  });
+
+  describe('when creating the console key conflicts', () => {
+    const conflict = () =>
+      new FthConflictError('access key name already in use', { message: 'duplicate' });
+
+    beforeEach(() => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      ddbMock.on(GetItemCommand).resolves({ Item: profileItem({}) });
+      ddbMock.on(UpdateItemCommand).resolves({});
+      ssmMock.on(PutParameterCommand).resolves({});
+      stubSetupApiCalls();
+    });
+
+    it('deletes the stale key and re-creates it under a unique idempotency key', async () => {
+      mockFthClient.createAccessKey.mockRejectedValueOnce(conflict()).mockResolvedValueOnce({
+        accessKeyId: 'AKIAFRESH',
+        secretAccessKey: 'SKFRESH',
+        name: 'filone-console',
+        permissions: [],
+        buckets: [],
+        createdAt: '2026-01-01T00:00:00Z',
+      });
+      mockFthClient.listAccessKeys.mockResolvedValue([
+        {
+          accessKeyId: 'AKIASTALE',
+          name: 'filone-console',
+          permissions: [],
+          buckets: [],
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+        {
+          accessKeyId: 'AKIAOTHER',
+          name: 'some-user-key',
+          permissions: [],
+          buckets: [],
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      ]);
+      mockFthClient.deleteAccessKey.mockResolvedValue(undefined);
+
+      const result = await ensureTenantReady(fthClient, orgId);
+
+      expect(result).toBe(fthClientId);
+      expect(mockFthClient.listAccessKeys).toHaveBeenCalledWith(fthClientId);
+      // Only the console key is revoked; the tenant's own keys are untouched.
+      expect(mockFthClient.deleteAccessKey).toHaveBeenCalledTimes(1);
+      expect(mockFthClient.deleteAccessKey).toHaveBeenCalledWith(
+        fthClientId,
+        'AKIASTALE',
+        expect.objectContaining({ idempotencyKey: `${orgId}-console-key-delete-AKIASTALE` }),
+      );
+
+      expect(mockFthClient.createAccessKey).toHaveBeenCalledTimes(2);
+      const [firstKey, secondKey] = mockFthClient.createAccessKey.mock.calls.map(
+        (call) => (call[2] as { idempotencyKey: string }).idempotencyKey,
+      );
+      expect(firstKey).toBe(`${orgId}-console-key`);
+      expect(secondKey).not.toBe(firstKey);
+      expect(secondKey).toMatch(new RegExp(`^${orgId}-console-key-.+`));
+
+      // SSM gets the fresh secret, not the unrecoverable stale one.
+      const putCalls = ssmMock.commandCalls(PutParameterCommand);
+      expect(putCalls).toHaveLength(1);
+      expect(putCalls[0].args[0].input.Value).toBe(
+        JSON.stringify({ accessKeyId: 'AKIAFRESH', secretAccessKey: 'SKFRESH' }),
+      );
+    });
+
+    it('deletes every console key when the listing has more than one', async () => {
+      mockFthClient.createAccessKey.mockRejectedValueOnce(conflict()).mockResolvedValueOnce({
+        accessKeyId: 'AKIAFRESH',
+        secretAccessKey: 'SKFRESH',
+        name: 'filone-console',
+        permissions: [],
+        buckets: [],
+        createdAt: '2026-01-01T00:00:00Z',
+      });
+      mockFthClient.listAccessKeys.mockResolvedValue([
+        {
+          accessKeyId: 'AKIAA',
+          name: 'filone-console',
+          permissions: [],
+          buckets: [],
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+        {
+          accessKeyId: 'AKIAB',
+          name: 'filone-console',
+          permissions: [],
+          buckets: [],
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      ]);
+      mockFthClient.deleteAccessKey.mockResolvedValue(undefined);
+
+      await ensureTenantReady(fthClient, orgId);
+
+      expect(mockFthClient.deleteAccessKey.mock.calls.map((c) => c[1])).toEqual(['AKIAA', 'AKIAB']);
+    });
+
+    it('fails when the conflicting key is absent from the listing', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockFthClient.createAccessKey.mockRejectedValueOnce(conflict());
+      mockFthClient.listAccessKeys.mockResolvedValue([]);
+
+      const result = await ensureTenantReady(fthClient, orgId);
+
+      expect(result).toBeNull();
+      expect(mockFthClient.deleteAccessKey).not.toHaveBeenCalled();
+      expect(mockFthClient.createAccessKey).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not rotate on non-conflict errors', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockFthClient.createAccessKey.mockRejectedValueOnce(new Error('boom'));
+
+      const result = await ensureTenantReady(fthClient, orgId);
+
+      expect(result).toBeNull();
+      expect(mockFthClient.listAccessKeys).not.toHaveBeenCalled();
+      expect(mockFthClient.deleteAccessKey).not.toHaveBeenCalled();
     });
   });
 
