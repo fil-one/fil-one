@@ -58,6 +58,66 @@ async function openFirstBucketInRegion(page: Page, region: Region): Promise<stri
   return new URL(page.url()).pathname.split('/').pop()!;
 }
 
+// A rejected PUT to a region's S3 endpoint has taken ~30s to come back (a 502
+// from the us-east-1 backend on staging), so the waits below — and the test
+// timeout they run under — must outlast that, otherwise the diagnostic is never
+// reached and the failure is again an opaque timeout.
+const PRESIGN_TIMEOUT_MS = 30_000;
+const UPLOAD_PUT_TIMEOUT_MS = 60_000;
+const UPLOAD_TEST_TIMEOUT_MS = 120_000;
+
+// Submits an upload and fails with the failing request's region, status and body
+// when it does not reach the object store. Uploading is two round-trips — POST
+// /api/presign for the URL, then a PUT straight to the region's S3 endpoint —
+// and neither failure navigates anywhere, so waiting only for the navigation
+// back to the bucket page reports every breakage as the same opaque toHaveURL
+// timeout: a region whose storage backend 502s looks exactly like a hung
+// browser. Read both responses instead, the way the bucket seeding does for
+// GET/POST /api/buckets (see buckets.util.ts).
+async function submitUploadExpectingSuccess(
+  page: Page,
+  bucketName: string,
+  objectName: string,
+  region: Region,
+): Promise<void> {
+  test.setTimeout(UPLOAD_TEST_TIMEOUT_MS);
+
+  const presignResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname.endsWith('/api/presign') &&
+      response.request().method() === 'POST',
+    { timeout: PRESIGN_TIMEOUT_MS },
+  );
+  // The PUT goes to the region's own endpoint (see getS3Endpoint in
+  // packages/shared/src/constants.ts), not to the app origin, and its path ends
+  // in the object key.
+  const putResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' &&
+      new URL(response.url()).pathname.endsWith(`/${objectName}`),
+    { timeout: UPLOAD_PUT_TIMEOUT_MS },
+  );
+
+  await submitUpload(page, bucketName, objectName);
+
+  const presign = await presignResponse;
+  if (!presign.ok()) {
+    throw new Error(
+      `POST /api/presign returned ${presign.status()} for a putObject in ${region} ` +
+        `(bucket "${bucketName}", key "${objectName}"). Response body: ${await presign.text()}`,
+    );
+  }
+
+  const put = await putResponse;
+  if (!put.ok()) {
+    throw new Error(
+      `PUT ${new URL(put.url()).origin} returned ${put.status()} when uploading "${objectName}" ` +
+        `to "${bucketName}" in ${region}, so the region's storage backend rejected the write. ` +
+        `Response body: ${await put.text()}`,
+    );
+  }
+}
+
 // Drives the upload form on the bucket detail page: opens the upload page,
 // selects the in-memory file under the given object name, and submits. Stops
 // at submit so callers can assert success or failure for their role.
@@ -91,7 +151,7 @@ for (const region of REGIONS) {
       const bucketName = await openFirstBucketInRegion(page, region);
       const objectName = uniqueObjectName();
 
-      await submitUpload(page, bucketName, objectName);
+      await submitUploadExpectingSuccess(page, bucketName, objectName, region);
 
       // On success the upload page navigates back to the bucket detail page.
       await expect(page).toHaveURL(
@@ -127,7 +187,7 @@ for (const region of REGIONS) {
       const bucketName = await openFirstBucketInRegion(page, region);
       const objectName = uniqueObjectName();
 
-      await submitUpload(page, bucketName, objectName);
+      await submitUploadExpectingSuccess(page, bucketName, objectName, region);
 
       await expect(page).toHaveURL(
         (url) =>
