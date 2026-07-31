@@ -302,6 +302,17 @@ describe('get-billing baseHandler', () => {
   // upserts that never read the local record). They must report their STORED
   // status — not a hardcoded trial. planId follows the buildBillingResponse
   // mapping.
+  //
+  // Two writer shapes produce them, and a `subscriptionId` is what tells them
+  // apart — so the cases below deliberately cover both:
+  //   - WITH subscriptionId — `handleSubscriptionUpdate` → `updateBillingRecord`
+  //     resolves the userId from Stripe metadata and writes subscriptionId +
+  //     status without ever reading the local record.
+  //   - WITHOUT subscriptionId — `handlePaymentFailed` (→ past_due) and
+  //     `handlePaymentSucceeded` (→ active) write ONLY a status plus a payment
+  //     timestamp. So a past_due record with no linked subscription is a real
+  //     production shape, not an incomplete fixture: the invoice webhook never
+  //     had a subscription id in hand to write.
   const trialEndsAtStored = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const graceEndsAtStored = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
   const orphanRecordCases: Record<
@@ -312,8 +323,12 @@ describe('get-billing baseHandler', () => {
       record: { subscriptionStatus: SubscriptionStatus.Active, subscriptionId: 'sub_456' },
       expected: { planId: PlanId.PayAsYouGo, status: SubscriptionStatus.Active },
     },
+    // handlePaymentFailed's exact write shape: status + failure timestamp only.
     past_due: {
-      record: { subscriptionStatus: SubscriptionStatus.PastDue },
+      record: {
+        subscriptionStatus: SubscriptionStatus.PastDue,
+        lastPaymentFailedAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      },
       expected: { planId: PlanId.PayAsYouGo, status: SubscriptionStatus.PastDue },
     },
     grace_period: {
@@ -351,6 +366,41 @@ describe('get-billing baseHandler', () => {
       expect(body).toStrictEqual({ subscription: expected });
     });
   }
+
+  it('reports the cached minimum for a record with no Stripe customer', async () => {
+    // No Stripe customer means no live price to read, but the cached snapshot
+    // is still authoritative for what the customer is billed — reporting no
+    // minimum here would understate it.
+    ddbMock.on(GetItemCommand).resolves(
+      subscriptionItem({
+        subscriptionStatus: SubscriptionStatus.Active,
+        stripePrice: CACHED_TIERED_PRICE,
+      }),
+    );
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription).toStrictEqual({
+      planId: PlanId.PayAsYouGo,
+      status: SubscriptionStatus.Active,
+      monthlyMinimumCents: 499,
+    });
+    expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
+  });
+
+  it('reports no minimum for a record with neither a Stripe customer nor a cached price', async () => {
+    // Factual, not a fabrication: with no Stripe customer there is no
+    // subscription for a minimum to be billed on.
+    ddbMock
+      .on(GetItemCommand)
+      .resolves(subscriptionItem({ subscriptionStatus: SubscriptionStatus.Active }));
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription.monthlyMinimumCents).toBeUndefined();
+  });
 
   it('does not call Stripe for a record with a status but no Stripe customer', async () => {
     // Even with a subscriptionId on the record there is no customer id to look

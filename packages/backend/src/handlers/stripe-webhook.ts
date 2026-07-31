@@ -300,25 +300,40 @@ async function handleSubscriptionUpdate(
       console.warn('[stripe-webhook] No userId in metadata for customer:', customerId);
       return;
     }
-    await updateBillingRecord(tableName, metaUserId, subscription, {
+    await updateBillingRecord({
+      tableName,
+      userId: metaUserId,
+      subscription,
       mappedStatus,
       orgId: subscription.metadata?.orgId || customer.metadata?.orgId,
     });
     return;
   }
 
-  await updateBillingRecord(tableName, userId, subscription, {
+  await updateBillingRecord({
+    tableName,
+    userId,
+    subscription,
     mappedStatus,
     orgId: subscription.metadata?.orgId,
   });
 }
 
-async function updateBillingRecord(
-  tableName: string,
-  userId: string,
-  subscription: Stripe.Subscription,
-  { mappedStatus, orgId }: { mappedStatus: SubscriptionStatus; orgId: string | undefined },
-): Promise<void> {
+interface UpdateBillingRecordParams {
+  tableName: string;
+  userId: string;
+  subscription: Stripe.Subscription;
+  mappedStatus: SubscriptionStatus;
+  orgId: string | undefined;
+}
+
+async function updateBillingRecord({
+  tableName,
+  userId,
+  subscription,
+  mappedStatus,
+  orgId,
+}: UpdateBillingRecordParams): Promise<void> {
   const backfill = orgIdBackfill(orgId);
   await dynamo.send(
     new UpdateItemCommand({

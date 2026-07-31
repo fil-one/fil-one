@@ -50,6 +50,10 @@ export async function baseHandler(
 
   // 3. Status but no Stripe customer (webhook-born or legacy records) → report
   // the stored status; there is no customer to look up, so no Stripe call.
+  // The minimum still comes from the cached price snapshot when the record
+  // carries one — the same source the Stripe-unreachable path reads. Only a
+  // record with no snapshot at all reports no minimum, and that is factual:
+  // with no Stripe customer there is no subscription to bill a minimum on.
   if (!billingRecord.stripeCustomerId) {
     const currentStatus = await evaluateStatusTransitions(
       billingRecord,
@@ -59,7 +63,7 @@ export async function baseHandler(
     );
     const response = buildBillingResponse(billingRecord, currentStatus, {
       paymentMethod: cachedPaymentMethod(billingRecord),
-      monthlyMinimumCents: undefined,
+      monthlyMinimumCents: deriveMonthlyMinimumCents(billingRecord.stripePrice),
     });
     return new ResponseBuilder().status(200).body(response).build();
   }
