@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { S3Region } from '@filone/shared';
 
 import { BucketsTab, type RagBucket } from './RagPipelineBucketsTab.js';
@@ -70,37 +70,41 @@ describe('BucketsTab — sync telemetry display', () => {
     expect(screen.queryByText(/Sync failed/)).not.toBeInTheDocument();
   });
 
-  it('renders "Not yet synced" for an enabled bucket that has never synced', () => {
-    // No syncState at all (absent) — the never-synced/idle case.
+  it('states the wait for an enabled bucket that has never completed a pass', () => {
+    // No syncState at all (absent): the never-indexed/idle case.
     const { container } = renderTab([bucket({ filesIndexed: 0, indexSize: 0 })]);
 
-    expect(container.textContent).toContain('Not yet synced');
+    expect(container.textContent).toContain('Up to 6 hours until the first results');
   });
 
-  it('renders a "Syncing…" indicator while a reconciliation is in flight, still treating the bucket as enabled', () => {
+  it('renders an "Indexing…" indicator while a reconciliation is in flight, still treating the bucket as enabled', () => {
     renderTab([bucket({ enabled: true, syncState: 'syncing' })]);
 
-    expect(screen.getByText('Syncing…')).toBeInTheDocument();
+    expect(screen.getByTestId('bucket-status')).toHaveTextContent('Indexing');
+    expect(screen.getByText('Checking for new and changed files')).toBeInTheDocument();
     // While syncing we suppress the (stale/partial) file-count line.
     expect(screen.queryByText('files indexed')).not.toBeInTheDocument();
-    // Sync state must NOT change enablement: the bucket stays queryable.
-    expect(screen.getByRole('button', { name: 'Ask questions' })).toBeInTheDocument();
+    // Sync state must NOT change enablement: the row keeps the drawer action and
+    // never falls back to the "Index" (enable) button.
+    expect(screen.getByTestId('bucket-row-ask')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Index' })).not.toBeInTheDocument();
   });
 
-  it('renders "Sync failed" with the error message after a failed sync, still treating the bucket as enabled', () => {
+  it('renders "Indexing failed" with the error message after a failed sync, still treating the bucket as enabled', () => {
     renderTab([bucket({ enabled: true, syncState: 'error', lastSyncError: 'Connection timeout' })]);
 
-    expect(screen.getByText(/Sync failed: Connection timeout/)).toBeInTheDocument();
-    // A failed sync must NOT disable/un-query the bucket.
-    expect(screen.getByRole('button', { name: 'Ask questions' })).toBeInTheDocument();
+    expect(screen.getByTestId('bucket-status')).toHaveTextContent('Failed');
+    expect(screen.getByText('Connection timeout')).toBeInTheDocument();
+    // A failed sync must NOT disable the bucket.
+    expect(screen.getByTestId('bucket-row-ask')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Index' })).not.toBeInTheDocument();
   });
 
-  it('renders a plain "Sync failed" when no error message is present', () => {
+  it('renders a plain "Indexing failed" when no error message is present', () => {
     renderTab([bucket({ enabled: true, syncState: 'error' })]);
 
-    expect(screen.getByText('Sync failed')).toBeInTheDocument();
+    expect(screen.getByTestId('bucket-status')).toHaveTextContent('Failed');
+    expect(screen.getByText('The last indexing run did not complete')).toBeInTheDocument();
   });
 
   it('renders "Not indexed" for a disabled bucket without telemetry noise', () => {
@@ -117,7 +121,13 @@ describe('BucketsTab — sync telemetry display', () => {
     renderTab([
       bucket({ name: 'alpha', enabled: true, syncState: 'syncing' }),
       bucket({ name: 'beta', enabled: true, syncState: 'error' }),
-      bucket({ name: 'gamma', enabled: true, syncState: 'idle' }),
+      bucket({
+        name: 'gamma',
+        enabled: true,
+        syncState: 'idle',
+        lastSyncedAt: '2026-06-22T11:59:00Z',
+      }),
+      bucket({ name: 'epsilon', enabled: true, syncState: 'idle' }),
       bucket({ name: 'delta', enabled: false }),
     ]);
 
@@ -135,6 +145,8 @@ describe('BucketsTab — sync telemetry display', () => {
     expect(statusOf('beta')).toBe('error');
     expect(statusOf('gamma')).toBe('synced');
     expect(statusOf('delta')).toBe('not-indexed');
+    // Enabled but no completed pass: must not read as ready.
+    expect(statusOf('epsilon')).toBe('awaiting-first-index');
   });
 });
 
@@ -142,24 +154,40 @@ describe('BucketsTab — sync telemetry display', () => {
 // First-indexing-pass gate — Ask questions availability
 // ---------------------------------------------------------------------------
 
-describe('BucketsTab — Ask questions before the first indexing pass', () => {
-  it('disables the button with an explanatory tooltip until the first sync completes', () => {
-    renderTab([bucket({ enabled: true, syncState: 'syncing' })]);
+describe('BucketsTab — before the first indexing pass', () => {
+  it('offers details rather than asking, and states the wait instead of empty stats', () => {
+    renderTab([bucket({ enabled: true, syncState: 'idle' })]);
 
-    const ask = screen.getByRole('button', { name: 'Ask questions' });
-    expect(ask).toBeDisabled();
+    // The drawer must stay reachable (it holds the API snippet), but the label
+    // must not offer asking while the question input inside is disabled.
+    const action = screen.getByTestId('bucket-row-ask');
+    expect(action).toBeEnabled();
+    expect(action).toHaveTextContent('View details');
+    expect(screen.queryByRole('button', { name: 'Ask questions' })).not.toBeInTheDocument();
 
-    // The tooltip trigger is the wrapper around the (disabled) button.
-    fireEvent.mouseEnter(ask.parentElement!);
-    expect(screen.getByRole('tooltip')).toHaveTextContent(/after the first indexing pass/);
+    // The wait is the only fact worth showing; 0 files / 0 B are not.
+    expect(screen.getByTestId('bucket-row-status')).toHaveTextContent(
+      /Up to 6 hours until the first results/,
+    );
+    expect(screen.queryByTestId('bucket-row-stat-files')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bucket-row-stat-size')).not.toBeInTheDocument();
   });
 
-  it('enables the button once the bucket has a completed sync', () => {
-    renderTab([bucket({ enabled: true, lastSyncedAt: '2026-06-22T11:59:00Z' })]);
+  it('does not report a bucket as ready before it can answer', () => {
+    renderTab([bucket({ enabled: true, syncState: 'idle' })]);
 
-    const ask = screen.getByRole('button', { name: 'Ask questions' });
-    expect(ask).toBeEnabled();
-    fireEvent.mouseEnter(ask.parentElement!);
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    const badge = screen.getByTestId('bucket-status');
+    expect(badge).toHaveTextContent('Indexing');
+    expect(badge).not.toHaveTextContent('Ready');
+  });
+
+  it('offers asking, with stats and a ready status, once a pass has completed', () => {
+    renderTab([bucket({ enabled: true, filesIndexed: 847, lastSyncedAt: '2026-06-22T11:59:00Z' })]);
+
+    const action = screen.getByTestId('bucket-row-ask');
+    expect(action).toBeEnabled();
+    expect(action).toHaveTextContent('Ask questions');
+    expect(screen.getByTestId('bucket-row-stat-files')).toHaveTextContent('847');
+    expect(screen.getByTestId('bucket-status')).toHaveTextContent('Ready');
   });
 });
