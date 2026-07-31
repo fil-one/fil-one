@@ -17,6 +17,7 @@ const FTH_FULL_PERMISSIONS = [
   's3:DeleteBucket',
   's3:ListBucket',
   's3:ListBucketVersions',
+  's3:ListBucketMultipartUploads',
   's3:GetObject',
   's3:PutObject',
   's3:DeleteObject',
