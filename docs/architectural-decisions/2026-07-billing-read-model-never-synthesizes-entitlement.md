@@ -28,8 +28,9 @@ guard would deny. Two supporting rules:
    payment method and no Stripe call) — not a hardcoded trial.
 2. **An absent status means _not entitled_, matching the guard.** No billing record, or a record
    without `subscriptionStatus` (e.g. the customer mapping `create-setup-intent` intentionally
-   writes), is reported as `{planId: 'none', status: 'inactive'}` — no `trialEndsAt`, no Stripe
-   call, no DynamoDB write.
+   writes), is reported as `{subscription: {planId: 'none', status: 'inactive'}}` — the standard
+   `BillingInfo` envelope, so a cached `paymentMethod` still accompanies it. No `trialEndsAt`, no
+   Stripe call, no DynamoDB write.
 
 `SubscriptionStatus.Inactive` and `PlanId.None` are **read-model values only**: never persisted,
 never returned by `mapStripeStatus`. The guard blocks `inactive` explicitly (it already failed

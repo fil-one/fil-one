@@ -418,7 +418,7 @@ exact decimal amount cannot be parsed.
 `subscriptionStatus` verbatim and never synthesizes entitlement. An account with
 no billing record — or a record without a status (e.g. the customer mapping
 `create-setup-intent` writes) — is reported as
-`{planId: 'none', status: 'inactive'}`, the same answer the subscription guard
+`{subscription: {planId: 'none', status: 'inactive'}}`, the same answer the subscription guard
 enforces with its 403 `SUBSCRIPTION_INACTIVE`. See
 [the ADR](docs/architectural-decisions/2026-07-billing-read-model-never-synthesizes-entitlement.md).
 

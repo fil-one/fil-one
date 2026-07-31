@@ -227,7 +227,7 @@ States are held on the user's billing record (`BillingTable`, key `CUSTOMER#${us
 
 \*\* One trial per normalized email, verified emails only — see [`trial-entitlement.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/lib/trial-entitlement.ts).
 
-`GET /api/billing` reports the same truth as this guard: an account the guard denies is reported as `{planId: 'none', status: 'inactive'}`, never as a synthesized trial.
+`GET /api/billing` reports the same truth as this guard: an account the guard denies is reported as `{subscription: {planId: 'none', status: 'inactive'}}` (the standard `BillingInfo` envelope), never as a synthesized trial.
 
 Grace-period durations live in [`packages/shared/src/constants.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/shared/src/constants.ts) (`TRIAL_GRACE_DAYS`, `PAID_GRACE_DAYS`).
 
