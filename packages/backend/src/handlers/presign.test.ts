@@ -17,6 +17,8 @@ const s3ClientContext = {
   region: 'auto',
   credentials: { accessKeyId: 'ak', secretAccessKey: 'sk' },
   forcePathStyle: true,
+  orchestratorId: 'test',
+  tenantId: 't-1',
 };
 
 const mockIsTenantReady = vi.fn();

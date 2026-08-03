@@ -18,10 +18,8 @@ export { chunk } from './chunker.js';
 export type { ChunkingOptions } from './chunker.js';
 
 export { extractText } from './extractor.js';
-export type { ExtractOptions } from './extractor.js';
 
 export { extractTextFromPdf } from './pdf-extractor.js';
-export type { PdfExtractionOptions, StageDocument } from './pdf-extractor.js';
 
 export { S3VectorsStore } from './s3-vectors-store.js';
 

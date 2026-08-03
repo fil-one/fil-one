@@ -47,7 +47,26 @@ describe('errorHandlerMiddleware', () => {
     expect(body).not.toContain('hunter2');
   });
 
-  it('logs the full error to console.error', async () => {
+  it('logs the full error with user context from an authenticated event', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { onError } = errorHandlerMiddleware();
+    const error = new Error('something broke');
+    const request = buildErrorRequest(error);
+    request.event = buildEvent({
+      userInfo: { userId: 'user-1', orgId: 'org-1' },
+    });
+
+    await onError!(request);
+
+    expect(spy).toHaveBeenCalledWith(
+      'Unhandled handler error:',
+      { orgId: 'org-1', userId: 'user-1', apiRequestId: 'req-1' },
+      error,
+    );
+    spy.mockRestore();
+  });
+
+  it('logs undefined user context when the event is not authenticated', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { onError } = errorHandlerMiddleware();
     const error = new Error('something broke');
@@ -55,7 +74,11 @@ describe('errorHandlerMiddleware', () => {
 
     await onError!(request);
 
-    expect(spy).toHaveBeenCalledWith('Unhandled handler error:', error);
+    expect(spy).toHaveBeenCalledWith(
+      'Unhandled handler error:',
+      { orgId: undefined, userId: undefined, apiRequestId: 'req-1' },
+      error,
+    );
     spy.mockRestore();
   });
 

@@ -223,6 +223,8 @@ describe('fthOrchestrator.getS3ClientContext', () => {
       region: 'us-east-1',
       credentials: { accessKeyId: 'AK1', secretAccessKey: 'SK1' },
       forcePathStyle: true,
+      orchestratorId: 'fth',
+      tenantId: fthClientId,
     });
   });
 
@@ -734,6 +736,26 @@ describe('fthOrchestrator.listBuckets', () => {
 
     expect(result.find((b) => b.bucketName === 'versioned')?.versioning).toBe(true);
     expect(result.find((b) => b.bucketName === 'plain')?.versioning).toBe(false);
+  });
+
+  it('skips GetBucketVersioning and returns versioning:false when includeVersioning is false', async () => {
+    ssmMock.on(GetParameterCommand).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
+    });
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [
+        { Name: 'b1', CreationDate: new Date('2026-01-01T00:00:00Z') },
+        { Name: 'b2', CreationDate: new Date('2026-02-01T00:00:00Z') },
+      ],
+    });
+    // If this were consulted the result would be versioning:true; the option
+    // must prevent the call entirely.
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+
+    const result = await fthOrchestrator.listBuckets(fthClientId, { includeVersioning: false });
+
+    expect(s3Mock.commandCalls(GetBucketVersioningCommand)).toHaveLength(0);
+    expect(result.map((b) => b.versioning)).toEqual([false, false]);
   });
 
   it('propagates GetBucketVersioning failures instead of swallowing them', async () => {

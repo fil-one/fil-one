@@ -53,6 +53,26 @@ import { S3_REGION, S3Region } from '@filone/shared';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
+// Mirrors the message baseHandler builds: the static summary, then one `id (region): reason`
+// leg per line in registry order, so a 500 in the logs names both the region and the cause.
+const aggregateMessage = (...legs: string[]): string =>
+  `One or more orchestrators failed to list buckets:\n${legs.join('\n')}`;
+
+// Returns the parts of the rejection under test as a plain object, so each test can compare
+// the whole shape in one assertion. `errors` is non-enumerable on AggregateError, which keeps
+// it invisible to matchers like `toMatchObject`.
+async function captureAggregateError(
+  promise: Promise<unknown>,
+): Promise<{ name: string; message: string; errors: unknown[] }> {
+  try {
+    await promise;
+  } catch (error) {
+    const aggregate = error as AggregateError;
+    return { name: aggregate.name, message: aggregate.message, errors: aggregate.errors };
+  }
+  throw new Error('Expected the handler to reject, but it resolved');
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -160,16 +180,19 @@ describe('list-buckets baseHandler (single-region)', () => {
     expect(availableOrchestrators).toHaveBeenCalledWith();
   });
 
-  it('throws when the orchestrator returns an error', async () => {
-    aurora.listBuckets.mockRejectedValue(
-      new Error('Failed to list buckets from Aurora for tenant aurora-t-1'),
-    );
+  it('wraps the orchestrator error in an AggregateError', async () => {
+    const auroraError = new Error('Failed to list buckets from Aurora for tenant aurora-t-1');
+    aurora.listBuckets.mockRejectedValue(auroraError);
 
     const event = buildEvent({ userInfo: USER_INFO });
 
-    await expect(baseHandler(event)).rejects.toThrow(
-      'Failed to list buckets from Aurora for tenant aurora-t-1',
-    );
+    expect(await captureAggregateError(baseHandler(event))).toStrictEqual({
+      name: 'AggregateError',
+      message: aggregateMessage(
+        'aurora (eu-west-1): Failed to list buckets from Aurora for tenant aurora-t-1',
+      ),
+      errors: [auroraError],
+    });
   });
 
   it('returns 200 with empty array when tenant is not ready', async () => {
@@ -332,12 +355,83 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     expect(fth.listBuckets).not.toHaveBeenCalled();
   });
 
-  it('propagates the error when any orchestrator throws', async () => {
+  it('aggregates the failure when a single orchestrator throws', async () => {
+    const fthError = new Error('FTH listBuckets blew up');
     aurora.listBuckets.mockResolvedValue([]);
-    fth.listBuckets.mockRejectedValue(new Error('FTH listBuckets blew up'));
+    fth.listBuckets.mockRejectedValue(fthError);
 
     const event = buildEvent({ userInfo: USER_INFO });
 
-    await expect(baseHandler(event)).rejects.toThrow('FTH listBuckets blew up');
+    expect(await captureAggregateError(baseHandler(event))).toStrictEqual({
+      name: 'AggregateError',
+      message: aggregateMessage('fth (us-east-1): FTH listBuckets blew up'),
+      errors: [fthError],
+    });
+  });
+
+  it('aggregates the failures of every leg in registry order', async () => {
+    const auroraError = new Error('Aurora listBuckets blew up');
+    const fthError = new Error('FTH listBuckets blew up');
+    aurora.listBuckets.mockRejectedValue(auroraError);
+    fth.listBuckets.mockRejectedValue(fthError);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+
+    expect(await captureAggregateError(baseHandler(event))).toStrictEqual({
+      name: 'AggregateError',
+      message: aggregateMessage(
+        'aurora (eu-west-1): Aurora listBuckets blew up',
+        'fth (us-east-1): FTH listBuckets blew up',
+      ),
+      errors: [auroraError, fthError],
+    });
+  });
+
+  it('falls back to string conversion for a leg that rejects with a non-Error', async () => {
+    aurora.listBuckets.mockResolvedValue([]);
+    fth.listBuckets.mockRejectedValue('socket hang up');
+
+    const event = buildEvent({ userInfo: USER_INFO });
+
+    expect(await captureAggregateError(baseHandler(event))).toStrictEqual({
+      name: 'AggregateError',
+      message: aggregateMessage('fth (us-east-1): socket hang up'),
+      errors: ['socket hang up'],
+    });
+  });
+
+  it('logs the orchestrator id and region of every failing leg', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const auroraError = new Error('Aurora listBuckets blew up');
+    aurora.listBuckets.mockRejectedValue(auroraError);
+    fth.listBuckets.mockRejectedValue(new Error('FTH listBuckets blew up'));
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    await expect(baseHandler(event)).rejects.toThrow(AggregateError);
+
+    expect(consoleError).toHaveBeenCalledWith('[list-buckets] Orchestrator listBuckets failed', {
+      orgId: 'org-1',
+      orchestratorId: 'aurora',
+      region: 'eu-west-1',
+      error: auroraError,
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      '[list-buckets] Orchestrator listBuckets failed',
+      expect.objectContaining({ orchestratorId: 'fth', region: 'us-east-1' }),
+    );
+    consoleError.mockRestore();
+  });
+
+  it('does not log when every orchestrator succeeds', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    aurora.listBuckets.mockResolvedValue([]);
+    fth.listBuckets.mockResolvedValue([]);
+
+    const event = buildEvent({ userInfo: USER_INFO });
+    const result = await baseHandler(event);
+
+    expect(result.statusCode).toBe(200);
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });

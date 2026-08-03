@@ -191,11 +191,11 @@ describe('indexBucket', () => {
   });
 
   // -----------------------------------------------------------------------
-  // PDF objects: extraction is routed through Textract, which reads the object
-  // straight from S3, so the object's own location is handed in as `documentLocation`.
+  // PDF objects: extraction happens in-process on the fetched bytes, exactly
+  // like every other content type — nothing is handed to an external service.
   // -----------------------------------------------------------------------
 
-  it('indexes a PDF object, handing Textract the object S3 location as documentLocation', async () => {
+  it('indexes a PDF object from its fetched bytes', async () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'doc.pdf', etag: 'e1' }]));
     const bytes = new Uint8Array([1, 2, 3]);
@@ -210,9 +210,7 @@ describe('indexBucket', () => {
       vectorStore,
     });
 
-    expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf', {
-      pdf: { documentLocation: { Bucket: 'bucket-1', Name: 'doc.pdf' } },
-    });
+    expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf');
     expect(vectorStore.upsertChunks).toHaveBeenCalledOnce();
     expect(mockSaveManifestEntry).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'bucket-1', {
       objectKey: 'doc.pdf',
@@ -237,12 +235,10 @@ describe('indexBucket', () => {
       vectorStore,
     });
 
-    expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf', {
-      pdf: { documentLocation: { Bucket: 'bucket-1', Name: 'report.pdf' } },
-    });
+    expect(mockExtractText).toHaveBeenCalledWith(bytes, 'application/pdf');
   });
 
-  it('forwards no PDF options for a non-PDF object', async () => {
+  it('passes the bytes and resolved content type to extractText for a non-PDF object', async () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'a.txt', etag: 'e1' }]));
 
@@ -254,17 +250,17 @@ describe('indexBucket', () => {
       vectorStore,
     });
 
-    expect(mockExtractText).toHaveBeenCalledWith(new Uint8Array([1]), 'text/plain', {});
+    expect(mockExtractText).toHaveBeenCalledWith(new Uint8Array([1]), 'text/plain');
   });
 
-  it('counts a PDF as failed (isolated) when Textract extraction throws', async () => {
+  it('counts a PDF as failed (isolated) when extraction throws', async () => {
     mockLoadManifest.mockResolvedValue(manifestOf([]));
     mockListObjects.mockResolvedValue(page([{ key: 'doc.pdf', etag: 'e1' }]));
     mockGetObjectBytes.mockResolvedValue({
       bytes: new Uint8Array([1]),
       contentType: 'application/pdf',
     });
-    mockExtractText.mockRejectedValue(new Error('Textract job failed'));
+    mockExtractText.mockRejectedValue(new Error('Invalid PDF structure.'));
 
     const result = await indexBucket({
       orgId: ORG,

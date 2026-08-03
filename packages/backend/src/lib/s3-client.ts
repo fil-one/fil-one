@@ -9,10 +9,14 @@ export interface S3ClientContext {
   region: string;
   credentials: { accessKeyId: string; secretAccessKey: string };
   forcePathStyle: boolean;
+  /** Which orchestrator issued this context — for error decoration only. */
+  orchestratorId: string;
+  /** Whose credentials the client acts with — for error decoration only. */
+  tenantId: string;
 }
 
 export function createS3Client(ctx: S3ClientContext): S3Client {
-  return new S3Client({
+  const client = new S3Client({
     endpoint: ctx.endpointUrl,
     region: ctx.region,
     credentials: ctx.credentials,
@@ -25,4 +29,58 @@ export function createS3Client(ctx: S3ClientContext): S3Client {
     requestChecksumCalculation: 'WHEN_REQUIRED',
     responseChecksumValidation: 'WHEN_REQUIRED',
   });
+
+  // Decorate every S3 failure with the operation, bucket, and tenant context,
+  // so an error escaping to the top-level handler still tells us which
+  // provider/tenant/bucket it came from.
+  client.middlewareStack.add(
+    (next, handlerContext) => async (args) => {
+      try {
+        return await next(args);
+      } catch (err) {
+        throw decorateS3Error(err, ctx, handlerContext.commandName, args.input);
+      }
+    },
+    { step: 'initialize', name: 's3ErrorContextMiddleware' },
+  );
+
+  return client;
+}
+
+/** Debugging context attached to failed S3 calls as `err.s3Context`. */
+export interface S3ErrorContext {
+  operation: string;
+  bucketName?: string;
+  tenantId: string;
+  orchestratorId: string;
+  region: string;
+  endpointUrl: string;
+}
+
+// Decorates the error in place (rather than wrapping it in a new Error) so
+// callers' `err.name` and `instanceof` checks keep working. The context is
+// attached as an enumerable property instead of appended to `err.message`:
+// console.error prints enumerable error properties (like the SDK's $metadata),
+// while `err.message` escapes to end users in some paths (e.g. the RAG
+// indexer persists it as lastSyncError, which the enablement API returns)
+// and must not carry tenant ids or internal endpoints.
+function decorateS3Error(
+  err: unknown,
+  ctx: S3ClientContext,
+  commandName: string | undefined,
+  input: unknown,
+): unknown {
+  if (!(err instanceof Error)) return err;
+
+  const bucketName = (input as { Bucket?: string } | undefined)?.Bucket;
+  const s3Context: S3ErrorContext = {
+    operation: commandName?.replace(/Command$/, '') ?? 'unknown',
+    ...(bucketName ? { bucketName } : {}),
+    tenantId: ctx.tenantId,
+    orchestratorId: ctx.orchestratorId,
+    region: ctx.region,
+    endpointUrl: ctx.endpointUrl,
+  };
+  Object.assign(err, { s3Context });
+  return err;
 }

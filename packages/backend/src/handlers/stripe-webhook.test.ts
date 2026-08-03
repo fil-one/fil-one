@@ -825,12 +825,83 @@ describe('stripe-webhook handler', () => {
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
-    it('skips when customer is deleted', async () => {
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupDeletedCustomerRetrieve();
+    describe('when the customer is already deleted', () => {
+      it('closes out the billing record instead of granting a grace period', async () => {
+        setupStripeEvent('customer.subscription.deleted', mockSubscription());
+        setupDeletedCustomerRetrieve();
+        setupAuroraTenantResolution();
 
-      await handler(buildWebhookEvent('{}'));
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+        const result = await handler(buildWebhookEvent('{}'));
+
+        expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
+          MOCK_ORG_ID,
+          'disabled',
+          WEBHOOK_STATUS_SYNC_RETRY,
+        );
+
+        const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+        expect(updateCalls).toHaveLength(1);
+        const input = updateCalls[0].args[0].input;
+        expect(input.Key).toEqual({
+          pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
+          sk: { S: 'SUBSCRIPTION' },
+        });
+        expect(input.ExpressionAttributeValues![':status']).toEqual({
+          S: SubscriptionStatus.Canceled,
+        });
+        expect(input.UpdateExpression).not.toContain('gracePeriodEndsAt = ');
+        expect(input.UpdateExpression).toContain('REMOVE gracePeriodEndsAt');
+
+        expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      });
+
+      it('emits a DunningEscalation metric with reason customer_deleted', async () => {
+        setupStripeEvent('customer.subscription.deleted', mockSubscription());
+        setupDeletedCustomerRetrieve();
+        setupAuroraTenantResolution();
+
+        await handler(buildWebhookEvent('{}'));
+
+        const emissions = dunningEmissions();
+        expect(
+          emissions.some(
+            (e) =>
+              (e as { stage?: string }).stage === 'canceled' &&
+              (e as { reason?: string }).reason === 'customer_deleted',
+          ),
+        ).toBe(true);
+      });
+
+      it('fails the webhook (500) when the subscription has no metadata.userId', async () => {
+        setupStripeEvent('customer.subscription.deleted', mockSubscription({ metadata: {} }));
+        setupDeletedCustomerRetrieve();
+
+        const result = await handler(buildWebhookEvent('{}'));
+
+        expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+        expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
+        expect(result).toEqual({
+          statusCode: 500,
+          body: JSON.stringify({ message: 'Processing error' }),
+        });
+      });
+
+      it('fails the webhook (500) without touching the record when a region fails to disable', async () => {
+        setupStripeEvent('customer.subscription.deleted', mockSubscription());
+        setupDeletedCustomerRetrieve();
+        setupAuroraTenantResolution();
+        mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
+          regionSyncFailure(new Error('Aurora API error')),
+        );
+
+        const result = await handler(buildWebhookEvent('{}'));
+
+        expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+        expect(result).toEqual({
+          statusCode: 500,
+          body: JSON.stringify({ message: 'Processing error' }),
+        });
+      });
     });
 
     it('skips when customer has no userId', async () => {
