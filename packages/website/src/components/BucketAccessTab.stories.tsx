@@ -29,17 +29,6 @@ const mockKeys: AccessKey[] = [
     buckets: ['my-bucket'],
     region: S3Region.UsEast1,
   },
-  {
-    // All-buckets key from another region: filtered out for a us-east-1 bucket.
-    id: '3',
-    keyName: 'EU All-Buckets Key',
-    accessKeyId: 'ACCESS_KEY_EU000EXAMPL',
-    createdAt: '2026-03-01T08:00:00Z',
-    status: 'active',
-    permissions: ['read', 'write', 'list'],
-    bucketScope: 'all',
-    region: S3Region.EuWest1,
-  },
 ];
 
 const meta: Meta<typeof BucketAccessTab> = {
