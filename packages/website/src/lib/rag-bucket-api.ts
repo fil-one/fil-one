@@ -37,9 +37,15 @@ export type RagBucket = {
  * is not enough: `lastSyncedAt` is written when an indexing pass completes, and
  * until then the query API rejects with BUCKET_NOT_INDEXED. This is the honest
  * test for anything that offers asking as an action.
+ *
+ * Tests `lastSyncedAt` for truthiness rather than `!== undefined` so it agrees
+ * with {@link bucketDisplayState} on every input, not just the ones the backend
+ * happens to send today. The two exist to keep the row, the status, and the
+ * drawer aligned, so an empty-string timestamp must not make one read queryable
+ * while the other still reads `awaiting-first-index`.
  */
 export function isBucketQueryable(bucket: RagBucket): boolean {
-  return bucket.enabled && bucket.lastSyncedAt !== undefined;
+  return Boolean(bucket.enabled && bucket.lastSyncedAt);
 }
 
 /**
