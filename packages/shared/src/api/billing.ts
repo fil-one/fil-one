@@ -42,6 +42,14 @@ export interface Subscription {
   currentPeriodEnd?: string;
   canceledAt?: string;
   gracePeriodEndsAt?: string;
+  /**
+   * Per-org monthly billing minimum in cents (e.g. 499 for the $4.99/month
+   * minimum on the current pay-as-you-go plan). Absent or 0 means the org has
+   * no minimum — including customers grandfathered on pre-minimum pricing. Set
+   * by the backend from the org's Stripe plan, which is the source of truth for
+   * what is actually billed.
+   */
+  monthlyMinimumCents?: number;
 }
 
 export interface PaymentMethod {

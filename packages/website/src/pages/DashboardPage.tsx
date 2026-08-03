@@ -61,10 +61,9 @@ function statusBadgeProps(status: SubscriptionStatus): { label: string; color: B
   }
 }
 
-function estimateMonthlyCost(usedBytes: number, pricePerTbCents: number): string {
-  if (usedBytes === 0) return '$0.00';
+function estimateMonthlyCost(usedBytes: number, pricePerTbCents: number, minimumCents = 0): string {
   const tb = usedBytes / TB_BYTES;
-  const cents = tb * pricePerTbCents;
+  const cents = Math.max(minimumCents, Math.round(tb * pricePerTbCents));
   return `$${(cents / 100).toFixed(2)}`;
 }
 
@@ -132,6 +131,9 @@ export function DashboardPage() {
 
   const badge = statusBadgeProps(billing.subscription.status);
   const pricePerTbCents = billing.subscription.planId === PlanId.PayAsYouGo ? 499 : 0;
+  // Per-org monthly minimum from the backend; 0 for grandfathered accounts and
+  // trial/free plans, so their estimate is never floored.
+  const monthlyMinimumCents = billing.subscription.monthlyMinimumCents ?? 0;
 
   const limits = getUsageLimits(isActivePaid);
   const storagePct =
@@ -320,7 +322,7 @@ export function DashboardPage() {
             <div className="flex items-center justify-between border-t border-zinc-200 pt-3">
               <span className="text-[11px] text-zinc-500">Est. monthly cost</span>
               <span className="text-[13px] font-medium text-zinc-900">
-                {estimateMonthlyCost(usage.storage.usedBytes, pricePerTbCents)}
+                {estimateMonthlyCost(usage.storage.usedBytes, pricePerTbCents, monthlyMinimumCents)}
               </span>
             </div>
           )}

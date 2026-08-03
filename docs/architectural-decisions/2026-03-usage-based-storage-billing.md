@@ -5,7 +5,7 @@
 
 ## Context
 
-Customers are billed for storage at $4.99/TiB/month. This ADR describes the automated pipeline that queries actual storage from the Aurora Backoffice API (the source of truth), computes the period average, and reports it to Stripe via Billing Meters. The `tenantId` maps to `orgId` stored in BillingTable.
+Customers are billed for storage at $4.99/TB/month, metered in GB. This ADR describes the automated pipeline that queries actual storage from the Aurora Backoffice API (the source of truth), computes the period average, and reports it to Stripe via Billing Meters. The `tenantId` maps to `orgId` stored in BillingTable.
 
 ## Options Considered
 
@@ -28,7 +28,7 @@ EventBridge (cron: daily at 06:00 UTC)
        -> async-invokes Worker Lambda per unique org
   -> Worker Lambda (packages/backend/src/jobs/usage-reporting-worker.ts)
        -> queries Aurora Backoffice API via getStorageSamples() (1h window, from currentPeriodStart to now)
-       -> computes average TiB over the billing period
+       -> computes average GB over the billing period
        -> reports meter event to Stripe Meter API
        -> writes audit record to BillingTable (pk: ORG#<orgId>, sk: USAGE_REPORT#<reportDate>, 90-day TTL)
 ```

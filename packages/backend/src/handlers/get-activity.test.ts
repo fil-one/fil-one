@@ -32,6 +32,11 @@ vi.mock('../lib/org-profile.js', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
 
+const mockReportMetric = vi.fn();
+vi.mock('../lib/metrics.js', () => ({
+  reportMetric: (...args: unknown[]) => mockReportMetric(...args),
+}));
+
 // Builds a fully self-contained fake orchestrator for multi-region tests.
 function createMockedOrchestrator(opts: {
   id: string;
@@ -74,6 +79,28 @@ function keyItem(id: string, keyName: string, createdAt: string) {
 
 function setTenant(tenantId?: string) {
   mockIsTenantReady.mockReturnValue(tenantId ?? null);
+}
+
+interface EmittedMetric {
+  _aws: {
+    Timestamp: number;
+    CloudWatchMetrics: {
+      Namespace: string;
+      Dimensions: string[][];
+      Metrics: { Name: string; Unit: string }[];
+    }[];
+  };
+  [key: string]: unknown;
+}
+
+function emittedMetrics(name: string): EmittedMetric[] {
+  return mockReportMetric.mock.calls
+    .map(([event]) => event as EmittedMetric)
+    .filter((event) => event._aws.CloudWatchMetrics[0].Metrics[0].Name === name);
+}
+
+function emittedPhases(): string[] {
+  return emittedMetrics('GetActivityPhaseDuration').map((event) => String(event.phase));
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +150,10 @@ describe('get-activity baseHandler', () => {
         },
       ],
     });
+
+    // The feed never surfaces versioning, so it must opt out of the per-bucket
+    // versioning lookups to avoid the FTH N+1.
+    expect(mockListBuckets).toHaveBeenCalledWith(AURORA_TENANT_ID, { includeVersioning: false });
   });
 
   it('respects the limit query parameter', async () => {
@@ -331,8 +362,8 @@ describe('get-activity baseHandler', () => {
         'eu-bucket',
         'us-bucket',
       ]);
-      expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t');
-      expect(fth.listBuckets).toHaveBeenCalledWith('fth-t');
+      expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t', { includeVersioning: false });
+      expect(fth.listBuckets).toHaveBeenCalledWith('fth-t', { includeVersioning: false });
     });
 
     it('skips orchestrators whose tenant is not ready', async () => {
@@ -356,6 +387,119 @@ describe('get-activity baseHandler', () => {
       ]);
       // The unprovisioned region is never queried for buckets.
       expect(fth.listBuckets).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('EMF metric emission', () => {
+    it('emits a well-formed EMF envelope for the total handler duration', async () => {
+      vi.setSystemTime(new Date('2026-01-08T12:00:00Z'));
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+      await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      const [total, ...rest] = emittedMetrics('GetActivityDuration');
+      expect(rest).toStrictEqual([]);
+      expect(total).toStrictEqual({
+        _aws: {
+          Timestamp: new Date('2026-01-08T12:00:00Z').getTime(),
+          CloudWatchMetrics: [
+            {
+              Namespace: 'FilOne',
+              Dimensions: [['handler']],
+              Metrics: [{ Name: 'GetActivityDuration', Unit: 'Milliseconds' }],
+            },
+          ],
+        },
+        handler: 'get-activity',
+        GetActivityDuration: expect.any(Number),
+      });
+      expect(total.GetActivityDuration).toBeGreaterThanOrEqual(0);
+    });
+
+    it('emits one phase duration per handler phase, dimensioned by handler and phase', async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+      await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(emittedPhases().sort()).toStrictEqual([
+        'fetchAccessKeyActivities',
+        'fetchBucketActivities',
+        'resolveRegions',
+      ]);
+      for (const event of emittedMetrics('GetActivityPhaseDuration')) {
+        expect(event._aws.CloudWatchMetrics[0].Dimensions).toStrictEqual([['handler', 'phase']]);
+        expect(event.handler).toBe('get-activity');
+        expect(event.GetActivityPhaseDuration).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('emits per-region listBuckets durations', async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+      const aurora = createMockedOrchestrator({
+        id: 'aurora',
+        region: 'eu-west-1',
+        tenantId: 'aurora-t',
+      });
+      const fth = createMockedOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: 'fth-t' });
+      mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+      await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      for (const name of ['ListBucketsDuration']) {
+        const events = emittedMetrics(name);
+        expect(events.map((e) => String(e.region)).sort()).toStrictEqual([
+          'eu-west-1',
+          'us-east-1',
+        ]);
+        for (const event of events) {
+          expect(event._aws.CloudWatchMetrics[0].Dimensions).toStrictEqual([['region']]);
+          expect(event[name]).toBeGreaterThanOrEqual(0);
+        }
+      }
+    });
+
+    it('tags a failing phase with an :error suffix and skips the total metric', async () => {
+      ddbMock.on(QueryCommand).rejects(new Error('dynamo down'));
+
+      await expect(baseHandler(buildEvent({ userInfo: USER_INFO }))).rejects.toThrow('dynamo down');
+
+      expect(emittedPhases()).toContain('fetchAccessKeyActivities:error');
+      expect(emittedPhases()).not.toContain('fetchAccessKeyActivities');
+      expect(emittedMetrics('GetActivityDuration')).toStrictEqual([]);
+    });
+
+    it('emits only the resolveRegions error phase when region resolution fails', async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+      mockGetAvailableOrchestrators.mockImplementation(() => {
+        throw new Error('registry down');
+      });
+
+      await expect(baseHandler(buildEvent({ userInfo: USER_INFO }))).rejects.toThrow(
+        'registry down',
+      );
+
+      expect(emittedPhases()).toStrictEqual(['resolveRegions:error']);
+      expect(emittedMetrics('GetActivityDuration')).toStrictEqual([]);
+    });
+
+    it('skips ListBucketsDuration for a region whose listBuckets fails', async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+      const aurora = createMockedOrchestrator({
+        id: 'aurora',
+        region: 'eu-west-1',
+        tenantId: 'aurora-t',
+      });
+      const fth = createMockedOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: 'fth-t' });
+      fth.listBuckets.mockRejectedValue(new Error('FTH down'));
+      mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+
+      await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(emittedMetrics('ListBucketsDuration').map((e) => e.region)).toStrictEqual([
+        'eu-west-1',
+      ]);
+      // The error is swallowed per-region, so the surrounding phase still succeeds.
+      expect(emittedPhases()).toContain('fetchBucketActivities');
     });
   });
 });

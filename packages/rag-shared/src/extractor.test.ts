@@ -1,28 +1,13 @@
-import {
-  GetDocumentTextDetectionCommand,
-  type S3Object,
-  StartDocumentTextDetectionCommand,
-  TextractClient,
-} from '@aws-sdk/client-textract';
-import { mockClient } from 'aws-sdk-client-mock';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { extractText } from './extractor.js';
-import { buildDocx, buildPptx, docxParagraph, pptxParagraph } from './test-fixtures.js';
-
-const textractMock = mockClient(TextractClient);
+import { buildDocx, buildPdf, buildPptx, docxParagraph, pptxParagraph } from './test-fixtures.js';
 
 function encode(text: string): Uint8Array {
   return new TextEncoder().encode(text);
 }
 
-const LOCATION: S3Object = { Bucket: 'b', Name: 'k' };
-
 describe('extractText', () => {
-  beforeEach(() => {
-    textractMock.reset();
-  });
-
   describe('plain text and markdown', () => {
     it('decodes text/plain as UTF-8', async () => {
       expect(await extractText(encode('hello world'), 'text/plain')).toBe('hello world');
@@ -86,28 +71,8 @@ describe('extractText', () => {
   });
 
   describe('pdf', () => {
-    it('routes PDFs through Textract', async () => {
-      textractMock.on(StartDocumentTextDetectionCommand).resolves({ JobId: 'j' });
-      textractMock.on(GetDocumentTextDetectionCommand).resolves({
-        JobStatus: 'SUCCEEDED',
-        Blocks: [
-          {
-            BlockType: 'LINE',
-            Text: 'pdf line',
-            Page: 1,
-            Geometry: { BoundingBox: { Top: 0.1, Left: 0, Width: 1, Height: 0.1 } },
-          },
-        ],
-      });
-
-      const text = await extractText(encode('%PDF-1.4'), 'application/pdf', {
-        pdf: {
-          client: textractMock as unknown as TextractClient,
-          documentLocation: LOCATION,
-          pollIntervalMs: 1,
-        },
-      });
-      expect(text).toBe('pdf line');
+    it('extracts PDF text in-process', async () => {
+      expect(await extractText(buildPdf([['pdf line']]), 'application/pdf')).toBe('pdf line');
     });
   });
 
@@ -138,6 +103,11 @@ describe('extractText', () => {
       const pptx = buildPptx([pptxParagraph('one'), pptxParagraph('two')]);
       const type = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
       expect(await extractText(pptx, type)).toBe(await extractText(pptx, type));
+
+      const pdf = buildPdf([['stable output']]);
+      expect(await extractText(pdf, 'application/pdf')).toBe(
+        await extractText(pdf, 'application/pdf'),
+      );
     });
   });
 });

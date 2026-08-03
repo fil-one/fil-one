@@ -18,14 +18,51 @@ export async function baseHandler(
 
   const orchestrators = getAvailableOrchestrators();
   const orgProfile = await getOrgProfile(orgId);
-  const results = await Promise.all(
+  // `allSettled` rather than `all` so every failing leg can be named in the logs and carried in
+  // the rethrown error: `all` discards which orchestrator rejected, which leaves a 500 here
+  // indistinguishable between regions. We wait for every leg to settle, log each failure, then
+  // rethrow them together as one AggregateError in registry order. The request still fails as
+  // a whole.
+  const settled = await Promise.allSettled(
     orchestrators.map(async (orchestrator) => {
       const tenantId = orchestrator.isTenantReady(orgProfile);
       if (!tenantId) return [];
       return orchestrator.listBuckets(tenantId);
     }),
   );
-  const buckets = results.flat().sort((a, b) => a.bucketName.localeCompare(b.bucketName));
+
+  // Pair each rejection with the orchestrator that produced it, in registry order, so the
+  // logging and the rethrow below both work off that one collection.
+  const failures = settled.flatMap((result, index) =>
+    result.status === 'rejected'
+      ? { orchestrator: orchestrators[index], reason: result.reason }
+      : [],
+  );
+
+  if (failures.length > 0) {
+    for (const { orchestrator, reason } of failures) {
+      console.error('[list-buckets] Orchestrator listBuckets failed', {
+        orgId,
+        orchestratorId: orchestrator.id,
+        region: orchestrator.region,
+        error: reason,
+      });
+    }
+    // Name every failing leg in the top-level message too: AggregateError hides the nested
+    // `errors` from most log formatters, so without this a 500 says nothing about the cause.
+    const legs = failures.map(
+      ({ orchestrator, reason }) =>
+        `${orchestrator.id} (${orchestrator.region}): ${reason instanceof Error ? reason.message : String(reason)}`,
+    );
+    throw new AggregateError(
+      failures.map(({ reason }) => reason),
+      `One or more orchestrators failed to list buckets:\n${legs.join('\n')}`,
+    );
+  }
+
+  const buckets = settled
+    .flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+    .sort((a, b) => a.bucketName.localeCompare(b.bucketName));
   return new ResponseBuilder().status(200).body<ListBucketsResponse>({ buckets }).build();
 }
 

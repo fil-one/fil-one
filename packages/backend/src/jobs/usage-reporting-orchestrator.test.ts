@@ -92,6 +92,9 @@ describe('usage-reporting-orchestrator', () => {
       Buffer.from(invokeCalls[0].args[0].input.Payload as Uint8Array).toString(),
     );
     expect(payload.orgId).toBe('org-1');
+    // userId comes from the record pk (CUSTOMER#<userId>) — the worker needs it
+    // to close out the billing record when self-healing a deleted customer.
+    expect(payload.userId).toBe('user-for-org-1');
     expect(payload.orgName).toBe('Org org-1');
     expect(payload.subscriptionId).toBe('sub_org-1');
     // Tenant resolution moved to the worker — no tenant ids in the payload.
@@ -192,6 +195,23 @@ describe('usage-reporting-orchestrator', () => {
     );
     expect(payload.orgId).toBe('shared-org');
     expect(payload.orgName).toBe('Org shared-org');
+  });
+
+  it('omits userId when the record pk has an empty suffix (bare CUSTOMER#)', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [subscriptionItem('org-1', { pk: 'CUSTOMER#' })],
+    });
+    mockOrgNames(['org-1']);
+    lambdaMock.on(InvokeCommand).resolves({});
+
+    await handler();
+
+    const invokeCalls = lambdaMock.commandCalls(InvokeCommand);
+    expect(invokeCalls).toHaveLength(1);
+    const payload = JSON.parse(
+      Buffer.from(invokeCalls[0].args[0].input.Payload as Uint8Array).toString(),
+    );
+    expect(payload.userId).toBeUndefined();
   });
 
   it('invokes worker even when the org has no profile (orgName undefined)', async () => {

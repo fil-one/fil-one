@@ -13,14 +13,14 @@ import type {
   RetentionMode,
   S3Region as S3RegionType,
 } from '@filone/shared';
-import { createClient, getBucketInfo, listBuckets } from '@filone/aurora-portal-client';
+import { getBucketInfo, listBuckets } from '@filone/aurora-portal-client';
 import { ensureTenantReady as ensureAuroraTenantReady } from '../aurora/aurora-tenant-setup.js';
 import {
   createAuroraAccessKey,
   createAuroraBucket,
+  createPortalClient,
   deleteAuroraAccessKey,
   findAuroraAccessKeyByName,
-  getAuroraPortalApiKey,
 } from '../aurora/aurora-portal.js';
 import {
   getOperationsSamples,
@@ -43,6 +43,7 @@ import type {
   GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
+  ListBucketsOptions,
   ServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
@@ -55,18 +56,6 @@ export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting
 
 function getStage(): string {
   return process.env.FILONE_STAGE!;
-}
-
-function getPortalBaseUrl(): string {
-  return process.env.AURORA_PORTAL_URL!;
-}
-
-async function createPortalReadClient(tenantId: string) {
-  const apiKey = await getAuroraPortalApiKey(getStage(), tenantId);
-  return createClient({
-    baseUrl: getPortalBaseUrl(),
-    headers: { 'X-Api-Key': apiKey },
-  });
 }
 
 export const auroraOrchestrator = {
@@ -122,8 +111,12 @@ export const auroraOrchestrator = {
     throw new NotImplementedError('Aurora bucket deletion is not yet supported. See FIL-204.');
   },
 
-  async listBuckets(tenantId: string): Promise<BucketSummary[]> {
-    const client = await createPortalReadClient(tenantId);
+  async listBuckets(tenantId: string, opts: ListBucketsOptions = {}): Promise<BucketSummary[]> {
+    // Aurora returns versioning inline via `flags`, so there's no per-bucket
+    // cost to skip; the option is honored only to keep the contract uniform
+    // with FTH (see ListBucketsOptions).
+    const includeVersioning = opts.includeVersioning ?? true;
+    const client = await createPortalClient(tenantId);
     const { data, error } = await listBuckets({
       client,
       path: { tenantId },
@@ -143,13 +136,13 @@ export const auroraOrchestrator = {
         region: auroraOrchestrator.region,
         createdAt: b.createdAt,
         isPublic: false,
-        versioning: b.flags?.includes('versioned') ?? false,
+        versioning: includeVersioning ? (b.flags?.includes('versioned') ?? false) : false,
         encrypted: b.flags?.includes('encrypted') ?? true,
       }));
   },
 
   async getBucket(tenantId: string, bucketName: string): Promise<BucketDetails | null> {
-    const client = await createPortalReadClient(tenantId);
+    const client = await createPortalClient(tenantId);
     const { data, error, response } = await getBucketInfo({
       client,
       path: { tenantId, bucketName },
@@ -226,6 +219,8 @@ export const auroraOrchestrator = {
       region: 'auto',
       credentials,
       forcePathStyle: true,
+      orchestratorId: auroraOrchestrator.id,
+      tenantId,
     };
   },
 

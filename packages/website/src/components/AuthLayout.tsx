@@ -29,7 +29,7 @@ const features: FeatureItem[] = [
   },
   {
     icon: LightningIcon,
-    text: 'Pay only for what you use',
+    text: 'Pay for the storage you use',
   },
 ];
 

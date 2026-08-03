@@ -38,6 +38,8 @@ const ctx: S3ClientContext = {
   region: 'auto',
   credentials: { accessKeyId: 'AK', secretAccessKey: 'SK' },
   forcePathStyle: true,
+  orchestratorId: 'test',
+  tenantId: 't-1',
 };
 
 // Capture the last command passed to getSignedUrl, so each test can assert
