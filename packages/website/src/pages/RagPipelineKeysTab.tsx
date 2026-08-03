@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
+  DownloadSimpleIcon,
   EyeIcon,
   EyeSlashIcon,
   KeyIcon,
@@ -24,11 +25,13 @@ import { IconButton } from '../components/IconButton.js';
 import { Input } from '../components/Input.js';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../components/Modal/index.js';
 import { RadioOption } from '../components/RadioOption.js';
+import { SplitButton } from '../components/SplitButton.js';
 import { Table } from '../components/Table/Table.js';
 import { useToast } from '../components/Toast/index.js';
 import { createRagApiKey, deleteRagApiKey, listRagApiKeys } from '../lib/rag-api-keys-api.js';
 import { bucketKey, type RagBucket } from '../lib/rag-bucket-api.js';
 import { queryKeys } from '../lib/query-client.js';
+import { ApiReference } from './RagPipelineTabs.js';
 import { formatDate } from '../lib/time.js';
 
 // ---------------------------------------------------------------------------
@@ -120,16 +123,16 @@ function CreateRagKeyModal({
   return (
     <Modal open={open} onClose={onClose} size="md" testId="create-rag-key-modal">
       <ModalHeader
-        description="The key authorizes the Query API only — it cannot read or write bucket contents."
+        description="Authorizes the Query API only. It cannot read or write bucket contents."
         onClose={onClose}
       >
         Create API key
       </ModalHeader>
       <ModalBody>
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="rag-key-name" className="text-sm font-medium text-zinc-900">
-              Key name
+        <div className="flex flex-col divide-y divide-zinc-100">
+          <div className="flex flex-col gap-1.5 pb-4">
+            <label htmlFor="rag-key-name" className="text-xs font-medium text-zinc-500">
+              Name
             </label>
             <Input
               id="rag-key-name"
@@ -147,8 +150,10 @@ function CreateRagKeyModal({
             )}
           </div>
 
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium text-zinc-900">Which buckets can this key query?</p>
+          <div className="flex flex-col gap-2 pt-4">
+            {/* "All buckets" / "Specific buckets" explain themselves, so the
+                helper sentence that was here was pure restatement. */}
+            <p className="text-xs font-medium text-zinc-500">Scope</p>
             <div className="flex gap-2">
               {(['all', 'specific'] as const).map((scope) => (
                 <RadioOption
@@ -167,7 +172,7 @@ function CreateRagKeyModal({
               <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
                 {selectableBuckets.length === 0 ? (
                   <p className="text-sm text-zinc-500">
-                    No RAG-enabled buckets yet. Enable RAG on a bucket in the Buckets tab first.
+                    No indexed buckets yet. Index a bucket in the Buckets tab first.
                   </p>
                 ) : (
                   <div className="flex flex-col space-y-1.5">
@@ -194,12 +199,13 @@ function CreateRagKeyModal({
           </div>
         </div>
       </ModalBody>
-      <ModalFooter>
-        <Button variant="ghost" onClick={onClose} disabled={createMutation.isPending}>
+      <ModalFooter fullWidth>
+        <Button variant="ghost" size="md" onClick={onClose} disabled={createMutation.isPending}>
           Cancel
         </Button>
         <Button
           variant="primary"
+          size="md"
           disabled={!canSubmit || createMutation.isPending}
           onClick={() => createMutation.mutate()}
         >
@@ -223,15 +229,40 @@ function RagKeyCreatedModal({
 }) {
   const [showToken, setShowToken] = useState(false);
 
+  // Mirrors the S3-credentials flow (SaveCredentialsModal): the token is shown
+  // exactly once, so offer a file as well as the clipboard. Written from a local
+  // Blob and never sent anywhere.
+  function downloadBlob(content: string, filename: string, type: string) {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // .env leads because the Query API sample and the reference copy both read the
+  // key from $FILONE_RAG_KEY, so this file drops straight in.
+  function handleDownloadEnv() {
+    downloadBlob(`FILONE_RAG_KEY=${createdKey.token}\n`, 'filone-rag-key.env', 'text/plain');
+  }
+
+  function handleDownloadCsv() {
+    const csv = ['Key name,API key', `${createdKey.keyName},${createdKey.token}`].join('\n');
+    downloadBlob(csv, 'filone-rag-key.csv', 'text/csv');
+  }
+
   return (
     <Modal open onClose={onDone} size="md" testId="rag-key-created-modal">
       <ModalHeader onClose={onDone}>Save your API key</ModalHeader>
       <ModalBody>
         <div className="mb-4">
-          <Alert
-            variant="amber"
-            description="This is the only time the key will be shown. Store it somewhere safe — you will not be able to view it again."
-          />
+          {/* Title only, at the larger of the two type sizes Alert offers: the
+              consequence of closing without saving is the whole message, and
+              splitting it across title and description made two lines out of one
+              idea. */}
+          <Alert variant="amber" title="Shown once only. Save your key somewhere safe." />
         </div>
         <div className="flex flex-col gap-1.5">
           <p className="text-sm font-medium text-(--color-text-base)">{createdKey.keyName}</p>
@@ -253,10 +284,16 @@ function RagKeyCreatedModal({
           </div>
         </div>
       </ModalBody>
-      <ModalFooter>
-        <Button variant="primary" onClick={onDone}>
+      <ModalFooter fullWidth>
+        <Button variant="ghost" onClick={onDone}>
           I've saved this key
         </Button>
+        <SplitButton
+          label="Download .env"
+          icon={DownloadSimpleIcon}
+          onMainClick={handleDownloadEnv}
+          items={[{ label: 'Download .csv', icon: DownloadSimpleIcon, onClick: handleDownloadCsv }]}
+        />
       </ModalFooter>
     </Modal>
   );
@@ -278,6 +315,10 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
     queryFn: () => listRagApiKeys(),
   });
   const keys = data?.keys ?? [];
+  // The empty state carries its own Create button, so the header one would be a
+  // second identical primary action on the same screen. Header yields until
+  // there is a list to add to.
+  const showEmptyState = !isPending && !isError && keys.length === 0;
 
   const deleteMutation = useMutation({
     mutationFn: (keyId: string) => deleteRagApiKey(keyId),
@@ -296,18 +337,24 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
         <Heading
           tag="h2"
           size="lg"
-          description="Bearer tokens for the Query API. Not to be confused with S3 access keys — these cannot read or write bucket contents."
+          // "Bearer tokens" described the HTTP mechanism rather than what the key
+          // does; that detail is already visible in the Authorization header of
+          // the sample below, where it is actionable.
+          description="Let apps and agents query your indexed buckets. Unlike S3 access keys, they cannot read or write bucket contents."
         >
           API Keys
         </Heading>
-        <Button
-          variant="primary"
-          icon={PlusIcon}
-          className="mt-1 flex-shrink-0"
-          onClick={() => setCreateOpen(true)}
-        >
-          Create API key
-        </Button>
+        {!showEmptyState && (
+          <Button
+            variant="primary"
+            size="sm"
+            icon={PlusIcon}
+            className="mt-1 flex-shrink-0"
+            onClick={() => setCreateOpen(true)}
+          >
+            Create API key
+          </Button>
+        )}
       </div>
 
       {isError && (
@@ -317,18 +364,21 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
         />
       )}
 
-      {!isPending && !isError && keys.length === 0 && (
+      {showEmptyState && (
         <div
           data-testid="rag-api-keys-empty"
-          className="flex flex-col items-center gap-3 rounded-xl border border-zinc-200 bg-white px-6 py-12 text-center"
+          className="flex flex-col items-center gap-3 rounded-xl border border-zinc-200 bg-white px-6 py-8 text-center"
         >
-          <IconBox icon={KeyIcon} color="grey" size="lg" />
+          <IconBox icon={KeyIcon} color="grey" size="md" />
           <div>
             <p className="text-sm font-medium text-zinc-900">No API keys yet</p>
             <p className="mt-1 text-xs text-zinc-500">
-              Create a key to query your RAG-enabled buckets from your app or agent.
+              Create a key to query your indexed buckets from your app or agent.
             </p>
           </div>
+          <Button variant="primary" size="sm" icon={PlusIcon} onClick={() => setCreateOpen(true)}>
+            Create API key
+          </Button>
         </div>
       )}
 
@@ -337,7 +387,11 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
           <Table.Header>
             <Table.Row>
               <Table.Head>Name</Table.Head>
-              <Table.Head>Key</Table.Head>
+              {/* "Key" implied this was the key, truncated, which contradicts the
+                  shown-once warning at creation. It is a 12-char display prefix
+                  (RAG_KEY_DISPLAY_PREFIX_LENGTH), of which only 5 characters are
+                  the secret; the backend keeps a SHA-256 hash and never the token. */}
+              <Table.Head>Prefix</Table.Head>
               <Table.Head>Scope</Table.Head>
               <Table.Head>Created</Table.Head>
               <Table.Head>Last used</Table.Head>
@@ -395,6 +449,10 @@ export function RagApiKeysTab({ buckets }: { buckets: RagBucket[] }) {
         description="Any application using this key will immediately lose access. This cannot be undone."
         confirmLabel="Delete key"
       />
+
+      <div className="border-t border-zinc-200 pt-6">
+        <ApiReference />
+      </div>
     </div>
   );
 }

@@ -56,7 +56,7 @@ export function BucketActionMenu({ onDisable }: BucketActionMenuProps) {
           data-testid="bucket-action-menu-list"
           role="menu"
           style={{ top: pos.top, right: pos.right }}
-          className="fixed z-50 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
+          className="fixed z-50 w-auto min-w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
         >
           <button
             data-testid="bucket-action-menu-disable"
@@ -66,10 +66,10 @@ export function BucketActionMenu({ onDisable }: BucketActionMenuProps) {
               setOpen(false);
               onDisable();
             }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+            className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50"
           >
-            <ProhibitIcon size={14} aria-hidden="true" />
-            Disable
+            <ProhibitIcon size={13} aria-hidden="true" />
+            Stop indexing
           </button>
         </div>
       )}

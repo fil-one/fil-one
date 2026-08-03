@@ -14,7 +14,7 @@ export type AlertVariant = 'blue' | 'green' | 'red' | 'grey' | 'amber';
 export type AlertProps = {
   variant?: AlertVariant;
   title?: string;
-  description: string;
+  description?: string;
   showIcon?: boolean;
   centered?: boolean;
 };
@@ -62,15 +62,25 @@ export function Alert({
     <div
       className={clsx(
         'flex gap-3 rounded-lg border p-3',
-        centered ? 'items-center justify-center' : 'items-start',
+        // Icon centres against the text block in both layouts, which keeps a
+        // one-line and a two-line alert equally balanced. `centered` now only
+        // controls horizontal centring.
+        'items-center',
+        centered && 'justify-center',
         containerStyles[variant],
       )}
       role="alert"
     >
+      {/* `md` (18px glyph in a 38px box) rather than `sm` (14px in 26px): at sm the
+          badge read as an undersized speck beside the text. Set here rather than
+          exposed as a per-caller prop so every alert stays consistent. */}
       {showIcon && (
-        <IconBox icon={iconComponents[variant]} color={iconBoxColors[variant]} size="sm" />
+        <IconBox icon={iconComponents[variant]} color={iconBoxColors[variant]} size="md" />
       )}
-      <div className={clsx('flex flex-col gap-1', !centered && 'flex-1', showIcon && 'pt-1')}>
+      {/* No top offset: `pt-1` nudged the text down to sit against the icon box
+          back when the row was top-aligned. The row now centres, so the offset
+          would push the text off centre instead. */}
+      <div className={clsx('flex flex-col gap-1', !centered && 'flex-1')}>
         {title && (
           <span
             className={clsx('text-sm font-medium', centered && 'text-center', textStyles[variant])}
@@ -78,11 +88,17 @@ export function Alert({
             {title}
           </span>
         )}
-        <span
-          className={clsx('text-xs leading-[18px]', centered && 'text-center', textStyles[variant])}
-        >
-          {description}
-        </span>
+        {description && (
+          <span
+            className={clsx(
+              'text-xs leading-[18px]',
+              centered && 'text-center',
+              textStyles[variant],
+            )}
+          >
+            {description}
+          </span>
+        )}
       </div>
     </div>
   );
