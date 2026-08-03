@@ -149,7 +149,7 @@ function BucketRow({
                 disabled={pending}
                 onClick={onToggle}
               >
-                {pending ? 'Enabling…' : 'Index'}
+                {pending ? 'Starting…' : 'Index'}
               </Button>
             )}
           </div>
