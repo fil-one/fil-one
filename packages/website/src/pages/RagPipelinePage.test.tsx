@@ -40,7 +40,7 @@ vi.mock('../lib/rag-api-keys-api.js', async (importOriginal) => ({
   listRagApiKeys: (...a: unknown[]) => mockListRagApiKeys(...a),
 }));
 
-import { RagPipelinePage } from './RagPipelinePage.js';
+import { RagPipelinePage, enablementPollInterval } from './RagPipelinePage.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { queryKeys } from '../lib/query-client.js';
 
@@ -417,5 +417,47 @@ describe('RagPipelinePage — access gate', () => {
       await screen.findByText('Bucket Intelligence is not available for your account.'),
     ).toBeInTheDocument();
     expect(mockListBuckets).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Enablement polling (the indexer writes state out of band)
+// ---------------------------------------------------------------------------
+
+describe('enablementPollInterval', () => {
+  function interval(data?: Partial<BucketRagEnablementResponse>): number | false {
+    return enablementPollInterval({
+      state: { data: data as BucketRagEnablementResponse | undefined },
+    });
+  }
+
+  it('does not poll before the first response lands', () => {
+    expect(interval(undefined)).toBe(false);
+  });
+
+  it('does not poll a bucket that is not enabled, since nothing will change on its own', () => {
+    expect(interval({ enabled: false })).toBe(false);
+  });
+
+  it('polls quickly while a pass is in flight', () => {
+    expect(interval({ enabled: true, syncState: 'syncing' })).toBe(30_000);
+  });
+
+  it('polls slowly while waiting on the first pass, which can take hours', () => {
+    expect(interval({ enabled: true, syncState: 'idle' })).toBe(120_000);
+  });
+
+  it('keeps polling after a failed pass, since the orchestrator retries on its own', () => {
+    // Without this the row stays on "Failed" until a manual reload, even after a
+    // later run succeeds.
+    expect(
+      interval({ enabled: true, syncState: 'error', lastSyncedAt: '2026-01-01T00:00:00Z' }),
+    ).toBe(120_000);
+  });
+
+  it('stops polling once a bucket is settled and healthy', () => {
+    expect(
+      interval({ enabled: true, syncState: 'idle', lastSyncedAt: '2026-01-01T00:00:00Z' }),
+    ).toBe(false);
   });
 });

@@ -202,13 +202,19 @@ function NotAvailable() {
  * The first pass can take up to 6 hours, so that state polls far more slowly than
  * an in-flight run; `refetchOnWindowFocus` (on by default) covers the common case
  * of someone returning to the tab.
+ *
+ * `error` is not a settled state: the orchestrator keeps re-indexing enabled
+ * buckets whose last run failed, so a later pass can succeed on its own. Stopping
+ * on error would leave the row reading "Failed" until a manual reload, so it keeps
+ * polling at the slow interval even once `lastSyncedAt` exists.
  */
-function enablementPollInterval(query: {
+export function enablementPollInterval(query: {
   state: { data?: BucketRagEnablementResponse };
 }): number | false {
   const data = query.state.data;
   if (!data?.enabled) return false;
   if (data.syncState === 'syncing') return 30_000;
+  if (data.syncState === 'error') return 120_000;
   if (!data.lastSyncedAt) return 120_000;
   return false;
 }
