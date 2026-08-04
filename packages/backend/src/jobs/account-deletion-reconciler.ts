@@ -32,12 +32,8 @@ export async function handler(): Promise<void> {
   );
   const stuck = incomplete.filter((record) => record.attemptCount >= STUCK_ATTEMPT_THRESHOLD);
 
-  console.log('[account-deletion-reconciler] Scan complete', {
-    incomplete: incomplete.length,
-    reinvoked: stale.length,
-    stuck: stuck.length,
-  });
-
+  let reinvoked = 0;
+  let failed = 0;
   for (const record of stale) {
     const orgId = record.pk.slice('ORG#'.length);
     try {
@@ -49,10 +45,20 @@ export async function handler(): Promise<void> {
           Payload: Buffer.from(JSON.stringify(payload)),
         }),
       );
+      reinvoked += 1;
     } catch (error) {
+      failed += 1;
       console.error('[account-deletion-reconciler] Failed to re-invoke worker', { orgId, error });
     }
   }
+
+  console.log('[account-deletion-reconciler] Reconcile complete', {
+    incomplete: incomplete.length,
+    stale: stale.length,
+    reinvoked,
+    failed,
+    stuck: stuck.length,
+  });
 
   reportMetric({
     _aws: {
@@ -69,6 +75,13 @@ export async function handler(): Promise<void> {
   });
 }
 
+// At current scale (< a few thousand orgs, running twice a day) a Scan with
+// FilterExpression is fine, even though it consumes RCUs for the whole table
+// regardless of the filter. TODO: if org count grows, add a sparse GSI on a
+// deletionStatus attribute carried only by non-DONE DELETION rows — with the
+// wrinkle that DELETION rows are retained forever as audit records, so the
+// finalize step must REMOVE the attribute for the index to stay
+// O(active deletions).
 async function scanIncompleteDeletions(): Promise<OrgDeletionRecord[]> {
   const records: OrgDeletionRecord[] = [];
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
@@ -77,6 +90,8 @@ async function scanIncompleteDeletions(): Promise<OrgDeletionRecord[]> {
       new ScanCommand({
         TableName: Resource.UserInfoTable.name,
         FilterExpression: 'sk = :deletion AND #s <> :done',
+        // Trim the returned payload to what the handler actually reads.
+        ProjectionExpression: 'pk, updatedAt, attemptCount',
         ExpressionAttributeNames: { '#s': 'status' },
         ExpressionAttributeValues: {
           ':deletion': { S: 'DELETION' },

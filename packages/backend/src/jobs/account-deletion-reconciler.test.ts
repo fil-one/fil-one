@@ -27,7 +27,7 @@ function deletionRecord(orgId: string, overrides?: Record<string, unknown>) {
   return marshall({
     pk: `ORG#${orgId}`,
     sk: 'DELETION',
-    status: 'TENANTS_DISABLED',
+    status: 'PENDING',
     attemptCount: 1,
     updatedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1h stale
     members: [],
@@ -83,7 +83,7 @@ describe('account-deletion-reconciler', () => {
     expect(emitted?.StuckAccountDeletionCount).toBe(1);
   });
 
-  it('excludes DONE records via the scan filter', async () => {
+  it('excludes DONE records via the scan filter and projects only what it reads', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [] });
 
     await handler();
@@ -91,5 +91,40 @@ describe('account-deletion-reconciler', () => {
     const scan = ddbMock.commandCalls(ScanCommand)[0].args[0].input;
     expect(scan.FilterExpression).toBe('sk = :deletion AND #s <> :done');
     expect(scan.ExpressionAttributeValues?.[':done']).toEqual({ S: 'DONE' });
+    expect(scan.ProjectionExpression).toBe('pk, updatedAt, attemptCount');
+  });
+
+  it('still rescues legacy records carrying a pre-redesign intermediate status', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [deletionRecord('org-legacy', { status: 'TENANTS_DISABLED' })],
+    });
+
+    await handler();
+
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
+  });
+
+  it('logs actual re-invoke outcomes, counting failed invokes separately', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [deletionRecord('org-1'), deletionRecord('org-2')],
+    });
+    lambdaMock.on(InvokeCommand).rejectsOnce(new Error('throttled')).resolves({});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await handler();
+
+      expect(logSpy).toHaveBeenCalledWith('[account-deletion-reconciler] Reconcile complete', {
+        incomplete: 2,
+        stale: 2,
+        reinvoked: 1,
+        failed: 1,
+        stuck: 0,
+      });
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
   });
 });
