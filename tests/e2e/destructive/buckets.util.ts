@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
-import { REGIONS, type Region } from './regions.util.ts';
+import { isRegion, REGIONS, type Region } from './regions.util.ts';
 
 // Bucket names are globally unique across regions and rejected with 409 if
 // taken, so each caller mints a fresh name. We do not delete buckets afterward
@@ -31,7 +31,7 @@ export async function ensureBucketInEachRegion(page: Page, role: string): Promis
 // "the list failed to load" (both render no bucket rows), and a failing
 // GET /api/buckets must not be mistaken for an empty account — seeding would
 // then pile up buckets the account may already have.
-async function listRegionsWithBucket(page: Page): Promise<Set<string>> {
+async function listRegionsWithBucket(page: Page): Promise<Set<Region>> {
   const listResponse = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname.endsWith('/api/buckets') &&
@@ -48,7 +48,9 @@ async function listRegionsWithBucket(page: Page): Promise<Set<string>> {
   }
 
   const { buckets } = (await response.json()) as { buckets: Array<{ region: string }> };
-  return new Set(buckets.map((bucket) => bucket.region));
+  // Regions the account has buckets in but this suite does not know about are
+  // irrelevant for seeding, so drop them instead of widening the type.
+  return new Set(buckets.map((bucket) => bucket.region).filter(isRegion));
 }
 
 // Creates a bucket without an access key. With the key toggle left off, the
