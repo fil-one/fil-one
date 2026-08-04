@@ -535,7 +535,9 @@ describe('usage-reporting-worker', () => {
       expect(input.ExpressionAttributeValues![':status']).toEqual({
         S: SubscriptionStatus.Canceled,
       });
-      expect(input.ConditionExpression).toBe('attribute_exists(pk)');
+      expect(input.ConditionExpression).toBe(
+        'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)',
+      );
 
       expect(auditItem()).toEqual(
         expect.objectContaining({

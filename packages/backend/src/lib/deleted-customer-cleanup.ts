@@ -42,12 +42,16 @@ export async function resolveOrgIdFromSubscription(userId: string): Promise<stri
  * region. Callers apply their own policy to the returned outcomes (webhook:
  * assertRegionSyncSucceeded → 500 → Stripe retries; usage worker: heal-failed
  * audit → retried on the next daily run).
+ *
+ * `billingCanceled` is false when the record was absent or the FIL-112
+ * deletion fence rejected the write (org mid-teardown) — callers must not
+ * treat the customer as dunning-canceled in that case.
  */
 export async function closeOutDeletedCustomer(params: {
   userId: string;
   orgId: string | null;
   retry?: RetryOptions;
-}): Promise<RegionSyncOutcome[]> {
+}): Promise<{ outcomes: RegionSyncOutcome[]; billingCanceled: boolean }> {
   const { userId, orgId, retry } = params;
 
   // No orgId means the billing record is missing or predates the orgId field
@@ -59,7 +63,7 @@ export async function closeOutDeletedCustomer(params: {
   const outcomes = orgId
     ? await syncTenantStatusInProvisionedRegions(orgId, 'disabled', retry)
     : [];
-  if (outcomes.some((o) => o.outcome === 'error')) return outcomes;
+  if (outcomes.some((o) => o.outcome === 'error')) return { outcomes, billingCanceled: false };
 
   const now = new Date().toISOString();
   try {
@@ -91,9 +95,9 @@ export async function closeOutDeletedCustomer(params: {
       console.warn('[deleted-customer-cleanup] No billing record to cancel or org mid-deletion', {
         userId,
       });
-      return outcomes;
+      return { outcomes, billingCanceled: false };
     }
     throw err;
   }
-  return outcomes;
+  return { outcomes, billingCanceled: true };
 }

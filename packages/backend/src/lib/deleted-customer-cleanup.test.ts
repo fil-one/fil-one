@@ -61,7 +61,7 @@ describe('closeOutDeletedCustomer', () => {
   });
 
   it('disables tenants, then marks the billing record canceled', async () => {
-    const outcomes = await closeOutDeletedCustomer({
+    const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
       userId: USER_ID,
       orgId: ORG_ID,
     });
@@ -86,10 +86,11 @@ describe('closeOutDeletedCustomer', () => {
         ':status': { S: SubscriptionStatus.Canceled },
         ':now': { S: expect.any(String) },
       },
-      ConditionExpression: 'attribute_exists(pk)',
+      ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)',
     });
 
     expect(outcomes).toEqual([okOutcome('aurora')]);
+    expect(billingCanceled).toBe(true);
   });
 
   it('passes the retry options through to the region sync', async () => {
@@ -114,19 +115,20 @@ describe('closeOutDeletedCustomer', () => {
       errorOutcome('fth'),
     ]);
 
-    const outcomes = await closeOutDeletedCustomer({
+    const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
       userId: USER_ID,
       orgId: ORG_ID,
     });
 
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     expect(outcomes).toEqual([okOutcome('aurora'), errorOutcome('fth')]);
+    expect(billingCanceled).toBe(false);
   });
 
   it('cancels the record without any region sync when orgId is null, with a warning', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const outcomes = await closeOutDeletedCustomer({
+    const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
       userId: USER_ID,
       orgId: null,
     });
@@ -134,6 +136,7 @@ describe('closeOutDeletedCustomer', () => {
     expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
     expect(outcomes).toEqual([]);
+    expect(billingCanceled).toBe(true);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('No orgId — skipping tenant status sync'),
       expect.objectContaining({ userId: USER_ID }),
@@ -147,9 +150,10 @@ describe('closeOutDeletedCustomer', () => {
     conditionalFailure.name = 'ConditionalCheckFailedException';
     ddbMock.on(UpdateItemCommand).rejects(conditionalFailure);
 
-    await expect(closeOutDeletedCustomer({ userId: USER_ID, orgId: ORG_ID })).resolves.toEqual([
-      okOutcome('aurora'),
-    ]);
+    await expect(closeOutDeletedCustomer({ userId: USER_ID, orgId: ORG_ID })).resolves.toEqual({
+      outcomes: [okOutcome('aurora')],
+      billingCanceled: false,
+    });
 
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('No billing record to cancel'),

@@ -265,9 +265,12 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
     });
   }
 
-  assertRegionSyncSucceeded(
-    await closeOutDeletedCustomer({ userId, orgId, retry: WEBHOOK_STATUS_SYNC_RETRY }),
-  );
+  const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
+    userId,
+    orgId,
+    retry: WEBHOOK_STATUS_SYNC_RETRY,
+  });
+  assertRegionSyncSucceeded(outcomes);
   if (orgId) {
     console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
       userId,
@@ -275,6 +278,8 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
       customerId: customer.id,
     });
   }
+  // Fenced or absent record (org mid-deletion): not a dunning cancellation.
+  if (!billingCanceled) return;
 
   emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
@@ -372,9 +377,12 @@ async function handleSubscriptionDeleted(
       );
     }
     const orgId = await resolveOrgIdFromSubscription(userId);
-    assertRegionSyncSucceeded(
-      await closeOutDeletedCustomer({ userId, orgId, retry: WEBHOOK_STATUS_SYNC_RETRY }),
-    );
+    const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
+      userId,
+      orgId,
+      retry: WEBHOOK_STATUS_SYNC_RETRY,
+    });
+    assertRegionSyncSucceeded(outcomes);
     console.log(
       '[stripe-webhook] Billing record closed out (subscription.deleted, customer deleted)',
       {
@@ -384,7 +392,10 @@ async function handleSubscriptionDeleted(
         subscriptionId: subscription.id,
       },
     );
-    emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
+    // Fenced or absent record (org mid-deletion): not a dunning cancellation.
+    if (billingCanceled) {
+      emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
+    }
     return;
   }
 
