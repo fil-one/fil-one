@@ -72,16 +72,18 @@ const UPLOAD_TEST_TIMEOUT_MS = 120_000;
 // and neither failure navigates anywhere, so waiting only for the navigation
 // back to the bucket page reports every breakage as the same opaque toHaveURL
 // timeout: a region whose storage backend 502s looks exactly like a hung
-// browser. Read both responses instead, the way the bucket seeding does for
-// GET/POST /api/buckets (see buckets.util.ts).
+// browser. Read both responses instead, the way the `unpaid user cannot create
+// bucket` test below waits on GET /api/buckets.
+//
+// Callers must raise the test timeout to UPLOAD_TEST_TIMEOUT_MS at the top of
+// the test body: the waits below can consume up to 90s on their own, and the
+// navigation that precedes them is subject to the same slow backends.
 async function submitUploadExpectingSuccess(
   page: Page,
   bucketName: string,
   objectName: string,
   region: Region,
 ): Promise<void> {
-  test.setTimeout(UPLOAD_TEST_TIMEOUT_MS);
-
   const presignResponse = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname.endsWith('/api/presign') &&
@@ -102,6 +104,10 @@ async function submitUploadExpectingSuccess(
 
   const presign = await presignResponse;
   if (!presign.ok()) {
+    // No PUT follows a failed presign, so the wait above would eventually time
+    // out and reject with nobody awaiting it — an unhandled rejection that
+    // buries the presign diagnostic we are about to throw.
+    putResponse.catch(() => {});
     throw new Error(
       `POST /api/presign returned ${presign.status()} for a putObject in ${region} ` +
         `(bucket "${bucketName}", key "${objectName}"). Response body: ${await presign.text()}`,
@@ -148,6 +154,8 @@ for (const region of REGIONS) {
     });
 
     test(`paid user can upload object and navigate to it (${region})`, async ({ page }) => {
+      test.setTimeout(UPLOAD_TEST_TIMEOUT_MS);
+
       const bucketName = await openFirstBucketInRegion(page, region);
       const objectName = uniqueObjectName();
 
@@ -184,6 +192,8 @@ for (const region of REGIONS) {
     });
 
     test(`trial user can upload object and navigate to it (${region})`, async ({ page }) => {
+      test.setTimeout(UPLOAD_TEST_TIMEOUT_MS);
+
       const bucketName = await openFirstBucketInRegion(page, region);
       const objectName = uniqueObjectName();
 
