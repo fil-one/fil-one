@@ -1,4 +1,4 @@
-import { DELETION_CODE_TTL_MINUTES, Stage } from '@filone/shared';
+import { DELETION_CODE_TTL_MINUTES, Stage, senderAddress } from '@filone/shared';
 import { Resource } from 'sst';
 
 /**
@@ -24,7 +24,7 @@ export async function sendDeletionCodeEmail(params: {
     return;
   }
 
-  const fromAddress = isProduction ? 'no-reply@filone.ai' : 'no-reply+staging@filone.ai';
+  const fromAddress = senderAddress(isProduction);
   const subject = `${params.code} is your Fil One account deletion code`;
   const text = [
     `You requested to permanently delete your Fil One account and organization "${params.orgName}".`,

@@ -284,6 +284,21 @@ describe('delete-account baseHandler', () => {
     }
   });
 
+  it('degrades gracefully on a re-confirm after teardown purged the org profile (400 name mismatch)', async () => {
+    // Once the async teardown deletes ORG#/PROFILE, a late re-confirm cannot
+    // match the typed org name against anything — it falls into the
+    // name-mismatch 400 rather than crashing or writing new state.
+    mockGetOrgProfile.mockResolvedValue(undefined);
+
+    const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body!).message).toBe('Organization name does not match');
+    expect(mockVerifyChallenge).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+  });
+
   it('is idempotent: a re-confirm after the record exists still invokes the worker', async () => {
     ddbMock
       .on(PutItemCommand)

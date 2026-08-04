@@ -138,6 +138,16 @@ export function getStageFromHostname(hostname: string): Stage {
   return hostname === 'app.fil.one' ? Stage.Production : Stage.Staging;
 }
 
+/**
+ * Product email sender ("from") address. Production sends from the bare
+ * address; every other stage uses the +staging subaddress so misdirected
+ * non-production email is identifiable. Shared by the Auth0 email-provider
+ * setup and direct SendGrid sends (e.g. account-deletion codes).
+ */
+export function senderAddress(isProduction: boolean): string {
+  return isProduction ? 'no-reply@filone.ai' : 'no-reply+staging@filone.ai';
+}
+
 /** Cookie name for the OAuth state parameter (CSRF protection for login flow). */
 export const OAUTH_STATE_COOKIE = 'hs_oauth_state';
 

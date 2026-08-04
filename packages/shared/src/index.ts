@@ -17,6 +17,7 @@ export {
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
+  senderAddress,
   OAUTH_STATE_COOKIE,
   CSRF_COOKIE_NAME,
   GB_BYTES,
