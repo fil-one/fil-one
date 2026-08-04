@@ -71,7 +71,13 @@ const ddbMock = mockClient(DynamoDBClient);
 
 process.env.FILONE_STAGE = 'test';
 
-import { assertPurgeAllowed, batchDelete, runAccountDeletion } from './account-deletion.js';
+import {
+  assertPurgeTargetAllowed,
+  batchDelete,
+  runAccountDeletion,
+  BILLING_PURGE_ALLOWLIST,
+  USER_INFO_PURGE_ALLOWLIST,
+} from './account-deletion.js';
 import { OrgDeletionStatus } from './dynamo-records.js';
 
 const ORG_ID = 'org-1';
@@ -147,15 +153,44 @@ function doneWrites() {
     .filter((c) => c.args[0].input.ExpressionAttributeValues?.[':done']?.S === 'DONE');
 }
 
-describe('assertPurgeAllowed', () => {
-  it('throws for the FIL-422 trial-claim prefix', () => {
+describe('assertPurgeTargetAllowed (purge blast-radius guard)', () => {
+  it('refuses to delete the EMAIL_NORM# trial-claim record, which must survive account deletion (FIL-422)', () => {
     expect(() =>
-      assertPurgeAllowed('EMAIL_NORM#user@gmail.com', ['ORG#', 'USER#', 'SUB#']),
+      assertPurgeTargetAllowed('EMAIL_NORM#user@gmail.com', USER_INFO_PURGE_ALLOWLIST),
     ).toThrow(/outside the allowlist/);
   });
 
-  it('allows org-prefixed keys', () => {
-    expect(() => assertPurgeAllowed('ORG#abc', ['ORG#', 'USER#', 'SUB#'])).not.toThrow();
+  it('permits deletion of keys under an allowlisted prefix', () => {
+    for (const pk of ['ORG#abc', 'USER#u-1', 'SUB#auth0|x', 'RAGKEYHASH#deadbeef']) {
+      expect(() => assertPurgeTargetAllowed(pk, USER_INFO_PURGE_ALLOWLIST)).not.toThrow();
+    }
+  });
+
+  it('is not fooled by prefix collisions: ORGANIZATION# is not ORG#', () => {
+    // The allowlist prefixes end in '#' precisely so a longer key family
+    // sharing the leading letters can never slip through the guard.
+    expect(() => assertPurgeTargetAllowed('ORGANIZATION#abc', USER_INFO_PURGE_ALLOWLIST)).toThrow(
+      /outside the allowlist/,
+    );
+  });
+
+  it('billing allowlist: permits CUSTOMER# and DELETION_CHALLENGE# rows only', () => {
+    expect(() => assertPurgeTargetAllowed('CUSTOMER#u-1', BILLING_PURGE_ALLOWLIST)).not.toThrow();
+    expect(() =>
+      assertPurgeTargetAllowed('DELETION_CHALLENGE#org-1', BILLING_PURGE_ALLOWLIST),
+    ).not.toThrow();
+  });
+
+  it('billing allowlist: refuses EMAIL_NORM# (trial claims) and ORG# tombstones, which must outlive the account', () => {
+    expect(() =>
+      assertPurgeTargetAllowed('EMAIL_NORM#user@gmail.com', BILLING_PURGE_ALLOWLIST),
+    ).toThrow(/outside the allowlist/);
+    expect(() => assertPurgeTargetAllowed('ORG_TOMBSTONE#org-1', BILLING_PURGE_ALLOWLIST)).toThrow(
+      /outside the allowlist/,
+    );
+    expect(() => assertPurgeTargetAllowed('ORG#org-1', BILLING_PURGE_ALLOWLIST)).toThrow(
+      /outside the allowlist/,
+    );
   });
 });
 

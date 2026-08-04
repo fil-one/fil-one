@@ -35,14 +35,17 @@ import { getStripeClient } from './stripe-client.js';
 const dynamo = getDynamoClient();
 
 /**
- * Partition-key prefixes the purge is allowed to delete. `EMAIL_NORM#` (the
- * FIL-422 trial-claim record) is structurally undeletable: any key outside
- * this allowlist throws before a delete is issued.
+ * Partition-key prefixes the purge is allowed to delete, per table. Anything
+ * outside them — e.g. `EMAIL_NORM#`, the FIL-422 trial-claim record that must
+ * survive account deletion — is structurally undeletable: the guard throws
+ * before a delete is issued. The trailing `#` matters: it stops a prefix
+ * colliding with a longer key family (`ORG#` never matches `ORGANIZATION#`).
  */
-const USER_INFO_PURGE_ALLOWLIST = ['ORG#', 'USER#', 'SUB#', 'RAGKEYHASH#'] as const;
-const BILLING_PURGE_ALLOWLIST = ['CUSTOMER#', 'DELETION_CHALLENGE#'] as const;
+export const USER_INFO_PURGE_ALLOWLIST = ['ORG#', 'USER#', 'SUB#', 'RAGKEYHASH#'] as const;
+export const BILLING_PURGE_ALLOWLIST = ['CUSTOMER#', 'DELETION_CHALLENGE#'] as const;
 
-export function assertPurgeAllowed(pk: string, allowlist: readonly string[]): void {
+/** Blast-radius guard: refuses any purge target whose pk is outside the allowlist. */
+export function assertPurgeTargetAllowed(pk: string, allowlist: readonly string[]): void {
   if (!allowlist.some((prefix) => pk.startsWith(prefix))) {
     throw new Error(`Refusing to purge key outside the allowlist: ${pk}`);
   }
@@ -319,12 +322,12 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
   const orgKeys = orgRows
     .filter((row) => row.sk !== DeletionKeys.deletionSk())
     .map((row) => ({ pk: row.pk as string, sk: row.sk as string }));
-  for (const key of orgKeys) assertPurgeAllowed(key.pk, USER_INFO_PURGE_ALLOWLIST);
+  for (const key of orgKeys) assertPurgeTargetAllowed(key.pk, USER_INFO_PURGE_ALLOWLIST);
   await batchDelete(Resource.UserInfoTable.name, orgKeys);
 
   for (const member of record.members) {
     const userKey = { pk: `USER#${member.userId}`, sk: 'PROFILE' };
-    assertPurgeAllowed(userKey.pk, USER_INFO_PURGE_ALLOWLIST);
+    assertPurgeTargetAllowed(userKey.pk, USER_INFO_PURGE_ALLOWLIST);
     await dynamo.send(
       new DeleteItemCommand({ TableName: Resource.UserInfoTable.name, Key: marshall(userKey) }),
     );
@@ -333,7 +336,7 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
     // only) so a stale-but-valid session can never resurrect the account —
     // strip the PII-adjacent attributes instead of deleting the row.
     if (member.sub) {
-      assertPurgeAllowed(`SUB#${member.sub}`, USER_INFO_PURGE_ALLOWLIST);
+      assertPurgeTargetAllowed(`SUB#${member.sub}`, USER_INFO_PURGE_ALLOWLIST);
       await dynamo.send(
         new UpdateItemCommand({
           TableName: Resource.UserInfoTable.name,
@@ -347,7 +350,7 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
     }
 
     const billingKey = { pk: `CUSTOMER#${member.userId}`, sk: 'SUBSCRIPTION' };
-    assertPurgeAllowed(billingKey.pk, BILLING_PURGE_ALLOWLIST);
+    assertPurgeTargetAllowed(billingKey.pk, BILLING_PURGE_ALLOWLIST);
     await dynamo.send(
       new DeleteItemCommand({ TableName: Resource.BillingTable.name, Key: marshall(billingKey) }),
     );
@@ -475,7 +478,7 @@ async function purgeRagKeyHashRows(orgId: string): Promise<void> {
     .map((row) => row.tokenHash)
     .filter((tokenHash): tokenHash is string => typeof tokenHash === 'string')
     .map((tokenHash) => ({ pk: RagApiKeyKeys.lookupPk(tokenHash), sk: RagApiKeyKeys.lookupSk() }));
-  for (const key of lookupKeys) assertPurgeAllowed(key.pk, USER_INFO_PURGE_ALLOWLIST);
+  for (const key of lookupKeys) assertPurgeTargetAllowed(key.pk, USER_INFO_PURGE_ALLOWLIST);
   await batchDelete(Resource.UserInfoTable.name, lookupKeys);
 }
 
