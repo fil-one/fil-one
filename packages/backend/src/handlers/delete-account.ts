@@ -4,6 +4,7 @@ import {
   PutItemCommand,
   QueryCommand,
   UpdateItemCommand,
+  type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -134,42 +135,60 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   return successResponse();
 }
 
-/** MEMBER# rows → {userId, sub} pairs (sub resolved via USER#/PROFILE). */
+/**
+ * MEMBER# rows → {userId, sub} pairs (sub resolved via USER#/PROFILE). The
+ * query is paginated — a silently truncated member list would leave the
+ * missing members' Auth0 users alive after teardown — and the per-member
+ * profile reads run in parallel.
+ */
 async function snapshotMembers(orgId: string): Promise<OrgDeletionMember[]> {
-  const result = await dynamo.send(
-    new QueryCommand({
-      TableName: Resource.UserInfoTable.name,
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :member)',
-      ExpressionAttributeValues: marshall({ ':pk': `ORG#${orgId}`, ':member': 'MEMBER#' }),
-    }),
-  );
-  const userIds = (result.Items ?? []).map((item) => item.sk!.S!.slice('MEMBER#'.length));
-
-  const members: OrgDeletionMember[] = [];
-  for (const memberUserId of userIds) {
-    const profile = await dynamo.send(
-      new GetItemCommand({
+  const userIds: string[] = [];
+  let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
+  do {
+    const result = await dynamo.send(
+      new QueryCommand({
         TableName: Resource.UserInfoTable.name,
-        Key: marshall({ pk: `USER#${memberUserId}`, sk: 'PROFILE' }),
+        KeyConditionExpression: 'pk = :pk AND begins_with(sk, :member)',
+        ExpressionAttributeValues: marshall({ ':pk': `ORG#${orgId}`, ':member': 'MEMBER#' }),
+        ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
       }),
     );
-    const sub = profile.Item?.sub?.S;
-    members.push({ userId: memberUserId, ...(sub ? { sub } : {}) });
-  }
-  return members;
+    userIds.push(...(result.Items ?? []).map((item) => item.sk!.S!.slice('MEMBER#'.length)));
+    lastEvaluatedKey = result.LastEvaluatedKey;
+  } while (lastEvaluatedKey);
+
+  return Promise.all(
+    userIds.map(async (memberUserId): Promise<OrgDeletionMember> => {
+      const profile = await dynamo.send(
+        new GetItemCommand({
+          TableName: Resource.UserInfoTable.name,
+          Key: marshall({ pk: `USER#${memberUserId}`, sk: 'PROFILE' }),
+        }),
+      );
+      const sub = profile.Item?.sub?.S;
+      return { userId: memberUserId, ...(sub ? { sub } : {}) };
+    }),
+  );
 }
 
-/** First member billing record with Stripe references wins (one per org). */
+/**
+ * First member billing record (in members order) with Stripe references wins
+ * (one per org). The reads themselves run in parallel.
+ */
 async function snapshotBilling(
   members: OrgDeletionMember[],
 ): Promise<Pick<OrgDeletionRecord, 'stripeCustomerId' | 'subscriptionId'>> {
-  for (const member of members) {
-    const { Item } = await dynamo.send(
-      new GetItemCommand({
-        TableName: Resource.BillingTable.name,
-        Key: marshall({ pk: `CUSTOMER#${member.userId}`, sk: 'SUBSCRIPTION' }),
-      }),
-    );
+  const rows = await Promise.all(
+    members.map((member) =>
+      dynamo.send(
+        new GetItemCommand({
+          TableName: Resource.BillingTable.name,
+          Key: marshall({ pk: `CUSTOMER#${member.userId}`, sk: 'SUBSCRIPTION' }),
+        }),
+      ),
+    ),
+  );
+  for (const { Item } of rows) {
     if (Item?.stripeCustomerId?.S || Item?.subscriptionId?.S) {
       return {
         ...(Item.stripeCustomerId?.S ? { stripeCustomerId: Item.stripeCustomerId.S } : {}),
@@ -204,7 +223,13 @@ async function applyFences(orgId: string, members: OrgDeletionMember[]): Promise
     // Profile already purged by a running teardown — nothing to fence.
   }
 
-  for (const member of members) {
+  // Per-member fences are independent — apply them all in parallel.
+  await Promise.all(members.map((member) => fenceMember(member, now)));
+}
+
+/** Billing-webhook fence + SUB# session kill for one member, in parallel. */
+async function fenceMember(member: OrgDeletionMember, now: string): Promise<void> {
+  const billingFence = (async () => {
     try {
       await dynamo.send(
         new UpdateItemCommand({
@@ -219,20 +244,22 @@ async function applyFences(orgId: string, members: OrgDeletionMember[]): Promise
       if (!(err instanceof ConditionalCheckFailedException)) throw err;
       // No billing record (e.g. trial never started) — nothing to fence.
     }
+  })();
 
-    if (member.sub) {
-      // if_not_exists keeps the original deletion timestamp stable across
-      // idempotent re-confirms (and matches the worker's purge step).
-      await dynamo.send(
+  // if_not_exists keeps the original deletion timestamp stable across
+  // idempotent re-confirms (and matches the worker's purge step).
+  const sessionKill = member.sub
+    ? dynamo.send(
         new UpdateItemCommand({
           TableName: Resource.UserInfoTable.name,
           Key: marshall({ pk: `SUB#${member.sub}`, sk: 'IDENTITY' }),
           UpdateExpression: 'SET deleted = :true, deletedAt = if_not_exists(deletedAt, :now)',
           ExpressionAttributeValues: marshall({ ':true': true, ':now': now }),
         }),
-      );
-    }
-  }
+      )
+    : Promise.resolve();
+
+  await Promise.all([billingFence, sessionKill]);
 }
 
 /**

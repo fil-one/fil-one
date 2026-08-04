@@ -227,6 +227,48 @@ describe('delete-account baseHandler', () => {
     );
   });
 
+  it('paginates the MEMBER# query so a truncated page cannot silently drop members from the snapshot', async () => {
+    // Two pages: user-1, then (via LastEvaluatedKey) user-2. A 1MB-truncated
+    // single query would have missed user-2 — leaving their Auth0 user alive.
+    ddbMock
+      .on(QueryCommand)
+      .resolvesOnce({
+        Items: [marshall({ pk: `ORG#${ORG_ID}`, sk: `MEMBER#${USER_ID}` })],
+        LastEvaluatedKey: marshall({ pk: `ORG#${ORG_ID}`, sk: `MEMBER#${USER_ID}` }),
+      })
+      .resolves({ Items: [marshall({ pk: `ORG#${ORG_ID}`, sk: 'MEMBER#user-2' })] });
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: 'USER#user-2' }, sk: { S: 'PROFILE' } } })
+      .resolves({ Item: marshall({ sub: 'auth0|sub-2' }) });
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: 'CUSTOMER#user-2' }, sk: { S: 'SUBSCRIPTION' } } })
+      .resolves({});
+
+    const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(200);
+
+    // Both pages' members are snapshotted with their subs.
+    const put = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
+    const written = unmarshall(put.Item!) as {
+      members: { userId: string; sub?: string }[];
+    };
+    expect(written.members).toEqual([
+      { userId: USER_ID, sub: SUB },
+      { userId: 'user-2', sub: 'auth0|sub-2' },
+    ]);
+
+    // And both members' sessions are fenced.
+    const updates = ddbMock.commandCalls(UpdateItemCommand).map((c) => c.args[0].input);
+    for (const sub of [SUB, 'auth0|sub-2']) {
+      expect(
+        updates.some(
+          (u) => u.Key?.pk?.S === `SUB#${sub}` && u.UpdateExpression?.includes('deleted = :true'),
+        ),
+      ).toBe(true);
+    }
+  });
+
   it('is idempotent: a re-confirm after the record exists still invokes the worker', async () => {
     ddbMock
       .on(PutItemCommand)
