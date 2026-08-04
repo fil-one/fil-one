@@ -40,6 +40,19 @@ vi.mock('../lib/auth-secrets.js', () => ({
   }),
 }));
 
+// Handler-level mocks: the full middy stack (auth, CSRF, MFA step-up gate)
+// is exercised by the second describe below.
+const { mockJwtVerify, mockGetMfaEnrollments } = vi.hoisted(() => ({
+  mockJwtVerify: vi.fn(),
+  mockGetMfaEnrollments: vi.fn(),
+}));
+vi.mock('jose', async () =>
+  (await import('../test/auth-mocks.js')).joseMockModule(mockJwtVerify),
+);
+vi.mock('../lib/auth0-management.js', async () =>
+  (await import('../test/auth-mocks.js')).auth0ManagementMockModule(mockGetMfaEnrollments),
+);
+
 const mockVerifyChallenge = vi.fn();
 vi.mock('../lib/deletion-challenge.js', () => ({
   verifyDeletionChallenge: (...args: unknown[]) => mockVerifyChallenge(...args),
@@ -57,12 +70,14 @@ const ddbMock = mockClient(DynamoDBClient);
 const lambdaMock = mockClient(LambdaClient);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
+process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 process.env.ACCOUNT_DELETION_WORKER_FUNCTION_NAME = 'account-deletion-worker';
 
-import { baseHandler } from './delete-account.js';
+import { baseHandler, handler } from './delete-account.js';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildAuthenticatedEvent, setupAuthMocks } from '../test/auth-mocks.js';
 
 const ORG_ID = 'org-1';
 const USER_ID = 'user-1';
@@ -286,5 +301,66 @@ describe('delete-account baseHandler', () => {
     )) as APIGatewayProxyStructuredResultV2;
 
     expect(result.statusCode).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Full middy stack — the MFA step-up gate sits on the route, so these tests
+// go through `handler` (auth + CSRF + requireMfaIfEnrolled), not baseHandler.
+// ---------------------------------------------------------------------------
+
+describe('delete-account handler (MFA step-up gate)', () => {
+  function makeHandlerEvent() {
+    return buildAuthenticatedEvent({
+      method: 'POST',
+      rawPath: '/api/account',
+      body: JSON.stringify({ code: '123456', orgName: 'Acme Corp' }),
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupHappyMocks();
+    // Password-only session: no 'mfa'/'phr' in amr, so the gate consults Auth0.
+    setupAuthMocks({
+      ddbMock,
+      mockJwtVerify,
+      sub: SUB,
+      userId: USER_ID,
+      orgId: ORG_ID,
+      idTokenPayload: { amr: ['pwd'] },
+    });
+  });
+
+  it('returns 401 step_up_required for an MFA-enrolled user without a strong-auth session', async () => {
+    mockGetMfaEnrollments.mockResolvedValue([
+      { id: 'e-1', type: 'authenticator', status: 'confirmed' },
+    ]);
+
+    const result = (await handler(
+      makeHandlerEvent(),
+      buildContext(),
+    )) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(401);
+    expect(JSON.parse(result.body!)).toEqual({ error: 'step_up_required' });
+    // The gate rejects BEFORE any deletion work.
+    expect(mockVerifyChallenge).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+  });
+
+  it('passes the gate for an un-enrolled user — the email code is their sole second factor', async () => {
+    mockGetMfaEnrollments.mockResolvedValue([]);
+
+    const result = (await handler(
+      makeHandlerEvent(),
+      buildContext(),
+    )) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(200);
+    expect(mockGetMfaEnrollments).toHaveBeenCalledWith(SUB);
+    expect(mockVerifyChallenge).toHaveBeenCalledWith(ORG_ID, '123456');
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
   });
 });

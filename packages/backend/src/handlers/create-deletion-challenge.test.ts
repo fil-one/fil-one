@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockClient } from 'aws-sdk-client-mock';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode } from '@filone/shared';
 
@@ -8,6 +10,22 @@ vi.mock('sst', () => ({
     BillingTable: { name: 'BillingTable' },
   },
 }));
+
+// Handler-level mocks: the full middy stack (auth, CSRF, MFA step-up gate)
+// is exercised by the second describe below.
+const { mockJwtVerify, mockGetMfaEnrollments } = vi.hoisted(() => ({
+  mockJwtVerify: vi.fn(),
+  mockGetMfaEnrollments: vi.fn(),
+}));
+vi.mock('jose', async () =>
+  (await import('../test/auth-mocks.js')).joseMockModule(mockJwtVerify),
+);
+vi.mock('../lib/auth-secrets.js', async () =>
+  (await import('../test/auth-mocks.js')).authSecretsMockModule(),
+);
+vi.mock('../lib/auth0-management.js', async () =>
+  (await import('../test/auth-mocks.js')).auth0ManagementMockModule(mockGetMfaEnrollments),
+);
 
 const mockReadDeletionRecord = vi.fn();
 vi.mock('../lib/deletion-record.js', () => ({
@@ -34,10 +52,17 @@ vi.mock('../lib/org-membership.js', () => ({
   isOrgAdmin: (orgId: string, userId: string) => mockIsOrgAdmin(orgId, userId),
 }));
 
-import { baseHandler } from './create-deletion-challenge.js';
-import { buildEvent } from '../test/lambda-test-utilities.js';
+const ddbMock = mockClient(DynamoDBClient);
+
+process.env.AUTH0_DOMAIN = 'test.auth0.com';
+process.env.AUTH0_AUDIENCE = 'https://api.test.com';
+
+import { baseHandler, handler } from './create-deletion-challenge.js';
+import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
+import { buildAuthenticatedEvent, setupAuthMocks } from '../test/auth-mocks.js';
 
 const ORG_ID = 'org-1';
+const SUB = 'auth0|sub-1';
 
 function makeEvent(email?: string | null) {
   return buildEvent({
@@ -123,5 +148,66 @@ describe('create-deletion-challenge baseHandler', () => {
     mockSendEmail.mockRejectedValue(new Error('SendGrid send failed (500)'));
 
     await expect(baseHandler(makeEvent())).rejects.toThrow('SendGrid send failed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Full middy stack — the MFA step-up gate sits on the route, so these tests
+// go through `handler` (auth + CSRF + requireMfaIfEnrolled), not baseHandler.
+// ---------------------------------------------------------------------------
+
+describe('create-deletion-challenge handler (MFA step-up gate)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    mockIsOrgAdmin.mockResolvedValue(true);
+    mockReadDeletionRecord.mockResolvedValue(undefined);
+    mockGetOrgProfile.mockResolvedValue({ name: { S: 'Acme Corp' } });
+    mockCreateChallenge.mockResolvedValue({
+      outcome: 'created',
+      code: '123456',
+      expiresAt: '2026-07-10T00:15:00.000Z',
+      resendAvailableAt: '2026-07-10T00:01:00.000Z',
+    });
+    mockSendEmail.mockResolvedValue(undefined);
+    // Password-only session: no 'mfa'/'phr' in amr, so the gate consults Auth0.
+    setupAuthMocks({
+      ddbMock,
+      mockJwtVerify,
+      sub: SUB,
+      userId: 'user-1',
+      orgId: ORG_ID,
+      idTokenPayload: { amr: ['pwd'] },
+    });
+  });
+
+  it('returns 401 step_up_required for an MFA-enrolled user without a strong-auth session', async () => {
+    mockGetMfaEnrollments.mockResolvedValue([
+      { id: 'e-1', type: 'authenticator', status: 'confirmed' },
+    ]);
+
+    const result = (await handler(
+      buildAuthenticatedEvent({ rawPath: '/api/account/delete-challenge' }),
+      buildContext(),
+    )) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(401);
+    expect(JSON.parse(result.body!)).toEqual({ error: 'step_up_required' });
+    // The gate rejects BEFORE any challenge work.
+    expect(mockCreateChallenge).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it('passes the gate for an un-enrolled user — the email code is their sole second factor', async () => {
+    mockGetMfaEnrollments.mockResolvedValue([]);
+
+    const result = (await handler(
+      buildAuthenticatedEvent({ rawPath: '/api/account/delete-challenge' }),
+      buildContext(),
+    )) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(200);
+    expect(mockGetMfaEnrollments).toHaveBeenCalledWith(SUB);
+    expect(mockSendEmail).toHaveBeenCalledOnce();
   });
 });

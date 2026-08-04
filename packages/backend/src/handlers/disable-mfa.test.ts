@@ -1,18 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockGetMfaEnrollments = vi.fn();
-const mockDeleteAllAuthenticators = vi.fn();
-vi.mock('../lib/auth0-management.js', () => ({
-  getConnectionType: (sub: string) => sub.split('|')[0] ?? 'unknown',
-  getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
-  deleteAllAuthenticators: (...args: unknown[]) => mockDeleteAllAuthenticators(...args),
+const { mockGetMfaEnrollments, mockDeleteAllAuthenticators, mockJwtVerify } = vi.hoisted(() => ({
+  mockGetMfaEnrollments: vi.fn(),
+  mockDeleteAllAuthenticators: vi.fn(),
+  mockJwtVerify: vi.fn(),
 }));
+vi.mock('../lib/auth0-management.js', async () =>
+  (await import('../test/auth-mocks.js')).auth0ManagementMockModule(mockGetMfaEnrollments, {
+    getConnectionType: (sub: string) => sub.split('|')[0] ?? 'unknown',
+    deleteAllAuthenticators: (...args: unknown[]) => mockDeleteAllAuthenticators(...args),
+  }),
+);
 
 vi.mock('sst', () => ({
   Resource: {
@@ -25,19 +29,13 @@ vi.mock('sst', () => ({
   },
 }));
 
-vi.mock('../lib/auth-secrets.js', () => ({
-  getAuthSecrets: () => ({
-    AUTH0_CLIENT_ID: 'test-client-id',
-    AUTH0_CLIENT_SECRET: 'test-client-secret',
-  }),
-}));
+vi.mock('../lib/auth-secrets.js', async () =>
+  (await import('../test/auth-mocks.js')).authSecretsMockModule(),
+);
 
-const mockJwtVerify = vi.fn();
-vi.mock('jose', () => ({
-  jwtVerify: (token: unknown, jwks: unknown, opts: unknown) => mockJwtVerify(token, jwks, opts),
-  decodeJwt: vi.fn(),
-  createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
-}));
+vi.mock('jose', async () =>
+  (await import('../test/auth-mocks.js')).joseMockModule(mockJwtVerify),
+);
 
 const ddbMock = mockClient(DynamoDBClient);
 
@@ -45,8 +43,8 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './disable-mfa.js';
-import { buildEvent, buildContext } from '../test/lambda-test-utilities.js';
-import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
+import { buildContext } from '../test/lambda-test-utilities.js';
+import { buildAuthenticatedEvent, setupAuthMocks } from '../test/auth-mocks.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,55 +54,23 @@ const MOCK_SUB = 'auth0|abc123';
 const MOCK_SOCIAL_SUB = 'google-oauth2|abc123';
 const MOCK_ORG_ID = 'org-1';
 const MOCK_USER_ID = 'user-1';
-const MOCK_EMAIL = 'user@example.com';
-const MOCK_CSRF_TOKEN = 'csrf-token-value';
 
-function disableMfaEvent(sub: string = MOCK_SUB) {
-  const event = buildEvent({
-    cookies: [
-      `hs_access_token=valid-token`,
-      `hs_id_token=id-token`,
-      `hs_csrf_token=${MOCK_CSRF_TOKEN}`,
-    ],
-    userInfo: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID, email: MOCK_EMAIL, sub },
-    method: 'POST',
-    rawPath: '/api/mfa/disable',
-  });
-  event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
-  return event;
+function disableMfaEvent() {
+  return buildAuthenticatedEvent({ method: 'POST', rawPath: '/api/mfa/disable' });
 }
 
-function setupAuthMocks(
+function setupAuth(
   sub: string = MOCK_SUB,
   idTokenPayload: Record<string, unknown> = { amr: ['mfa'] },
 ) {
-  mockJwtVerify.mockResolvedValueOnce({ payload: { sub } }).mockResolvedValueOnce({
-    payload: { email: MOCK_EMAIL, email_verified: true, ...idTokenPayload },
+  setupAuthMocks({
+    ddbMock,
+    mockJwtVerify,
+    sub,
+    userId: MOCK_USER_ID,
+    orgId: MOCK_ORG_ID,
+    idTokenPayload,
   });
-
-  ddbMock
-    .on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
-    })
-    .resolves({
-      Item: {
-        userId: { S: MOCK_USER_ID },
-        orgId: { S: MOCK_ORG_ID },
-      },
-    });
-
-  ddbMock
-    .on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } },
-    })
-    .resolves({
-      Item: {
-        orgConfirmed: { BOOL: true },
-        auroraSetupStatus: { S: FINAL_SETUP_STATUS },
-      },
-    });
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +84,7 @@ describe('POST /api/mfa/disable handler', () => {
   });
 
   it('disables MFA and deletes authenticators for database connection users', async () => {
-    setupAuthMocks();
+    setupAuth();
     mockGetMfaEnrollments.mockResolvedValue([
       { id: 'test', type: 'authenticator', status: 'confirmed' },
     ]);
@@ -136,13 +102,13 @@ describe('POST /api/mfa/disable handler', () => {
   });
 
   it('disables MFA for social login users', async () => {
-    setupAuthMocks(MOCK_SOCIAL_SUB);
+    setupAuth(MOCK_SOCIAL_SUB);
     mockGetMfaEnrollments.mockResolvedValue([
       { id: 'test', type: 'authenticator', status: 'confirmed' },
     ]);
     mockDeleteAllAuthenticators.mockResolvedValue(undefined);
 
-    const result = await handler(disableMfaEvent(MOCK_SOCIAL_SUB), buildContext());
+    const result = await handler(disableMfaEvent(), buildContext());
 
     expect(result).toMatchObject({
       statusCode: 200,
@@ -154,7 +120,7 @@ describe('POST /api/mfa/disable handler', () => {
   });
 
   it('returns 400 when MFA is not currently enabled', async () => {
-    setupAuthMocks();
+    setupAuth();
     mockGetMfaEnrollments.mockResolvedValue([]);
 
     const result = await handler(disableMfaEvent(), buildContext());
@@ -167,7 +133,7 @@ describe('POST /api/mfa/disable handler', () => {
   });
 
   it('returns 401 step_up_required when the ID token has no amr: ["mfa"]', async () => {
-    setupAuthMocks(MOCK_SUB, { amr: ['pwd'] });
+    setupAuth(MOCK_SUB, { amr: ['pwd'] });
     mockGetMfaEnrollments.mockResolvedValue([
       { id: 'test', type: 'authenticator', status: 'confirmed' },
     ]);
