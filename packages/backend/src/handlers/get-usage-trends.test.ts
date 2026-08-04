@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockGetAvailableOrchestrators = vi.fn();
+const mockGetAvailableOrchestrators = vi.hoisted(() => vi.fn());
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
   getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
 }));
