@@ -39,6 +39,7 @@ function challengeKey(orgId: string) {
  */
 export async function createDeletionChallenge(orgId: string): Promise<CreateChallengeResult> {
   const now = new Date();
+  const nowEpoch = Math.floor(now.getTime() / 1000);
   const code = randomInt(0, 10 ** DELETION_CODE_LENGTH)
     .toString()
     .padStart(DELETION_CODE_LENGTH, '0');
@@ -46,21 +47,23 @@ export async function createDeletionChallenge(orgId: string): Promise<CreateChal
   const expiresAt = new Date(now.getTime() + DELETION_CODE_TTL_MINUTES * 60 * 1000).toISOString();
   const cooldownCutoff = new Date(now.getTime() - RESEND_COOLDOWN_SECONDS * 1000).toISOString();
 
-  // The send counter lives on the row being replaced, so the rate limit is an
-  // atomic conditional update: allowed when no row exists, or when the
-  // cooldown has elapsed and the window's send budget remains. The window is
-  // anchored on the first send (`ttl`/`createdAt` keep their original values).
+  // The send counter lives on the row being replaced, so the rate limit is a
+  // pair of atomic conditional updates. DynamoDB's TTL janitor deletes expired
+  // rows lazily (possibly hours late), so an expired row must never keep
+  // blocking sends: phase 1 reclaims it (fresh window, sendCount reset to 1),
+  // and only a physically live window falls through to phase 2, where the
+  // cooldown and send budget apply and the window anchor (`ttl`/`createdAt`)
+  // is preserved.
   try {
+    // Phase 1 — start a fresh window: no row, or the row's TTL has lapsed.
     await getDynamoClient().send(
       new UpdateItemCommand({
         TableName: Resource.BillingTable.name,
         Key: challengeKey(orgId),
         UpdateExpression:
           'SET codeHash = :codeHash, salt = :salt, attempts = :zero, lastSentAt = :now, ' +
-          'expiresAt = :expiresAt, createdAt = if_not_exists(createdAt, :now), ' +
-          '#ttl = if_not_exists(#ttl, :ttl) ADD sendCount :one',
-        ConditionExpression:
-          'attribute_not_exists(pk) OR (lastSentAt < :cooldownCutoff AND sendCount < :maxSends)',
+          'expiresAt = :expiresAt, createdAt = :now, #ttl = :ttl, sendCount = :one',
+        ConditionExpression: 'attribute_not_exists(pk) OR #ttl <= :nowEpoch',
         ExpressionAttributeNames: { '#ttl': 'ttl' },
         ExpressionAttributeValues: marshall({
           ':codeHash': hashCode(orgId, salt, code),
@@ -69,18 +72,48 @@ export async function createDeletionChallenge(orgId: string): Promise<CreateChal
           ':one': 1,
           ':now': now.toISOString(),
           ':expiresAt': expiresAt,
-          ':ttl': Math.floor(now.getTime() / 1000) + ROW_TTL_SECONDS,
-          ':cooldownCutoff': cooldownCutoff,
-          ':maxSends': MAX_SENDS_PER_WINDOW,
+          ':ttl': nowEpoch + ROW_TTL_SECONDS,
+          ':nowEpoch': nowEpoch,
         }),
-        ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
       }),
     );
   } catch (err) {
-    if (err instanceof ConditionalCheckFailedException) {
-      return rateLimitedResult(err, now);
+    if (!(err instanceof ConditionalCheckFailedException)) throw err;
+    // Phase 2 — resend within the live window: cooldown elapsed and send
+    // budget remaining. The `#ttl > :nowEpoch` guard keeps this from racing a
+    // concurrent phase-1 reclaim onto a stale window.
+    try {
+      await getDynamoClient().send(
+        new UpdateItemCommand({
+          TableName: Resource.BillingTable.name,
+          Key: challengeKey(orgId),
+          UpdateExpression:
+            'SET codeHash = :codeHash, salt = :salt, attempts = :zero, lastSentAt = :now, ' +
+            'expiresAt = :expiresAt ADD sendCount :one',
+          ConditionExpression:
+            '(attribute_not_exists(#ttl) OR #ttl > :nowEpoch) AND ' +
+            'lastSentAt < :cooldownCutoff AND sendCount < :maxSends',
+          ExpressionAttributeNames: { '#ttl': 'ttl' },
+          ExpressionAttributeValues: marshall({
+            ':codeHash': hashCode(orgId, salt, code),
+            ':salt': salt,
+            ':zero': 0,
+            ':one': 1,
+            ':now': now.toISOString(),
+            ':expiresAt': expiresAt,
+            ':nowEpoch': nowEpoch,
+            ':cooldownCutoff': cooldownCutoff,
+            ':maxSends': MAX_SENDS_PER_WINDOW,
+          }),
+          ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
+        }),
+      );
+    } catch (resendErr) {
+      if (resendErr instanceof ConditionalCheckFailedException) {
+        return rateLimitedResult(resendErr, now);
+      }
+      throw resendErr;
     }
-    throw err;
   }
 
   return {
