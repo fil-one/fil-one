@@ -9,14 +9,27 @@ import {
   ConditionalCheckFailedException,
 } from '@aws-sdk/client-dynamodb';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
-import { marshall } from '@aws-sdk/util-dynamodb';
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
+
+// The handler imports the REAL orchestrator registry (via region-helpers) to
+// snapshot tenant ids for every provisioned region — deliberately unmocked so
+// adding a region to the registry exercises this suite. The FTH client is
+// constructed at module load, so its env must exist before imports evaluate.
+vi.hoisted(() => {
+  process.env.FILONE_STAGE = 'test';
+  process.env.FTH_MANAGEMENT_API_URL = 'https://fth.test.example.com';
+  process.env.FORGE_MANAGEMENT_API_URL = 'https://forge.test.example.com';
+});
 
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
     BillingTable: { name: 'BillingTable' },
+    FthManagementApiToken: { value: 'fth-token' },
+    ForgeManagementApiToken: { value: 'forge-token' },
+    AuroraBackofficeToken: { value: 'aurora-token' },
   },
 }));
 
@@ -47,11 +60,31 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.ACCOUNT_DELETION_WORKER_FUNCTION_NAME = 'account-deletion-worker';
 
 import { baseHandler } from './delete-account.js';
+import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.js';
+import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
 const ORG_ID = 'org-1';
 const USER_ID = 'user-1';
 const SUB = 'auth0|sub-1';
+
+/**
+ * Profile with a provisioned tenant for EVERY available orchestrator: each one
+ * stores its tenant id under the `${id}TenantId` PROFILE attribute (aurora
+ * additionally gates readiness on its setup status). Built programmatically so
+ * a region added to the registry automatically joins this fixture.
+ */
+function fullyProvisionedProfile() {
+  return {
+    pk: { S: `ORG#${ORG_ID}` },
+    sk: { S: 'PROFILE' },
+    name: { S: 'Acme Corp' },
+    auroraSetupStatus: { S: OrgSetupStatus.AURORA_S3_ACCESS_KEY_CREATED },
+    ...Object.fromEntries(
+      getAvailableOrchestrators().map((o) => [`${o.id}TenantId`, { S: `${o.id}-t-1` }]),
+    ),
+  };
+}
 
 function makeEvent(body?: Record<string, unknown>) {
   const event = buildEvent({
@@ -65,12 +98,7 @@ function makeEvent(body?: Record<string, unknown>) {
 function setupHappyMocks() {
   ddbMock.reset();
   lambdaMock.reset();
-  mockGetOrgProfile.mockResolvedValue({
-    pk: { S: `ORG#${ORG_ID}` },
-    sk: { S: 'PROFILE' },
-    name: { S: 'Acme Corp' },
-    auroraTenantId: { S: 'aurora-t-1' },
-  });
+  mockGetOrgProfile.mockResolvedValue(fullyProvisionedProfile());
   mockVerifyChallenge.mockResolvedValue('ok');
   ddbMock
     .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: `MEMBER#${USER_ID}` } } })
@@ -147,8 +175,21 @@ describe('delete-account baseHandler', () => {
     expect(put.ConditionExpression).toBe('attribute_not_exists(pk)');
     expect(put.Item!.sk.S).toBe('DELETION');
     expect(put.Item!.status.S).toBe('PENDING');
-    expect(put.Item!.auroraTenantId?.S).toBe('aurora-t-1');
     expect(put.Item!.subscriptionId?.S).toBe('sub_1');
+
+    // Region-generic tenant snapshot: EVERY orchestrator provisioned for the
+    // org must appear in the written tenantIds map, keyed by orchestrator id —
+    // a region added to the registry that deletion misses fails this test.
+    const orchestrators = getAvailableOrchestrators();
+    expect(orchestrators.length).toBeGreaterThan(0);
+    const written = unmarshall(put.Item!) as { tenantIds: Record<string, string> };
+    for (const orchestrator of orchestrators) {
+      expect(written.tenantIds[orchestrator.id]).toBe(`${orchestrator.id}-t-1`);
+    }
+    expect(Object.keys(written.tenantIds)).toHaveLength(orchestrators.length);
+    // The legacy per-orchestrator fields are no longer written.
+    expect(put.Item!.auroraTenantId).toBeUndefined();
+    expect(put.Item!.fthTenantId).toBeUndefined();
 
     const updates = ddbMock.commandCalls(UpdateItemCommand).map((c) => c.args[0].input);
     // Profile deleting fence.

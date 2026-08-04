@@ -270,7 +270,16 @@ export interface OrgDeletionRecord {
   requestedAt: string; // ISO-8601
   requestedByUserId: string;
   members: OrgDeletionMember[];
+  /**
+   * Region-generic tenant snapshot: orchestrator id → tenant id for every
+   * region provisioned when deletion was confirmed (refreshed with any
+   * late-provisioned tenants before the ORG# partition purge). The only
+   * tenant-id shape written going forward.
+   */
+  tenantIds?: Record<string, string>;
+  /** @deprecated Legacy snapshot field, read for in-flight records only — no longer written. */
   auroraTenantId?: string;
+  /** @deprecated Legacy snapshot field, read for in-flight records only — no longer written. */
   fthTenantId?: string;
   stripeCustomerId?: string;
   subscriptionId?: string;

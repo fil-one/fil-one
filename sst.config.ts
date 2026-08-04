@@ -1102,6 +1102,9 @@ export default $config({
       handler: 'delete-account',
       extraLink: mgmtRuntimeResources,
       extraEnv: {
+        // The handler snapshots tenant ids for every provisioned region via
+        // the orchestrator registry, so it needs the full orchestrator env.
+        ...orchestratorEnv,
         AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
         ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
       },

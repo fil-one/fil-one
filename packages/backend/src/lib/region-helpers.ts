@@ -1,6 +1,6 @@
 import pRetry, { type Options as RetryOptions } from 'p-retry';
 import { getAvailableOrchestrators } from './service-orchestrator-registry.js';
-import { getOrgProfile } from './org-profile.js';
+import { getOrgProfile, type OrgProfileItem } from './org-profile.js';
 import type { ServiceOrchestrator } from './service-orchestrator.js';
 import type { TenantStatus } from '@filone/shared/src/api/tenants.js';
 
@@ -9,16 +9,26 @@ export interface ProvisionedRegion {
   tenantId: string;
 }
 
-export async function getProvisionedRegions(orgId: string): Promise<ProvisionedRegion[]> {
-  const orchestrators = getAvailableOrchestrators();
-  if (orchestrators.length === 0) return [];
-  const orgProfile = await getOrgProfile(orgId);
-  return orchestrators
+/**
+ * Synchronous variant of {@link getProvisionedRegions} for callers that have
+ * already fetched the `ORG#{orgId}/PROFILE` item: resolves each available
+ * orchestrator's tenant from the given profile without re-reading it.
+ */
+export function getProvisionedRegionsFromProfile(
+  orgProfile: OrgProfileItem | undefined,
+): ProvisionedRegion[] {
+  return getAvailableOrchestrators()
     .map((orchestrator) => {
       const tenantId = orchestrator.isTenantReady(orgProfile);
       return tenantId ? { orchestrator, tenantId } : null;
     })
     .filter((t): t is ProvisionedRegion => t !== null);
+}
+
+export async function getProvisionedRegions(orgId: string): Promise<ProvisionedRegion[]> {
+  const orchestrators = getAvailableOrchestrators();
+  if (orchestrators.length === 0) return [];
+  return getProvisionedRegionsFromProfile(await getOrgProfile(orgId));
 }
 
 export interface RegionSyncOutcome {

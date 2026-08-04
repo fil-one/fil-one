@@ -24,6 +24,7 @@ import {
   type OrgDeletionRecord,
 } from '../lib/dynamo-records.js';
 import { getOrgProfile } from '../lib/org-profile.js';
+import { getProvisionedRegionsFromProfile } from '../lib/region-helpers.js';
 import { COOKIE_NAMES, makeClearAuthCookies, ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -89,6 +90,16 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const members = await snapshotMembers(orgId);
   const billing = await snapshotBilling(members);
 
+  // Region-generic tenant snapshot: one entry per provisioned orchestrator,
+  // keyed by orchestrator id, derived from the profile already fetched above.
+  // A new region added to the registry is picked up here automatically.
+  const tenantIds = Object.fromEntries(
+    getProvisionedRegionsFromProfile(orgProfile).map(({ orchestrator, tenantId }) => [
+      orchestrator.id,
+      tenantId,
+    ]),
+  );
+
   const record: OrgDeletionRecord = {
     pk: DeletionKeys.deletionPk(orgId),
     sk: DeletionKeys.deletionSk(),
@@ -96,8 +107,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     requestedAt: new Date().toISOString(),
     requestedByUserId: userId,
     members,
-    ...(orgProfile?.auroraTenantId?.S ? { auroraTenantId: orgProfile.auroraTenantId.S } : {}),
-    ...(orgProfile?.fthTenantId?.S ? { fthTenantId: orgProfile.fthTenantId.S } : {}),
+    tenantIds,
     ...billing,
     attemptCount: 0,
     updatedAt: new Date().toISOString(),
