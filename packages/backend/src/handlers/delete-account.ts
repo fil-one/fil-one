@@ -12,7 +12,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { DeleteAccountResponse, ErrorResponse } from '@filone/shared';
-import { ApiErrorCode, CSRF_COOKIE_NAME, DeleteAccountSchema, OrgRole } from '@filone/shared';
+import { ApiErrorCode, CSRF_COOKIE_NAME, DeleteAccountSchema } from '@filone/shared';
 import { Resource } from 'sst';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { parseCookies } from '../lib/cookies.js';
@@ -24,6 +24,7 @@ import {
   type OrgDeletionMember,
   type OrgDeletionRecord,
 } from '../lib/dynamo-records.js';
+import { isOrgAdmin } from '../lib/org-membership.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import { getProvisionedRegionsFromProfile } from '../lib/region-helpers.js';
 import { COOKIE_NAMES, makeClearAuthCookies, ResponseBuilder } from '../lib/response-builder.js';
@@ -66,13 +67,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     return errorResponse(400, 'Organization name does not match');
   }
 
-  const memberRow = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: marshall({ pk: `ORG#${orgId}`, sk: `MEMBER#${userId}` }),
-    }),
-  );
-  if (memberRow.Item?.role?.S !== OrgRole.Admin) {
+  if (!(await isOrgAdmin(orgId, userId))) {
     return errorResponse(403, 'Only an organization admin can delete the account');
   }
 

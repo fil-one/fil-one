@@ -29,6 +29,11 @@ vi.mock('../lib/org-profile.js', () => ({
   getOrgProfile: (orgId: string) => mockGetOrgProfile(orgId),
 }));
 
+const mockIsOrgAdmin = vi.fn();
+vi.mock('../lib/org-membership.js', () => ({
+  isOrgAdmin: (orgId: string, userId: string) => mockIsOrgAdmin(orgId, userId),
+}));
+
 import { baseHandler } from './create-deletion-challenge.js';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 
@@ -49,6 +54,7 @@ function makeEvent(email?: string | null) {
 describe('create-deletion-challenge baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsOrgAdmin.mockResolvedValue(true);
     mockReadDeletionRecord.mockResolvedValue(undefined);
     mockGetOrgProfile.mockResolvedValue({ name: { S: 'Acme Corp' } });
     mockCreateChallenge.mockResolvedValue({
@@ -60,13 +66,26 @@ describe('create-deletion-challenge baseHandler', () => {
     mockSendEmail.mockResolvedValue(undefined);
   });
 
-  it('returns 409 when a deletion is already in progress', async () => {
+  it('rejects a non-admin member with 403 before doing any challenge work', async () => {
+    mockIsOrgAdmin.mockResolvedValue(false);
+
+    const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(403);
+    expect(mockIsOrgAdmin).toHaveBeenCalledWith(ORG_ID, 'user-1');
+    expect(mockCreateChallenge).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it('returns 200 deletion_in_progress without issuing a code when a deletion already exists', async () => {
     mockReadDeletionRecord.mockResolvedValue({ status: 'PENDING' });
 
     const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
 
-    expect(result.statusCode).toBe(409);
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body!)).toEqual({ outcome: 'deletion_in_progress' });
     expect(mockCreateChallenge).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
   it('returns 429 with resendAvailableAt when rate limited, without sending email', async () => {
@@ -94,6 +113,7 @@ describe('create-deletion-challenge baseHandler', () => {
       code: '123456',
     });
     expect(JSON.parse(result.body!)).toEqual({
+      outcome: 'challenge_created',
       expiresAt: '2026-07-10T00:15:00.000Z',
       resendAvailableAt: '2026-07-10T00:01:00.000Z',
     });

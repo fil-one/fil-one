@@ -54,6 +54,12 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
   const challengeMutation = useMutation({
     mutationFn: requestDeletionChallenge,
     onSuccess: (challenge) => {
+      if (challenge.outcome === 'deletion_in_progress') {
+        // Deletion was already confirmed — no code was emailed, so stay on
+        // the current step instead of advancing to code entry.
+        setCodeError('Account deletion is already in progress.');
+        return;
+      }
       setResendAvailableAt(challenge.resendAvailableAt);
       setCodeError(null);
       setStep('code');

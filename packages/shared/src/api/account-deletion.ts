@@ -22,9 +22,13 @@ export interface DeleteAccountResponse {
   message: string;
 }
 
-export interface DeletionChallengeResponse {
-  /** ISO timestamp — when the emailed code expires. */
-  expiresAt: string;
-  /** ISO timestamp — earliest moment another code may be requested. */
-  resendAvailableAt: string;
-}
+export type DeletionChallengeResponse =
+  | {
+      outcome: 'challenge_created';
+      /** ISO timestamp — when the emailed code expires. */
+      expiresAt: string;
+      /** ISO timestamp — earliest moment another code may be requested. */
+      resendAvailableAt: string;
+    }
+  /** A deletion is already confirmed and running — no new code was issued. */
+  | { outcome: 'deletion_in_progress' };

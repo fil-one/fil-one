@@ -6,6 +6,7 @@ import { ApiErrorCode } from '@filone/shared';
 import { createDeletionChallenge } from '../lib/deletion-challenge.js';
 import { readDeletionRecord } from '../lib/deletion-record.js';
 import { sendDeletionCodeEmail } from '../lib/deletion-email.js';
+import { isOrgAdmin } from '../lib/org-membership.js';
 import { getOrgProfile } from '../lib/org-profile.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
@@ -22,7 +23,7 @@ import { requireMfaIfEnrolled } from '../middleware/require-mfa.js';
  * the code is only ever sent to the verified address.
  */
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
-  const { orgId, email } = getUserInfo(event);
+  const { orgId, userId, email } = getUserInfo(event);
   if (!email) {
     return new ResponseBuilder()
       .status(400)
@@ -30,10 +31,21 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       .build();
   }
 
+  // Same admin gate as the confirm endpoint — a non-admin must not be able
+  // to trigger deletion codes at the admins' inboxes.
+  if (!(await isOrgAdmin(orgId, userId))) {
+    return new ResponseBuilder()
+      .status(403)
+      .body<ErrorResponse>({ message: 'Only an organization admin can delete the account' })
+      .build();
+  }
+
+  // Deletion already confirmed — idempotent success, no new code is issued
+  // or emailed. The client shows the in-progress state instead of a code step.
   if (await readDeletionRecord(orgId)) {
     return new ResponseBuilder()
-      .status(409)
-      .body<ErrorResponse>({ message: 'Account deletion is already in progress' })
+      .status(200)
+      .body<DeletionChallengeResponse>({ outcome: 'deletion_in_progress' })
       .build();
   }
 
@@ -59,6 +71,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   return new ResponseBuilder()
     .status(200)
     .body<DeletionChallengeResponse>({
+      outcome: 'challenge_created',
       expiresAt: challenge.expiresAt,
       resendAvailableAt: challenge.resendAvailableAt,
     })

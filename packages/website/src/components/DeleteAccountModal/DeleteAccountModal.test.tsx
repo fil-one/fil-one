@@ -31,6 +31,7 @@ describe('DeleteAccountModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRequestChallenge.mockResolvedValue({
+      outcome: 'challenge_created',
       expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       resendAvailableAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
@@ -121,6 +122,22 @@ describe('DeleteAccountModal', () => {
     await waitFor(() => {
       expect(screen.getByText('Incorrect verification code')).toBeInTheDocument();
     });
+  });
+
+  it('shows an in-progress message and does not advance when deletion is already running', async () => {
+    mockRequestChallenge.mockResolvedValue({ outcome: 'deletion_in_progress' });
+    renderModal();
+    fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+      target: { value: ORG_NAME },
+    });
+    fireEvent.click(sendCodeButton());
+
+    await waitFor(() => {
+      expect(screen.getByText('Account deletion is already in progress.')).toBeInTheDocument();
+    });
+    // Still on the confirm step — no code was emailed, so no code entry.
+    expect(screen.queryByLabelText(/enter the 6-digit code/i)).not.toBeInTheDocument();
+    expect(sendCodeButton()).toBeInTheDocument();
   });
 
   it('states honestly that stored object data is not instantly erased', () => {
