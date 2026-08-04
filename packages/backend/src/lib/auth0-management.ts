@@ -408,11 +408,21 @@ export async function regenerateRecoveryCode(sub: string): Promise<string> {
 export async function deleteAuth0User(sub: string): Promise<void> {
   const domain = getMgmtDomain();
   const token = await getManagementToken();
-  const resp = await fetch(`https://${domain}/api/v2/users/${encodeURIComponent(sub)}`, {
+  const url = `https://${domain}/api/v2/users/${encodeURIComponent(sub)}`;
+  const resp = await fetch(url, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
 
-  if (resp.status === 404) return;
+  if (resp.status === 404) {
+    // Still success (idempotent retry), but surfaced: a 404 on the FIRST
+    // attempt can also mean a malformed sub or wrong-domain URL, which would
+    // otherwise silently leave the Auth0 user alive.
+    console.warn(
+      '[auth0] Delete user returned 404 (already deleted — expected on teardown retry — or bad sub/URL)',
+      { sub, url },
+    );
+    return;
+  }
   await throwIfNotOk(resp, 'Auth0 delete user failed');
 }
