@@ -91,6 +91,12 @@ async function runSubscriptionGuard(
     return buildCanceledResponse();
   }
 
+  // Inactive is a read-model value (never persisted), but if it ever reaches a
+  // record, blocking is the stated contract — not an accident of fail-closed.
+  if (status === SubscriptionStatus.Inactive) {
+    return buildInactiveResponse();
+  }
+
   // Unknown or unhandled status → block (fail closed)
   return buildInactiveResponse();
 }

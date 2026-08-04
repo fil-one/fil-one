@@ -4,3 +4,7 @@
 export const REGIONS = ['eu-west-1', 'us-east-1'] as const;
 
 export type Region = (typeof REGIONS)[number];
+
+export function isRegion(value: string): value is Region {
+  return (REGIONS as readonly string[]).includes(value);
+}

@@ -79,6 +79,11 @@ export function BillingPage() {
     staleTime: USAGE_STALE_TIME,
   });
 
+  // No invoices to fetch while trialing, and an inactive account may have no
+  // Stripe customer at all — skip the request for both.
+  const hasInvoiceHistory = (status: SubscriptionStatus) =>
+    status !== SubscriptionStatus.Trialing && status !== SubscriptionStatus.Inactive;
+
   const {
     data: invoices,
     isPending: invoicesPending,
@@ -86,7 +91,7 @@ export function BillingPage() {
   } = useQuery({
     queryKey: queryKeys.invoices,
     queryFn: getInvoices,
-    enabled: !!billing && billing.subscription.status !== SubscriptionStatus.Trialing,
+    enabled: !!billing && hasInvoiceHistory(billing.subscription.status),
   });
 
   const loading = billingPending || usagePending;
@@ -94,7 +99,7 @@ export function BillingPage() {
     ? (billingError?.message ?? 'Failed to load billing information')
     : null;
   const invoicesLoading =
-    invoicesPending && !!billing && billing.subscription.status !== SubscriptionStatus.Trialing;
+    invoicesPending && !!billing && hasInvoiceHistory(billing.subscription.status);
   const invoicesError = isInvoicesError ? 'Unable to load invoices. Please try again later.' : null;
 
   // Modal states
@@ -119,6 +124,7 @@ export function BillingPage() {
   const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
   const isGracePeriod = billing?.subscription.status === SubscriptionStatus.GracePeriod;
   const isCanceled = billing?.subscription.status === SubscriptionStatus.Canceled;
+  const isInactive = billing?.subscription.status === SubscriptionStatus.Inactive;
   const trialDays =
     isTrialing && billing?.subscription.trialEndsAt
       ? daysUntil(billing.subscription.trialEndsAt)
@@ -308,7 +314,9 @@ export function BillingPage() {
                   ? 'border-amber-200'
                   : isCanceled
                     ? 'border-red-200'
-                    : 'border-brand-200'
+                    : isInactive
+                      ? 'border-zinc-200'
+                      : 'border-brand-200'
             }`}
           >
             <div className="flex items-center justify-between">
@@ -316,7 +324,9 @@ export function BillingPage() {
                 <h2 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
                   {isActive || isPastDue || isGracePeriod || isCanceled
                     ? 'Pay-as-you-go'
-                    : 'Free Trial'}
+                    : isInactive
+                      ? 'No active plan'
+                      : 'Free Trial'}
                 </h2>
                 <p className="text-[13px] text-zinc-500 leading-[19.5px]">
                   {isActive || isPastDue
@@ -325,9 +335,11 @@ export function BillingPage() {
                       ? `Read-only access${graceDays !== null ? ` — ${graceDays} days remaining` : ''}`
                       : isCanceled
                         ? 'Subscription inactive'
-                        : trialDays !== null
-                          ? `${trialDays} days remaining \u00b7 1 TB included`
-                          : '30-day trial \u00b7 1 TB included'}
+                        : isInactive
+                          ? 'Choose a plan to start storing data'
+                          : trialDays !== null
+                            ? `${trialDays} days remaining \u00b7 1 TB included`
+                            : '30-day trial \u00b7 1 TB included'}
                 </p>
               </div>
 
@@ -355,6 +367,11 @@ export function BillingPage() {
                 {isCanceled && (
                   <Badge color="red" size="sm" weight="medium">
                     Canceled
+                  </Badge>
+                )}
+                {isInactive && (
+                  <Badge color="grey" size="sm" weight="medium">
+                    No plan
                   </Badge>
                 )}
               </div>
@@ -437,7 +454,9 @@ export function BillingPage() {
                     ? 'Your usage this billing period'
                     : isCanceled
                       ? 'Usage at time of cancellation'
-                      : 'Storage and egress during your free trial'}
+                      : isInactive
+                        ? 'Storage and egress for your account'
+                        : 'Storage and egress during your free trial'}
               </p>
             </div>
 
@@ -494,7 +513,9 @@ export function BillingPage() {
               <p className="text-[13px] text-zinc-500 leading-[19.5px] mt-1">
                 {billing?.paymentMethod
                   ? 'Your active payment method'
-                  : 'Add a payment method to continue after your trial'}
+                  : isInactive
+                    ? 'Add a payment method to choose a plan'
+                    : 'Add a payment method to continue after your trial'}
               </p>
             </div>
 
@@ -537,8 +558,9 @@ export function BillingPage() {
             )}
           </div>
 
-          {/* Invoice history card */}
-          {!isTrialing && invoicesLoading && (
+          {/* Invoice history card — hidden while trialing or inactive: neither
+              has invoices, and an inactive account may have no Stripe customer */}
+          {!isTrialing && !isInactive && invoicesLoading && (
             <div className="animate-pulse rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
               <div className="h-3 w-28 rounded bg-zinc-200 mb-2" />
               <div className="h-3 w-44 rounded bg-zinc-200 mb-4" />
@@ -547,7 +569,7 @@ export function BillingPage() {
               <div className="h-4 w-full rounded bg-zinc-200" />
             </div>
           )}
-          {!isTrialing && !invoicesLoading && (
+          {!isTrialing && !isInactive && !invoicesLoading && (
             <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
               <h3 className="text-[13px] font-medium tracking-[-0.325px] leading-[19.5px] text-zinc-900">
                 Invoice history
@@ -642,8 +664,11 @@ export function BillingPage() {
                 ))}
               </ul>
 
-              {/* CTA for trial / grace / canceled users */}
-              {(isTrialing || isGracePeriod || isCanceled) && (
+              {/* CTA for trial / grace / canceled / inactive users. For
+                  inactive, canReactivateWithSavedCard stays false, so the flow
+                  goes through a fresh SetupIntent rather than a saved-card
+                  reactivation the backend would reject. */}
+              {(isTrialing || isGracePeriod || isCanceled || isInactive) && (
                 <Button
                   id="billing-plan-cta-button"
                   variant="primary"
@@ -651,7 +676,7 @@ export function BillingPage() {
                   onClick={handleUpgradeClick}
                   className="w-full justify-center"
                 >
-                  {isTrialing ? 'Upgrade now' : 'Reactivate'}
+                  {isTrialing ? 'Upgrade now' : isInactive ? 'Choose a plan' : 'Reactivate'}
                 </Button>
               )}
             </div>

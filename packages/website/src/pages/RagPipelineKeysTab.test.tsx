@@ -110,7 +110,7 @@ describe('RagApiKeysTab', () => {
     renderTab();
     fireEvent.click(await screen.findByRole('button', { name: /Create API key/ }));
 
-    fireEvent.change(screen.getByLabelText('Key name'), { target: { value: 'new key' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'new key' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
 
     await waitFor(() =>
@@ -144,7 +144,7 @@ describe('RagApiKeysTab', () => {
     ]);
 
     fireEvent.click(await screen.findByRole('button', { name: /Create API key/ }));
-    fireEvent.change(screen.getByLabelText('Key name'), { target: { value: 'scoped' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'scoped' } });
     fireEvent.click(screen.getByRole('radio', { name: 'Specific buckets' }));
 
     // Only RAG-enabled buckets are offered.
@@ -184,7 +184,7 @@ describe('RagApiKeysTab', () => {
 
     renderTab();
     fireEvent.click(await screen.findByRole('button', { name: /Create API key/ }));
-    fireEvent.change(screen.getByLabelText('Key name'), { target: { value: 'new key' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'new key' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create key' }));
 
     expect(await screen.findByText('quota exceeded')).toBeInTheDocument();
