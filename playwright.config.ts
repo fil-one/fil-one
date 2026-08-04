@@ -29,24 +29,31 @@ export default defineConfig({
       name: 'setup',
       testMatch: /auth\.setup\.ts/,
     },
+    // Seeds a bucket per region for the roles that need one. Separate from the
+    // `setup` project because it reuses the storage state that project writes.
+    {
+      name: 'seed-buckets',
+      testMatch: /buckets\.setup\.ts/,
+      dependencies: ['setup'],
+    },
     // `full-*` projects run both smoke and staging-only suites across all browsers.
     {
       name: 'full-chromium',
       testDir: './tests/e2e',
       use: { ...devices['Desktop Chrome'] },
-      dependencies: ['setup'],
+      dependencies: ['seed-buckets'],
     },
     {
       name: 'full-firefox',
       testDir: './tests/e2e',
       use: { ...devices['Desktop Firefox'] },
-      dependencies: ['setup'],
+      dependencies: ['seed-buckets'],
     },
     {
       name: 'full-webkit',
       testDir: './tests/e2e',
       use: { ...devices['Desktop Safari'] },
-      dependencies: ['setup'],
+      dependencies: ['seed-buckets'],
     },
     // smoke tests executed in production
     {
