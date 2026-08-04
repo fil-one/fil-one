@@ -265,18 +265,17 @@ async function deleteAuth0Users(record: OrgDeletionRecord): Promise<void> {
 /** Drop every S3 Vectors index for the org's buckets and purge RAG rows. */
 async function purgeRagData(orgId: string): Promise<void> {
   const vectorStore = new S3VectorsStore(Resource.RagVectorBucket.name);
-  const prefixes = [`BUCKET#${orgId}#`, `INDEXER_CHECKPOINT#${orgId}#`];
+  // Both prefixes in ONE paged scan — the table is scanned once, not per prefix.
+  const keys = await scanRagKeys(orgId);
   const droppedIndexes = new Set<string>();
 
-  for (const prefix of prefixes) {
-    const keys = await scanRagKeysByPrefix(prefix);
-    for (const key of keys) {
-      if (droppedIndexes.has(key.pk)) continue;
-      droppedIndexes.add(key.pk);
-      await dropVectorIndexForPk(vectorStore, key.pk);
-    }
-    await batchDelete(Resource.RagIndexerTable.name, keys);
+  for (const key of keys) {
+    if (droppedIndexes.has(key.pk)) continue;
+    droppedIndexes.add(key.pk);
+    // INDEXER_CHECKPOINT# pks parse to undefined and are skipped inside.
+    await dropVectorIndexForPk(vectorStore, key.pk);
   }
+  await batchDelete(Resource.RagIndexerTable.name, keys);
 }
 
 /** Drop the S3 Vectors index behind a BUCKET# pk; already-gone is success. */
@@ -478,15 +477,20 @@ async function queryOrgRows(orgId: string, skPrefix?: string): Promise<Record<st
   return rows;
 }
 
-async function scanRagKeysByPrefix(prefix: string): Promise<{ pk: string; sk: string }[]> {
+/** One paged full-table Scan matching BOTH of the org's RAG pk prefixes. */
+async function scanRagKeys(orgId: string): Promise<{ pk: string; sk: string }[]> {
   const keys: { pk: string; sk: string }[] = [];
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
   do {
     const result = await dynamo.send(
       new ScanCommand({
         TableName: Resource.RagIndexerTable.name,
-        FilterExpression: 'begins_with(pk, :prefix)',
-        ExpressionAttributeValues: marshall({ ':prefix': prefix }),
+        FilterExpression:
+          'begins_with(pk, :bucketPrefix) OR begins_with(pk, :checkpointPrefix)',
+        ExpressionAttributeValues: marshall({
+          ':bucketPrefix': `BUCKET#${orgId}#`,
+          ':checkpointPrefix': `INDEXER_CHECKPOINT#${orgId}#`,
+        }),
         ProjectionExpression: 'pk, sk',
         ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
       }),

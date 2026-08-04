@@ -444,23 +444,63 @@ describe('runAccountDeletion', () => {
     expect(mockDeleteTenant).toHaveBeenCalledWith('aurora-t-1');
   });
 
-  it('drops vector indexes for RAG rows and tolerates NotFound on re-run', async () => {
+  it('purges all RAG rows (bucket + checkpoint prefixes) with a single table scan', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        marshall({ pk: `BUCKET#${ORG_ID}#eu-west-1#my-bucket`, sk: 'RAG' }),
+        marshall({ pk: `BUCKET#${ORG_ID}#eu-west-1#my-bucket`, sk: 'MANIFEST#a.txt' }),
+        marshall({ pk: `INDEXER_CHECKPOINT#${ORG_ID}#eu-west-1#my-bucket`, sk: 'CHECKPOINT' }),
+      ],
+    });
+
+    await runAccountDeletion(ORG_ID);
+
+    // ONE scan pass covering both prefixes, not one full scan per prefix.
+    const scans = ddbMock.commandCalls(ScanCommand);
+    expect(scans).toHaveLength(1);
+    expect(scans[0].args[0].input.FilterExpression).toBe(
+      'begins_with(pk, :bucketPrefix) OR begins_with(pk, :checkpointPrefix)',
+    );
+    expect(unmarshall(scans[0].args[0].input.ExpressionAttributeValues!)).toEqual({
+      ':bucketPrefix': `BUCKET#${ORG_ID}#`,
+      ':checkpointPrefix': `INDEXER_CHECKPOINT#${ORG_ID}#`,
+    });
+
+    // The vector index is dropped once per bucket, and every row (manifests
+    // and the checkpoint alike) is batch-deleted.
+    expect(mockDropIndex).toHaveBeenCalledTimes(1);
+    expect(mockDropIndex).toHaveBeenCalledWith(ORG_ID, 'eu-west-1', 'my-bucket');
+    const ragDeletes = ddbMock
+      .commandCalls(BatchWriteItemCommand)
+      .flatMap((c) => c.args[0].input.RequestItems?.RagIndexerTable ?? [])
+      .map((r) => r.DeleteRequest!.Key!.pk.S);
+    expect(ragDeletes).toEqual([
+      `BUCKET#${ORG_ID}#eu-west-1#my-bucket`,
+      `BUCKET#${ORG_ID}#eu-west-1#my-bucket`,
+      `INDEXER_CHECKPOINT#${ORG_ID}#eu-west-1#my-bucket`,
+    ]);
+  });
+
+  it('pages the RAG scan and tolerates NotFound index drops on re-run', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
     ddbMock
       .on(ScanCommand)
       .resolvesOnce({
-        Items: [
-          marshall({ pk: `BUCKET#${ORG_ID}#eu-west-1#my-bucket`, sk: 'RAG' }),
-          marshall({ pk: `BUCKET#${ORG_ID}#eu-west-1#my-bucket`, sk: 'MANIFEST#a.txt' }),
-        ],
+        Items: [marshall({ pk: `BUCKET#${ORG_ID}#eu-west-1#my-bucket`, sk: 'RAG' })],
+        LastEvaluatedKey: marshall({ pk: 'x', sk: 'y' }),
       })
-      .resolves({ Items: [] });
+      .resolves({
+        Items: [marshall({ pk: `BUCKET#${ORG_ID}#eu-west-1#my-bucket`, sk: 'MANIFEST#a.txt' })],
+      });
     mockDropIndex.mockRejectedValue(
       Object.assign(new Error('gone'), { name: 'NotFoundException' }),
     );
 
     await runAccountDeletion(ORG_ID);
 
+    // Paged once via LastEvaluatedKey — still a single scan PASS.
+    expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(2);
     expect(mockDropIndex).toHaveBeenCalledWith(ORG_ID, 'eu-west-1', 'my-bucket');
     // NotFound swallowed → the run still completed.
     expect(doneWrites()).toHaveLength(1);
