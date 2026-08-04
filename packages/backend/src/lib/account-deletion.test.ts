@@ -71,7 +71,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 process.env.FILONE_STAGE = 'test';
 
-import { assertPurgeAllowed, runAccountDeletion } from './account-deletion.js';
+import { assertPurgeAllowed, batchDelete, runAccountDeletion } from './account-deletion.js';
 import { OrgDeletionStatus } from './dynamo-records.js';
 
 const ORG_ID = 'org-1';
@@ -156,6 +156,46 @@ describe('assertPurgeAllowed', () => {
 
   it('allows org-prefixed keys', () => {
     expect(() => assertPurgeAllowed('ORG#abc', ['ORG#', 'USER#', 'SUB#'])).not.toThrow();
+  });
+});
+
+describe('batchDelete', () => {
+  const KEY = { pk: 'ORG#org-1', sk: 'MEMBER#user-1' };
+  const unprocessed = {
+    UnprocessedItems: { TestTable: [{ DeleteRequest: { Key: marshall(KEY) } }] },
+  };
+
+  beforeEach(() => {
+    ddbMock.reset();
+  });
+
+  it('retries UnprocessedItems with backoff instead of looping tight: two sends, second retries only the leftovers', async () => {
+    ddbMock.on(BatchWriteItemCommand).resolvesOnce(unprocessed).resolves({});
+
+    await batchDelete('TestTable', [{ pk: 'ORG#org-1', sk: 'PROFILE' }, KEY], {
+      retries: 4,
+      minTimeout: 0,
+    });
+
+    const sends = ddbMock.commandCalls(BatchWriteItemCommand);
+    expect(sends).toHaveLength(2);
+    expect(sends[0].args[0].input.RequestItems!.TestTable).toHaveLength(2);
+    // Only the unprocessed key is retried, not the whole chunk.
+    expect(sends[1].args[0].input.RequestItems!.TestTable).toHaveLength(1);
+    expect(sends[1].args[0].input.RequestItems!.TestTable[0].DeleteRequest!.Key!.sk.S).toBe(
+      KEY.sk,
+    );
+  });
+
+  it('caps the retries and throws on exhaustion so the reconciler re-drives', async () => {
+    ddbMock.on(BatchWriteItemCommand).resolves(unprocessed);
+
+    await expect(
+      batchDelete('TestTable', [KEY], { retries: 2, minTimeout: 0 }),
+    ).rejects.toThrow(/unprocessed delete/);
+
+    // 1 initial attempt + 2 retries.
+    expect(ddbMock.commandCalls(BatchWriteItemCommand)).toHaveLength(3);
   });
 });
 

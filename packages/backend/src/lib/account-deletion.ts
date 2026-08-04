@@ -8,6 +8,7 @@ import {
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import pRetry, { type Options as RetryOptions } from 'p-retry';
 import { S3VectorsStore } from '@filone/rag-shared';
 import { Resource } from 'sst';
 import { deleteAuth0User } from './auth0-management.js';
@@ -503,17 +504,38 @@ async function scanRagKeys(orgId: string): Promise<{ pk: string; sk: string }[]>
   return keys;
 }
 
-/** BatchWrite deletes in 25-key chunks, retrying UnprocessedItems. */
-async function batchDelete(tableName: string, keys: { pk: string; sk: string }[]): Promise<void> {
+// UnprocessedItems means DynamoDB is shedding load — retry with exponential
+// backoff + jitter instead of hammering it in a tight loop, and give up after
+// ~5 attempts (the thrown error keeps the record non-DONE, so the Lambda
+// retry / reconciler re-drives the idempotent purge later).
+const BATCH_DELETE_RETRY: RetryOptions = { retries: 4, minTimeout: 100, randomize: true };
+
+/**
+ * BatchWrite deletes in 25-key chunks, retrying only the UnprocessedItems of
+ * each chunk with capped exponential backoff. Exported for direct testing;
+ * `retry` is injectable so tests keep timeouts tiny.
+ */
+export async function batchDelete(
+  tableName: string,
+  keys: { pk: string; sk: string }[],
+  retry: RetryOptions = BATCH_DELETE_RETRY,
+): Promise<void> {
   for (let i = 0; i < keys.length; i += 25) {
     let requests = keys
       .slice(i, i + 25)
       .map((key) => ({ DeleteRequest: { Key: marshall({ pk: key.pk, sk: key.sk }) } }));
-    while (requests.length > 0) {
+    await pRetry(async () => {
       const result = await dynamo.send(
         new BatchWriteItemCommand({ RequestItems: { [tableName]: requests } }),
       );
-      requests = (result.UnprocessedItems?.[tableName] ?? []) as typeof requests;
-    }
+      const unprocessed = (result.UnprocessedItems?.[tableName] ?? []) as typeof requests;
+      if (unprocessed.length > 0) {
+        // Narrow the next attempt to what's left, then let pRetry back off.
+        requests = unprocessed;
+        throw new Error(
+          `BatchWriteItem left ${unprocessed.length} unprocessed delete(s) for ${tableName}`,
+        );
+      }
+    }, retry);
   }
 }
