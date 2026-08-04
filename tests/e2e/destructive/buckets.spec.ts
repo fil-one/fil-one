@@ -2,16 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
 import { STORAGE_STATE } from './roles.util.ts';
 import { REGIONS, type Region } from './regions.util.ts';
-
-// Bucket names are globally unique across regions and rejected with 409 if
-// taken, so each test mints a fresh name. We do not delete buckets afterward
-// because the delete API is not wired for any region yet — it routes to the
-// Aurora orchestrator, which does not support deletion, and the UI delete
-// button is disabled for the same reason (see
-// packages/website/src/pages/BucketsPage.tsx).
-function uniqueBucketName(role: string, region: Region): string {
-  return `e2e-${role}-${region}-${randomUUID()}`;
-}
+import { uniqueBucketName } from './buckets.util.ts';
 
 // In-memory upload fixture so the test does not depend on a checked-in file.
 // The object key is minted per upload (see `uniqueObjectName`) so reusing a
@@ -41,9 +32,10 @@ async function createBucketWithKey(page: Page, bucketName: string, region: Regio
 // its name. Bucket links carry the region as a search param
 // (/buckets/<name>?region=<region>), which is the stable per-region hook.
 // Upload tests reuse existing buckets rather than creating new ones because
-// the account-wide bucket limit is 100 and buckets are not yet deletable, so
-// each test account must be seeded with at least one bucket per region (see
-// README "End-to-end tests").
+// the account-wide bucket limit is 100 and buckets are not yet deletable. The
+// `seed-buckets` project (buckets.setup.ts) creates a bucket per region for
+// every role that has none, so reaching the assertion below means the seeding
+// did not run or did not cover this region.
 async function openFirstBucketInRegion(page: Page, region: Region): Promise<string> {
   await page.goto('/buckets');
   const firstBucketLink = page
@@ -51,11 +43,77 @@ async function openFirstBucketInRegion(page: Page, region: Region): Promise<stri
     .first();
   await expect(
     firstBucketLink,
-    `No ${region} bucket found for this test account — seed one manually (see README "End-to-end tests")`,
+    `No ${region} bucket found for this test account — check the bucket seeding in buckets.setup.ts (see README "Seeded buckets per region")`,
   ).toBeVisible();
   await firstBucketLink.click();
   await page.waitForURL((url) => /^\/buckets\/[^/]+$/.test(url.pathname));
   return new URL(page.url()).pathname.split('/').pop()!;
+}
+
+// A rejected PUT to a region's S3 endpoint has taken ~30s to come back (a 502
+// from the us-east-1 backend on staging), so the waits below — and the test
+// timeout they run under — must outlast that, otherwise the diagnostic is never
+// reached and the failure is again an opaque timeout.
+const PRESIGN_TIMEOUT_MS = 30_000;
+const UPLOAD_PUT_TIMEOUT_MS = 60_000;
+const UPLOAD_TEST_TIMEOUT_MS = 120_000;
+
+// Submits an upload and fails with the failing request's region, status and body
+// when it does not reach the object store. Uploading is two round-trips — POST
+// /api/presign for the URL, then a PUT straight to the region's S3 endpoint —
+// and neither failure navigates anywhere, so waiting only for the navigation
+// back to the bucket page reports every breakage as the same opaque toHaveURL
+// timeout: a region whose storage backend 502s looks exactly like a hung
+// browser. Read both responses instead, the way the `unpaid user cannot create
+// bucket` test below waits on GET /api/buckets.
+//
+// Callers must raise the test timeout to UPLOAD_TEST_TIMEOUT_MS at the top of
+// the test body: the waits below can consume up to 90s on their own, and the
+// navigation that precedes them is subject to the same slow backends.
+async function submitUploadExpectingSuccess(
+  page: Page,
+  bucketName: string,
+  objectName: string,
+  region: Region,
+): Promise<void> {
+  const presignResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname.endsWith('/api/presign') &&
+      response.request().method() === 'POST',
+    { timeout: PRESIGN_TIMEOUT_MS },
+  );
+  // The PUT goes to the region's own endpoint (see getS3Endpoint in
+  // packages/shared/src/constants.ts), not to the app origin, and its path ends
+  // in the object key.
+  const putResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' &&
+      new URL(response.url()).pathname.endsWith(`/${objectName}`),
+    { timeout: UPLOAD_PUT_TIMEOUT_MS },
+  );
+
+  await submitUpload(page, bucketName, objectName);
+
+  const presign = await presignResponse;
+  if (!presign.ok()) {
+    // No PUT follows a failed presign, so the wait above would eventually time
+    // out and reject with nobody awaiting it — an unhandled rejection that
+    // buries the presign diagnostic we are about to throw.
+    putResponse.catch(() => {});
+    throw new Error(
+      `POST /api/presign returned ${presign.status()} for a putObject in ${region} ` +
+        `(bucket "${bucketName}", key "${objectName}"). Response body: ${await presign.text()}`,
+    );
+  }
+
+  const put = await putResponse;
+  if (!put.ok()) {
+    throw new Error(
+      `PUT ${new URL(put.url()).origin} returned ${put.status()} when uploading "${objectName}" ` +
+        `to "${bucketName}" in ${region}, so the region's storage backend rejected the write. ` +
+        `Response body: ${await put.text()}`,
+    );
+  }
 }
 
 // Drives the upload form on the bucket detail page: opens the upload page,
@@ -88,10 +146,12 @@ for (const region of REGIONS) {
     });
 
     test(`paid user can upload object and navigate to it (${region})`, async ({ page }) => {
+      test.setTimeout(UPLOAD_TEST_TIMEOUT_MS);
+
       const bucketName = await openFirstBucketInRegion(page, region);
       const objectName = uniqueObjectName();
 
-      await submitUpload(page, bucketName, objectName);
+      await submitUploadExpectingSuccess(page, bucketName, objectName, region);
 
       // On success the upload page navigates back to the bucket detail page.
       await expect(page).toHaveURL(
@@ -124,10 +184,12 @@ for (const region of REGIONS) {
     });
 
     test(`trial user can upload object and navigate to it (${region})`, async ({ page }) => {
+      test.setTimeout(UPLOAD_TEST_TIMEOUT_MS);
+
       const bucketName = await openFirstBucketInRegion(page, region);
       const objectName = uniqueObjectName();
 
-      await submitUpload(page, bucketName, objectName);
+      await submitUploadExpectingSuccess(page, bucketName, objectName, region);
 
       await expect(page).toHaveURL(
         (url) =>
