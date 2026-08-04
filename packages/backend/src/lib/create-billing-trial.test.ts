@@ -1,11 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import {
-  DynamoDBClient,
-  GetItemCommand,
-  PutItemCommand,
-  ConditionalCheckFailedException,
-} from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -49,6 +44,7 @@ describe('createBillingTrial', () => {
 
     // Default: no existing billing record, so the guard falls through.
     ddbMock.on(GetItemCommand).resolves({});
+    ddbMock.on(UpdateItemCommand).resolves({});
 
     mockCustomersCreate.mockResolvedValue({ id: 'cus_test_123' });
     mockSubscriptionsCreate.mockResolvedValue({
@@ -60,8 +56,6 @@ describe('createBillingTrial', () => {
   });
 
   it('creates Stripe customer, subscription, and DynamoDB trial record', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
-
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1', email: 'test@example.com' });
 
     // Verify Stripe customer creation
@@ -81,31 +75,57 @@ describe('createBillingTrial', () => {
       { idempotencyKey: 'billing-trial-sub-user-1' },
     );
 
-    // Verify DynamoDB put
-    const putCalls = ddbMock.commandCalls(PutItemCommand);
-    expect(putCalls).toHaveLength(1);
+    // Verify DynamoDB write
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updateCalls).toHaveLength(1);
 
-    const input = putCalls[0].args[0].input;
+    const input = updateCalls[0].args[0].input;
     expect(input.TableName).toBe('BillingTable');
-    expect(input.ConditionExpression).toBe('attribute_not_exists(pk)');
+    expect(input.Key).toEqual({ pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } });
 
-    const item = input.Item!;
-    expect(item.pk).toEqual({ S: 'CUSTOMER#user-1' });
-    expect(item.sk).toEqual({ S: 'SUBSCRIPTION' });
-    expect(item.orgId).toEqual({ S: 'org-1' });
-    expect(item.stripeCustomerId).toEqual({ S: 'cus_test_123' });
-    expect(item.subscriptionId).toEqual({ S: 'sub_test_123' });
-    expect(item.subscriptionStatus).toEqual({ S: SubscriptionStatus.Trialing });
-    expect(item.trialStartedAt).toBeDefined();
-    expect(item.trialEndsAt).toBeDefined();
-    expect(item.currentPeriodStart).toBeDefined();
-    expect(item.currentPeriodEnd).toBeDefined();
-    expect(item.updatedAt).toBeDefined();
+    const values = input.ExpressionAttributeValues!;
+    expect(values[':orgId']).toEqual({ S: 'org-1' });
+    expect(values[':customerId']).toEqual({ S: 'cus_test_123' });
+    expect(values[':subscriptionId']).toEqual({ S: 'sub_test_123' });
+    expect(values[':status']).toEqual({ S: SubscriptionStatus.Trialing });
+    expect(values[':trialStartedAt']).toBeDefined();
+    expect(values[':trialEndsAt']).toBeDefined();
+    expect(values[':periodStart']).toEqual({ S: new Date(1700000000 * 1000).toISOString() });
+    expect(values[':periodEnd']).toEqual({ S: new Date(1701209600 * 1000).toISOString() });
+    expect(values[':now']).toBeDefined();
+  });
+
+  it('fills the customer mapping when a webhook already created a partial record', async () => {
+    // The subscription webhook can land between our GetItem and our write,
+    // upserting a partial record (status, no stripeCustomerId). The write must
+    // be an unconditional update so the customer mapping is stored anyway — a
+    // conditional put would silently no-op and lose it forever.
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updateCalls).toHaveLength(1);
+
+    const input = updateCalls[0].args[0].input;
+    expect(input.ConditionExpression).toBeUndefined();
+    expect(input.UpdateExpression).toContain('stripeCustomerId = :customerId');
+    expect(input.ExpressionAttributeValues![':customerId']).toEqual({ S: 'cus_test_123' });
+  });
+
+  it('does not overwrite a subscription status written by a webhook', async () => {
+    // A webhook may have already advanced the status (e.g. to active);
+    // if_not_exists keeps the fresher webhook value.
+    await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
+
+    const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+    expect(input.UpdateExpression).toContain(
+      'subscriptionStatus = if_not_exists(subscriptionStatus, :status)',
+    );
+    expect(input.ExpressionAttributeValues![':status']).toEqual({
+      S: SubscriptionStatus.Trialing,
+    });
   });
 
   it('sets trial_end to 30 days from now', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
-
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
 
     const trialEnd = mockSubscriptionsCreate.mock.calls[0][0].trial_end;
@@ -118,30 +138,12 @@ describe('createBillingTrial', () => {
   });
 
   it('passes undefined email when not provided', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
-
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
 
     expect(mockCustomersCreate).toHaveBeenCalledWith(
       { email: undefined, metadata: { userId: 'user-1', orgId: 'org-1' } },
       { idempotencyKey: 'billing-trial-user-1' },
     );
-  });
-
-  it('no-ops when DynamoDB record already exists', async () => {
-    ddbMock.on(PutItemCommand).rejects(
-      new ConditionalCheckFailedException({
-        message: 'The conditional request failed',
-        $metadata: {},
-      }),
-    );
-
-    // Should not throw
-    await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
-
-    // Stripe calls should still have been made (idempotent on Stripe side)
-    expect(mockCustomersCreate).toHaveBeenCalledOnce();
-    expect(mockSubscriptionsCreate).toHaveBeenCalledOnce();
   });
 
   it('returns early without touching Stripe when a billing record already exists', async () => {
@@ -155,7 +157,7 @@ describe('createBillingTrial', () => {
     // customers/subscriptions on re-invocation past Stripe's idempotency window.
     expect(mockCustomersCreate).not.toHaveBeenCalled();
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
 
     const getCalls = ddbMock.commandCalls(GetItemCommand);
     expect(getCalls).toHaveLength(1);
@@ -175,7 +177,7 @@ describe('createBillingTrial', () => {
 
     // Should not attempt subscription or DynamoDB
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('propagates Stripe subscription creation errors', async () => {
@@ -187,11 +189,11 @@ describe('createBillingTrial', () => {
 
     // Customer was created but DynamoDB should not have been called
     expect(mockCustomersCreate).toHaveBeenCalledOnce();
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('propagates unexpected DynamoDB errors', async () => {
-    ddbMock.on(PutItemCommand).rejects(new Error('Service unavailable'));
+    ddbMock.on(UpdateItemCommand).rejects(new Error('Service unavailable'));
 
     await expect(createBillingTrial({ userId: 'user-1', orgId: 'org-1' })).rejects.toThrow(
       'Service unavailable',

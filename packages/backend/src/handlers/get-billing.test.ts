@@ -199,7 +199,10 @@ describe('get-billing baseHandler', () => {
     ddbMock.reset();
   });
 
-  it('returns trial state when no billing record exists', async () => {
+  // The distinction the endpoint rests on: absent status ⇒ inactive; present
+  // status with no Stripe customer ⇒ report that stored status.
+
+  it('reports an inactive subscription when no billing record exists', async () => {
     ddbMock.on(GetItemCommand).resolves({});
 
     const event = buildEvent({ userInfo: USER_INFO });
@@ -209,14 +212,212 @@ describe('get-billing baseHandler', () => {
     const body = JSON.parse(String(result.body));
     expect(body).toStrictEqual({
       subscription: {
-        planId: PlanId.FreeTrial,
-        status: SubscriptionStatus.Trialing,
-        trialEndsAt: expect.any(String),
+        planId: PlanId.None,
+        status: SubscriptionStatus.Inactive,
       },
     });
   });
 
-  it('returns trial state when billing record has no stripeCustomerId', async () => {
+  // A record can exist without a subscriptionStatus (e.g. the customer mapping
+  // create-setup-intent writes). No status means no entitlement — the guard
+  // 403s these accounts, and this endpoint must not report a trial for them.
+  const statuslessRecordVariants: Record<string, Record<string, unknown>> = {
+    'bare record': {},
+    'customer mapping only': { stripeCustomerId: 'cus_123', orgId: 'org-1' },
+    'customer mapping with cached price': {
+      stripeCustomerId: 'cus_123',
+      stripePrice: CACHED_GRANDFATHERED_PRICE,
+    },
+  };
+  for (const [description, overrides] of Object.entries(statuslessRecordVariants)) {
+    it(`reports inactive for a record with no subscription status (${description})`, async () => {
+      ddbMock.on(GetItemCommand).resolves(subscriptionItem(overrides));
+
+      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(result.statusCode).toBe(200);
+      const body = JSON.parse(String(result.body));
+      expect(body).toStrictEqual({
+        subscription: {
+          planId: PlanId.None,
+          status: SubscriptionStatus.Inactive,
+        },
+      });
+    });
+  }
+
+  it('reports the cached card for an inactive record that has one', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      subscriptionItem({
+        stripeCustomerId: 'cus_123',
+        paymentMethodId: 'pm_cached',
+        paymentMethodLast4: '1234',
+        paymentMethodBrand: 'mastercard',
+        paymentMethodExpMonth: 6,
+        paymentMethodExpYear: 2028,
+      }),
+    );
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(result.statusCode).toBe(200);
+    const body = JSON.parse(String(result.body));
+    expect(body).toStrictEqual({
+      subscription: {
+        planId: PlanId.None,
+        status: SubscriptionStatus.Inactive,
+      },
+      paymentMethod: {
+        id: 'pm_cached',
+        last4: '1234',
+        brand: 'mastercard',
+        expMonth: 6,
+        expYear: 2028,
+      },
+    });
+  });
+
+  it('does not call Stripe when the record has no subscription status', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      subscriptionItem({
+        stripeCustomerId: 'cus_123',
+        subscriptionId: 'sub_456',
+      }),
+    );
+
+    await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
+  });
+
+  it('never writes to DynamoDB when reporting inactive', async () => {
+    ddbMock.on(GetItemCommand).resolves(subscriptionItem({ stripeCustomerId: 'cus_123' }));
+
+    await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  // Records with a status but no stripeCustomerId exist in production (webhook
+  // upserts that never read the local record). They must report their STORED
+  // status — not a hardcoded trial. planId follows the buildBillingResponse
+  // mapping.
+  //
+  // Two writer shapes produce them, and a `subscriptionId` is what tells them
+  // apart — so the cases below deliberately cover both:
+  //   - WITH subscriptionId — `handleSubscriptionUpdate` → `updateBillingRecord`
+  //     resolves the userId from Stripe metadata and writes subscriptionId +
+  //     status without ever reading the local record.
+  //   - WITHOUT subscriptionId — `handlePaymentFailed` (→ past_due) and
+  //     `handlePaymentSucceeded` (→ active) write ONLY a status plus a payment
+  //     timestamp. So a past_due record with no linked subscription is a real
+  //     production shape, not an incomplete fixture: the invoice webhook never
+  //     had a subscription id in hand to write.
+  const trialEndsAtStored = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const graceEndsAtStored = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+  const orphanRecordCases: Record<
+    string,
+    { record: Record<string, unknown>; expected: Record<string, unknown> }
+  > = {
+    active: {
+      record: { subscriptionStatus: SubscriptionStatus.Active, subscriptionId: 'sub_456' },
+      expected: { planId: PlanId.PayAsYouGo, status: SubscriptionStatus.Active },
+    },
+    // handlePaymentFailed's exact write shape: status + failure timestamp only.
+    past_due: {
+      record: {
+        subscriptionStatus: SubscriptionStatus.PastDue,
+        lastPaymentFailedAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      },
+      expected: { planId: PlanId.PayAsYouGo, status: SubscriptionStatus.PastDue },
+    },
+    grace_period: {
+      record: {
+        subscriptionStatus: SubscriptionStatus.GracePeriod,
+        gracePeriodEndsAt: graceEndsAtStored,
+      },
+      expected: {
+        planId: PlanId.PayAsYouGo,
+        status: SubscriptionStatus.GracePeriod,
+        gracePeriodEndsAt: graceEndsAtStored,
+      },
+    },
+    trialing: {
+      record: {
+        subscriptionStatus: SubscriptionStatus.Trialing,
+        subscriptionId: 'sub_456',
+        trialEndsAt: trialEndsAtStored,
+      },
+      expected: {
+        planId: PlanId.FreeTrial,
+        status: SubscriptionStatus.Trialing,
+        trialEndsAt: trialEndsAtStored,
+      },
+    },
+  };
+  for (const [status, { record, expected }] of Object.entries(orphanRecordCases)) {
+    it(`reports the stored ${status} status for a record with no Stripe customer`, async () => {
+      ddbMock.on(GetItemCommand).resolves(subscriptionItem(record));
+
+      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(result.statusCode).toBe(200);
+      const body = JSON.parse(String(result.body));
+      expect(body).toStrictEqual({ subscription: expected });
+    });
+  }
+
+  it('reports the cached minimum for a record with no Stripe customer', async () => {
+    // No Stripe customer means no live price to read, but the cached snapshot
+    // is still authoritative for what the customer is billed — reporting no
+    // minimum here would understate it.
+    ddbMock.on(GetItemCommand).resolves(
+      subscriptionItem({
+        subscriptionStatus: SubscriptionStatus.Active,
+        stripePrice: CACHED_TIERED_PRICE,
+      }),
+    );
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription).toStrictEqual({
+      planId: PlanId.PayAsYouGo,
+      status: SubscriptionStatus.Active,
+      monthlyMinimumCents: 499,
+    });
+    expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
+  });
+
+  it('reports no minimum for a record with neither a Stripe customer nor a cached price', async () => {
+    // Factual, not a fabrication: with no Stripe customer there is no
+    // subscription for a minimum to be billed on.
+    ddbMock
+      .on(GetItemCommand)
+      .resolves(subscriptionItem({ subscriptionStatus: SubscriptionStatus.Active }));
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription.monthlyMinimumCents).toBeUndefined();
+  });
+
+  it('does not call Stripe for a record with a status but no Stripe customer', async () => {
+    // Even with a subscriptionId on the record there is no customer id to look
+    // up, so this branch must stay Stripe-free.
+    ddbMock.on(GetItemCommand).resolves(
+      subscriptionItem({
+        subscriptionStatus: SubscriptionStatus.Active,
+        subscriptionId: 'sub_456',
+      }),
+    );
+
+    await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
+  });
+
+  it('reports the recorded trial when the record has no Stripe customer', async () => {
     const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     ddbMock.on(GetItemCommand).resolves(
       subscriptionItem({
@@ -256,14 +457,15 @@ describe('get-billing baseHandler', () => {
     const body = JSON.parse(String(result.body));
     expect(body).toStrictEqual({
       subscription: {
-        planId: PlanId.FreeTrial,
+        planId: PlanId.PayAsYouGo,
         status: SubscriptionStatus.GracePeriod,
         trialEndsAt: expiredTrialEndsAt,
         gracePeriodEndsAt: expect.any(String),
       },
     });
 
-    // Verify UpdateItemCommand was called
+    // The lazy trial→grace transition must still persist, now from the single
+    // surviving implementation in evaluateStatusTransitions.
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(1);
   });

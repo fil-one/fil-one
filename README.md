@@ -423,6 +423,14 @@ The endpoint never guesses the minimum: it fails the request instead of reportin
 "no minimum" when the price is graduated but carries no tiers, or when Stripe's
 exact decimal amount cannot be parsed.
 
+`GET /api/billing` is a read model that grants nothing: it reports the stored
+`subscriptionStatus` verbatim and never synthesizes entitlement. An account with
+no billing record — or a record without a status (e.g. the customer mapping
+`create-setup-intent` writes) — is reported as
+`{subscription: {planId: 'none', status: 'inactive'}}`, the same answer the subscription guard
+enforces with its 403 `SUBSCRIPTION_INACTIVE`. See
+[the ADR](docs/architectural-decisions/2026-07-billing-read-model-never-synthesizes-entitlement.md).
+
 ### 2. Configure Customer Portal
 
 **Settings > Billing > Customer portal** — enable:
