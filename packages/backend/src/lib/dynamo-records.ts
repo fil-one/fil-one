@@ -234,15 +234,16 @@ export interface DeletionChallengeRecord {
   ttl: number; // epoch seconds; DynamoDB TTL janitor (~1h)
 }
 
-/** Teardown progress states for {@link OrgDeletionRecord}, in execution order. */
+/**
+ * Teardown states for {@link OrgDeletionRecord}. Only these two are written:
+ * every external teardown step is idempotent, so the worker just re-runs
+ * everything until it completes — no per-step tracking. Legacy records may
+ * still carry an old intermediate status (KEYS_REVOKED, TENANTS_DISABLED,
+ * STRIPE_CANCELED, AUTH0_DELETED, RAG_PURGED, RECORDS_PURGED); readers treat
+ * anything that is not DONE as "in progress".
+ */
 export const OrgDeletionStatus = {
   Pending: 'PENDING',
-  KeysRevoked: 'KEYS_REVOKED',
-  TenantsDisabled: 'TENANTS_DISABLED',
-  StripeCanceled: 'STRIPE_CANCELED',
-  Auth0Deleted: 'AUTH0_DELETED',
-  RagPurged: 'RAG_PURGED',
-  RecordsPurged: 'RECORDS_PURGED',
   Done: 'DONE',
 } as const;
 
@@ -251,7 +252,12 @@ export type OrgDeletionStatusValue = (typeof OrgDeletionStatus)[keyof typeof Org
 /** Snapshot of an org member captured when deletion is confirmed. */
 export interface OrgDeletionMember {
   userId: string;
-  /** Auth0 sub; stripped from the record when teardown reaches DONE. */
+  /**
+   * Auth0 sub. Retained on the audit record even after teardown completes:
+   * the SUB# identity tombstone keeps the sub forever anyway (it is the key
+   * that stops a stale session resurrecting the account), so stripping it
+   * here would buy no privacy while breaking audit correlation.
+   */
   sub?: string;
 }
 
@@ -266,7 +272,13 @@ export interface OrgDeletionMember {
 export interface OrgDeletionRecord {
   pk: string;
   sk: string;
-  status: OrgDeletionStatusValue;
+  /**
+   * {@link OrgDeletionStatus} value on records written by current code, but
+   * typed as string because legacy records may persist old intermediate
+   * statuses — compare against `OrgDeletionStatus.Done` only, never
+   * exhaustive-switch.
+   */
+  status: string;
   requestedAt: string; // ISO-8601
   requestedByUserId: string;
   members: OrgDeletionMember[];

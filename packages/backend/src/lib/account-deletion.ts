@@ -1,6 +1,5 @@
 import {
   BatchWriteItemCommand,
-  ConditionalCheckFailedException,
   DeleteItemCommand,
   PutItemCommand,
   QueryCommand,
@@ -20,23 +19,16 @@ import {
   OrgDeletionStatus,
   RAGKeys,
   type OrgDeletionRecord,
-  type OrgDeletionStatusValue,
   type OrgTombstoneRecord,
 } from './dynamo-records.js';
 import { getOrgProfile } from './org-profile.js';
 import {
-  assertRegionSyncSucceeded,
   getProvisionedRegions,
   getProvisionedRegionsFromProfile,
-  syncTenantStatusInProvisionedRegions,
   type ProvisionedRegion,
 } from './region-helpers.js';
-import {
-  getAvailableOrchestrators,
-  getOrchestratorForRegion,
-} from './service-orchestrator-registry.js';
+import { getAvailableOrchestrators } from './service-orchestrator-registry.js';
 import { getStripeClient } from './stripe-client.js';
-import { S3Region } from '@filone/shared';
 
 const dynamo = getDynamoClient();
 
@@ -55,11 +47,19 @@ export function assertPurgeAllowed(pk: string, allowlist: readonly string[]): vo
 }
 
 /**
- * Run (or resume) the teardown state machine for an org whose deletion was
- * confirmed. Driven by the ORG#{orgId}/DELETION record written by the
- * delete-account handler; every step is idempotent, so a crash at any point
- * is resumed by re-invoking (async Lambda retry or the reconciler cron).
- * A concurrent invocation loses the conditional status advance and exits.
+ * Run (or resume) the teardown for an org whose deletion was confirmed.
+ * Driven by the ORG#{orgId}/DELETION record written by the delete-account
+ * handler. There is no per-step state machine: every external teardown is
+ * idempotent and snapshot-driven, so each invocation simply runs ALL of them
+ * concurrently, then purges the DDB records and marks the record DONE. A
+ * failure anywhere leaves the record non-DONE and throws after everything
+ * settles, so Lambda's async retry / the reconciler cron re-drives the whole
+ * (idempotent) teardown. Concurrent invocations are harmless for the same
+ * reason.
+ *
+ * `record.status` is read as a plain string: legacy records may still carry
+ * an old intermediate status (KEYS_REVOKED, TENANTS_DISABLED, ...) — anything
+ * that is not DONE means "in progress, run everything".
  */
 export async function runAccountDeletion(orgId: string): Promise<void> {
   const record = await readDeletionRecord(orgId);
@@ -71,91 +71,35 @@ export async function runAccountDeletion(orgId: string): Promise<void> {
 
   await bumpAttemptCount(orgId);
 
-  let status: OrgDeletionStatusValue = record.status;
-  while (status !== OrgDeletionStatus.Done) {
-    const next = await runStep(orgId, status, record);
-    if (next === 'lost-race') {
-      console.warn('[account-deletion] Concurrent teardown advanced the state; exiting', {
-        orgId,
-        status,
-      });
-      return;
-    }
-    console.warn('[account-deletion] Step complete', { orgId, from: status, to: next });
-    status = next;
+  // The external teardowns are independent — run them concurrently and only
+  // fail after all settle, so one vendor/region outage doesn't block the rest.
+  const externals: { name: string; run: () => Promise<void> }[] = [
+    { name: 'regions', run: () => deleteAllRegions(orgId, record) },
+    { name: 'stripe', run: () => cancelStripeAndWriteTombstone(orgId, record) },
+    { name: 'auth0', run: () => deleteAuth0Users(record) },
+    { name: 'rag', run: () => purgeRagData(orgId) },
+  ];
+  const results = await Promise.allSettled(externals.map(({ run }) => run()));
+  const failures = results
+    .map((result, i) => ({ result, name: externals[i].name }))
+    .filter(
+      (f): f is { result: PromiseRejectedResult; name: string } => f.result.status === 'rejected',
+    );
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures.map((f) => f.result.reason),
+      `Account teardown failed for org ${orgId} in: ${failures.map((f) => f.name).join(', ')}`,
+    );
   }
+
+  await purgeRecords(orgId, record);
+  await markDone(orgId);
   console.warn('[account-deletion] Teardown complete', { orgId });
 }
 
-async function runStep(
-  orgId: string,
-  status: OrgDeletionStatusValue,
-  record: OrgDeletionRecord,
-): Promise<OrgDeletionStatusValue | 'lost-race'> {
-  switch (status) {
-    case OrgDeletionStatus.Pending:
-      await revokeAllAccessKeys(orgId);
-      return advanceStatus(orgId, status, OrgDeletionStatus.KeysRevoked);
-    case OrgDeletionStatus.KeysRevoked:
-      await disableAllTenants(orgId);
-      return advanceStatus(orgId, status, OrgDeletionStatus.TenantsDisabled);
-    case OrgDeletionStatus.TenantsDisabled:
-      await cancelStripeAndWriteTombstone(orgId, record);
-      return advanceStatus(orgId, status, OrgDeletionStatus.StripeCanceled);
-    case OrgDeletionStatus.StripeCanceled:
-      await deleteAuth0Users(record);
-      return advanceStatus(orgId, status, OrgDeletionStatus.Auth0Deleted);
-    case OrgDeletionStatus.Auth0Deleted:
-      await purgeRagData(orgId);
-      return advanceStatus(orgId, status, OrgDeletionStatus.RagPurged);
-    case OrgDeletionStatus.RagPurged:
-      await purgeRecords(orgId, record);
-      return advanceStatus(orgId, status, OrgDeletionStatus.RecordsPurged);
-    case OrgDeletionStatus.RecordsPurged:
-      return finalize(orgId, record);
-    default:
-      throw new Error(`Unexpected deletion status "${status}" for org ${orgId}`);
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Steps — each idempotent
+// External teardowns — each idempotent
 // ---------------------------------------------------------------------------
-
-/** Revoke every access key via its owning orchestrator, then delete the row. */
-async function revokeAllAccessKeys(orgId: string): Promise<void> {
-  const orgProfile = await getOrgProfile(orgId);
-  const rows = await queryOrgRows(orgId, 'ACCESSKEY#');
-
-  for (const row of rows) {
-    const keyId = (row.sk as string).slice('ACCESSKEY#'.length);
-    // Legacy rows without `region` predate FTH → Aurora (mirrors delete-access-key).
-    const region = (row.region as S3Region | undefined) ?? S3Region.EuWest1;
-    const orchestrator = getOrchestratorForRegion(region);
-    const tenantId = orchestrator.isTenantReady(orgProfile);
-    if (tenantId) {
-      // Contract: idempotent, a missing key is success.
-      await orchestrator.deleteAccessKey(tenantId, keyId);
-    } else {
-      console.warn('[account-deletion] No ready tenant for key; deleting record only', {
-        orgId,
-        keyId,
-        region,
-      });
-    }
-    await dynamo.send(
-      new DeleteItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: marshall({ pk: `ORG#${orgId}`, sk: `ACCESSKEY#${keyId}` }),
-      }),
-    );
-  }
-}
-
-/** Set every provisioned tenant (Aurora and FTH alike) to `disabled`. */
-async function disableAllTenants(orgId: string): Promise<void> {
-  assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'disabled'));
-}
 
 async function cancelStripeAndWriteTombstone(
   orgId: string,
@@ -228,21 +172,23 @@ async function dropVectorIndexForPk(vectorStore: S3VectorsStore, pk: string): Pr
 }
 
 async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<void> {
-  // A tenant setup racing the confirm may have provisioned after the earlier
-  // disable pass. Re-check before the profile row (the only pointer to the
-  // tenant ids) is purged, and persist the live tenant ids onto the DELETION
-  // record so a crash between the purge and the tenant deletion still leaves
-  // every tenant findable. The `deleting` flag written at confirm time blocks
-  // new setups, so this converges.
+  // A tenant setup racing the confirm may have provisioned after the
+  // concurrent region teardown ran. Re-check before the profile row (the only
+  // pointer to the tenant ids) is purged, persist the live tenant ids onto
+  // the DELETION record so a crash still leaves every tenant findable, and
+  // tear the stragglers down. The `deleting` flag written at confirm time
+  // blocks new setups, so this converges.
   const lateRegions = await getProvisionedRegions(orgId);
   if (lateRegions.length > 0) {
     await snapshotTenantIdsOnDeletionRecord(orgId, record, lateRegions);
-    await revokeAllAccessKeys(orgId);
+    for (const { orchestrator, tenantId } of lateRegions) {
+      await orchestrator.deleteTenant(tenantId);
+    }
   }
 
-  await deleteAllRegions(orgId, record);
-
   // UserInfoTable: everything under ORG#{orgId} except the DELETION record.
+  // This includes the ACCESSKEY# rows — their upstream keys died with the
+  // tenant (deleteTenant), so no per-key orchestrator revocation is needed.
   const orgRows = await queryOrgRows(orgId);
   const orgKeys = orgRows
     .filter((row) => row.sk !== DeletionKeys.deletionSk())
@@ -353,34 +299,25 @@ async function snapshotTenantIdsOnDeletionRecord(
   record.tenantIds = tenantIds;
 }
 
-async function finalize(
-  orgId: string,
-  record: OrgDeletionRecord,
-): Promise<OrgDeletionStatusValue | 'lost-race'> {
-  // Strip member subs from the audit record — the org's rows are gone, the
-  // record stays as the PII-light audit trail of the teardown.
-  const strippedMembers = record.members.map(({ userId }) => ({ userId }));
-  try {
-    await dynamo.send(
-      new UpdateItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
-        UpdateExpression: 'SET #s = :done, members = :members, updatedAt = :now',
-        ConditionExpression: '#s = :expected',
-        ExpressionAttributeNames: { '#s': 'status' },
-        ExpressionAttributeValues: marshall({
-          ':done': OrgDeletionStatus.Done,
-          ':expected': OrgDeletionStatus.RecordsPurged,
-          ':members': strippedMembers,
-          ':now': new Date().toISOString(),
-        }),
+/**
+ * Terminal status write. Members are kept intact on the audit record: the
+ * SUB# identity tombstone retains each sub forever anyway (see purgeRecords),
+ * so stripping them here bought no privacy and broke audit correlation.
+ */
+async function markDone(orgId: string): Promise<void> {
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
+      UpdateExpression: 'SET #s = :done, updatedAt = :now',
+      ConditionExpression: 'attribute_exists(pk)',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: marshall({
+        ':done': OrgDeletionStatus.Done,
+        ':now': new Date().toISOString(),
       }),
-    );
-  } catch (err) {
-    if (err instanceof ConditionalCheckFailedException) return 'lost-race';
-    throw err;
-  }
-  return OrgDeletionStatus.Done;
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -397,38 +334,6 @@ async function bumpAttemptCount(orgId: string): Promise<void> {
       ExpressionAttributeValues: marshall({ ':one': 1 }),
     }),
   );
-}
-
-/**
- * Conditional status advance (mirrors aurora-tenant-setup's advanceStatus):
- * only the invocation holding the expected status moves forward; a loser
- * gets 'lost-race' and exits, leaving the winner to continue.
- */
-async function advanceStatus(
-  orgId: string,
-  expected: OrgDeletionStatusValue,
-  next: OrgDeletionStatusValue,
-): Promise<OrgDeletionStatusValue | 'lost-race'> {
-  try {
-    await dynamo.send(
-      new UpdateItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
-        UpdateExpression: 'SET #s = :next, updatedAt = :now',
-        ConditionExpression: '#s = :expected',
-        ExpressionAttributeNames: { '#s': 'status' },
-        ExpressionAttributeValues: marshall({
-          ':next': next,
-          ':expected': expected,
-          ':now': new Date().toISOString(),
-        }),
-      }),
-    );
-  } catch (err) {
-    if (err instanceof ConditionalCheckFailedException) return 'lost-race';
-    throw err;
-  }
-  return next;
 }
 
 /** Paged Query of the org partition, optionally filtered to an sk prefix. */

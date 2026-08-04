@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   BatchWriteItemCommand,
-  ConditionalCheckFailedException,
   DeleteItemCommand,
   DynamoDBClient,
   GetItemCommand,
@@ -11,7 +10,6 @@ import {
   ScanCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
-import { DeleteParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 
 vi.mock('sst', () => ({
@@ -28,20 +26,16 @@ vi.mock('./auth0-management.js', () => ({
   deleteAuth0User: (sub: string) => mockDeleteAuth0User(sub),
 }));
 
-const mockSync = vi.fn();
 const mockGetProvisionedRegions = vi.fn();
 vi.mock('./region-helpers.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./region-helpers.js')>()),
-  syncTenantStatusInProvisionedRegions: (...args: unknown[]) => mockSync(...args),
   getProvisionedRegions: (...args: unknown[]) => mockGetProvisionedRegions(...args),
 }));
 
-const mockDeleteAccessKey = vi.fn();
 const mockIsTenantReady = vi.fn();
 const mockDeleteTenant = vi.fn();
 const testOrchestrator = {
   id: 'aurora',
-  deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
   isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
   deleteTenant: (...args: unknown[]) => mockDeleteTenant(...args),
 };
@@ -70,7 +64,6 @@ vi.mock('@filone/rag-shared', () => ({
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
-const ssmMock = mockClient(SSMClient);
 
 process.env.FILONE_STAGE = 'test';
 
@@ -98,7 +91,6 @@ function deletionItem(status: string, overrides?: Record<string, unknown>) {
 
 function setupHappyMocks(status: string) {
   ddbMock.reset();
-  ssmMock.reset();
   ddbMock
     .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
     .resolves({ Item: deletionItem(status) });
@@ -107,20 +99,24 @@ function setupHappyMocks(status: string) {
   ddbMock.on(BatchWriteItemCommand).resolves({});
   ddbMock.on(QueryCommand).resolves({ Items: [] });
   ddbMock.on(ScanCommand).resolves({ Items: [] });
-  ssmMock.on(DeleteParameterCommand).resolves({});
   mockGetOrgProfile.mockResolvedValue({
     pk: { S: `ORG#${ORG_ID}` },
     sk: { S: 'PROFILE' },
     auroraTenantId: { S: 'aurora-t-1' },
   });
-  mockSync.mockResolvedValue([]);
   mockGetProvisionedRegions.mockResolvedValue([]);
   mockDeleteAuth0User.mockResolvedValue(undefined);
   mockSubscriptionsCancel.mockResolvedValue({});
   mockDropIndex.mockResolvedValue(undefined);
   mockIsTenantReady.mockReturnValue('aurora-t-1');
-  mockDeleteAccessKey.mockResolvedValue(undefined);
   mockDeleteTenant.mockResolvedValue(undefined);
+}
+
+/** UpdateItem calls that write the terminal DONE status. */
+function doneWrites() {
+  return ddbMock
+    .commandCalls(UpdateItemCommand)
+    .filter((c) => c.args[0].input.ExpressionAttributeValues?.[':done']?.S === 'DONE');
 }
 
 describe('assertPurgeAllowed', () => {
@@ -146,43 +142,42 @@ describe('runAccountDeletion', () => {
 
     await runAccountDeletion(ORG_ID);
 
-    expect(mockSync).not.toHaveBeenCalled();
+    expect(mockDeleteTenant).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
-  it('is a no-op when already DONE', async () => {
+  it('is a no-op when already DONE: a re-invocation runs no externals', async () => {
     setupHappyMocks(OrgDeletionStatus.Done);
 
     await runAccountDeletion(ORG_ID);
 
-    expect(mockSync).not.toHaveBeenCalled();
+    expect(mockDeleteTenant).not.toHaveBeenCalled();
+    expect(mockSubscriptionsCancel).not.toHaveBeenCalled();
+    expect(mockDeleteAuth0User).not.toHaveBeenCalled();
     // Not even an attemptCount bump.
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
-  it('runs the full pipeline from PENDING to DONE', async () => {
+  it('runs every external teardown, purges the records, and marks DONE', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
-    ddbMock
-      .on(QueryCommand)
-      .resolvesOnce({
-        // revokeAllAccessKeys: one access key row
-        Items: [marshall({ pk: `ORG#${ORG_ID}`, sk: 'ACCESSKEY#key-1', region: 'eu-west-1' })],
-      })
-      .resolves({
-        // purgeRecords org partition query
-        Items: [
-          marshall({ pk: `ORG#${ORG_ID}`, sk: 'PROFILE' }),
-          marshall({ pk: `ORG#${ORG_ID}`, sk: 'MEMBER#user-1' }),
-          marshall({ pk: `ORG#${ORG_ID}`, sk: 'DELETION' }),
-        ],
-      });
+    ddbMock.on(QueryCommand).resolves({
+      // purgeRecords org partition query — includes an ACCESSKEY# row, whose
+      // upstream key died with the tenant (no per-key revocation anymore).
+      Items: [
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'PROFILE' }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'MEMBER#user-1' }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'ACCESSKEY#key-1' }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'DELETION' }),
+      ],
+    });
 
     await runAccountDeletion(ORG_ID);
 
-    expect(mockDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', 'key-1');
-    expect(mockSync).toHaveBeenCalledWith(ORG_ID, 'disabled');
+    // All four externals ran.
+    expect(mockDeleteTenant).toHaveBeenCalledWith('aurora-t-1');
     expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_1');
     expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|sub-1');
+    expect(ddbMock.commandCalls(ScanCommand).length).toBeGreaterThan(0); // RAG purge
 
     // Tombstone written to BillingTable without PII and without a ttl.
     const puts = ddbMock.commandCalls(PutItemCommand);
@@ -193,16 +188,19 @@ describe('runAccountDeletion', () => {
     expect(tombstone.ttl).toBeUndefined();
     expect(Object.keys(tombstone)).not.toContain('members');
 
-    // Tenant deleted per region via its orchestrator (which owns the tenant's
-    // upstream resources and SSM secret cleanup).
-    expect(mockDeleteTenant).toHaveBeenCalledWith('aurora-t-1');
+    // attemptCount bumped for the reconciler's stuck gauge.
+    const bumps = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .filter((c) => c.args[0].input.UpdateExpression?.includes('attemptCount'));
+    expect(bumps).toHaveLength(1);
 
-    // The DELETION row itself is never batch-deleted.
+    // Org rows purged (ACCESSKEY# included); the DELETION row itself never is.
     const batchedKeys = ddbMock
       .commandCalls(BatchWriteItemCommand)
       .flatMap((c) => Object.values(c.args[0].input.RequestItems!))
       .flat()
       .map((r) => r.DeleteRequest!.Key!.sk.S);
+    expect(batchedKeys).toContain('ACCESSKEY#key-1');
     expect(batchedKeys).not.toContain('DELETION');
 
     // SUB# row is stripped, not deleted.
@@ -212,74 +210,65 @@ describe('runAccountDeletion', () => {
     expect(subUpdates).toHaveLength(1);
     expect(subUpdates[0].args[0].input.UpdateExpression).toContain('REMOVE userId, orgId');
 
-    // Final status write is DONE with stripped members.
-    const statusWrites = ddbMock
-      .commandCalls(UpdateItemCommand)
-      .filter((c) => c.args[0].input.ExpressionAttributeNames?.['#s'] === 'status');
-    const finalWrite = statusWrites.at(-1)!.args[0].input;
-    expect(
-      finalWrite.ExpressionAttributeValues?.[':done']?.S ??
-        finalWrite.ExpressionAttributeValues?.[':next']?.S,
-    ).toBe(OrgDeletionStatus.Done);
+    // Terminal DONE write keeps the members audit trail intact.
+    const finals = doneWrites();
+    expect(finals).toHaveLength(1);
+    expect(finals[0].args[0].input.UpdateExpression).not.toContain('members');
   });
 
-  it('resumes mid-pipeline: STRIPE_CANCELED start skips keys/tenants/stripe', async () => {
-    setupHappyMocks(OrgDeletionStatus.StripeCanceled);
-
-    await runAccountDeletion(ORG_ID);
-
-    expect(mockDeleteAccessKey).not.toHaveBeenCalled();
-    expect(mockSubscriptionsCancel).not.toHaveBeenCalled();
-    expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|sub-1');
-    expect(mockDropIndex).not.toHaveBeenCalled(); // no RAG rows in this fixture
-  });
-
-  it('stops without corrupting state when a region sync fails', async () => {
-    setupHappyMocks(OrgDeletionStatus.KeysRevoked);
-    mockSync.mockResolvedValue([
-      { orchestratorId: 'aurora', tenantId: 'aurora-t-1', outcome: 'error', cause: new Error('x') },
-    ]);
-
-    await expect(runAccountDeletion(ORG_ID)).rejects.toThrow(/tenant status sync failed/);
-
-    // Status never advanced past KEYS_REVOKED: no status-advance writes.
-    const statusWrites = ddbMock
-      .commandCalls(UpdateItemCommand)
-      .filter((c) => c.args[0].input.ExpressionAttributeNames?.['#s'] === 'status');
-    expect(statusWrites).toHaveLength(0);
-    expect(mockSubscriptionsCancel).not.toHaveBeenCalled();
-  });
-
-  it('exits on lost-race when a concurrent invocation advanced the status', async () => {
+  it('partial failure: the other externals still run, the error propagates, and the record stays non-DONE', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
-    ddbMock
-      .on(UpdateItemCommand)
-      .resolvesOnce({}) // attemptCount bump
-      .rejects(
-        new ConditionalCheckFailedException({ message: 'conditional failed', $metadata: {} }),
-      );
+    mockSubscriptionsCancel.mockRejectedValue(new Error('stripe is down'));
+
+    await expect(runAccountDeletion(ORG_ID)).rejects.toThrow(/Account teardown failed .* stripe/);
+
+    // Concurrent siblings were not aborted by the Stripe failure.
+    expect(mockDeleteTenant).toHaveBeenCalledWith('aurora-t-1');
+    expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|sub-1');
+    expect(ddbMock.commandCalls(ScanCommand).length).toBeGreaterThan(0);
+
+    // The purge and the terminal status write never happened.
+    expect(ddbMock.commandCalls(BatchWriteItemCommand)).toHaveLength(0);
+    expect(doneWrites()).toHaveLength(0);
+
+    // The next run re-executes everything and completes.
+    mockSubscriptionsCancel.mockResolvedValue({});
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockDeleteTenant).toHaveBeenCalledTimes(2);
+    expect(mockDeleteAuth0User).toHaveBeenCalledTimes(2);
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('a record persisted with a legacy intermediate status still completes', async () => {
+    // Written by the retired step state machine; anything non-DONE means
+    // "in progress → run everything".
+    setupHappyMocks('STRIPE_CANCELED');
 
     await runAccountDeletion(ORG_ID);
 
-    // Lost the PENDING→KEYS_REVOKED race; the loop exits without Stripe work.
-    expect(mockSubscriptionsCancel).not.toHaveBeenCalled();
+    expect(mockDeleteTenant).toHaveBeenCalledWith('aurora-t-1');
+    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_1');
+    expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|sub-1');
+    expect(doneWrites()).toHaveLength(1);
   });
 
-  it('treats already-canceled Stripe subscriptions and missing Auth0 users as success', async () => {
-    setupHappyMocks(OrgDeletionStatus.TenantsDisabled);
+  it('treats already-canceled Stripe subscriptions as success', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
     mockSubscriptionsCancel.mockRejectedValue(
       Object.assign(new Error('No such subscription'), { code: 'resource_missing' }),
     );
 
     await runAccountDeletion(ORG_ID);
 
-    expect(mockDeleteAuth0User).toHaveBeenCalled(); // pipeline continued
+    expect(doneWrites()).toHaveLength(1);
   });
 
   it('snapshots late-provisioned tenants onto the DELETION record and deletes them before purging', async () => {
-    setupHappyMocks(OrgDeletionStatus.RagPurged);
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    const lateDeleteTenant = vi.fn().mockResolvedValue(undefined);
     mockGetProvisionedRegions.mockResolvedValue([
-      { orchestrator: { id: 'aurora' }, tenantId: 'late-tenant' },
+      { orchestrator: { id: 'aurora', deleteTenant: lateDeleteTenant }, tenantId: 'late-tenant' },
     ]);
 
     await runAccountDeletion(ORG_ID);
@@ -293,16 +282,18 @@ describe('runAccountDeletion', () => {
     const written = unmarshall(tenantIdWrites[0].args[0].input.ExpressionAttributeValues!);
     expect(written[':tenantIds']).toMatchObject({ aurora: 'late-tenant' });
 
-    // And the region teardown ran.
-    expect(mockDeleteTenant).toHaveBeenCalled();
+    // And the straggler tenant was torn down.
+    expect(lateDeleteTenant).toHaveBeenCalledWith('late-tenant');
   });
 
   it('falls back to the DELETION-record snapshot when the profile row is already purged', async () => {
-    setupHappyMocks(OrgDeletionStatus.RagPurged);
+    setupHappyMocks(OrgDeletionStatus.Pending);
     mockGetOrgProfile.mockResolvedValue(undefined);
     ddbMock
       .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
-      .resolves({ Item: deletionItem(OrgDeletionStatus.RagPurged, { tenantIds: { aurora: 'snap-t-9' } }) });
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, { tenantIds: { aurora: 'snap-t-9' } }),
+      });
 
     await runAccountDeletion(ORG_ID);
 
@@ -310,7 +301,7 @@ describe('runAccountDeletion', () => {
   });
 
   it('falls back to the legacy per-orchestrator snapshot fields for in-flight records', async () => {
-    setupHappyMocks(OrgDeletionStatus.RagPurged);
+    setupHappyMocks(OrgDeletionStatus.Pending);
     mockGetOrgProfile.mockResolvedValue(undefined);
     // deletionItem carries legacy auroraTenantId: 'aurora-t-1' and no tenantIds.
 
@@ -320,7 +311,7 @@ describe('runAccountDeletion', () => {
   });
 
   it('drops vector indexes for RAG rows and tolerates NotFound on re-run', async () => {
-    setupHappyMocks(OrgDeletionStatus.Auth0Deleted);
+    setupHappyMocks(OrgDeletionStatus.Pending);
     ddbMock
       .on(ScanCommand)
       .resolvesOnce({
@@ -337,7 +328,7 @@ describe('runAccountDeletion', () => {
     await runAccountDeletion(ORG_ID);
 
     expect(mockDropIndex).toHaveBeenCalledWith(ORG_ID, 'eu-west-1', 'my-bucket');
-    // NotFound swallowed → pipeline reached the purge and finalize steps.
-    expect(mockGetProvisionedRegions).toHaveBeenCalled();
+    // NotFound swallowed → the run still completed.
+    expect(doneWrites()).toHaveLength(1);
   });
 });
