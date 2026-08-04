@@ -1,10 +1,14 @@
 import { useState } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { S3Region, formatBytes, type Bucket } from '@filone/shared';
+import {
+  S3Region,
+  formatBytes,
+  type Bucket,
+  type BucketRagEnablementResponse,
+} from '@filone/shared';
 
 import { Alert } from '../components/Alert.js';
-import { Badge } from '../components/Badge.js';
 import { Heading } from '../components/Heading/Heading.js';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs/index.js';
 import { useToast } from '../components/Toast/index.js';
@@ -19,15 +23,49 @@ import { queryKeys } from '../lib/query-client.js';
 import { useRagAccess } from '../lib/use-rag-access.js';
 import { BucketsTab, type RagBucket } from './RagPipelineBucketsTab.js';
 import { RagApiKeysTab } from './RagPipelineKeysTab.js';
-import { IntegrateTab, ModelsTab } from './RagPipelineTabs.js';
 
 // ---------------------------------------------------------------------------
 // RagPipelineView
 // ---------------------------------------------------------------------------
 
+/** Placeholder while a counter's data is still in flight. */
+function StatSkeleton() {
+  return (
+    <span
+      data-testid="rag-pipeline-stat-loading"
+      aria-hidden="true"
+      className="block h-6 w-14 animate-pulse rounded bg-zinc-200"
+    />
+  );
+}
+
+/**
+ * A counter's rendered value, keeping the three cases distinct.
+ *
+ * A dash was previously shown for both "still loading" and "the request failed",
+ * so a failed request left something that looked like a real value sitting there
+ * forever with no error surfaced. Loading now shows a skeleton and failure says
+ * so in words.
+ */
+function statValue({
+  pending,
+  failed,
+  value,
+}: {
+  pending: boolean;
+  failed: boolean;
+  value: string;
+}): React.ReactNode {
+  if (failed) return <span className="text-base font-medium text-zinc-500">Unavailable</span>;
+  if (pending) return <StatSkeleton />;
+  return value;
+}
+
 function RagPipelineView({
   buckets,
   apiKeyCount,
+  apiKeysPending,
+  apiKeysError,
   isLoading,
   isError,
   errorMessage,
@@ -35,32 +73,52 @@ function RagPipelineView({
   onConfirmToggle,
 }: {
   buckets: RagBucket[];
-  /** Org's RAG API key count; undefined while loading/errored. */
+  /** Org's RAG API key count; undefined until the request resolves. */
   apiKeyCount: number | undefined;
+  apiKeysPending: boolean;
+  apiKeysError: boolean;
   isLoading: boolean;
   isError: boolean;
   errorMessage: string | undefined;
   togglingBucket: string | null;
   onConfirmToggle: (bucket: RagBucket) => void;
 }) {
-  const anyEnabled = buckets.some((b) => b.enabled);
   const totalFiles = buckets.reduce((sum, b) => sum + (b.enabled ? b.filesIndexed : 0), 0);
   const totalIndexSize = buckets.reduce((sum, b) => sum + (b.enabled ? b.indexSize : 0), 0);
+  const indexedBuckets = buckets.filter((b) => b.enabled).length;
 
+  // Once loaded the counters read 0 before any bucket is indexed, which is the
+  // truth, so there is no separate "not enabled" placeholder state. The
+  // per-bucket rows below carry the enablement state. While the bucket data is
+  // still arriving, though, 0 would be a claim rather than a fact, so the
+  // counters show a skeleton instead.
   const stats = [
     {
       label: 'Files indexed',
-      value: anyEnabled ? totalFiles.toLocaleString() : '—',
-      sub: anyEnabled ? 'across all buckets' : 'Available once enabled',
+      value: statValue({
+        pending: isLoading,
+        failed: isError,
+        value: totalFiles.toLocaleString(),
+      }),
+      // The card label already says "indexed", so repeating it here is noise.
+      sub: indexedBuckets === 1 ? 'across 1 bucket' : `across ${indexedBuckets} buckets`,
     },
     {
       label: 'Index size',
-      value: anyEnabled ? formatBytes(totalIndexSize) : '—',
-      sub: anyEnabled ? 'total storage used' : 'Available once enabled',
+      value: statValue({
+        pending: isLoading,
+        failed: isError,
+        value: formatBytes(totalIndexSize),
+      }),
+      sub: 'total size of indexed files',
     },
     {
       label: 'API keys',
-      value: apiKeyCount !== undefined ? apiKeyCount.toLocaleString() : '—',
+      value: statValue({
+        pending: apiKeysPending,
+        failed: apiKeysError,
+        value: (apiKeyCount ?? 0).toLocaleString(),
+      }),
       sub: 'for the Query API',
     },
   ];
@@ -68,42 +126,24 @@ function RagPipelineView({
   return (
     <div data-testid="rag-pipeline-page" className="px-10 py-12 pb-20">
       <div className="space-y-8">
-        <div className="flex items-start justify-between gap-6">
-          <Heading
-            tag="h1"
-            size="2xl"
-            description="Turn any bucket into a queryable knowledge base."
-          >
-            <span className="inline-flex items-center gap-2.5">
-              Bucket Intelligence
-              {anyEnabled ? (
-                <Badge color="green" size="sm" strength="strong" dot>
-                  Active
-                </Badge>
-              ) : (
-                <Badge color="grey" size="sm" strength="strong">
-                  Not enabled
-                </Badge>
-              )}
-            </span>
-          </Heading>
-        </div>
+        <Heading tag="h1" size="2xl" description="Turn any bucket into a queryable knowledge base.">
+          Bucket Intelligence
+        </Heading>
 
+        {/* One panel split by hairlines rather than three separate cards: three
+            numbers do not need three borders competing with the tabs below, and a
+            single container keeps the values on a shared baseline. Labels are
+            sentence case (uppercase tracking-widest reads as legacy dashboard),
+            and figures use tabular-nums so digits line up as they change. */}
         <div
           data-testid="rag-pipeline-stats"
-          className={`grid grid-cols-3 gap-3 ${!anyEnabled ? 'opacity-60' : ''}`}
+          className="grid grid-cols-3 divide-x divide-zinc-200 rounded-xl border border-zinc-200 bg-white"
         >
           {stats.map((s) => (
-            <div
-              key={s.label}
-              data-testid="rag-pipeline-stat"
-              className="rounded-xl border border-zinc-200 bg-white p-5"
-            >
-              <p className="mb-2.5 text-xs font-medium uppercase tracking-wider text-zinc-500">
-                {s.label}
-              </p>
-              <p className="text-xl font-semibold text-zinc-950">{s.value}</p>
-              <p className="mt-1 text-xs text-zinc-400">{s.sub}</p>
+            <div key={s.label} data-testid="rag-pipeline-stat" className="px-5 py-4">
+              <p className="text-xs font-medium text-zinc-500">{s.label}</p>
+              <p className="mt-1.5 text-2xl font-semibold tabular-nums text-zinc-950">{s.value}</p>
+              {s.sub && <p className="mt-1 text-xs text-zinc-500">{s.sub}</p>}
             </div>
           ))}
         </div>
@@ -111,9 +151,7 @@ function RagPipelineView({
         <Tabs>
           <TabList>
             <Tab>Buckets</Tab>
-            <Tab>Models</Tab>
             <Tab>API Keys</Tab>
-            <Tab>Integrate</Tab>
           </TabList>
           <TabPanels>
             <TabPanel>
@@ -127,13 +165,7 @@ function RagPipelineView({
               />
             </TabPanel>
             <TabPanel>
-              <ModelsTab enabled={anyEnabled} />
-            </TabPanel>
-            <TabPanel>
               <RagApiKeysTab buckets={buckets} />
-            </TabPanel>
-            <TabPanel>
-              <IntegrateTab enabled={anyEnabled} buckets={buckets} />
             </TabPanel>
           </TabPanels>
         </Tabs>
@@ -158,6 +190,35 @@ function NotAvailable() {
 // Page export
 // ---------------------------------------------------------------------------
 
+/**
+ * How often to re-read one bucket's enablement, per bucket.
+ *
+ * The indexer writes `syncState`/`lastSyncedAt` out of band, so without polling a
+ * bucket showed "Indexing" until the page was manually reloaded: the copy tells
+ * people to come back in a few hours, and on return the page still claimed to be
+ * working. Polling stops as soon as there is nothing left to wait for, so a
+ * settled page makes no repeat requests.
+ *
+ * The first pass can take up to 6 hours, so that state polls far more slowly than
+ * an in-flight run; `refetchOnWindowFocus` (on by default) covers the common case
+ * of someone returning to the tab.
+ *
+ * `error` is not a settled state: the orchestrator keeps re-indexing enabled
+ * buckets whose last run failed, so a later pass can succeed on its own. Stopping
+ * on error would leave the row reading "Failed" until a manual reload, so it keeps
+ * polling at the slow interval even once `lastSyncedAt` exists.
+ */
+export function enablementPollInterval(query: {
+  state: { data?: BucketRagEnablementResponse };
+}): number | false {
+  const data = query.state.data;
+  if (!data?.enabled) return false;
+  if (data.syncState === 'syncing') return 30_000;
+  if (data.syncState === 'error') return 120_000;
+  if (!data.lastSyncedAt) return 120_000;
+  return false;
+}
+
 export function RagPipelinePage() {
   const ragAccess = useRagAccess();
   const queryClient = useQueryClient();
@@ -179,7 +240,11 @@ export function RagPipelinePage() {
 
   // Same query key as the API Keys tab, so the count and the table stay in
   // sync (creates/deletes invalidate ['rag-api-keys']).
-  const { data: apiKeysData } = useQuery({
+  const {
+    data: apiKeysData,
+    isPending: apiKeysPending,
+    isError: apiKeysError,
+  } = useQuery({
     queryKey: queryKeys.ragApiKeys,
     queryFn: () => listRagApiKeys(),
     enabled: ragAccess,
@@ -190,6 +255,7 @@ export function RagPipelinePage() {
       queryKey: queryKeys.ragBucketEnabledFor(b.bucketName, b.region as S3Region),
       queryFn: () => getBucketRagEnabled(b.bucketName, b.region as S3Region),
       enabled: ragAccess,
+      refetchInterval: enablementPollInterval,
     })),
   });
 
@@ -208,10 +274,14 @@ export function RagPipelinePage() {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.ragBucketEnabledFor(bucketName, region),
       });
-      toast.success(`RAG ${data.enabled ? 'enabled' : 'disabled'} for "${bucketName}"`);
+      toast.success(
+        data.enabled
+          ? `Indexing started for "${bucketName}"`
+          : `Indexing stopped for "${bucketName}"`,
+      );
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to update RAG enablement');
+      toast.error(err instanceof Error ? err.message : 'Failed to update indexing for this bucket');
     },
     onSettled: () => setTogglingBucket(null),
   });
@@ -247,6 +317,8 @@ export function RagPipelinePage() {
     <RagPipelineView
       buckets={buckets}
       apiKeyCount={apiKeysData?.keys.length}
+      apiKeysPending={apiKeysPending}
+      apiKeysError={apiKeysError}
       isLoading={bucketsPending || (bucketList.length > 0 && enablementLoading)}
       isError={bucketsError}
       errorMessage={bucketsErr instanceof Error ? bucketsErr.message : undefined}

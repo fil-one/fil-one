@@ -7,9 +7,12 @@ vi.mock('./api.js', () => ({
 }));
 
 import {
+  bucketDisplayState,
   getBucketRagEnabled,
+  isBucketQueryable,
   listBucketsForRag,
   queryBucket,
+  type RagBucket,
   setBucketRagEnabled,
 } from './rag-bucket-api.js';
 
@@ -71,5 +74,50 @@ describe('rag-bucket-api', () => {
       method: 'POST',
       body: JSON.stringify({ query: 'hello', top_k: 5, model: 'm' }),
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Display-state helpers
+// ---------------------------------------------------------------------------
+
+function bucket(over: Partial<RagBucket> = {}): RagBucket {
+  return {
+    name: 'my-bucket',
+    region: S3Region.UsEast1,
+    enabled: true,
+    filesIndexed: 0,
+    indexSize: 0,
+    ...over,
+  };
+}
+
+describe('isBucketQueryable', () => {
+  it('is false for a bucket that is not enabled', () => {
+    expect(
+      isBucketQueryable(bucket({ enabled: false, lastSyncedAt: '2026-01-01T00:00:00Z' })),
+    ).toBe(false);
+  });
+
+  it('is false while an enabled bucket still awaits its first completed pass', () => {
+    expect(isBucketQueryable(bucket())).toBe(false);
+  });
+
+  it('is true once a pass has completed', () => {
+    expect(isBucketQueryable(bucket({ lastSyncedAt: '2026-01-01T00:00:00Z' }))).toBe(true);
+  });
+
+  it('stays true while a re-index is in flight, since the previous index still answers', () => {
+    expect(
+      isBucketQueryable(bucket({ syncState: 'syncing', lastSyncedAt: '2026-01-01T00:00:00Z' })),
+    ).toBe(true);
+  });
+
+  it('agrees with bucketDisplayState on an empty-string timestamp', () => {
+    // These two helpers exist to keep the row, the status, and the drawer
+    // aligned, so neither may treat a falsy timestamp as a completed pass.
+    const b = bucket({ lastSyncedAt: '' });
+    expect(bucketDisplayState(b)).toBe('awaiting-first-index');
+    expect(isBucketQueryable(b)).toBe(false);
   });
 });
