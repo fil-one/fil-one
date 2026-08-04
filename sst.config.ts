@@ -39,6 +39,11 @@ export default $config({
     // ⚠️  All Lambda functions MUST be created via createFn() to ensure
     //     log forwarding is set up. Never use `new sst.aws.Function()` directly.
 
+    const stage = $app.stage;
+    const isProduction = stage === 'production';
+    const isStaging = stage === 'staging';
+    const isEphemeralStage = !isProduction && !isStaging;
+
     // ── Secrets (set via: pnpx sst secret set <Name> <value>) ─────────
     const auth0ClientId = new sst.Secret('Auth0ClientId');
     const auth0ClientSecret = new sst.Secret('Auth0ClientSecret');
@@ -52,12 +57,17 @@ export default $config({
     const stripePriceId = new sst.Secret('StripePriceId');
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
+    // linked on non-production stages.
+    const forgeManagementApiToken =
+      isStaging || isEphemeralStage ? new sst.Secret('ForgeManagementApiToken') : undefined;
+    const managementApiTokens = [
+      auroraBackofficeToken,
+      fthManagementApiToken,
+      ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
+    ];
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
-    const sendGridApiKey =
-      $app.stage === 'staging' || $app.stage === 'production'
-        ? new sst.Secret('SendGridApiKey')
-        : undefined;
+    const sendGridApiKey = isStaging || isProduction ? new sst.Secret('SendGridApiKey') : undefined;
     const AWS_CACHING_DISABLED_POLICY = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
 
     // ── Global Function settings ────────────────────────────
@@ -127,6 +137,14 @@ export default $config({
     }
     const ragVectorBucketResource = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
       vectorBucketName: ragVectorBucketName,
+      // Indexes are created at runtime by the RAG indexer (one opaque
+      // rag-<hash> index per RAG-enabled bucket), so Pulumi has no knowledge of
+      // them. Without forceDestroy, `sst remove` of a preview/staging stage
+      // fails with a 409 ConflictException ("vector bucket is not empty") on
+      // DeleteVectorBucket. forceDestroy makes the provider delete all indexes
+      // and vectors first. Gated off production, which is removal:'retain' and
+      // never torn down anyway.
+      forceDestroy: !isProduction,
     });
 
     // Wrap the raw Pulumi resource so handlers can read it via SST resource
@@ -164,11 +182,6 @@ export default $config({
     ];
 
     // ── Stage-aware domain config ────────────────────────────────────
-    const stage = $app.stage;
-    const isProduction = stage === 'production';
-    const isStaging = stage === 'staging';
-    const isEphemeralStage = !isProduction && !isStaging;
-
     // Ephemeral stages become subdomains of dev.fil.one — enforce DNS label rules.
     if (isEphemeralStage && !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(stage)) {
       throw new Error(
@@ -439,8 +452,7 @@ export default $config({
       stripeSecretKey,
       stripePublishableKey,
       stripePriceId,
-      auroraBackofficeToken,
-      fthManagementApiToken,
+      ...managementApiTokens,
     ];
     // Management API runtime credentials — linked only to handlers that call the Auth0 Management API
     const mgmtRuntimeResources = [auth0MgmtRuntimeClientId, auth0MgmtRuntimeClientSecret];
@@ -470,23 +482,31 @@ export default $config({
       FTH_MANAGEMENT_API_URL: 'https://api.fortilyx.com',
     };
 
+    // Forge (Management-API) — non-prod only. One shared endpoint serves every
+    // Forge region; the region is sent per-tenant in the PUT /tenants body.
+    const forgeEnv = {
+      FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://hilt.staging.fil.one',
+    };
+
     // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
     // drives region/orchestrator selection, and instantiating the orchestrator
     // registry eagerly loads both the Aurora and FTH clients, so each backend's
     // endpoint config must be present. FILONE_STAGE is intentionally also in
     // sharedEnv (the partial-bundle route handlers read it); it's repeated here
     // so cron jobs, which bypass sharedEnv, receive it too.
-    const orchestratorEnv = { FILONE_STAGE: $app.stage, ...auroraEnv, ...fthEnv };
+    const orchestratorEnv = { FILONE_STAGE: $app.stage, ...auroraEnv, ...fthEnv, ...forgeEnv };
 
     const auroraApiKeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-portal/tenant-api-key/*`;
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
+    const forgeS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forge-s3/*`;
+    const orchestratorS3KeySsmArns = [auroraS3KeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn];
     // Per-tenant console S3 access keys (getConsoleS3Credentials), needed by
     // handlers that talk to the S3 data plane directly (presign, indexing, …).
     const s3DataPlanePermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
-        resources: [auroraS3KeySsmArn, fthS3KeySsmArn],
+        resources: orchestratorS3KeySsmArns,
       },
     ];
     // Per-tenant credentials for the bucket read path (getBucket/listBuckets):
@@ -494,7 +514,7 @@ export default $config({
     const bucketReadPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
-        resources: [auroraApiKeySsmArn, fthS3KeySsmArn],
+        resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn],
       },
     ];
 
@@ -600,6 +620,7 @@ export default $config({
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         ...fthEnv,
+        ...forgeEnv,
       },
       permissions: bucketReadPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
@@ -613,7 +634,7 @@ export default $config({
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
+          resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
         },
       ],
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
@@ -626,6 +647,7 @@ export default $config({
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         ...fthEnv,
+        ...forgeEnv,
       },
       permissions: bucketReadPermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
@@ -635,7 +657,7 @@ export default $config({
       method: 'DELETE',
       routePath: '/api/buckets/{name}',
       handler: 'delete-bucket',
-      extraEnv: { ...fthEnv },
+      extraEnv: { ...fthEnv, ...forgeEnv },
       permissions: s3DataPlanePermissions,
     });
     addRoute({
@@ -652,7 +674,7 @@ export default $config({
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
+          resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
         },
       ],
       timeout: '30 seconds',
@@ -664,6 +686,7 @@ export default $config({
       extraEnv: {
         AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
         ...fthEnv,
+        ...forgeEnv,
       },
       permissions: [
         {
@@ -694,7 +717,7 @@ export default $config({
       method: 'POST',
       routePath: '/api/presign',
       handler: 'presign',
-      extraEnv: { ...fthEnv },
+      extraEnv: { ...fthEnv, ...forgeEnv },
       permissions: s3DataPlanePermissions,
       provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       memory: '512 MB',
@@ -922,14 +945,7 @@ export default $config({
     // ── Usage reporting (cron-based) ────────────────────────────────
     const usageWorker = createFn('UsageReportingWorker', {
       handler: 'packages/backend/src/jobs/usage-reporting-worker.handler',
-      link: [
-        billingTable,
-        userInfoTable,
-        stripeSecretKey,
-        stripePriceId,
-        auroraBackofficeToken,
-        fthManagementApiToken,
-      ],
+      link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, ...managementApiTokens],
       environment: {
         ...orchestratorEnv,
         STRIPE_METER_EVENT_NAME: 'gb_month_meter',
@@ -964,7 +980,7 @@ export default $config({
     // ── Grace period enforcement ────────────────────────────────────
     const gracePeriodEnforcer = createFn('GracePeriodEnforcer', {
       handler: 'packages/backend/src/jobs/grace-period-enforcer.handler',
-      link: [billingTable, userInfoTable, auroraBackofficeToken, fthManagementApiToken],
+      link: [billingTable, userInfoTable, ...managementApiTokens],
       environment: orchestratorEnv,
       timeout: '300 seconds',
       memory: '256 MB',
@@ -984,27 +1000,13 @@ export default $config({
     // buckets are resumed across runs via a persisted continuation checkpoint.
     const ragIndexerWorker = createFn('RagIndexerWorker', {
       handler: 'packages/backend/src/jobs/rag-indexer-worker.handler',
-      link: [
-        billingTable,
-        userInfoTable,
-        ragIndexerTable,
-        ragVectorBucket,
-        auroraBackofficeToken,
-        fthManagementApiToken,
-      ],
+      link: [billingTable, userInfoTable, ragIndexerTable, ragVectorBucket, ...managementApiTokens],
       environment: orchestratorEnv,
       timeout: '900 seconds',
-      memory: '512 MB',
-      permissions: [
-        ...s3DataPlanePermissions,
-        ...ragPermissions,
-        {
-          // PDF extraction (@filone/rag-shared pdf-extractor). Textract has no
-          // resource-level permissions — actions require Resource: '*'.
-          actions: ['textract:StartDocumentTextDetection', 'textract:GetDocumentTextDetection'],
-          resources: ['*'],
-        },
-      ],
+      // 1024 MB: PDF text extraction runs in-process (pdf.js), which is
+      // CPU- and heap-hungry on large documents.
+      memory: '1024 MB',
+      permissions: [...s3DataPlanePermissions, ...ragPermissions],
     });
 
     const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
@@ -1115,7 +1117,7 @@ export default $config({
     // ── Subscription drift checker (cron-based, observe-only) ───────
     const subscriptionDriftChecker = createFn('SubscriptionDriftChecker', {
       handler: 'packages/backend/src/jobs/subscription-drift-checker.handler',
-      link: [billingTable, userInfoTable, auroraBackofficeToken, fthManagementApiToken],
+      link: [billingTable, userInfoTable, ...managementApiTokens],
       environment: orchestratorEnv,
       timeout: '300 seconds',
       memory: '256 MB',

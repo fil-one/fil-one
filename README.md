@@ -155,6 +155,8 @@ In CI, all nine credential vars come from GitHub repository secrets (see [.githu
 
 The bucket/upload tests in `tests/e2e/destructive/buckets.spec.ts` run once per S3 region (`eu-west-1` and `us-east-1`, see `tests/e2e/destructive/regions.util.ts`) and reuse existing buckets rather than creating them (the account-wide bucket limit is 100 and buckets are not yet deletable). Each test account — paid, unpaid, and trial — must therefore have at least one bucket in **each** region on the target stage; otherwise the test fails with a `No <region> bucket found` error. Seeding is manual: log in as each test user and create one bucket per region via the UI. The unpaid account cannot create buckets in its `past_due` state, so seed its buckets while its billing state permits (or temporarily reset it via the `BillingTable`).
 
+The upload tests report backend failures the same way. An upload is two round-trips — `POST /api/presign`, then a `PUT` straight to the region's S3 endpoint (`getS3Endpoint` in [packages/shared/src/constants.ts](packages/shared/src/constants.ts)) — and neither failure navigates anywhere, so `submitUploadExpectingSuccess` reads both responses and fails with the region, status and response body. Without it, a region whose storage backend returns a 502 is indistinguishable from a hung browser: both surface only as a `toHaveURL` timeout on the navigation back to the bucket page. A rejected `PUT` has taken ~30s to come back, so these tests get a longer timeout than the default.
+
 #### Running locally
 
 The `test:e2e` script wraps Playwright in `sst shell` so SST Resource bindings (e.g. `BillingTable` name) resolve to the current SST stage. Deploy a stage first, then:
@@ -391,13 +393,28 @@ Use **test mode** first. Switch to live mode for production.
 
 1. **Products > Add product**
    - Name: `Fil.one Storage`
-   - Description: `Decentralized cloud storage — $4.99/TiB/month`
+   - Description: `Decentralized cloud storage — $4.99/TB/month, $4.99/month minimum`
 2. **Add price** on that product:
-   - Pricing model: Standard
+   - Pricing model: **Graduated tiering**
    - Recurring: Monthly
-   - Usage type: **Metered** (sum of usage values during period)
-   - Price: `$4.99` per unit, unit label: `TiB`
+   - Usage type: **Metered** (sum of usage values during period), unit label: `GB`
+   - First tier: up to `1000` GB, flat fee `$4.99` — this flat fee is the monthly minimum
+   - Final tier: `$0.00499` per GB — the same $4.99/TB rate, for usage above the first tier
 3. Note the **Price ID** (`price_xxxxx`)
+
+Usage is metered in decimal GB (`GB_BYTES = 1e9`, see the usage-reporting worker),
+so 1000 GB of included usage is exactly the $4.99 the flat fee covers.
+
+The first tier's flat amount is what the console shows as the monthly minimum:
+`GET /api/billing` reports it as `subscription.monthlyMinimumCents`, read from the
+price the org's subscription is actually billed on. Customers grandfathered on the
+older plain per-unit price have no tiers and therefore no minimum. The price
+snapshot is cached on the billing record so the minimum stays correct while the
+Stripe API is unavailable.
+
+The endpoint never guesses the minimum: it fails the request instead of reporting
+"no minimum" when the price is graduated but carries no tiers, or when Stripe's
+exact decimal amount cannot be parsed.
 
 ### 2. Configure Customer Portal
 

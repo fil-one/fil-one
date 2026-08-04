@@ -64,7 +64,7 @@ const {
   throwOnError: false,
 });
 
-console.log('Status:', response1.status);
+console.log('Status:', response1?.status);
 if (error1) {
   console.error('First creation failed:', JSON.stringify(error1, null, 2));
   process.exit(1);
@@ -90,7 +90,7 @@ const { data: getById, response: getByIdResp } = await getS3AccessKey({
   path: { tenantId, accessKeyId: auroraKeyId! },
   throwOnError: false,
 });
-console.log('Status:', getByIdResp.status);
+console.log('Status:', getByIdResp?.status);
 console.log('Response:', JSON.stringify(getById, null, 2));
 
 // ── Step 2c: Get key by S3 accessKeyId ───────────────────────────────
@@ -102,7 +102,7 @@ const { data: getByS3, response: getByS3Resp } = await getS3AccessKey({
   path: { tenantId, accessKeyId: s3KeyId! },
   throwOnError: false,
 });
-console.log('Status:', getByS3Resp.status);
+console.log('Status:', getByS3Resp?.status);
 console.log('Response:', JSON.stringify(getByS3, null, 2));
 
 // ── Step 2d: Duplicate creation attempt ──────────────────────────────
@@ -119,10 +119,10 @@ const {
   throwOnError: false,
 });
 
-console.log('Status:', response2.status);
+console.log('Status:', response2?.status);
 if (error2) {
   console.error('Second creation error:', JSON.stringify(error2, null, 2));
-  console.log('\nAurora REJECTS duplicate key names with status', response2.status);
+  console.log('\nAurora REJECTS duplicate key names with status', response2?.status);
 } else {
   console.log('Second key created:', JSON.stringify(data2, null, 2));
   console.log('\nAurora ALLOWS duplicate key names (created two keys with same name)');

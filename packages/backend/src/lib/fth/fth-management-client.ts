@@ -309,7 +309,7 @@ async function runRequest<T>(
   if (!httpResponse.ok) {
     const responseBody = await readBodySafe(httpResponse);
     const message = extractErrorMessage(responseBody) ?? httpResponse.statusText;
-    const apiError = createApiError(httpResponse.status, message, responseBody);
+    const apiError = createApiError(httpResponse.status, message, responseBody, { method, path });
     throw await runErrorInterceptors(ctx, {
       error: apiError,
       response: httpResponse,

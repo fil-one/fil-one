@@ -40,7 +40,21 @@ export async function baseHandler(
     };
   }
 
-  const result = await getDynamoClient().send(new QueryCommand(queryInput));
+  // Attribute a 500 from this handler: on its own the error names neither the org nor
+  // whether the conditional bucket-filter branch was in play, which is the only thing
+  // that varies the query shape.
+  let result;
+  try {
+    result = await getDynamoClient().send(new QueryCommand(queryInput));
+  } catch (error) {
+    console.error('[list-access-keys] Access key query failed', {
+      orgId,
+      bucketFilter: bucketFilter ?? null,
+      filtered: Boolean(bucketFilter),
+      error,
+    });
+    throw error;
+  }
 
   const keys: AccessKey[] = (result.Items ?? []).map((item) => {
     const record = unmarshall(item);

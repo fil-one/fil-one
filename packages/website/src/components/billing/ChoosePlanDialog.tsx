@@ -13,6 +13,7 @@ type ChoosePlanDialogProps = {
 
 const PAY_AS_YOU_GO_FEATURES = [
   'Pay monthly',
+  '$4.99/month minimum',
   'No egress fees',
   'No API request fees',
   'Data integrity guarantees',

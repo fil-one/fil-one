@@ -236,7 +236,7 @@ export function PaymentForm({
           </div>
 
           <p className="text-center text-[11px] text-[#677183]">
-            Pay only for what you use. Cancel anytime.
+            Pay for the storage you use, $4.99/month minimum. Cancel anytime.
           </p>
         </div>
       </ModalBody>

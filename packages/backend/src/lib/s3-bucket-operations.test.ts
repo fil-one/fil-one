@@ -40,6 +40,8 @@ const s3 = createS3Client({
   region: 'auto',
   credentials: { accessKeyId: 'AK', secretAccessKey: 'SK' },
   forcePathStyle: true,
+  orchestratorId: 'test',
+  tenantId: 't-1',
 } satisfies S3ClientContext);
 
 // ---------------------------------------------------------------------------

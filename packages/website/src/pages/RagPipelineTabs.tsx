@@ -1,197 +1,103 @@
-import { useState } from 'react';
-import {
-  ChatCircleIcon,
-  CubeIcon,
-  LightningIcon,
-  TerminalIcon,
-} from '@phosphor-icons/react/dist/ssr';
-
-import { Alert } from '../components/Alert.js';
 import { Badge } from '../components/Badge.js';
-import { Card } from '../components/Card.js';
 import { CodeBlock } from '../components/CodeBlock.js';
-import { Heading } from '../components/Heading/Heading.js';
-import { Select } from '../components/Select.js';
-import { API_URL } from '../env.js';
-import { bucketKey, type RagBucket } from './RagPipelineBucketsTab.js';
-
-const ALL_BUCKETS_VALUE = '__all__';
+import { Link } from '../components/Link.js';
+import { RAG_DOCS_URL } from '../lib/rag-docs.js';
+import { buildQueryCurl } from '../lib/rag-query-snippet.js';
 
 // ---------------------------------------------------------------------------
-// ModelsTab — read-only Fil-One-managed model (no BYO / no API keys)
+// ApiReference
 // ---------------------------------------------------------------------------
 
-function ModelCard({
-  icon,
-  heading,
-  description,
-  testId,
-}: {
-  icon: React.ReactNode;
-  heading: string;
-  description: string;
-  testId: string;
-}) {
+/**
+ * Display copy for the two Fil-One-managed Bedrock models. Every model is
+ * managed: there is no bring-your-own-model or custom-embedding path, so this is
+ * reference material for API callers rather than something to configure.
+ *
+ * Sources of truth: the completion id must match the single entry in
+ * `SUPPORTED_COMPLETION_MODELS` (packages/shared/src/api/rag.ts), which is what
+ * the `model` request override validates against; the embedding model is
+ * `EMBEDDING_MODEL_ID` in @filone/rag-shared. The embedding id is deliberately
+ * not shown, because callers cannot select an embedding model.
+ */
+const MANAGED_MODELS = [
+  { role: 'Indexing', name: 'Titan Text Embeddings V2', id: undefined },
+  { role: 'Answers', name: 'Claude Opus 4.8', id: 'us.anthropic.claude-opus-4-8' },
+] as const;
+
+/**
+ * One labelled row of reference material: label in a fixed left column, content
+ * on the right. Borrowed from settings-page layouts, and the reason this section
+ * no longer needs cards or icons to look organised: alignment does that work, so
+ * the keys table above stays the only boxed element on the tab.
+ */
+function ReferenceRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <Card data-testid={testId} padding="md">
-      <div className="space-y-5">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-zinc-400">{icon}</span>
-            <span className="text-sm font-semibold text-zinc-800">{heading}</span>
-          </div>
-          <p className="mt-1 text-xs text-zinc-500">{description}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
-            Model
+    <div className="flex flex-col gap-2 py-4 sm:flex-row sm:gap-6">
+      {/* No top padding: label and content are both text-xs, so they share a
+          baseline only if neither is nudged. */}
+      <p className="w-32 flex-shrink-0 text-xs font-medium leading-4 text-zinc-500">{label}</p>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * The non-bucket-specific half of calling the API: the endpoint shape and which
+ * models run. Rendered under the API-keys table, because that is where someone
+ * goes to get a key and it is reachable with nothing indexed yet.
+ *
+ * A runnable call for one bucket lives in that bucket's drawer, where the bucket
+ * is already chosen. This content briefly had its own "Integrate" tab with a
+ * bucket dropdown to pick which bucket the snippet described, which is a filter
+ * compensating for page-level placement of bucket-level content; its default
+ * ("All buckets") rendered a snippet nobody could run.
+ */
+export function ApiReference() {
+  const endpointShape = buildQueryCurl({ bucketName: '{bucketName}', region: '{region}' });
+
+  return (
+    <section data-testid="api-reference" className="pt-2">
+      <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+        Reference
+      </h3>
+      <div className="mt-1 divide-y divide-zinc-100">
+        <ReferenceRow label="Query endpoint">
+          <CodeBlock code={endpointShape} language="bash" />
+          <p className="mt-2 text-xs text-zinc-500">
+            Export your key as <code className="font-mono">FILONE_RAG_KEY</code>, then replace{' '}
+            <code className="font-mono">{'{bucketName}'}</code> and{' '}
+            <code className="font-mono">{'{region}'}</code>. Opening a bucket gives you the same
+            call with those already filled in.
           </p>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-medium text-zinc-800">Fil One-managed model</span>
+        </ReferenceRow>
+        <ReferenceRow label="Models">
+          <dl data-testid="api-models" className="space-y-1.5">
+            {MANAGED_MODELS.map((model) => (
+              <div key={model.role} className="flex items-baseline gap-3 text-xs">
+                <dt className="w-16 flex-shrink-0 text-zinc-500">{model.role}</dt>
+                <dd className="min-w-0 text-zinc-800">
+                  <span className="font-medium">{model.name}</span>
+                  {model.id && <code className="ml-2 font-mono text-zinc-500">{model.id}</code>}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-3 flex items-center gap-2 text-xs text-zinc-500">
             <Badge color="grey" size="sm" strength="subtle">
               Managed
             </Badge>
-          </div>
-          <p className="mt-2 text-xs text-zinc-500">
-            Embeddings and answers are generated by Fil One's managed model. Bring-your-own model
-            support is coming soon.
+            Bring-your-own-model support is coming soon.
           </p>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-export function ModelsTab({ enabled }: { enabled: boolean }) {
-  return (
-    <div data-testid="models-tab" className="space-y-6">
-      <Heading
-        tag="h2"
-        size="lg"
-        description="Configure the models used for indexing and querying your buckets."
-      >
-        Models
-      </Heading>
-      <div className={`grid grid-cols-2 gap-6${!enabled ? ' opacity-60' : ''}`}>
-        <ModelCard
-          testId="model-card-index"
-          icon={<CubeIcon size={16} />}
-          heading="Index model"
-          description="Creates embeddings when files are uploaded to your buckets."
-        />
-        <ModelCard
-          testId="model-card-query"
-          icon={<ChatCircleIcon size={16} />}
-          heading="Query model"
-          description="Generates answers when you search across your indexed buckets."
-        />
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// IntegrateTab
-// ---------------------------------------------------------------------------
-
-export function IntegrateTab({ enabled, buckets }: { enabled: boolean; buckets: RagBucket[] }) {
-  const enabledBuckets = buckets.filter((b) => b.enabled);
-  const [selected, setSelected] = useState<string>(ALL_BUCKETS_VALUE);
-  const selectedBucket = enabledBuckets.find((b) => bucketKey(b) === selected);
-  const arg = selectedBucket ? selectedBucket.name : '{bucketName}';
-  // Bucket names are region-scoped, so the query endpoint needs the region.
-  const region = selectedBucket?.region ?? '{region}';
-
-  const mcpCode = JSON.stringify(
-    {
-      mcpServers: {
-        filone: {
-          command: 'npx',
-          args: ['@filone/mcp-server', '--buckets', arg],
-          env: { FILONE_KEY: 'sk-live_...' },
-        },
-      },
-    },
-    null,
-    2,
-  );
-
-  // Full URL so the sample is copy-paste runnable outside the browser. In prod
-  // API_URL is empty (same-origin behind CloudFront), so fall back to the
-  // page's own origin. Computed in-component so jsdom tests get a value.
-  const baseUrl = API_URL || window.location.origin;
-  // $FILONE_RAG_KEY (an env var, not a literal token) keeps real keys out of
-  // shell history when users copy-paste-edit the sample.
-  const queryCode = [
-    `curl -X POST "${baseUrl}/api/buckets/${arg}/query?region=${region}" \\`,
-    `  -H "Authorization: Bearer $FILONE_RAG_KEY" \\`,
-    `  -H "Content-Type: application/json" \\`,
-    `  -d '${JSON.stringify({ query: 'What are the retention policies?', top_k: 5 })}'`,
-  ].join('\n');
-
-  return (
-    <div data-testid="integrate-tab" className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <Heading
-          tag="h2"
-          size="lg"
-          description="Connect your buckets to AI apps and your own code."
-        >
-          Integrate
-        </Heading>
-        {enabled && enabledBuckets.length > 0 && (
-          <div className="mt-1 flex flex-shrink-0 items-center gap-3">
-            <span className="flex-shrink-0 text-xs font-medium text-zinc-400">Select bucket</span>
-            <div data-testid="integrate-bucket-select" className="w-44">
-              <Select value={selected} onChange={setSelected} aria-label="Select bucket">
-                <option value={ALL_BUCKETS_VALUE}>All buckets</option>
-                {enabledBuckets.map((b) => (
-                  <option key={bucketKey(b)} value={bucketKey(b)}>
-                    {b.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
-        )}
-      </div>
-      {!enabled && (
-        <Alert
-          variant="grey"
-          description="These endpoints will be active once you enable RAG Pipeline on a bucket."
-        />
-      )}
-      <div className="grid grid-cols-2 divide-x divide-zinc-100">
-        <div data-testid="integrate-query-api" className="pr-6">
-          <div className="flex items-center gap-2">
-            <LightningIcon size={16} className="text-zinc-400" />
-            <span className="text-sm font-semibold text-zinc-800">Query API</span>
-          </div>
-          <p className="mt-1 text-xs text-zinc-500">Call directly from your app or agent.</p>
-          <div className={`mt-4${!enabled ? ' pointer-events-none select-none blur-md' : ''}`}>
-            <CodeBlock code={queryCode} language="bash" />
-            <p className="mt-2 text-xs text-zinc-500">
-              Create a key in the API Keys tab and export it as{' '}
-              <code className="font-mono">FILONE_RAG_KEY</code>.
-            </p>
-          </div>
-        </div>
-        <div data-testid="integrate-mcp" className="pl-6">
-          <div className="flex items-center gap-2">
-            <TerminalIcon size={16} className="text-zinc-400" />
-            <span className="text-sm font-semibold text-zinc-800">MCP endpoint</span>
-            <Badge color="grey" size="sm" strength="subtle">
-              Coming later
-            </Badge>
-          </div>
-          <p className="mt-1 text-xs text-zinc-500">
-            For Claude Desktop, Cursor, and any MCP-compatible client.
+        </ReferenceRow>
+        <ReferenceRow label="Documentation">
+          <p className="text-xs leading-4 text-zinc-500">
+            Supported file types, indexing schedule, and key handling in full.{' '}
+            <Link href={RAG_DOCS_URL} variant="accent">
+              docs.fil.one
+            </Link>
           </p>
-          <div className="pointer-events-none mt-4 select-none opacity-50">
-            <CodeBlock code={mcpCode} language="json" />
-          </div>
-        </div>
+        </ReferenceRow>
       </div>
-    </div>
+    </section>
   );
 }
