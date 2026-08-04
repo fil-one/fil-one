@@ -14,11 +14,16 @@ import { S3Region } from '@filone/shared';
 
 const mockQueryBucket = vi.fn();
 
-vi.mock('../lib/rag-bucket-api.js', () => ({
+// Spread the real module: the drawer also imports the pure display-state helpers
+// (bucketDisplayState / bucketDotClass) from here, and only the network call
+// needs stubbing.
+vi.mock('../lib/rag-bucket-api.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/rag-bucket-api.js')>()),
   queryBucket: (...a: unknown[]) => mockQueryBucket(...a),
 }));
 
 import type { RagBucket } from '../lib/rag-bucket-api';
+import { ToastProvider } from './Toast/ToastProvider.js';
 import { BucketDrawer } from './BucketDrawer';
 
 const bucket: RagBucket = {
@@ -30,10 +35,14 @@ const bucket: RagBucket = {
   lastSyncedAt: '2026-06-22T11:59:00Z',
 };
 
-function renderDrawer(onClose: () => void = () => {}) {
+function renderDrawer(onClose: () => void = () => {}, onStopIndexing: () => void = () => {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const rootRoute = createRootRoute({
-    component: () => <BucketDrawer bucket={bucket} onClose={onClose} />,
+    component: () => (
+      <ToastProvider>
+        <BucketDrawer bucket={bucket} onClose={onClose} onStopIndexing={onStopIndexing} />
+      </ToastProvider>
+    ),
   });
   const objectsRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -111,5 +120,18 @@ describe('BucketDrawer', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Close' }));
     expect(onClose).not.toHaveBeenCalled();
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
+  it('offers stop indexing in a footer, away from the Ask action', async () => {
+    const onStopIndexing = vi.fn();
+    renderDrawer(() => {}, onStopIndexing);
+
+    const stop = await screen.findByTestId('bucket-drawer-stop');
+    expect(stop).toHaveTextContent('Stop indexing');
+    // Must not sit inside the ask section, where it could be mis-clicked for Ask.
+    expect(screen.getByTestId('bucket-drawer-ask')).not.toContainElement(stop);
+
+    fireEvent.click(stop);
+    expect(onStopIndexing).toHaveBeenCalledOnce();
   });
 });

@@ -1,23 +1,30 @@
 import { useEffect, useState } from 'react';
-import { XIcon } from '@phosphor-icons/react/dist/ssr';
+import { ProhibitIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
 import { useMutation, type UseMutationResult } from '@tanstack/react-query';
 
 import { formatBytes, type QueryBucketResponse } from '@filone/shared';
 
 import { queryBucket, type RagBucket } from '../lib/rag-bucket-api.js';
+import { buildQueryCurl } from '../lib/rag-query-snippet.js';
 import { timeAgo } from '../lib/time.js';
 import { Button } from './Button.js';
+import { CodeBlock } from './CodeBlock.js';
 import { Input } from './Input.js';
 import { QueryAnswer } from './QueryAnswer.js';
-import { SyncStatusBadge } from './SyncStatusBadge.js';
+import { BucketStatus } from './BucketStatus.js';
 
 export type BucketDrawerProps = {
   bucket: RagBucket;
   onClose: () => void;
+  /**
+   * Opens the stop-indexing confirmation. Owned by the buckets tab so the drawer
+   * and the row action share one confirm dialog and one mutation.
+   */
+  onStopIndexing: () => void;
 };
 
 /** Slide-over query playground for a single RAG-enabled bucket. */
-export function BucketDrawer({ bucket, onClose }: BucketDrawerProps) {
+export function BucketDrawer({ bucket, onClose, onStopIndexing }: BucketDrawerProps) {
   const [input, setInput] = useState('');
   const [question, setQuestion] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
@@ -74,8 +81,36 @@ export function BucketDrawer({ bucket, onClose }: BucketDrawerProps) {
             onAsk={handleAsk}
             queryMutation={queryMutation}
           />
+          <QueryFromCodeSection bucket={bucket} />
         </div>
+
+        <DrawerFooter onStopIndexing={onStopIndexing} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Stop-indexing lives in the drawer as well as the row's overflow menu: this is
+ * the bucket's detail view, and without it, deciding to stop while watching a
+ * long-running index means closing the drawer and hunting for the row's kebab.
+ * Pinned to the bottom and visually separated so it is nowhere near "Ask".
+ */
+function DrawerFooter({ onStopIndexing }: { onStopIndexing: () => void }) {
+  return (
+    <div
+      data-testid="bucket-drawer-footer"
+      className="flex flex-shrink-0 justify-end border-t border-zinc-100 px-5 py-3"
+    >
+      <Button
+        data-testid="bucket-drawer-stop"
+        variant="ghost"
+        size="sm"
+        icon={ProhibitIcon}
+        onClick={onStopIndexing}
+      >
+        Stop indexing
+      </Button>
     </div>
   );
 }
@@ -92,11 +127,13 @@ function DrawerHeader({ bucket, onClose }: DrawerHeaderProps) {
       data-testid="bucket-drawer-header"
       className="flex flex-shrink-0 items-center justify-between border-b border-zinc-100 px-5 py-4"
     >
-      <div className="flex items-center gap-2.5">
-        <span className="h-2 w-2 rounded-full bg-green-500" />
+      <div className="flex items-center gap-3 text-xs">
         <span data-testid="bucket-drawer-title" className="text-sm font-semibold text-zinc-900">
           {bucket.name}
         </span>
+        {/* Same component as the bucket row, so the drawer cannot claim a
+            different status from the row it was opened from. */}
+        <BucketStatus bucket={bucket} />
       </div>
       <button
         data-testid="bucket-drawer-close"
@@ -114,13 +151,27 @@ type StatsBarProps = {
   bucket: RagBucket;
 };
 
-/** Summary strip of index stats: file count, size, and last-synced time. */
+/**
+ * Summary strip of index stats.
+ *
+ * Before the first pass completes the counters are both 0, so rendering
+ * "0 files · 0 B · Not yet synced" says "nothing yet" three times and buries the
+ * only useful fact. That state shows the wait instead, matching the bucket row.
+ */
 function StatsBar({ bucket }: StatsBarProps) {
+  const wrapper =
+    'flex flex-shrink-0 items-center gap-4 border-b border-zinc-100 bg-zinc-50/60 px-5 py-2.5 text-xs text-zinc-500';
+
+  if (!bucket.lastSyncedAt) {
+    return (
+      <div data-testid="bucket-drawer-stats" className={wrapper}>
+        <span data-testid="bucket-drawer-stat-waiting">Up to 6 hours until the first results</span>
+      </div>
+    );
+  }
+
   return (
-    <div
-      data-testid="bucket-drawer-stats"
-      className="flex flex-shrink-0 items-center gap-4 border-b border-zinc-100 bg-zinc-50/60 px-5 py-2.5 text-xs text-zinc-500"
-    >
+    <div data-testid="bucket-drawer-stats" className={wrapper}>
       <span data-testid="bucket-drawer-stat-files">
         <span className="font-medium text-zinc-800">{bucket.filesIndexed.toLocaleString()}</span>{' '}
         files
@@ -131,21 +182,9 @@ function StatsBar({ bucket }: StatsBarProps) {
       </span>
       <span className="text-zinc-300">·</span>
       <span data-testid="bucket-drawer-stat-synced">
-        {bucket.lastSyncedAt ? (
-          <>
-            Last synced{' '}
-            <span className="font-medium text-zinc-800">{timeAgo(bucket.lastSyncedAt)}</span>
-          </>
-        ) : (
-          'Not yet synced'
-        )}
+        {'Last indexed '}
+        <span className="font-medium text-zinc-800">{timeAgo(bucket.lastSyncedAt)}</span>
       </span>
-      {bucket.syncState === 'syncing' || bucket.syncState === 'error' ? (
-        <>
-          <span className="text-zinc-300">·</span>
-          <SyncStatusBadge bucket={bucket} />
-        </>
-      ) : null}
     </div>
   );
 }
@@ -159,7 +198,14 @@ type AskSectionProps = {
   queryMutation: UseMutationResult<QueryBucketResponse, Error, string>;
 };
 
-/** Question input plus the streamed answer for the current query. */
+/**
+ * Question input plus the streamed answer for the current query.
+ *
+ * Before the first indexing pass lands there is nothing to answer from (the API
+ * rejects such queries with BUCKET_NOT_INDEXED), so the input is disabled and the
+ * reason stated inline. The drawer still opens in that state, because the code
+ * snippet below is exactly what a developer wants during the up-to-6-hour wait.
+ */
 function AskSection({
   bucket,
   input,
@@ -169,29 +215,39 @@ function AskSection({
   queryMutation,
 }: AskSectionProps) {
   const { isPending, isError, error, data: result } = queryMutation;
+  const notYetIndexed = !bucket.lastSyncedAt;
 
   return (
     <div data-testid="bucket-drawer-ask" className="px-5 py-5">
-      <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
+      <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
         Ask a question
       </p>
       <div className="flex gap-2">
         <Input
-          placeholder={`Ask about ${bucket.name}…`}
+          placeholder={
+            notYetIndexed ? 'Waiting for the first indexing pass…' : `Ask about ${bucket.name}…`
+          }
           value={input}
           onChange={onInputChange}
+          disabled={notYetIndexed}
           className="flex-1"
         />
         <Button
           data-testid="bucket-drawer-ask-submit"
           variant="primary"
           size="sm"
-          disabled={!input.trim()}
+          disabled={notYetIndexed || !input.trim()}
           onClick={onAsk}
         >
           Ask
         </Button>
       </div>
+      {notYetIndexed && (
+        <p data-testid="bucket-drawer-not-indexed" className="mt-2 text-xs text-zinc-500">
+          You can ask questions once the first indexing pass has completed, which can take up to 6
+          hours.
+        </p>
+      )}
       <QueryAnswer
         bucket={bucket}
         question={question}
@@ -200,6 +256,29 @@ function AskSection({
         error={error}
         result={result}
       />
+    </div>
+  );
+}
+
+/**
+ * The same query as a copy-pasteable API call, scoped to this bucket. It lives
+ * here rather than in a page-level tab because the bucket is already chosen, so
+ * the snippet is runnable as-is with no bucket picker.
+ */
+function QueryFromCodeSection({ bucket }: { bucket: RagBucket }) {
+  return (
+    <div data-testid="bucket-drawer-code" className="border-t border-zinc-100 px-5 py-5">
+      <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+        Query from code
+      </p>
+      <CodeBlock
+        code={buildQueryCurl({ bucketName: bucket.name, region: bucket.region })}
+        language="bash"
+      />
+      <p className="mt-2 text-xs text-zinc-500">
+        Create a key in the API Keys tab and export it as{' '}
+        <code className="font-mono">FILONE_RAG_KEY</code>.
+      </p>
     </div>
   );
 }
