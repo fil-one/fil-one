@@ -17,6 +17,7 @@ import {
 import { ACCESS_KEY_PERMISSIONS, ErrorResponse } from '@filone/shared';
 import { createAuroraAccessKey } from './aurora-portal.js';
 import { reportMetric } from '../metrics.js';
+import { assertOrgNotDeleting } from '../org-profile.js';
 import { OrgSetupStatus, isOrgSetupComplete } from '../org-setup-status.js';
 import { scanAndEmitStuckTenantCount } from '../stuck-tenant-metric.js';
 import { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
@@ -102,11 +103,7 @@ export async function processTenantSetup(orgId: string): Promise<{ auroraTenantI
     throw new Error(`Org profile not found for org ${orgId}`);
   }
 
-  // Account deletion in progress (FIL-112): never provision against an org
-  // being torn down — a setup racing teardown would orphan a live tenant.
-  if (orgProfile.deleting?.BOOL === true) {
-    throw new Error(`Org ${orgId} is being deleted; refusing tenant setup`);
-  }
+  assertOrgNotDeleting(orgProfile, orgId);
 
   const orgName = orgProfile.name?.S ?? '';
   const auroraSetupStatus = orgProfile.auroraSetupStatus?.S;

@@ -15,6 +15,7 @@ import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
+import { assertOrgNotDeleting } from '../org-profile.js';
 import {
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
   getTenantsByTenantIdAccessKeys,
@@ -96,6 +97,11 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
       ConsistentRead: true,
     }),
   );
+  // Checked BEFORE the existing-tenant early return: once the org is being
+  // deleted, even an already-provisioned tenant id must not be handed back
+  // to callers that would then act on the doomed tenant.
+  assertOrgNotDeleting(existing.Item, orgId);
+
   const existingTenantId = existing.Item?.[tenantIdAttribute]?.S;
   if (existingTenantId) {
     return existingTenantId;
