@@ -161,6 +161,8 @@ The **unpaid** account is `past_due`, and the subscription guard rejects write r
 
 If the bucket list itself fails (`GET /api/buckets` returning a 5xx, e.g. when a stage's per-tenant S3 credentials in SSM have gone stale), the seeding step fails loudly with the status and response body rather than mistaking the error for an empty account — and because the browser projects depend on it, the whole run stops.
 
+The upload tests report backend failures the same way. An upload is two round-trips — `POST /api/presign`, then a `PUT` straight to the region's S3 endpoint (`getS3Endpoint` in [packages/shared/src/constants.ts](packages/shared/src/constants.ts)) — and neither failure navigates anywhere, so `submitUploadExpectingSuccess` reads both responses and fails with the region, status and response body. Without it, a region whose storage backend returns a 502 is indistinguishable from a hung browser: both surface only as a `toHaveURL` timeout on the navigation back to the bucket page. A rejected `PUT` has taken ~30s to come back, so these tests get a longer timeout than the default.
+
 #### Running locally
 
 The `test:e2e` script wraps Playwright in `sst shell` so SST Resource bindings (e.g. `BillingTable` name) resolve to the current SST stage. Deploy a stage first, then:

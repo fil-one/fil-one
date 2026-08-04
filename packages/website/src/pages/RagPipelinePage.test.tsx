@@ -40,7 +40,7 @@ vi.mock('../lib/rag-api-keys-api.js', async (importOriginal) => ({
   listRagApiKeys: (...a: unknown[]) => mockListRagApiKeys(...a),
 }));
 
-import { RagPipelinePage } from './RagPipelinePage.js';
+import { RagPipelinePage, enablementPollInterval } from './RagPipelinePage.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { queryKeys } from '../lib/query-client.js';
 
@@ -188,10 +188,16 @@ describe('RagPipelinePage — Buckets tab', () => {
 
     renderPage();
 
-    expect(await screen.findByText('Syncing…')).toBeInTheDocument();
-    expect(screen.getByText(/Sync failed: Connection timeout/)).toBeInTheDocument();
-    // Both syncing + errored buckets stay queryable: two "Ask questions" actions.
-    expect(screen.getAllByRole('button', { name: 'Ask questions' })).toHaveLength(2);
+    // Status now reads off the badge; the description carries only the detail.
+    const badges = await screen.findAllByTestId('bucket-status');
+    const states = badges.map((b) => b.getAttribute('data-sync-state'));
+    expect(states).toContain('syncing');
+    expect(states).toContain('error');
+    expect(screen.getByText(/Connection timeout/)).toBeInTheDocument();
+    // Sync state must not flip enablement: both rows keep the drawer action and
+    // neither falls back to the "Index" (enable) button. Neither has a completed
+    // pass, so the action reads "View details" rather than offering asking.
+    expect(screen.getAllByTestId('bucket-row-ask')).toHaveLength(2);
   });
 
   it('enables a disabled bucket via the confirm modal', async () => {
@@ -206,10 +212,11 @@ describe('RagPipelinePage — Buckets tab', () => {
     await screen.findByText('marketing-assets');
     // The disabled bucket exposes an "Index" action.
     fireEvent.click(screen.getByRole('button', { name: 'Index' }));
-    // Confirm modal opens with an Enable button — and no pricing.
-    expect(await screen.findByText('Enable Bucket Intelligence?')).toBeInTheDocument();
+    // Confirm modal opens naming the bucket, and shows no pricing.
+    expect(await screen.findByText('Index this bucket?')).toBeInTheDocument();
+    expect(screen.getByText(/“marketing-assets” become queryable/)).toBeInTheDocument();
     expect(screen.queryByText(/\$15/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start indexing' }));
 
     await waitFor(() =>
       expect(mockSetEnabled).toHaveBeenCalledWith('marketing-assets', 'us-east-1', true),
@@ -229,12 +236,12 @@ describe('RagPipelinePage — Buckets tab', () => {
     // Open the action menu for the first enabled bucket and pick Disable.
     const menus = screen.getAllByRole('button', { name: 'Bucket actions' });
     fireEvent.click(menus[0]);
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Disable' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Stop indexing' }));
 
-    // Confirm modal opens; confirm the disable.
-    expect(await screen.findByText('Disable Bucket Intelligence?')).toBeInTheDocument();
+    // Confirm modal opens; confirm stopping.
+    expect(await screen.findByText('Stop indexing this bucket?')).toBeInTheDocument();
     const dialog = screen.getByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Disable' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Stop indexing' }));
 
     await waitFor(() =>
       expect(mockSetEnabled).toHaveBeenCalledWith('my-docs-bucket', 'us-east-1', false),
@@ -243,24 +250,32 @@ describe('RagPipelinePage — Buckets tab', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Models tab — read-only Fil-One model, no API keys
+// Managed models: reference block in Integrate, not a configuration tab
 // ---------------------------------------------------------------------------
 
-describe('RagPipelinePage — Models tab', () => {
-  it('shows the Fil One-managed model read-only with no API key input', async () => {
+describe('RagPipelinePage: managed models', () => {
+  it('names both managed models read-only under API Keys, with no BYO inputs', async () => {
     renderPage();
     await screen.findByText('my-docs-bucket');
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Models' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'API Keys' }));
 
-    expect(await screen.findByText('Index model')).toBeInTheDocument();
-    expect(screen.getByText('Query model')).toBeInTheDocument();
-    expect(screen.getAllByText('Fil One-managed model').length).toBeGreaterThan(0);
+    const models = await screen.findByTestId('api-models');
+    expect(within(models).getByText('Titan Text Embeddings V2')).toBeInTheDocument();
+    expect(within(models).getByText('Claude Opus 4.8')).toBeInTheDocument();
+    expect(screen.getByText(/bring-your-own-model support is coming soon/i)).toBeInTheDocument();
 
-    // No API-key entry and no provider/model dropdowns.
+    // No BYO credential entry and no provider/model dropdowns.
     expect(screen.queryByPlaceholderText(/sk-/)).not.toBeInTheDocument();
     expect(screen.queryByText('API Key')).not.toBeInTheDocument();
     expect(screen.queryByText('Provider')).not.toBeInTheDocument();
+  });
+
+  it('does not offer a Models tab, since nothing there was configurable', async () => {
+    renderPage();
+    await screen.findByText('my-docs-bucket');
+
+    expect(screen.queryByRole('tab', { name: 'Models' })).not.toBeInTheDocument();
   });
 });
 
@@ -314,25 +329,30 @@ describe('RagPipelinePage — Query Playground', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Integrate tab — REST endpoint + MCP coming later
+// API reference — endpoint shape lives with the keys, MCP placeholder is gone
 // ---------------------------------------------------------------------------
 
-describe('RagPipelinePage — Integrate tab', () => {
-  it('shows the REST query endpoint and MCP as coming later', async () => {
+describe('RagPipelinePage — API reference', () => {
+  it('shows the endpoint shape under API Keys and no separate API tab', async () => {
     renderPage();
     await screen.findByText('my-docs-bucket');
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Integrate' }));
+    // The tab strip is Buckets + API Keys only.
+    expect(screen.queryByRole('tab', { name: 'Integrate' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'API' })).not.toBeInTheDocument();
 
-    expect(await screen.findByText('Query API')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'API Keys' }));
+
+    expect(await screen.findByTestId('api-reference')).toBeInTheDocument();
     // Full-URL curl sample with bearer auth (jsdom origin = http://localhost:3000).
     expect(
       screen.getByText(/curl -X POST "http:\/\/localhost:3000\/api\/buckets\/.+\/query\?region=/),
     ).toBeInTheDocument();
     expect(screen.getByText(/Authorization: Bearer \$FILONE_RAG_KEY/)).toBeInTheDocument();
 
-    expect(screen.getByText('MCP endpoint')).toBeInTheDocument();
-    expect(screen.getByText('Coming later')).toBeInTheDocument();
+    // The MCP endpoint is not built, so it is no longer advertised.
+    expect(screen.queryByText('MCP endpoint')).not.toBeInTheDocument();
+    expect(screen.queryByText('Coming later')).not.toBeInTheDocument();
   });
 });
 
@@ -397,5 +417,47 @@ describe('RagPipelinePage — access gate', () => {
       await screen.findByText('Bucket Intelligence is not available for your account.'),
     ).toBeInTheDocument();
     expect(mockListBuckets).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Enablement polling (the indexer writes state out of band)
+// ---------------------------------------------------------------------------
+
+describe('enablementPollInterval', () => {
+  function interval(data?: Partial<BucketRagEnablementResponse>): number | false {
+    return enablementPollInterval({
+      state: { data: data as BucketRagEnablementResponse | undefined },
+    });
+  }
+
+  it('does not poll before the first response lands', () => {
+    expect(interval(undefined)).toBe(false);
+  });
+
+  it('does not poll a bucket that is not enabled, since nothing will change on its own', () => {
+    expect(interval({ enabled: false })).toBe(false);
+  });
+
+  it('polls quickly while a pass is in flight', () => {
+    expect(interval({ enabled: true, syncState: 'syncing' })).toBe(30_000);
+  });
+
+  it('polls slowly while waiting on the first pass, which can take hours', () => {
+    expect(interval({ enabled: true, syncState: 'idle' })).toBe(120_000);
+  });
+
+  it('keeps polling after a failed pass, since the orchestrator retries on its own', () => {
+    // Without this the row stays on "Failed" until a manual reload, even after a
+    // later run succeeds.
+    expect(
+      interval({ enabled: true, syncState: 'error', lastSyncedAt: '2026-01-01T00:00:00Z' }),
+    ).toBe(120_000);
+  });
+
+  it('stops polling once a bucket is settled and healthy', () => {
+    expect(
+      interval({ enabled: true, syncState: 'idle', lastSyncedAt: '2026-01-01T00:00:00Z' }),
+    ).toBe(false);
   });
 });
