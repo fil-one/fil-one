@@ -1,7 +1,12 @@
-import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import type { Options as RetryOptions } from 'p-retry';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
+import { DELETION_FENCE } from './billing-fence.js';
 import { getDynamoClient } from './ddb-client.js';
 import { syncTenantStatusInProvisionedRegions, type RegionSyncOutcome } from './region-helpers.js';
 
@@ -84,11 +89,11 @@ export async function closeOutDeletedCustomer(params: {
         // own subscriptions.cancel echoes back as webhook events — this write
         // must not touch a record the teardown owns (or upsert it back after
         // the purge).
-        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)',
+        ConditionExpression: DELETION_FENCE,
       }),
     );
   } catch (err) {
-    if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+    if (err instanceof ConditionalCheckFailedException) {
       // Customer without a billing record (created outside the app, record
       // already removed, or org mid-deletion) — nothing to cancel; do not
       // fail the caller.

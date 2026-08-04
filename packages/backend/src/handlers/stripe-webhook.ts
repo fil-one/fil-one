@@ -1,4 +1,9 @@
-import { DeleteItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DeleteItemCommand,
+  PutItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
@@ -9,6 +14,7 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
+import { DELETION_FENCE } from '../lib/billing-fence.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import {
   closeOutDeletedCustomer,
@@ -30,14 +36,6 @@ import {
 const dynamo = getDynamoClient();
 
 /**
- * Fence for FIL-112 account deletion: billing-record updates only apply while
- * the record exists and no deletion has been requested. Without this, our own
- * teardown-driven subscriptions.cancel would echo back as webhook events that
- * upsert zombie records or re-activate a disabled tenant.
- */
-const DELETION_FENCE = 'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)';
-
-/**
  * Sends a billing-record UpdateItem guarded by {@link DELETION_FENCE}.
  * Returns null when the fence rejects the write (record purged or org
  * mid-deletion) — callers must then skip follow-on tenant status syncs.
@@ -51,7 +49,7 @@ async function sendFencedBillingUpdate(
       new UpdateItemCommand({ ...input, ConditionExpression: DELETION_FENCE }),
     );
   } catch (err) {
-    if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+    if (err instanceof ConditionalCheckFailedException) {
       console.warn(
         '[stripe-webhook] Billing record missing or org mid-deletion; skipping update',
         context,
@@ -115,7 +113,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       }),
     );
   } catch (err) {
-    if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+    if (err instanceof ConditionalCheckFailedException) {
       console.warn('[stripe-webhook] Already processed event:', stripeEvent.id);
       return { statusCode: 200, body: JSON.stringify({ received: true }) };
     }

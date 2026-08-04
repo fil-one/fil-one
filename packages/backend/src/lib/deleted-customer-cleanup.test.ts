@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 
@@ -146,9 +151,14 @@ describe('closeOutDeletedCustomer', () => {
 
   it('tolerates a missing billing record (conditional check failure)', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const conditionalFailure = new Error('The conditional request failed');
-    conditionalFailure.name = 'ConditionalCheckFailedException';
-    ddbMock.on(UpdateItemCommand).rejects(conditionalFailure);
+    ddbMock
+      .on(UpdateItemCommand)
+      .rejects(
+        new ConditionalCheckFailedException({
+          message: 'The conditional request failed',
+          $metadata: {},
+        }),
+      );
 
     await expect(closeOutDeletedCustomer({ userId: USER_ID, orgId: ORG_ID })).resolves.toEqual({
       outcomes: [okOutcome('aurora')],

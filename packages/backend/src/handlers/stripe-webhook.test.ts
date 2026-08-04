@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
+  ConditionalCheckFailedException,
   DynamoDBClient,
   DeleteItemCommand,
   GetItemCommand,
@@ -58,6 +59,7 @@ const reportMetricMock = vi.mocked(reportMetric);
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './stripe-webhook.js';
+import { DELETION_FENCE } from '../lib/billing-fence.js';
 import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
@@ -66,8 +68,6 @@ import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 // ---------------------------------------------------------------------------
 
 const TABLE_NAME = 'BillingTable';
-// Fence applied to all billing-record updates (FIL-112 account deletion).
-const DELETION_FENCE = 'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)';
 const MOCK_USER_ID = 'test-user-uuid';
 const MOCK_CUSTOMER_ID = 'cus_test_123';
 const MOCK_SUBSCRIPTION_ID = 'sub_test_456';
@@ -273,9 +273,11 @@ describe('stripe-webhook handler', () => {
   describe('idempotency', () => {
     it('returns 200 without processing when event already handled', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
-      const condError = new Error('Conditional check failed');
-      (condError as { name: string }).name = 'ConditionalCheckFailedException';
-      ddbMock.on(PutItemCommand).rejects(condError);
+      ddbMock
+        .on(PutItemCommand)
+        .rejects(
+          new ConditionalCheckFailedException({ message: 'Conditional check failed', $metadata: {} }),
+        );
 
       const result = await handler(buildWebhookEvent('{}'));
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
@@ -1690,9 +1692,14 @@ describe('stripe-webhook handler', () => {
   // -----------------------------------------------------------------------
   describe('deletion fence', () => {
     function fenceRejection() {
-      const err = new Error('The conditional request failed');
-      (err as { name: string }).name = 'ConditionalCheckFailedException';
-      ddbMock.on(UpdateItemCommand).rejects(err);
+      ddbMock
+        .on(UpdateItemCommand)
+        .rejects(
+          new ConditionalCheckFailedException({
+            message: 'The conditional request failed',
+            $metadata: {},
+          }),
+        );
     }
 
     it('subscription.deleted for a fenced record: 200, no upsert side effects, no write-lock sync', async () => {
