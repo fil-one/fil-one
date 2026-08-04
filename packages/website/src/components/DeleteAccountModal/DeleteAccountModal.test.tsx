@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ApiErrorCode } from '@filone/shared';
 
 const mockRequestChallenge = vi.fn();
 const mockDeleteAccount = vi.fn();
@@ -138,6 +139,70 @@ describe('DeleteAccountModal', () => {
     // Still on the confirm step — no code was emailed, so no code entry.
     expect(screen.queryByLabelText(/enter the 6-digit code/i)).not.toBeInTheDocument();
     expect(sendCodeButton()).toBeInTheDocument();
+  });
+
+  it('disables the send button with the server cooldown when the challenge is rate limited', async () => {
+    // Server timestamp is 30s out — distinct from the default 60s window, so
+    // the assertion proves the countdown came from the 429 body.
+    mockRequestChallenge.mockRejectedValue(
+      Object.assign(new Error('Too many verification codes requested. Try again later.'), {
+        status: 429,
+        code: ApiErrorCode.DELETION_RATE_LIMITED,
+        resendAvailableAt: new Date(Date.now() + 30 * 1000).toISOString(),
+      }),
+    );
+    renderModal();
+    fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+      target: { value: ORG_NAME },
+    });
+    fireEvent.click(sendCodeButton());
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Too many verification codes requested. Try again later.'),
+      ).toBeInTheDocument();
+    });
+    const button = screen.getByRole('button', { name: /send verification code in \d+s/i });
+    expect(button).toBeDisabled();
+    const seconds = Number(/in (\d+)s/.exec(button.textContent ?? '')?.[1]);
+    expect(seconds).toBeGreaterThan(0);
+    expect(seconds).toBeLessThanOrEqual(30);
+  });
+
+  it('keeps the server cooldown when the modal is closed and reopened', async () => {
+    mockRequestChallenge.mockRejectedValue(
+      Object.assign(new Error('Too many verification codes requested. Try again later.'), {
+        status: 429,
+        code: ApiErrorCode.DELETION_RATE_LIMITED,
+        resendAvailableAt: new Date(Date.now() + 45 * 1000).toISOString(),
+      }),
+    );
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const ui = (open: boolean) => (
+      <QueryClientProvider client={client}>
+        <DeleteAccountModal open={open} onClose={() => {}} orgName={ORG_NAME} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui(true));
+    fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+      target: { value: ORG_NAME },
+    });
+    fireEvent.click(sendCodeButton());
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /send verification code in \d+s/i }),
+      ).toBeDisabled();
+    });
+
+    // Close (resets step/name/error but not the cooldown) and reopen.
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    rerender(ui(false));
+    rerender(ui(true));
+
+    fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+      target: { value: ORG_NAME },
+    });
+    expect(screen.getByRole('button', { name: /send verification code in \d+s/i })).toBeDisabled();
   });
 
   it('states honestly that stored object data is not instantly erased', () => {

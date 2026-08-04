@@ -65,6 +65,11 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
       setStep('code');
     },
     onError: (err) => {
+      // A 429 from the server carries the authoritative cooldown end; feed it
+      // into the countdown so the UI mirrors the server-enforced window
+      // instead of leaving the button enabled (or on a stale 60s timer).
+      const serverCooldown = (err as { resendAvailableAt?: string }).resendAvailableAt;
+      if (serverCooldown) setResendAvailableAt(serverCooldown);
       setCodeError(err instanceof Error ? err.message : 'Failed to send the verification code');
     },
   });
@@ -114,6 +119,10 @@ export function DeleteAccountModal({ open, onClose, orgName }: DeleteAccountModa
     setTypedName('');
     setCode('');
     flow.setCodeError(null);
+    // Deliberately NOT resetting resendAvailableAt: it mirrors a
+    // server-enforced cooldown that outlives the modal. The countdown hook
+    // already floors at 0, and clearing it would re-enable a send button the
+    // server will just 429.
     onClose();
   }
 
@@ -239,11 +248,13 @@ function PrimaryAction({ flow }: { flow: Flow }) {
         id="delete-account-send-code-button"
         variant="destructive"
         className="flex-1"
-        disabled={!flow.nameMatches || flow.busy}
+        disabled={!flow.nameMatches || flow.busy || flow.resendSecondsLeft > 0}
         onClick={() => flow.challengeMutation.mutate()}
       >
         {flow.challengeMutation.isPending && <Spinner ariaLabel="Sending code" size={14} />}
-        Send verification code
+        {flow.resendSecondsLeft > 0
+          ? `Send verification code in ${flow.resendSecondsLeft}s`
+          : 'Send verification code'}
       </Button>
     );
   }

@@ -123,10 +123,23 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   }
 
   if (!response.ok) {
-    const error = (await response.json().catch(() => ({}))) as { message?: string };
+    const error = (await response.json().catch(() => ({}))) as {
+      message?: string;
+      code?: string;
+      resendAvailableAt?: string;
+    };
     throw Object.assign(
       new Error(error.message ?? `Request failed with status ${response.status}`),
-      { status: response.status },
+      {
+        status: response.status,
+        // Pass structured error details through so callers can branch on the
+        // error code or honor server-enforced cooldowns (e.g. the 429 from
+        // the deletion-challenge endpoint carries resendAvailableAt).
+        ...(error.code !== undefined && { code: error.code }),
+        ...(error.resendAvailableAt !== undefined && {
+          resendAvailableAt: error.resendAvailableAt,
+        }),
+      },
     );
   }
 
