@@ -23,6 +23,7 @@ import {
   type OrgTombstoneRecord,
 } from './dynamo-records.js';
 import { getOrgProfile } from './org-profile.js';
+import { RagApiKeyKeys } from './rag-api-keys.js';
 import {
   getProvisionedRegions,
   getProvisionedRegionsFromProfile,
@@ -38,7 +39,7 @@ const dynamo = getDynamoClient();
  * FIL-422 trial-claim record) is structurally undeletable: any key outside
  * this allowlist throws before a delete is issued.
  */
-const USER_INFO_PURGE_ALLOWLIST = ['ORG#', 'USER#', 'SUB#'] as const;
+const USER_INFO_PURGE_ALLOWLIST = ['ORG#', 'USER#', 'SUB#', 'RAGKEYHASH#'] as const;
 const BILLING_PURGE_ALLOWLIST = ['CUSTOMER#', 'DELETION_CHALLENGE#'] as const;
 
 export function assertPurgeAllowed(pk: string, allowlist: readonly string[]): void {
@@ -306,6 +307,11 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
     }
   }
 
+  // The RAGKEYHASH# lookup rows live OUTSIDE the org partition and are only
+  // findable through the RAGKEY# rows — delete them first, while those rows
+  // still point at them.
+  await purgeRagKeyHashRows(orgId);
+
   // UserInfoTable: everything under ORG#{orgId} except the DELETION record.
   // This includes the ACCESSKEY# rows — their upstream keys died with the
   // tenant (deleteTenant), so no per-key orchestrator revocation is needed.
@@ -454,6 +460,23 @@ async function bumpAttemptCount(orgId: string): Promise<void> {
       ExpressionAttributeValues: marshall({ ':one': 1 }),
     }),
   );
+}
+
+/**
+ * RAG API keys write a `RAGKEYHASH#{sha256}/LOOKUP` row alongside the org's
+ * `RAGKEY#` row (see lib/rag-api-keys.ts). The ORG# partition purge removes
+ * the RAGKEY# rows but not the hash lookups — credential-hash residue that
+ * would survive an erasure request forever — so derive each lookup pk from
+ * the RAGKEY# rows' stored `tokenHash` and delete them explicitly.
+ */
+async function purgeRagKeyHashRows(orgId: string): Promise<void> {
+  const ragKeyRows = await queryOrgRows(orgId, RagApiKeyKeys.orgSkPrefix());
+  const lookupKeys = ragKeyRows
+    .map((row) => row.tokenHash)
+    .filter((tokenHash): tokenHash is string => typeof tokenHash === 'string')
+    .map((tokenHash) => ({ pk: RagApiKeyKeys.lookupPk(tokenHash), sk: RagApiKeyKeys.lookupSk() }));
+  for (const key of lookupKeys) assertPurgeAllowed(key.pk, USER_INFO_PURGE_ALLOWLIST);
+  await batchDelete(Resource.UserInfoTable.name, lookupKeys);
 }
 
 /** Paged Query of the org partition, optionally filtered to an sk prefix. */

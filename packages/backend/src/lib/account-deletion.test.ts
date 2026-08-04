@@ -484,6 +484,31 @@ describe('runAccountDeletion', () => {
     expect(mockDeleteTenant).toHaveBeenCalledWith('aurora-t-1');
   });
 
+  it('purges the RAGKEYHASH lookup rows (credential-hash residue) before the ORG# partition delete', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    // The RAGKEY#-prefixed query purgeRagKeyHashRows issues.
+    ddbMock
+      .on(QueryCommand, {
+        ExpressionAttributeValues: marshall({ ':pk': `ORG#${ORG_ID}`, ':skPrefix': 'RAGKEY#' }),
+      })
+      .resolves({
+        Items: [
+          marshall({ pk: `ORG#${ORG_ID}`, sk: 'RAGKEY#key-1', tokenHash: 'hash-1' }),
+          marshall({ pk: `ORG#${ORG_ID}`, sk: 'RAGKEY#key-2', tokenHash: 'hash-2' }),
+        ],
+      });
+
+    await runAccountDeletion(ORG_ID);
+
+    const userInfoDeletes = ddbMock
+      .commandCalls(BatchWriteItemCommand)
+      .flatMap((c) => c.args[0].input.RequestItems?.UserInfoTable ?? [])
+      .map((r) => unmarshall(r.DeleteRequest!.Key!));
+    expect(userInfoDeletes).toContainEqual({ pk: 'RAGKEYHASH#hash-1', sk: 'LOOKUP' });
+    expect(userInfoDeletes).toContainEqual({ pk: 'RAGKEYHASH#hash-2', sk: 'LOOKUP' });
+    expect(doneWrites()).toHaveLength(1);
+  });
+
   it('purges all RAG rows (bucket + checkpoint prefixes) with a single table scan', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
     ddbMock.on(ScanCommand).resolves({
