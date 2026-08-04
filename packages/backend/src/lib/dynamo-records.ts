@@ -295,6 +295,11 @@ export interface OrgDeletionRecord {
   fthTenantId?: string;
   stripeCustomerId?: string;
   subscriptionId?: string;
+  /**
+   * Stripe Redaction Job driving the customer's PII erasure, persisted at
+   * creation so retries advance the same job instead of creating duplicates.
+   */
+  stripeRedactionJobId?: string;
   /** Worker invocations so far; the reconciler alerts past a threshold. */
   attemptCount: number;
   updatedAt: string; // ISO-8601

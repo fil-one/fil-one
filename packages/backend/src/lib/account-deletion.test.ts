@@ -45,8 +45,12 @@ vi.mock('./service-orchestrator-registry.js', () => ({
 }));
 
 const mockSubscriptionsCancel = vi.fn();
+const mockRawRequest = vi.fn();
 vi.mock('./stripe-client.js', () => ({
-  getStripeClient: () => ({ subscriptions: { cancel: mockSubscriptionsCancel } }),
+  getStripeClient: () => ({
+    subscriptions: { cancel: mockSubscriptionsCancel },
+    rawRequest: (...args: unknown[]) => mockRawRequest(...args),
+  }),
 }));
 
 const mockGetOrgProfile = vi.fn();
@@ -73,7 +77,7 @@ import { OrgDeletionStatus } from './dynamo-records.js';
 const ORG_ID = 'org-1';
 
 function deletionItem(status: string, overrides?: Record<string, unknown>) {
-  return marshall({
+  const item: Record<string, unknown> = {
     pk: `ORG#${ORG_ID}`,
     sk: 'DELETION',
     status,
@@ -86,7 +90,12 @@ function deletionItem(status: string, overrides?: Record<string, unknown>) {
     attemptCount: 0,
     updatedAt: '2026-07-10T00:00:00.000Z',
     ...overrides,
-  });
+  };
+  // An `undefined` override means "absent from the record".
+  for (const key of Object.keys(item)) {
+    if (item[key] === undefined) delete item[key];
+  }
+  return marshall(item);
 }
 
 function setupHappyMocks(status: string) {
@@ -110,6 +119,25 @@ function setupHappyMocks(status: string) {
   mockDropIndex.mockResolvedValue(undefined);
   mockIsTenantReady.mockReturnValue('aurora-t-1');
   mockDeleteTenant.mockResolvedValue(undefined);
+  stubRedactionJob();
+}
+
+/**
+ * Happy-path Redaction Jobs API: create → validate → GET reports `ready` →
+ * run. Instant validation, so a single teardown pass completes redaction.
+ */
+function stubRedactionJob(statusOnGet = 'ready') {
+  mockRawRequest.mockImplementation((method: string, path: string) => {
+    if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
+      return Promise.resolve({ id: 'prj_1', status: 'created' });
+    }
+    if (method === 'GET') return Promise.resolve({ id: 'prj_1', status: statusOnGet });
+    return Promise.resolve({ id: 'prj_1' });
+  });
+}
+
+function rawRequestCalls() {
+  return mockRawRequest.mock.calls.map(([method, path]) => `${method} ${path}`);
 }
 
 /** UpdateItem calls that write the terminal DONE status. */
@@ -188,6 +216,24 @@ describe('runAccountDeletion', () => {
     expect(tombstone.ttl).toBeUndefined();
     expect(Object.keys(tombstone)).not.toContain('members');
 
+    // Customer PII redacted after the cancel: create → validate → run, with
+    // the job id persisted so a retry advances this job rather than minting
+    // a duplicate.
+    expect(mockRawRequest).toHaveBeenCalledWith('POST', '/v1/privacy/redaction_jobs', {
+      objects: { customers: ['cus_1'] },
+    });
+    expect(rawRequestCalls()).toEqual([
+      'POST /v1/privacy/redaction_jobs',
+      'POST /v1/privacy/redaction_jobs/prj_1/validate',
+      'GET /v1/privacy/redaction_jobs/prj_1',
+      'POST /v1/privacy/redaction_jobs/prj_1/run',
+    ]);
+    const jobIdWrites = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .filter((c) => c.args[0].input.UpdateExpression?.includes('stripeRedactionJobId'));
+    expect(jobIdWrites).toHaveLength(1);
+    expect(jobIdWrites[0].args[0].input.ExpressionAttributeValues?.[':jobId']?.S).toBe('prj_1');
+
     // attemptCount bumped for the reconciler's stuck gauge.
     const bumps = ddbMock
       .commandCalls(UpdateItemCommand)
@@ -251,6 +297,94 @@ describe('runAccountDeletion', () => {
     expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_1');
     expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|sub-1');
     expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('leaves a not-yet-ready redaction job pending (record stays non-DONE) and advances it on re-entry without re-creating', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    // Validation still running when this pass checks the job.
+    stubRedactionJob('validating');
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+    expect(err).toBeInstanceOf(AggregateError);
+    expect(err.errors.map(String).join('\n')).toMatch(/not ready yet/);
+    expect(doneWrites()).toHaveLength(0);
+
+    // Re-entry: the record now carries the persisted job id — the job is
+    // fetched and run, never re-created.
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, { stripeRedactionJobId: 'prj_1' }),
+      });
+    mockRawRequest.mockClear();
+    stubRedactionJob('ready');
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(rawRequestCalls()).toEqual([
+      'GET /v1/privacy/redaction_jobs/prj_1',
+      'POST /v1/privacy/redaction_jobs/prj_1/run',
+    ]);
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('treats an already redacting/succeeded job as done on re-entry', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, { stripeRedactionJobId: 'prj_1' }),
+      });
+    stubRedactionJob('redacting');
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(rawRequestCalls()).toEqual(['GET /v1/privacy/redaction_jobs/prj_1']);
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('tolerates a missing or already-redacted customer at job creation', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockRawRequest.mockRejectedValue(
+      Object.assign(new Error('No such customer'), { code: 'resource_missing' }),
+    );
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(rawRequestCalls()).toEqual(['POST /v1/privacy/redaction_jobs']);
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('skips redaction when the snapshot has no Stripe customer', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, {
+          stripeCustomerId: undefined,
+          subscriptionId: undefined,
+        }),
+      });
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockRawRequest).not.toHaveBeenCalled();
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('surfaces a failed redaction job so the stuck gauge catches it', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, { stripeRedactionJobId: 'prj_1' }),
+      });
+    stubRedactionJob('failed');
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+    expect(err).toBeInstanceOf(AggregateError);
+    expect(err.errors.map(String).join('\n')).toMatch(/unexpected status "failed"/);
+    expect(doneWrites()).toHaveLength(0);
   });
 
   it('treats already-canceled Stripe subscriptions as success', async () => {

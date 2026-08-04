@@ -117,8 +117,9 @@ async function cancelStripeAndWriteTombstone(
     }
   }
 
-  // The Stripe CUSTOMER is deliberately kept for finance/audit; this
-  // PII-free tombstone preserves the reference across the purge.
+  // The Stripe CUSTOMER object is kept (finance/audit needs the reference),
+  // but its PII is erased via a Redaction Job; this PII-free tombstone
+  // preserves the customer id across the purge.
   const tombstone: OrgTombstoneRecord = {
     pk: DeletionKeys.tombstonePk(orgId),
     sk: DeletionKeys.tombstoneSk(),
@@ -129,11 +130,130 @@ async function cancelStripeAndWriteTombstone(
   await dynamo.send(
     new PutItemCommand({ TableName: Resource.BillingTable.name, Item: marshall(tombstone) }),
   );
+
+  await redactStripeCustomer(orgId, record);
 }
 
 function isStripeAlreadyCanceled(err: unknown): boolean {
   const e = err as { code?: string; message?: string };
   return e.code === 'resource_missing' || /canceled/i.test(e.message ?? '');
+}
+
+// ---------------------------------------------------------------------------
+// Stripe customer redaction (docs.stripe.com/privacy/redaction)
+// ---------------------------------------------------------------------------
+
+interface StripeRedactionJob {
+  id: string;
+  /** created | validating | ready | redacting | succeeded | failed | canceling | canceled */
+  status?: string;
+}
+
+/**
+ * Redact the canceled customer's PII via Stripe's Redaction Jobs API. The
+ * pinned SDK (22.0.2) has no `privacy.redactionJobs` namespace, so the REST
+ * endpoints are driven through `stripe.rawRequest`.
+ *
+ * Job lifecycle: created → (validate) → validating → ready → (run) →
+ * redacting → succeeded. Validation is asynchronous, so a single pass may
+ * find the job short of `ready`; the job id is persisted on the DELETION
+ * record at creation, and a not-yet-ready job throws so the record stays
+ * non-DONE and the Lambda retry / reconciler advances the SAME job (never a
+ * duplicate) on the next pass. `redacting`/`succeeded` count as done —
+ * redaction is irreversible once running.
+ */
+async function redactStripeCustomer(orgId: string, record: OrgDeletionRecord): Promise<void> {
+  const customerId = record.stripeCustomerId;
+  if (!customerId) return;
+
+  let jobId = record.stripeRedactionJobId;
+  if (!jobId) {
+    let created: StripeRedactionJob;
+    try {
+      created = await stripeRawRequest<StripeRedactionJob>('POST', '/v1/privacy/redaction_jobs', {
+        objects: { customers: [customerId] },
+      });
+    } catch (err) {
+      if (isRedactionUnnecessary(err)) {
+        console.warn('[account-deletion] Stripe customer already redacted/missing', {
+          orgId,
+          customerId,
+        });
+        return;
+      }
+      throw err;
+    }
+    jobId = created.id;
+    await persistRedactionJobId(orgId, jobId);
+    record.stripeRedactionJobId = jobId;
+    await stripeRawRequest('POST', `/v1/privacy/redaction_jobs/${jobId}/validate`);
+  }
+
+  await advanceRedactionJob(orgId, jobId);
+}
+
+/** GET the job's current status and take the one legal step toward `succeeded`. */
+async function advanceRedactionJob(orgId: string, jobId: string): Promise<void> {
+  const job = await stripeRawRequest<StripeRedactionJob>(
+    'GET',
+    `/v1/privacy/redaction_jobs/${jobId}`,
+  );
+  switch (job.status) {
+    case 'succeeded':
+    case 'redacting':
+      // Running or already complete — irreversible, nothing left to drive.
+      return;
+    case 'ready':
+      await stripeRawRequest('POST', `/v1/privacy/redaction_jobs/${jobId}/run`);
+      return;
+    case 'created':
+      await stripeRawRequest('POST', `/v1/privacy/redaction_jobs/${jobId}/validate`);
+      throw redactionNotReadyError(orgId, jobId, job.status);
+    case 'validating':
+      throw redactionNotReadyError(orgId, jobId, job.status);
+    default:
+      // failed / canceled / unknown: keep the record non-DONE so the stuck
+      // gauge surfaces it — a failed validation needs operator attention.
+      throw new Error(
+        `Stripe redaction job ${jobId} for org ${orgId} is in unexpected status "${job.status}"`,
+      );
+  }
+}
+
+function redactionNotReadyError(orgId: string, jobId: string, status: string): Error {
+  return new Error(
+    `Stripe redaction job ${jobId} for org ${orgId} is not ready yet (status "${status}"); ` +
+      'the next teardown pass advances it',
+  );
+}
+
+async function persistRedactionJobId(orgId: string, jobId: string): Promise<void> {
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
+      UpdateExpression: 'SET stripeRedactionJobId = :jobId, updatedAt = :now',
+      ConditionExpression: 'attribute_exists(pk)',
+      ExpressionAttributeValues: marshall({
+        ':jobId': jobId,
+        ':now': new Date().toISOString(),
+      }),
+    }),
+  );
+}
+
+async function stripeRawRequest<T = unknown>(
+  method: 'GET' | 'POST',
+  path: string,
+  params?: Record<string, unknown>,
+): Promise<T> {
+  return (await getStripeClient().rawRequest(method, path, params)) as T;
+}
+
+/** A missing or already-redacted customer means there is nothing to redact. */
+function isRedactionUnnecessary(err: unknown): boolean {
+  const e = err as { code?: string; message?: string };
+  return e.code === 'resource_missing' || /already.{0,20}redact/i.test(e.message ?? '');
 }
 
 async function deleteAuth0Users(record: OrgDeletionRecord): Promise<void> {
