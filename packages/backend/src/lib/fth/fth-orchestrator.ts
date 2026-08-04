@@ -48,7 +48,11 @@ import {
   getBucketVersioning,
   getBucketObjectLock,
 } from '../s3-bucket-operations.js';
-import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
+import {
+  deleteConsoleS3Credentials,
+  getConsoleS3Credentials,
+  _resetS3CredentialsCacheForTesting,
+} from '../s3-credentials.js';
 import {
   createFthManagementClient,
   FthApiError,
@@ -103,6 +107,25 @@ export const fthOrchestrator = {
       if (cause instanceof FthNotFoundError) return { kind: 'not_found' };
       return { kind: 'error', cause };
     }
+  },
+
+  async deleteTenant(tenantId: string): Promise<void> {
+    // FTH requires the client to be `disabled` before deletion; a missing
+    // client at any step means it is already gone (idempotent success).
+    await disableFthTenantForDeletion(tenantId);
+    try {
+      await deleteFthClientToleratingNotFound(tenantId);
+    } catch (err) {
+      if (!(err instanceof FthConflictError)) throw err;
+      // 409: the disable hadn't taken effect yet — disable again, retry once.
+      await disableFthTenantForDeletion(tenantId);
+      await deleteFthClientToleratingNotFound(tenantId);
+    }
+    await deleteConsoleS3Credentials({
+      orchestratorId: fthOrchestrator.id,
+      stage: process.env.FILONE_STAGE!,
+      tenantId,
+    });
   },
 
   async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
@@ -336,6 +359,32 @@ export const fthOrchestrator = {
     return [{ timestamp, bytesUsed, objectCount }];
   },
 } satisfies ServiceOrchestrator;
+
+// Pre-deletion disable (FTH 409s a delete of a non-disabled client). A
+// missing client means it is already deleted — success for our caller.
+async function disableFthTenantForDeletion(tenantId: string): Promise<void> {
+  try {
+    await client.updateClientStatus(tenantId, { status: 'disabled' });
+  } catch (err) {
+    if (err instanceof FthNotFoundError) return;
+    throw new Error(`Failed to disable FTH tenant ${tenantId} before deletion`, { cause: err });
+  }
+}
+
+// DELETE the FTH client, treating 404 as already-deleted success. Conflicts
+// (409, not disabled) propagate as FthConflictError for the caller to handle.
+async function deleteFthClientToleratingNotFound(tenantId: string): Promise<void> {
+  try {
+    await client.deleteClient(tenantId);
+  } catch (err) {
+    if (err instanceof FthNotFoundError) {
+      console.log(`FTH tenant ${tenantId} not found, treating as already deleted`);
+      return;
+    }
+    if (err instanceof FthConflictError) throw err;
+    throw new Error(`Failed to delete FTH tenant ${tenantId}`, { cause: err });
+  }
+}
 
 const FTH_TENANT_STATUSES: readonly TenantStatus[] = ['active', 'write-locked', 'disabled'];
 

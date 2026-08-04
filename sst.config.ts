@@ -1049,8 +1049,7 @@ export default $config({
         // only cancels subscriptions (same pairing as UsageReportingWorker).
         stripeSecretKey,
         stripePriceId,
-        auroraBackofficeToken,
-        fthManagementApiToken,
+        ...managementApiTokens,
         ...mgmtRuntimeResources,
       ],
       environment: { ...orchestratorEnv, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
@@ -1059,8 +1058,10 @@ export default $config({
       permissions: [
         ...ragPermissions,
         {
+          // deleteTenant removes every orchestrator's per-tenant secrets: the
+          // `${id}-s3` console key for each region plus Aurora's portal API key.
           actions: ['ssm:GetParameter', 'ssm:DeleteParameter'],
-          resources: [auroraApiKeySsmArn, auroraS3KeySsmArn, fthS3KeySsmArn],
+          resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
         },
       ],
     });

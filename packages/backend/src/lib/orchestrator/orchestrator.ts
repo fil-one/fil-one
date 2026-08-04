@@ -51,9 +51,10 @@ import {
   getBucketVersioning,
   getBucketObjectLock,
 } from '../s3-bucket-operations.js';
-import { getConsoleS3Credentials } from '../s3-credentials.js';
+import { deleteConsoleS3Credentials, getConsoleS3Credentials } from '../s3-credentials.js';
 import {
   createClient,
+  deleteTenantsByTenantId,
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
   getTenantsByTenantId,
   getTenantsByTenantIdAccessKeys,
@@ -149,6 +150,33 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
       }
     },
 
+    async deleteTenant(tenantId: string): Promise<void> {
+      // The contract requires the tenant to be `disabled` before deletion
+      // (409 otherwise) and makes DELETE idempotent (204 when already gone).
+      await disableTenantForDeletion(client, config.id, tenantId);
+      let result = await deleteTenantsByTenantId({
+        client,
+        path: { tenantId },
+        throwOnError: false,
+      });
+      if (result.response?.status === 409) {
+        // The disable hadn't taken effect yet — disable again, retry once.
+        await disableTenantForDeletion(client, config.id, tenantId);
+        result = await deleteTenantsByTenantId({ client, path: { tenantId }, throwOnError: false });
+      }
+      // 404 = tenant already gone: exactly the state deletion wants.
+      if (result.error && result.response?.status !== 404) {
+        throw new Error(`Failed to delete ${config.id} tenant ${tenantId}`, {
+          cause: result.error,
+        });
+      }
+      await deleteConsoleS3Credentials({
+        orchestratorId: config.id,
+        stage: config.stage,
+        tenantId,
+      });
+    },
+
     async getTenantStatus(tenantId: string): Promise<TenantStatusProbe> {
       try {
         const { data, error, response } = await getTenantsByTenantId({
@@ -176,6 +204,27 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
     ...buildAccessKeyMethods(client, config.id),
     ...buildMetricsMethods(client),
   } satisfies ServiceOrchestrator;
+}
+
+// Pre-deletion disable: the contract mandates `disabled` before
+// DELETE /tenants/{tenantId}. A 404 means the tenant is already gone — the
+// subsequent DELETE is then an idempotent 204 no-op.
+async function disableTenantForDeletion(
+  client: Client,
+  orchestratorId: string,
+  tenantId: string,
+): Promise<void> {
+  const { error, response } = await postTenantsByTenantIdStatus({
+    client,
+    path: { tenantId },
+    body: { status: 'disabled' },
+    throwOnError: false,
+  });
+  if (error && response?.status !== 404) {
+    throw new Error(`Failed to disable ${orchestratorId} tenant ${tenantId} before deletion`, {
+      cause: error,
+    });
+  }
 }
 
 function resolveClient(config: FilOneOrchestratorConfig): Client {

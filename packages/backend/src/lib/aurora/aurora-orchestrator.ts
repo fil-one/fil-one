@@ -34,7 +34,12 @@ import {
 } from '../aurora/aurora-backoffice.js';
 import { isOrgSetupComplete } from '../org-setup-status.js';
 import type { OrgProfileItem } from '../org-profile.js';
-import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.js';
+import {
+  deleteConsoleS3Credentials,
+  deleteSsmParameter,
+  getConsoleS3Credentials,
+  _resetS3CredentialsCacheForTesting,
+} from '../s3-credentials.js';
 import { BucketNotFoundError, NotImplementedError } from '../errors.js';
 import type {
   BucketDetails,
@@ -86,6 +91,37 @@ export const auroraOrchestrator = {
       kind: 'ok',
       status: result.status ? mapFromModelsTenantStatus(result.status) : undefined,
     };
+  },
+
+  async deleteTenant(tenantId: string): Promise<void> {
+    // Aurora's Backoffice/Portal APIs expose no tenant-deletion endpoint, so
+    // this performs the strongest teardown available remotely: force the
+    // tenant to `disabled` and delete the FilOne-held credentials from SSM.
+    const probe = await auroraOrchestrator.getTenantStatus(tenantId);
+    if (probe.kind === 'error') {
+      throw new Error(`Aurora status probe failed while deleting tenant ${tenantId}`, {
+        cause: probe.cause,
+      });
+    }
+    if (probe.kind === 'ok') {
+      if (probe.status !== 'disabled') {
+        await auroraOrchestrator.updateTenantStatus(tenantId, 'disabled');
+      }
+      console.warn(
+        '[aurora-orchestrator] Aurora has no remote tenant-deletion API; the tenant was ' +
+          'disabled and its credentials deleted, but removing the Aurora tenant itself ' +
+          'requires a manual backoffice step',
+        { tenantId },
+      );
+    }
+
+    const stage = getStage();
+    await deleteSsmParameter(`/filone/${stage}/aurora-portal/tenant-api-key/${tenantId}`);
+    await deleteConsoleS3Credentials({
+      orchestratorId: auroraOrchestrator.id,
+      stage,
+      tenantId,
+    });
   },
 
   async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {

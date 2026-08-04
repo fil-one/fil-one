@@ -12,7 +12,7 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { DeleteParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
-import { marshall } from '@aws-sdk/util-dynamodb';
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 
 vi.mock('sst', () => ({
   Resource: {
@@ -38,13 +38,16 @@ vi.mock('./region-helpers.js', async (importOriginal) => ({
 
 const mockDeleteAccessKey = vi.fn();
 const mockIsTenantReady = vi.fn();
+const mockDeleteTenant = vi.fn();
+const testOrchestrator = {
+  id: 'aurora',
+  deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
+  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
+  deleteTenant: (...args: unknown[]) => mockDeleteTenant(...args),
+};
 vi.mock('./service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: () => ({
-    id: 'aurora',
-    deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
-    isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
-  }),
-  getAvailableOrchestrators: () => [],
+  getOrchestratorForRegion: () => testOrchestrator,
+  getAvailableOrchestrators: () => [testOrchestrator],
 }));
 
 const mockSubscriptionsCancel = vi.fn();
@@ -117,6 +120,7 @@ function setupHappyMocks(status: string) {
   mockDropIndex.mockResolvedValue(undefined);
   mockIsTenantReady.mockReturnValue('aurora-t-1');
   mockDeleteAccessKey.mockResolvedValue(undefined);
+  mockDeleteTenant.mockResolvedValue(undefined);
 }
 
 describe('assertPurgeAllowed', () => {
@@ -189,12 +193,9 @@ describe('runAccountDeletion', () => {
     expect(tombstone.ttl).toBeUndefined();
     expect(Object.keys(tombstone)).not.toContain('members');
 
-    // SSM params deleted for the snapshot tenant.
-    const ssmDeletes = ssmMock
-      .commandCalls(DeleteParameterCommand)
-      .map((c) => c.args[0].input.Name);
-    expect(ssmDeletes).toContain('/filone/test/aurora-portal/tenant-api-key/aurora-t-1');
-    expect(ssmDeletes).toContain('/filone/test/aurora-s3/access-key/aurora-t-1');
+    // Tenant deleted per region via its orchestrator (which owns the tenant's
+    // upstream resources and SSM secret cleanup).
+    expect(mockDeleteTenant).toHaveBeenCalledWith('aurora-t-1');
 
     // The DELETION row itself is never batch-deleted.
     const batchedKeys = ddbMock
@@ -275,7 +276,7 @@ describe('runAccountDeletion', () => {
     expect(mockDeleteAuth0User).toHaveBeenCalled(); // pipeline continued
   });
 
-  it('re-disables tenants provisioned after the snapshot (setup race) before purging', async () => {
+  it('snapshots late-provisioned tenants onto the DELETION record and deletes them before purging', async () => {
     setupHappyMocks(OrgDeletionStatus.RagPurged);
     mockGetProvisionedRegions.mockResolvedValue([
       { orchestrator: { id: 'aurora' }, tenantId: 'late-tenant' },
@@ -283,7 +284,39 @@ describe('runAccountDeletion', () => {
 
     await runAccountDeletion(ORG_ID);
 
-    expect(mockSync).toHaveBeenCalledWith(ORG_ID, 'disabled');
+    // Live tenant ids persisted onto the DELETION record BEFORE the ORG#
+    // partition purge kills the profile row (the only other pointer to them).
+    const tenantIdWrites = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .filter((c) => c.args[0].input.UpdateExpression?.includes('tenantIds'));
+    expect(tenantIdWrites).toHaveLength(1);
+    const written = unmarshall(tenantIdWrites[0].args[0].input.ExpressionAttributeValues!);
+    expect(written[':tenantIds']).toMatchObject({ aurora: 'late-tenant' });
+
+    // And the region teardown ran.
+    expect(mockDeleteTenant).toHaveBeenCalled();
+  });
+
+  it('falls back to the DELETION-record snapshot when the profile row is already purged', async () => {
+    setupHappyMocks(OrgDeletionStatus.RagPurged);
+    mockGetOrgProfile.mockResolvedValue(undefined);
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolves({ Item: deletionItem(OrgDeletionStatus.RagPurged, { tenantIds: { aurora: 'snap-t-9' } }) });
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockDeleteTenant).toHaveBeenCalledWith('snap-t-9');
+  });
+
+  it('falls back to the legacy per-orchestrator snapshot fields for in-flight records', async () => {
+    setupHappyMocks(OrgDeletionStatus.RagPurged);
+    mockGetOrgProfile.mockResolvedValue(undefined);
+    // deletionItem carries legacy auroraTenantId: 'aurora-t-1' and no tenantIds.
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockDeleteTenant).toHaveBeenCalledWith('aurora-t-1');
   });
 
   it('drops vector indexes for RAG rows and tolerates NotFound on re-run', async () => {

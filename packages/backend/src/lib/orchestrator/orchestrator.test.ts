@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { SSMClient, GetParameterCommand, DeleteParameterCommand } from '@aws-sdk/client-ssm';
 import {
   S3Client,
   CreateBucketCommand,
@@ -32,9 +32,11 @@ const mockListAccessKeys = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockDeleteAccessKey = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetTenantMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetBucketMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockDeleteTenant = vi.fn((_o: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/orchestrator-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
+  deleteTenantsByTenantId: (o: Record<string, unknown>) => mockDeleteTenant(o),
   postTenantsByTenantIdStatus: (o: Record<string, unknown>) => mockSetStatus(o),
   getTenantsByTenantId: (o: Record<string, unknown>) => mockGetTenant(o),
   postTenantsByTenantIdAccessKeys: (o: Record<string, unknown>) => mockCreateAccessKey(o),
@@ -200,6 +202,93 @@ describe('updateTenantStatus', () => {
     await expect(orchestrator.updateTenantStatus(tenantId, 'write-locked')).rejects.toThrow(
       `Failed to set tenant ${tenantId} status to "write-locked"`,
     );
+  });
+});
+
+describe('deleteTenant', () => {
+  const consoleKeyParam = `/filone/test/forge-s3/access-key/${tenantId}`;
+
+  function stubHappyDeletion() {
+    mockSetStatus.mockResolvedValue(noContent());
+    mockDeleteTenant.mockResolvedValue(noContent());
+    ssmMock.on(DeleteParameterCommand).resolves({});
+  }
+
+  it('disables the tenant, deletes it, then deletes the console-key SSM parameter', async () => {
+    stubHappyDeletion();
+
+    await orchestrator.deleteTenant(tenantId);
+
+    // The contract requires `disabled` before DELETE /tenants/{tenantId}.
+    expect(mockSetStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ path: { tenantId }, body: { status: 'disabled' } }),
+    );
+    expect(mockDeleteTenant).toHaveBeenCalledWith(
+      expect.objectContaining({ client: MOCK_CLIENT, path: { tenantId }, throwOnError: false }),
+    );
+    const ssmDeletes = ssmMock.commandCalls(DeleteParameterCommand).map((c) => c.args[0].input.Name);
+    expect(ssmDeletes).toEqual([consoleKeyParam]);
+  });
+
+  it('treats an already-deleted tenant (404s) as success and still deletes the SSM parameter', async () => {
+    mockSetStatus.mockResolvedValue(fail(404, 'gone'));
+    mockDeleteTenant.mockResolvedValue(fail(404, 'gone'));
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    await orchestrator.deleteTenant(tenantId);
+
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
+  });
+
+  it('tolerates an already-deleted SSM parameter (idempotent re-run)', async () => {
+    mockSetStatus.mockResolvedValue(noContent());
+    mockDeleteTenant.mockResolvedValue(noContent());
+    ssmMock
+      .on(DeleteParameterCommand)
+      .rejects(Object.assign(new Error('missing'), { name: 'ParameterNotFound' }));
+
+    await expect(orchestrator.deleteTenant(tenantId)).resolves.toBeUndefined();
+  });
+
+  it('re-disables and retries once on 409 (tenant not disabled yet)', async () => {
+    mockSetStatus.mockResolvedValue(noContent());
+    mockDeleteTenant.mockResolvedValueOnce(fail(409, 'not disabled')).mockResolvedValue(noContent());
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    await orchestrator.deleteTenant(tenantId);
+
+    expect(mockSetStatus).toHaveBeenCalledTimes(2);
+    expect(mockDeleteTenant).toHaveBeenCalledTimes(2);
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
+  });
+
+  it('throws on a persistent 409 and leaves the SSM parameter alone', async () => {
+    mockSetStatus.mockResolvedValue(noContent());
+    mockDeleteTenant.mockResolvedValue(fail(409, 'not disabled'));
+
+    await expect(orchestrator.deleteTenant(tenantId)).rejects.toThrow(
+      `Failed to delete forge tenant ${tenantId}`,
+    );
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
+  });
+
+  it('throws when the deletion fails, leaving the SSM parameter for the retry', async () => {
+    mockSetStatus.mockResolvedValue(noContent());
+    mockDeleteTenant.mockResolvedValue(fail(500, 'boom'));
+
+    await expect(orchestrator.deleteTenant(tenantId)).rejects.toThrow(
+      `Failed to delete forge tenant ${tenantId}`,
+    );
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
+  });
+
+  it('throws when the pre-deletion disable fails', async () => {
+    mockSetStatus.mockResolvedValue(fail(500, 'boom'));
+
+    await expect(orchestrator.deleteTenant(tenantId)).rejects.toThrow(
+      `Failed to disable forge tenant ${tenantId} before deletion`,
+    );
+    expect(mockDeleteTenant).not.toHaveBeenCalled();
   });
 });
 

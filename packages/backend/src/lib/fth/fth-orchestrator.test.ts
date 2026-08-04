@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { SSMClient, GetParameterCommand, DeleteParameterCommand } from '@aws-sdk/client-ssm';
 import {
   S3Client,
   CreateBucketCommand,
@@ -37,6 +37,7 @@ const mockFthClient = vi.hoisted(() => ({
   createAccessKey: vi.fn(),
   listAccessKeys: vi.fn(),
   deleteAccessKey: vi.fn(),
+  deleteClient: vi.fn(),
   listStorageUsers: vi.fn(),
   getClient: (...args: unknown[]) => mockGetClient(...args),
   getClientMetricsTimeseries: (...args: unknown[]) => mockGetClientMetricsTimeseries(...args),
@@ -98,6 +99,82 @@ function stubConsoleStorageUser() {
     },
   ]);
 }
+
+describe('fthOrchestrator.deleteTenant', () => {
+  const consoleKeyParam = `/filone/test/fth-s3/access-key/${fthClientId}`;
+
+  function notFound() {
+    return new FthNotFoundError('not found', undefined);
+  }
+
+  it('disables the client, deletes it, then deletes the console-key SSM parameter', async () => {
+    mockUpdateClientStatus.mockResolvedValue(undefined);
+    mockFthClient.deleteClient.mockResolvedValue(undefined);
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    await fthOrchestrator.deleteTenant(fthClientId);
+
+    // FTH 409s deletion of a non-disabled client, so disable comes first.
+    expect(mockUpdateClientStatus).toHaveBeenCalledWith(fthClientId, { status: 'disabled' });
+    expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId);
+    const ssmDeletes = ssmMock.commandCalls(DeleteParameterCommand).map((c) => c.args[0].input.Name);
+    expect(ssmDeletes).toEqual([consoleKeyParam]);
+  });
+
+  it('treats an already-deleted client as success and still deletes the SSM parameter', async () => {
+    mockUpdateClientStatus.mockRejectedValue(notFound());
+    mockFthClient.deleteClient.mockRejectedValue(notFound());
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    await fthOrchestrator.deleteTenant(fthClientId);
+
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
+  });
+
+  it('re-disables and retries once on a 409 conflict (client not disabled yet)', async () => {
+    mockUpdateClientStatus.mockResolvedValue(undefined);
+    mockFthClient.deleteClient
+      .mockRejectedValueOnce(new FthConflictError('not disabled', undefined))
+      .mockResolvedValue(undefined);
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    await fthOrchestrator.deleteTenant(fthClientId);
+
+    expect(mockUpdateClientStatus).toHaveBeenCalledTimes(2);
+    expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(2);
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
+  });
+
+  it('throws on any other deletion failure and leaves the SSM parameter for the retry', async () => {
+    mockUpdateClientStatus.mockResolvedValue(undefined);
+    mockFthClient.deleteClient.mockRejectedValue(new FthApiError(500, 'boom', undefined));
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
+      `Failed to delete FTH tenant ${fthClientId}`,
+    );
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
+  });
+
+  it('throws when the pre-deletion disable fails', async () => {
+    mockUpdateClientStatus.mockRejectedValue(new FthApiError(500, 'boom', undefined));
+
+    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
+      `Failed to disable FTH tenant ${fthClientId} before deletion`,
+    );
+    expect(mockFthClient.deleteClient).not.toHaveBeenCalled();
+  });
+
+  it('tolerates an already-deleted SSM parameter (idempotent re-run)', async () => {
+    mockUpdateClientStatus.mockResolvedValue(undefined);
+    mockFthClient.deleteClient.mockResolvedValue(undefined);
+    ssmMock
+      .on(DeleteParameterCommand)
+      .rejects(Object.assign(new Error('missing'), { name: 'ParameterNotFound' }));
+
+    await expect(fthOrchestrator.deleteTenant(fthClientId)).resolves.toBeUndefined();
+  });
+});
 
 describe('fthOrchestrator.ensureTenantReady', () => {
   it('delegates to ensureTenantReady from fth-tenant-setup', async () => {

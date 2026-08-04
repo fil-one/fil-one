@@ -8,7 +8,6 @@ import {
   UpdateItemCommand,
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
-import { DeleteParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { S3VectorsStore } from '@filone/rag-shared';
 import { Resource } from 'sst';
@@ -28,14 +27,18 @@ import { getOrgProfile } from './org-profile.js';
 import {
   assertRegionSyncSucceeded,
   getProvisionedRegions,
+  getProvisionedRegionsFromProfile,
   syncTenantStatusInProvisionedRegions,
+  type ProvisionedRegion,
 } from './region-helpers.js';
-import { getOrchestratorForRegion } from './service-orchestrator-registry.js';
+import {
+  getAvailableOrchestrators,
+  getOrchestratorForRegion,
+} from './service-orchestrator-registry.js';
 import { getStripeClient } from './stripe-client.js';
 import { S3Region } from '@filone/shared';
 
 const dynamo = getDynamoClient();
-const ssm = new SSMClient({});
 
 /**
  * Partition-key prefixes the purge is allowed to delete. `EMAIL_NORM#` (the
@@ -226,16 +229,18 @@ async function dropVectorIndexForPk(vectorStore: S3VectorsStore, pk: string): Pr
 
 async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<void> {
   // A tenant setup racing the confirm may have provisioned after the earlier
-  // disable pass. Re-check and re-disable before the profile row (the only
-  // pointer to the tenant ids) is purged. The `deleting` flag written at
-  // confirm time blocks new setups, so this converges.
+  // disable pass. Re-check before the profile row (the only pointer to the
+  // tenant ids) is purged, and persist the live tenant ids onto the DELETION
+  // record so a crash between the purge and the tenant deletion still leaves
+  // every tenant findable. The `deleting` flag written at confirm time blocks
+  // new setups, so this converges.
   const lateRegions = await getProvisionedRegions(orgId);
   if (lateRegions.length > 0) {
+    await snapshotTenantIdsOnDeletionRecord(orgId, record, lateRegions);
     await revokeAllAccessKeys(orgId);
-    await disableAllTenants(orgId);
   }
 
-  await deleteTenantSsmParams(orgId, record);
+  await deleteAllRegions(orgId, record);
 
   // UserInfoTable: everything under ORG#{orgId} except the DELETION record.
   const orgRows = await queryOrgRows(orgId);
@@ -279,31 +284,73 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
   await deleteDeletionChallenge(orgId);
 }
 
-async function deleteTenantSsmParams(orgId: string, record: OrgDeletionRecord): Promise<void> {
-  const stage = process.env.FILONE_STAGE!;
-  // Prefer the live profile (it may know tenants provisioned after the
-  // snapshot); fall back to the snapshot if the profile is gone.
-  const profile = await getOrgProfile(orgId);
-  const auroraTenantId = profile?.auroraTenantId?.S ?? record.auroraTenantId;
-  const fthTenantId = profile?.fthTenantId?.S ?? record.fthTenantId;
-
-  const names = [
-    ...(auroraTenantId
-      ? [
-          `/filone/${stage}/aurora-portal/tenant-api-key/${auroraTenantId}`,
-          `/filone/${stage}/aurora-s3/access-key/${auroraTenantId}`,
-        ]
-      : []),
-    ...(fthTenantId ? [`/filone/${stage}/fth-s3/access-key/${fthTenantId}`] : []),
-  ];
-
-  for (const name of names) {
-    try {
-      await ssm.send(new DeleteParameterCommand({ Name: name }));
-    } catch (err) {
-      if ((err as { name?: string }).name !== 'ParameterNotFound') throw err;
-    }
+/**
+ * Deletes the org's tenant (and its secrets) in every region via each
+ * orchestrator's `deleteTenant`. Idempotent — already-deleted tenants are
+ * success — so re-runs after a crash converge.
+ */
+async function deleteAllRegions(orgId: string, record: OrgDeletionRecord): Promise<void> {
+  for (const { orchestrator, tenantId } of await resolveRegionTargets(orgId, record)) {
+    await orchestrator.deleteTenant(tenantId);
   }
+}
+
+/**
+ * Regions to tear down: prefer the live profile (it may know tenants
+ * provisioned after the snapshot); when the profile row is already purged,
+ * fall back to the DELETION-record snapshot — the region-generic `tenantIds`
+ * map, plus the legacy per-orchestrator fields for in-flight records.
+ */
+async function resolveRegionTargets(
+  orgId: string,
+  record: OrgDeletionRecord,
+): Promise<ProvisionedRegion[]> {
+  const profile = await getOrgProfile(orgId);
+  if (profile) return getProvisionedRegionsFromProfile(profile);
+
+  const snapshot: Record<string, string> = {
+    ...(record.auroraTenantId ? { aurora: record.auroraTenantId } : {}),
+    ...(record.fthTenantId ? { fth: record.fthTenantId } : {}),
+    ...(record.tenantIds ?? {}),
+  };
+  return getAvailableOrchestrators()
+    .map((orchestrator) => {
+      const tenantId = snapshot[orchestrator.id];
+      return tenantId ? { orchestrator, tenantId } : null;
+    })
+    .filter((t): t is ProvisionedRegion => t !== null);
+}
+
+/**
+ * Persist the live orchestrator-id → tenant-id map onto the DELETION record
+ * (merged over the confirm-time snapshot) so tenants provisioned after the
+ * confirm stay findable once the profile row is purged.
+ */
+async function snapshotTenantIdsOnDeletionRecord(
+  orgId: string,
+  record: OrgDeletionRecord,
+  regions: ProvisionedRegion[],
+): Promise<void> {
+  const tenantIds: Record<string, string> = {
+    ...(record.auroraTenantId ? { aurora: record.auroraTenantId } : {}),
+    ...(record.fthTenantId ? { fth: record.fthTenantId } : {}),
+    ...(record.tenantIds ?? {}),
+    ...Object.fromEntries(regions.map(({ orchestrator, tenantId }) => [orchestrator.id, tenantId])),
+  };
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
+      UpdateExpression: 'SET tenantIds = :tenantIds, updatedAt = :now',
+      ConditionExpression: 'attribute_exists(pk)',
+      ExpressionAttributeValues: marshall({
+        ':tenantIds': tenantIds,
+        ':now': new Date().toISOString(),
+      }),
+    }),
+  );
+  // Keep the in-memory record in step for the deleteAllRegions fallback.
+  record.tenantIds = tenantIds;
 }
 
 async function finalize(
