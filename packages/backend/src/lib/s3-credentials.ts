@@ -74,9 +74,7 @@ export function consoleS3CredentialsSsmPath(args: GetConsoleS3CredentialsArgs): 
  * warm-container cache entry so a stale credential can't be served after
  * the parameter is gone.
  */
-export async function deleteConsoleS3Credentials(
-  args: GetConsoleS3CredentialsArgs,
-): Promise<void> {
+export async function deleteConsoleS3Credentials(args: GetConsoleS3CredentialsArgs): Promise<void> {
   ssmCache.delete(`${args.stage}/${args.orchestratorId}/${args.tenantId}`);
   await deleteSsmParameter(consoleS3CredentialsSsmPath(args));
 }
