@@ -1736,6 +1736,20 @@ describe('stripe-webhook handler', () => {
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
+    it('customer.updated for a purged record: 200-swallow instead of the old 500+retry', async () => {
+      // Before the guard, a missing record made this write upsert; now the
+      // guarded update no-ops and the webhook acknowledges with 200 so Stripe
+      // stops retrying an event for an account that no longer exists.
+      setupStripeEvent('customer.updated', mockCustomerObject());
+      guardRejection();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      // Idempotency claim is kept — no DeleteItem release on the guarded path.
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+    });
+
     it('payment_failed for a mid-deletion record: 200, no dunning metric', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieve();

@@ -190,6 +190,10 @@ async function persistBillingAndUnlock(params: {
       .body({ message: 'Account has been deleted', code: ApiErrorCode.ACCOUNT_DELETED })
       .build();
   }
+  // Accepted TOCTOU with account deletion (FIL-112): the guarded save above
+  // passed on then-current state, but a teardown can claim the record before
+  // this unlock lands. The transiently unlocked tenant converges when the
+  // teardown deletes the tenants themselves.
   await unlockAllProvisionedRegions(orgId);
   return null;
 }
