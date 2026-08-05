@@ -92,7 +92,10 @@ async function scanGracePeriodCandidates(
     const result = await dynamo.send(
       new ScanCommand({
         TableName: billingTableName,
-        FilterExpression: 'sk = :sk AND subscriptionStatus = :gracePeriod',
+        // Records with deletionRequestedAt belong to the account-deletion
+        // worker (FIL-112); the enforcer must not fight it over tenant state.
+        FilterExpression:
+          'sk = :sk AND subscriptionStatus = :gracePeriod AND attribute_not_exists(deletionRequestedAt)',
         ExpressionAttributeValues: {
           ':sk': { S: 'SUBSCRIPTION' },
           ':gracePeriod': { S: SubscriptionStatus.GracePeriod },

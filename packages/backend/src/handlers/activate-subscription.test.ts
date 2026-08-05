@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
@@ -406,6 +411,35 @@ describe('activate-subscription handler', () => {
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+  });
+
+  it('returns 410 ACCOUNT_DELETED and skips the unlock when the deletion guard rejects the save', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
+    // The teardown guarded/purged the billing record mid-request.
+    ddbMock
+      .on(UpdateItemCommand)
+      .rejects(
+        new ConditionalCheckFailedException({
+          message: 'The conditional request failed',
+          $metadata: {},
+        }),
+      );
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    const result = await handler(event, {} as never);
+    const body = JSON.parse((result as { body: string }).body);
+
+    expect((result as { statusCode: number }).statusCode).toBe(410);
+    expect(body.code).toBe('ACCOUNT_DELETED');
+    // The tenant must NOT be unlocked while the teardown is disabling it.
     expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
   });
 

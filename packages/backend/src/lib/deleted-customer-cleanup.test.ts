@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 
@@ -26,6 +31,7 @@ import {
   closeOutDeletedCustomer,
   resolveOrgIdFromSubscription,
 } from './deleted-customer-cleanup.js';
+import { DELETION_GUARD } from './deletion-guard.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,7 +67,7 @@ describe('closeOutDeletedCustomer', () => {
   });
 
   it('disables tenants, then marks the billing record canceled', async () => {
-    const outcomes = await closeOutDeletedCustomer({
+    const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
       userId: USER_ID,
       orgId: ORG_ID,
     });
@@ -86,10 +92,11 @@ describe('closeOutDeletedCustomer', () => {
         ':status': { S: SubscriptionStatus.Canceled },
         ':now': { S: expect.any(String) },
       },
-      ConditionExpression: 'attribute_exists(pk)',
+      ConditionExpression: DELETION_GUARD,
     });
 
     expect(outcomes).toEqual([okOutcome('aurora')]);
+    expect(billingCanceled).toBe(true);
   });
 
   it('passes the retry options through to the region sync', async () => {
@@ -114,19 +121,20 @@ describe('closeOutDeletedCustomer', () => {
       errorOutcome('fth'),
     ]);
 
-    const outcomes = await closeOutDeletedCustomer({
+    const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
       userId: USER_ID,
       orgId: ORG_ID,
     });
 
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     expect(outcomes).toEqual([okOutcome('aurora'), errorOutcome('fth')]);
+    expect(billingCanceled).toBe(false);
   });
 
   it('cancels the record without any region sync when orgId is null, with a warning', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const outcomes = await closeOutDeletedCustomer({
+    const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
       userId: USER_ID,
       orgId: null,
     });
@@ -134,6 +142,7 @@ describe('closeOutDeletedCustomer', () => {
     expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
     expect(outcomes).toEqual([]);
+    expect(billingCanceled).toBe(true);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('No orgId — skipping tenant status sync'),
       expect.objectContaining({ userId: USER_ID }),
@@ -143,13 +152,19 @@ describe('closeOutDeletedCustomer', () => {
 
   it('tolerates a missing billing record (conditional check failure)', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const conditionalFailure = new Error('The conditional request failed');
-    conditionalFailure.name = 'ConditionalCheckFailedException';
-    ddbMock.on(UpdateItemCommand).rejects(conditionalFailure);
+    ddbMock
+      .on(UpdateItemCommand)
+      .rejects(
+        new ConditionalCheckFailedException({
+          message: 'The conditional request failed',
+          $metadata: {},
+        }),
+      );
 
-    await expect(closeOutDeletedCustomer({ userId: USER_ID, orgId: ORG_ID })).resolves.toEqual([
-      okOutcome('aurora'),
-    ]);
+    await expect(closeOutDeletedCustomer({ userId: USER_ID, orgId: ORG_ID })).resolves.toEqual({
+      outcomes: [okOutcome('aurora')],
+      billingCanceled: false,
+    });
 
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('No billing record to cancel'),

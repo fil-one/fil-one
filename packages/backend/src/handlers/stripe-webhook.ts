@@ -1,4 +1,9 @@
-import { DeleteItemCommand, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DeleteItemCommand,
+  PutItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import Stripe from 'stripe';
@@ -9,6 +14,7 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
+import { DELETION_GUARD } from '../lib/deletion-guard.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import {
   closeOutDeletedCustomer,
@@ -28,6 +34,31 @@ import {
 } from '../lib/stripe-webhook-metrics.js';
 
 const dynamo = getDynamoClient();
+
+/**
+ * Sends a billing-record UpdateItem guarded by {@link DELETION_GUARD}.
+ * Returns null when the guard rejects the write (record purged or org
+ * mid-deletion) — callers must then skip follow-on tenant status syncs.
+ */
+async function sendGuardedBillingUpdate(
+  input: Omit<ConstructorParameters<typeof UpdateItemCommand>[0], 'ConditionExpression'>,
+  context: Record<string, unknown>,
+): Promise<import('@aws-sdk/client-dynamodb').UpdateItemCommandOutput | null> {
+  try {
+    return await dynamo.send(
+      new UpdateItemCommand({ ...input, ConditionExpression: DELETION_GUARD }),
+    );
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) {
+      console.warn(
+        '[stripe-webhook] Billing record missing or org mid-deletion; skipping update',
+        context,
+      );
+      return null;
+    }
+    throw err;
+  }
+}
 
 /**
  * Stripe webhook handler — NO auth middleware.
@@ -82,7 +113,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       }),
     );
   } catch (err) {
-    if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+    if (err instanceof ConditionalCheckFailedException) {
       console.warn('[stripe-webhook] Already processed event:', stripeEvent.id);
       return { statusCode: 200, body: JSON.stringify({ received: true }) };
     }
@@ -208,8 +239,8 @@ async function updatePaymentMethod(
   userId: string,
   pm: Stripe.PaymentMethod,
 ): Promise<void> {
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -225,8 +256,8 @@ async function updatePaymentMethod(
         ':expYear': { N: String(pm.card?.exp_year ?? 0) },
         ':now': { S: new Date().toISOString() },
       },
-      ConditionExpression: 'attribute_exists(pk)',
-    }),
+    },
+    { userId, event: 'customer.updated' },
   );
 }
 
@@ -251,9 +282,12 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
     });
   }
 
-  assertRegionSyncSucceeded(
-    await closeOutDeletedCustomer({ userId, orgId, retry: WEBHOOK_STATUS_SYNC_RETRY }),
-  );
+  const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
+    userId,
+    orgId,
+    retry: WEBHOOK_STATUS_SYNC_RETRY,
+  });
+  assertRegionSyncSucceeded(outcomes);
   if (orgId) {
     console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
       userId,
@@ -261,6 +295,8 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
       customerId: customer.id,
     });
   }
+  // Guard rejected or record absent (org mid-deletion): not a dunning cancellation.
+  if (!billingCanceled) return;
 
   emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
@@ -335,8 +371,8 @@ async function updateBillingRecord({
   orgId,
 }: UpdateBillingRecordParams): Promise<void> {
   const backfill = orgIdBackfill(orgId);
-  await dynamo.send(
-    new UpdateItemCommand({
+  await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -355,7 +391,8 @@ async function updateBillingRecord({
         ':now': { S: new Date().toISOString() },
         ...backfill.values,
       },
-    }),
+    },
+    { userId, subscriptionId: subscription.id, event: 'subscription.created/updated' },
   );
 }
 
@@ -379,9 +416,12 @@ async function handleSubscriptionDeleted(
       );
     }
     const orgId = await resolveOrgIdFromSubscription(userId);
-    assertRegionSyncSucceeded(
-      await closeOutDeletedCustomer({ userId, orgId, retry: WEBHOOK_STATUS_SYNC_RETRY }),
-    );
+    const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
+      userId,
+      orgId,
+      retry: WEBHOOK_STATUS_SYNC_RETRY,
+    });
+    assertRegionSyncSucceeded(outcomes);
     console.log(
       '[stripe-webhook] Billing record closed out (subscription.deleted, customer deleted)',
       {
@@ -391,7 +431,10 @@ async function handleSubscriptionDeleted(
         subscriptionId: subscription.id,
       },
     );
-    emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
+    // Guard rejected or record absent (org mid-deletion): not a dunning cancellation.
+    if (billingCanceled) {
+      emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
+    }
     return;
   }
 
@@ -404,8 +447,8 @@ async function handleSubscriptionDeleted(
   const gracePeriodEndsAt = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
 
   const backfill = orgIdBackfill(customer.metadata?.orgId);
-  await dynamo.send(
-    new UpdateItemCommand({
+  const applied = await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -418,8 +461,10 @@ async function handleSubscriptionDeleted(
         ':grace': { S: gracePeriodEndsAt },
         ...backfill.values,
       },
-    }),
+    },
+    { userId, subscriptionId: subscription.id, event: 'subscription.deleted' },
   );
+  if (!applied) return;
 
   const latestInvoice = subscription.latest_invoice;
   const attemptCount =
@@ -462,8 +507,10 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   if (!userId) return;
 
   const backfill = orgIdBackfill(customer.metadata?.orgId);
-  const updateResult = await dynamo.send(
-    new UpdateItemCommand({
+  // The guard is load-bearing here: after self-serve deletion, the final
+  // invoice's payment_succeeded must not re-activate a disabled tenant.
+  const updateResult = await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -476,8 +523,10 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
         ...backfill.values,
       },
       ReturnValues: 'ALL_OLD',
-    }),
+    },
+    { userId, event: 'invoice.payment_succeeded' },
   );
+  if (!updateResult) return;
 
   const priorStatus = updateResult.Attributes?.subscriptionStatus?.S;
   if (
@@ -524,8 +573,8 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
   // the subscription after all retries are exhausted.
   const now = new Date().toISOString();
   const backfill = orgIdBackfill(customer.metadata?.orgId);
-  await dynamo.send(
-    new UpdateItemCommand({
+  const applied = await sendGuardedBillingUpdate(
+    {
       TableName: tableName,
       Key: {
         pk: { S: `CUSTOMER#${userId}` },
@@ -538,8 +587,10 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
         ':now': { S: now },
         ...backfill.values,
       },
-    }),
+    },
+    { userId, event: 'invoice.payment_failed' },
   );
+  if (!applied) return;
 
   const attemptCount = invoice.attempt_count ?? 0;
   emitDunningEscalation({

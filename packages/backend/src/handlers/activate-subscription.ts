@@ -3,6 +3,7 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import type Stripe from 'stripe';
 import {
   ActivateSubscriptionRequestSchema,
   ApiErrorCode,
@@ -127,9 +128,10 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
       .build();
   }
 
-  // 6. Persist billing record and unlock the tenant on every orchestrator
-  await saveBillingRecord(userId, subscription, paymentMethodId, mappedStatus);
-  await unlockAllProvisionedRegions(orgId);
+  // 6. Persist billing record and unlock the tenant on every orchestrator.
+  const saveArgs = { userId, orgId, subscription, paymentMethodId, mappedStatus };
+  const guardResponse = await persistBillingAndUnlock(saveArgs);
+  if (guardResponse) return guardResponse;
 
   const response: ActivateSubscriptionResponse = {
     subscription: {
@@ -142,6 +144,35 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   };
 
   return new ResponseBuilder().status(200).body(response).build();
+}
+
+/**
+ * Deletion-guarded billing-record save + tenant unlock. The save is guarded against
+ * FIL-112 account deletion: when the teardown owns (or has purged) the
+ * record, this request must not unlock tenants the teardown is disabling —
+ * returns the 410 ACCOUNT_DELETED response instead, or null on success.
+ */
+async function persistBillingAndUnlock(params: {
+  userId: string;
+  orgId: string;
+  subscription: Stripe.Subscription;
+  paymentMethodId: string;
+  mappedStatus: SubscriptionStatus;
+}): Promise<APIGatewayProxyResultV2 | null> {
+  const { userId, orgId, subscription, paymentMethodId, mappedStatus } = params;
+  const saved = await saveBillingRecord(userId, subscription, paymentMethodId, mappedStatus);
+  if (!saved) {
+    console.warn('[activate-subscription] Account deletion in progress; skipping unlock', {
+      userId,
+      orgId,
+    });
+    return new ResponseBuilder()
+      .status(410)
+      .body({ message: 'Account has been deleted', code: ApiErrorCode.ACCOUNT_DELETED })
+      .build();
+  }
+  await unlockAllProvisionedRegions(orgId);
+  return null;
 }
 
 async function getCustomerBillingRecord(

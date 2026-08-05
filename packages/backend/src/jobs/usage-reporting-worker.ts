@@ -451,7 +451,7 @@ async function reconcileDeletedCustomer(params: {
     };
   }
 
-  const outcomes = await closeOutDeletedCustomer({ userId, orgId });
+  const { outcomes } = await closeOutDeletedCustomer({ userId, orgId });
   const failed = outcomes.filter((o) => o.outcome === 'error');
   if (failed.length > 0) {
     // Record left non-canceled on purpose: tomorrow's run re-enters this path

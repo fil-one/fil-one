@@ -1,7 +1,8 @@
-import { UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { ConditionalCheckFailedException, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import type Stripe from 'stripe';
 import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
+import { DELETION_GUARD } from './deletion-guard.js';
 import { getDynamoClient } from './ddb-client.js';
 import {
   assertRegionSyncSucceeded,
@@ -10,12 +11,21 @@ import {
 
 const dynamo = getDynamoClient();
 
+/**
+ * Persists the activated subscription onto the billing record. Guarded by the
+ * FIL-112 {@link DELETION_GUARD}: an in-flight activation must not re-create
+ * or re-activate a record the account teardown owns. Returns false when the
+ * guard rejects the write (record purged or org mid-deletion) — the caller
+ * must then skip tenant unlocks. The record is guaranteed to exist on the
+ * happy path (the handler 400s earlier without one), so `attribute_exists(pk)`
+ * only trips when the teardown purged it mid-request.
+ */
 export async function saveBillingRecord(
   userId: string,
   subscription: Stripe.Subscription,
   paymentMethodId: string,
   mappedStatus: SubscriptionStatus,
-): Promise<void> {
+): Promise<boolean> {
   const pm = subscription.default_payment_method;
   let paymentMethodLast4 = '';
   let paymentMethodBrand = '';
@@ -29,30 +39,43 @@ export async function saveBillingRecord(
     paymentMethodExpYear = pm.card.exp_year;
   }
 
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: Resource.BillingTable.name,
-      Key: {
-        pk: { S: `CUSTOMER#${userId}` },
-        sk: { S: 'SUBSCRIPTION' },
-      },
-      UpdateExpression:
-        'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
-      ExpressionAttributeValues: {
-        ':subId': { S: subscription.id },
-        ':status': { S: mappedStatus },
-        ':periodEnd': {
-          S: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
+  try {
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: Resource.BillingTable.name,
+        Key: {
+          pk: { S: `CUSTOMER#${userId}` },
+          sk: { S: 'SUBSCRIPTION' },
         },
-        ':pmId': { S: paymentMethodId },
-        ':last4': { S: paymentMethodLast4 },
-        ':brand': { S: paymentMethodBrand },
-        ':expMonth': { N: String(paymentMethodExpMonth) },
-        ':expYear': { N: String(paymentMethodExpYear) },
-        ':now': { S: new Date().toISOString() },
-      },
-    }),
-  );
+        UpdateExpression:
+          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
+        ConditionExpression: DELETION_GUARD,
+        ExpressionAttributeValues: {
+          ':subId': { S: subscription.id },
+          ':status': { S: mappedStatus },
+          ':periodEnd': {
+            S: new Date(subscription.items.data[0].current_period_end * 1000).toISOString(),
+          },
+          ':pmId': { S: paymentMethodId },
+          ':last4': { S: paymentMethodLast4 },
+          ':brand': { S: paymentMethodBrand },
+          ':expMonth': { N: String(paymentMethodExpMonth) },
+          ':expYear': { N: String(paymentMethodExpYear) },
+          ':now': { S: new Date().toISOString() },
+        },
+      }),
+    );
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) {
+      console.warn(
+        '[billing-activation] Billing record missing or org mid-deletion; skipping save',
+        { userId, subscriptionId: subscription.id },
+      );
+      return false;
+    }
+    throw err;
+  }
+  return true;
 }
 
 // Unlocks the org's tenant on every orchestrator where it exists (Aurora, FTH,

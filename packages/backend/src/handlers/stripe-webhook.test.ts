@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
+  ConditionalCheckFailedException,
   DynamoDBClient,
   DeleteItemCommand,
   GetItemCommand,
@@ -58,6 +59,7 @@ const reportMetricMock = vi.mocked(reportMetric);
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './stripe-webhook.js';
+import { DELETION_GUARD } from '../lib/deletion-guard.js';
 import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
@@ -271,9 +273,11 @@ describe('stripe-webhook handler', () => {
   describe('idempotency', () => {
     it('returns 200 without processing when event already handled', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
-      const condError = new Error('Conditional check failed');
-      (condError as { name: string }).name = 'ConditionalCheckFailedException';
-      ddbMock.on(PutItemCommand).rejects(condError);
+      ddbMock
+        .on(PutItemCommand)
+        .rejects(
+          new ConditionalCheckFailedException({ message: 'Conditional check failed', $metadata: {} }),
+        );
 
       const result = await handler(buildWebhookEvent('{}'));
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
@@ -371,6 +375,7 @@ describe('stripe-webhook handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: DELETION_GUARD,
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -574,6 +579,7 @@ describe('stripe-webhook handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: DELETION_GUARD,
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -657,7 +663,7 @@ describe('stripe-webhook handler', () => {
           ':expYear': { N: String(MOCK_PM_EXP_YEAR) },
           ':now': { S: expect.any(String) },
         },
-        ConditionExpression: 'attribute_exists(pk)',
+        ConditionExpression: DELETION_GUARD,
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -792,6 +798,7 @@ describe('stripe-webhook handler', () => {
           ':now': { S: expect.any(String) },
           ':grace': { S: expect.any(String) },
         },
+        ConditionExpression: DELETION_GUARD,
       });
 
       const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();
@@ -1119,6 +1126,7 @@ describe('stripe-webhook handler', () => {
           ':now': { S: expect.any(String) },
         },
         ReturnValues: 'ALL_OLD',
+        ConditionExpression: DELETION_GUARD,
       });
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
@@ -1224,6 +1232,7 @@ describe('stripe-webhook handler', () => {
           ':failedAt': { S: expect.any(String) },
           ':now': { S: expect.any(String) },
         },
+        ConditionExpression: DELETION_GUARD,
       });
 
       // Must NOT set gracePeriodEndsAt — Stripe Smart Retries handle the retry window
@@ -1674,6 +1683,92 @@ describe('stripe-webhook handler', () => {
       await handler(buildWebhookEvent('{}'));
 
       expect(invoiceFinalizationFailedEmissions()).toHaveLength(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Deletion guard (FIL-112): events for purged or mid-deletion orgs are
+  // acknowledged without resurrecting billing state or touching tenants.
+  // -----------------------------------------------------------------------
+  describe('deletion guard', () => {
+    function guardRejection() {
+      ddbMock
+        .on(UpdateItemCommand)
+        .rejects(
+          new ConditionalCheckFailedException({
+            message: 'The conditional request failed',
+            $metadata: {},
+          }),
+        );
+    }
+
+    it('subscription.deleted for a mid-deletion record: 200, no upsert side effects, no write-lock sync', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      guardRejection();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(dunningEmissions()).toHaveLength(0);
+      // Idempotency claim is kept — no DeleteItem release on the guarded path
+      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+    });
+
+    it('payment_succeeded for a mid-deletion record: 200 and does NOT re-activate the tenant', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+      setupAuroraTenantResolution();
+      guardRejection();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    });
+
+    it('subscription.updated for a purged record: 200, no zombie record written', async () => {
+      setupStripeEvent('customer.subscription.updated', mockSubscription());
+      guardRejection();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+    });
+
+    it('payment_failed for a mid-deletion record: 200, no dunning metric', async () => {
+      setupStripeEvent('invoice.payment_failed', mockInvoice());
+      setupCustomerRetrieve();
+      guardRejection();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(dunningEmissions()).toHaveLength(0);
+    });
+
+    it('customer.deleted for a mid-deletion record: 200, no dunning metric', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      guardRejection();
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(dunningEmissions()).toHaveLength(0);
+    });
+
+    it('non-conditional DynamoDB errors still fail the webhook (500, retryable)', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      ddbMock.on(UpdateItemCommand).rejects(new Error('throttled'));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Processing error' }),
+      });
     });
   });
 
