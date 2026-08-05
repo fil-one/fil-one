@@ -29,7 +29,7 @@ function deletionRecord(orgId: string, overrides?: Record<string, unknown>) {
     sk: 'DELETION',
     status: 'PENDING',
     attemptCount: 1,
-    updatedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1h stale
+    updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2h — past the 60min window
     members: [],
     requestedAt: '2026-07-10T00:00:00.000Z',
     requestedByUserId: 'user-1',
@@ -60,6 +60,20 @@ describe('account-deletion-reconciler', () => {
   it('leaves recently-active records alone', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [deletionRecord('org-1', { updatedAt: new Date().toISOString() })],
+    });
+
+    await handler();
+
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+  });
+
+  it('leaves a record inside the 60-minute window alone: the worker (900s timeout) may still be running', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        deletionRecord('org-1', {
+          updatedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(), // 30min
+        }),
+      ],
     });
 
     await handler();

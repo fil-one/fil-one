@@ -10,8 +10,14 @@ import type { AccountDeletionWorkerPayload } from './account-deletion-worker.js'
 const dynamo = getDynamoClient();
 const lambda = new LambdaClient({});
 
-/** Ignore records the worker touched more recently than this — it's live. */
-const STALE_AFTER_MS = 10 * 60 * 1000;
+/**
+ * Ignore records the worker touched more recently than this — it's live.
+ * Must exceed the worker's 900s Lambda timeout: the worker bumps `updatedAt`
+ * once per pass (bumpAttemptCount), so a window shorter than a pass could
+ * re-invoke against a still-running worker. 60 minutes leaves generous room
+ * for the worker's own async retries too.
+ */
+const STALE_AFTER_MS = 60 * 60 * 1000;
 /** Past this many worker attempts the record counts as stuck (alerting gauge). */
 const STUCK_ATTEMPT_THRESHOLD = 3;
 
