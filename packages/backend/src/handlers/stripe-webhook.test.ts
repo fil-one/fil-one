@@ -273,14 +273,12 @@ describe('stripe-webhook handler', () => {
   describe('idempotency', () => {
     it('returns 200 without processing when event already handled', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
-      ddbMock
-        .on(PutItemCommand)
-        .rejects(
-          new ConditionalCheckFailedException({
-            message: 'Conditional check failed',
-            $metadata: {},
-          }),
-        );
+      ddbMock.on(PutItemCommand).rejects(
+        new ConditionalCheckFailedException({
+          message: 'Conditional check failed',
+          $metadata: {},
+        }),
+      );
 
       const result = await handler(buildWebhookEvent('{}'));
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
