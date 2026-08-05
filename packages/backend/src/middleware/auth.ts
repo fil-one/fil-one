@@ -6,7 +6,7 @@ import type {
   Context,
 } from 'aws-lambda';
 import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { jwtVerify, type createRemoteJWKSet } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
@@ -25,7 +25,7 @@ import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
-import { exchangeAndVerifyRefreshToken, type NewTokens } from '../lib/token-refresh.js';
+import { exchangeAndVerifyRefreshToken, getJWKS, type NewTokens } from '../lib/token-refresh.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,18 +64,6 @@ export function getVerifiedIdTokenClaims(
   request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
 ): IdTokenClaims {
   return (request.internal as AuthInternal).idTokenClaims ?? EMPTY_ID_CLAIMS;
-}
-
-// ---------------------------------------------------------------------------
-// Module-level JWKS cache — reused across Lambda warm starts
-// ---------------------------------------------------------------------------
-
-let cachedJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
-
-function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
-  if (cachedJWKS) return cachedJWKS;
-  cachedJWKS = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
-  return cachedJWKS;
 }
 
 // ---------------------------------------------------------------------------

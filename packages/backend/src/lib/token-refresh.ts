@@ -1,5 +1,15 @@
-import { jwtVerify, type createRemoteJWKSet } from 'jose';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { getAuthSecrets } from './auth-secrets.js';
+
+// Module-level JWKS cache — reused across Lambda warm starts. Shared by the
+// auth middleware and the auth-callback handler.
+let cachedJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+export function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
+  if (cachedJWKS) return cachedJWKS;
+  cachedJWKS = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
+  return cachedJWKS;
+}
 
 export interface NewTokens {
   access_token: string;

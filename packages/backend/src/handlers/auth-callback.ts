@@ -2,7 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { jwtVerify } from 'jose';
 import { OAUTH_STATE_COOKIE, CSRF_COOKIE_NAME } from '@filone/shared';
 import { Resource } from 'sst';
 import {
@@ -16,6 +16,7 @@ import {
 import { parseCookies } from '../lib/cookies.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { getJWKS } from '../lib/token-refresh.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { resolveOrigin } from '../lib/resolve-origin.js';
 
@@ -108,16 +109,6 @@ async function baseHandler(
   ];
 
   return redirect(`${origin}/dashboard`, responseCookies);
-}
-
-// Module-level JWKS cache — reused across Lambda warm starts (same pattern
-// as middleware/auth.ts).
-let cachedJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
-
-function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
-  if (cachedJWKS) return cachedJWKS;
-  cachedJWKS = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
-  return cachedJWKS;
 }
 
 /**
