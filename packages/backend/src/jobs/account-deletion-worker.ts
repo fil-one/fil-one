@@ -14,8 +14,10 @@ export interface AccountDeletionWorkerPayload {
 export async function handler(event: AccountDeletionWorkerPayload): Promise<void> {
   const { orgId } = event;
   if (!orgId) {
-    console.error('[account-deletion-worker] Missing orgId in payload', { event });
-    return;
+    // Throw (never warn-and-return): a swallowed invalid payload marks the
+    // async invoke successful, hiding the bug from Lambda's retry/DLQ and
+    // error metrics while the org's teardown silently never runs.
+    throw new Error(`[account-deletion-worker] Missing orgId in payload: ${JSON.stringify(event)}`);
   }
 
   try {
