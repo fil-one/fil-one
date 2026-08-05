@@ -7,15 +7,19 @@ export interface AccountDeletionWorkerPayload {
 /**
  * Async teardown worker for self-serve account deletion (FIL-112). Invoked
  * Event-style by the delete-account handler right after the user confirms,
- * and re-invoked by the reconciler cron for records that stall. The state
- * machine in runAccountDeletion is resumable, so a throw here (surfaced to
- * Lambda's async retry) picks up at the failed step.
+ * and re-invoked by the reconciler cron for records that stall. There is no
+ * per-step state machine: every teardown in runAccountDeletion is idempotent,
+ * so each invocation simply re-runs ALL of them; a throw here (surfaced to
+ * Lambda's async retry) means the whole pass is re-driven until the record
+ * is marked DONE.
  */
 export async function handler(event: AccountDeletionWorkerPayload): Promise<void> {
   const { orgId } = event;
   if (!orgId) {
-    console.error('[account-deletion-worker] Missing orgId in payload', { event });
-    return;
+    // Throw (never warn-and-return): a swallowed invalid payload marks the
+    // async invoke successful, hiding the bug from Lambda's retry/DLQ and
+    // error metrics while the org's teardown silently never runs.
+    throw new Error(`[account-deletion-worker] Missing orgId in payload: ${JSON.stringify(event)}`);
   }
 
   try {

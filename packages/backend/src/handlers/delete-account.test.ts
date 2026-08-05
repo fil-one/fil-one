@@ -240,6 +240,24 @@ describe('delete-account baseHandler', () => {
     );
   });
 
+  it('snapshots a half-provisioned tenant: tenantId present but setup incomplete', async () => {
+    // Deleting mid-setup: the aurora tenant id exists on the profile but the
+    // setup status never reached completion. isTenantReady would hide it —
+    // the snapshot must still capture it or the remote tenant and its SSM
+    // secrets leak forever once the profile row is purged.
+    mockGetOrgProfile.mockResolvedValue({
+      ...fullyProvisionedProfile(),
+      auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+    });
+
+    const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(200);
+    const put = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
+    const written = unmarshall(put.Item!) as { tenantIds: Record<string, string> };
+    expect(written.tenantIds.aurora).toBe('aurora-t-1');
+  });
+
   it('paginates the MEMBER# query so a truncated page cannot silently drop members from the snapshot', async () => {
     // Two pages: user-1, then (via LastEvaluatedKey) user-2. A 1MB-truncated
     // single query would have missed user-2 — leaving their Auth0 user alive.
@@ -280,6 +298,39 @@ describe('delete-account baseHandler', () => {
         ),
       ).toBe(true);
     }
+  });
+
+  it('snapshots EVERY member billing customer when the one-customer-per-org invariant is violated', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        marshall({ pk: `ORG#${ORG_ID}`, sk: `MEMBER#${USER_ID}` }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'MEMBER#user-2' }),
+      ],
+    });
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: 'USER#user-2' }, sk: { S: 'PROFILE' } } })
+      .resolves({ Item: marshall({ sub: 'auth0|sub-2' }) });
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: 'CUSTOMER#user-2' }, sk: { S: 'SUBSCRIPTION' } } })
+      .resolves({ Item: marshall({ stripeCustomerId: 'cus_2', subscriptionId: 'sub_2' }) });
+
+    const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(200);
+    const put = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
+    const written = unmarshall(put.Item!) as {
+      stripeCustomerId?: string;
+      subscriptionId?: string;
+      billingCustomers?: { stripeCustomerId?: string; subscriptionId?: string }[];
+    };
+    // Every member's Stripe pointers are captured, so teardown can cancel and
+    // redact each; the legacy single fields keep carrying the first entry.
+    expect(written.billingCustomers).toEqual([
+      { stripeCustomerId: 'cus_1', subscriptionId: 'sub_1' },
+      { stripeCustomerId: 'cus_2', subscriptionId: 'sub_2' },
+    ]);
+    expect(written.stripeCustomerId).toBe('cus_1');
+    expect(written.subscriptionId).toBe('sub_1');
   });
 
   it('degrades gracefully on a re-confirm after teardown purged the org profile (400 name mismatch)', async () => {
@@ -326,7 +377,7 @@ describe('delete-account handler (MFA step-up gate)', () => {
   function makeHandlerEvent() {
     return buildAuthenticatedEvent({
       method: 'POST',
-      rawPath: '/api/account',
+      rawPath: '/api/account/delete',
       body: JSON.stringify({ code: '123456', orgName: 'Acme Corp' }),
     });
   }

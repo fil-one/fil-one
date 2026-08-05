@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DELETION_GUARD } from '../lib/deletion-guard.js';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  PutItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import type { UsageReportingWorkerPayload } from './usage-reporting-worker.js';
@@ -565,6 +570,45 @@ describe('usage-reporting-worker', () => {
           reportedToStripe: { BOOL: true },
         }),
       );
+      expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
+    });
+
+    it('reports guard-rejected cleanup accurately instead of claiming reconciliation', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
+      mockMeterEventsCreate.mockRejectedValueOnce(makeResourceMissingError());
+      mockGetCustomerExistence.mockResolvedValue('deleted');
+      // The account teardown owns (or has purged) the billing record: the
+      // guarded cancel inside closeOutDeletedCustomer rejects.
+      ddbMock.on(UpdateItemCommand).rejects(
+        new ConditionalCheckFailedException({
+          $metadata: {},
+          message: 'The conditional request failed',
+        }),
+      );
+
+      await handler(basePayload);
+
+      // The tenant disable still ran...
+      expect(mockAuroraUpdateTenantStatus).toHaveBeenCalledWith('aurora-tenant-123', 'disabled');
+      // ...but the run must not claim a reconciliation it did not perform.
+      expect(logSpy).not.toHaveBeenCalledWith(
+        '[usage-worker] Reconciled deleted Stripe customer',
+        expect.anything(),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('skipped the billing cancel'),
+        expect.objectContaining({ orgId: 'org-1', userId: 'user-1', stripeCustomerId: 'cus_123' }),
+      );
+      expect(auditItem()).toEqual(
+        expect.objectContaining({
+          orgSyncAction: { S: 'reconcile-skipped:guard-rejected' },
+          lockAction: { S: 'disabled' },
+          reportedToStripe: { BOOL: false },
+        }),
+      );
+      // The teardown finishes the job — nothing left for a retry to fix.
       expect(mockEmitStripeCustomersOutOfSync).toHaveBeenCalledWith(0);
     });
 

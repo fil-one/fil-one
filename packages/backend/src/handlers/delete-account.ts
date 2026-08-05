@@ -3,7 +3,6 @@ import {
   GetItemCommand,
   PutItemCommand,
   QueryCommand,
-  UpdateItemCommand,
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
@@ -18,6 +17,7 @@ import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { parseCookies } from '../lib/cookies.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { verifyDeletionChallenge } from '../lib/deletion-challenge.js';
+import { applyDeletionGuards } from '../lib/deletion-guards.js';
 import {
   DeletionKeys,
   OrgDeletionStatus,
@@ -26,7 +26,7 @@ import {
 } from '../lib/dynamo-records.js';
 import { isOrgAdmin } from '../lib/org-membership.js';
 import { getOrgProfile } from '../lib/org-profile.js';
-import { getProvisionedRegionsFromProfile } from '../lib/region-helpers.js';
+import { getRegionsWithTenantIds } from '../lib/region-helpers.js';
 import { COOKIE_NAMES, makeClearAuthCookies, ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -86,11 +86,14 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const members = await snapshotMembers(orgId);
   const billing = await snapshotBilling(members);
 
-  // Region-generic tenant snapshot: one entry per provisioned orchestrator,
-  // keyed by orchestrator id, derived from the profile already fetched above.
-  // A new region added to the registry is picked up here automatically.
+  // Region-generic tenant snapshot: one entry per orchestrator with a tenant
+  // id on the profile, keyed by orchestrator id, derived from the profile
+  // already fetched above. Raw resolution (not readiness-gated): a tenant
+  // whose setup is still mid-flight must be torn down too, so the snapshot
+  // has to see it. A new region added to the registry is picked up here
+  // automatically.
   const tenantIds = Object.fromEntries(
-    getProvisionedRegionsFromProfile(orgProfile).map(({ orchestrator, tenantId }) => [
+    getRegionsWithTenantIds(orgProfile).map(({ orchestrator, tenantId }) => [
       orchestrator.id,
       tenantId,
     ]),
@@ -167,12 +170,16 @@ async function snapshotMembers(orgId: string): Promise<OrgDeletionMember[]> {
 }
 
 /**
- * First member billing record (in members order) with Stripe references wins
- * (one per org). The reads themselves run in parallel.
+ * EVERY member billing record with Stripe references is snapshotted (reads
+ * in parallel, members order). The one-customer-per-org invariant makes this
+ * normally a single entry, but if it is ever violated the extras' CUSTOMER#
+ * rows still get purged — their Stripe pointers must survive on the snapshot
+ * so teardown cancels/redacts each of them. The legacy single top-level
+ * fields keep carrying the first entry for in-flight readers.
  */
 async function snapshotBilling(
   members: OrgDeletionMember[],
-): Promise<Pick<OrgDeletionRecord, 'stripeCustomerId' | 'subscriptionId'>> {
+): Promise<Pick<OrgDeletionRecord, 'stripeCustomerId' | 'subscriptionId' | 'billingCustomers'>> {
   const rows = await Promise.all(
     members.map((member) =>
       dynamo.send(
@@ -183,78 +190,19 @@ async function snapshotBilling(
       ),
     ),
   );
-  for (const { Item } of rows) {
-    if (Item?.stripeCustomerId?.S || Item?.subscriptionId?.S) {
-      return {
-        ...(Item.stripeCustomerId?.S ? { stripeCustomerId: Item.stripeCustomerId.S } : {}),
-        ...(Item.subscriptionId?.S ? { subscriptionId: Item.subscriptionId.S } : {}),
-      };
-    }
+  const billingCustomers = rows
+    .map(({ Item }) => ({
+      ...(Item?.stripeCustomerId?.S ? { stripeCustomerId: Item.stripeCustomerId.S } : {}),
+      ...(Item?.subscriptionId?.S ? { subscriptionId: Item.subscriptionId.S } : {}),
+    }))
+    .filter((customer) => customer.stripeCustomerId || customer.subscriptionId);
+  if (billingCustomers.length === 0) return {};
+  if (billingCustomers.length > 1) {
+    console.warn('[delete-account] Multiple member billing customers found (invariant violation)', {
+      count: billingCustomers.length,
+    });
   }
-  return {};
-}
-
-/**
- * The synchronous, security-critical writes: guard Stripe billing writes and the
- * grace-period enforcer off the billing record, block tenant setup on the
- * profile, and tombstone every member identity so all sessions die on their
- * very next request — before the 200 is returned.
- */
-async function applyDeletionGuards(orgId: string, members: OrgDeletionMember[]): Promise<void> {
-  const now = new Date().toISOString();
-
-  try {
-    await dynamo.send(
-      new UpdateItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: marshall({ pk: `ORG#${orgId}`, sk: 'PROFILE' }),
-        UpdateExpression: 'SET deleting = :true',
-        ConditionExpression: 'attribute_exists(pk)',
-        ExpressionAttributeValues: marshall({ ':true': true }),
-      }),
-    );
-  } catch (err) {
-    if (!(err instanceof ConditionalCheckFailedException)) throw err;
-    // Profile already purged by a running teardown — nothing to guard.
-  }
-
-  // Per-member guards are independent — apply them all in parallel.
-  await Promise.all(members.map((member) => guardMember(member, now)));
-}
-
-/** Billing-webhook deletion guard + SUB# session kill for one member, in parallel. */
-async function guardMember(member: OrgDeletionMember, now: string): Promise<void> {
-  const billingGuard = (async () => {
-    try {
-      await dynamo.send(
-        new UpdateItemCommand({
-          TableName: Resource.BillingTable.name,
-          Key: marshall({ pk: `CUSTOMER#${member.userId}`, sk: 'SUBSCRIPTION' }),
-          UpdateExpression: 'SET deletionRequestedAt = :now',
-          ConditionExpression: 'attribute_exists(pk)',
-          ExpressionAttributeValues: marshall({ ':now': now }),
-        }),
-      );
-    } catch (err) {
-      if (!(err instanceof ConditionalCheckFailedException)) throw err;
-      // No billing record (e.g. trial never started) — nothing to guard.
-    }
-  })();
-
-  // if_not_exists keeps the original deletion timestamp stable across
-  // idempotent re-confirms (and matches the worker's purge step).
-  const sessionKill = member.sub
-    ? dynamo.send(
-        new UpdateItemCommand({
-          TableName: Resource.UserInfoTable.name,
-          Key: marshall({ pk: `SUB#${member.sub}`, sk: 'IDENTITY' }),
-          UpdateExpression: 'SET deleted = :true, deletedAt = if_not_exists(deletedAt, :now)',
-          ExpressionAttributeValues: marshall({ ':true': true, ':now': now }),
-        }),
-      )
-    : Promise.resolve();
-
-  await Promise.all([billingGuard, sessionKill]);
+  return { ...billingCustomers[0], billingCustomers };
 }
 
 /**

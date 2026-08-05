@@ -1,5 +1,6 @@
 import {
   BatchWriteItemCommand,
+  ConditionalCheckFailedException,
   DeleteItemCommand,
   PutItemCommand,
   QueryCommand,
@@ -14,19 +15,21 @@ import { Resource } from 'sst';
 import { deleteAuth0User } from './auth0-management.js';
 import { getDynamoClient } from './ddb-client.js';
 import { deleteDeletionChallenge } from './deletion-challenge.js';
+import { applyDeletionGuards } from './deletion-guards.js';
 import { readDeletionRecord } from './deletion-record.js';
 import {
   DeletionKeys,
   OrgDeletionStatus,
   RAGKeys,
+  type OrgDeletionBillingCustomer,
   type OrgDeletionRecord,
   type OrgTombstoneRecord,
 } from './dynamo-records.js';
 import { getOrgProfile } from './org-profile.js';
 import { RagApiKeyKeys } from './rag-api-keys.js';
 import {
-  getProvisionedRegions,
-  getProvisionedRegionsFromProfile,
+  getRegionsWithTenantIds,
+  getRegionsWithTenantIdsForOrg,
   type ProvisionedRegion,
 } from './region-helpers.js';
 import { getAvailableOrchestrators } from './service-orchestrator-registry.js';
@@ -76,6 +79,11 @@ export async function runAccountDeletion(orgId: string): Promise<void> {
 
   await bumpAttemptCount(orgId);
 
+  // The confirm handler consumes the challenge BEFORE writing the fences; a
+  // crash in between leaves this record fence-less with the code burned.
+  // Re-applying the (idempotent) fences here closes that gap on every pass.
+  await applyDeletionGuards(orgId, record.members);
+
   // The external teardowns are independent — run them concurrently and only
   // fail after all settle, so one vendor/region outage doesn't block the rest.
   const externals: { name: string; run: () => Promise<void> }[] = [
@@ -110,38 +118,81 @@ async function cancelStripeAndWriteTombstone(
   orgId: string,
   record: OrgDeletionRecord,
 ): Promise<void> {
-  if (record.subscriptionId) {
+  const customers = resolveBillingCustomers(record);
+
+  for (const { subscriptionId } of customers) {
+    if (!subscriptionId) continue;
     try {
-      await getStripeClient().subscriptions.cancel(record.subscriptionId);
+      await getStripeClient().subscriptions.cancel(subscriptionId);
     } catch (err) {
       if (!isStripeAlreadyCanceled(err)) throw err;
       console.warn('[account-deletion] Subscription already canceled/missing', {
         orgId,
-        subscriptionId: record.subscriptionId,
+        subscriptionId,
       });
     }
   }
 
-  // The Stripe CUSTOMER object is kept (finance/audit needs the reference),
-  // but its PII is erased via a Redaction Job; this PII-free tombstone
-  // preserves the customer id across the purge.
+  // The Stripe CUSTOMER objects are kept (finance/audit needs the
+  // references), but their PII is erased via a Redaction Job; this PII-free
+  // tombstone preserves the customer ids across the purge.
+  const customerIds = billingCustomerIds(customers);
   const tombstone: OrgTombstoneRecord = {
     pk: DeletionKeys.tombstonePk(orgId),
     sk: DeletionKeys.tombstoneSk(),
     orgId,
-    ...(record.stripeCustomerId ? { stripeCustomerId: record.stripeCustomerId } : {}),
+    ...(customerIds.length > 0 ? { stripeCustomerId: customerIds[0] } : {}),
+    ...(customerIds.length > 1 ? { stripeCustomerIds: customerIds } : {}),
     deletedAt: new Date().toISOString(),
   };
   await dynamo.send(
     new PutItemCommand({ TableName: Resource.BillingTable.name, Item: marshall(tombstone) }),
   );
 
-  await redactStripeCustomer(orgId, record);
+  await redactStripeCustomers(orgId, record, customerIds);
 }
 
+/**
+ * Billing customers to cancel/redact: the `billingCustomers` snapshot when
+ * present, falling back to the legacy single top-level fields for in-flight
+ * records written before the list existed.
+ */
+function resolveBillingCustomers(record: OrgDeletionRecord): OrgDeletionBillingCustomer[] {
+  if (record.billingCustomers && record.billingCustomers.length > 0) {
+    return record.billingCustomers;
+  }
+  if (record.stripeCustomerId || record.subscriptionId) {
+    return [
+      {
+        ...(record.stripeCustomerId ? { stripeCustomerId: record.stripeCustomerId } : {}),
+        ...(record.subscriptionId ? { subscriptionId: record.subscriptionId } : {}),
+      },
+    ];
+  }
+  return [];
+}
+
+function billingCustomerIds(customers: OrgDeletionBillingCustomer[]): string[] {
+  return customers
+    .map((c) => c.stripeCustomerId)
+    .filter((id): id is string => typeof id === 'string');
+}
+
+/**
+ * Genuine already-canceled signals only: a missing subscription
+ * (`resource_missing`) or Stripe's invalid_request_error for canceling a
+ * subscription that is already canceled ("This subscription can't be
+ * canceled because it's already canceled."). Matching /canceled/i on any
+ * message was dangerous — a transport-level "request was canceled" (aborted
+ * fetch, client timeout) would read as cancel-success and the subscription
+ * would never actually be canceled.
+ */
 function isStripeAlreadyCanceled(err: unknown): boolean {
-  const e = err as { code?: string; message?: string };
-  return e.code === 'resource_missing' || /canceled/i.test(e.message ?? '');
+  const e = err as { code?: string; type?: string; rawType?: string; message?: string };
+  if (e.code === 'resource_missing') return true;
+  const isInvalidRequest =
+    e.type === 'StripeInvalidRequestError' || e.rawType === 'invalid_request_error';
+  return isInvalidRequest && /already canceled/i.test(e.message ?? '');
 }
 
 // ---------------------------------------------------------------------------
@@ -152,12 +203,19 @@ interface StripeRedactionJob {
   id: string;
   /** created | validating | ready | redacting | succeeded | failed | canceling | canceled */
   status?: string;
+  /** Objects the job redacts, as passed at creation. */
+  objects?: { customers?: string[] };
+}
+
+interface StripeRedactionJobList {
+  data?: StripeRedactionJob[];
 }
 
 /**
- * Redact the canceled customer's PII via Stripe's Redaction Jobs API. The
- * pinned SDK (22.0.2) has no `privacy.redactionJobs` namespace, so the REST
- * endpoints are driven through `stripe.rawRequest`.
+ * Redact the canceled customers' PII via Stripe's Redaction Jobs API (one
+ * job covers every snapshotted customer). The pinned SDK (22.0.2) has no
+ * `privacy.redactionJobs` namespace, so the REST endpoints are driven
+ * through `stripe.rawRequest`.
  *
  * Job lifecycle: created → (validate) → validating → ready → (run) →
  * redacting → succeeded. Validation is asynchronous, so a single pass may
@@ -167,34 +225,91 @@ interface StripeRedactionJob {
  * duplicate) on the next pass. `redacting`/`succeeded` count as done —
  * redaction is irreversible once running.
  */
-async function redactStripeCustomer(orgId: string, record: OrgDeletionRecord): Promise<void> {
-  const customerId = record.stripeCustomerId;
-  if (!customerId) return;
+async function redactStripeCustomers(
+  orgId: string,
+  record: OrgDeletionRecord,
+  customerIds: string[],
+): Promise<void> {
+  if (customerIds.length === 0) return;
 
   let jobId = record.stripeRedactionJobId;
   if (!jobId) {
-    let created: StripeRedactionJob;
-    try {
-      created = await stripeRawRequest<StripeRedactionJob>('POST', '/v1/privacy/redaction_jobs', {
-        objects: { customers: [customerId] },
-      });
-    } catch (err) {
-      if (isRedactionUnnecessary(err)) {
-        console.warn('[account-deletion] Stripe customer already redacted/missing', {
-          orgId,
-          customerId,
-        });
-        return;
-      }
-      throw err;
-    }
-    jobId = created.id;
-    await persistRedactionJobId(orgId, jobId);
+    const established = await establishRedactionJob(orgId, customerIds);
+    if (!established) return; // customer missing — nothing to redact
+    jobId = established;
     record.stripeRedactionJobId = jobId;
-    await stripeRawRequest('POST', `/v1/privacy/redaction_jobs/${jobId}/validate`);
   }
 
   await advanceRedactionJob(orgId, jobId);
+}
+
+/**
+ * Create the customers' redaction job and persist its id — or, when Stripe
+ * reports a customer is already in another (live) redaction job, recover
+ * and persist THAT job's id so its lifecycle gets driven instead of the
+ * redaction being skipped. Returns `null` only when the customer no longer
+ * exists (nothing to redact).
+ */
+async function establishRedactionJob(orgId: string, customerIds: string[]): Promise<string | null> {
+  let created: StripeRedactionJob | undefined;
+  try {
+    created = await stripeRawRequest<StripeRedactionJob>('POST', '/v1/privacy/redaction_jobs', {
+      objects: { customers: customerIds },
+    });
+  } catch (err) {
+    if (isRedactionUnnecessary(err)) {
+      console.warn('[account-deletion] Stripe customer already redacted/missing', {
+        orgId,
+        customerIds,
+      });
+      return null;
+    }
+    if (!isRedactionJobConflict(err)) throw err;
+    // A customer is already included in another redaction job (e.g. a
+    // previous pass created one but crashed before persisting its id).
+    // That job is NOT complete — recover its id and drive ITS lifecycle
+    // instead of skipping redaction, or the original job sits unvalidated
+    // forever. advanceRedactionJob issues the validate when the recovered
+    // job is still in `created`.
+    return persistRedactionJobId(orgId, await findRedactionJobIdForCustomers(orgId, customerIds));
+  }
+
+  // Persist may lose against a concurrent worker — the stored id wins, and
+  // only OUR freshly created job gets the initial validate kick (the stored
+  // one's lifecycle is driven by advanceRedactionJob).
+  const jobId = await persistRedactionJobId(orgId, created.id);
+  if (jobId === created.id) {
+    await stripeRawRequest('POST', `/v1/privacy/redaction_jobs/${jobId}/validate`);
+  }
+  return jobId;
+}
+
+/**
+ * Recover the id of the live redaction job that already contains one of the
+ * customers (create returned a job-conflict). Terminal jobs
+ * (failed/canceled) are skipped — they no longer block a new job, so they
+ * can't be the conflicting one.
+ */
+async function findRedactionJobIdForCustomers(
+  orgId: string,
+  customerIds: string[],
+): Promise<string> {
+  const jobs = await stripeRawRequest<StripeRedactionJobList>('GET', '/v1/privacy/redaction_jobs', {
+    limit: 100,
+  });
+  const match = (jobs.data ?? []).find(
+    (job) =>
+      job.status !== 'failed' &&
+      job.status !== 'canceled' &&
+      (job.objects?.customers ?? []).some((c) => customerIds.includes(c)),
+  );
+  if (!match) {
+    throw new Error(
+      `Stripe reported customer(s) ${customerIds.join(', ')} (org ${orgId}) are already in a ` +
+        'redaction job, but no live job containing them was found; the next teardown pass retries',
+    );
+  }
+  return match.id;
 }
 
 /** GET the job's current status and take the one legal step toward `succeeded`. */
@@ -232,19 +347,49 @@ function redactionNotReadyError(orgId: string, jobId: string, status: string): E
   );
 }
 
-async function persistRedactionJobId(orgId: string, jobId: string): Promise<void> {
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
-      UpdateExpression: 'SET stripeRedactionJobId = :jobId, updatedAt = :now',
-      ConditionExpression: 'attribute_exists(pk)',
-      ExpressionAttributeValues: marshall({
-        ':jobId': jobId,
-        ':now': new Date().toISOString(),
+/**
+ * Persist the redaction job id — but only if none is stored yet. Two
+ * overlapping workers can each create/recover a job; an unconditional SET
+ * would let the loser overwrite the winner and leave a duplicate redaction
+ * job driving nowhere. On a conditional failure the stored id wins: it is
+ * re-read and returned so the caller drives THAT job.
+ *
+ * @returns the effective job id — `jobId` when this write won, otherwise the
+ *          id another worker persisted first.
+ */
+async function persistRedactionJobId(orgId: string, jobId: string): Promise<string> {
+  try {
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
+        UpdateExpression: 'SET stripeRedactionJobId = :jobId, updatedAt = :now',
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobId)',
+        ExpressionAttributeValues: marshall({
+          ':jobId': jobId,
+          ':now': new Date().toISOString(),
+        }),
       }),
-    }),
-  );
+    );
+    return jobId;
+  } catch (err) {
+    if (!(err instanceof ConditionalCheckFailedException)) throw err;
+    const stored = (await readDeletionRecord(orgId))?.stripeRedactionJobId;
+    if (!stored) {
+      // The condition can only fail because the id exists or the record is
+      // gone; either way a missing id on re-read needs a retry, not a guess.
+      throw new Error(
+        `Deletion record for org ${orgId} rejected redaction job id ${jobId} but no stored id ` +
+          'was found on re-read; the next teardown pass retries',
+      );
+    }
+    console.warn('[account-deletion] Redaction job id already persisted by a concurrent worker', {
+      orgId,
+      jobId,
+      storedJobId: stored,
+    });
+    return stored;
+  }
 }
 
 async function stripeRawRequest<T = unknown>(
@@ -255,10 +400,27 @@ async function stripeRawRequest<T = unknown>(
   return (await getStripeClient().rawRequest(method, path, params)) as T;
 }
 
-/** A missing or already-redacted customer means there is nothing to redact. */
+/**
+ * A missing customer means there is nothing to redact. Deliberately narrow:
+ * only Stripe's `resource_missing` error code counts. Message sniffing (e.g.
+ * matching "already ... redact") is dangerous here — "already included in a
+ * redaction job" would read as already-REDACTED and skip driving the
+ * conflicting job's lifecycle (see {@link isRedactionJobConflict}).
+ */
 function isRedactionUnnecessary(err: unknown): boolean {
-  const e = err as { code?: string; message?: string };
-  return e.code === 'resource_missing' || /already.{0,20}redact/i.test(e.message ?? '');
+  const e = err as { code?: string };
+  return e.code === 'resource_missing';
+}
+
+/**
+ * Job creation rejected because the customer is already included in another
+ * redaction job. Stripe ships no dedicated error code for this conflict, so
+ * the message is matched — narrowly, requiring "redaction job" so a genuine
+ * already-redacted message can never satisfy it.
+ */
+function isRedactionJobConflict(err: unknown): boolean {
+  const e = err as { message?: string };
+  return /already.{0,40}redaction job/i.test(e.message ?? '');
 }
 
 async function deleteAuth0Users(record: OrgDeletionRecord): Promise<void> {
@@ -301,8 +463,9 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
   // pointer to the tenant ids) is purged, persist the live tenant ids onto
   // the DELETION record so a crash still leaves every tenant findable, and
   // tear the stragglers down. The `deleting` flag written at confirm time
-  // blocks new setups, so this converges.
-  const lateRegions = await getProvisionedRegions(orgId);
+  // blocks new setups, so this converges. Raw tenant-id resolution (not
+  // readiness-gated): a half-provisioned straggler must be torn down too.
+  const lateRegions = await getRegionsWithTenantIdsForOrg(orgId);
   if (lateRegions.length > 0) {
     await snapshotTenantIdsOnDeletionRecord(orgId, record, lateRegions);
     for (const { orchestrator, tenantId } of lateRegions) {
@@ -375,13 +538,16 @@ async function deleteAllRegions(orgId: string, record: OrgDeletionRecord): Promi
  * provisioned after the snapshot); when the profile row is already purged,
  * fall back to the DELETION-record snapshot — the region-generic `tenantIds`
  * map, plus the legacy per-orchestrator fields for in-flight records.
+ * Resolution is raw (`getRegionsWithTenantIds`), not readiness-gated: a
+ * tenant whose setup is still mid-flight exists upstream and must be
+ * deleted too, or its remote resources and SSM secrets leak forever.
  */
 async function resolveRegionTargets(
   orgId: string,
   record: OrgDeletionRecord,
 ): Promise<ProvisionedRegion[]> {
   const profile = await getOrgProfile(orgId);
-  if (profile) return getProvisionedRegionsFromProfile(profile);
+  if (profile) return getRegionsWithTenantIds(profile);
 
   const snapshot: Record<string, string> = {
     ...(record.auroraTenantId ? { aurora: record.auroraTenantId } : {}),
@@ -453,14 +619,19 @@ async function markDone(orgId: string): Promise<void> {
 // Record + Dynamo helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Per-pass liveness bump: `updatedAt` is touched alongside the attempt count
+ * because the reconciler treats a stale `updatedAt` as "worker died — re-
+ * drive"; a live worker mid-teardown must never look stale to it.
+ */
 async function bumpAttemptCount(orgId: string): Promise<void> {
   await dynamo.send(
     new UpdateItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
-      UpdateExpression: 'ADD attemptCount :one',
+      UpdateExpression: 'SET updatedAt = :now ADD attemptCount :one',
       ConditionExpression: 'attribute_exists(pk)',
-      ExpressionAttributeValues: marshall({ ':one': 1 }),
+      ExpressionAttributeValues: marshall({ ':one': 1, ':now': new Date().toISOString() }),
     }),
   );
 }

@@ -31,6 +31,36 @@ export async function getProvisionedRegions(orgId: string): Promise<ProvisionedR
   return getProvisionedRegionsFromProfile(await getOrgProfile(orgId));
 }
 
+/**
+ * Raw teardown-scoped variant of {@link getProvisionedRegionsFromProfile}:
+ * returns every region whose `${id}TenantId` attribute EXISTS on the profile,
+ * regardless of setup readiness. `isTenantReady` deliberately hides tenants
+ * whose setup is still mid-flight, but account deletion must see them too — a
+ * half-provisioned tenant already exists upstream (and may hold SSM secrets),
+ * and purging the profile row (the only pointer to it) would leak it forever.
+ * Every orchestrator persists its tenant id under the `${id}TenantId` PROFILE
+ * attribute (see FilOneOrchestratorConfig.id), which this reads directly.
+ *
+ * Only teardown target resolution may use this; every serving path must keep
+ * going through the readiness-gated variants above.
+ */
+export function getRegionsWithTenantIds(
+  orgProfile: OrgProfileItem | undefined,
+): ProvisionedRegion[] {
+  return getAvailableOrchestrators()
+    .map((orchestrator) => {
+      const tenantId = orgProfile?.[`${orchestrator.id}TenantId`]?.S;
+      return tenantId ? { orchestrator, tenantId } : null;
+    })
+    .filter((t): t is ProvisionedRegion => t !== null);
+}
+
+/** Async wrapper of {@link getRegionsWithTenantIds} that reads the profile itself. */
+export async function getRegionsWithTenantIdsForOrg(orgId: string): Promise<ProvisionedRegion[]> {
+  if (getAvailableOrchestrators().length === 0) return [];
+  return getRegionsWithTenantIds(await getOrgProfile(orgId));
+}
+
 export interface RegionSyncOutcome {
   orchestratorId: string;
   tenantId: string;

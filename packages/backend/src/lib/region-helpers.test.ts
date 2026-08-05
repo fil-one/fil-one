@@ -15,6 +15,8 @@ process.env.FILONE_STAGE = 'test';
 import {
   assertRegionSyncSucceeded,
   getProvisionedRegions,
+  getRegionsWithTenantIds,
+  getRegionsWithTenantIdsForOrg,
   syncTenantStatusInProvisionedRegions,
   WEBHOOK_STATUS_SYNC_RETRY,
   type RegionSyncOutcome,
@@ -316,6 +318,74 @@ describe('getProvisionedRegions', () => {
     mockGetAvailableOrchestrators.mockReturnValue([]);
 
     await getProvisionedRegions('org-1');
+
+    expect(mockGetOrgProfile).not.toHaveBeenCalled();
+  });
+});
+
+describe('getRegionsWithTenantIds (raw teardown-target resolution)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns a region whose tenant-id attribute exists even when isTenantReady says not ready', () => {
+    // Half-provisioned tenant: the id was persisted mid-setup, readiness never
+    // reached. isTenantReady hides it; the raw variant must not.
+    const aurora = fakeOrchestrator('aurora', { ready: false });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+    const profile = {
+      pk: { S: 'ORG#org-1' },
+      auroraTenantId: { S: 'aurora-mid-setup' },
+      auroraSetupStatus: { S: 'AURORA_TENANT_CREATED' },
+    };
+
+    expect(getRegionsWithTenantIds(profile)).toEqual([
+      { orchestrator: aurora, tenantId: 'aurora-mid-setup' },
+    ]);
+    // Raw resolution never consults readiness.
+    expect(aurora.isTenantReady).not.toHaveBeenCalled();
+  });
+
+  it('omits regions with no tenant-id attribute on the profile', () => {
+    const aurora = fakeOrchestrator('aurora');
+    const fth = fakeOrchestrator('fth');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+    const profile = { pk: { S: 'ORG#org-1' }, fthTenantId: { S: 'fth-t-1' } };
+
+    expect(getRegionsWithTenantIds(profile)).toEqual([{ orchestrator: fth, tenantId: 'fth-t-1' }]);
+  });
+
+  it('returns an empty array for a missing profile', () => {
+    mockGetAvailableOrchestrators.mockReturnValue([fakeOrchestrator('aurora')]);
+
+    expect(getRegionsWithTenantIds(undefined)).toEqual([]);
+  });
+});
+
+describe('getRegionsWithTenantIdsForOrg', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reads the profile once and resolves raw tenant ids from it', async () => {
+    const aurora = fakeOrchestrator('aurora', { ready: false });
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+    const midSetupProfile = {
+      pk: { S: 'ORG#org-1' },
+      auroraTenantId: { S: 'aurora-mid-setup' },
+    };
+    mockGetOrgProfile.mockResolvedValue(midSetupProfile);
+
+    const result = await getRegionsWithTenantIdsForOrg('org-1');
+
+    expect(result).toEqual([{ orchestrator: aurora, tenantId: 'aurora-mid-setup' }]);
+    expect(mockGetOrgProfile.mock.calls).toEqual([['org-1']]);
+  });
+
+  it('does not fetch the PROFILE row when no orchestrator is available', async () => {
+    mockGetAvailableOrchestrators.mockReturnValue([]);
+
+    await expect(getRegionsWithTenantIdsForOrg('org-1')).resolves.toEqual([]);
 
     expect(mockGetOrgProfile).not.toHaveBeenCalled();
   });
