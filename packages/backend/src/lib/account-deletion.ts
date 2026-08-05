@@ -140,9 +140,21 @@ async function cancelStripeAndWriteTombstone(
   await redactStripeCustomer(orgId, record);
 }
 
+/**
+ * Genuine already-canceled signals only: a missing subscription
+ * (`resource_missing`) or Stripe's invalid_request_error for canceling a
+ * subscription that is already canceled ("This subscription can't be
+ * canceled because it's already canceled."). Matching /canceled/i on any
+ * message was dangerous — a transport-level "request was canceled" (aborted
+ * fetch, client timeout) would read as cancel-success and the subscription
+ * would never actually be canceled.
+ */
 function isStripeAlreadyCanceled(err: unknown): boolean {
-  const e = err as { code?: string; message?: string };
-  return e.code === 'resource_missing' || /canceled/i.test(e.message ?? '');
+  const e = err as { code?: string; type?: string; rawType?: string; message?: string };
+  if (e.code === 'resource_missing') return true;
+  const isInvalidRequest =
+    e.type === 'StripeInvalidRequestError' || e.rawType === 'invalid_request_error';
+  return isInvalidRequest && /already canceled/i.test(e.message ?? '');
 }
 
 // ---------------------------------------------------------------------------

@@ -598,6 +598,32 @@ describe('runAccountDeletion', () => {
     expect(doneWrites()).toHaveLength(1);
   });
 
+  it("treats Stripe's invalid_request_error for an already-canceled subscription as success", async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockSubscriptionsCancel.mockRejectedValue(
+      Object.assign(
+        new Error("This subscription can't be canceled because it's already canceled."),
+        { type: 'StripeInvalidRequestError', rawType: 'invalid_request_error' },
+      ),
+    );
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('propagates a transport-level "request was canceled" error instead of reading it as cancel-success', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    // No Stripe error type/code — e.g. an aborted fetch. /canceled/i message
+    // sniffing used to swallow this and skip the cancellation forever.
+    mockSubscriptionsCancel.mockRejectedValue(new Error('The request was canceled'));
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+    expect(err).toBeInstanceOf(AggregateError);
+    expect(err.errors.map(String).join('\n')).toMatch(/request was canceled/);
+    expect(doneWrites()).toHaveLength(0);
+  });
+
   it('tears down a half-provisioned tenant: tenantId on the profile but setup incomplete', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
     // Mid-setup profile: the tenant id attribute exists but the setup status
