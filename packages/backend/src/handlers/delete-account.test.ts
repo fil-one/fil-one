@@ -180,7 +180,7 @@ describe('delete-account baseHandler', () => {
     expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.DELETION_CODE_EXPIRED_OR_LOCKED);
   });
 
-  it('happy path: writes the deletion record, fences, kills sessions, invokes the worker, clears cookies', async () => {
+  it('happy path: writes the deletion record, applies the deletion guards, kills sessions, invokes the worker, clears cookies', async () => {
     const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
 
     expect(result.statusCode).toBe(200);
@@ -207,13 +207,13 @@ describe('delete-account baseHandler', () => {
     expect(put.Item!.fthTenantId).toBeUndefined();
 
     const updates = ddbMock.commandCalls(UpdateItemCommand).map((c) => c.args[0].input);
-    // Profile deleting fence.
+    // Profile deleting guard.
     expect(
       updates.some(
         (u) => u.Key?.sk?.S === 'PROFILE' && u.UpdateExpression === 'SET deleting = :true',
       ),
     ).toBe(true);
-    // Billing webhook fence.
+    // Billing webhook deletion guard.
     expect(
       updates.some(
         (u) =>
@@ -273,7 +273,7 @@ describe('delete-account baseHandler', () => {
       { userId: 'user-2', sub: 'auth0|sub-2' },
     ]);
 
-    // And both members' sessions are fenced.
+    // And both members' sessions are killed.
     const updates = ddbMock.commandCalls(UpdateItemCommand).map((c) => c.args[0].input);
     for (const sub of [SUB, 'auth0|sub-2']) {
       expect(

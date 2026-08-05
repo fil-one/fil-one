@@ -414,11 +414,11 @@ describe('activate-subscription handler', () => {
     expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
   });
 
-  it('returns 410 ACCOUNT_DELETED and skips the unlock when the deletion fence rejects the save', async () => {
+  it('returns 410 ACCOUNT_DELETED and skips the unlock when the deletion guard rejects the save', async () => {
     ddbMock
       .on(GetItemCommand)
       .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
-    // The teardown fenced/purged the billing record mid-request.
+    // The teardown guarded/purged the billing record mid-request.
     ddbMock
       .on(UpdateItemCommand)
       .rejects(

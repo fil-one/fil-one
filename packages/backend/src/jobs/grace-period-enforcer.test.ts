@@ -105,7 +105,7 @@ describe('grace-period-enforcer', () => {
     expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
   });
 
-  it('scan excludes records fenced by account deletion (deletionRequestedAt)', async () => {
+  it('scan excludes records under the account-deletion guard (deletionRequestedAt)', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [] });
 
     await handler();

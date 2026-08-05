@@ -14,7 +14,7 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import { DELETION_FENCE } from '../lib/billing-fence.js';
+import { DELETION_GUARD } from '../lib/deletion-guard.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import {
   closeOutDeletedCustomer,
@@ -36,17 +36,17 @@ import {
 const dynamo = getDynamoClient();
 
 /**
- * Sends a billing-record UpdateItem guarded by {@link DELETION_FENCE}.
- * Returns null when the fence rejects the write (record purged or org
+ * Sends a billing-record UpdateItem guarded by {@link DELETION_GUARD}.
+ * Returns null when the guard rejects the write (record purged or org
  * mid-deletion) — callers must then skip follow-on tenant status syncs.
  */
-async function sendFencedBillingUpdate(
+async function sendGuardedBillingUpdate(
   input: Omit<ConstructorParameters<typeof UpdateItemCommand>[0], 'ConditionExpression'>,
   context: Record<string, unknown>,
 ): Promise<import('@aws-sdk/client-dynamodb').UpdateItemCommandOutput | null> {
   try {
     return await dynamo.send(
-      new UpdateItemCommand({ ...input, ConditionExpression: DELETION_FENCE }),
+      new UpdateItemCommand({ ...input, ConditionExpression: DELETION_GUARD }),
     );
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {
@@ -220,7 +220,7 @@ async function updatePaymentMethod(
   userId: string,
   pm: Stripe.PaymentMethod,
 ): Promise<void> {
-  await sendFencedBillingUpdate(
+  await sendGuardedBillingUpdate(
     {
       TableName: tableName,
       Key: {
@@ -276,7 +276,7 @@ async function handleCustomerDeleted(tableName: string, customer: Stripe.Custome
       customerId: customer.id,
     });
   }
-  // Fenced or absent record (org mid-deletion): not a dunning cancellation.
+  // Guard rejected or record absent (org mid-deletion): not a dunning cancellation.
   if (!billingCanceled) return;
 
   emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
@@ -330,7 +330,7 @@ async function updateBillingRecord(
   subscription: Stripe.Subscription,
   mappedStatus: SubscriptionStatus,
 ): Promise<void> {
-  await sendFencedBillingUpdate(
+  await sendGuardedBillingUpdate(
     {
       TableName: tableName,
       Key: {
@@ -390,7 +390,7 @@ async function handleSubscriptionDeleted(
         subscriptionId: subscription.id,
       },
     );
-    // Fenced or absent record (org mid-deletion): not a dunning cancellation.
+    // Guard rejected or record absent (org mid-deletion): not a dunning cancellation.
     if (billingCanceled) {
       emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
     }
@@ -405,7 +405,7 @@ async function handleSubscriptionDeleted(
   const now = new Date();
   const gracePeriodEndsAt = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
 
-  const applied = await sendFencedBillingUpdate(
+  const applied = await sendGuardedBillingUpdate(
     {
       TableName: tableName,
       Key: {
@@ -464,9 +464,9 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   const userId = customer.metadata?.userId;
   if (!userId) return;
 
-  // The fence is load-bearing here: after self-serve deletion, the final
+  // The guard is load-bearing here: after self-serve deletion, the final
   // invoice's payment_succeeded must not re-activate a disabled tenant.
-  const updateResult = await sendFencedBillingUpdate(
+  const updateResult = await sendGuardedBillingUpdate(
     {
       TableName: tableName,
       Key: {
@@ -529,7 +529,7 @@ async function handlePaymentFailed(tableName: string, invoice: Stripe.Invoice): 
   // continue attempting payment. Grace period only begins when Stripe cancels
   // the subscription after all retries are exhausted.
   const now = new Date().toISOString();
-  const applied = await sendFencedBillingUpdate(
+  const applied = await sendGuardedBillingUpdate(
     {
       TableName: tableName,
       Key: {

@@ -31,6 +31,7 @@ import {
   closeOutDeletedCustomer,
   resolveOrgIdFromSubscription,
 } from './deleted-customer-cleanup.js';
+import { DELETION_GUARD } from './deletion-guard.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -91,7 +92,7 @@ describe('closeOutDeletedCustomer', () => {
         ':status': { S: SubscriptionStatus.Canceled },
         ':now': { S: expect.any(String) },
       },
-      ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)',
+      ConditionExpression: DELETION_GUARD,
     });
 
     expect(outcomes).toEqual([okOutcome('aurora')]);

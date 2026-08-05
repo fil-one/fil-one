@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { DELETION_GUARD } from '../lib/deletion-guard.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
@@ -535,9 +536,7 @@ describe('usage-reporting-worker', () => {
       expect(input.ExpressionAttributeValues![':status']).toEqual({
         S: SubscriptionStatus.Canceled,
       });
-      expect(input.ConditionExpression).toBe(
-        'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)',
-      );
+      expect(input.ConditionExpression).toBe(DELETION_GUARD);
 
       expect(auditItem()).toEqual(
         expect.objectContaining({

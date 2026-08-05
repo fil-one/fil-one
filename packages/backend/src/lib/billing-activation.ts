@@ -2,7 +2,7 @@ import { ConditionalCheckFailedException, UpdateItemCommand } from '@aws-sdk/cli
 import type Stripe from 'stripe';
 import { Resource } from 'sst';
 import { SubscriptionStatus } from '@filone/shared';
-import { DELETION_FENCE } from './billing-fence.js';
+import { DELETION_GUARD } from './deletion-guard.js';
 import { getDynamoClient } from './ddb-client.js';
 import {
   assertRegionSyncSucceeded,
@@ -13,9 +13,9 @@ const dynamo = getDynamoClient();
 
 /**
  * Persists the activated subscription onto the billing record. Guarded by the
- * FIL-112 {@link DELETION_FENCE}: an in-flight activation must not re-create
+ * FIL-112 {@link DELETION_GUARD}: an in-flight activation must not re-create
  * or re-activate a record the account teardown owns. Returns false when the
- * fence rejects the write (record purged or org mid-deletion) — the caller
+ * guard rejects the write (record purged or org mid-deletion) — the caller
  * must then skip tenant unlocks. The record is guaranteed to exist on the
  * happy path (the handler 400s earlier without one), so `attribute_exists(pk)`
  * only trips when the teardown purged it mid-request.
@@ -49,7 +49,7 @@ export async function saveBillingRecord(
         },
         UpdateExpression:
           'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
-        ConditionExpression: DELETION_FENCE,
+        ConditionExpression: DELETION_GUARD,
         ExpressionAttributeValues: {
           ':subId': { S: subscription.id },
           ':status': { S: mappedStatus },

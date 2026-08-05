@@ -130,8 +130,8 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 
   // 6. Persist billing record and unlock the tenant on every orchestrator.
   const saveArgs = { userId, orgId, subscription, paymentMethodId, mappedStatus };
-  const fenced = await persistBillingAndUnlock(saveArgs);
-  if (fenced) return fenced;
+  const guardResponse = await persistBillingAndUnlock(saveArgs);
+  if (guardResponse) return guardResponse;
 
   const response: ActivateSubscriptionResponse = {
     subscription: {
@@ -147,7 +147,7 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
 }
 
 /**
- * Fenced billing-record save + tenant unlock. The save is guarded against
+ * Deletion-guarded billing-record save + tenant unlock. The save is guarded against
  * FIL-112 account deletion: when the teardown owns (or has purged) the
  * record, this request must not unlock tenants the teardown is disabling —
  * returns the 410 ACCOUNT_DELETED response instead, or null on success.

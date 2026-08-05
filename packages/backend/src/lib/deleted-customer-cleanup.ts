@@ -6,7 +6,7 @@ import {
 import type { Options as RetryOptions } from 'p-retry';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
-import { DELETION_FENCE } from './billing-fence.js';
+import { DELETION_GUARD } from './deletion-guard.js';
 import { getDynamoClient } from './ddb-client.js';
 import { syncTenantStatusInProvisionedRegions, type RegionSyncOutcome } from './region-helpers.js';
 
@@ -49,7 +49,7 @@ export async function resolveOrgIdFromSubscription(userId: string): Promise<stri
  * audit → retried on the next daily run).
  *
  * `billingCanceled` is false when the record was absent or the FIL-112
- * deletion fence rejected the write (org mid-teardown) — callers must not
+ * deletion guard rejected the write (org mid-teardown) — callers must not
  * treat the customer as dunning-canceled in that case.
  */
 export async function closeOutDeletedCustomer(params: {
@@ -85,11 +85,11 @@ export async function closeOutDeletedCustomer(params: {
           ':status': { S: SubscriptionStatus.Canceled },
           ':now': { S: now },
         },
-        // FIL-112 deletion fence: while an account teardown is in flight, our
+        // FIL-112 deletion guard: while an account teardown is in flight, our
         // own subscriptions.cancel echoes back as webhook events — this write
         // must not touch a record the teardown owns (or upsert it back after
         // the purge).
-        ConditionExpression: DELETION_FENCE,
+        ConditionExpression: DELETION_GUARD,
       }),
     );
   } catch (err) {

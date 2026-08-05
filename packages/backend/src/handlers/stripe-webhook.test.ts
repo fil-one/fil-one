@@ -59,7 +59,7 @@ const reportMetricMock = vi.mocked(reportMetric);
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './stripe-webhook.js';
-import { DELETION_FENCE } from '../lib/billing-fence.js';
+import { DELETION_GUARD } from '../lib/deletion-guard.js';
 import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.js';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.js';
 
@@ -375,7 +375,7 @@ describe('stripe-webhook handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
-        ConditionExpression: DELETION_FENCE,
+        ConditionExpression: DELETION_GUARD,
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -579,7 +579,7 @@ describe('stripe-webhook handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
         },
-        ConditionExpression: DELETION_FENCE,
+        ConditionExpression: DELETION_GUARD,
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -663,7 +663,7 @@ describe('stripe-webhook handler', () => {
           ':expYear': { N: String(MOCK_PM_EXP_YEAR) },
           ':now': { S: expect.any(String) },
         },
-        ConditionExpression: DELETION_FENCE,
+        ConditionExpression: DELETION_GUARD,
       });
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
@@ -798,7 +798,7 @@ describe('stripe-webhook handler', () => {
           ':now': { S: expect.any(String) },
           ':grace': { S: expect.any(String) },
         },
-        ConditionExpression: DELETION_FENCE,
+        ConditionExpression: DELETION_GUARD,
       });
 
       const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();
@@ -1126,7 +1126,7 @@ describe('stripe-webhook handler', () => {
           ':now': { S: expect.any(String) },
         },
         ReturnValues: 'ALL_OLD',
-        ConditionExpression: DELETION_FENCE,
+        ConditionExpression: DELETION_GUARD,
       });
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
@@ -1232,7 +1232,7 @@ describe('stripe-webhook handler', () => {
           ':failedAt': { S: expect.any(String) },
           ':now': { S: expect.any(String) },
         },
-        ConditionExpression: DELETION_FENCE,
+        ConditionExpression: DELETION_GUARD,
       });
 
       // Must NOT set gracePeriodEndsAt — Stripe Smart Retries handle the retry window
@@ -1687,11 +1687,11 @@ describe('stripe-webhook handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Deletion fence (FIL-112): events for purged or mid-deletion orgs are
+  // Deletion guard (FIL-112): events for purged or mid-deletion orgs are
   // acknowledged without resurrecting billing state or touching tenants.
   // -----------------------------------------------------------------------
-  describe('deletion fence', () => {
-    function fenceRejection() {
+  describe('deletion guard', () => {
+    function guardRejection() {
       ddbMock
         .on(UpdateItemCommand)
         .rejects(
@@ -1702,25 +1702,25 @@ describe('stripe-webhook handler', () => {
         );
     }
 
-    it('subscription.deleted for a fenced record: 200, no upsert side effects, no write-lock sync', async () => {
+    it('subscription.deleted for a mid-deletion record: 200, no upsert side effects, no write-lock sync', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
-      fenceRejection();
+      guardRejection();
 
       const result = await handler(buildWebhookEvent('{}'));
 
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
       expect(dunningEmissions()).toHaveLength(0);
-      // Idempotency claim is kept — no DeleteItem release on the fenced path
+      // Idempotency claim is kept — no DeleteItem release on the guarded path
       expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
     });
 
-    it('payment_succeeded for a fenced record: 200 and does NOT re-activate the tenant', async () => {
+    it('payment_succeeded for a mid-deletion record: 200 and does NOT re-activate the tenant', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
       setupAuroraTenantResolution();
-      fenceRejection();
+      guardRejection();
 
       const result = await handler(buildWebhookEvent('{}'));
 
@@ -1730,17 +1730,17 @@ describe('stripe-webhook handler', () => {
 
     it('subscription.updated for a purged record: 200, no zombie record written', async () => {
       setupStripeEvent('customer.subscription.updated', mockSubscription());
-      fenceRejection();
+      guardRejection();
 
       const result = await handler(buildWebhookEvent('{}'));
 
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
-    it('payment_failed for a fenced record: 200, no dunning metric', async () => {
+    it('payment_failed for a mid-deletion record: 200, no dunning metric', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieve();
-      fenceRejection();
+      guardRejection();
 
       const result = await handler(buildWebhookEvent('{}'));
 
@@ -1748,9 +1748,9 @@ describe('stripe-webhook handler', () => {
       expect(dunningEmissions()).toHaveLength(0);
     });
 
-    it('customer.deleted for a fenced record: 200, no dunning metric', async () => {
+    it('customer.deleted for a mid-deletion record: 200, no dunning metric', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject());
-      fenceRejection();
+      guardRejection();
 
       const result = await handler(buildWebhookEvent('{}'));
 

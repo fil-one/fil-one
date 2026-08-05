@@ -23,7 +23,7 @@ vi.mock('./service-orchestrator-registry.js', () => ({
 const ddbMock = mockClient(DynamoDBClient);
 
 import { saveBillingRecord } from './billing-activation.js';
-import { DELETION_FENCE } from './billing-fence.js';
+import { DELETION_GUARD } from './deletion-guard.js';
 
 const USER_ID = 'user-1';
 
@@ -43,7 +43,7 @@ describe('saveBillingRecord', () => {
     ddbMock.reset();
   });
 
-  it('writes the record under the FIL-112 deletion fence and returns true', async () => {
+  it('writes the record under the FIL-112 deletion guard and returns true', async () => {
     ddbMock.on(UpdateItemCommand).resolves({});
 
     const saved = await saveBillingRecord(
@@ -55,11 +55,11 @@ describe('saveBillingRecord', () => {
 
     expect(saved).toBe(true);
     const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
-    expect(input.ConditionExpression).toBe(DELETION_FENCE);
+    expect(input.ConditionExpression).toBe(DELETION_GUARD);
     expect(input.Key).toEqual({ pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } });
   });
 
-  it('returns false without throwing when the deletion fence rejects the write', async () => {
+  it('returns false without throwing when the deletion guard rejects the write', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     ddbMock
       .on(UpdateItemCommand)

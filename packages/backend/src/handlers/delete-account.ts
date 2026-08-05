@@ -118,11 +118,11 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       }),
     );
   } catch (err) {
-    // Deletion already confirmed earlier — idempotent re-confirm. The fences
+    // Deletion already confirmed earlier — idempotent re-confirm. The guards
     // below re-apply harmlessly and the worker invoke resumes the teardown.
     if (!(err instanceof ConditionalCheckFailedException)) throw err;
   }
-  await applyFences(orgId, members);
+  await applyDeletionGuards(orgId, members);
 
   await revokeRefreshToken(event);
   await invokeWorker(orgId);
@@ -195,12 +195,12 @@ async function snapshotBilling(
 }
 
 /**
- * The synchronous, security-critical writes: fence Stripe webhooks and the
+ * The synchronous, security-critical writes: guard Stripe billing writes and the
  * grace-period enforcer off the billing record, block tenant setup on the
  * profile, and tombstone every member identity so all sessions die on their
  * very next request — before the 200 is returned.
  */
-async function applyFences(orgId: string, members: OrgDeletionMember[]): Promise<void> {
+async function applyDeletionGuards(orgId: string, members: OrgDeletionMember[]): Promise<void> {
   const now = new Date().toISOString();
 
   try {
@@ -215,16 +215,16 @@ async function applyFences(orgId: string, members: OrgDeletionMember[]): Promise
     );
   } catch (err) {
     if (!(err instanceof ConditionalCheckFailedException)) throw err;
-    // Profile already purged by a running teardown — nothing to fence.
+    // Profile already purged by a running teardown — nothing to guard.
   }
 
-  // Per-member fences are independent — apply them all in parallel.
-  await Promise.all(members.map((member) => fenceMember(member, now)));
+  // Per-member guards are independent — apply them all in parallel.
+  await Promise.all(members.map((member) => guardMember(member, now)));
 }
 
-/** Billing-webhook fence + SUB# session kill for one member, in parallel. */
-async function fenceMember(member: OrgDeletionMember, now: string): Promise<void> {
-  const billingFence = (async () => {
+/** Billing-webhook deletion guard + SUB# session kill for one member, in parallel. */
+async function guardMember(member: OrgDeletionMember, now: string): Promise<void> {
+  const billingGuard = (async () => {
     try {
       await dynamo.send(
         new UpdateItemCommand({
@@ -237,7 +237,7 @@ async function fenceMember(member: OrgDeletionMember, now: string): Promise<void
       );
     } catch (err) {
       if (!(err instanceof ConditionalCheckFailedException)) throw err;
-      // No billing record (e.g. trial never started) — nothing to fence.
+      // No billing record (e.g. trial never started) — nothing to guard.
     }
   })();
 
@@ -254,7 +254,7 @@ async function fenceMember(member: OrgDeletionMember, now: string): Promise<void
       )
     : Promise.resolve();
 
-  await Promise.all([billingFence, sessionKill]);
+  await Promise.all([billingGuard, sessionKill]);
 }
 
 /**
