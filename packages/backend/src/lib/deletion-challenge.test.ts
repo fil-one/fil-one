@@ -60,7 +60,8 @@ describe('createDeletionChallenge', () => {
 
     const result = await createDeletionChallenge(ORG_ID);
 
-    if (result.outcome !== 'created') expect.unreachable(`expected outcome=created, got ${result.outcome}`);
+    if (result.outcome !== 'created')
+      expect.unreachable(`expected outcome=created, got ${result.outcome}`);
     expect(result.code).toMatch(/^\d{6}$/);
     expect(new Date(result.expiresAt).getTime()).toBeGreaterThan(Date.now());
     expect(new Date(result.resendAvailableAt).getTime()).toBeGreaterThan(Date.now());
@@ -123,7 +124,8 @@ describe('createDeletionChallenge', () => {
 
     const result = await createDeletionChallenge(ORG_ID);
 
-    if (result.outcome !== 'rate_limited') expect.unreachable(`expected outcome=rate_limited, got ${result.outcome}`);
+    if (result.outcome !== 'rate_limited')
+      expect.unreachable(`expected outcome=rate_limited, got ${result.outcome}`);
     expect(new Date(result.resendAvailableAt).getTime()).toBeCloseTo(
       new Date(lastSentAt).getTime() + RESEND_COOLDOWN_SECONDS * 1000,
       -3,
@@ -144,7 +146,8 @@ describe('createDeletionChallenge', () => {
 
     const result = await createDeletionChallenge(ORG_ID);
 
-    if (result.outcome !== 'rate_limited') expect.unreachable(`expected outcome=rate_limited, got ${result.outcome}`);
+    if (result.outcome !== 'rate_limited')
+      expect.unreachable(`expected outcome=rate_limited, got ${result.outcome}`);
     expect(new Date(result.resendAvailableAt).getTime()).toBe(windowEnd * 1000);
   });
 
@@ -155,10 +158,7 @@ describe('createDeletionChallenge', () => {
   });
 
   it('rethrows non-conditional errors from the in-window resend', async () => {
-    ddbMock
-      .on(UpdateItemCommand)
-      .rejectsOnce(conditionalFailure())
-      .rejects(new Error('throttled'));
+    ddbMock.on(UpdateItemCommand).rejectsOnce(conditionalFailure()).rejects(new Error('throttled'));
 
     await expect(createDeletionChallenge(ORG_ID)).rejects.toThrow('throttled');
   });

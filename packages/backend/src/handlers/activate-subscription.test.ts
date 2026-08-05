@@ -419,14 +419,12 @@ describe('activate-subscription handler', () => {
       .on(GetItemCommand)
       .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
     // The teardown guarded/purged the billing record mid-request.
-    ddbMock
-      .on(UpdateItemCommand)
-      .rejects(
-        new ConditionalCheckFailedException({
-          message: 'The conditional request failed',
-          $metadata: {},
-        }),
-      );
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
 
     const event = buildEvent({
