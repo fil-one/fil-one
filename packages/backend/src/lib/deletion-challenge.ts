@@ -46,6 +46,8 @@ export async function createDeletionChallenge(orgId: string): Promise<CreateChal
   const salt = randomBytes(16).toString('hex');
   const expiresAt = new Date(now.getTime() + DELETION_CODE_TTL_MINUTES * 60 * 1000).toISOString();
   const cooldownCutoff = new Date(now.getTime() - RESEND_COOLDOWN_SECONDS * 1000).toISOString();
+  // Phase 2 may clamp this to the live row's TTL window end (see below).
+  let issuedExpiresAt = expiresAt;
 
   // The send counter lives on the row being replaced, so the rate limit is a
   // pair of atomic conditional updates. DynamoDB's TTL janitor deletes expired
@@ -75,10 +77,19 @@ export async function createDeletionChallenge(orgId: string): Promise<CreateChal
           ':ttl': nowEpoch + ROW_TTL_SECONDS,
           ':nowEpoch': nowEpoch,
         }),
+        ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
       }),
     );
   } catch (err) {
     if (!(err instanceof ConditionalCheckFailedException)) throw err;
+    // The TTL janitor may delete the row as soon as its window ends, so a
+    // resent code must never claim to outlive the row: clamp the stated
+    // expiry to min(now + code TTL, window end).
+    const liveRow = err.Item ? unmarshall(err.Item) : undefined;
+    const windowEndMs = typeof liveRow?.ttl === 'number' ? liveRow.ttl * 1000 : undefined;
+    if (windowEndMs !== undefined && windowEndMs < new Date(expiresAt).getTime()) {
+      issuedExpiresAt = new Date(windowEndMs).toISOString();
+    }
     // Phase 2 — resend within the live window: cooldown elapsed and send
     // budget remaining. The `#ttl > :nowEpoch` guard keeps this from racing a
     // concurrent phase-1 reclaim onto a stale window.
@@ -100,7 +111,7 @@ export async function createDeletionChallenge(orgId: string): Promise<CreateChal
             ':zero': 0,
             ':one': 1,
             ':now': now.toISOString(),
-            ':expiresAt': expiresAt,
+            ':expiresAt': issuedExpiresAt,
             ':nowEpoch': nowEpoch,
             ':cooldownCutoff': cooldownCutoff,
             ':maxSends': MAX_SENDS_PER_WINDOW,
@@ -119,7 +130,7 @@ export async function createDeletionChallenge(orgId: string): Promise<CreateChal
   return {
     outcome: 'created',
     code,
-    expiresAt,
+    expiresAt: issuedExpiresAt,
     resendAvailableAt: new Date(now.getTime() + RESEND_COOLDOWN_SECONDS * 1000).toISOString(),
   };
 }
@@ -181,10 +192,21 @@ export async function verifyDeletionChallenge(
     return 'invalid';
   }
 
-  // Single-use: a verified code cannot be replayed.
-  await getDynamoClient().send(
-    new DeleteItemCommand({ TableName: Resource.BillingTable.name, Key: key }),
-  );
+  // Single-use: a verified code cannot be replayed. The conditional delete
+  // makes consumption atomic — if a concurrent verify already consumed the
+  // row, this call must not also report success.
+  try {
+    await getDynamoClient().send(
+      new DeleteItemCommand({
+        TableName: Resource.BillingTable.name,
+        Key: key,
+        ConditionExpression: 'attribute_exists(pk)',
+      }),
+    );
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) return 'invalid';
+    throw err;
+  }
   return 'ok';
 }
 

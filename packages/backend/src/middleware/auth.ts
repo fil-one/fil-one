@@ -6,7 +6,7 @@ import type {
   Context,
 } from 'aws-lambda';
 import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { jwtVerify, type createRemoteJWKSet } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
@@ -25,11 +25,7 @@ import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
-import {
-  exchangeAndVerifyRefreshToken,
-  exchangeRefreshToken,
-  type NewTokens,
-} from '../lib/token-refresh.js';
+import { exchangeAndVerifyRefreshToken, getJWKS, type NewTokens } from '../lib/token-refresh.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,18 +64,6 @@ export function getVerifiedIdTokenClaims(
   request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
 ): IdTokenClaims {
   return (request.internal as AuthInternal).idTokenClaims ?? EMPTY_ID_CLAIMS;
-}
-
-// ---------------------------------------------------------------------------
-// Module-level JWKS cache — reused across Lambda warm starts
-// ---------------------------------------------------------------------------
-
-let cachedJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
-
-function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
-  if (cachedJWKS) return cachedJWKS;
-  cachedJWKS = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
-  return cachedJWKS;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +238,10 @@ async function resolveUserAndOrg(
   // userId/orgId check so a deleted user's still-valid tokens can neither
   // operate on remnants nor fall through to createNewUserAndOrg below and
   // resurrect the account as a fresh org.
+  // Eventually-consistent read — an accepted sub-second staleness window.
+  // Resurrection is independently blocked by the `attribute_not_exists(pk)`
+  // transact condition against the retained SUB# identity row in
+  // createNewUserAndOrg's onboarding transaction.
   if (result.Item?.deleted?.BOOL === true) {
     throw new AccountDeletedError();
   }
@@ -584,9 +572,19 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     )._forceTokenRefresh;
 
     if (forceRefresh && request.internal.refreshToken) {
-      const refreshed = await exchangeRefreshToken(request.internal.refreshToken);
+      // Same verification gate as the before hook: the minted access token's
+      // signature is checked before any cookie is set. A failed exchange or
+      // verification keeps the previous semantics — no fresh cookies, the
+      // handler response goes out unchanged.
+      const domain = process.env.AUTH0_DOMAIN!;
+      const refreshed = await exchangeAndVerifyRefreshToken({
+        refreshToken: request.internal.refreshToken,
+        jwks: getJWKS(domain),
+        audience: process.env.AUTH0_AUDIENCE!,
+        issuer: `https://${domain}/`,
+      });
       if (refreshed) {
-        newTokens = refreshed;
+        newTokens = refreshed.tokens;
         console.warn('[auth] Force token refresh succeeded');
       }
     }

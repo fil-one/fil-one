@@ -89,6 +89,16 @@ describe('create-deletion-challenge baseHandler', () => {
     mockSendEmail.mockResolvedValue(undefined);
   });
 
+  it('returns 400 when the authenticated session carries no email', async () => {
+    const result = (await baseHandler(makeEvent(null))) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body!).message).toBe('No email on the authenticated session');
+    expect(mockIsOrgAdmin).not.toHaveBeenCalled();
+    expect(mockCreateChallenge).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
   it('rejects a non-admin member with 403 before doing any challenge work', async () => {
     mockIsOrgAdmin.mockResolvedValue(false);
 

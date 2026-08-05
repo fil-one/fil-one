@@ -8,7 +8,10 @@ export const DELETION_CODE_TTL_MINUTES = 15;
 export const DeleteAccountSchema = z.object({
   code: z
     .string()
-    .regex(new RegExp(`^\\d{${DELETION_CODE_LENGTH}}$`), 'Enter the 6-digit verification code'),
+    .regex(
+      new RegExp(`^\\d{${DELETION_CODE_LENGTH}}$`),
+      `Enter the ${DELETION_CODE_LENGTH}-digit verification code`,
+    ),
   /**
    * The org name the user typed to confirm. Validated server-side against the
    * stored org profile name — the client-side gating alone is not trusted.

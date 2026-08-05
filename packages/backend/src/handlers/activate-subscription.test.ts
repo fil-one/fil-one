@@ -18,6 +18,7 @@ import { buildEvent } from '../test/lambda-test-utilities.js';
 const mockSetupIntentsList = vi.fn();
 const mockSubscriptionsCreate = vi.fn();
 const mockSubscriptionsUpdate = vi.fn();
+const mockSubscriptionsCancel = vi.fn();
 const mockPromotionCodesList = vi.fn();
 
 vi.mock('sst', () => ({
@@ -45,7 +46,11 @@ vi.mock('../lib/region-helpers.js', async (importOriginal) => ({
 vi.mock('../lib/stripe-client.js', () => ({
   getStripeClient: () => ({
     setupIntents: { list: mockSetupIntentsList },
-    subscriptions: { create: mockSubscriptionsCreate, update: mockSubscriptionsUpdate },
+    subscriptions: {
+      create: mockSubscriptionsCreate,
+      update: mockSubscriptionsUpdate,
+      cancel: mockSubscriptionsCancel,
+    },
     promotionCodes: { list: mockPromotionCodesList },
   }),
   getBillingSecrets: () => ({
@@ -128,6 +133,7 @@ describe('activate-subscription handler', () => {
     mockSetupIntentsList.mockReset();
     mockSubscriptionsCreate.mockReset();
     mockSubscriptionsUpdate.mockReset();
+    mockSubscriptionsCancel.mockReset();
     mockPromotionCodesList.mockReset();
     mockSyncTenantStatusInProvisionedRegions.mockReset();
 
@@ -439,6 +445,79 @@ describe('activate-subscription handler', () => {
     expect(body.code).toBe('ACCOUNT_DELETED');
     // The tenant must NOT be unlocked while the teardown is disabling it.
     expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    // The Stripe mutation already happened — the subscription it produced is
+    // best-effort canceled so a deleted account isn't billed by an orphan.
+    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_test_456');
+  });
+
+  it('cancels the brand-new subscription created on the reactivation path when the guard rejects', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    // Stored status grace_period → createOrUpdateSubscription creates a
+    // fresh subscription whose id the teardown never snapshotted, so only
+    // this handler can cancel it.
+    ddbMock.on(GetItemCommand).resolvesOnce({
+      Item: buildBillingRecord({
+        subscriptionId: 'sub_canceled_old',
+        subscriptionStatus: SubscriptionStatus.GracePeriod,
+        paymentMethodId: 'pm_saved_123',
+      }),
+    });
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
+    mockSubscriptionsCreate.mockResolvedValue(
+      mockSubscriptionResponse({ id: 'sub_fresh_999', status: 'active' }),
+    );
+    mockSubscriptionsCancel.mockResolvedValue({ id: 'sub_fresh_999', status: 'canceled' });
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+      body: JSON.stringify({ useSavedPaymentMethod: true }),
+    });
+    const result = await handler(event, {} as never);
+    const body = JSON.parse((result as { body: string }).body);
+
+    expect((result as { statusCode: number }).statusCode).toBe(410);
+    expect(body.code).toBe('ACCOUNT_DELETED');
+    expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_fresh_999');
+    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+  });
+
+  it('still returns 410 when the best-effort cancel itself fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
+    mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+    mockSubscriptionsCancel.mockRejectedValue(new Error('Stripe is down'));
+
+    const event = buildEvent({
+      userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+      method: 'POST',
+      rawPath: '/api/billing/activate',
+    });
+    const result = await handler(event, {} as never);
+    const body = JSON.parse((result as { body: string }).body);
+
+    expect((result as { statusCode: number }).statusCode).toBe(410);
+    expect(body.code).toBe('ACCOUNT_DELETED');
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to cancel subscription after deletion-guard rejection'),
+      expect.objectContaining({ userId: 'user-1', subscriptionId: 'sub_test_456' }),
+    );
   });
 
   it('returns 500 when updateTenantStatus fails', async () => {

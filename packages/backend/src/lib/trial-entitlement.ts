@@ -1,5 +1,6 @@
 import {
   ConditionalCheckFailedException,
+  GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
@@ -8,6 +9,31 @@ import { getDynamoClient } from './ddb-client.js';
 import { createBillingTrial } from './create-billing-trial.js';
 import { normalizeEmailForEntitlement } from './email-normalization.js';
 import { TrialEntitlementError } from './errors.js';
+
+/**
+ * FIL-112 deletion race: the auth middleware's tombstone gate runs earlier in
+ * the request on an eventually-consistent read, and a deletion can be
+ * confirmed at any moment after it. This consistent re-read of the identity
+ * row gates every entitlement side effect — without it, a login racing
+ * account deletion could (a) claim the EMAIL_NORM# key (which survives
+ * deletion by design, FIL-422) without a trial ever being granted, locking
+ * the email out of future trials, and (b) mint a Stripe trial subscription
+ * after the teardown's billing snapshot, which teardown would then never
+ * cancel. The confirm handler sets `deleted` synchronously before returning
+ * 200, so this check closes the race to the sub-second window between the
+ * read and the Stripe call; even that residue is bounded — the trial
+ * subscription self-cancels at trial end (missing_payment_method: 'cancel').
+ */
+async function isIdentityLive(sub: string): Promise<boolean> {
+  const identity = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
+      ConsistentRead: true,
+    }),
+  );
+  return identity.Item?.deleted?.BOOL !== true && Boolean(identity.Item?.userId?.S);
+}
 
 export interface EnsureTrialEntitlementParams {
   sub: string;
@@ -31,6 +57,15 @@ export async function ensureTrialEntitlement({
   if (!emailVerified || !email) return false;
 
   const tableName = Resource.UserInfoTable.name;
+
+  if (!(await isIdentityLive(sub))) {
+    console.warn('[trial-entitlement] Identity deleted or missing — skipping trial claim', {
+      userId,
+      orgId,
+    });
+    return false;
+  }
+
   const normalizedEmail = normalizeEmailForEntitlement(email);
   const now = new Date().toISOString();
 

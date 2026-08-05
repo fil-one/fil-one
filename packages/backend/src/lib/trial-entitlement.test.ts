@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
+  GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
   ConditionalCheckFailedException,
@@ -36,6 +37,8 @@ describe('ensureTrialEntitlement', () => {
     ddbMock.reset();
     vi.clearAllMocks();
     mockCreateBillingTrial.mockResolvedValue(undefined);
+    // Live identity row for the FIL-112 pre-side-effect tombstone re-check.
+    ddbMock.on(GetItemCommand).resolves({ Item: { userId: { S: 'user-1' } } });
   });
 
   it('returns false and writes nothing when email is unverified', async () => {
@@ -51,6 +54,34 @@ describe('ensureTrialEntitlement', () => {
 
     expect(result).toBe(false);
     expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+  });
+
+  it('re-checks the identity with a consistent read and skips everything when tombstoned (FIL-112)', async () => {
+    // A deletion confirmed after the auth middleware's (eventually-consistent)
+    // tombstone gate must not claim the entitlement key or touch Stripe.
+    ddbMock
+      .on(GetItemCommand)
+      .resolves({ Item: { userId: { S: 'user-1' }, deleted: { BOOL: true } } });
+
+    const result = await ensureTrialEntitlement(BASE);
+
+    expect(result).toBe(false);
+    const getInput = ddbMock.commandCalls(GetItemCommand)[0].args[0].input;
+    expect(getInput.ConsistentRead).toBe(true);
+    expect(getInput.Key).toStrictEqual({ pk: { S: 'SUB#auth0|sub-1' }, sk: { S: 'IDENTITY' } });
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(mockCreateBillingTrial).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('skips everything when the identity row is already purged (no userId)', async () => {
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+
+    const result = await ensureTrialEntitlement(BASE);
+
+    expect(result).toBe(false);
+    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    expect(mockCreateBillingTrial).not.toHaveBeenCalled();
   });
 
   it('claims the normalized key, creates the trial, and sets the flag when claim is won', async () => {

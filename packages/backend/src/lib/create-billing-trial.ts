@@ -56,15 +56,15 @@ export async function createBillingTrial({
     { idempotencyKey: `billing-trial-sub-${userId}` },
   );
 
-  // 3. Write to DynamoDB. Deliberately an unconditional update, NOT a
-  // conditional put: Stripe fires customer.subscription.created as soon as the
-  // subscription above exists, and if that webhook lands first it upserts a
-  // partial record (subscriptionId + status, no customer mapping). A
-  // put guarded by attribute_not_exists would then silently no-op and the
-  // stripeCustomerId would never be stored — the user could not activate. The
-  // update fills the mapping in either arrival order; subscriptionStatus uses
-  // if_not_exists so a status a webhook already wrote is never clobbered by
-  // this stale-at-write-time `trialing`.
+  // 3. Write to DynamoDB. This write is what CREATES the billing record:
+  // webhook writers are deletion-guarded (attribute_exists(pk), see
+  // lib/deletion-guard.ts) and no-op on a missing record, so a
+  // customer.subscription.created event racing this write is dropped rather
+  // than upserting a partial record. subscriptionStatus still uses
+  // if_not_exists as a belt-and-braces guard: should this write ever re-run
+  // after a webhook has updated the record (concurrent onboarding retries),
+  // the status the webhook wrote is never clobbered by this
+  // stale-at-write-time `trialing`.
   await getDynamoClient().send(
     new UpdateItemCommand({
       TableName: Resource.BillingTable.name,
