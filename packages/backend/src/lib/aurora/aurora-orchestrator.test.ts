@@ -574,6 +574,30 @@ describe('auroraOrchestrator', () => {
       expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(2);
     });
 
+    it('evicts the cached portal API key so warm containers stop serving it', async () => {
+      // The aurora-portal mock spreads the original module, so deleteTenant
+      // runs the real deleteAuroraPortalApiKey against the real cache.
+      const portal =
+        await vi.importActual<typeof import('./aurora-portal.js')>('./aurora-portal.js');
+      ssmMock
+        .on(GetParameterCommand, { Name: portalApiKeyParam, WithDecryption: true })
+        .resolves({ Parameter: { Value: 'portal-key' } });
+      await portal.getAuroraPortalApiKey('test', tenantId); // prime the cache
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
+      ssmMock.on(DeleteParameterCommand).resolves({});
+
+      await auroraOrchestrator.deleteTenant(tenantId);
+
+      // A cache hit would serve the stale key without touching SSM; the
+      // eviction surfaces as a re-fetch that now finds the parameter gone.
+      ssmMock
+        .on(GetParameterCommand)
+        .rejects(Object.assign(new Error('gone'), { name: 'ParameterNotFound' }));
+      await expect(portal.getAuroraPortalApiKey('test', tenantId)).rejects.toThrow(
+        `Aurora API key not found in SSM for tenant ${tenantId}`,
+      );
+    });
+
     it('tolerates already-deleted SSM parameters (idempotent re-run)', async () => {
       mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'not_found' });
       ssmMock

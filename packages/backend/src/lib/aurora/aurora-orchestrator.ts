@@ -20,6 +20,7 @@ import {
   createAuroraBucket,
   createPortalClient,
   deleteAuroraAccessKey,
+  deleteAuroraPortalApiKey,
   findAuroraAccessKeyByName,
 } from '../aurora/aurora-portal.js';
 import {
@@ -36,7 +37,6 @@ import { isOrgSetupComplete } from '../org-setup-status.js';
 import type { OrgProfileItem } from '../org-profile.js';
 import {
   deleteConsoleS3Credentials,
-  deleteSsmParameter,
   getConsoleS3Credentials,
   _resetS3CredentialsCacheForTesting,
 } from '../s3-credentials.js';
@@ -116,7 +116,9 @@ export const auroraOrchestrator = {
     }
 
     const stage = getStage();
-    await deleteSsmParameter(`/filone/${stage}/aurora-portal/tenant-api-key/${tenantId}`);
+    // Deletes the SSM copy AND evicts aurora-portal's warm-container cache —
+    // otherwise a warm Lambda keeps serving the deleted portal API key.
+    await deleteAuroraPortalApiKey(stage, tenantId);
     await deleteConsoleS3Credentials({
       orchestratorId: auroraOrchestrator.id,
       stage,
