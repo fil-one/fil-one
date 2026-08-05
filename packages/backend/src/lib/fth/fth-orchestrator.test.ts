@@ -124,6 +124,7 @@ describe('fthOrchestrator.deleteTenant', () => {
   });
 
   it('treats an already-deleted client as success and still deletes the SSM parameter', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockUpdateClientStatus.mockRejectedValue(notFound());
     mockFthClient.deleteClient.mockRejectedValue(notFound());
     ssmMock.on(DeleteParameterCommand).resolves({});
@@ -131,6 +132,16 @@ describe('fthOrchestrator.deleteTenant', () => {
     await fthOrchestrator.deleteTenant(fthClientId);
 
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
+    // The contract defines idempotent deletion via 204; an undocumented 404
+    // may be a misrouted baseUrl/gateway, so it must be flagged loudly.
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('misrouted'),
+      expect.objectContaining({
+        orchestratorId: 'fth',
+        tenantId: fthClientId,
+        baseUrl: 'https://api.fortilyx.test',
+      }),
+    );
   });
 
   it('re-disables and retries once on a 409 conflict (client not disabled yet)', async () => {

@@ -388,7 +388,22 @@ async function deleteFthClientToleratingNotFound(tenantId: string): Promise<void
     await client.deleteClient(tenantId);
   } catch (err) {
     if (err instanceof FthNotFoundError) {
-      console.log(`FTH tenant ${tenantId} not found, treating as already deleted`);
+      // Tolerated as already-gone, but loudly: the Management API contract
+      // defines idempotent deletion via 204 and never documents a 404 for
+      // the tenant DELETE. A 404 can equally be a misrouted baseUrl or
+      // gateway answering for the wrong service — in which case the SSM
+      // credentials deleted next would orphan a client that lives on
+      // upstream.
+      console.warn(
+        `[fth] DELETE for tenant ${tenantId} returned 404 — treating as already deleted, ` +
+          'but idempotent deletion is contractually a 204; a 404 may indicate a misrouted ' +
+          'baseUrl/gateway rather than actual deletion',
+        {
+          orchestratorId: fthOrchestrator.id,
+          tenantId,
+          baseUrl: process.env.FTH_MANAGEMENT_API_URL,
+        },
+      );
       return;
     }
     if (err instanceof FthConflictError) throw err;
