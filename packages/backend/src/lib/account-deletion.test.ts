@@ -320,10 +320,15 @@ describe('runAccountDeletion', () => {
     expect(batchedKeys).toContain('ACCESSKEY#key-1');
     expect(batchedKeys).not.toContain('DELETION');
 
-    // SUB# row is stripped, not deleted.
+    // SUB# row is stripped, not deleted. (The fence re-application also
+    // touches SUB#, so filter to the purge's attribute-stripping write.)
     const subUpdates = ddbMock
       .commandCalls(UpdateItemCommand)
-      .filter((c) => c.args[0].input.Key?.pk?.S === 'SUB#auth0|sub-1');
+      .filter(
+        (c) =>
+          c.args[0].input.Key?.pk?.S === 'SUB#auth0|sub-1' &&
+          c.args[0].input.UpdateExpression?.includes('REMOVE'),
+      );
     expect(subUpdates).toHaveLength(1);
     expect(subUpdates[0].args[0].input.UpdateExpression).toContain('REMOVE userId, orgId');
 
@@ -423,6 +428,59 @@ describe('runAccountDeletion', () => {
     await runAccountDeletion(ORG_ID);
 
     expect(rawRequestCalls()).toEqual(['POST /v1/privacy/redaction_jobs']);
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('re-applies the deletion fences at teardown start (confirm handler may have crashed before writing them)', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+
+    await runAccountDeletion(ORG_ID);
+
+    const updates = ddbMock.commandCalls(UpdateItemCommand).map((c) => c.args[0].input);
+    // Org profile tenant-setup fence.
+    expect(
+      updates.some(
+        (u) =>
+          u.Key?.pk?.S === `ORG#${ORG_ID}` &&
+          u.Key?.sk?.S === 'PROFILE' &&
+          u.UpdateExpression === 'SET deleting = :true',
+      ),
+    ).toBe(true);
+    // Billing-webhook fence for the snapshotted member.
+    expect(
+      updates.some(
+        (u) =>
+          u.Key?.pk?.S === 'CUSTOMER#user-1' &&
+          u.UpdateExpression === 'SET deletionRequestedAt = :now',
+      ),
+    ).toBe(true);
+    // SUB# session-kill tombstone.
+    expect(
+      updates.some(
+        (u) =>
+          u.Key?.pk?.S === 'SUB#auth0|sub-1' &&
+          u.UpdateExpression === 'SET deleted = :true, deletedAt = if_not_exists(deletedAt, :now)',
+      ),
+    ).toBe(true);
+  });
+
+  it('tolerates already-purged profile and billing rows when re-applying the fences', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    // A later pass: the profile and billing rows are gone, so the guarded
+    // conditional writes fail their attribute_exists conditions.
+    const conditionFailure = new ConditionalCheckFailedException({
+      message: 'gone',
+      $metadata: {},
+    });
+    ddbMock
+      .on(UpdateItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } } })
+      .rejects(conditionFailure);
+    ddbMock
+      .on(UpdateItemCommand, { Key: { pk: { S: 'CUSTOMER#user-1' }, sk: { S: 'SUBSCRIPTION' } } })
+      .rejects(conditionFailure);
+
+    await runAccountDeletion(ORG_ID);
+
     expect(doneWrites()).toHaveLength(1);
   });
 

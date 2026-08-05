@@ -15,6 +15,7 @@ import { Resource } from 'sst';
 import { deleteAuth0User } from './auth0-management.js';
 import { getDynamoClient } from './ddb-client.js';
 import { deleteDeletionChallenge } from './deletion-challenge.js';
+import { applyDeletionGuards } from './deletion-guards.js';
 import { readDeletionRecord } from './deletion-record.js';
 import {
   DeletionKeys,
@@ -76,6 +77,11 @@ export async function runAccountDeletion(orgId: string): Promise<void> {
   if (record.status === OrgDeletionStatus.Done) return;
 
   await bumpAttemptCount(orgId);
+
+  // The confirm handler consumes the challenge BEFORE writing the fences; a
+  // crash in between leaves this record fence-less with the code burned.
+  // Re-applying the (idempotent) fences here closes that gap on every pass.
+  await applyDeletionGuards(orgId, record.members);
 
   // The external teardowns are independent — run them concurrently and only
   // fail after all settle, so one vendor/region outage doesn't block the rest.

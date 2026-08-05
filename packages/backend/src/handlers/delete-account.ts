@@ -3,7 +3,6 @@ import {
   GetItemCommand,
   PutItemCommand,
   QueryCommand,
-  UpdateItemCommand,
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
@@ -18,6 +17,7 @@ import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { parseCookies } from '../lib/cookies.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { verifyDeletionChallenge } from '../lib/deletion-challenge.js';
+import { applyDeletionGuards } from '../lib/deletion-guards.js';
 import {
   DeletionKeys,
   OrgDeletionStatus,
@@ -195,69 +195,6 @@ async function snapshotBilling(
     }
   }
   return {};
-}
-
-/**
- * The synchronous, security-critical writes: guard Stripe billing writes and the
- * grace-period enforcer off the billing record, block tenant setup on the
- * profile, and tombstone every member identity so all sessions die on their
- * very next request — before the 200 is returned.
- */
-async function applyDeletionGuards(orgId: string, members: OrgDeletionMember[]): Promise<void> {
-  const now = new Date().toISOString();
-
-  try {
-    await dynamo.send(
-      new UpdateItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: marshall({ pk: `ORG#${orgId}`, sk: 'PROFILE' }),
-        UpdateExpression: 'SET deleting = :true',
-        ConditionExpression: 'attribute_exists(pk)',
-        ExpressionAttributeValues: marshall({ ':true': true }),
-      }),
-    );
-  } catch (err) {
-    if (!(err instanceof ConditionalCheckFailedException)) throw err;
-    // Profile already purged by a running teardown — nothing to guard.
-  }
-
-  // Per-member guards are independent — apply them all in parallel.
-  await Promise.all(members.map((member) => guardMember(member, now)));
-}
-
-/** Billing-webhook deletion guard + SUB# session kill for one member, in parallel. */
-async function guardMember(member: OrgDeletionMember, now: string): Promise<void> {
-  const billingGuard = (async () => {
-    try {
-      await dynamo.send(
-        new UpdateItemCommand({
-          TableName: Resource.BillingTable.name,
-          Key: marshall({ pk: `CUSTOMER#${member.userId}`, sk: 'SUBSCRIPTION' }),
-          UpdateExpression: 'SET deletionRequestedAt = :now',
-          ConditionExpression: 'attribute_exists(pk)',
-          ExpressionAttributeValues: marshall({ ':now': now }),
-        }),
-      );
-    } catch (err) {
-      if (!(err instanceof ConditionalCheckFailedException)) throw err;
-      // No billing record (e.g. trial never started) — nothing to guard.
-    }
-  })();
-
-  // if_not_exists keeps the original deletion timestamp stable across
-  // idempotent re-confirms (and matches the worker's purge step).
-  const sessionKill = member.sub
-    ? dynamo.send(
-        new UpdateItemCommand({
-          TableName: Resource.UserInfoTable.name,
-          Key: marshall({ pk: `SUB#${member.sub}`, sk: 'IDENTITY' }),
-          UpdateExpression: 'SET deleted = :true, deletedAt = if_not_exists(deletedAt, :now)',
-          ExpressionAttributeValues: marshall({ ':true': true, ':now': now }),
-        }),
-      )
-    : Promise.resolve();
-
-  await Promise.all([billingGuard, sessionKill]);
 }
 
 /**
