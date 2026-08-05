@@ -76,6 +76,20 @@ describe('DeleteAccountModal', () => {
     expect(screen.getByRole('button', { name: /resend code in/i })).toBeDisabled();
   });
 
+  it('moves keyboard focus to the code input when the challenge succeeds', async () => {
+    // The confirm-step button that held focus becomes disabled/replaced on
+    // the step change, which would otherwise drop focus to <body>.
+    renderModal();
+    fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+      target: { value: ORG_NAME },
+    });
+    fireEvent.click(sendCodeButton());
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/enter the 6-digit code/i)).toHaveFocus();
+    });
+  });
+
   it('keeps the delete button disabled until 6 digits are entered, then submits', async () => {
     mockDeleteAccount.mockResolvedValue({ message: 'Account deleted' });
     renderModal();

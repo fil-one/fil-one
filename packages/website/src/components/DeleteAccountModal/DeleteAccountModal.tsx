@@ -227,6 +227,10 @@ function CodeStep({
           inputMode="numeric"
           autoComplete="one-time-code"
           invalid={flow.codeError !== null}
+          // The confirm→code transition disables/replaces the button that held
+          // focus, which would otherwise drop keyboard focus to <body>. Focus
+          // the code input as the step mounts (precedent: ProvidersMultiSelect).
+          autoFocus
         />
       </FormField>
       <button
