@@ -85,6 +85,18 @@ describe('ensureTenantReady', () => {
     expect(mockFthClient.createClient).not.toHaveBeenCalled();
   });
 
+  it('refuses setup when the org is being deleted (FIL-112)', async () => {
+    ddbMock.on(GetItemCommand).resolves({
+      Item: { ...profileItem({}), deleting: { BOOL: true } },
+    });
+
+    const result = await ensureTenantReady(fthClient, orgId);
+
+    // ensureTenantReady swallows setup errors and returns null.
+    expect(result).toBeNull();
+    expect(mockFthClient.createClient).not.toHaveBeenCalled();
+  });
+
   it('creates client, storage user, access key, SSM cred and PROFILE row on first run', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: profileItem({}) });
     ddbMock.on(UpdateItemCommand).resolves({});

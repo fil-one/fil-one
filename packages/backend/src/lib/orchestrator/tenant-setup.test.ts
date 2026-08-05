@@ -91,6 +91,32 @@ describe('ensureTenantReady', () => {
     expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input.ConsistentRead).toBe(true);
   });
 
+  it('refuses setup for an org whose deletion is in progress (FIL-112)', async () => {
+    stubHappyPath();
+    ddbMock.on(GetItemCommand).resolves({
+      Item: { ...profileItem({}), deleting: { BOOL: true } },
+    });
+
+    const result = await ensureTenantReady(deps, orgId);
+
+    // A setup racing the teardown would orphan a live tenant.
+    expect(result).toBeNull();
+    expect(mockPutTenant).not.toHaveBeenCalled();
+    expect(mockCreateAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('refuses to hand back an already-provisioned tenant id once the org is deleting', async () => {
+    // The deleting guard must run BEFORE the existing-tenant early return.
+    ddbMock.on(GetItemCommand).resolves({
+      Item: { ...profileItem({ forgeTenantId: orgId }), deleting: { BOOL: true } },
+    });
+
+    const result = await ensureTenantReady(deps, orgId);
+
+    expect(result).toBeNull();
+    expect(mockPutTenant).not.toHaveBeenCalled();
+  });
+
   it('provisions tenant, console key, SSM cred and PROFILE row on first run', async () => {
     stubHappyPath();
 

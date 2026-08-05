@@ -28,3 +28,19 @@ export async function getOrgProfile(orgId: string): Promise<OrgProfileItem | und
   );
   return Item;
 }
+
+/**
+ * Account deletion in progress (FIL-112): never provision against an org
+ * being torn down — a tenant setup racing the teardown would orphan a live
+ * tenant. Every orchestrator's tenant-setup path must call this right after
+ * its ConsistentRead profile Get. Pure and dependency-free so it stays
+ * bundle-safe, like the rest of this module.
+ */
+export function assertOrgNotDeleting(
+  orgProfile: OrgProfileItem | undefined,
+  orgId: string,
+): void {
+  if (orgProfile?.deleting?.BOOL === true) {
+    throw new Error(`Org ${orgId} is being deleted; refusing tenant setup`);
+  }
+}

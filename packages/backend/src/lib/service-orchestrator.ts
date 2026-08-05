@@ -202,6 +202,19 @@ export interface ServiceOrchestrator {
   updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void>;
 
   /**
+   * Permanently deletes the org's tenant on this orchestrator — every
+   * upstream resource it owns (buckets, objects, access keys) plus the
+   * FilOne-held tenant secrets in SSM. Implementations first force the
+   * tenant to `disabled` when the upstream API requires it, and MUST be
+   * idempotent: an already-deleted tenant (or already-deleted secret) is
+   * success, so account-deletion re-runs converge. Orchestrators without a
+   * remote tenant-deletion API perform the strongest teardown available
+   * (disable + secret deletion) and log the required manual follow-up.
+   * Only the account-deletion teardown may call this.
+   */
+  deleteTenant(tenantId: string): Promise<void>;
+
+  /**
    * Reads the tenant's current live status from this orchestrator's API. Like
    * the other non-setup methods it is stateless and takes a `tenantId` directly,
    * issues an orchestrator API call only, and never writes to DDB. Never throws:

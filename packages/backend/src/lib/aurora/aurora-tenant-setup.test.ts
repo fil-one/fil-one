@@ -102,6 +102,20 @@ describe('processTenantSetup', () => {
     ssmMock.reset();
   });
 
+  it('refuses setup when the org is being deleted (FIL-112)', async () => {
+    ddbMock.on(GetItemCommand).resolves({
+      Item: {
+        pk: { S: 'ORG#org-1' },
+        sk: { S: 'PROFILE' },
+        auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+        deleting: { BOOL: true },
+      },
+    });
+
+    await expect(processTenantSetup('org-1')).rejects.toThrow('is being deleted');
+    expect(mockCreateAuroraTenant).not.toHaveBeenCalled();
+  });
+
   it('is a no-op when auroraSetupStatus is AURORA_S3_ACCESS_KEY_CREATED', async () => {
     ddbMock.on(GetItemCommand).resolves(
       orgProfileItem({

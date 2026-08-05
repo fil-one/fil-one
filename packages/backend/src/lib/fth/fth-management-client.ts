@@ -18,6 +18,12 @@ export interface FthManagementClient {
     clientRef: string,
     args: { status: FthClientStatus; displayName?: string; idempotencyKey?: string },
   ): Promise<void>;
+  /**
+   * Permanently deletes the client and every resource it owns. FTH requires
+   * the client to be `disabled` first (409 otherwise) and 404s when the
+   * client is already gone — callers treat that as idempotent success.
+   */
+  deleteClient(clientRef: string): Promise<void>;
 
   createStorageUser(clientRef: string, args: CreateStorageUserArgs): Promise<FthStorageUser>;
   listStorageUsers(clientRef: string): Promise<FthStorageUser[]>;
@@ -381,6 +387,11 @@ function buildEndpointMethods(request: RequestFn): Omit<FthManagementClient, 'in
           idempotencyKey: args.idempotencyKey,
         },
       ),
+
+    // No Idempotency-Key: deletion is naturally idempotent (404 when already
+    // gone), and replaying a key after a 409 could re-serve the cached conflict.
+    deleteClient: (clientRef) =>
+      request<void>('DELETE', '/management/v1/clients/{clientRef}', { clientRef }),
 
     createStorageUser: (clientRef, args) =>
       request<FthStorageUser>(

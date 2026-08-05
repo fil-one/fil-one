@@ -333,6 +333,20 @@ describe('FthClient endpoint coverage', () => {
     expect(req.headers.get('Idempotency-Key')).toBe('idem-1');
   });
 
+  it('deleteClient DELETEs the client path without an Idempotency-Key', async () => {
+    fetchMock = mockFetch(204);
+    client = buildClient({ fetch: fetchMock });
+
+    await client.deleteClient('client-1');
+
+    const req = lastRequest(fetchMock);
+    expect(req.method).toBe('DELETE');
+    expect(req.url).toBe('https://api.fortilyx.com/management/v1/clients/client-1');
+    // No Idempotency-Key: replaying a key after a 409 could re-serve the
+    // cached conflict; deletion is naturally idempotent via its 404.
+    expect(req.headers.get('Idempotency-Key')).toBeNull();
+  });
+
   it('listStorageUsers GETs the collection', async () => {
     fetchMock = mockFetch(200, { items: [{ id: '1', userCode: 'u' }] });
     client = buildClient({ fetch: fetchMock });

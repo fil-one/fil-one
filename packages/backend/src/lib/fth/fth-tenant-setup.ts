@@ -9,6 +9,7 @@ import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
+import { assertOrgNotDeleting } from '../org-profile.js';
 import type { FthManagementClient } from './fth-management-client.js';
 
 const FTH_FULL_PERMISSIONS = [
@@ -71,6 +72,8 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
       ConsistentRead: true,
     }),
   );
+  assertOrgNotDeleting(existing.Item, orgId);
+
   const existingTenantId = existing.Item?.fthTenantId?.S;
   // TODO: check fthTenantSetupStatus
   if (existingTenantId) {

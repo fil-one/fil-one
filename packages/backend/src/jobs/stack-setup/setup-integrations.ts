@@ -11,6 +11,7 @@ import type {
   CloudFormationCustomResourceEvent,
   CloudFormationCustomResourceResponse,
 } from 'aws-lambda';
+import { senderAddress } from '@filone/shared';
 import { onExecutePostLogin } from './mfa-action.js';
 import { setupAuth0PasskeyAuth } from './setup-passkey.js';
 import { getAuth0ManagementToken } from './auth0-mgmt-token.js';
@@ -285,7 +286,7 @@ async function teardownAuth0Callbacks(
 
 async function setupAuth0EmailProvider(domain: string, isProduction: boolean): Promise<void> {
   const token = await getAuth0ManagementToken(domain);
-  const fromAddress = isProduction ? 'no-reply@filone.ai' : 'no-reply+staging@filone.ai';
+  const fromAddress = senderAddress(isProduction);
 
   const payload = {
     name: 'sendgrid',

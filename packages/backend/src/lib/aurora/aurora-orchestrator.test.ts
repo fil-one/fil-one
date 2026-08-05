@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { SSMClient, GetParameterCommand, DeleteParameterCommand } from '@aws-sdk/client-ssm';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -528,6 +528,71 @@ describe('auroraOrchestrator', () => {
         });
       });
     }
+  });
+
+  describe('deleteTenant', () => {
+    const tenantId = 'aurora-t-1';
+    const portalApiKeyParam = `/filone/test/aurora-portal/tenant-api-key/${tenantId}`;
+    const s3KeyParam = `/filone/test/aurora-s3/access-key/${tenantId}`;
+
+    it('disables an active tenant and deletes both FilOne-held SSM secrets', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+      ssmMock.on(DeleteParameterCommand).resolves({});
+
+      await auroraOrchestrator.deleteTenant(tenantId);
+
+      // Aurora has no remote tenant-deletion API — deletion here means the
+      // strongest available teardown: disable + credential removal.
+      expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledWith({
+        tenantId,
+        status: 'DISABLED',
+      });
+      const ssmDeletes = ssmMock
+        .commandCalls(DeleteParameterCommand)
+        .map((c) => c.args[0].input.Name);
+      expect(ssmDeletes).toEqual([portalApiKeyParam, s3KeyParam]);
+    });
+
+    it('skips the status update when the tenant is already disabled', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
+      ssmMock.on(DeleteParameterCommand).resolves({});
+
+      await auroraOrchestrator.deleteTenant(tenantId);
+
+      expect(mockUpdateAuroraTenantStatusApi).not.toHaveBeenCalled();
+      expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(2);
+    });
+
+    it('treats a missing tenant as already deleted and still deletes the SSM secrets', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'not_found' });
+      ssmMock.on(DeleteParameterCommand).resolves({});
+
+      await auroraOrchestrator.deleteTenant(tenantId);
+
+      expect(mockUpdateAuroraTenantStatusApi).not.toHaveBeenCalled();
+      expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(2);
+    });
+
+    it('tolerates already-deleted SSM parameters (idempotent re-run)', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'not_found' });
+      ssmMock
+        .on(DeleteParameterCommand)
+        .rejects(Object.assign(new Error('missing'), { name: 'ParameterNotFound' }));
+
+      await expect(auroraOrchestrator.deleteTenant(tenantId)).resolves.toBeUndefined();
+    });
+
+    it('throws when the status probe fails, leaving everything for the retry', async () => {
+      const cause = new Error('backoffice down');
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'error', cause });
+
+      await expect(auroraOrchestrator.deleteTenant(tenantId)).rejects.toThrow(
+        `Aurora status probe failed while deleting tenant ${tenantId}`,
+      );
+      expect(mockUpdateAuroraTenantStatusApi).not.toHaveBeenCalled();
+      expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
+    });
   });
 
   describe('getTenantStatus', () => {

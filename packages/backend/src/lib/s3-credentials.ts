@@ -6,7 +6,7 @@
 // error translation so adding a third orchestrator does not require
 // re-implementing the lookup.
 
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { SSMClient, GetParameterCommand, DeleteParameterCommand } from '@aws-sdk/client-ssm';
 import QuickLRU from 'quick-lru';
 
 export interface S3Credentials {
@@ -37,7 +37,7 @@ export async function getConsoleS3Credentials(
   const cached = ssmCache.get(cacheKey);
   if (cached) return JSON.parse(cached) as S3Credentials;
 
-  const parameterName = `/filone/${stage}/${orchestratorId}-s3/access-key/${tenantId}`;
+  const parameterName = consoleS3CredentialsSsmPath(args);
   let value: string | undefined;
   try {
     const { Parameter } = await ssm.send(
@@ -61,4 +61,31 @@ export async function getConsoleS3Credentials(
   const credentials = JSON.parse(value) as S3Credentials;
   ssmCache.set(cacheKey, value);
   return credentials;
+}
+
+/** The SSM parameter each orchestrator's tenant setup stashes the console S3 key under. */
+export function consoleS3CredentialsSsmPath(args: GetConsoleS3CredentialsArgs): string {
+  return `/filone/${args.stage}/${args.orchestratorId}-s3/access-key/${args.tenantId}`;
+}
+
+/**
+ * Deletes a tenant's console S3 credentials from SSM (account deletion).
+ * Idempotent — an already-deleted parameter is success. Also evicts the
+ * warm-container cache entry so a stale credential can't be served after
+ * the parameter is gone.
+ */
+export async function deleteConsoleS3Credentials(
+  args: GetConsoleS3CredentialsArgs,
+): Promise<void> {
+  ssmCache.delete(`${args.stage}/${args.orchestratorId}/${args.tenantId}`);
+  await deleteSsmParameter(consoleS3CredentialsSsmPath(args));
+}
+
+/** DeleteParameter treating ParameterNotFound as success (idempotent). */
+export async function deleteSsmParameter(name: string): Promise<void> {
+  try {
+    await ssm.send(new DeleteParameterCommand({ Name: name }));
+  } catch (err) {
+    if ((err as { name?: string }).name !== 'ParameterNotFound') throw err;
+  }
 }
