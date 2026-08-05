@@ -61,14 +61,12 @@ describe('saveBillingRecord', () => {
 
   it('returns false without throwing when the deletion guard rejects the write', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    ddbMock
-      .on(UpdateItemCommand)
-      .rejects(
-        new ConditionalCheckFailedException({
-          message: 'The conditional request failed',
-          $metadata: {},
-        }),
-      );
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
 
     const saved = await saveBillingRecord(
       USER_ID,
