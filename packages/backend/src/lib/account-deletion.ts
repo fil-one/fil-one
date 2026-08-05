@@ -152,6 +152,12 @@ interface StripeRedactionJob {
   id: string;
   /** created | validating | ready | redacting | succeeded | failed | canceling | canceled */
   status?: string;
+  /** Objects the job redacts, as passed at creation. */
+  objects?: { customers?: string[] };
+}
+
+interface StripeRedactionJobList {
+  data?: StripeRedactionJob[];
 }
 
 /**
@@ -173,7 +179,7 @@ async function redactStripeCustomer(orgId: string, record: OrgDeletionRecord): P
 
   let jobId = record.stripeRedactionJobId;
   if (!jobId) {
-    let created: StripeRedactionJob;
+    let created: StripeRedactionJob | undefined;
     try {
       created = await stripeRawRequest<StripeRedactionJob>('POST', '/v1/privacy/redaction_jobs', {
         objects: { customers: [customerId] },
@@ -186,15 +192,53 @@ async function redactStripeCustomer(orgId: string, record: OrgDeletionRecord): P
         });
         return;
       }
-      throw err;
+      if (!isRedactionJobConflict(err)) throw err;
+      // The customer is already included in another redaction job (e.g. a
+      // previous pass created one but crashed before persisting its id).
+      // That job is NOT complete — recover its id and drive ITS lifecycle
+      // instead of skipping redaction, or the original job sits unvalidated
+      // forever.
     }
-    jobId = created.id;
-    await persistRedactionJobId(orgId, jobId);
-    record.stripeRedactionJobId = jobId;
-    await stripeRawRequest('POST', `/v1/privacy/redaction_jobs/${jobId}/validate`);
+    if (created) {
+      jobId = created.id;
+      await persistRedactionJobId(orgId, jobId);
+      record.stripeRedactionJobId = jobId;
+      await stripeRawRequest('POST', `/v1/privacy/redaction_jobs/${jobId}/validate`);
+    } else {
+      jobId = await findRedactionJobIdForCustomer(orgId, customerId);
+      await persistRedactionJobId(orgId, jobId);
+      record.stripeRedactionJobId = jobId;
+      // advanceRedactionJob below issues the validate when the recovered job
+      // is still in `created`.
+    }
   }
 
   await advanceRedactionJob(orgId, jobId);
+}
+
+/**
+ * Recover the id of the live redaction job that already contains the
+ * customer (create returned a job-conflict). Terminal jobs (failed/canceled)
+ * are skipped — they no longer block a new job, so they can't be the
+ * conflicting one.
+ */
+async function findRedactionJobIdForCustomer(orgId: string, customerId: string): Promise<string> {
+  const jobs = await stripeRawRequest<StripeRedactionJobList>('GET', '/v1/privacy/redaction_jobs', {
+    limit: 100,
+  });
+  const match = (jobs.data ?? []).find(
+    (job) =>
+      job.status !== 'failed' &&
+      job.status !== 'canceled' &&
+      (job.objects?.customers ?? []).includes(customerId),
+  );
+  if (!match) {
+    throw new Error(
+      `Stripe reported customer ${customerId} (org ${orgId}) is already in a redaction job, ` +
+        'but no live job containing it was found; the next teardown pass retries',
+    );
+  }
+  return match.id;
 }
 
 /** GET the job's current status and take the one legal step toward `succeeded`. */
@@ -255,10 +299,27 @@ async function stripeRawRequest<T = unknown>(
   return (await getStripeClient().rawRequest(method, path, params)) as T;
 }
 
-/** A missing or already-redacted customer means there is nothing to redact. */
+/**
+ * A missing customer means there is nothing to redact. Deliberately narrow:
+ * only Stripe's `resource_missing` error code counts. Message sniffing (e.g.
+ * matching "already ... redact") is dangerous here — "already included in a
+ * redaction job" would read as already-REDACTED and skip driving the
+ * conflicting job's lifecycle (see {@link isRedactionJobConflict}).
+ */
 function isRedactionUnnecessary(err: unknown): boolean {
-  const e = err as { code?: string; message?: string };
-  return e.code === 'resource_missing' || /already.{0,20}redact/i.test(e.message ?? '');
+  const e = err as { code?: string };
+  return e.code === 'resource_missing';
+}
+
+/**
+ * Job creation rejected because the customer is already included in another
+ * redaction job. Stripe ships no dedicated error code for this conflict, so
+ * the message is matched — narrowly, requiring "redaction job" so a genuine
+ * already-redacted message can never satisfy it.
+ */
+function isRedactionJobConflict(err: unknown): boolean {
+  const e = err as { message?: string };
+  return /already.{0,40}redaction job/i.test(e.message ?? '');
 }
 
 async function deleteAuth0Users(record: OrgDeletionRecord): Promise<void> {

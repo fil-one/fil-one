@@ -425,6 +425,73 @@ describe('runAccountDeletion', () => {
     expect(doneWrites()).toHaveLength(1);
   });
 
+  it('recovers the existing redaction job on an already-in-a-redaction-job conflict instead of skipping', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    // A previous pass created a job but crashed before persisting its id.
+    mockRawRequest.mockImplementation((method: string, path: string) => {
+      if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
+        return Promise.reject(
+          Object.assign(new Error('Customer cus_1 is already included in a redaction job.'), {
+            type: 'invalid_request_error',
+          }),
+        );
+      }
+      if (method === 'GET' && path === '/v1/privacy/redaction_jobs') {
+        return Promise.resolve({
+          data: [
+            { id: 'prj_dead', status: 'canceled', objects: { customers: ['cus_1'] } },
+            { id: 'prj_other', status: 'ready', objects: { customers: ['cus_9'] } },
+            { id: 'prj_live', status: 'ready', objects: { customers: ['cus_1'] } },
+          ],
+        });
+      }
+      if (method === 'GET') return Promise.resolve({ id: 'prj_live', status: 'ready' });
+      return Promise.resolve({ id: 'prj_live' });
+    });
+
+    await runAccountDeletion(ORG_ID);
+
+    // The live job containing the customer is recovered (terminal/other-
+    // customer jobs skipped), persisted, and driven to run.
+    expect(rawRequestCalls()).toEqual([
+      'POST /v1/privacy/redaction_jobs',
+      'GET /v1/privacy/redaction_jobs',
+      'GET /v1/privacy/redaction_jobs/prj_live',
+      'POST /v1/privacy/redaction_jobs/prj_live/run',
+    ]);
+    const jobIdWrites = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .filter((c) => c.args[0].input.UpdateExpression?.includes('stripeRedactionJobId'));
+    expect(jobIdWrites).toHaveLength(1);
+    expect(jobIdWrites[0].args[0].input.ExpressionAttributeValues?.[':jobId']?.S).toBe('prj_live');
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('stays non-DONE when the conflicting redaction job cannot be found in the list', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    mockRawRequest.mockImplementation((method: string, path: string) => {
+      if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
+        return Promise.reject(new Error('Customer cus_1 is already included in a redaction job.'));
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+    expect(err).toBeInstanceOf(AggregateError);
+    expect(err.errors.map(String).join('\n')).toMatch(/no live job containing it was found/);
+    expect(doneWrites()).toHaveLength(0);
+  });
+
+  it('no longer treats a message-only "already redacted" error as success (must be resource_missing)', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    // No Stripe error code — message sniffing alone must not count as done.
+    mockRawRequest.mockRejectedValue(new Error('This customer was already redacted elsewhere'));
+
+    const err = (await runAccountDeletion(ORG_ID).catch((e: unknown) => e)) as AggregateError;
+    expect(err).toBeInstanceOf(AggregateError);
+    expect(doneWrites()).toHaveLength(0);
+  });
+
   it('skips redaction when the snapshot has no Stripe customer', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
     ddbMock
