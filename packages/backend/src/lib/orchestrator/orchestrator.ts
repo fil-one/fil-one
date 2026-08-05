@@ -164,8 +164,9 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
         await disableTenantForDeletion(client, config.id, tenantId);
         result = await deleteTenantsByTenantId({ client, path: { tenantId }, throwOnError: false });
       }
-      // 404 = tenant already gone: exactly the state deletion wants.
-      if (result.error && result.response?.status !== 404) {
+      if (result.error && result.response?.status === 404) {
+        warnUndocumentedDeleteNotFound(config, tenantId);
+      } else if (result.error) {
         throw new Error(`Failed to delete ${config.id} tenant ${tenantId}`, {
           cause: result.error,
         });
@@ -204,6 +205,25 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
     ...buildAccessKeyMethods(client, config.id),
     ...buildMetricsMethods(client),
   } satisfies ServiceOrchestrator;
+}
+
+// A 404 from DELETE /tenants/{tenantId} is tolerated as already-gone, but
+// loudly: the contract defines idempotent deletion via 204
+// (management-openapi.yaml) and never documents a 404 for that DELETE. A 404
+// can equally be a misrouted baseUrl or gateway answering for the wrong
+// service — in which case the SSM credentials deleted next would orphan a
+// tenant that lives on upstream.
+function warnUndocumentedDeleteNotFound(config: FilOneOrchestratorConfig, tenantId: string): void {
+  console.warn(
+    `[${config.id}] DELETE /tenants/${tenantId} returned 404 — treating as already ` +
+      'deleted, but the contract defines idempotent deletion via 204; a 404 may indicate ' +
+      'a misrouted baseUrl/gateway rather than actual deletion',
+    {
+      orchestratorId: config.id,
+      tenantId,
+      ...('baseUrl' in config.api ? { baseUrl: config.api.baseUrl } : {}),
+    },
+  );
 }
 
 // Pre-deletion disable: the contract mandates `disabled` before

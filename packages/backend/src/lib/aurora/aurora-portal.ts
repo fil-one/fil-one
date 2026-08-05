@@ -23,6 +23,7 @@ import {
   AccessKeyValidationError,
   BucketAlreadyExistsError,
 } from '../errors.js';
+import { deleteSsmParameter } from '../s3-credentials.js';
 import { instrumentClient } from './aurora-api-metrics.js';
 
 const ssm = new SSMClient({});
@@ -325,6 +326,22 @@ export async function deleteAuroraAccessKey({
   console.log(`Aurora access key "${auroraKeyId}" deleted for tenant ${tenantId}`);
 }
 
+/** The SSM parameter aurora-tenant-setup stashes the tenant's portal API key under. */
+function portalApiKeySsmPath(stage: string, tenantId: string): string {
+  return `/filone/${stage}/aurora-portal/tenant-api-key/${tenantId}`;
+}
+
+/**
+ * Deletes a tenant's portal API key from SSM (account deletion). Idempotent —
+ * an already-deleted parameter is success. Also evicts the warm-container
+ * cache entry so a stale key can't be served after the parameter is gone
+ * (mirrors deleteConsoleS3Credentials in s3-credentials.ts).
+ */
+export async function deleteAuroraPortalApiKey(stage: string, tenantId: string): Promise<void> {
+  ssmCache.delete(`${stage}/${tenantId}`);
+  await deleteSsmParameter(portalApiKeySsmPath(stage, tenantId));
+}
+
 export async function getAuroraPortalApiKey(stage: string, tenantId: string): Promise<string> {
   const cacheKey = `${stage}/${tenantId}`;
   const cached = ssmCache.get(cacheKey);
@@ -334,7 +351,7 @@ export async function getAuroraPortalApiKey(stage: string, tenantId: string): Pr
   try {
     const { Parameter } = await ssm.send(
       new GetParameterCommand({
-        Name: `/filone/${stage}/aurora-portal/tenant-api-key/${tenantId}`,
+        Name: portalApiKeySsmPath(stage, tenantId),
         WithDecryption: true,
       }),
     );

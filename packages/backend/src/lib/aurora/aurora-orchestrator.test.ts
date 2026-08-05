@@ -21,6 +21,7 @@ vi.mock('./aurora-tenant-setup.js', () => ({
 
 const mockCreateAuroraBucket = vi.fn();
 const mockCreateAuroraAccessKey = vi.fn();
+const mockDeleteAuroraAccessKey = vi.fn();
 const mockFindAuroraAccessKeyByName = vi.fn();
 const mockGetAuroraPortalApiKey = vi.fn();
 const mockCreatePortalClient = vi.fn().mockResolvedValue('instrumented-portal-client');
@@ -31,6 +32,7 @@ vi.mock('./aurora-portal.js', async (importOriginal) => {
     ...original,
     createAuroraBucket: (...args: unknown[]) => mockCreateAuroraBucket(...args),
     createAuroraAccessKey: (...args: unknown[]) => mockCreateAuroraAccessKey(...args),
+    deleteAuroraAccessKey: (...args: unknown[]) => mockDeleteAuroraAccessKey(...args),
     findAuroraAccessKeyByName: (...args: unknown[]) => mockFindAuroraAccessKeyByName(...args),
     getAuroraPortalApiKey: (...args: unknown[]) => mockGetAuroraPortalApiKey(...args),
     createPortalClient: (...args: unknown[]) => mockCreatePortalClient(...args),
@@ -535,23 +537,131 @@ describe('auroraOrchestrator', () => {
     const portalApiKeyParam = `/filone/test/aurora-portal/tenant-api-key/${tenantId}`;
     const s3KeyParam = `/filone/test/aurora-s3/access-key/${tenantId}`;
 
-    it('disables an active tenant and deletes both FilOne-held SSM secrets', async () => {
+    it('disables an active tenant, revokes the console S3 key, and deletes both FilOne-held SSM secrets', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
       mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
       mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+      mockFindAuroraAccessKeyByName.mockResolvedValue({
+        id: 'aurora-key-1',
+        accessKeyId: 'AKIACONSOLE',
+        createdAt: '2026-01-01T00:00:00Z',
+      });
+      mockDeleteAuroraAccessKey.mockResolvedValue(undefined);
       ssmMock.on(DeleteParameterCommand).resolves({});
 
       await auroraOrchestrator.deleteTenant(tenantId);
 
       // Aurora has no remote tenant-deletion API — deletion here means the
-      // strongest available teardown: disable + credential removal.
+      // strongest available teardown: disable + upstream key revocation +
+      // credential removal.
       expect(mockUpdateAuroraTenantStatusApi).toHaveBeenCalledWith({
         tenantId,
         status: 'DISABLED',
+      });
+      expect(mockFindAuroraAccessKeyByName).toHaveBeenCalledWith({
+        tenantId,
+        keyName: 'filone-console',
+      });
+      expect(mockDeleteAuroraAccessKey).toHaveBeenCalledWith({
+        tenantId,
+        auroraKeyId: 'aurora-key-1',
       });
       const ssmDeletes = ssmMock
         .commandCalls(DeleteParameterCommand)
         .map((c) => c.args[0].input.Name);
       expect(ssmDeletes).toEqual([portalApiKeyParam, s3KeyParam]);
+    });
+
+    it('revokes the console S3 key upstream BEFORE deleting its SSM copies', async () => {
+      // Once SSM is cleaned the portal is unreachable and the key id
+      // unrecoverable, so revocation must come first.
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+      mockFindAuroraAccessKeyByName.mockResolvedValue({
+        id: 'aurora-key-1',
+        accessKeyId: 'AKIACONSOLE',
+        createdAt: '2026-01-01T00:00:00Z',
+      });
+      mockDeleteAuroraAccessKey.mockImplementation(() => {
+        expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
+        return Promise.resolve();
+      });
+      ssmMock.on(DeleteParameterCommand).resolves({});
+
+      await auroraOrchestrator.deleteTenant(tenantId);
+
+      expect(mockDeleteAuroraAccessKey).toHaveBeenCalledTimes(1);
+      expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(2);
+    });
+
+    it('tolerates an already-revoked console S3 key (absent from the listing)', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
+      mockFindAuroraAccessKeyByName.mockResolvedValue(undefined);
+      ssmMock.on(DeleteParameterCommand).resolves({});
+
+      await auroraOrchestrator.deleteTenant(tenantId);
+
+      expect(mockDeleteAuroraAccessKey).not.toHaveBeenCalled();
+      expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(2);
+    });
+
+    it('skips revocation when the portal API key is already gone from SSM (idempotent re-run)', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
+      mockFindAuroraAccessKeyByName.mockRejectedValue(
+        new Error(`Aurora API key not found in SSM for tenant ${tenantId}`),
+      );
+      ssmMock.on(DeleteParameterCommand).resolves({});
+
+      await expect(auroraOrchestrator.deleteTenant(tenantId)).resolves.toBeUndefined();
+
+      expect(mockDeleteAuroraAccessKey).not.toHaveBeenCalled();
+      expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(2);
+    });
+
+    it('propagates revocation failures and leaves the SSM parameters for the retry', async () => {
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
+      mockFindAuroraAccessKeyByName.mockResolvedValue({
+        id: 'aurora-key-1',
+        accessKeyId: 'AKIACONSOLE',
+        createdAt: '2026-01-01T00:00:00Z',
+      });
+      mockDeleteAuroraAccessKey.mockRejectedValue(new Error('portal 500'));
+
+      await expect(auroraOrchestrator.deleteTenant(tenantId)).rejects.toThrow('portal 500');
+      expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
+    });
+
+    it('warns about the manual backoffice step only on the run that disables the tenant, after the deletions', async () => {
+      // Snapshot how much cleanup had executed when the warn fired — the
+      // wording must describe work that has already happened.
+      let ssmDeletesAtWarnTime = -1;
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {
+        ssmDeletesAtWarnTime = ssmMock.commandCalls(DeleteParameterCommand).length;
+      });
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+      mockFindAuroraAccessKeyByName.mockResolvedValue(undefined);
+      ssmMock.on(DeleteParameterCommand).resolves({});
+
+      await auroraOrchestrator.deleteTenant(tenantId);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('manual backoffice step'), {
+        tenantId,
+      });
+      expect(ssmDeletesAtWarnTime).toBe(2);
+    });
+
+    it('does not repeat the manual-step warning on an idempotent re-run (already disabled)', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
+      mockFindAuroraAccessKeyByName.mockResolvedValue(undefined);
+      ssmMock.on(DeleteParameterCommand).resolves({});
+
+      await auroraOrchestrator.deleteTenant(tenantId);
+
+      expect(warnSpy).not.toHaveBeenCalled();
     });
 
     it('skips the status update when the tenant is already disabled', async () => {
@@ -571,7 +681,33 @@ describe('auroraOrchestrator', () => {
       await auroraOrchestrator.deleteTenant(tenantId);
 
       expect(mockUpdateAuroraTenantStatusApi).not.toHaveBeenCalled();
+      // No tenant upstream — nothing to revoke a key from.
+      expect(mockFindAuroraAccessKeyByName).not.toHaveBeenCalled();
       expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(2);
+    });
+
+    it('evicts the cached portal API key so warm containers stop serving it', async () => {
+      // The aurora-portal mock spreads the original module, so deleteTenant
+      // runs the real deleteAuroraPortalApiKey against the real cache.
+      const portal =
+        await vi.importActual<typeof import('./aurora-portal.js')>('./aurora-portal.js');
+      ssmMock
+        .on(GetParameterCommand, { Name: portalApiKeyParam, WithDecryption: true })
+        .resolves({ Parameter: { Value: 'portal-key' } });
+      await portal.getAuroraPortalApiKey('test', tenantId); // prime the cache
+      mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'DISABLED' });
+      ssmMock.on(DeleteParameterCommand).resolves({});
+
+      await auroraOrchestrator.deleteTenant(tenantId);
+
+      // A cache hit would serve the stale key without touching SSM; the
+      // eviction surfaces as a re-fetch that now finds the parameter gone.
+      ssmMock
+        .on(GetParameterCommand)
+        .rejects(Object.assign(new Error('gone'), { name: 'ParameterNotFound' }));
+      await expect(portal.getAuroraPortalApiKey('test', tenantId)).rejects.toThrow(
+        `Aurora API key not found in SSM for tenant ${tenantId}`,
+      );
     });
 
     it('tolerates already-deleted SSM parameters (idempotent re-run)', async () => {
