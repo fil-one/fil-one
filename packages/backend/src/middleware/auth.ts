@@ -250,6 +250,10 @@ async function resolveUserAndOrg(
   // userId/orgId check so a deleted user's still-valid tokens can neither
   // operate on remnants nor fall through to createNewUserAndOrg below and
   // resurrect the account as a fresh org.
+  // Eventually-consistent read — an accepted sub-second staleness window.
+  // Resurrection is independently blocked by the `attribute_not_exists(pk)`
+  // transact condition against the retained SUB# identity row in
+  // createNewUserAndOrg's onboarding transaction.
   if (result.Item?.deleted?.BOOL === true) {
     throw new AccountDeletedError();
   }

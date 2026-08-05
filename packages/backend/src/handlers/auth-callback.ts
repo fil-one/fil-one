@@ -126,6 +126,11 @@ function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
  * trusted. Fails open on verification/DynamoDB errors: login must not gain
  * a hard dependency here — the check only ever adds a restriction, and the
  * auth middleware's own tombstone gate still backstops this path.
+ *
+ * Eventually-consistent read — an accepted sub-second staleness window.
+ * Resurrection is independently blocked by the `attribute_not_exists(pk)`
+ * transact condition against the retained SUB# identity row in the auth
+ * middleware's onboarding transaction (createNewUserAndOrg).
  */
 async function isTombstonedIdentity(
   idToken: string,
