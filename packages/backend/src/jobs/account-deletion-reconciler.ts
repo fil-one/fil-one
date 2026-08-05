@@ -32,11 +32,28 @@ export async function handler(): Promise<void> {
   const workerFunctionName = process.env.ACCOUNT_DELETION_WORKER_FUNCTION_NAME!;
   const now = Date.now();
 
+  // If the scan itself fails, the handler throws here and NO metric is
+  // emitted this run — deliberate: an absent gauge alerts differently from a
+  // zero, and the cron's own error metric covers the scan failure.
   const incomplete = await scanIncompleteDeletions();
-  const stale = incomplete.filter(
-    (record) => now - new Date(record.updatedAt).getTime() > STALE_AFTER_MS,
-  );
+  const stale = incomplete.filter((record) => isStale(record, now));
   const stuck = incomplete.filter((record) => record.attemptCount >= STUCK_ATTEMPT_THRESHOLD);
+
+  // Emit the stuck gauge BEFORE the re-invokes: it must reach CloudWatch even
+  // when a later worker invoke fails.
+  reportMetric({
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [[]],
+          Metrics: [{ Name: 'StuckAccountDeletionCount', Unit: 'Count' }],
+        },
+      ],
+    },
+    StuckAccountDeletionCount: stuck.length,
+  });
 
   let reinvoked = 0;
   let failed = 0;
@@ -65,20 +82,26 @@ export async function handler(): Promise<void> {
     failed,
     stuck: stuck.length,
   });
+}
 
-  reportMetric({
-    _aws: {
-      Timestamp: Date.now(),
-      CloudWatchMetrics: [
-        {
-          Namespace: 'FilOne',
-          Dimensions: [[]],
-          Metrics: [{ Name: 'StuckAccountDeletionCount', Unit: 'Count' }],
-        },
-      ],
-    },
-    StuckAccountDeletionCount: stuck.length,
-  });
+/**
+ * Staleness check with a NaN guard: a garbled or missing `updatedAt` parses
+ * to NaN, and `NaN > x` is false — such a record would silently NEVER look
+ * stale and never be re-driven. Treat it as stale (and warn) instead.
+ */
+function isStale(record: IncompleteDeletion, now: number): boolean {
+  const updatedAtMs = new Date(record.updatedAt).getTime();
+  if (Number.isNaN(updatedAtMs)) {
+    console.warn(
+      '[account-deletion-reconciler] Record has an unparseable updatedAt; treating as stale',
+      {
+        pk: record.pk,
+        updatedAt: record.updatedAt,
+      },
+    );
+    return true;
+  }
+  return now - updatedAtMs > STALE_AFTER_MS;
 }
 
 /** What the lean ProjectionExpression below actually returns per record. */
@@ -98,11 +121,15 @@ async function scanIncompleteDeletions(): Promise<IncompleteDeletion[]> {
     const result = await dynamo.send(
       new ScanCommand({
         TableName: Resource.UserInfoTable.name,
-        FilterExpression: 'sk = :deletion AND #s <> :done',
+        // begins_with(pk, :orgPrefix) keeps any future non-ORG row that
+        // happens to carry an sk of DELETION out of the reconciler (same
+        // pattern as lib/stuck-tenant-metric.ts).
+        FilterExpression: 'begins_with(pk, :orgPrefix) AND sk = :deletion AND #s <> :done',
         // Trim the returned payload to what the handler actually reads.
         ProjectionExpression: 'pk, updatedAt, attemptCount',
         ExpressionAttributeNames: { '#s': 'status' },
         ExpressionAttributeValues: {
+          ':orgPrefix': { S: 'ORG#' },
           ':deletion': { S: 'DELETION' },
           ':done': { S: OrgDeletionStatus.Done },
         },
