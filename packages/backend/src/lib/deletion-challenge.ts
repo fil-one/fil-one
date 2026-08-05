@@ -192,10 +192,21 @@ export async function verifyDeletionChallenge(
     return 'invalid';
   }
 
-  // Single-use: a verified code cannot be replayed.
-  await getDynamoClient().send(
-    new DeleteItemCommand({ TableName: Resource.BillingTable.name, Key: key }),
-  );
+  // Single-use: a verified code cannot be replayed. The conditional delete
+  // makes consumption atomic — if a concurrent verify already consumed the
+  // row, this call must not also report success.
+  try {
+    await getDynamoClient().send(
+      new DeleteItemCommand({
+        TableName: Resource.BillingTable.name,
+        Key: key,
+        ConditionExpression: 'attribute_exists(pk)',
+      }),
+    );
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) return 'invalid';
+    throw err;
+  }
   return 'ok';
 }
 

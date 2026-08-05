@@ -223,6 +223,24 @@ describe('verifyDeletionChallenge', () => {
     expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
   });
 
+  it('returns invalid when a concurrent verify already consumed the challenge', async () => {
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: marshall(challengeAttrs()) });
+    ddbMock.on(DeleteItemCommand).rejects(conditionalFailure());
+
+    const result = await verifyDeletionChallenge(ORG_ID, '123456');
+
+    expect(result).toBe('invalid');
+    const input = ddbMock.commandCalls(DeleteItemCommand)[0].args[0].input;
+    expect(input.ConditionExpression).toBe('attribute_exists(pk)');
+  });
+
+  it('rethrows non-conditional errors from the consuming delete', async () => {
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: marshall(challengeAttrs()) });
+    ddbMock.on(DeleteItemCommand).rejects(new Error('throttled'));
+
+    await expect(verifyDeletionChallenge(ORG_ID, '123456')).rejects.toThrow('throttled');
+  });
+
   it('returns expired_or_locked when the attempt-consumption condition fails', async () => {
     ddbMock.on(UpdateItemCommand).rejects(conditionalFailure());
 
