@@ -25,11 +25,7 @@ import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
-import {
-  exchangeAndVerifyRefreshToken,
-  exchangeRefreshToken,
-  type NewTokens,
-} from '../lib/token-refresh.js';
+import { exchangeAndVerifyRefreshToken, type NewTokens } from '../lib/token-refresh.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -584,9 +580,19 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     )._forceTokenRefresh;
 
     if (forceRefresh && request.internal.refreshToken) {
-      const refreshed = await exchangeRefreshToken(request.internal.refreshToken);
+      // Same verification gate as the before hook: the minted access token's
+      // signature is checked before any cookie is set. A failed exchange or
+      // verification keeps the previous semantics — no fresh cookies, the
+      // handler response goes out unchanged.
+      const domain = process.env.AUTH0_DOMAIN!;
+      const refreshed = await exchangeAndVerifyRefreshToken({
+        refreshToken: request.internal.refreshToken,
+        jwks: getJWKS(domain),
+        audience: process.env.AUTH0_AUDIENCE!,
+        issuer: `https://${domain}/`,
+      });
       if (refreshed) {
-        newTokens = refreshed;
+        newTokens = refreshed.tokens;
         console.warn('[auth] Force token refresh succeeded');
       }
     }
