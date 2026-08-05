@@ -117,7 +117,9 @@ describe('fthOrchestrator.deleteTenant', () => {
     // FTH 409s deletion of a non-disabled client, so disable comes first.
     expect(mockUpdateClientStatus).toHaveBeenCalledWith(fthClientId, { status: 'disabled' });
     expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId);
-    const ssmDeletes = ssmMock.commandCalls(DeleteParameterCommand).map((c) => c.args[0].input.Name);
+    const ssmDeletes = ssmMock
+      .commandCalls(DeleteParameterCommand)
+      .map((c) => c.args[0].input.Name);
     expect(ssmDeletes).toEqual([consoleKeyParam]);
   });
 

@@ -226,7 +226,9 @@ describe('deleteTenant', () => {
     expect(mockDeleteTenant).toHaveBeenCalledWith(
       expect.objectContaining({ client: MOCK_CLIENT, path: { tenantId }, throwOnError: false }),
     );
-    const ssmDeletes = ssmMock.commandCalls(DeleteParameterCommand).map((c) => c.args[0].input.Name);
+    const ssmDeletes = ssmMock
+      .commandCalls(DeleteParameterCommand)
+      .map((c) => c.args[0].input.Name);
     expect(ssmDeletes).toEqual([consoleKeyParam]);
   });
 
@@ -252,7 +254,9 @@ describe('deleteTenant', () => {
 
   it('re-disables and retries once on 409 (tenant not disabled yet)', async () => {
     mockSetStatus.mockResolvedValue(noContent());
-    mockDeleteTenant.mockResolvedValueOnce(fail(409, 'not disabled')).mockResolvedValue(noContent());
+    mockDeleteTenant
+      .mockResolvedValueOnce(fail(409, 'not disabled'))
+      .mockResolvedValue(noContent());
     ssmMock.on(DeleteParameterCommand).resolves({});
 
     await orchestrator.deleteTenant(tenantId);

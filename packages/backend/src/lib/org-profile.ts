@@ -36,10 +36,7 @@ export async function getOrgProfile(orgId: string): Promise<OrgProfileItem | und
  * its ConsistentRead profile Get. Pure and dependency-free so it stays
  * bundle-safe, like the rest of this module.
  */
-export function assertOrgNotDeleting(
-  orgProfile: OrgProfileItem | undefined,
-  orgId: string,
-): void {
+export function assertOrgNotDeleting(orgProfile: OrgProfileItem | undefined, orgId: string): void {
   if (orgProfile?.deleting?.BOOL === true) {
     throw new Error(`Org ${orgId} is being deleted; refusing tenant setup`);
   }
