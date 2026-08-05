@@ -147,6 +147,19 @@ describe('fthOrchestrator.deleteTenant', () => {
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
   });
 
+  it('throws a wrapped error on a persistent 409 and leaves the SSM parameter alone', async () => {
+    mockUpdateClientStatus.mockResolvedValue(undefined);
+    mockFthClient.deleteClient.mockRejectedValue(new FthConflictError('not disabled', undefined));
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    // Wrapped like the shared orchestrator — not the raw FthConflictError.
+    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
+      `Failed to delete FTH tenant ${fthClientId}`,
+    );
+    expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(2);
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
+  });
+
   it('throws on any other deletion failure and leaves the SSM parameter for the retry', async () => {
     mockUpdateClientStatus.mockResolvedValue(undefined);
     mockFthClient.deleteClient.mockRejectedValue(new FthApiError(500, 'boom', undefined));

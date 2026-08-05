@@ -119,7 +119,17 @@ export const fthOrchestrator = {
       if (!(err instanceof FthConflictError)) throw err;
       // 409: the disable hadn't taken effect yet — disable again, retry once.
       await disableFthTenantForDeletion(tenantId);
-      await deleteFthClientToleratingNotFound(tenantId);
+      try {
+        await deleteFthClientToleratingNotFound(tenantId);
+      } catch (retryErr) {
+        if (retryErr instanceof FthConflictError) {
+          // Persistent 409: wrap it like the shared orchestrator does so
+          // callers get a uniform "Failed to delete" error instead of the
+          // raw transport-level conflict.
+          throw new Error(`Failed to delete FTH tenant ${tenantId}`, { cause: retryErr });
+        }
+        throw retryErr;
+      }
     }
     await deleteConsoleS3Credentials({
       orchestratorId: fthOrchestrator.id,
