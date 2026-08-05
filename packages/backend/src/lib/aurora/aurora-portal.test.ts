@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { SSMClient, GetParameterCommand, DeleteParameterCommand } from '@aws-sdk/client-ssm';
 import type { BucketsBucketCreateRequest } from '@filone/aurora-portal-client';
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,7 @@ import {
   createAuroraAccessKey,
   createAuroraBucket,
   createPortalClient,
+  deleteAuroraPortalApiKey,
   findAuroraAccessKeyByName,
   getAuroraPortalApiKey,
   _resetSsmCacheForTesting,
@@ -326,6 +327,51 @@ describe('getAuroraPortalApiKey', () => {
     expect(result1).toBe('key-for-tenant-1');
     expect(result2).toBe('key-for-tenant-2');
     expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(2);
+  });
+});
+
+describe('deleteAuroraPortalApiKey', () => {
+  beforeEach(() => {
+    ssmMock.reset();
+    _resetSsmCacheForTesting();
+  });
+
+  it('deletes the SSM parameter for the tenant', async () => {
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    await deleteAuroraPortalApiKey('test', 'tenant-1');
+
+    const deleteCalls = ssmMock.commandCalls(DeleteParameterCommand);
+    expect(deleteCalls).toHaveLength(1);
+    expect(deleteCalls[0].args[0].input).toStrictEqual({
+      Name: '/filone/test/aurora-portal/tenant-api-key/tenant-1',
+    });
+  });
+
+  it('evicts the cached key so the next lookup re-fetches from SSM', async () => {
+    // Prime the warm-container cache, delete, then look up again: without the
+    // eviction the stale key would still be served from cache.
+    setupSsmMock('soon-deleted-key');
+    ssmMock.on(DeleteParameterCommand).resolves({});
+    await getAuroraPortalApiKey('test', 'tenant-1');
+
+    await deleteAuroraPortalApiKey('test', 'tenant-1');
+
+    ssmMock
+      .on(GetParameterCommand)
+      .rejects(Object.assign(new Error('Parameter not found'), { name: 'ParameterNotFound' }));
+    await expect(getAuroraPortalApiKey('test', 'tenant-1')).rejects.toThrow(
+      'Aurora API key not found in SSM for tenant tenant-1',
+    );
+    expect(ssmMock.commandCalls(GetParameterCommand)).toHaveLength(2);
+  });
+
+  it('tolerates an already-deleted parameter (idempotent re-run)', async () => {
+    ssmMock
+      .on(DeleteParameterCommand)
+      .rejects(Object.assign(new Error('missing'), { name: 'ParameterNotFound' }));
+
+    await expect(deleteAuroraPortalApiKey('test', 'tenant-1')).resolves.toBeUndefined();
   });
 });
 

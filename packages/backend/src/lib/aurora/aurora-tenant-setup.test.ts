@@ -206,13 +206,15 @@ describe('processTenantSetup', () => {
     const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
     expect(updateCalls).toHaveLength(4);
 
-    // First update: set auroraTenantId + AURORA_TENANT_CREATED
+    // First update: set auroraTenantId + AURORA_TENANT_CREATED. The
+    // tenant-id-persisting write additionally refuses deleting orgs
+    // (FIL-112 TOCTOU with the teardown).
     expect(updateCalls[0].args[0].input).toStrictEqual({
       TableName: 'UserInfoTable',
       Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
       UpdateExpression:
         'SET auroraTenantId = :auroraTenantId, auroraSetupStatus = :status, updatedAt = :now',
-      ConditionExpression: 'auroraSetupStatus = :expected',
+      ConditionExpression: 'auroraSetupStatus = :expected AND attribute_not_exists(deleting)',
       ExpressionAttributeValues: {
         ':auroraTenantId': { S: 'aurora-t-1' },
         ':status': { S: OrgSetupStatus.AURORA_TENANT_CREATED },
@@ -764,6 +766,52 @@ describe('processTenantSetup', () => {
       message: 'The conditional request failed',
     });
   }
+
+  it('refuses to persist the tenant id when deletion races the setup (FIL-112 TOCTOU)', async () => {
+    // Entry-point GetItem passed the deleting check, but the teardown set
+    // `deleting` while createAuroraTenant was in flight: the conditional
+    // tenant-id write fails and the re-read sees the deleting flag.
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce(orgProfileItem({ auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }))
+      .resolves({
+        Item: {
+          pk: { S: 'ORG#org-1' },
+          sk: { S: 'PROFILE' },
+          auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED },
+          deleting: { BOOL: true },
+        },
+      });
+    ddbMock.on(UpdateItemCommand).rejects(conditionalCheckFailed());
+    mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-doomed' });
+
+    await expect(processTenantSetup('org-1')).rejects.toThrow(
+      'Org org-1 is deleting or purged; refusing to persist Aurora tenant aurora-t-doomed',
+    );
+    // No further setup steps run against the doomed tenant.
+    expect(mockSetupAuroraTenant).not.toHaveBeenCalled();
+    // The tenant-id write itself must carry the deletion guard.
+    const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+    expect(updateCalls[0].args[0].input.ConditionExpression).toBe(
+      'auroraSetupStatus = :expected AND attribute_not_exists(deleting)',
+    );
+  });
+
+  it('refuses to persist the tenant id when the PROFILE row was purged mid-setup', async () => {
+    // Same race, later stage: the teardown already purged the PROFILE row, so
+    // the conditional write fails and the re-read finds nothing to resurrect.
+    ddbMock
+      .on(GetItemCommand)
+      .resolvesOnce(orgProfileItem({ auroraSetupStatus: { S: OrgSetupStatus.FILONE_ORG_CREATED } }))
+      .resolves({ Item: undefined });
+    ddbMock.on(UpdateItemCommand).rejects(conditionalCheckFailed());
+    mockCreateAuroraTenant.mockResolvedValue({ auroraTenantId: 'aurora-t-doomed' });
+
+    await expect(processTenantSetup('org-1')).rejects.toThrow(
+      'Org org-1 is deleting or purged; refusing to persist Aurora tenant aurora-t-doomed',
+    );
+    expect(mockSetupAuroraTenant).not.toHaveBeenCalled();
+  });
 
   it('continues the chain when createTenant loses the status-advance race', async () => {
     // Initial entry-point GetItem: status is FILONE_ORG_CREATED.

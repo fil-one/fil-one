@@ -116,6 +116,33 @@ describe('createDeletionChallenge', () => {
     });
   });
 
+  it('clamps a resent code expiry to the window end so it never outlives the row', async () => {
+    // Window ends in 5 minutes — sooner than the code's normal TTL.
+    const windowEnd = Math.floor(Date.now() / 1000) + 5 * 60;
+    ddbMock
+      .on(UpdateItemCommand)
+      .rejectsOnce(
+        conditionalFailure(
+          challengeAttrs({
+            lastSentAt: new Date(Date.now() - 120_000).toISOString(),
+            ttl: windowEnd,
+          }),
+        ),
+      )
+      .resolves({});
+
+    const result = await createDeletionChallenge(ORG_ID);
+
+    if (result.outcome !== 'created')
+      expect.unreachable(`expected outcome=created, got ${result.outcome}`);
+    expect(result.expiresAt).toBe(new Date(windowEnd * 1000).toISOString());
+    // The stored expiry is clamped too, not just the reported one.
+    const input = ddbMock.commandCalls(UpdateItemCommand)[1].args[0].input;
+    expect(input.ExpressionAttributeValues?.[':expiresAt']).toEqual({
+      S: new Date(windowEnd * 1000).toISOString(),
+    });
+  });
+
   it('returns rate_limited with resend time on cooldown rejection', async () => {
     const lastSentAt = new Date().toISOString();
     ddbMock
@@ -194,6 +221,24 @@ describe('verifyDeletionChallenge', () => {
 
     expect(result).toBe('invalid');
     expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
+  });
+
+  it('returns invalid when a concurrent verify already consumed the challenge', async () => {
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: marshall(challengeAttrs()) });
+    ddbMock.on(DeleteItemCommand).rejects(conditionalFailure());
+
+    const result = await verifyDeletionChallenge(ORG_ID, '123456');
+
+    expect(result).toBe('invalid');
+    const input = ddbMock.commandCalls(DeleteItemCommand)[0].args[0].input;
+    expect(input.ConditionExpression).toBe('attribute_exists(pk)');
+  });
+
+  it('rethrows non-conditional errors from the consuming delete', async () => {
+    ddbMock.on(UpdateItemCommand).resolves({ Attributes: marshall(challengeAttrs()) });
+    ddbMock.on(DeleteItemCommand).rejects(new Error('throttled'));
+
+    await expect(verifyDeletionChallenge(ORG_ID, '123456')).rejects.toThrow('throttled');
   });
 
   it('returns expired_or_locked when the attempt-consumption condition fails', async () => {

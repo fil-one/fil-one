@@ -124,6 +124,7 @@ describe('fthOrchestrator.deleteTenant', () => {
   });
 
   it('treats an already-deleted client as success and still deletes the SSM parameter', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockUpdateClientStatus.mockRejectedValue(notFound());
     mockFthClient.deleteClient.mockRejectedValue(notFound());
     ssmMock.on(DeleteParameterCommand).resolves({});
@@ -131,6 +132,16 @@ describe('fthOrchestrator.deleteTenant', () => {
     await fthOrchestrator.deleteTenant(fthClientId);
 
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
+    // The contract defines idempotent deletion via 204; an undocumented 404
+    // may be a misrouted baseUrl/gateway, so it must be flagged loudly.
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('misrouted'),
+      expect.objectContaining({
+        orchestratorId: 'fth',
+        tenantId: fthClientId,
+        baseUrl: 'https://api.fortilyx.test',
+      }),
+    );
   });
 
   it('re-disables and retries once on a 409 conflict (client not disabled yet)', async () => {
@@ -145,6 +156,19 @@ describe('fthOrchestrator.deleteTenant', () => {
     expect(mockUpdateClientStatus).toHaveBeenCalledTimes(2);
     expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(2);
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
+  });
+
+  it('throws a wrapped error on a persistent 409 and leaves the SSM parameter alone', async () => {
+    mockUpdateClientStatus.mockResolvedValue(undefined);
+    mockFthClient.deleteClient.mockRejectedValue(new FthConflictError('not disabled', undefined));
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    // Wrapped like the shared orchestrator — not the raw FthConflictError.
+    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
+      `Failed to delete FTH tenant ${fthClientId}`,
+    );
+    expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(2);
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
   });
 
   it('throws on any other deletion failure and leaves the SSM parameter for the retry', async () => {

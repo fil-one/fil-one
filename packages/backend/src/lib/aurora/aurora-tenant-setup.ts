@@ -167,10 +167,12 @@ async function createTenant(
   });
 
   if (result === 'lost-race') {
-    // A concurrent invocation already wrote AURORA_TENANT_CREATED (or beyond)
-    // and the winner's auroraTenantId is recorded on the org. Aurora's 409
-    // handler in createAuroraTenant returns the same ID, but re-read here to
-    // guarantee we use the persisted value rather than relying on that.
+    // The conditional write failed. Either a concurrent invocation already
+    // wrote AURORA_TENANT_CREATED (or beyond) — the winner's auroraTenantId
+    // is recorded on the org — or the deletion guard tripped: a teardown set
+    // `deleting` (or purged the PROFILE row) while createAuroraTenant was in
+    // flight (TOCTOU on the entry-point deleting check). Re-read to tell the
+    // two apart rather than relying on Aurora's 409 handler.
     const { Item } = await dynamo.send(
       new GetItemCommand({
         TableName: Resource.UserInfoTable.name,
@@ -178,7 +180,18 @@ async function createTenant(
         ConsistentRead: true,
       }),
     );
-    const persistedId = Item?.auroraTenantId?.S;
+    if (!Item || Item.deleting?.BOOL === true) {
+      // The Aurora tenant created above is now unreferenced. If the PROFILE
+      // row still exists, the teardown's late-region re-check will sweep it;
+      // if the row was already purged, this error must be surfaced so the
+      // tenant is cleaned up manually.
+      throw new Error(
+        `Org ${orgId} is deleting or purged; refusing to persist Aurora tenant ${auroraTenantId}. ` +
+          `The just-created Aurora tenant is swept by the teardown's late-region re-check ` +
+          `if the profile still exists; otherwise it needs manual cleanup.`,
+      );
+    }
+    const persistedId = Item.auroraTenantId?.S;
     assert(persistedId, `auroraTenantId missing after status-advance race for org ${orgId}`);
     return persistedId;
   }
@@ -448,13 +461,23 @@ async function advanceStatus(opts: AdvanceStatusOptions): Promise<'wrote' | 'los
       : {}),
   };
 
+  // The tenant-id-persisting write additionally refuses orgs whose deletion
+  // began after the entry-point deleting check (TOCTOU) — createTenant's
+  // lost-race re-read turns that refusal into a loud error. Status-only
+  // advances stay unguarded: they never persist a tenant id, and the
+  // teardown's late-region re-check covers them.
+  const conditionExpression =
+    opts.writeAuroraTenantId !== undefined
+      ? 'auroraSetupStatus = :expected AND attribute_not_exists(deleting)'
+      : 'auroraSetupStatus = :expected';
+
   try {
     const out = await dynamo.send(
       new UpdateItemCommand({
         TableName: Resource.UserInfoTable.name,
         Key: opts.orgProfileKey,
         UpdateExpression: setExpr,
-        ConditionExpression: 'auroraSetupStatus = :expected',
+        ConditionExpression: conditionExpression,
         ExpressionAttributeValues: exprValues,
         // On the terminal advance, read the prior auroraSetupFailureCount so
         // we can refresh the stuck-tenant gauge when this org was previously
