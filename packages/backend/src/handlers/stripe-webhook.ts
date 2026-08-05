@@ -2,7 +2,6 @@ import {
   ConditionalCheckFailedException,
   DeleteItemCommand,
   PutItemCommand,
-  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
@@ -14,7 +13,7 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
-import { DELETION_GUARD } from '../lib/deletion-guard.js';
+import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import {
   closeOutDeletedCustomer,
@@ -34,31 +33,6 @@ import {
 } from '../lib/stripe-webhook-metrics.js';
 
 const dynamo = getDynamoClient();
-
-/**
- * Sends a billing-record UpdateItem guarded by {@link DELETION_GUARD}.
- * Returns null when the guard rejects the write (record purged or org
- * mid-deletion) — callers must then skip follow-on tenant status syncs.
- */
-async function sendGuardedBillingUpdate(
-  input: Omit<ConstructorParameters<typeof UpdateItemCommand>[0], 'ConditionExpression'>,
-  context: Record<string, unknown>,
-): Promise<import('@aws-sdk/client-dynamodb').UpdateItemCommandOutput | null> {
-  try {
-    return await dynamo.send(
-      new UpdateItemCommand({ ...input, ConditionExpression: DELETION_GUARD }),
-    );
-  } catch (err) {
-    if (err instanceof ConditionalCheckFailedException) {
-      console.warn(
-        '[stripe-webhook] Billing record missing or org mid-deletion; skipping update',
-        context,
-      );
-      return null;
-    }
-    throw err;
-  }
-}
 
 /**
  * Stripe webhook handler — NO auth middleware.
