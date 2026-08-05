@@ -6,7 +6,7 @@ import type {
   Context,
 } from 'aws-lambda';
 import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
-import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
@@ -14,25 +14,26 @@ import type { ErrorResponse } from '@filone/shared';
 import {
   COOKIE_NAMES,
   TOKEN_MAX_AGE,
+  makeClearAuthCookies,
   makeCookieHeader,
   makeHintCookieHeader,
   ResponseBuilder,
 } from '../lib/response-builder.js';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
+import { AccountDeletedError } from '../lib/errors.js';
 import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
+import {
+  exchangeAndVerifyRefreshToken,
+  exchangeRefreshToken,
+  type NewTokens,
+} from '../lib/token-refresh.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface NewTokens {
-  access_token: string;
-  id_token: string;
-  refresh_token: string;
-}
 
 export interface AuthInternal extends Record<string, unknown> {
   newTokens?: NewTokens;
@@ -92,6 +93,21 @@ function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
 }
 
+/**
+ * 401 for tombstoned identities (FIL-112): the session's cookies are cleared
+ * so the client stops presenting tokens for an account that no longer exists.
+ */
+function accountDeletedResponse(): APIGatewayProxyStructuredResultV2 {
+  const builder = new ResponseBuilder().status(401).body<ErrorResponse>({
+    message: 'Account has been deleted',
+    code: ApiErrorCode.ACCOUNT_DELETED,
+  });
+  for (const cookie of makeClearAuthCookies(CSRF_COOKIE_NAME)) {
+    builder.addCookie(cookie);
+  }
+  return builder.build();
+}
+
 function emailNotVerifiedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(403)
@@ -100,45 +116,6 @@ function emailNotVerifiedResponse(): APIGatewayProxyStructuredResultV2 {
       code: ApiErrorCode.EMAIL_NOT_VERIFIED,
     })
     .build();
-}
-
-/**
- * Exchange a refresh token for fresh access/id/refresh tokens.
- * Returns null if the refresh fails for any reason.
- */
-async function exchangeRefreshToken(refreshToken: string): Promise<NewTokens | null> {
-  const domain = process.env.AUTH0_DOMAIN!;
-  const secrets = getAuthSecrets();
-  try {
-    const res = await fetch(`https://${domain}/oauth/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: secrets.AUTH0_CLIENT_ID,
-        client_secret: secrets.AUTH0_CLIENT_SECRET,
-        refresh_token: refreshToken,
-      }).toString(),
-    });
-
-    if (res.ok) {
-      const tokens = (await res.json()) as {
-        access_token: string;
-        id_token: string;
-        refresh_token?: string;
-      };
-      return {
-        access_token: tokens.access_token,
-        id_token: tokens.id_token,
-        refresh_token: tokens.refresh_token ?? refreshToken,
-      };
-    }
-    const body = await res.text().catch(() => '');
-    console.warn('[auth] Token refresh failed', { status: res.status, body });
-  } catch (err) {
-    console.warn('[auth] Token refresh threw', { error: err });
-  }
-  return null;
 }
 
 function setCookiesFromTokens(
@@ -272,6 +249,14 @@ async function resolveUserAndOrg(
       },
     }),
   );
+
+  // Tombstoned identity (FIL-112 account deletion): reject before the
+  // userId/orgId check so a deleted user's still-valid tokens can neither
+  // operate on remnants nor fall through to createNewUserAndOrg below and
+  // resurrect the account as a fresh org.
+  if (result.Item?.deleted?.BOOL === true) {
+    throw new AccountDeletedError();
+  }
 
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
     const userId = result.Item.userId.S;
@@ -439,6 +424,9 @@ async function tryValidateAccessToken({
     });
     return true;
   } catch (err) {
+    // Not a token problem — the identity is tombstoned. Let it surface so the
+    // before hook returns 401 ACCOUNT_DELETED instead of trying a refresh.
+    if (err instanceof AccountDeletedError) throw err;
     console.warn(failureLabel, { error: err });
     return false;
   }
@@ -473,6 +461,19 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
   const { requireVerifiedEmail = true } = options;
 
   const before = async (
+    request: AuthMiddlewareRequest,
+  ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
+    try {
+      return await authenticate(request);
+    } catch (err) {
+      // Any auth path (access token, refresh exchange, fallback) that reaches
+      // a tombstoned identity ends the session here — no retry can succeed.
+      if (err instanceof AccountDeletedError) return accountDeletedResponse();
+      throw err;
+    }
+  };
+
+  const authenticate = async (
     request: AuthMiddlewareRequest,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
     const { event } = request;
@@ -515,14 +516,17 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
 
     // Step 2: Attempt token refresh (always runs when forceRefresh=1)
     if (refreshToken) {
-      const tokens = await exchangeRefreshToken(refreshToken);
-      if (tokens) {
-        request.internal.newTokens = tokens;
-        request.internal.refreshToken = tokens.refresh_token;
-        const refreshedPayload = decodeJwt(tokens.access_token);
-        const refreshedSub = refreshedPayload.sub!;
+      const refreshed = await exchangeAndVerifyRefreshToken({
+        refreshToken,
+        jwks,
+        audience,
+        issuer,
+      });
+      if (refreshed) {
+        request.internal.newTokens = refreshed.tokens;
+        request.internal.refreshToken = refreshed.tokens.refresh_token;
         const refreshedClaims = await extractIdTokenClaims({
-          idToken: tokens.id_token,
+          idToken: refreshed.tokens.id_token,
           jwks,
           clientId: secrets.AUTH0_CLIENT_ID,
           issuer,
@@ -530,7 +534,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
         request.internal.idTokenClaims = refreshedClaims;
         await attachIdentity({
           event,
-          sub: refreshedSub,
+          sub: refreshed.sub,
           email: refreshedClaims.email,
           emailVerified: refreshedClaims.emailVerified,
           name: refreshedClaims.name,

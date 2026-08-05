@@ -184,6 +184,51 @@ describe('authMiddleware', () => {
       });
     });
 
+    it('returns 401 ACCOUNT_DELETED with cleared cookies for a tombstoned identity and never recreates the user', async () => {
+      mockJwtVerify
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+
+      ddbMock
+        .on(GetItemCommand, {
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: `SUB#${MOCK_SUB}` },
+            sk: { S: 'IDENTITY' },
+            deleted: { BOOL: true },
+            deletedAt: { S: '2026-07-10T00:00:00.000Z' },
+          },
+        });
+
+      const { before } = authMiddleware();
+      const event = buildEvent({
+        cookies: [
+          `hs_access_token=valid-token`,
+          `hs_id_token=id-token`,
+          `hs_refresh_token=refresh-token`,
+        ],
+      });
+
+      const result = (await before(buildMiddyRequest(event))) as APIGatewayProxyStructuredResultV2;
+
+      expect(result.statusCode).toBe(401);
+      expect(JSON.parse(result.body!)).toEqual({
+        message: 'Account has been deleted',
+        code: ApiErrorCode.ACCOUNT_DELETED,
+      });
+      const cookies = result.cookies ?? [];
+      for (const name of ['hs_access_token', 'hs_id_token', 'hs_refresh_token', 'hs_logged_in']) {
+        expect(cookies).toEqual(expect.arrayContaining([expect.stringContaining(`${name}=;`)]));
+      }
+      // The resurrection hole: a tombstoned identity must never fall through
+      // to createNewUserAndOrg.
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+      // No refresh attempt either — the account is gone, no retry can succeed.
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it('extracts name and picture from ID token claims', async () => {
       const existingUserId = 'existing-user-uuid';
       const existingOrgId = 'existing-org-uuid';
@@ -252,14 +297,18 @@ describe('authMiddleware', () => {
       const existingUserId = 'refreshed-user-uuid';
       const existingOrgId = 'refreshed-org-uuid';
 
-      mockJwtVerify.mockRejectedValueOnce(new Error('token expired')).mockResolvedValueOnce({
-        payload: {
-          email: MOCK_EMAIL,
-          email_verified: true,
-          name: MOCK_NAME,
-          picture: MOCK_PICTURE,
-        },
-      });
+      mockJwtVerify
+        .mockRejectedValueOnce(new Error('token expired'))
+        // Refreshed access token verify (sub extraction)
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
+        .mockResolvedValueOnce({
+          payload: {
+            email: MOCK_EMAIL,
+            email_verified: true,
+            name: MOCK_NAME,
+            picture: MOCK_PICTURE,
+          },
+        });
 
       mockFetch.mockResolvedValue({
         ok: true,
@@ -269,8 +318,6 @@ describe('authMiddleware', () => {
           refresh_token: 'new-refresh-token',
         }),
       });
-
-      mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
 
       ddbMock
         .on(GetItemCommand, {
@@ -552,9 +599,11 @@ describe('authMiddleware', () => {
       const existingUserId = 'refreshed-user-uuid';
       const existingOrgId = 'refreshed-org-uuid';
 
-      // First call: access token verify fails; second call: refreshed ID token verify succeeds
+      // 1st: access token verify fails; 2nd: refreshed access token verify
+      // succeeds (sub); 3rd: refreshed ID token verify succeeds (claims).
       mockJwtVerify
         .mockRejectedValueOnce(new Error('token expired'))
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
         .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
 
       mockFetch.mockResolvedValue({
@@ -564,11 +613,6 @@ describe('authMiddleware', () => {
           id_token: 'new-id-token',
           refresh_token: 'new-refresh-token',
         }),
-      });
-
-      // decodeJwt is used for the refreshed access token (sub extraction)
-      mockDecodeJwt.mockReturnValue({
-        sub: MOCK_SUB,
       });
 
       ddbMock
@@ -847,6 +891,8 @@ describe('authMiddleware', () => {
     it('returns 403 on the refresh path when refreshed claims are unverified', async () => {
       mockJwtVerify
         .mockRejectedValueOnce(new Error('token expired'))
+        // Refreshed access token verify (sub extraction)
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
         .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
       mockFetch.mockResolvedValue({
         ok: true,
@@ -856,7 +902,6 @@ describe('authMiddleware', () => {
           refresh_token: 'new-refresh-token',
         }),
       });
-      mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
       mockExistingUser();
 
       const { before } = authMiddleware();
@@ -872,6 +917,34 @@ describe('authMiddleware', () => {
         message: 'Email verification required',
         code: ApiErrorCode.EMAIL_NOT_VERIFIED,
       });
+    });
+
+    it('returns 401 without minting cookies when the refreshed access token fails verification', async () => {
+      mockJwtVerify
+        .mockRejectedValueOnce(new Error('token expired'))
+        // Refreshed access token must be VERIFIED, not just decoded; a
+        // verification failure is treated like a failed refresh, not a 5xx.
+        .mockRejectedValueOnce(new Error('signature verification failed'));
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: 'new-access-token',
+          id_token: 'new-id-token',
+          refresh_token: 'new-refresh-token',
+        }),
+      });
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=expired-token`, `hs_refresh_token=valid-refresh`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expectErrorResponse(result, 401, { message: 'Unauthorized' });
+      expect(request.internal.newTokens).toBeUndefined();
     });
 
     it('fails closed when the ID token cookie is missing entirely', async () => {
