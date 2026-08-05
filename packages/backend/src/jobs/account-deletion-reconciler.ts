@@ -81,6 +81,9 @@ export async function handler(): Promise<void> {
   });
 }
 
+/** What the lean ProjectionExpression below actually returns per record. */
+type IncompleteDeletion = Pick<OrgDeletionRecord, 'pk' | 'updatedAt' | 'attemptCount'>;
+
 // At current scale (< a few thousand orgs, running twice a day) a Scan with
 // FilterExpression is fine, even though it consumes RCUs for the whole table
 // regardless of the filter. TODO: if org count grows, add a sparse GSI on a
@@ -88,8 +91,8 @@ export async function handler(): Promise<void> {
 // wrinkle that DELETION rows are retained forever as audit records, so the
 // finalize step must REMOVE the attribute for the index to stay
 // O(active deletions).
-async function scanIncompleteDeletions(): Promise<OrgDeletionRecord[]> {
-  const records: OrgDeletionRecord[] = [];
+async function scanIncompleteDeletions(): Promise<IncompleteDeletion[]> {
+  const records: IncompleteDeletion[] = [];
   let lastEvaluatedKey: Record<string, AttributeValue> | undefined;
   do {
     const result = await dynamo.send(
@@ -106,7 +109,7 @@ async function scanIncompleteDeletions(): Promise<OrgDeletionRecord[]> {
         ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
       }),
     );
-    records.push(...(result.Items ?? []).map((item) => unmarshall(item) as OrgDeletionRecord));
+    records.push(...(result.Items ?? []).map((item) => unmarshall(item) as IncompleteDeletion));
     lastEvaluatedKey = result.LastEvaluatedKey;
   } while (lastEvaluatedKey);
   return records;
