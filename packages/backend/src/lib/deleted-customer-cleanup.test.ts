@@ -152,14 +152,12 @@ describe('closeOutDeletedCustomer', () => {
 
   it('tolerates a missing billing record (conditional check failure)', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    ddbMock
-      .on(UpdateItemCommand)
-      .rejects(
-        new ConditionalCheckFailedException({
-          message: 'The conditional request failed',
-          $metadata: {},
-        }),
-      );
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'The conditional request failed',
+        $metadata: {},
+      }),
+    );
 
     await expect(closeOutDeletedCustomer({ userId: USER_ID, orgId: ORG_ID })).resolves.toEqual({
       outcomes: [okOutcome('aurora')],

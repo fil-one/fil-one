@@ -512,8 +512,7 @@ async function scanRagKeys(orgId: string): Promise<{ pk: string; sk: string }[]>
     const result = await dynamo.send(
       new ScanCommand({
         TableName: Resource.RagIndexerTable.name,
-        FilterExpression:
-          'begins_with(pk, :bucketPrefix) OR begins_with(pk, :checkpointPrefix)',
+        FilterExpression: 'begins_with(pk, :bucketPrefix) OR begins_with(pk, :checkpointPrefix)',
         ExpressionAttributeValues: marshall({
           ':bucketPrefix': `BUCKET#${orgId}#`,
           ':checkpointPrefix': `INDEXER_CHECKPOINT#${orgId}#`,

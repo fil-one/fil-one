@@ -217,17 +217,15 @@ describe('batchDelete', () => {
     expect(sends[0].args[0].input.RequestItems!.TestTable).toHaveLength(2);
     // Only the unprocessed key is retried, not the whole chunk.
     expect(sends[1].args[0].input.RequestItems!.TestTable).toHaveLength(1);
-    expect(sends[1].args[0].input.RequestItems!.TestTable[0].DeleteRequest!.Key!.sk.S).toBe(
-      KEY.sk,
-    );
+    expect(sends[1].args[0].input.RequestItems!.TestTable[0].DeleteRequest!.Key!.sk.S).toBe(KEY.sk);
   });
 
   it('caps the retries and throws on exhaustion so the reconciler re-drives', async () => {
     ddbMock.on(BatchWriteItemCommand).resolves(unprocessed);
 
-    await expect(
-      batchDelete('TestTable', [KEY], { retries: 2, minTimeout: 0 }),
-    ).rejects.toThrow(/unprocessed delete/);
+    await expect(batchDelete('TestTable', [KEY], { retries: 2, minTimeout: 0 })).rejects.toThrow(
+      /unprocessed delete/,
+    );
 
     // 1 initial attempt + 2 retries.
     expect(ddbMock.commandCalls(BatchWriteItemCommand)).toHaveLength(3);
