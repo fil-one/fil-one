@@ -21,6 +21,7 @@ vi.mock('../lib/auth-secrets.js', () => ({
 
 process.env.WEBSITE_URL = 'https://app.example.com';
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
+process.env.ALLOWED_REDIRECT_ORIGINS = 'https://app.fil.one,https://app.filone.ai';
 
 import { handler } from './auth-logout.js';
 
@@ -58,6 +59,35 @@ describe('auth-logout handler', () => {
     const location = new URL(result.headers!['Location'] as string);
     expect(location.searchParams.get('client_id')).toBe('test-client-id');
     expect(location.searchParams.get('returnTo')).toBe('https://fil.one');
+  });
+
+  // Signing out of a demo alias must not land the user on fil.one, which may be
+  // blocklisted — that would end a demo on a dead page.
+  describe('host-aware returnTo', () => {
+    async function returnToFor(forwardedHost?: string): Promise<string | null> {
+      const event = buildEvent();
+      // buildEvent always starts with empty headers, so set the viewer host here
+      // rather than through its props.
+      if (forwardedHost) event.headers = { 'x-forwarded-host': forwardedHost };
+      const result = await handler(event, stubContext);
+      return new URL(result.headers!['Location'] as string).searchParams.get('returnTo');
+    }
+
+    it('sends the canonical console to the canonical marketing site', async () => {
+      expect(await returnToFor('app.fil.one')).toBe('https://fil.one');
+    });
+
+    it('keeps a demo-alias logout on the alias marketing site', async () => {
+      expect(await returnToFor('app.filone.ai')).toBe('https://filone.ai');
+    });
+
+    it('falls back to the default for a host outside the allowlist', async () => {
+      expect(await returnToFor('attacker.example')).toBe('https://fil.one');
+    });
+
+    it('falls back to the default when no host header is present', async () => {
+      expect(await returnToFor()).toBe('https://fil.one');
+    });
   });
 
   it('clears all auth and CSRF cookies', async () => {

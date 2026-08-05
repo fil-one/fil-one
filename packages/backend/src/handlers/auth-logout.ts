@@ -1,10 +1,15 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { CSRF_COOKIE_NAME } from '@filone/shared';
+import {
+  CSRF_COOKIE_NAME,
+  DEFAULT_MARKETING_URL,
+  MARKETING_URL_BY_CONSOLE_ORIGIN,
+} from '@filone/shared';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { COOKIE_NAMES, makeClearCookieHeader } from '../lib/response-builder.js';
 import { parseCookies } from '../lib/cookies.js';
+import { resolveOrigin } from '../lib/resolve-origin.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 
 async function baseHandler(
@@ -42,9 +47,12 @@ async function baseHandler(
     makeClearCookieHeader(CSRF_COOKIE_NAME),
   ];
 
+  // Follows the console host, so signing out of an alias does not land on fil.one.
+  const returnTo = MARKETING_URL_BY_CONSOLE_ORIGIN[resolveOrigin(event)] ?? DEFAULT_MARKETING_URL;
+
   const logoutUrl = new URL(`https://${domain}/v2/logout`);
   logoutUrl.searchParams.set('client_id', secrets.AUTH0_CLIENT_ID);
-  logoutUrl.searchParams.set('returnTo', 'https://fil.one');
+  logoutUrl.searchParams.set('returnTo', returnTo);
 
   return {
     statusCode: 302,

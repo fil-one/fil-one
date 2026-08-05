@@ -52,6 +52,7 @@ import { handler } from './setup-integrations.js';
 
 interface SetupProperties {
   SiteUrl: string;
+  AliasSiteUrls?: string;
   Stage: string;
 }
 
@@ -623,6 +624,71 @@ describe('setup-integrations', () => {
       });
 
       await handler(buildCfnEvent({ RequestType: 'Create' }));
+
+      expect(capturedAuth0PatchBody).toEqual({
+        callbacks: [
+          'https://old.example.com/callback',
+          'https://app.example.com/api/auth/callback',
+        ],
+        allowed_logout_urls: ['https://fil.one'],
+        web_origins: ['https://app.example.com'],
+      });
+    });
+
+    it('registers a callback, origin, and logout URL for each demo alias', async () => {
+      // Production stage refuses a test Stripe key, and the alias hosts only
+      // exist in production.
+      mockResource.StripeSecretKey.value = 'sk_live_real';
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({ id: 'we_1', secret: 'whsec_1' });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://app.fil.one',
+            AliasSiteUrls: 'https://app.filone.ai',
+            Stage: 'production',
+          },
+        }),
+      );
+
+      expect(capturedAuth0PatchBody).toEqual({
+        callbacks: [
+          'https://old.example.com/callback',
+          'https://app.fil.one/api/auth/callback',
+          'https://app.filone.ai/api/auth/callback',
+        ],
+        // Each console origin maps to its own marketing site, so logging out of
+        // the alias does not land on the domain the alias exists to avoid.
+        allowed_logout_urls: ['https://fil.one', 'https://filone.ai'],
+        web_origins: ['https://app.fil.one', 'https://app.filone.ai'],
+        // Auth0 permits exactly one, so it stays on the canonical host.
+        initiate_login_uri: 'https://app.fil.one/login',
+      });
+    });
+
+    // A stack deployed before AliasSiteUrls existed sends no such property; its
+    // Auth0 client must come out exactly as it did before this change.
+    it('leaves the client unchanged when AliasSiteUrls is absent', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({ id: 'we_1', secret: 'whsec_1' });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://app.example.com',
+            Stage: 'dev',
+          },
+        }),
+      );
 
       expect(capturedAuth0PatchBody).toEqual({
         callbacks: [

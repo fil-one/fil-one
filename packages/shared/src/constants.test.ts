@@ -8,6 +8,10 @@ import {
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
+  PROD_CONSOLE_HOST,
+  PROD_CONSOLE_ALIAS_HOSTS,
+  MARKETING_URL_BY_CONSOLE_ORIGIN,
+  DEFAULT_MARKETING_URL,
   getAvailableRegions,
   supportsBucketManagement,
   isFoundationEmail,
@@ -109,12 +113,30 @@ describe('getStageFromHostname', () => {
     expect(getStageFromHostname('app.fil.one')).toBe(Stage.Production);
   });
 
+  for (const hostname of PROD_CONSOLE_ALIAS_HOSTS) {
+    it(`returns Production for the demo alias "${hostname}"`, () => {
+      expect(getStageFromHostname(hostname)).toBe(Stage.Production);
+    });
+  }
+
+  it('ignores hostname casing', () => {
+    expect(getStageFromHostname('APP.FIL.ONE')).toBe(Stage.Production);
+  });
+
   const nonProductionHostnames = [
     'staging.fil.one',
     'pr-42.fil.one',
     'localhost',
     'd123abc.cloudfront.net',
     '',
+    // Guards against this ever being relaxed into a suffix or substring match.
+    // Each of these is a hostname an attacker could control that ends with,
+    // starts with, or contains a production host.
+    'app.fil.one.attacker.example',
+    'app.filone.ai.attacker.example',
+    'notapp.filone.ai',
+    'filone.ai',
+    'fil.one',
   ];
 
   for (const hostname of nonProductionHostnames) {
@@ -122,6 +144,39 @@ describe('getStageFromHostname', () => {
       expect(getStageFromHostname(hostname)).toBe(Stage.Staging);
     });
   }
+});
+
+describe('demo alias constants', () => {
+  it('gives every production console origin a marketing site to log out to', () => {
+    for (const host of [PROD_CONSOLE_HOST, ...PROD_CONSOLE_ALIAS_HOSTS]) {
+      expect(MARKETING_URL_BY_CONSOLE_ORIGIN[`https://${host}`]).toBeDefined();
+    }
+  });
+
+  // The alias console must not send a signed-out user to fil.one, which is the
+  // domain the alias exists to route around.
+  it('keeps each alias console on its own marketing domain', () => {
+    expect(MARKETING_URL_BY_CONSOLE_ORIGIN['https://app.filone.ai']).toBe('https://filone.ai');
+  });
+
+  it('leaves origins outside the table to the shared default', () => {
+    expect(MARKETING_URL_BY_CONSOLE_ORIGIN['https://staging.fil.one']).toBeUndefined();
+    expect(DEFAULT_MARKETING_URL).toBe('https://fil.one');
+  });
+
+  // getStageFromHostname lowercases its input before comparing, so an entry
+  // carrying any uppercase could never match.
+  it('declares every host in lowercase', () => {
+    for (const host of [PROD_CONSOLE_HOST, ...PROD_CONSOLE_ALIAS_HOSTS]) {
+      expect(host).toBe(host.toLowerCase());
+    }
+  });
+
+  it('keeps aliases off the flagged domain they exist to avoid', () => {
+    for (const host of PROD_CONSOLE_ALIAS_HOSTS) {
+      expect(host.endsWith('.fil.one')).toBe(false);
+    }
+  });
 });
 
 describe('getAvailableRegions', () => {
