@@ -103,7 +103,7 @@ pnpx sst secret set Auth0MgmtClientSecret <M2M-client-secret> [--stage <stage>]
 
 ### Runtime user management (`Auth0MgmtRuntimeClientId` / `Auth0MgmtRuntimeClientSecret`)
 
-Used by request-time Lambda handlers (`update-profile`, `resend-verification`, `enroll-mfa`, `disable-mfa`, `delete-mfa-enrollment`, `delete-passkey`, `get-me`) to manage user records, trigger verification emails, and manage MFA enrollments and passkeys.
+Used by request-time Lambda handlers (`update-profile`, `resend-verification`, `enroll-mfa`, `disable-mfa`, `delete-mfa-enrollment`, `delete-passkey`, `get-me`, `create-deletion-challenge`, `delete-account`) and the account-deletion worker to manage user records, trigger verification emails, manage MFA enrollments and passkeys, and delete Auth0 users during self-serve account deletion (FIL-112, via `delete:users`).
 
 | Environment | App name    | Dashboard                                                                                                                     |
 | ----------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------- |

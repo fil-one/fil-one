@@ -20,6 +20,7 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 import {
   flagMfaEnrollment,
   getMfaEnrollments,
+  deleteAuth0User,
   deleteGuardianEnrollment,
   deleteAuthenticationMethod,
   deleteAllAuthenticators,
@@ -304,6 +305,62 @@ describe('deleteGuardianEnrollment', () => {
 
     await expect(deleteGuardianEnrollment('nonexistent')).rejects.toThrow(
       'Auth0 delete enrollment failed (404): Not found',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deleteAuth0User
+// ---------------------------------------------------------------------------
+
+describe('deleteAuth0User', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('calls DELETE on the users endpoint', async () => {
+    let deletedUrl: string | undefined;
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/oauth/token')) return mockTokenResponse();
+      if (String(url).includes('/api/v2/users/') && init?.method === 'DELETE') {
+        deletedUrl = String(url);
+        return new Response(null, { status: 204 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    await deleteAuth0User('auth0|abc123');
+
+    expect(deletedUrl).toContain(`/api/v2/users/${encodeURIComponent('auth0|abc123')}`);
+  });
+
+  it('resolves on 404 but warns (already deleted or bad sub/URL) without leaking the token', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    setupFetchMock([]); // everything but the token endpoint 404s
+
+    await expect(deleteAuth0User('auth0|gone')).resolves.toBeUndefined();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Delete user returned 404'),
+      expect.objectContaining({
+        sub: 'auth0|gone',
+        url: expect.stringContaining(`/api/v2/users/${encodeURIComponent('auth0|gone')}`),
+      }),
+    );
+    // The bearer token must never be logged.
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('mgmt-token');
+    warnSpy.mockRestore();
+  });
+
+  it('throws on non-404 API errors', async () => {
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/oauth/token')) return mockTokenResponse();
+      if (init?.method === 'DELETE') return new Response('boom', { status: 500 });
+      return new Response('Not found', { status: 404 });
+    });
+
+    await expect(deleteAuth0User('auth0|abc123')).rejects.toThrow(
+      'Auth0 delete user failed (500): boom',
     );
   });
 });

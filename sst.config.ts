@@ -1034,6 +1034,66 @@ export default $config({
       function: ragIndexerOrchestrator.arn,
     });
 
+    // ── Account deletion (FIL-112): worker ──────────────────────────
+    // Async teardown for self-serve account deletion. The delete-account
+    // route Event-invokes the worker.
+    const accountDeletionWorker = createFn('AccountDeletionWorker', {
+      handler: 'packages/backend/src/jobs/account-deletion-worker.handler',
+      link: [
+        billingTable,
+        userInfoTable,
+        ragIndexerTable,
+        ragVectorBucket,
+        // getBillingSecrets reads both Stripe secrets even though the worker
+        // only cancels subscriptions (same pairing as UsageReportingWorker).
+        stripeSecretKey,
+        stripePriceId,
+        ...managementApiTokens,
+        ...mgmtRuntimeResources,
+      ],
+      environment: { ...orchestratorEnv, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+      timeout: '900 seconds',
+      memory: '512 MB',
+      permissions: [
+        ...ragPermissions,
+        {
+          // deleteTenant removes every orchestrator's per-tenant secrets: the
+          // `${id}-s3` console key for each region plus Aurora's portal API key.
+          actions: ['ssm:GetParameter', 'ssm:DeleteParameter'],
+          resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
+        },
+      ],
+    });
+
+    addRoute({
+      method: 'POST',
+      routePath: '/api/account/delete-challenge',
+      handler: 'create-deletion-challenge',
+      extraLink: [...mgmtRuntimeResources, ...(sendGridApiKey ? [sendGridApiKey] : [])],
+      extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+    });
+
+    addRoute({
+      method: 'POST',
+      routePath: '/api/account/delete',
+      handler: 'delete-account',
+      extraLink: mgmtRuntimeResources,
+      extraEnv: {
+        // The handler snapshots tenant ids for every provisioned region via
+        // the orchestrator registry, so it needs the full orchestrator env.
+        ...orchestratorEnv,
+        AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
+        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
+      },
+      permissions: [
+        {
+          actions: ['lambda:InvokeFunction'],
+          resources: [accountDeletionWorker.arn],
+        },
+      ],
+      timeout: '30 seconds',
+    });
+
     // ── Subscription drift checker (cron-based, observe-only) ───────
     const subscriptionDriftChecker = createFn('SubscriptionDriftChecker', {
       handler: 'packages/backend/src/jobs/subscription-drift-checker.handler',

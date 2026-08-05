@@ -398,3 +398,31 @@ export async function regenerateRecoveryCode(sub: string): Promise<string> {
   const data = (await resp.json()) as { recovery_code: string };
   return data.recovery_code;
 }
+
+/**
+ * Permanently delete the Auth0 user (FIL-112 account deletion). Idempotent:
+ * a 404 (already gone) is success, so the teardown worker can safely retry.
+ * Requires the `delete:users` scope on the runtime M2M app — see
+ * docs/Auth0OneTimeSetup.md.
+ */
+export async function deleteAuth0User(sub: string): Promise<void> {
+  const domain = getMgmtDomain();
+  const token = await getManagementToken();
+  const url = `https://${domain}/api/v2/users/${encodeURIComponent(sub)}`;
+  const resp = await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (resp.status === 404) {
+    // Still success (idempotent retry), but surfaced: a 404 on the FIRST
+    // attempt can also mean a malformed sub or wrong-domain URL, which would
+    // otherwise silently leave the Auth0 user alive.
+    console.warn(
+      '[auth0] Delete user returned 404 (already deleted — expected on teardown retry — or bad sub/URL)',
+      { sub, url },
+    );
+    return;
+  }
+  await throwIfNotOk(resp, 'Auth0 delete user failed');
+}
