@@ -34,12 +34,17 @@ function useResendCountdown(resendAvailableAt: string | null): number {
   const [secondsLeft, setSecondsLeft] = useState(0);
   useEffect(() => {
     if (!resendAvailableAt) return;
-    const tick = () => {
-      const left = Math.ceil((new Date(resendAvailableAt).getTime() - Date.now()) / 1000);
-      setSecondsLeft(Math.max(0, left));
-    };
-    tick();
-    const interval = setInterval(tick, 1000);
+    const compute = () =>
+      Math.max(0, Math.ceil((new Date(resendAvailableAt).getTime() - Date.now()) / 1000));
+    setSecondsLeft(compute());
+    const interval = setInterval(() => {
+      const left = compute();
+      setSecondsLeft(left);
+      // A finished countdown never restarts on its own (a new send replaces
+      // resendAvailableAt and re-runs this effect) — stop ticking instead of
+      // re-rendering the mounted modal every second forever.
+      if (left <= 0) clearInterval(interval);
+    }, 1000);
     return () => clearInterval(interval);
   }, [resendAvailableAt]);
   return secondsLeft;

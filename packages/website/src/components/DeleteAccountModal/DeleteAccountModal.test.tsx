@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiErrorCode } from '@filone/shared';
 
@@ -305,5 +305,70 @@ describe('DeleteAccountModal close/reopen', () => {
     // Back on the confirm step with the gate intact.
     expect(screen.queryByLabelText(/enter the 6-digit code/i)).not.toBeInTheDocument();
     expect(sendCodeButton()).toBeDisabled();
+  });
+});
+
+describe('DeleteAccountModal resend countdown (fake timers)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultChallengeMock();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Render, pass the confirm gate, and land on the code step (60s cooldown running). */
+  async function renderOnCodeStep() {
+    const view = renderModal();
+    fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+      target: { value: ORG_NAME },
+    });
+    fireEvent.click(sendCodeButton());
+    // Flush the mutation's microtasks so the step transition commits.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByLabelText(/enter the 6-digit code/i)).toBeInTheDocument();
+    return view;
+  }
+
+  it('ticks down to zero and re-enables the resend button', async () => {
+    await renderOnCodeStep();
+    expect(screen.getByRole('button', { name: /resend code in \d+s/i })).toBeDisabled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000);
+    });
+
+    expect(screen.getByRole('button', { name: /^resend code$/i })).toBeEnabled();
+  });
+
+  it('stops the interval once the countdown reaches zero instead of ticking forever', async () => {
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+    await renderOnCodeStep();
+    const intervalId = setIntervalSpy.mock.results[setIntervalSpy.mock.results.length - 1]!
+      .value as ReturnType<typeof setInterval>;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000);
+    });
+
+    expect(clearIntervalSpy).toHaveBeenCalledWith(intervalId);
+  });
+
+  it('cleans the countdown interval up on unmount', async () => {
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+    const view = await renderOnCodeStep();
+    const intervalId = setIntervalSpy.mock.results[setIntervalSpy.mock.results.length - 1]!
+      .value as ReturnType<typeof setInterval>;
+    expect(clearIntervalSpy).not.toHaveBeenCalledWith(intervalId);
+
+    view.unmount();
+
+    expect(clearIntervalSpy).toHaveBeenCalledWith(intervalId);
   });
 });

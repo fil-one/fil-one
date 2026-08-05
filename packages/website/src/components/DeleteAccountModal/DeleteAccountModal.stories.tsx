@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { userEvent, waitFor, within } from 'storybook/test';
@@ -36,24 +36,39 @@ function body(canvasElement: HTMLElement) {
 
 /**
  * Stub the challenge endpoint so the code step is reachable without a
- * backend; every other request falls through to the real fetch.
+ * backend; every other request falls through to the real fetch. The patch
+ * lives in an effect so the original window.fetch is restored when the
+ * story unmounts instead of leaking into every later story.
  */
 function withChallengeStub(Story: React.ComponentType) {
-  const originalFetch = window.fetch;
-  window.fetch = async (input, init) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (url.endsWith('/account/delete-challenge')) {
-      return new Response(
-        JSON.stringify({
-          expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-          resendAvailableAt: new Date(Date.now() + 60 * 1000).toISOString(),
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      );
-    }
-    return originalFetch(input, init);
-  };
-  return <Story />;
+  return (
+    <ChallengeStub>
+      <Story />
+    </ChallengeStub>
+  );
+}
+
+function ChallengeStub({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    const originalFetch = window.fetch;
+    window.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith('/account/delete-challenge')) {
+        return new Response(
+          JSON.stringify({
+            expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+            resendAvailableAt: new Date(Date.now() + 60 * 1000).toISOString(),
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return originalFetch(input, init);
+    };
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
+  return <>{children}</>;
 }
 
 /** Step 1: the destructive action is locked behind typing the exact org name. */
