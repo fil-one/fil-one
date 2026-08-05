@@ -96,23 +96,24 @@ export const auroraOrchestrator = {
   async deleteTenant(tenantId: string): Promise<void> {
     // Aurora's Backoffice/Portal APIs expose no tenant-deletion endpoint, so
     // this performs the strongest teardown available remotely: force the
-    // tenant to `disabled` and delete the FilOne-held credentials from SSM.
+    // tenant to `disabled`, revoke the console S3 key upstream, and delete
+    // the FilOne-held credentials from SSM.
     const probe = await auroraOrchestrator.getTenantStatus(tenantId);
     if (probe.kind === 'error') {
       throw new Error(`Aurora status probe failed while deleting tenant ${tenantId}`, {
         cause: probe.cause,
       });
     }
+    const didDisable = probe.kind === 'ok' && probe.status !== 'disabled';
+    if (didDisable) {
+      await auroraOrchestrator.updateTenantStatus(tenantId, 'disabled');
+    }
+
+    // Revoke the console S3 key upstream BEFORE deleting the SSM copies:
+    // reaching the Portal requires the portal API key still held in SSM, so
+    // once the SSM records are gone automated revocation is impossible.
     if (probe.kind === 'ok') {
-      if (probe.status !== 'disabled') {
-        await auroraOrchestrator.updateTenantStatus(tenantId, 'disabled');
-      }
-      console.warn(
-        '[aurora-orchestrator] Aurora has no remote tenant-deletion API; the tenant was ' +
-          'disabled and its credentials deleted, but removing the Aurora tenant itself ' +
-          'requires a manual backoffice step',
-        { tenantId },
-      );
+      await revokeConsoleS3AccessKey(tenantId);
     }
 
     const stage = getStage();
@@ -124,6 +125,17 @@ export const auroraOrchestrator = {
       stage,
       tenantId,
     });
+
+    // Emitted only on the run that actually disabled the tenant (not on
+    // idempotent re-runs), after the work it reports has executed.
+    if (didDisable) {
+      console.warn(
+        '[aurora-orchestrator] Aurora has no remote tenant-deletion API; the tenant was ' +
+          'disabled, its console S3 key revoked, and the FilOne-held SSM secrets deleted. ' +
+          'Removing the Aurora tenant itself still requires a manual backoffice step',
+        { tenantId },
+      );
+    }
   },
 
   async createBucket(tenantId: string, args: CreateBucketArgs): Promise<void> {
@@ -331,6 +343,42 @@ export const auroraOrchestrator = {
       }));
   },
 } satisfies ServiceOrchestrator;
+
+// The tenant's console S3 key is provisioned under this name by
+// createAndStoreS3AccessKey in aurora-tenant-setup.ts.
+const AURORA_CONSOLE_KEY_NAME = 'filone-console';
+
+// Revokes the console S3 access key upstream (account deletion). Aurora's
+// delete endpoint takes the Portal-internal key id — not the accessKeyId
+// stashed in SSM — so resolve it by the well-known key name. Tolerates:
+//   - an already-revoked key (listing no longer contains the name);
+//   - a portal API key already removed from SSM (idempotent re-run whose
+//     first pass got past revocation before cleaning SSM);
+//   - a key deleted concurrently (deleteAuroraAccessKey treats 404 as done).
+// Any other failure propagates so the caller retries BEFORE the SSM copies
+// are deleted — after that, automated revocation is impossible.
+async function revokeConsoleS3AccessKey(tenantId: string): Promise<void> {
+  let key: Awaited<ReturnType<typeof findAuroraAccessKeyByName>>;
+  try {
+    key = await findAuroraAccessKeyByName({ tenantId, keyName: AURORA_CONSOLE_KEY_NAME });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('not found in SSM')) {
+      console.log(
+        `[aurora-orchestrator] portal API key already deleted from SSM for tenant ${tenantId}; ` +
+          'skipping console S3 key revocation (a previous run already revoked it)',
+      );
+      return;
+    }
+    throw err;
+  }
+  if (!key) {
+    console.log(
+      `[aurora-orchestrator] console S3 key "${AURORA_CONSOLE_KEY_NAME}" already revoked for tenant ${tenantId}`,
+    );
+    return;
+  }
+  await deleteAuroraAccessKey({ tenantId, auroraKeyId: key.id });
+}
 
 // Aurora's metrics API only accepts windows in m/h units, so the
 // orchestrator-agnostic '1d' value is translated before it hits the wire.
