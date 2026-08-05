@@ -43,16 +43,20 @@ export function authSecretsMockModule() {
 
 /**
  * Module factory for `vi.mock('../lib/auth0-management.js', ...)` covering
- * what the step-up middlewares import: `getMfaEnrollments` plus
- * `MFA_GUARDIAN_TYPES` as a REAL Set (the gate calls `.has` on it). Pass
- * `extras` for any further exports the handler under test consumes.
+ * what the step-up middlewares import: `getMfaEnrollments` plus the REAL
+ * `MFA_GUARDIAN_TYPES` Set (the gate calls `.has` on it) pulled from the
+ * actual module so the mock can never drift from it. Pass `extras` for any
+ * further exports the handler under test consumes.
  */
-export function auth0ManagementMockModule(
+export async function auth0ManagementMockModule(
   mockGetMfaEnrollments: Mock,
   extras: Record<string, unknown> = {},
 ) {
+  const { MFA_GUARDIAN_TYPES } = await vi.importActual<typeof import('../lib/auth0-management.js')>(
+    '../lib/auth0-management.js',
+  );
   return {
-    MFA_GUARDIAN_TYPES: new Set(['authenticator', 'webauthn-roaming', 'webauthn-platform']),
+    MFA_GUARDIAN_TYPES,
     getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
     ...extras,
   };
