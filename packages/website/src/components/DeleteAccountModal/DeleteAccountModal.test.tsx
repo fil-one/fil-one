@@ -28,14 +28,36 @@ function sendCodeButton() {
   return screen.getByRole('button', { name: /send verification code/i });
 }
 
+/** Renders the modal with a controllable `open` prop for close/reopen tests. */
+function renderReopenableModal() {
+  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  const ui = (open: boolean) => (
+    <QueryClientProvider client={client}>
+      <DeleteAccountModal open={open} onClose={() => {}} orgName={ORG_NAME} />
+    </QueryClientProvider>
+  );
+  const view = render(ui(true));
+  return {
+    closeAndReopen() {
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+      view.rerender(ui(false));
+      view.rerender(ui(true));
+    },
+  };
+}
+
+function setupDefaultChallengeMock() {
+  mockRequestChallenge.mockResolvedValue({
+    outcome: 'challenge_created',
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    resendAvailableAt: new Date(Date.now() + 60 * 1000).toISOString(),
+  });
+}
+
 describe('DeleteAccountModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequestChallenge.mockResolvedValue({
-      outcome: 'challenge_created',
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      resendAvailableAt: new Date(Date.now() + 60 * 1000).toISOString(),
-    });
+    setupDefaultChallengeMock();
   });
 
   it('disables "Send verification code" until the exact org name is typed', () => {
@@ -183,6 +205,24 @@ describe('DeleteAccountModal', () => {
     expect(seconds).toBeLessThanOrEqual(30);
   });
 
+  it('states honestly that stored object data is not instantly erased', () => {
+    renderModal();
+    expect(screen.getByText(/not instantly erased/i)).toBeInTheDocument();
+  });
+
+  it('describes cancellation as in-progress — accurate for the async teardown and for trial accounts without a subscription', () => {
+    renderModal();
+    expect(screen.getByText(/any active subscription is being canceled/i)).toBeInTheDocument();
+    expect(screen.queryByText(/canceled immediately/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('DeleteAccountModal close/reopen', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultChallengeMock();
+  });
+
   it('keeps the server cooldown when the modal is closed and reopened', async () => {
     mockRequestChallenge.mockRejectedValue(
       Object.assign(new Error('Too many verification codes requested. Try again later.'), {
@@ -191,13 +231,7 @@ describe('DeleteAccountModal', () => {
         resendAvailableAt: new Date(Date.now() + 45 * 1000).toISOString(),
       }),
     );
-    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
-    const ui = (open: boolean) => (
-      <QueryClientProvider client={client}>
-        <DeleteAccountModal open={open} onClose={() => {}} orgName={ORG_NAME} />
-      </QueryClientProvider>
-    );
-    const { rerender } = render(ui(true));
+    const modal = renderReopenableModal();
     fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
       target: { value: ORG_NAME },
     });
@@ -209,9 +243,7 @@ describe('DeleteAccountModal', () => {
     });
 
     // Close (resets step/name/error but not the cooldown) and reopen.
-    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
-    rerender(ui(false));
-    rerender(ui(true));
+    modal.closeAndReopen();
 
     fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
       target: { value: ORG_NAME },
@@ -219,14 +251,36 @@ describe('DeleteAccountModal', () => {
     expect(screen.getByRole('button', { name: /send verification code in \d+s/i })).toBeDisabled();
   });
 
-  it('states honestly that stored object data is not instantly erased', () => {
-    renderModal();
-    expect(screen.getByText(/not instantly erased/i)).toBeInTheDocument();
+  it('reopens on the code step while a challenge is live, so a valid emailed code is not stranded', async () => {
+    const modal = renderReopenableModal();
+    fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+      target: { value: ORG_NAME },
+    });
+    fireEvent.click(sendCodeButton());
+    await waitFor(() => screen.getByLabelText(/enter the 6-digit code/i));
+
+    // Accidental close (Escape/Cancel) while the emailed code is still valid.
+    modal.closeAndReopen();
+
+    // Code entry is still possible — no forced re-confirm + resend against
+    // the cooldown. The existing resend affordance is available.
+    expect(screen.getByLabelText(/enter the 6-digit code/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /resend code in \d+s/i })).toBeDisabled();
+    expect(mockRequestChallenge).toHaveBeenCalledOnce();
+
+    fireEvent.change(screen.getByLabelText(/enter the 6-digit code/i), {
+      target: { value: '123456' },
+    });
+    expect(screen.getByRole('button', { name: /permanently delete account/i })).toBeEnabled();
   });
 
-  it('describes cancellation as in-progress — accurate for the async teardown and for trial accounts without a subscription', () => {
-    renderModal();
-    expect(screen.getByText(/any active subscription is being canceled/i)).toBeInTheDocument();
-    expect(screen.queryByText(/canceled immediately/i)).not.toBeInTheDocument();
+  it('still requires the org-name confirmation before the FIRST send after close and reopen', () => {
+    const modal = renderReopenableModal();
+    // Close without ever sending a code.
+    modal.closeAndReopen();
+
+    // Back on the confirm step with the gate intact.
+    expect(screen.queryByLabelText(/enter the 6-digit code/i)).not.toBeInTheDocument();
+    expect(sendCodeButton()).toBeDisabled();
   });
 });

@@ -48,6 +48,10 @@ function useResendCountdown(resendAvailableAt: string | null): number {
 function useDeleteAccountFlow(orgName: string, typedName: string, code: string) {
   const [step, setStep] = useState<Step>('confirm');
   const [codeError, setCodeError] = useState<string | null>(null);
+  // A code was emailed at some point — survives close/reopen so an
+  // accidental Escape doesn't strand a valid code behind the confirm step
+  // (whose send button sits under the resend cooldown).
+  const [challengeIssued, setChallengeIssued] = useState(false);
   const [resendAvailableAt, setResendAvailableAt] = useState<string | null>(null);
   const resendSecondsLeft = useResendCountdown(resendAvailableAt);
 
@@ -60,6 +64,7 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
         setCodeError('Account deletion is already in progress.');
         return;
       }
+      setChallengeIssued(true);
       setResendAvailableAt(challenge.resendAvailableAt);
       setCodeError(null);
       setStep('code');
@@ -90,6 +95,7 @@ function useDeleteAccountFlow(orgName: string, typedName: string, code: string) 
     setStep,
     codeError,
     setCodeError,
+    challengeIssued,
     resendSecondsLeft,
     challengeMutation,
     deleteMutation,
@@ -115,7 +121,12 @@ export function DeleteAccountModal({ open, onClose, orgName }: DeleteAccountModa
 
   function handleClose() {
     if (flow.busy) return;
-    flow.setStep('confirm');
+    // While a challenge is live, reopening lands back on the code step: the
+    // emailed code is still valid, and resetting to 'confirm' would strand it
+    // behind a send button locked by the resend cooldown. The org-name gate
+    // still guards the FIRST send — only a successful send flips
+    // challengeIssued.
+    flow.setStep(flow.challengeIssued ? 'code' : 'confirm');
     setTypedName('');
     setCode('');
     flow.setCodeError(null);
