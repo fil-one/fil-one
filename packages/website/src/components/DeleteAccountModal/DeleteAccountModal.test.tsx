@@ -161,6 +161,29 @@ describe('DeleteAccountModal', () => {
     });
   });
 
+  it('announces a rejected code to assistive tech and links it to the input via aria-describedby', async () => {
+    mockDeleteAccount.mockRejectedValue(
+      Object.assign(new Error('Incorrect verification code'), { status: 400 }),
+    );
+    renderModal();
+    fireEvent.change(screen.getByLabelText(`Type "${ORG_NAME}" to continue`), {
+      target: { value: ORG_NAME },
+    });
+    fireEvent.click(sendCodeButton());
+    await waitFor(() => screen.getByLabelText(/enter the 6-digit code/i));
+
+    fireEvent.change(screen.getByLabelText(/enter the 6-digit code/i), {
+      target: { value: '000000' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /permanently delete account/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Incorrect verification code');
+    const input = screen.getByLabelText(/enter the 6-digit code/i);
+    expect(input).toHaveAttribute('aria-describedby', alert.id);
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+  });
+
   it('shows an in-progress message and does not advance when deletion is already running', async () => {
     mockRequestChallenge.mockResolvedValue({ outcome: 'deletion_in_progress' });
     renderModal();

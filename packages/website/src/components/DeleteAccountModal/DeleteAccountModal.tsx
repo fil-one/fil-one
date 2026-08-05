@@ -114,6 +114,9 @@ type Flow = ReturnType<typeof useDeleteAccountFlow>;
  * to the static /account-deleted page — deletion reads as instantly complete
  * while the backend teardown finishes asynchronously.
  */
+/** id linking the inline error to the active input via aria-describedby. */
+const ERROR_ID = 'delete-account-error';
+
 export function DeleteAccountModal({ open, onClose, orgName }: DeleteAccountModalProps) {
   const [typedName, setTypedName] = useState('');
   const [code, setCode] = useState('');
@@ -143,11 +146,23 @@ export function DeleteAccountModal({ open, onClose, orgName }: DeleteAccountModa
         <DeletionWarning orgName={orgName} />
         <div className="mt-4 flex flex-col gap-3 px-2">
           {flow.step === 'confirm' ? (
-            <ConfirmStep orgName={orgName} typedName={typedName} onChange={setTypedName} />
+            <ConfirmStep
+              orgName={orgName}
+              typedName={typedName}
+              onChange={setTypedName}
+              describedBy={flow.codeError !== null ? ERROR_ID : undefined}
+            />
           ) : (
             <CodeStep code={code} flow={flow} onChange={setCode} />
           )}
-          {flow.codeError && <p className="text-xs text-red-600">{flow.codeError}</p>}
+          {/* role="alert" announces the error to assistive tech on render
+              (repo convention: Alert.tsx / Banner.tsx); ERROR_ID links it to
+              the input via aria-describedby. */}
+          {flow.codeError && (
+            <p id={ERROR_ID} role="alert" className="text-xs text-red-600">
+              {flow.codeError}
+            </p>
+          )}
         </div>
       </ModalBody>
       <ModalFooter>
@@ -193,10 +208,13 @@ function ConfirmStep({
   orgName,
   typedName,
   onChange,
+  describedBy,
 }: {
   orgName: string;
   typedName: string;
   onChange: (value: string) => void;
+  /** Errors (e.g. a failed challenge send) also render on this step. */
+  describedBy?: string;
 }) {
   return (
     <FormField label={`Type "${orgName}" to continue`} htmlFor="delete-account-org-name">
@@ -206,6 +224,7 @@ function ConfirmStep({
         onChange={onChange}
         placeholder={orgName}
         autoComplete="off"
+        aria-describedby={describedBy}
       />
     </FormField>
   );
@@ -238,6 +257,7 @@ function CodeStep({
           inputMode="numeric"
           autoComplete="one-time-code"
           invalid={flow.codeError !== null}
+          aria-describedby={flow.codeError !== null ? ERROR_ID : undefined}
           // The confirm→code transition disables/replaces the button that held
           // focus, which would otherwise drop keyboard focus to <body>. Focus
           // the code input as the step mounts (precedent: ProvidersMultiSelect).
