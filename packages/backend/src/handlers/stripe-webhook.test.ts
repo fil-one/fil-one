@@ -276,7 +276,10 @@ describe('stripe-webhook handler', () => {
       ddbMock
         .on(PutItemCommand)
         .rejects(
-          new ConditionalCheckFailedException({ message: 'Conditional check failed', $metadata: {} }),
+          new ConditionalCheckFailedException({
+            message: 'Conditional check failed',
+            $metadata: {},
+          }),
         );
 
       const result = await handler(buildWebhookEvent('{}'));
@@ -1692,14 +1695,12 @@ describe('stripe-webhook handler', () => {
   // -----------------------------------------------------------------------
   describe('deletion guard', () => {
     function guardRejection() {
-      ddbMock
-        .on(UpdateItemCommand)
-        .rejects(
-          new ConditionalCheckFailedException({
-            message: 'The conditional request failed',
-            $metadata: {},
-          }),
-        );
+      ddbMock.on(UpdateItemCommand).rejects(
+        new ConditionalCheckFailedException({
+          message: 'The conditional request failed',
+          $metadata: {},
+        }),
+      );
     }
 
     it('subscription.deleted for a mid-deletion record: 200, no upsert side effects, no write-lock sync', async () => {
