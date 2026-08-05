@@ -223,4 +223,10 @@ describe('DeleteAccountModal', () => {
     renderModal();
     expect(screen.getByText(/not instantly erased/i)).toBeInTheDocument();
   });
+
+  it('describes cancellation as in-progress — accurate for the async teardown and for trial accounts without a subscription', () => {
+    renderModal();
+    expect(screen.getByText(/any active subscription is being canceled/i)).toBeInTheDocument();
+    expect(screen.queryByText(/canceled immediately/i)).not.toBeInTheDocument();
+  });
 });

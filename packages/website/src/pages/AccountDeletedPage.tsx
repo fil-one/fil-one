@@ -19,9 +19,9 @@ export function AccountDeletedPage() {
             Your account has been deleted
           </Heading>
           <p className="text-sm text-zinc-500">
-            Your subscription has been canceled, your access keys are revoked, and your profile and
-            account data are being removed. Object data held by our storage provider is locked and
-            inaccessible, and is scheduled for later destruction.
+            Any active subscription is being canceled, your access keys are revoked, and your
+            profile and account data are being removed. Object data held by our storage provider is
+            locked and inaccessible, and is scheduled for later destruction.
           </p>
           <p className="text-sm text-zinc-500">
             Thanks for trying Fil One. You can close this page, or head back to{' '}
