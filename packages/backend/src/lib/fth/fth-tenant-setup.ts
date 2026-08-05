@@ -5,7 +5,11 @@
 // aurora-tenant-setup.ts for the pattern to mirror.
 
 import { format } from 'node:util';
-import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
@@ -118,17 +122,42 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
     }),
   );
 
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: key,
-      UpdateExpression: 'SET fthTenantId = :tenantId, updatedAt = :now',
-      ExpressionAttributeValues: {
-        ':tenantId': { S: tenantId },
-        ':now': { S: new Date().toISOString() },
-      },
-    }),
-  );
+  // The deleting re-check at the top of this function is seconds stale by
+  // now (TOCTOU): a teardown may have set `deleting` — or purged the PROFILE
+  // row entirely — while the FTH calls above were in flight. Condition the
+  // tenant-id-persisting write on both so a racing setup can neither orphan
+  // a live FTH client behind a deleted org nor resurrect a purged PROFILE
+  // row via UpdateItem's upsert semantics. (The PROFILE row is created by
+  // the onboarding transaction, so attribute_exists(pk) never conflicts
+  // with first-time provisioning.)
+  try {
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: key,
+        UpdateExpression: 'SET fthTenantId = :tenantId, updatedAt = :now',
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+        ExpressionAttributeValues: {
+          ':tenantId': { S: tenantId },
+          ':now': { S: new Date().toISOString() },
+        },
+      }),
+    );
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) {
+      // The FTH client created above is now unreferenced. If the PROFILE
+      // row still exists, the teardown's late-region re-check will sweep
+      // it; if the row was already purged, this error must be surfaced so
+      // the client is cleaned up manually.
+      throw new Error(
+        `Org ${orgId} is deleting or purged; refusing to persist FTH tenant ${tenantId}. ` +
+          `The just-created FTH client is swept by the teardown's late-region re-check ` +
+          `if the profile still exists; otherwise it needs manual cleanup.`,
+        { cause: err },
+      );
+    }
+    throw err;
+  }
 
   return tenantId;
 }

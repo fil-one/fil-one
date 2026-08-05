@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { SSMClient, PutParameterCommand } from '@aws-sdk/client-ssm';
 import type { FthManagementClient } from './fth-management-client.js';
 
@@ -143,6 +148,37 @@ describe('ensureTenantReady', () => {
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({
       ':tenantId': { S: fthClientId },
     });
+    // The write must refuse deleting/purged orgs (TOCTOU with the teardown).
+    expect(updateCalls[0].args[0].input.ConditionExpression).toBe(
+      'attribute_exists(pk) AND attribute_not_exists(deleting)',
+    );
+  });
+
+  it('refuses to persist the tenant id when deletion races the setup (FIL-112 TOCTOU)', async () => {
+    // The entry-point deleting check passed, but the teardown set `deleting`
+    // (or purged the PROFILE row) during the FTH calls — the conditional
+    // tenant-id write must fail loudly instead of committing.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock.on(GetItemCommand).resolves({ Item: profileItem({}) });
+    ddbMock.on(UpdateItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        $metadata: {},
+        message: 'The conditional request failed',
+      }),
+    );
+    ssmMock.on(PutParameterCommand).resolves({});
+    stubSetupApiCalls();
+
+    const result = await ensureTenantReady(fthClient, orgId);
+
+    expect(result).toBeNull();
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[fth-tenant-setup] setup failed',
+      expect.objectContaining({
+        orgId,
+        error: expect.stringContaining(`Org ${orgId} is deleting or purged`),
+      }),
+    );
   });
 
   it('returns null when setup throws', async () => {
