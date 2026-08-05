@@ -33,9 +33,7 @@ vi.mock('../lib/auth-secrets.js', async () =>
   (await import('../test/auth-mocks.js')).authSecretsMockModule(),
 );
 
-vi.mock('jose', async () =>
-  (await import('../test/auth-mocks.js')).joseMockModule(mockJwtVerify),
-);
+vi.mock('jose', async () => (await import('../test/auth-mocks.js')).joseMockModule(mockJwtVerify));
 
 const ddbMock = mockClient(DynamoDBClient);
 
