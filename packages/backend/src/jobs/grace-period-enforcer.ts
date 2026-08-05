@@ -1,8 +1,9 @@
-import { ScanCommand, UpdateItemCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
+import { ScanCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
+import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
@@ -73,8 +74,7 @@ async function processCandidate(
   now: Date,
 ): Promise<CandidateOutcome> {
   if (candidate.action === 'cancel') {
-    await cancelSubscriptionAndDisableTenant(candidate, billingTableName, now);
-    return 'canceled';
+    return cancelSubscriptionAndDisableTenant(candidate, billingTableName, now);
   }
 
   return ensureTenantWriteLocked(candidate);
@@ -147,13 +147,17 @@ async function cancelSubscriptionAndDisableTenant(
   candidate: Candidate,
   billingTableName: string,
   now: Date,
-): Promise<void> {
+): Promise<CandidateOutcome> {
   assertRegionSyncSucceeded(
     await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled'),
   );
-  // Transition DynamoDB status to canceled
-  await dynamo.send(
-    new UpdateItemCommand({
+  // Transition DynamoDB status to canceled. The scan filtered out records
+  // with deletionRequestedAt, but an account teardown can claim (or purge)
+  // the record mid-sweep — an unconditional write here would upsert a zombie
+  // {pk, sk, canceled} record after the purge, so route it through the
+  // deletion guard and skip the follow-on logging when it rejects.
+  const applied = await sendGuardedBillingUpdate(
+    {
       TableName: billingTableName,
       Key: { pk: { S: candidate.pk }, sk: { S: 'SUBSCRIPTION' } },
       UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
@@ -161,14 +165,17 @@ async function cancelSubscriptionAndDisableTenant(
         ':status': { S: SubscriptionStatus.Canceled },
         ':now': { S: now.toISOString() },
       },
-    }),
+    },
+    { source: 'grace-period-enforcer', userId: candidate.userId, orgId: candidate.orgId },
   );
+  if (!applied) return 'skipped';
 
   console.log('[grace-period-enforcer] Canceled + disabled', {
     userId: candidate.userId,
     orgId: candidate.orgId,
     previousStatus: candidate.subscriptionStatus,
   });
+  return 'canceled';
 }
 
 // Non-expired grace period — ensure every orchestrator tenant is write-locked.
