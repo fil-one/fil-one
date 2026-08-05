@@ -10,6 +10,8 @@ export async function isOrgAdmin(orgId: string, userId: string): Promise<boolean
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: marshall({ pk: `ORG#${orgId}`, sk: `MEMBER#${userId}` }),
+      // Access-control read — must see the latest role, not a stale replica.
+      ConsistentRead: true,
     }),
   );
   return memberRow.Item?.role?.S === OrgRole.Admin;

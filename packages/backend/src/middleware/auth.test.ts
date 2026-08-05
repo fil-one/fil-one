@@ -1060,7 +1060,8 @@ describe('authMiddleware', () => {
           refresh_token: 'post-handler-rt',
         }),
       });
-      mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
+      // The after hook verifies the minted access token before setting cookies.
+      mockJwtVerify.mockResolvedValue({ payload: { sub: MOCK_SUB } });
 
       const event = buildEvent();
       (
@@ -1091,6 +1092,42 @@ describe('authMiddleware', () => {
       const cookies = response.cookies ?? [];
       expect(cookies[0]).toContain('post-handler-at');
       expect(cookies[1]).toContain('post-handler-it');
+    });
+
+    it('does not mint cookies when the force-refreshed token fails verification', async () => {
+      const { after } = authMiddleware();
+      const response: APIGatewayProxyStructuredResultV2 = { statusCode: 200, body: '{}' };
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: 'unverifiable-at',
+          id_token: 'unverifiable-it',
+          refresh_token: 'unverifiable-rt',
+        }),
+      });
+      // The exchange succeeded, but the minted access token does not verify —
+      // the after hook must treat it like a failed refresh, not set cookies.
+      mockJwtVerify.mockRejectedValue(new Error('signature verification failed'));
+
+      const event = buildEvent();
+      (
+        event.requestContext as APIGatewayProxyEventV2['requestContext'] & {
+          _forceTokenRefresh?: boolean;
+        }
+      )._forceTokenRefresh = true;
+
+      const request: AuthRequest = {
+        event,
+        context: {} as Context,
+        response,
+        error: undefined,
+        internal: { refreshToken: 'session-rt' },
+      };
+
+      await after(request);
+
+      expect(response.cookies).toBeUndefined();
     });
 
     it('does not modify response when no newTokens', async () => {

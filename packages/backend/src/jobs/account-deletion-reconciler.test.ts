@@ -24,17 +24,22 @@ process.env.ACCOUNT_DELETION_WORKER_FUNCTION_NAME = 'account-deletion-worker';
 import { handler } from './account-deletion-reconciler.js';
 
 function deletionRecord(orgId: string, overrides?: Record<string, unknown>) {
-  return marshall({
+  const item: Record<string, unknown> = {
     pk: `ORG#${orgId}`,
     sk: 'DELETION',
     status: 'PENDING',
     attemptCount: 1,
-    updatedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1h stale
+    updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2h — past the 60min window
     members: [],
     requestedAt: '2026-07-10T00:00:00.000Z',
     requestedByUserId: 'user-1',
     ...overrides,
-  });
+  };
+  // An `undefined` override means "absent from the record".
+  for (const key of Object.keys(item)) {
+    if (item[key] === undefined) delete item[key];
+  }
+  return marshall(item);
 }
 
 describe('account-deletion-reconciler', () => {
@@ -67,6 +72,20 @@ describe('account-deletion-reconciler', () => {
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
   });
 
+  it('leaves a record inside the 60-minute window alone: the worker (900s timeout) may still be running', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        deletionRecord('org-1', {
+          updatedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(), // 30min
+        }),
+      ],
+    });
+
+    await handler();
+
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+  });
+
   it('emits StuckAccountDeletionCount for records past the attempt threshold', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
@@ -83,15 +102,91 @@ describe('account-deletion-reconciler', () => {
     expect(emitted?.StuckAccountDeletionCount).toBe(1);
   });
 
-  it('excludes DONE records via the scan filter and projects only what it reads', async () => {
+  it('excludes DONE and non-ORG records via the scan filter and projects only what it reads', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [] });
 
     await handler();
 
     const scan = ddbMock.commandCalls(ScanCommand)[0].args[0].input;
-    expect(scan.FilterExpression).toBe('sk = :deletion AND #s <> :done');
+    expect(scan.FilterExpression).toBe(
+      'begins_with(pk, :orgPrefix) AND sk = :deletion AND #s <> :done',
+    );
+    expect(scan.ExpressionAttributeValues?.[':orgPrefix']).toEqual({ S: 'ORG#' });
     expect(scan.ExpressionAttributeValues?.[':done']).toEqual({ S: 'DONE' });
     expect(scan.ProjectionExpression).toBe('pk, updatedAt, attemptCount');
+  });
+
+  it('pages the scan via LastEvaluatedKey and reconciles records from every page', async () => {
+    ddbMock
+      .on(ScanCommand)
+      .resolvesOnce({
+        Items: [deletionRecord('org-1')],
+        LastEvaluatedKey: marshall({ pk: 'ORG#org-1', sk: 'DELETION' }),
+      })
+      .resolves({ Items: [deletionRecord('org-2')] });
+
+    await handler();
+
+    expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(2);
+    const orgIds = lambdaMock.commandCalls(InvokeCommand).map(
+      (c) =>
+        (
+          JSON.parse(new TextDecoder().decode(c.args[0].input.Payload as Uint8Array)) as {
+            orgId: string;
+          }
+        ).orgId,
+    );
+    expect(orgIds).toEqual(['org-1', 'org-2']);
+  });
+
+  it('a failed scan propagates: no re-invokes and (by design) no stuck gauge this run', async () => {
+    ddbMock.on(ScanCommand).rejects(new Error('DynamoDB unavailable'));
+
+    await expect(handler()).rejects.toThrow('DynamoDB unavailable');
+
+    expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+    expect(reportMetricMock).not.toHaveBeenCalled();
+  });
+
+  it('treats a record with a garbled or missing updatedAt as stale so it still gets re-driven', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        deletionRecord('org-garbled', { updatedAt: 'not-a-timestamp' }),
+        deletionRecord('org-missing', { updatedAt: undefined }),
+      ],
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await handler();
+
+      expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(2);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('unparseable updatedAt'),
+        expect.objectContaining({ pk: 'ORG#org-garbled' }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('emits the stuck gauge even when every re-invoke fails', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [deletionRecord('org-1', { attemptCount: 5 })],
+    });
+    lambdaMock.on(InvokeCommand).rejects(new Error('throttled'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await handler();
+
+      const emitted = reportMetricMock.mock.calls
+        .map(([e]) => e as MetricEvent)
+        .find((e) => 'StuckAccountDeletionCount' in e);
+      expect(emitted?.StuckAccountDeletionCount).toBe(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('still rescues legacy records carrying a pre-redesign intermediate status', async () => {

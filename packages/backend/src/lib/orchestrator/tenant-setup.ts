@@ -11,7 +11,11 @@
 // "fully provisioned, console credentials stashed in SSM".
 
 import { format } from 'node:util';
-import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.js';
@@ -134,20 +138,45 @@ async function processTenantSetup(deps: TenantSetupDeps, orgId: string): Promise
     );
   }
 
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: key,
-      UpdateExpression: 'SET #tenantIdAttr = :tenantId, updatedAt = :now',
-      ExpressionAttributeNames: {
-        '#tenantIdAttr': tenantIdAttribute,
-      },
-      ExpressionAttributeValues: {
-        ':tenantId': { S: orgId },
-        ':now': { S: new Date().toISOString() },
-      },
-    }),
-  );
+  // The deleting re-check at the top of this function is seconds stale by
+  // now (TOCTOU): a teardown may have set `deleting` — or purged the PROFILE
+  // row entirely — while the upstream calls above were in flight. Condition
+  // the tenant-id-persisting write on both so a racing setup can neither
+  // orphan a live upstream tenant behind a deleted org nor resurrect a
+  // purged PROFILE row via UpdateItem's upsert semantics. (The PROFILE row
+  // is created by the onboarding transaction, so attribute_exists(pk) never
+  // conflicts with first-time provisioning.)
+  try {
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: key,
+        UpdateExpression: 'SET #tenantIdAttr = :tenantId, updatedAt = :now',
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+        ExpressionAttributeNames: {
+          '#tenantIdAttr': tenantIdAttribute,
+        },
+        ExpressionAttributeValues: {
+          ':tenantId': { S: orgId },
+          ':now': { S: new Date().toISOString() },
+        },
+      }),
+    );
+  } catch (err) {
+    if (err instanceof ConditionalCheckFailedException) {
+      // The upstream tenant created above is now unreferenced. If the
+      // PROFILE row still exists, the teardown's late-region re-check will
+      // sweep it; if the row was already purged, this error must be
+      // surfaced so the tenant is cleaned up manually.
+      throw new Error(
+        `Org ${orgId} is deleting or purged; refusing to persist ${id} tenant ${orgId}. ` +
+          `The just-created upstream tenant is swept by the teardown's late-region re-check ` +
+          `if the profile still exists; otherwise it needs manual cleanup.`,
+        { cause: err },
+      );
+    }
+    throw err;
+  }
 
   return orgId;
 }

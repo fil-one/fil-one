@@ -233,6 +233,7 @@ describe('deleteTenant', () => {
   });
 
   it('treats an already-deleted tenant (404s) as success and still deletes the SSM parameter', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockSetStatus.mockResolvedValue(fail(404, 'gone'));
     mockDeleteTenant.mockResolvedValue(fail(404, 'gone'));
     ssmMock.on(DeleteParameterCommand).resolves({});
@@ -240,6 +241,25 @@ describe('deleteTenant', () => {
     await orchestrator.deleteTenant(tenantId);
 
     expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
+    // The contract defines idempotent deletion via 204; an undocumented 404
+    // may be a misrouted baseUrl/gateway, so it must be flagged loudly.
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('misrouted'),
+      expect.objectContaining({
+        orchestratorId: 'forge',
+        tenantId,
+        baseUrl: 'https://api.example.com',
+      }),
+    );
+  });
+
+  it('does not warn about a 404 misroute when the DELETE succeeds', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubHappyDeletion();
+
+    await orchestrator.deleteTenant(tenantId);
+
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it('tolerates an already-deleted SSM parameter (idempotent re-run)', async () => {

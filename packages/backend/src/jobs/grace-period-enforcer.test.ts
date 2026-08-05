@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, ScanCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  ScanCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 
@@ -130,6 +135,83 @@ describe('grace-period-enforcer', () => {
     await handler();
 
     expect(canceledUpdate()).toBeDefined();
+  });
+
+  it('routes the cancel write through the deletion guard', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
+
+    await handler();
+
+    // An unconditional write could upsert a zombie record after the account
+    // teardown purge; the guard makes it a no-op instead.
+    const update = canceledUpdate();
+    expect(update).toBeDefined();
+    expect(update!.args[0].input.ConditionExpression).toBe(
+      'attribute_exists(pk) AND attribute_not_exists(deletionRequestedAt)',
+    );
+  });
+
+  it('skips the cancel when the guard rejects mid-sweep, and the run continues', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const otherUserId = 'user-999';
+    const otherOrgId = 'org-999';
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        buildBillingItem({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+        marshall({
+          pk: `CUSTOMER#${otherUserId}`,
+          sk: 'SUBSCRIPTION',
+          orgId: otherOrgId,
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          gracePeriodEndsAt: pastDate(1),
+        }),
+      ],
+    });
+    // An account teardown claimed the first record between the scan and the
+    // cancel write — the guarded update fails its condition.
+    ddbMock
+      .on(UpdateItemCommand, {
+        Key: { pk: { S: `CUSTOMER#${MOCK_USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+      })
+      .rejects(
+        new ConditionalCheckFailedException({
+          $metadata: {},
+          message: 'The conditional request failed',
+        }),
+      );
+
+    await expect(handler()).resolves.toBeUndefined();
+
+    // The rejected record produced no cancel claim...
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[deletion-guard] Billing record missing or org mid-deletion; skipping update',
+      expect.objectContaining({ source: 'grace-period-enforcer', userId: MOCK_USER_ID }),
+    );
+    expect(logSpy).not.toHaveBeenCalledWith(
+      '[grace-period-enforcer] Canceled + disabled',
+      expect.objectContaining({ userId: MOCK_USER_ID }),
+    );
+    // ...while the sweep still processed the next candidate normally...
+    expect(logSpy).toHaveBeenCalledWith(
+      '[grace-period-enforcer] Canceled + disabled',
+      expect.objectContaining({ userId: otherUserId, orgId: otherOrgId }),
+    );
+    // ...and the run counted the rejection as skipped, not failed.
+    expect(logSpy).toHaveBeenCalledWith(
+      '[grace-period-enforcer] Complete',
+      expect.objectContaining({ canceled: 1, skipped: 1, failed: 0 }),
+    );
   });
 
   it('disables the tenant in every provisioned region when grace expired', async () => {
