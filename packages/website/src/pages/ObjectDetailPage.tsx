@@ -160,7 +160,12 @@ export function ObjectDetailPage({
   const objectVersions = (cachedVersions?.versions ?? []).filter((v) => v.key === objectKey);
 
   const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
-  const canShare = billing?.subscription.status !== SubscriptionStatus.Trialing;
+  // Allowlist, not a denylist: a status this list doesn't know (e.g. inactive)
+  // must not enable sharing.
+  const canShare =
+    billing?.subscription.status === SubscriptionStatus.Active ||
+    billing?.subscription.status === SubscriptionStatus.PastDue ||
+    billing?.subscription.status === SubscriptionStatus.GracePeriod;
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);

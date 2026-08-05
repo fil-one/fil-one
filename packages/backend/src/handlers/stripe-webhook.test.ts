@@ -1676,4 +1676,120 @@ describe('stripe-webhook handler', () => {
       expect(invoiceFinalizationFailedEmissions()).toHaveLength(0);
     });
   });
+
+  // -----------------------------------------------------------------------
+  // 11. orgId backfill — webhook-born records without an orgId are invisible
+  // to every lifecycle job, so each writer persists it from Stripe metadata.
+  // if_not_exists is the do-not-overwrite guarantee: a stored orgId wins over
+  // whatever the metadata carries.
+  // -----------------------------------------------------------------------
+  describe('orgId backfill', () => {
+    function setupCustomerRetrieveWithOrg() {
+      mockCustomersRetrieve.mockResolvedValue({
+        id: MOCK_CUSTOMER_ID,
+        deleted: false,
+        metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
+      });
+    }
+
+    function billingUpdateInput() {
+      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
+      expect(updateCalls).toHaveLength(1);
+      return updateCalls[0].args[0].input;
+    }
+
+    function expectOrgIdBackfilled() {
+      const input = billingUpdateInput();
+      expect(input.UpdateExpression).toContain('orgId = if_not_exists(orgId, :orgId)');
+      expect(input.ExpressionAttributeValues![':orgId']).toEqual({ S: MOCK_ORG_ID });
+    }
+
+    function expectNoOrgIdClause() {
+      const input = billingUpdateInput();
+      expect(input.UpdateExpression).not.toContain('orgId');
+      expect(input.ExpressionAttributeValues![':orgId']).toBeUndefined();
+    }
+
+    it('subscription update persists orgId from subscription metadata when present', async () => {
+      setupStripeEvent(
+        'customer.subscription.updated',
+        mockSubscription({ metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID } }),
+      );
+
+      await handler(buildWebhookEvent('{}'));
+
+      expectOrgIdBackfilled();
+    });
+
+    it('subscription update persists orgId from customer metadata on the fallback path', async () => {
+      setupStripeEvent('customer.subscription.updated', mockSubscription({ metadata: {} }));
+      setupCustomerRetrieveWithOrg();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expectOrgIdBackfilled();
+    });
+
+    it('subscription update omits the orgId clause when metadata carries none', async () => {
+      setupStripeEvent('customer.subscription.updated', mockSubscription());
+
+      await handler(buildWebhookEvent('{}'));
+
+      expectNoOrgIdClause();
+    });
+
+    it('subscription deleted persists orgId from customer metadata', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieveWithOrg();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expectOrgIdBackfilled();
+    });
+
+    it('subscription deleted omits the orgId clause when metadata carries none', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expectNoOrgIdClause();
+    });
+
+    it('payment succeeded persists orgId from customer metadata', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieveWithOrg();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expectOrgIdBackfilled();
+    });
+
+    it('payment succeeded omits the orgId clause when metadata carries none', async () => {
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expectNoOrgIdClause();
+    });
+
+    it('payment failed persists orgId from customer metadata', async () => {
+      setupStripeEvent('invoice.payment_failed', mockInvoice());
+      setupCustomerRetrieveWithOrg();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expectOrgIdBackfilled();
+    });
+
+    it('payment failed omits the orgId clause when metadata carries none', async () => {
+      setupStripeEvent('invoice.payment_failed', mockInvoice());
+      setupCustomerRetrieve();
+
+      await handler(buildWebhookEvent('{}'));
+
+      expectNoOrgIdClause();
+    });
+  });
 });

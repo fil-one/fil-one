@@ -100,6 +100,28 @@ describe('ensureTrialEntitlement', () => {
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
   });
 
+  it('logs the permanent denial at warn so it is visible in production logs', async () => {
+    // Production Lambdas run with applicationLogLevel WARN; console.info would
+    // make this denial invisible.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    ddbMock.on(PutItemCommand).rejects(
+      new ConditionalCheckFailedException({
+        message: 'exists',
+        $metadata: {},
+        Item: { userId: { S: 'someone-else' } },
+      }),
+    );
+    ddbMock.on(UpdateItemCommand).resolves({});
+
+    await ensureTrialEntitlement(BASE);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[trial-entitlement] Normalized email already claimed — no trial granted',
+      { userId: 'user-1', orgId: 'org-1' },
+    );
+    warnSpy.mockRestore();
+  });
+
   it('creates the trial when the existing claim is owned by the same user (retry)', async () => {
     ddbMock.on(PutItemCommand).rejects(
       new ConditionalCheckFailedException({

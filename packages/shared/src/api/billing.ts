@@ -16,6 +16,12 @@ export type ActivateSubscriptionRequest = z.input<typeof ActivateSubscriptionReq
 export enum PlanId {
   FreeTrial = 'free_trial',
   PayAsYouGo = 'pay_as_you_go',
+  /**
+   * Read-model value only: reported by `GET /api/billing` when the account has
+   * no entitlement (no billing record, or a record without a subscription
+   * status). Never persisted to DynamoDB.
+   */
+  None = 'none',
 }
 
 export enum SubscriptionStatus {
@@ -24,6 +30,13 @@ export enum SubscriptionStatus {
   PastDue = 'past_due',
   Canceled = 'canceled',
   GracePeriod = 'grace_period',
+  /**
+   * Read-model value only: the subscription-guard denies these accounts with
+   * `SUBSCRIPTION_INACTIVE`, and `GET /api/billing` reports the same state
+   * instead of synthesizing a trial. Never persisted to DynamoDB and never
+   * returned by `mapStripeStatus`.
+   */
+  Inactive = 'inactive',
 }
 
 export interface Plan {

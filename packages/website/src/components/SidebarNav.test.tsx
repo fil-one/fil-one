@@ -21,6 +21,7 @@ vi.mock('./use-sidebar-data.js', () => ({
     initial: 'A',
     isTrialing: true,
     isPastDue: true,
+    isInactive: true,
     trialDays: 5,
     trialEndsLabel: 'Expires soon',
     graceDays: 3,
@@ -60,7 +61,11 @@ function renderBothSidebars() {
   );
 }
 
-const UNIQUE_IDS = ['sidebar-upgrade-button', 'sidebar-update-payment-button'];
+const UNIQUE_IDS = [
+  'sidebar-upgrade-button',
+  'sidebar-update-payment-button',
+  'sidebar-choose-plan-button',
+];
 const UNIQUE_TESTIDS = [
   'nav-dashboard',
   'nav-buckets',
