@@ -239,17 +239,15 @@ export default $config({
       },
     });
 
-    const { getAuth0Domain, getS3Endpoint, S3Region, Stage, SUPPORTED_COMPLETION_MODELS } =
+    const { getAuth0Domain, getS3CspOrigins, Stage, SUPPORTED_COMPLETION_MODELS } =
       await import('@filone/shared');
     const stageForEndpoints = isProduction ? Stage.Production : Stage.Staging;
     // The browser hits the S3 endpoint of every region directly — list-objects,
     // uploads, downloads, etc. — so each one needs to be in `connect-src` or the
     // browser blocks the request with a CSP violation before it ever leaves.
-    // CSP is a single static document header that cannot vary per user, so it
-    // must list every regional S3 endpoint any user could reach.
-    const s3GatewayUrls = Object.values(S3Region)
-      .map((r) => getS3Endpoint(r, stageForEndpoints))
-      .join(' ');
+    // In production this covers both data domains while regions migrate to
+    // s3.filonecontent.com one at a time — see getS3CspOrigins (FIL-627).
+    const s3GatewayUrls = getS3CspOrigins(stageForEndpoints).join(' ');
 
     // ── CloudFront security headers (CSP applied to the HTML document) ──
     const sentryCspEndpoint =

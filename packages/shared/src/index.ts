@@ -15,6 +15,7 @@ export {
   isSupportedRegion,
   supportsBucketManagement,
   getS3Endpoint,
+  getS3CspOrigins,
   getAuth0Domain,
   getStageFromHostname,
   OAUTH_STATE_COOKIE,

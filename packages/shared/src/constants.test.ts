@@ -6,6 +6,7 @@ import {
   UNLIMITED,
   getUsageLimits,
   getS3Endpoint,
+  getS3CspOrigins,
   getAuth0Domain,
   getStageFromHostname,
   getAvailableRegions,
@@ -87,6 +88,69 @@ describe('getS3Endpoint', () => {
 
   it('returns the eu-central-3 staging gateway', () => {
     expect(getS3Endpoint(S3Region.EuCentral3, Stage.Staging)).toBe('https://ingot.staging.fil.one');
+  });
+
+  // FIL-627: regions move to s3.filonecontent.com one at a time, each gated on an
+  // independent operator issuing its own TLS certificate for the new hostname.
+  describe('per-region data domain (FIL-627)', () => {
+    it('serves eu-central-3 from the content domain, never having been on fil.one', () => {
+      expect(getS3Endpoint(S3Region.EuCentral3, Stage.Production)).toBe(
+        'https://eu-central-3.s3.filonecontent.com',
+      );
+    });
+
+    it('gives every region exactly one production endpoint on a known data domain', () => {
+      for (const region of Object.values(S3Region)) {
+        expect(getS3Endpoint(region, Stage.Production)).toMatch(
+          new RegExp(`^https://${region}\\.s3\\.(fil\\.one|filonecontent\\.com)$`),
+        );
+      }
+    });
+
+    it('leaves non-production on the operators own hostnames', () => {
+      for (const region of Object.values(S3Region)) {
+        expect(getS3Endpoint(region, Stage.Staging)).not.toContain('filonecontent.com');
+      }
+    });
+  });
+});
+
+describe('getS3CspOrigins', () => {
+  it('covers both data domains for every region in production', () => {
+    const origins = getS3CspOrigins(Stage.Production);
+    for (const region of Object.values(S3Region)) {
+      expect(origins).toContain(`https://${region}.s3.fil.one`);
+      expect(origins).toContain(`https://${region}.s3.filonecontent.com`);
+    }
+  });
+
+  // A presigned URL minted just before a region flipped stays valid on the old
+  // host for up to MAX_GET_OBJECT_EXPIRY_SECONDS, and a page still holding it may
+  // retry the request — so dropping the legacy origin early breaks those retries.
+  it('keeps the endpoint each region currently serves in the allowlist', () => {
+    const origins = getS3CspOrigins(Stage.Production);
+    for (const region of Object.values(S3Region)) {
+      expect(origins).toContain(getS3Endpoint(region, Stage.Production));
+    }
+  });
+
+  it('emits no duplicates', () => {
+    const origins = getS3CspOrigins(Stage.Production);
+    expect(origins).toHaveLength(new Set(origins).size);
+  });
+
+  it('lists the operators own hostnames on non-production stages', () => {
+    expect([...getS3CspOrigins(Stage.Staging)].sort()).toEqual([
+      'https://ingot.staging.fil.one',
+      'https://s3.dev.aur.lu',
+      'https://us-east-1.fortilyx.com',
+    ]);
+  });
+
+  it('never leaks a production data domain into a non-production policy', () => {
+    for (const stage of [Stage.Staging, 'dev', 'pr-42']) {
+      expect(getS3CspOrigins(stage).join(' ')).not.toContain('filonecontent.com');
+    }
   });
 });
 
