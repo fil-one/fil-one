@@ -171,6 +171,23 @@ export function logoutReturnTo(origin: string): string {
   return MARKETING_URL_BY_CONSOLE_ORIGIN[origin] ?? origin;
 }
 
+/**
+ * Auth0 domain to authenticate against, keyed by the console origin the request
+ * arrived on. Production hosts only — non-production stages never match and fall
+ * through to their configured domain.
+ *
+ * Aliases cannot use `auth.fil.one`: a second Auth0 custom domain requires an
+ * Enterprise plan, and `auth.fil.one` sits on the same flagged TLD the aliases exist
+ * to escape. They use the tenant's own domain, which stays available alongside a
+ * custom domain. Consequences — passkeys and sessions do not carry between the two,
+ * because the WebAuthn relying-party ID is the Auth0 hostname — are in
+ * docs/Auth0OneTimeSetup.md §4a.
+ */
+export const AUTH0_DOMAIN_BY_CONSOLE_ORIGIN: Readonly<Record<string, string | undefined>> = {
+  [`https://${PROD_CONSOLE_HOST}`]: 'auth.fil.one',
+  'https://app.filone.ai': 'fil-one.us.auth0.com',
+};
+
 const PRODUCTION_HOSTS: ReadonlySet<string> = new Set([
   PROD_CONSOLE_HOST,
   ...PROD_CONSOLE_ALIAS_HOSTS,

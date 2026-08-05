@@ -12,6 +12,7 @@ import {
   PROD_CONSOLE_ALIAS_HOSTS,
   MARKETING_URL_BY_CONSOLE_ORIGIN,
   logoutReturnTo,
+  AUTH0_DOMAIN_BY_CONSOLE_ORIGIN,
   getAvailableRegions,
   supportsBucketManagement,
   isFoundationEmail,
@@ -161,6 +162,21 @@ describe('demo alias constants', () => {
 
   it('leaves non-production origins out of the table', () => {
     expect(MARKETING_URL_BY_CONSOLE_ORIGIN['https://staging.fil.one']).toBeUndefined();
+  });
+
+  // Without this, adding an alias host and forgetting its Auth0 entry routes that
+  // alias's login through auth.fil.one — the flagged TLD the alias exists to escape
+  // — and nothing else in the suite would catch it.
+  it('gives every production console origin an Auth0 domain to authenticate against', () => {
+    for (const host of [PROD_CONSOLE_HOST, ...PROD_CONSOLE_ALIAS_HOSTS]) {
+      expect(AUTH0_DOMAIN_BY_CONSOLE_ORIGIN[`https://${host}`]).toBeDefined();
+    }
+  });
+
+  it('keeps aliases off the Auth0 custom domain on the flagged TLD', () => {
+    for (const host of PROD_CONSOLE_ALIAS_HOSTS) {
+      expect(AUTH0_DOMAIN_BY_CONSOLE_ORIGIN[`https://${host}`]).not.toBe('auth.fil.one');
+    }
   });
 
   // getStageFromHostname lowercases its input before comparing, so an entry

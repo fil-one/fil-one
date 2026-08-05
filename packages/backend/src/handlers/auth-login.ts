@@ -5,13 +5,16 @@ import { OAUTH_STATE_COOKIE, buildAuth0AuthorizeUrl } from '@filone/shared';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
 import { resolveOrigin } from '../lib/resolve-origin.js';
+import { resolveAuth0Domain } from '../lib/auth0-domain.js';
 
 async function baseHandler(
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const origin = resolveOrigin(event);
   const secrets = getAuthSecrets();
-  const domain = process.env.AUTH0_DOMAIN!;
+  // Matches the console host: the alias hostnames authenticate against a
+  // different Auth0 domain, and the callback must come back to the same one.
+  const domain = resolveAuth0Domain(event);
   const audience = process.env.AUTH0_AUDIENCE!;
 
   const state = crypto.randomUUID();
