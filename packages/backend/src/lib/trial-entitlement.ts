@@ -87,7 +87,10 @@ export async function ensureTrialEntitlement({
       });
     }
   } else {
-    console.info('[trial-entitlement] Normalized email already claimed — no trial granted', {
+    // warn, not info: production Lambdas log at WARN (sst.config.ts
+    // applicationLogLevel), and this permanent denial is the one line that
+    // explains a "why am I locked out" ticket.
+    console.warn('[trial-entitlement] Normalized email already claimed — no trial granted', {
       userId,
       orgId,
     });

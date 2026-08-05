@@ -79,6 +79,33 @@ describe('create-setup-intent baseHandler', () => {
     expect(item.trialEndsAt).toBeUndefined();
   });
 
+  it('stamps userId and orgId on the Stripe customer (first-time)', async () => {
+    // Webhook writers backfill orgId onto billing records from this metadata;
+    // without it, webhook-born records are skipped by every lifecycle job.
+    ddbMock.on(GetItemCommand).resolves({});
+    ddbMock.on(PutItemCommand).resolves({});
+
+    await baseHandler(setupIntentEvent());
+
+    expect(mockCustomersCreate).toHaveBeenCalledWith({
+      email: 'user@example.com',
+      metadata: { userId: USER_ID, orgId: ORG_ID },
+    });
+  });
+
+  it('stamps userId and orgId on the Stripe customer (existing record without one)', async () => {
+    ddbMock.on(GetItemCommand).resolves({
+      Item: { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } },
+    });
+
+    await baseHandler(setupIntentEvent());
+
+    expect(mockCustomersCreate).toHaveBeenCalledWith({
+      email: 'user@example.com',
+      metadata: { userId: USER_ID, orgId: ORG_ID },
+    });
+  });
+
   it('swallows ConditionalCheckFailedException when a record was created concurrently', async () => {
     // The entitlement path won the race and already wrote the record, so the
     // conditional PutItem fails. We must not fail the request — keep going and

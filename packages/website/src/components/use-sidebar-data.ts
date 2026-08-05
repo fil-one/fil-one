@@ -13,6 +13,7 @@ export function useSidebarData() {
   const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
   const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
   const isActivePaid = billing?.subscription.status === SubscriptionStatus.Active;
+  const isInactive = billing?.subscription.status === SubscriptionStatus.Inactive;
   const trialDays =
     isTrialing && billing?.subscription.trialEndsAt
       ? daysUntil(billing.subscription.trialEndsAt)
@@ -42,6 +43,7 @@ export function useSidebarData() {
     initial: displayName.charAt(0).toUpperCase(),
     isTrialing,
     isPastDue,
+    isInactive,
     trialDays,
     trialEndsLabel,
     graceDays,

@@ -181,8 +181,15 @@ Start with **Option 1 (pure metered)** for launch to minimize signup friction an
 
 Free trials consume real Filecoin storage at our cost, so abuse is a direct financial loss:
 
+- **One trial per normalized email (implemented):** verified emails only. The subscription
+  guard claims `EMAIL_NORM#<normalized-email>/TRIAL_ENTITLEMENT` with a conditional write;
+  only the account that wins the claim is granted a trial. A re-signup with the same
+  normalized email (dots/plus-tags stripped, see
+  [`email-normalization.ts`](../packages/backend/src/lib/email-normalization.ts)) is denied
+  and reported as `{subscription: {planId: 'none', status: 'inactive'}}` by `GET /api/billing`. See
+  [`trial-entitlement.ts`](../packages/backend/src/lib/trial-entitlement.ts); the permanent
+  denial logs at `warn` so it is visible at the production `applicationLogLevel`.
 - **Radar:** Score payment method at signup, block high-risk cards
-- **Rate limiting:** One trial per payment method, one trial per email domain
 - **Usage enforcement:** Backend rejects uploads exceeding the 1TB trial limit
 - **Disposable email blocking:** Via Radar custom rules
 

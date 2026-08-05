@@ -2,16 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
 import { STORAGE_STATE } from './roles.util.ts';
 import { REGIONS, type Region } from './regions.util.ts';
-
-// Bucket names are globally unique across regions and rejected with 409 if
-// taken, so each test mints a fresh name. We do not delete buckets afterward
-// because the delete API is not wired for any region yet — it routes to the
-// Aurora orchestrator, which does not support deletion, and the UI delete
-// button is disabled for the same reason (see
-// packages/website/src/pages/BucketsPage.tsx).
-function uniqueBucketName(role: string, region: Region): string {
-  return `e2e-${role}-${region}-${randomUUID()}`;
-}
+import { uniqueBucketName } from './buckets.util.ts';
 
 // In-memory upload fixture so the test does not depend on a checked-in file.
 // The object key is minted per upload (see `uniqueObjectName`) so reusing a
@@ -41,9 +32,10 @@ async function createBucketWithKey(page: Page, bucketName: string, region: Regio
 // its name. Bucket links carry the region as a search param
 // (/buckets/<name>?region=<region>), which is the stable per-region hook.
 // Upload tests reuse existing buckets rather than creating new ones because
-// the account-wide bucket limit is 100 and buckets are not yet deletable, so
-// each test account must be seeded with at least one bucket per region (see
-// README "End-to-end tests").
+// the account-wide bucket limit is 100 and buckets are not yet deletable. The
+// `seed-buckets` project (buckets.setup.ts) creates a bucket per region for
+// every role that has none, so reaching the assertion below means the seeding
+// did not run or did not cover this region.
 async function openFirstBucketInRegion(page: Page, region: Region): Promise<string> {
   await page.goto('/buckets');
   const firstBucketLink = page
@@ -51,7 +43,7 @@ async function openFirstBucketInRegion(page: Page, region: Region): Promise<stri
     .first();
   await expect(
     firstBucketLink,
-    `No ${region} bucket found for this test account — seed one manually (see README "End-to-end tests")`,
+    `No ${region} bucket found for this test account — check the bucket seeding in buckets.setup.ts (see README "Seeded buckets per region")`,
   ).toBeVisible();
   await firstBucketLink.click();
   await page.waitForURL((url) => /^\/buckets\/[^/]+$/.test(url.pathname));
