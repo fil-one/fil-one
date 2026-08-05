@@ -116,6 +116,33 @@ describe('createDeletionChallenge', () => {
     });
   });
 
+  it('clamps a resent code expiry to the window end so it never outlives the row', async () => {
+    // Window ends in 5 minutes — sooner than the code's normal TTL.
+    const windowEnd = Math.floor(Date.now() / 1000) + 5 * 60;
+    ddbMock
+      .on(UpdateItemCommand)
+      .rejectsOnce(
+        conditionalFailure(
+          challengeAttrs({
+            lastSentAt: new Date(Date.now() - 120_000).toISOString(),
+            ttl: windowEnd,
+          }),
+        ),
+      )
+      .resolves({});
+
+    const result = await createDeletionChallenge(ORG_ID);
+
+    if (result.outcome !== 'created')
+      expect.unreachable(`expected outcome=created, got ${result.outcome}`);
+    expect(result.expiresAt).toBe(new Date(windowEnd * 1000).toISOString());
+    // The stored expiry is clamped too, not just the reported one.
+    const input = ddbMock.commandCalls(UpdateItemCommand)[1].args[0].input;
+    expect(input.ExpressionAttributeValues?.[':expiresAt']).toEqual({
+      S: new Date(windowEnd * 1000).toISOString(),
+    });
+  });
+
   it('returns rate_limited with resend time on cooldown rejection', async () => {
     const lastSentAt = new Date().toISOString();
     ddbMock
