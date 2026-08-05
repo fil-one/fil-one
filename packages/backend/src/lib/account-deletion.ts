@@ -21,6 +21,7 @@ import {
   DeletionKeys,
   OrgDeletionStatus,
   RAGKeys,
+  type OrgDeletionBillingCustomer,
   type OrgDeletionRecord,
   type OrgTombstoneRecord,
 } from './dynamo-records.js';
@@ -117,33 +118,64 @@ async function cancelStripeAndWriteTombstone(
   orgId: string,
   record: OrgDeletionRecord,
 ): Promise<void> {
-  if (record.subscriptionId) {
+  const customers = resolveBillingCustomers(record);
+
+  for (const { subscriptionId } of customers) {
+    if (!subscriptionId) continue;
     try {
-      await getStripeClient().subscriptions.cancel(record.subscriptionId);
+      await getStripeClient().subscriptions.cancel(subscriptionId);
     } catch (err) {
       if (!isStripeAlreadyCanceled(err)) throw err;
       console.warn('[account-deletion] Subscription already canceled/missing', {
         orgId,
-        subscriptionId: record.subscriptionId,
+        subscriptionId,
       });
     }
   }
 
-  // The Stripe CUSTOMER object is kept (finance/audit needs the reference),
-  // but its PII is erased via a Redaction Job; this PII-free tombstone
-  // preserves the customer id across the purge.
+  // The Stripe CUSTOMER objects are kept (finance/audit needs the
+  // references), but their PII is erased via a Redaction Job; this PII-free
+  // tombstone preserves the customer ids across the purge.
+  const customerIds = billingCustomerIds(customers);
   const tombstone: OrgTombstoneRecord = {
     pk: DeletionKeys.tombstonePk(orgId),
     sk: DeletionKeys.tombstoneSk(),
     orgId,
-    ...(record.stripeCustomerId ? { stripeCustomerId: record.stripeCustomerId } : {}),
+    ...(customerIds.length > 0 ? { stripeCustomerId: customerIds[0] } : {}),
+    ...(customerIds.length > 1 ? { stripeCustomerIds: customerIds } : {}),
     deletedAt: new Date().toISOString(),
   };
   await dynamo.send(
     new PutItemCommand({ TableName: Resource.BillingTable.name, Item: marshall(tombstone) }),
   );
 
-  await redactStripeCustomer(orgId, record);
+  await redactStripeCustomers(orgId, record, customerIds);
+}
+
+/**
+ * Billing customers to cancel/redact: the `billingCustomers` snapshot when
+ * present, falling back to the legacy single top-level fields for in-flight
+ * records written before the list existed.
+ */
+function resolveBillingCustomers(record: OrgDeletionRecord): OrgDeletionBillingCustomer[] {
+  if (record.billingCustomers && record.billingCustomers.length > 0) {
+    return record.billingCustomers;
+  }
+  if (record.stripeCustomerId || record.subscriptionId) {
+    return [
+      {
+        ...(record.stripeCustomerId ? { stripeCustomerId: record.stripeCustomerId } : {}),
+        ...(record.subscriptionId ? { subscriptionId: record.subscriptionId } : {}),
+      },
+    ];
+  }
+  return [];
+}
+
+function billingCustomerIds(customers: OrgDeletionBillingCustomer[]): string[] {
+  return customers
+    .map((c) => c.stripeCustomerId)
+    .filter((id): id is string => typeof id === 'string');
 }
 
 /**
@@ -180,9 +212,10 @@ interface StripeRedactionJobList {
 }
 
 /**
- * Redact the canceled customer's PII via Stripe's Redaction Jobs API. The
- * pinned SDK (22.0.2) has no `privacy.redactionJobs` namespace, so the REST
- * endpoints are driven through `stripe.rawRequest`.
+ * Redact the canceled customers' PII via Stripe's Redaction Jobs API (one
+ * job covers every snapshotted customer). The pinned SDK (22.0.2) has no
+ * `privacy.redactionJobs` namespace, so the REST endpoints are driven
+ * through `stripe.rawRequest`.
  *
  * Job lifecycle: created → (validate) → validating → ready → (run) →
  * redacting → succeeded. Validation is asynchronous, so a single pass may
@@ -192,13 +225,16 @@ interface StripeRedactionJobList {
  * duplicate) on the next pass. `redacting`/`succeeded` count as done —
  * redaction is irreversible once running.
  */
-async function redactStripeCustomer(orgId: string, record: OrgDeletionRecord): Promise<void> {
-  const customerId = record.stripeCustomerId;
-  if (!customerId) return;
+async function redactStripeCustomers(
+  orgId: string,
+  record: OrgDeletionRecord,
+  customerIds: string[],
+): Promise<void> {
+  if (customerIds.length === 0) return;
 
   let jobId = record.stripeRedactionJobId;
   if (!jobId) {
-    const established = await establishRedactionJob(orgId, customerId);
+    const established = await establishRedactionJob(orgId, customerIds);
     if (!established) return; // customer missing — nothing to redact
     jobId = established;
     record.stripeRedactionJobId = jobId;
@@ -208,34 +244,34 @@ async function redactStripeCustomer(orgId: string, record: OrgDeletionRecord): P
 }
 
 /**
- * Create the customer's redaction job and persist its id — or, when Stripe
- * reports the customer is already in another (live) redaction job, recover
+ * Create the customers' redaction job and persist its id — or, when Stripe
+ * reports a customer is already in another (live) redaction job, recover
  * and persist THAT job's id so its lifecycle gets driven instead of the
  * redaction being skipped. Returns `null` only when the customer no longer
  * exists (nothing to redact).
  */
-async function establishRedactionJob(orgId: string, customerId: string): Promise<string | null> {
+async function establishRedactionJob(orgId: string, customerIds: string[]): Promise<string | null> {
   let created: StripeRedactionJob | undefined;
   try {
     created = await stripeRawRequest<StripeRedactionJob>('POST', '/v1/privacy/redaction_jobs', {
-      objects: { customers: [customerId] },
+      objects: { customers: customerIds },
     });
   } catch (err) {
     if (isRedactionUnnecessary(err)) {
       console.warn('[account-deletion] Stripe customer already redacted/missing', {
         orgId,
-        customerId,
+        customerIds,
       });
       return null;
     }
     if (!isRedactionJobConflict(err)) throw err;
-    // The customer is already included in another redaction job (e.g. a
+    // A customer is already included in another redaction job (e.g. a
     // previous pass created one but crashed before persisting its id).
     // That job is NOT complete — recover its id and drive ITS lifecycle
     // instead of skipping redaction, or the original job sits unvalidated
     // forever. advanceRedactionJob issues the validate when the recovered
     // job is still in `created`.
-    return persistRedactionJobId(orgId, await findRedactionJobIdForCustomer(orgId, customerId));
+    return persistRedactionJobId(orgId, await findRedactionJobIdForCustomers(orgId, customerIds));
   }
 
   // Persist may lose against a concurrent worker — the stored id wins, and
@@ -249,12 +285,15 @@ async function establishRedactionJob(orgId: string, customerId: string): Promise
 }
 
 /**
- * Recover the id of the live redaction job that already contains the
- * customer (create returned a job-conflict). Terminal jobs (failed/canceled)
- * are skipped — they no longer block a new job, so they can't be the
- * conflicting one.
+ * Recover the id of the live redaction job that already contains one of the
+ * customers (create returned a job-conflict). Terminal jobs
+ * (failed/canceled) are skipped — they no longer block a new job, so they
+ * can't be the conflicting one.
  */
-async function findRedactionJobIdForCustomer(orgId: string, customerId: string): Promise<string> {
+async function findRedactionJobIdForCustomers(
+  orgId: string,
+  customerIds: string[],
+): Promise<string> {
   const jobs = await stripeRawRequest<StripeRedactionJobList>('GET', '/v1/privacy/redaction_jobs', {
     limit: 100,
   });
@@ -262,12 +301,12 @@ async function findRedactionJobIdForCustomer(orgId: string, customerId: string):
     (job) =>
       job.status !== 'failed' &&
       job.status !== 'canceled' &&
-      (job.objects?.customers ?? []).includes(customerId),
+      (job.objects?.customers ?? []).some((c) => customerIds.includes(c)),
   );
   if (!match) {
     throw new Error(
-      `Stripe reported customer ${customerId} (org ${orgId}) is already in a redaction job, ` +
-        'but no live job containing it was found; the next teardown pass retries',
+      `Stripe reported customer(s) ${customerIds.join(', ')} (org ${orgId}) are already in a ` +
+        'redaction job, but no live job containing them was found; the next teardown pass retries',
     );
   }
   return match.id;

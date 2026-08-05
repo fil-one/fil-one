@@ -300,6 +300,39 @@ describe('delete-account baseHandler', () => {
     }
   });
 
+  it('snapshots EVERY member billing customer when the one-customer-per-org invariant is violated', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        marshall({ pk: `ORG#${ORG_ID}`, sk: `MEMBER#${USER_ID}` }),
+        marshall({ pk: `ORG#${ORG_ID}`, sk: 'MEMBER#user-2' }),
+      ],
+    });
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: 'USER#user-2' }, sk: { S: 'PROFILE' } } })
+      .resolves({ Item: marshall({ sub: 'auth0|sub-2' }) });
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: 'CUSTOMER#user-2' }, sk: { S: 'SUBSCRIPTION' } } })
+      .resolves({ Item: marshall({ stripeCustomerId: 'cus_2', subscriptionId: 'sub_2' }) });
+
+    const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(200);
+    const put = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
+    const written = unmarshall(put.Item!) as {
+      stripeCustomerId?: string;
+      subscriptionId?: string;
+      billingCustomers?: { stripeCustomerId?: string; subscriptionId?: string }[];
+    };
+    // Every member's Stripe pointers are captured, so teardown can cancel and
+    // redact each; the legacy single fields keep carrying the first entry.
+    expect(written.billingCustomers).toEqual([
+      { stripeCustomerId: 'cus_1', subscriptionId: 'sub_1' },
+      { stripeCustomerId: 'cus_2', subscriptionId: 'sub_2' },
+    ]);
+    expect(written.stripeCustomerId).toBe('cus_1');
+    expect(written.subscriptionId).toBe('sub_1');
+  });
+
   it('degrades gracefully on a re-confirm after teardown purged the org profile (400 name mismatch)', async () => {
     // Once the async teardown deletes ORG#/PROFILE, a late re-confirm cannot
     // match the typed org name against anything — it falls into the

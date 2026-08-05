@@ -170,12 +170,16 @@ async function snapshotMembers(orgId: string): Promise<OrgDeletionMember[]> {
 }
 
 /**
- * First member billing record (in members order) with Stripe references wins
- * (one per org). The reads themselves run in parallel.
+ * EVERY member billing record with Stripe references is snapshotted (reads
+ * in parallel, members order). The one-customer-per-org invariant makes this
+ * normally a single entry, but if it is ever violated the extras' CUSTOMER#
+ * rows still get purged — their Stripe pointers must survive on the snapshot
+ * so teardown cancels/redacts each of them. The legacy single top-level
+ * fields keep carrying the first entry for in-flight readers.
  */
 async function snapshotBilling(
   members: OrgDeletionMember[],
-): Promise<Pick<OrgDeletionRecord, 'stripeCustomerId' | 'subscriptionId'>> {
+): Promise<Pick<OrgDeletionRecord, 'stripeCustomerId' | 'subscriptionId' | 'billingCustomers'>> {
   const rows = await Promise.all(
     members.map((member) =>
       dynamo.send(
@@ -186,15 +190,19 @@ async function snapshotBilling(
       ),
     ),
   );
-  for (const { Item } of rows) {
-    if (Item?.stripeCustomerId?.S || Item?.subscriptionId?.S) {
-      return {
-        ...(Item.stripeCustomerId?.S ? { stripeCustomerId: Item.stripeCustomerId.S } : {}),
-        ...(Item.subscriptionId?.S ? { subscriptionId: Item.subscriptionId.S } : {}),
-      };
-    }
+  const billingCustomers = rows
+    .map(({ Item }) => ({
+      ...(Item?.stripeCustomerId?.S ? { stripeCustomerId: Item.stripeCustomerId.S } : {}),
+      ...(Item?.subscriptionId?.S ? { subscriptionId: Item.subscriptionId.S } : {}),
+    }))
+    .filter((customer) => customer.stripeCustomerId || customer.subscriptionId);
+  if (billingCustomers.length === 0) return {};
+  if (billingCustomers.length > 1) {
+    console.warn('[delete-account] Multiple member billing customers found (invariant violation)', {
+      count: billingCustomers.length,
+    });
   }
-  return {};
+  return { ...billingCustomers[0], billingCustomers };
 }
 
 /**

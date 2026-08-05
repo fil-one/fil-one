@@ -261,6 +261,12 @@ export interface OrgDeletionMember {
   sub?: string;
 }
 
+/** One member's Stripe billing references snapshotted onto the DELETION record. */
+export interface OrgDeletionBillingCustomer {
+  stripeCustomerId?: string;
+  subscriptionId?: string;
+}
+
 /**
  * Resumable state record for the account-deletion worker (FIL-112). Written by
  * the delete-account handler at confirm time; snapshots everything the worker
@@ -293,11 +299,22 @@ export interface OrgDeletionRecord {
   auroraTenantId?: string;
   /** @deprecated Legacy snapshot field, read for in-flight records only — no longer written. */
   fthTenantId?: string;
+  /** @deprecated Legacy single-customer snapshot (first member's), still written for in-flight readers — prefer {@link billingCustomers}. */
   stripeCustomerId?: string;
+  /** @deprecated Legacy single-customer snapshot (first member's), still written for in-flight readers — prefer {@link billingCustomers}. */
   subscriptionId?: string;
   /**
-   * Stripe Redaction Job driving the customer's PII erasure, persisted at
-   * creation so retries advance the same job instead of creating duplicates.
+   * Every member billing customer found at confirm time. One entry per org
+   * when the one-customer-per-org invariant holds; if it is ever violated,
+   * the extras' Stripe pointers must not be destroyed by the CUSTOMER# purge
+   * — teardown cancels/redacts each entry. Absent on legacy records, whose
+   * single top-level fields are read instead.
+   */
+  billingCustomers?: OrgDeletionBillingCustomer[];
+  /**
+   * Stripe Redaction Job driving the customers' PII erasure (one job covers
+   * every snapshotted customer), persisted at creation so retries advance
+   * the same job instead of creating duplicates.
    */
   stripeRedactionJobId?: string;
   /** Worker invocations so far; the reconciler alerts past a threshold. */
@@ -317,6 +334,8 @@ export interface OrgTombstoneRecord {
   sk: string;
   orgId: string;
   stripeCustomerId?: string;
+  /** Every snapshotted customer id, written only when there is more than one. */
+  stripeCustomerIds?: string[];
   deletedAt: string; // ISO-8601
 }
 
