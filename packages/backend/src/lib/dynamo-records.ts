@@ -209,6 +209,128 @@ export interface RagIndexerCheckpointRecord {
 }
 
 /**
+ * Short-lived email verification challenge for account deletion (FIL-112).
+ * One live challenge per org; re-issuing replaces the code. Lives in
+ * BillingTable because that table has DynamoDB TTL enabled (UserInfoTable
+ * deliberately does not — a stray `ttl` attribute on an identity row would
+ * silently hard-delete account data).
+ *
+ * BillingTable — pk: DELETION_CHALLENGE#{orgId}, sk: CHALLENGE
+ */
+export interface DeletionChallengeRecord {
+  pk: string;
+  sk: string;
+  /** hex sha256 of `${orgId}:${salt}:${code}` — never the code itself. */
+  codeHash: string;
+  /** 16 random bytes, hex. */
+  salt: string;
+  /** Verify attempts consumed; the record locks at the max. */
+  attempts: number;
+  /** Codes issued against this row within its TTL window. */
+  sendCount: number;
+  lastSentAt: string; // ISO-8601 — resend cooldown anchor
+  expiresAt: string; // ISO-8601 — code validity, checked in ConditionExpressions
+  createdAt: string; // ISO-8601
+  ttl: number; // epoch seconds; DynamoDB TTL janitor (~1h)
+}
+
+/**
+ * Teardown states for {@link OrgDeletionRecord}. Only these two are written:
+ * every external teardown step is idempotent, so the worker just re-runs
+ * everything until it completes — no per-step tracking. Legacy records may
+ * still carry an old intermediate status (KEYS_REVOKED, TENANTS_DISABLED,
+ * STRIPE_CANCELED, AUTH0_DELETED, RAG_PURGED, RECORDS_PURGED); readers treat
+ * anything that is not DONE as "in progress".
+ */
+export const OrgDeletionStatus = {
+  Pending: 'PENDING',
+  Done: 'DONE',
+} as const;
+
+export type OrgDeletionStatusValue = (typeof OrgDeletionStatus)[keyof typeof OrgDeletionStatus];
+
+/** Snapshot of an org member captured when deletion is confirmed. */
+export interface OrgDeletionMember {
+  userId: string;
+  /**
+   * Auth0 sub. Retained on the audit record even after teardown completes:
+   * the SUB# identity tombstone keeps the sub forever anyway (it is the key
+   * that stops a stale session resurrecting the account), so stripping it
+   * here would buy no privacy while breaking audit correlation.
+   */
+  sub?: string;
+}
+
+/**
+ * Resumable state record for the account-deletion worker (FIL-112). Written by
+ * the delete-account handler at confirm time; snapshots everything the worker
+ * needs (tenant ids, member subs, Stripe ids) so teardown can finish even
+ * after the source rows are purged. Survives the purge as the audit record.
+ *
+ * UserInfoTable — pk: ORG#{orgId}, sk: DELETION
+ */
+export interface OrgDeletionRecord {
+  pk: string;
+  sk: string;
+  /**
+   * {@link OrgDeletionStatus} value on records written by current code, but
+   * typed as string because legacy records may persist old intermediate
+   * statuses — compare against `OrgDeletionStatus.Done` only, never
+   * exhaustive-switch.
+   */
+  status: string;
+  requestedAt: string; // ISO-8601
+  requestedByUserId: string;
+  members: OrgDeletionMember[];
+  /**
+   * Region-generic tenant snapshot: orchestrator id → tenant id for every
+   * region provisioned when deletion was confirmed (refreshed with any
+   * late-provisioned tenants before the ORG# partition purge). The only
+   * tenant-id shape written going forward.
+   */
+  tenantIds?: Record<string, string>;
+  /** @deprecated Legacy snapshot field, read for in-flight records only — no longer written. */
+  auroraTenantId?: string;
+  /** @deprecated Legacy snapshot field, read for in-flight records only — no longer written. */
+  fthTenantId?: string;
+  stripeCustomerId?: string;
+  subscriptionId?: string;
+  /**
+   * Stripe Redaction Job driving the customer's PII erasure, persisted at
+   * creation so retries advance the same job instead of creating duplicates.
+   */
+  stripeRedactionJobId?: string;
+  /** Worker invocations so far; the reconciler alerts past a threshold. */
+  attemptCount: number;
+  updatedAt: string; // ISO-8601
+}
+
+/**
+ * Permanent, PII-free marker that an org was deleted, retaining the Stripe
+ * customer reference for finance/audit (the Stripe customer is kept, only the
+ * subscription is canceled). No `ttl` attribute — never expires.
+ *
+ * BillingTable — pk: ORG_TOMBSTONE#{orgId}, sk: TOMBSTONE
+ */
+export interface OrgTombstoneRecord {
+  pk: string;
+  sk: string;
+  orgId: string;
+  stripeCustomerId?: string;
+  deletedAt: string; // ISO-8601
+}
+
+/** Key builders for the account-deletion records above. */
+export const DeletionKeys = {
+  challengePk: (orgId: string): string => `DELETION_CHALLENGE#${orgId}`,
+  challengeSk: (): string => 'CHALLENGE',
+  deletionPk: (orgId: string): string => `ORG#${orgId}`,
+  deletionSk: (): string => 'DELETION',
+  tombstonePk: (orgId: string): string => `ORG_TOMBSTONE#${orgId}`,
+  tombstoneSk: (): string => 'TOMBSTONE',
+} as const;
+
+/**
  * Key builders for the RAG records above. Centralizing the pk/sk shapes keeps
  * the partition design (and the per-bucket `begins_with MANIFEST#` query)
  * consistent across handlers and jobs.
