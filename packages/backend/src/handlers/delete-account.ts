@@ -26,7 +26,7 @@ import {
 } from '../lib/dynamo-records.js';
 import { isOrgAdmin } from '../lib/org-membership.js';
 import { getOrgProfile } from '../lib/org-profile.js';
-import { getProvisionedRegionsFromProfile } from '../lib/region-helpers.js';
+import { getRegionsWithTenantIds } from '../lib/region-helpers.js';
 import { COOKIE_NAMES, makeClearAuthCookies, ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -86,11 +86,14 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const members = await snapshotMembers(orgId);
   const billing = await snapshotBilling(members);
 
-  // Region-generic tenant snapshot: one entry per provisioned orchestrator,
-  // keyed by orchestrator id, derived from the profile already fetched above.
-  // A new region added to the registry is picked up here automatically.
+  // Region-generic tenant snapshot: one entry per orchestrator with a tenant
+  // id on the profile, keyed by orchestrator id, derived from the profile
+  // already fetched above. Raw resolution (not readiness-gated): a tenant
+  // whose setup is still mid-flight must be torn down too, so the snapshot
+  // has to see it. A new region added to the registry is picked up here
+  // automatically.
   const tenantIds = Object.fromEntries(
-    getProvisionedRegionsFromProfile(orgProfile).map(({ orchestrator, tenantId }) => [
+    getRegionsWithTenantIds(orgProfile).map(({ orchestrator, tenantId }) => [
       orchestrator.id,
       tenantId,
     ]),

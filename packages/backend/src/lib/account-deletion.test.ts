@@ -26,17 +26,15 @@ vi.mock('./auth0-management.js', () => ({
   deleteAuth0User: (sub: string) => mockDeleteAuth0User(sub),
 }));
 
-const mockGetProvisionedRegions = vi.fn();
+const mockGetRegionsWithTenantIdsForOrg = vi.fn();
 vi.mock('./region-helpers.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./region-helpers.js')>()),
-  getProvisionedRegions: (...args: unknown[]) => mockGetProvisionedRegions(...args),
+  getRegionsWithTenantIdsForOrg: (...args: unknown[]) => mockGetRegionsWithTenantIdsForOrg(...args),
 }));
 
-const mockIsTenantReady = vi.fn();
 const mockDeleteTenant = vi.fn();
 const testOrchestrator = {
   id: 'aurora',
-  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
   deleteTenant: (...args: unknown[]) => mockDeleteTenant(...args),
 };
 vi.mock('./service-orchestrator-registry.js', () => ({
@@ -119,11 +117,10 @@ function setupHappyMocks(status: string) {
     sk: { S: 'PROFILE' },
     auroraTenantId: { S: 'aurora-t-1' },
   });
-  mockGetProvisionedRegions.mockResolvedValue([]);
+  mockGetRegionsWithTenantIdsForOrg.mockResolvedValue([]);
   mockDeleteAuth0User.mockResolvedValue(undefined);
   mockSubscriptionsCancel.mockResolvedValue({});
   mockDropIndex.mockResolvedValue(undefined);
-  mockIsTenantReady.mockReturnValue('aurora-t-1');
   mockDeleteTenant.mockResolvedValue(undefined);
   stubRedactionJob();
 }
@@ -471,10 +468,28 @@ describe('runAccountDeletion', () => {
     expect(doneWrites()).toHaveLength(1);
   });
 
+  it('tears down a half-provisioned tenant: tenantId on the profile but setup incomplete', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    // Mid-setup profile: the tenant id attribute exists but the setup status
+    // never reached completion — isTenantReady would return null for this,
+    // yet the tenant already exists upstream and must still be deleted.
+    mockGetOrgProfile.mockResolvedValue({
+      pk: { S: `ORG#${ORG_ID}` },
+      sk: { S: 'PROFILE' },
+      auroraTenantId: { S: 'half-provisioned-t' },
+      auroraSetupStatus: { S: 'AURORA_TENANT_CREATED' },
+    });
+
+    await runAccountDeletion(ORG_ID);
+
+    expect(mockDeleteTenant).toHaveBeenCalledWith('half-provisioned-t');
+    expect(doneWrites()).toHaveLength(1);
+  });
+
   it('snapshots late-provisioned tenants onto the DELETION record and deletes them before purging', async () => {
     setupHappyMocks(OrgDeletionStatus.Pending);
     const lateDeleteTenant = vi.fn().mockResolvedValue(undefined);
-    mockGetProvisionedRegions.mockResolvedValue([
+    mockGetRegionsWithTenantIdsForOrg.mockResolvedValue([
       { orchestrator: { id: 'aurora', deleteTenant: lateDeleteTenant }, tenantId: 'late-tenant' },
     ]);
 

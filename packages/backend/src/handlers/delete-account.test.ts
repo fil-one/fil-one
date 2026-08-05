@@ -240,6 +240,24 @@ describe('delete-account baseHandler', () => {
     );
   });
 
+  it('snapshots a half-provisioned tenant: tenantId present but setup incomplete', async () => {
+    // Deleting mid-setup: the aurora tenant id exists on the profile but the
+    // setup status never reached completion. isTenantReady would hide it —
+    // the snapshot must still capture it or the remote tenant and its SSM
+    // secrets leak forever once the profile row is purged.
+    mockGetOrgProfile.mockResolvedValue({
+      ...fullyProvisionedProfile(),
+      auroraSetupStatus: { S: OrgSetupStatus.AURORA_TENANT_CREATED },
+    });
+
+    const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
+
+    expect(result.statusCode).toBe(200);
+    const put = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
+    const written = unmarshall(put.Item!) as { tenantIds: Record<string, string> };
+    expect(written.tenantIds.aurora).toBe('aurora-t-1');
+  });
+
   it('paginates the MEMBER# query so a truncated page cannot silently drop members from the snapshot', async () => {
     // Two pages: user-1, then (via LastEvaluatedKey) user-2. A 1MB-truncated
     // single query would have missed user-2 — leaving their Auth0 user alive.

@@ -25,8 +25,8 @@ import {
 import { getOrgProfile } from './org-profile.js';
 import { RagApiKeyKeys } from './rag-api-keys.js';
 import {
-  getProvisionedRegions,
-  getProvisionedRegionsFromProfile,
+  getRegionsWithTenantIds,
+  getRegionsWithTenantIdsForOrg,
   type ProvisionedRegion,
 } from './region-helpers.js';
 import { getAvailableOrchestrators } from './service-orchestrator-registry.js';
@@ -301,8 +301,9 @@ async function purgeRecords(orgId: string, record: OrgDeletionRecord): Promise<v
   // pointer to the tenant ids) is purged, persist the live tenant ids onto
   // the DELETION record so a crash still leaves every tenant findable, and
   // tear the stragglers down. The `deleting` flag written at confirm time
-  // blocks new setups, so this converges.
-  const lateRegions = await getProvisionedRegions(orgId);
+  // blocks new setups, so this converges. Raw tenant-id resolution (not
+  // readiness-gated): a half-provisioned straggler must be torn down too.
+  const lateRegions = await getRegionsWithTenantIdsForOrg(orgId);
   if (lateRegions.length > 0) {
     await snapshotTenantIdsOnDeletionRecord(orgId, record, lateRegions);
     for (const { orchestrator, tenantId } of lateRegions) {
@@ -375,13 +376,16 @@ async function deleteAllRegions(orgId: string, record: OrgDeletionRecord): Promi
  * provisioned after the snapshot); when the profile row is already purged,
  * fall back to the DELETION-record snapshot — the region-generic `tenantIds`
  * map, plus the legacy per-orchestrator fields for in-flight records.
+ * Resolution is raw (`getRegionsWithTenantIds`), not readiness-gated: a
+ * tenant whose setup is still mid-flight exists upstream and must be
+ * deleted too, or its remote resources and SSM secrets leak forever.
  */
 async function resolveRegionTargets(
   orgId: string,
   record: OrgDeletionRecord,
 ): Promise<ProvisionedRegion[]> {
   const profile = await getOrgProfile(orgId);
-  if (profile) return getProvisionedRegionsFromProfile(profile);
+  if (profile) return getRegionsWithTenantIds(profile);
 
   const snapshot: Record<string, string> = {
     ...(record.auroraTenantId ? { aurora: record.auroraTenantId } : {}),
