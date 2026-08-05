@@ -451,7 +451,7 @@ async function reconcileDeletedCustomer(params: {
     };
   }
 
-  const { outcomes } = await closeOutDeletedCustomer({ userId, orgId });
+  const { outcomes, billingCanceled } = await closeOutDeletedCustomer({ userId, orgId });
   const failed = outcomes.filter((o) => o.outcome === 'error');
   if (failed.length > 0) {
     // Record left non-canceled on purpose: tomorrow's run re-enters this path
@@ -461,6 +461,28 @@ async function reconcileDeletedCustomer(params: {
       orgSyncAction: `reconcile-failed:${failedRegions}`,
       lockAction: `error:sync-failed:${failedRegions}`,
       outOfSync: true,
+    };
+  }
+
+  if (!billingCanceled) {
+    // The regions synced, but the FIL-112 deletion guard rejected the billing
+    // cancel (record absent or org mid-teardown): the account-deletion flow
+    // owns the record now, so this run did NOT reconcile it — the log and
+    // audit row must not claim otherwise. Not out of sync in the retry
+    // sense: the teardown finishes the job.
+    console.warn(
+      '[usage-worker] Deleted-customer cleanup skipped the billing cancel (record missing or org mid-deletion)',
+      {
+        orgId,
+        userId,
+        stripeCustomerId,
+        regions: outcomes.map((o) => ({ orchestratorId: o.orchestratorId, outcome: o.outcome })),
+      },
+    );
+    return {
+      orgSyncAction: 'reconcile-skipped:guard-rejected',
+      lockAction: 'disabled',
+      outOfSync: false,
     };
   }
 
