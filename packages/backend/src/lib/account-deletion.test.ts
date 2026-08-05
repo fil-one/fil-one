@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   BatchWriteItemCommand,
+  ConditionalCheckFailedException,
   DeleteItemCommand,
   DynamoDBClient,
   GetItemCommand,
@@ -423,6 +424,68 @@ describe('runAccountDeletion', () => {
 
     expect(rawRequestCalls()).toEqual(['POST /v1/privacy/redaction_jobs']);
     expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('touches updatedAt on every attemptCount bump so a live worker never looks stale to the reconciler', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+
+    await runAccountDeletion(ORG_ID);
+
+    const bumps = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .filter((c) => c.args[0].input.UpdateExpression?.includes('attemptCount'));
+    expect(bumps).toHaveLength(1);
+    expect(bumps[0].args[0].input.UpdateExpression).toContain('SET updatedAt = :now');
+    expect(bumps[0].args[0].input.ExpressionAttributeValues?.[':now']?.S).toBeDefined();
+  });
+
+  it('persists the redaction job id conditionally and defers to a concurrently stored id', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+    // Initial record read: no job id. Re-read after the conditional failure:
+    // another worker has stored prj_stored in the meantime.
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'DELETION' } } })
+      .resolvesOnce({ Item: deletionItem(OrgDeletionStatus.Pending) })
+      .resolves({
+        Item: deletionItem(OrgDeletionStatus.Pending, { stripeRedactionJobId: 'prj_stored' }),
+      });
+    ddbMock
+      .on(UpdateItemCommand, {
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobId)',
+      })
+      .rejects(new ConditionalCheckFailedException({ message: 'exists', $metadata: {} }));
+    mockRawRequest.mockImplementation((method: string, path: string) => {
+      if (method === 'POST' && path === '/v1/privacy/redaction_jobs') {
+        return Promise.resolve({ id: 'prj_mine', status: 'created' });
+      }
+      if (method === 'GET') return Promise.resolve({ id: 'prj_stored', status: 'ready' });
+      return Promise.resolve({ id: 'prj_stored' });
+    });
+
+    await runAccountDeletion(ORG_ID);
+
+    // The losing worker's own job (prj_mine) is never validated or driven —
+    // the stored job's lifecycle is advanced instead.
+    expect(rawRequestCalls()).toEqual([
+      'POST /v1/privacy/redaction_jobs',
+      'GET /v1/privacy/redaction_jobs/prj_stored',
+      'POST /v1/privacy/redaction_jobs/prj_stored/run',
+    ]);
+    expect(doneWrites()).toHaveLength(1);
+  });
+
+  it('writes the redaction job id with an attribute_not_exists condition', async () => {
+    setupHappyMocks(OrgDeletionStatus.Pending);
+
+    await runAccountDeletion(ORG_ID);
+
+    const jobIdWrites = ddbMock
+      .commandCalls(UpdateItemCommand)
+      .filter((c) => c.args[0].input.UpdateExpression?.includes('stripeRedactionJobId'));
+    expect(jobIdWrites).toHaveLength(1);
+    expect(jobIdWrites[0].args[0].input.ConditionExpression).toBe(
+      'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobId)',
+    );
   });
 
   it('recovers the existing redaction job on an already-in-a-redaction-job conflict instead of skipping', async () => {

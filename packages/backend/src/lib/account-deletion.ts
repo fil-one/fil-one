@@ -1,5 +1,6 @@
 import {
   BatchWriteItemCommand,
+  ConditionalCheckFailedException,
   DeleteItemCommand,
   PutItemCommand,
   QueryCommand,
@@ -179,41 +180,54 @@ async function redactStripeCustomer(orgId: string, record: OrgDeletionRecord): P
 
   let jobId = record.stripeRedactionJobId;
   if (!jobId) {
-    let created: StripeRedactionJob | undefined;
-    try {
-      created = await stripeRawRequest<StripeRedactionJob>('POST', '/v1/privacy/redaction_jobs', {
-        objects: { customers: [customerId] },
-      });
-    } catch (err) {
-      if (isRedactionUnnecessary(err)) {
-        console.warn('[account-deletion] Stripe customer already redacted/missing', {
-          orgId,
-          customerId,
-        });
-        return;
-      }
-      if (!isRedactionJobConflict(err)) throw err;
-      // The customer is already included in another redaction job (e.g. a
-      // previous pass created one but crashed before persisting its id).
-      // That job is NOT complete — recover its id and drive ITS lifecycle
-      // instead of skipping redaction, or the original job sits unvalidated
-      // forever.
-    }
-    if (created) {
-      jobId = created.id;
-      await persistRedactionJobId(orgId, jobId);
-      record.stripeRedactionJobId = jobId;
-      await stripeRawRequest('POST', `/v1/privacy/redaction_jobs/${jobId}/validate`);
-    } else {
-      jobId = await findRedactionJobIdForCustomer(orgId, customerId);
-      await persistRedactionJobId(orgId, jobId);
-      record.stripeRedactionJobId = jobId;
-      // advanceRedactionJob below issues the validate when the recovered job
-      // is still in `created`.
-    }
+    const established = await establishRedactionJob(orgId, customerId);
+    if (!established) return; // customer missing — nothing to redact
+    jobId = established;
+    record.stripeRedactionJobId = jobId;
   }
 
   await advanceRedactionJob(orgId, jobId);
+}
+
+/**
+ * Create the customer's redaction job and persist its id — or, when Stripe
+ * reports the customer is already in another (live) redaction job, recover
+ * and persist THAT job's id so its lifecycle gets driven instead of the
+ * redaction being skipped. Returns `null` only when the customer no longer
+ * exists (nothing to redact).
+ */
+async function establishRedactionJob(orgId: string, customerId: string): Promise<string | null> {
+  let created: StripeRedactionJob | undefined;
+  try {
+    created = await stripeRawRequest<StripeRedactionJob>('POST', '/v1/privacy/redaction_jobs', {
+      objects: { customers: [customerId] },
+    });
+  } catch (err) {
+    if (isRedactionUnnecessary(err)) {
+      console.warn('[account-deletion] Stripe customer already redacted/missing', {
+        orgId,
+        customerId,
+      });
+      return null;
+    }
+    if (!isRedactionJobConflict(err)) throw err;
+    // The customer is already included in another redaction job (e.g. a
+    // previous pass created one but crashed before persisting its id).
+    // That job is NOT complete — recover its id and drive ITS lifecycle
+    // instead of skipping redaction, or the original job sits unvalidated
+    // forever. advanceRedactionJob issues the validate when the recovered
+    // job is still in `created`.
+    return persistRedactionJobId(orgId, await findRedactionJobIdForCustomer(orgId, customerId));
+  }
+
+  // Persist may lose against a concurrent worker — the stored id wins, and
+  // only OUR freshly created job gets the initial validate kick (the stored
+  // one's lifecycle is driven by advanceRedactionJob).
+  const jobId = await persistRedactionJobId(orgId, created.id);
+  if (jobId === created.id) {
+    await stripeRawRequest('POST', `/v1/privacy/redaction_jobs/${jobId}/validate`);
+  }
+  return jobId;
 }
 
 /**
@@ -276,19 +290,49 @@ function redactionNotReadyError(orgId: string, jobId: string, status: string): E
   );
 }
 
-async function persistRedactionJobId(orgId: string, jobId: string): Promise<void> {
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
-      UpdateExpression: 'SET stripeRedactionJobId = :jobId, updatedAt = :now',
-      ConditionExpression: 'attribute_exists(pk)',
-      ExpressionAttributeValues: marshall({
-        ':jobId': jobId,
-        ':now': new Date().toISOString(),
+/**
+ * Persist the redaction job id — but only if none is stored yet. Two
+ * overlapping workers can each create/recover a job; an unconditional SET
+ * would let the loser overwrite the winner and leave a duplicate redaction
+ * job driving nowhere. On a conditional failure the stored id wins: it is
+ * re-read and returned so the caller drives THAT job.
+ *
+ * @returns the effective job id — `jobId` when this write won, otherwise the
+ *          id another worker persisted first.
+ */
+async function persistRedactionJobId(orgId: string, jobId: string): Promise<string> {
+  try {
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: Resource.UserInfoTable.name,
+        Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
+        UpdateExpression: 'SET stripeRedactionJobId = :jobId, updatedAt = :now',
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(stripeRedactionJobId)',
+        ExpressionAttributeValues: marshall({
+          ':jobId': jobId,
+          ':now': new Date().toISOString(),
+        }),
       }),
-    }),
-  );
+    );
+    return jobId;
+  } catch (err) {
+    if (!(err instanceof ConditionalCheckFailedException)) throw err;
+    const stored = (await readDeletionRecord(orgId))?.stripeRedactionJobId;
+    if (!stored) {
+      // The condition can only fail because the id exists or the record is
+      // gone; either way a missing id on re-read needs a retry, not a guess.
+      throw new Error(
+        `Deletion record for org ${orgId} rejected redaction job id ${jobId} but no stored id ` +
+          'was found on re-read; the next teardown pass retries',
+      );
+    }
+    console.warn('[account-deletion] Redaction job id already persisted by a concurrent worker', {
+      orgId,
+      jobId,
+      storedJobId: stored,
+    });
+    return stored;
+  }
 }
 
 async function stripeRawRequest<T = unknown>(
@@ -518,14 +562,19 @@ async function markDone(orgId: string): Promise<void> {
 // Record + Dynamo helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Per-pass liveness bump: `updatedAt` is touched alongside the attempt count
+ * because the reconciler treats a stale `updatedAt` as "worker died — re-
+ * drive"; a live worker mid-teardown must never look stale to it.
+ */
 async function bumpAttemptCount(orgId: string): Promise<void> {
   await dynamo.send(
     new UpdateItemCommand({
       TableName: Resource.UserInfoTable.name,
       Key: marshall({ pk: DeletionKeys.deletionPk(orgId), sk: DeletionKeys.deletionSk() }),
-      UpdateExpression: 'ADD attemptCount :one',
+      UpdateExpression: 'SET updatedAt = :now ADD attemptCount :one',
       ConditionExpression: 'attribute_exists(pk)',
-      ExpressionAttributeValues: marshall({ ':one': 1 }),
+      ExpressionAttributeValues: marshall({ ':one': 1, ':now': new Date().toISOString() }),
     }),
   );
 }
