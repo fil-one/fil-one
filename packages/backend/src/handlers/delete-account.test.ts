@@ -377,7 +377,7 @@ describe('delete-account handler (MFA step-up gate)', () => {
   function makeHandlerEvent() {
     return buildAuthenticatedEvent({
       method: 'POST',
-      rawPath: '/api/account',
+      rawPath: '/api/account/delete',
       body: JSON.stringify({ code: '123456', orgName: 'Acme Corp' }),
     });
   }
