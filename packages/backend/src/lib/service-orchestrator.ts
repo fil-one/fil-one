@@ -207,7 +207,12 @@ export interface ServiceOrchestrator {
    * FilOne-held tenant secrets in SSM. Implementations first force the
    * tenant to `disabled` when the upstream API requires it, and MUST be
    * idempotent: an already-deleted tenant (or already-deleted secret) is
-   * success, so account-deletion re-runs converge. Orchestrators without a
+   * success, so account-deletion re-runs converge. That idempotency must come
+   * from the upstream's own repeat-delete success, never from tolerating a
+   * not-found error: a reference that fails to resolve is not evidence the
+   * tenant is gone — it is equally a misrouted baseUrl or a wrong-scope token,
+   * for which every reference fails — so implementations MUST fail rather than
+   * fall through to deleting the FilOne-held secrets. Orchestrators without a
    * remote tenant-deletion API perform the strongest teardown available
    * (disable + secret deletion) and log the required manual follow-up.
    * Only the account-deletion teardown may call this.

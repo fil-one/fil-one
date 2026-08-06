@@ -123,25 +123,44 @@ describe('fthOrchestrator.deleteTenant', () => {
     expect(ssmDeletes).toEqual([consoleKeyParam]);
   });
 
-  it('treats an already-deleted client as success and still deletes the SSM parameter', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    mockUpdateClientStatus.mockRejectedValue(notFound());
-    mockFthClient.deleteClient.mockRejectedValue(notFound());
+  it('converges on a re-run, because a deleted client still answers 204', async () => {
+    // Where idempotency actually comes from: FTH keeps a deleted client's ref
+    // resolving, so the teardown's second pass repeats PATCH 204 → DELETE 204
+    // rather than relying on any tolerated error.
+    mockUpdateClientStatus.mockResolvedValue(undefined);
+    mockFthClient.deleteClient.mockResolvedValue(undefined);
     ssmMock.on(DeleteParameterCommand).resolves({});
 
     await fthOrchestrator.deleteTenant(fthClientId);
+    await fthOrchestrator.deleteTenant(fthClientId);
 
-    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(1);
-    // The contract defines idempotent deletion via 204; an undocumented 404
-    // may be a misrouted baseUrl/gateway, so it must be flagged loudly.
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('misrouted'),
-      expect.objectContaining({
-        orchestratorId: 'fth',
-        tenantId: fthClientId,
-        baseUrl: 'https://api.fortilyx.test',
-      }),
+    expect(mockFthClient.deleteClient).toHaveBeenCalledTimes(2);
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(2);
+  });
+
+  it('throws on a 404 from the delete and leaves the SSM parameter alone', async () => {
+    mockUpdateClientStatus.mockResolvedValue(undefined);
+    mockFthClient.deleteClient.mockRejectedValue(notFound());
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    // A 404 means the ref never resolved — a misrouted baseUrl or wrong-scope
+    // token — not that the client is gone. Deleting the console key here would
+    // strand a client that is still live upstream.
+    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
+      `Failed to delete FTH tenant ${fthClientId}`,
     );
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
+  });
+
+  it('throws on a 404 from the pre-deletion disable and never attempts the delete', async () => {
+    mockUpdateClientStatus.mockRejectedValue(notFound());
+    ssmMock.on(DeleteParameterCommand).resolves({});
+
+    await expect(fthOrchestrator.deleteTenant(fthClientId)).rejects.toThrow(
+      `Failed to disable FTH tenant ${fthClientId} before deletion`,
+    );
+    expect(mockFthClient.deleteClient).not.toHaveBeenCalled();
+    expect(ssmMock.commandCalls(DeleteParameterCommand)).toHaveLength(0);
   });
 
   it('re-disables and retries once on a 409 conflict (client not disabled yet)', async () => {
