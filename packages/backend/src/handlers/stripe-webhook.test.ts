@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
+  BatchGetItemCommand,
   ConditionalCheckFailedException,
   DynamoDBClient,
   DeleteItemCommand,
   GetItemCommand,
   PutItemCommand,
+  QueryCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { buildEvent } from '../test/lambda-test-utilities.js';
 import { type MetricEvent, reportMetric } from '../lib/metrics.js';
@@ -57,6 +60,11 @@ vi.mock('../lib/metrics.js', () => ({
 const reportMetricMock = vi.mocked(reportMetric);
 
 const ddbMock = mockClient(DynamoDBClient);
+const lambdaMock = mockClient(LambdaClient);
+
+// The customer.deleted path runs the REAL lib/account-deletion-start.js, so the
+// record write, the fences and the worker invoke are all exercised here.
+process.env.ACCOUNT_DELETION_WORKER_FUNCTION_NAME = 'account-deletion-worker';
 
 import { handler } from './stripe-webhook.js';
 import { DELETION_GUARD } from '../lib/deletion-guard.js';
@@ -215,12 +223,34 @@ describe('stripe-webhook handler', () => {
       .filter((e) => (e as { DunningEscalation?: unknown }).DunningEscalation === 1);
   }
 
+  /** The DELETION record writes startAccountDeletion made, if any. */
+  function deletionRecordPuts() {
+    return ddbMock
+      .commandCalls(PutItemCommand)
+      .map((call) => call.args[0].input)
+      .filter((input) => input.Item?.sk?.S === 'DELETION');
+  }
+
+  function teardownEmissions(): MetricEvent[] {
+    return reportMetricMock.mock.calls
+      .map(([event]) => event)
+      .filter(
+        (e) =>
+          (e as { WebhookAccountDeletionStarted?: unknown }).WebhookAccountDeletionStarted === 1,
+      );
+  }
+
   beforeEach(() => {
     ddbMock.reset();
+    lambdaMock.reset();
+    lambdaMock.on(InvokeCommand).resolves({});
     ddbMock.on(PutItemCommand).resolves({});
     ddbMock.on(UpdateItemCommand).resolves({});
     ddbMock.on(DeleteItemCommand).resolves({});
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+    // Member snapshot reads for the teardown paths: no members by default.
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+    ddbMock.on(BatchGetItemCommand).resolves({ Responses: {} });
     mockConstructEvent.mockReset();
     mockCustomersRetrieve.mockReset();
     mockPaymentMethodsRetrieve.mockReset();
@@ -834,50 +864,23 @@ describe('stripe-webhook handler', () => {
     });
 
     describe('when the customer is already deleted', () => {
-      it('closes out the billing record instead of granting a grace period', async () => {
+      // The immediate backstop for a customer.deleted that was never
+      // delivered, so it must take exactly the same teardown path.
+      it('starts the full account teardown instead of granting a grace period', async () => {
         setupStripeEvent('customer.subscription.deleted', mockSubscription());
         setupDeletedCustomerRetrieve();
         setupAuroraTenantResolution();
 
         const result = await handler(buildWebhookEvent('{}'));
 
-        expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
-          MOCK_ORG_ID,
-          'disabled',
-          WEBHOOK_STATUS_SYNC_RETRY,
-        );
-
-        const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-        expect(updateCalls).toHaveLength(1);
-        const input = updateCalls[0].args[0].input;
-        expect(input.Key).toEqual({
-          pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
-          sk: { S: 'SUBSCRIPTION' },
-        });
-        expect(input.ExpressionAttributeValues![':status']).toEqual({
-          S: SubscriptionStatus.Canceled,
-        });
-        expect(input.UpdateExpression).not.toContain('gracePeriodEndsAt = ');
-        expect(input.UpdateExpression).toContain('REMOVE gracePeriodEndsAt');
-
+        const puts = deletionRecordPuts();
+        expect(puts).toHaveLength(1);
+        expect(puts[0].Item!.requestedByUserId.S).toBe('stripe-webhook');
+        expect(puts[0].Item!.reason.S).toBe('stripe_customer_deleted');
+        expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
+        expect(teardownEmissions()).toHaveLength(1);
+        expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
         expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-      });
-
-      it('emits a DunningEscalation metric with reason customer_deleted', async () => {
-        setupStripeEvent('customer.subscription.deleted', mockSubscription());
-        setupDeletedCustomerRetrieve();
-        setupAuroraTenantResolution();
-
-        await handler(buildWebhookEvent('{}'));
-
-        const emissions = dunningEmissions();
-        expect(
-          emissions.some(
-            (e) =>
-              (e as { stage?: string }).stage === 'canceled' &&
-              (e as { reason?: string }).reason === 'customer_deleted',
-          ),
-        ).toBe(true);
       });
 
       it('fails the webhook (500) when the subscription has no metadata.userId', async () => {
@@ -886,7 +889,7 @@ describe('stripe-webhook handler', () => {
 
         const result = await handler(buildWebhookEvent('{}'));
 
-        expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+        expect(deletionRecordPuts()).toHaveLength(0);
         expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
         expect(result).toEqual({
           statusCode: 500,
@@ -894,21 +897,15 @@ describe('stripe-webhook handler', () => {
         });
       });
 
-      it('fails the webhook (500) without touching the record when a region fails to disable', async () => {
+      it('warns and starts nothing when no org can be resolved', async () => {
         setupStripeEvent('customer.subscription.deleted', mockSubscription());
         setupDeletedCustomerRetrieve();
-        setupAuroraTenantResolution();
-        mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
-          regionSyncFailure(new Error('Aurora API error')),
-        );
 
         const result = await handler(buildWebhookEvent('{}'));
 
-        expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-        expect(result).toEqual({
-          statusCode: 500,
-          body: JSON.stringify({ message: 'Processing error' }),
-        });
+        expect(deletionRecordPuts()).toHaveLength(0);
+        expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+        expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       });
     });
 
@@ -972,45 +969,73 @@ describe('stripe-webhook handler', () => {
   // 5b. customer.deleted
   // -----------------------------------------------------------------------
   describe('customer.deleted', () => {
-    it('disables the customer immediately by setting Canceled status and DISABLING Aurora tenant', async () => {
+    it('starts the full account teardown: DELETION record, org fenced, worker invoked', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject());
       setupAuroraTenantResolution();
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
-        MOCK_ORG_ID,
-        'disabled',
-        WEBHOOK_STATUS_SYNC_RETRY,
-      );
+      const puts = deletionRecordPuts();
+      expect(puts).toHaveLength(1);
+      expect(puts[0].TableName).toBe('UserInfoTable');
+      expect(puts[0].ConditionExpression).toBe('attribute_not_exists(pk)');
+      expect(puts[0].Item!.pk.S).toBe(`ORG#${MOCK_ORG_ID}`);
+      expect(puts[0].Item!.status.S).toBe('PENDING');
+      // No requesting user on this path — the sentinel tells an operator apart
+      // a Stripe-initiated deletion from a self-serve one.
+      expect(puts[0].Item!.requestedByUserId.S).toBe('stripe-webhook');
+      expect(puts[0].Item!.reason.S).toBe('stripe_customer_deleted');
 
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
+      expect(
+        ddbMock
+          .commandCalls(UpdateItemCommand)
+          .some((c) => c.args[0].input.UpdateExpression === 'SET deleting = :true'),
+      ).toBe(true);
 
-      const input = updateCalls[0].args[0].input;
-      expect(input.Key).toEqual({
-        pk: { S: `CUSTOMER#${MOCK_USER_ID}` },
-        sk: { S: 'SUBSCRIPTION' },
+      const invoke = lambdaMock.commandCalls(InvokeCommand)[0].args[0].input;
+      expect(invoke.FunctionName).toBe('account-deletion-worker');
+      expect(invoke.InvocationType).toBe('Event');
+      expect(JSON.parse(new TextDecoder().decode(invoke.Payload as Uint8Array))).toEqual({
+        orgId: MOCK_ORG_ID,
       });
-      expect(input.ExpressionAttributeValues![':status']).toEqual({
-        S: SubscriptionStatus.Canceled,
-      });
 
+      expect(teardownEmissions()).toHaveLength(1);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
-    it('does not write a grace period', async () => {
+    it('leaves the region disable and the billing write to the worker', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject());
       setupAuroraTenantResolution();
 
       await handler(buildWebhookEvent('{}'));
 
-      const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
-      expect(input.UpdateExpression).not.toContain('gracePeriodEndsAt = ');
-      expect(input.UpdateExpression).toContain('REMOVE gracePeriodEndsAt');
-      expect(input.ExpressionAttributeValues![':status']).toEqual({
-        S: SubscriptionStatus.Canceled,
-      });
+      // No local close-out: the worker disables the regions itself, and the
+      // billing cancel would be blocked by the deletion guard anyway.
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(
+        ddbMock
+          .commandCalls(UpdateItemCommand)
+          .some(
+            (c) =>
+              c.args[0].input.ExpressionAttributeValues?.[':status']?.S ===
+              SubscriptionStatus.Canceled,
+          ),
+      ).toBe(false);
+      expect(dunningEmissions()).toHaveLength(0);
+    });
+
+    it('is idempotent on a replay: the conditional record write fails and the teardown still runs', async () => {
+      setupStripeEvent('customer.deleted', mockCustomerObject());
+      setupAuroraTenantResolution();
+      // The DELETION record already exists from the first delivery.
+      ddbMock
+        .on(PutItemCommand, { TableName: 'UserInfoTable' })
+        .rejects(new ConditionalCheckFailedException({ message: 'exists', $metadata: {} }));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('reads userId from the event payload and never calls Stripe customers.retrieve', async () => {
@@ -1027,63 +1052,27 @@ describe('stripe-webhook handler', () => {
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(deletionRecordPuts()).toHaveLength(0);
       expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
       expect(result).toEqual({
         statusCode: 500,
         body: JSON.stringify({ message: 'Processing error' }),
       });
     });
 
-    it('fails the webhook (500) and releases idempotency when Aurora DISABLE fails', async () => {
+    it('warns and starts nothing when no org can be resolved', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject());
-      setupAuroraTenantResolution();
-      mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
-        regionSyncFailure(new Error('Aurora API error')),
-      );
+      // No setupAuroraTenantResolution: the billing record carries no orgId.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0); // Aurora throws before the DDB write
-    });
-
-    it('emits a DunningEscalation metric with reason customer_deleted', async () => {
-      setupStripeEvent('customer.deleted', mockCustomerObject());
-      setupAuroraTenantResolution();
-
-      await handler(buildWebhookEvent('{}'));
-
-      const emissions = dunningEmissions();
-      expect(
-        emissions.some(
-          (e) =>
-            (e as { stage?: string }).stage === 'canceled' &&
-            (e as { reason?: string }).reason === 'customer_deleted',
-        ),
-      ).toBe(true);
-    });
-
-    it('still cancels in DynamoDB when there is no Aurora tenant (no orgId)', async () => {
-      setupStripeEvent('customer.deleted', mockCustomerObject());
-      // do NOT call setupAuroraTenantResolution, so GetItemCommand default returns no orgId
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input.ExpressionAttributeValues![':status']).toEqual({
-        S: SubscriptionStatus.Canceled,
-      });
-
+      expect(deletionRecordPuts()).toHaveLength(0);
+      expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
+      expect(teardownEmissions()).toHaveLength(0);
+      expect(warn.mock.calls.flat().join(' ')).toContain('no teardown started');
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      warn.mockRestore();
     });
   });
 
@@ -1761,13 +1750,15 @@ describe('stripe-webhook handler', () => {
       expect(dunningEmissions()).toHaveLength(0);
     });
 
-    it('customer.deleted for a mid-deletion record: 200, no dunning metric', async () => {
+    it('customer.deleted for an org already mid-deletion: 200, teardown re-driven', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject());
+      setupAuroraTenantResolution();
       guardRejection();
 
       const result = await handler(buildWebhookEvent('{}'));
 
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(1);
       expect(dunningEmissions()).toHaveLength(0);
     });
 

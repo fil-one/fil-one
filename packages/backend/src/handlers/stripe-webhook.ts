@@ -13,12 +13,10 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
+import { startAccountDeletion } from '../lib/account-deletion-start.js';
 import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import {
-  closeOutDeletedCustomer,
-  resolveOrgIdFromSubscription,
-} from '../lib/deleted-customer-cleanup.js';
+import { resolveOrgIdFromSubscription } from '../lib/deleted-customer-cleanup.js';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
@@ -30,6 +28,7 @@ import {
   emitInvoiceFinalizationFailed,
   emitInvoiceFinalized,
   emitInvoicePaid,
+  emitWebhookAccountDeletionStarted,
 } from '../lib/stripe-webhook-metrics.js';
 
 const dynamo = getDynamoClient();
@@ -132,7 +131,7 @@ async function processStripeEvent(tableName: string, stripeEvent: Stripe.Event):
     }
     case 'customer.deleted': {
       const customer = stripeEvent.data.object as Stripe.Customer;
-      await handleCustomerDeleted(tableName, customer);
+      await handleCustomerDeleted(customer);
       return;
     }
     case 'customer.subscription.trial_will_end': {
@@ -233,44 +232,43 @@ async function updatePaymentMethod(
   );
 }
 
-async function handleCustomerDeleted(tableName: string, customer: Stripe.Customer): Promise<void> {
+/**
+ * A gone Stripe customer tears the whole account down (FIL-112) — the worker
+ * disables every region and purges the data, so there is no local close-out
+ * here. Idempotent, so a webhook replay is safe; a throw returns 500 and Stripe
+ * retries (there is no cron fallback for canceled records).
+ */
+async function startTeardownForDeletedCustomer(
+  orgId: string,
+  context: Record<string, string>,
+): Promise<void> {
+  await startAccountDeletion(orgId, {
+    requestedByUserId: 'stripe-webhook',
+    reason: 'stripe_customer_deleted',
+  });
+  emitWebhookAccountDeletionStarted();
+  console.warn('[stripe-webhook] Account teardown started', { orgId, ...context });
+}
+
+async function handleCustomerDeleted(customer: Stripe.Customer): Promise<void> {
   // The customer.deleted payload carries the full pre-deletion Customer, including metadata.
   // We do NOT retrieve from Stripe — the customer no longer exists there.
   const userId = customer.metadata?.userId;
   if (!userId) {
     throw new Error(
-      `[stripe-webhook] customer.deleted missing metadata.userId; cannot disable customer ${customer.id}`,
+      `[stripe-webhook] customer.deleted missing metadata.userId; cannot start teardown for customer ${customer.id}`,
     );
   }
 
-  // Disable immediately — no grace period. Tenants first; a failed region throws so the
-  // webhook returns 500 and Stripe retries (there is no cron fallback for canceled records).
-  // The sync is probe-first, so a retry skips regions that are already disabled.
   const orgId = await resolveOrgIdFromSubscription(userId);
   if (!orgId) {
-    console.warn('[stripe-webhook] customer.deleted: no tenant to disable', {
+    console.warn('[stripe-webhook] customer.deleted: no org resolved, no teardown started', {
       userId,
       customerId: customer.id,
     });
+    return;
   }
-
-  const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
-    userId,
-    orgId,
-    retry: WEBHOOK_STATUS_SYNC_RETRY,
-  });
-  assertRegionSyncSucceeded(outcomes);
-  if (orgId) {
-    console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
-      userId,
-      orgId,
-      customerId: customer.id,
-    });
-  }
-  // Guard rejected or record absent (org mid-deletion): not a dunning cancellation.
-  if (!billingCanceled) return;
-
-  emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
+  await startTeardownForDeletedCustomer(orgId, { userId, customerId: customer.id });
 }
 
 async function handleSubscriptionUpdate(
@@ -376,11 +374,10 @@ async function handleSubscriptionDeleted(
   const customerId = getCustomerIdString(subscription.customer);
   const customer = await stripe.customers.retrieve(customerId);
   if ('deleted' in customer && customer.deleted) {
-    // The customer is gone (deleted before/with this cancellation), so there
-    // is no grace period to grant — close out the record the same way
-    // customer.deleted does. This is the fallback when the customer.deleted
-    // event itself was never delivered (e.g. the endpoint was not subscribed
-    // to it at the time).
+    // The customer is gone (deleted before/with this cancellation), so there is
+    // no grace period to grant — tear the account down exactly as
+    // customer.deleted does. This is the backstop for a customer.deleted event
+    // that was never delivered.
     const userId = subscription.metadata?.userId;
     if (!userId) {
       throw new Error(
@@ -388,25 +385,18 @@ async function handleSubscriptionDeleted(
       );
     }
     const orgId = await resolveOrgIdFromSubscription(userId);
-    const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
-      userId,
-      orgId,
-      retry: WEBHOOK_STATUS_SYNC_RETRY,
-    });
-    assertRegionSyncSucceeded(outcomes);
-    console.log(
-      '[stripe-webhook] Billing record closed out (subscription.deleted, customer deleted)',
-      {
-        userId,
-        orgId,
-        customerId,
-        subscriptionId: subscription.id,
-      },
-    );
-    // Guard rejected or record absent (org mid-deletion): not a dunning cancellation.
-    if (billingCanceled) {
-      emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
+    if (!orgId) {
+      console.warn(
+        '[stripe-webhook] subscription.deleted for a deleted customer: no org resolved, no teardown started',
+        { userId, customerId, subscriptionId: subscription.id },
+      );
+      return;
     }
+    await startTeardownForDeletedCustomer(orgId, {
+      userId,
+      customerId,
+      subscriptionId: subscription.id,
+    });
     return;
   }
 

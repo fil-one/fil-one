@@ -451,6 +451,13 @@ async function reconcileDeletedCustomer(params: {
     };
   }
 
+  // Deliberately only a local close-out, unlike the webhook, which starts a
+  // full teardown: this is a daily sweep over every org and a bug here would
+  // mass-delete. The teardown is left for an operator to start.
+  console.warn(
+    '[usage-worker] Stripe customer is deleted but the account is still live — a customer.deleted webhook was likely missed; NO account teardown was started',
+    { orgId, userId, stripeCustomerId },
+  );
   const { outcomes, billingCanceled } = await closeOutDeletedCustomer({ userId, orgId });
   const failed = outcomes.filter((o) => o.outcome === 'error');
   if (failed.length > 0) {
