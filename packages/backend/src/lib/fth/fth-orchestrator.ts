@@ -69,15 +69,9 @@ const FTH_CONSOLE_USER_CODE = 'filone-console';
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
-// Deletion requires the client to be `disabled`, and FTH 409s the DELETE
-// otherwise. A 409 is NOT a disable that hasn't landed yet: the PATCH and the
-// DELETE are both synchronous, and 15 zero-delay probe sequences against the
-// live API never produced one. It means a competing writer set the client back
-// to `active` between our two calls — today that is the trial lock enforcer in
-// usage-reporting-worker, whose scan is not fenced by the deletion guard. Each
-// attempt re-disables, so the retry budget is what lets us outlast that write.
-// Retrying the pair also covers a 5xx partway through cleanup, which the
-// orchestrator contract says leaves the tenant deletable on retry.
+// A 409 means a competing writer re-activated the client, not a disable that
+// hasn't landed; the budget is what outlasts that writer. See
+// docs/architectural-decisions/2026-08-tenant-deletion-semantics.md.
 const TENANT_DELETE_RETRY = { retries: 3 } as const;
 
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
@@ -121,12 +115,8 @@ export const fthOrchestrator = {
   },
 
   async deleteTenant(tenantId: string): Promise<void> {
-    // FTH requires the client to be `disabled` before deletion. Idempotency
-    // comes from FTH itself, not from tolerating errors: a deleted client's
-    // ref still resolves, so a re-run repeats PATCH 204 → DELETE 204 and
-    // converges. A 404 at either step therefore means the ref did not resolve
-    // — a config or scope fault, never proof of deletion — and must fail
-    // before the SSM credentials below are destroyed.
+    // Disable-then-delete, re-disabling on every attempt; no error is
+    // tolerated (see ServiceOrchestrator.deleteTenant).
     try {
       await pRetry(async () => {
         await disableFthTenantForDeletion(tenantId);
@@ -380,10 +370,7 @@ export const fthOrchestrator = {
   },
 } satisfies ServiceOrchestrator;
 
-// Pre-deletion disable (FTH 409s a delete of a non-disabled client). A 404 is
-// NOT tolerated here — see deleteFthClient for why, and note that FTH answers
-// 204 to this PATCH even for an already-deleted client, so tolerating 404
-// would buy no idempotency it does not already have.
+// Pre-deletion disable (FTH 409s a delete of a non-disabled client).
 async function disableFthTenantForDeletion(tenantId: string): Promise<void> {
   try {
     await client.updateClientStatus(tenantId, { status: 'disabled' });
@@ -392,17 +379,8 @@ async function disableFthTenantForDeletion(tenantId: string): Promise<void> {
   }
 }
 
-// DELETE the FTH client. Conflicts (409, not disabled) propagate as
-// FthConflictError for the caller to retry; everything else — 404 included —
-// wraps into one uniform failure.
-//
-// A 404 is deliberately NOT treated as already-deleted. Probing the live API
-// showed a deleted client's ref keeps resolving on every verb (GET 200,
-// PATCH 204, DELETE 204), so deletion is idempotent without any 404 tolerance,
-// and the only way to produce a 404 is a ref that never resolved at all. That
-// is what a misrouted baseUrl, a wrong-scope token, or a gateway answering for
-// the wrong service produces for *every* id — and reading it as success would
-// delete the SSM credentials of a client that is still live upstream.
+// Conflicts (409, not disabled) propagate as FthConflictError for the caller
+// to retry; everything else — 404 included — wraps into one uniform failure.
 async function deleteFthClient(tenantId: string): Promise<void> {
   try {
     await client.deleteClient(tenantId);

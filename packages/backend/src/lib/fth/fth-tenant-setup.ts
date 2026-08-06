@@ -122,14 +122,8 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
     }),
   );
 
-  // The deleting re-check at the top of this function is seconds stale by
-  // now (TOCTOU): a teardown may have set `deleting` — or purged the PROFILE
-  // row entirely — while the FTH calls above were in flight. Condition the
-  // tenant-id-persisting write on both so a racing setup can neither orphan
-  // a live FTH client behind a deleted org nor resurrect a purged PROFILE
-  // row via UpdateItem's upsert semantics. (The PROFILE row is created by
-  // the onboarding transaction, so attribute_exists(pk) never conflicts
-  // with first-time provisioning.)
+  // Conditioned against a teardown that raced the FTH calls above — see
+  // orchestrator/tenant-setup.ts for the full rationale.
   try {
     await dynamo.send(
       new UpdateItemCommand({
@@ -145,10 +139,7 @@ async function processTenantSetup(client: FthManagementClient, orgId: string): P
     );
   } catch (err) {
     if (err instanceof ConditionalCheckFailedException) {
-      // The FTH client created above is now unreferenced. If the PROFILE
-      // row still exists, the teardown's late-region re-check will sweep
-      // it; if the row was already purged, this error must be surfaced so
-      // the client is cleaned up manually.
+      // The FTH client created above is now unreferenced.
       throw new Error(
         `Org ${orgId} is deleting or purged; refusing to persist FTH tenant ${tenantId}. ` +
           `The just-created FTH client is swept by the teardown's late-region re-check ` +
