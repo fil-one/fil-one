@@ -332,10 +332,8 @@ function portalApiKeySsmPath(stage: string, tenantId: string): string {
 }
 
 /**
- * Deletes a tenant's portal API key from SSM (account deletion). Idempotent —
- * an already-deleted parameter is success. Also evicts the warm-container
- * cache entry so a stale key can't be served after the parameter is gone
- * (mirrors deleteConsoleS3Credentials in s3-credentials.ts).
+ * Idempotent — an already-deleted parameter is success. Also evicts the
+ * warm-container cache entry.
  */
 export async function deleteAuroraPortalApiKey(stage: string, tenantId: string): Promise<void> {
   ssmCache.delete(`${stage}/${tenantId}`);

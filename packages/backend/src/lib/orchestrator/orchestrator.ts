@@ -95,15 +95,10 @@ export interface FilOneOrchestratorConfig {
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
-// The contract requires the tenant to be `disabled` before deletion and 409s
-// otherwise. A 409 is NOT a disable that hasn't landed yet: the contract calls
-// DELETE synchronous and setting the same status twice a no-op 204, so there is
-// no propagation window. It means a competing writer set the tenant back to
-// `active` between our two calls — today that is the trial lock enforcer in
-// usage-reporting-worker, whose scan is not fenced by the deletion guard. Each
-// attempt re-disables, so the retry budget is what lets us outlast that write.
-// Retrying the pair also covers the 5xx the contract mandates when cleanup
-// fails partway through ("the tenant must remain deletable on retry").
+// A 409 means a competing writer re-activated the tenant, not a disable that
+// hasn't landed; the budget is what outlasts that writer. Also covers the 5xx
+// the contract mandates on partway-through cleanup. See
+// docs/architectural-decisions/2026-08-tenant-deletion-semantics.md.
 const TENANT_DELETE_RETRY = { retries: 3 } as const;
 
 export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): ServiceOrchestrator {
@@ -162,17 +157,9 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
     },
 
     async deleteTenant(tenantId: string): Promise<void> {
-      // The contract requires the tenant to be `disabled` before deletion
-      // (409 otherwise) and makes DELETE idempotent (204 when already gone),
-      // so idempotency needs no error tolerance: a re-run just repeats the
-      // 204s. A 404 is not a documented outcome of either call, so it means
-      // the ref did not resolve — a misrouted baseUrl or a gateway answering
-      // for the wrong service — and must fail before the SSM credentials
-      // below are destroyed for a tenant that is still live upstream.
-      // Each attempt re-disables, so a tenant re-activated mid-sequence is
-      // closed again before the next DELETE. The SDK reports failures in
-      // `result` rather than throwing, so wrap them here to make them visible
-      // to pRetry; the last one is what surfaces when the budget is spent.
+      // Disable-then-delete, re-disabling on every attempt; no error is
+      // tolerated (see ServiceOrchestrator.deleteTenant). The SDK reports
+      // failures in `result` rather than throwing, so wrap them for pRetry.
       await pRetry(async () => {
         await disableTenantForDeletion(client, config.id, tenantId);
         const result = await deleteTenantsByTenantId({
@@ -223,9 +210,7 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
 }
 
 // Pre-deletion disable: the contract mandates `disabled` before
-// DELETE /tenants/{tenantId}. A 404 is not tolerated, for the same reason it
-// is not tolerated on the DELETE itself — the contract documents neither, so a
-// 404 signals an unresolvable ref rather than an already-gone tenant.
+// DELETE /tenants/{tenantId}.
 async function disableTenantForDeletion(
   client: Client,
   orchestratorId: string,
