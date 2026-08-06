@@ -31,6 +31,23 @@ export function emitDunningEscalation(args: {
   });
 }
 
+/** A Stripe customer deletion started a full account teardown (FIL-112). */
+export function emitWebhookAccountDeletionStarted(): void {
+  reportMetric({
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [[]],
+          Metrics: [{ Name: 'WebhookAccountDeletionStarted', Unit: 'Count' }],
+        },
+      ],
+    },
+    WebhookAccountDeletionStarted: 1,
+  });
+}
+
 export function emitInvoicePaid(): void {
   reportMetric({
     _aws: {

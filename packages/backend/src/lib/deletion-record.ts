@@ -4,14 +4,9 @@ import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.js';
 import { DeletionKeys, type OrgDeletionRecord } from './dynamo-records.js';
 
-/**
- * Read the org's teardown state record (FIL-112). Lives in its own module —
- * NOT in account-deletion.ts — so request handlers that only need to check
- * whether a deletion is in flight (create-deletion-challenge) don't pull the
- * full teardown lib into their bundle: that lib imports the orchestrator
- * registry, which instantiates the Aurora/FTH clients at module load and
- * crashes on lambdas without the orchestrator env vars.
- */
+// Separate module so handlers that only check for an in-flight deletion don't
+// import account-deletion.ts — it loads the orchestrator registry, which
+// crashes lambdas without orchestrator env vars.
 export async function readDeletionRecord(orgId: string): Promise<OrgDeletionRecord | undefined> {
   const { Item } = await getDynamoClient().send(
     new GetItemCommand({

@@ -13,11 +13,13 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { Resource } from 'sst';
+import { startAccountDeletion } from '../lib/account-deletion-start.js';
 import { sendGuardedBillingUpdate } from '../lib/deletion-guard.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import {
   closeOutDeletedCustomer,
   resolveOrgIdFromSubscription,
+  verifyOrgMatchesUserProfile,
 } from '../lib/deleted-customer-cleanup.js';
 import {
   assertRegionSyncSucceeded,
@@ -30,6 +32,7 @@ import {
   emitInvoiceFinalizationFailed,
   emitInvoiceFinalized,
   emitInvoicePaid,
+  emitWebhookAccountDeletionStarted,
 } from '../lib/stripe-webhook-metrics.js';
 
 const dynamo = getDynamoClient();
@@ -132,7 +135,7 @@ async function processStripeEvent(tableName: string, stripeEvent: Stripe.Event):
     }
     case 'customer.deleted': {
       const customer = stripeEvent.data.object as Stripe.Customer;
-      await handleCustomerDeleted(tableName, customer);
+      await handleCustomerDeleted(customer);
       return;
     }
     case 'customer.subscription.trial_will_end': {
@@ -169,14 +172,10 @@ function getCustomerIdString(customer: string | Stripe.Customer | Stripe.Deleted
 }
 
 /**
- * Webhook writers are deletion-guarded no-ops on a missing record (see
- * lib/deletion-guard.ts) — they never create one — but a stored record can
- * still lack an orgId (records predating the field), and such a record is
- * invisible to every lifecycle job (usage reporting, drift checking, grace
- * enforcement all skip records lacking one). Backfill it from Stripe metadata
- * whenever it is in hand — if_not_exists so a known-good stored value is never
- * clobbered. Returns the SET clause fragment and its value, empty when the
- * metadata carries no orgId.
+ * Records predating the orgId field are invisible to every lifecycle job (usage
+ * reporting, drift checking, grace enforcement all skip records lacking one).
+ * Backfill from Stripe metadata whenever it is in hand — if_not_exists so a
+ * known-good stored value is never clobbered.
  */
 function orgIdBackfill(orgId: string | undefined): {
   clause: string;
@@ -237,44 +236,56 @@ async function updatePaymentMethod(
   );
 }
 
-async function handleCustomerDeleted(tableName: string, customer: Stripe.Customer): Promise<void> {
+/**
+ * A gone Stripe customer tears the whole account down (FIL-112) — the worker
+ * disables every region and purges the data, so there is no local close-out on
+ * that path. Idempotent, so a webhook replay is safe; a throw returns 500 and
+ * Stripe retries (there is no cron fallback for canceled records).
+ *
+ * The billing orgId is Stripe-metadata-derived, so it is cross-checked against
+ * USER#/PROFILE first. Without a verified org nothing is torn down, and the
+ * pre-teardown close-out runs instead so the record does not linger
+ * non-canceled until the next daily usage-reporting sweep.
+ */
+async function startTeardownForDeletedCustomer(
+  userId: string,
+  orgId: string | null,
+  context: Record<string, string>,
+): Promise<void> {
+  if (!orgId || !(await verifyOrgMatchesUserProfile(userId, orgId))) {
+    console.warn(
+      '[stripe-webhook] No verified org — closing out the billing record, no teardown started',
+      { userId, billingOrgId: orgId, ...context },
+    );
+    const { outcomes } = await closeOutDeletedCustomer({
+      userId,
+      orgId: null,
+      retry: WEBHOOK_STATUS_SYNC_RETRY,
+    });
+    assertRegionSyncSucceeded(outcomes);
+    return;
+  }
+  await startAccountDeletion(orgId, {
+    requestedByUserId: 'stripe-webhook',
+    reason: 'stripe_customer_deleted',
+  });
+  emitWebhookAccountDeletionStarted();
+  console.warn('[stripe-webhook] Account teardown started', { orgId, userId, ...context });
+}
+
+async function handleCustomerDeleted(customer: Stripe.Customer): Promise<void> {
   // The customer.deleted payload carries the full pre-deletion Customer, including metadata.
   // We do NOT retrieve from Stripe — the customer no longer exists there.
   const userId = customer.metadata?.userId;
   if (!userId) {
     throw new Error(
-      `[stripe-webhook] customer.deleted missing metadata.userId; cannot disable customer ${customer.id}`,
+      `[stripe-webhook] customer.deleted missing metadata.userId; cannot start teardown for customer ${customer.id}`,
     );
   }
 
-  // Disable immediately — no grace period. Tenants first; a failed region throws so the
-  // webhook returns 500 and Stripe retries (there is no cron fallback for canceled records).
-  // The sync is probe-first, so a retry skips regions that are already disabled.
-  const orgId = await resolveOrgIdFromSubscription(userId);
-  if (!orgId) {
-    console.warn('[stripe-webhook] customer.deleted: no tenant to disable', {
-      userId,
-      customerId: customer.id,
-    });
-  }
-
-  const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
-    userId,
-    orgId,
-    retry: WEBHOOK_STATUS_SYNC_RETRY,
+  await startTeardownForDeletedCustomer(userId, await resolveOrgIdFromSubscription(userId), {
+    customerId: customer.id,
   });
-  assertRegionSyncSucceeded(outcomes);
-  if (orgId) {
-    console.log('[stripe-webhook] Tenant disabled (customer.deleted)', {
-      userId,
-      orgId,
-      customerId: customer.id,
-    });
-  }
-  // Guard rejected or record absent (org mid-deletion): not a dunning cancellation.
-  if (!billingCanceled) return;
-
-  emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
 
 async function handleSubscriptionUpdate(
@@ -380,37 +391,20 @@ async function handleSubscriptionDeleted(
   const customerId = getCustomerIdString(subscription.customer);
   const customer = await stripe.customers.retrieve(customerId);
   if ('deleted' in customer && customer.deleted) {
-    // The customer is gone (deleted before/with this cancellation), so there
-    // is no grace period to grant — close out the record the same way
-    // customer.deleted does. This is the fallback when the customer.deleted
-    // event itself was never delivered (e.g. the endpoint was not subscribed
-    // to it at the time).
+    // The customer is gone (deleted before/with this cancellation), so there is
+    // no grace period to grant — tear the account down exactly as
+    // customer.deleted does. This is the backstop for a customer.deleted event
+    // that was never delivered.
     const userId = subscription.metadata?.userId;
     if (!userId) {
       throw new Error(
         `[stripe-webhook] subscription.deleted for deleted customer ${customerId} has no metadata.userId; cannot close out billing record`,
       );
     }
-    const orgId = await resolveOrgIdFromSubscription(userId);
-    const { outcomes, billingCanceled } = await closeOutDeletedCustomer({
-      userId,
-      orgId,
-      retry: WEBHOOK_STATUS_SYNC_RETRY,
+    await startTeardownForDeletedCustomer(userId, await resolveOrgIdFromSubscription(userId), {
+      customerId,
+      subscriptionId: subscription.id,
     });
-    assertRegionSyncSucceeded(outcomes);
-    console.log(
-      '[stripe-webhook] Billing record closed out (subscription.deleted, customer deleted)',
-      {
-        userId,
-        orgId,
-        customerId,
-        subscriptionId: subscription.id,
-      },
-    );
-    // Guard rejected or record absent (org mid-deletion): not a dunning cancellation.
-    if (billingCanceled) {
-      emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
-    }
     return;
   }
 
@@ -521,10 +515,8 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   // Best-effort: re-enable the tenant on every orchestrator if recovering from
   // PastDue/GracePeriod. If this fails, the tenant may remain locked until
   // manual intervention.
-  // Accepted TOCTOU with account deletion (FIL-112): the guard above passed
-  // on then-current state, but a teardown can claim the record before this
-  // 'active' sync lands. The transiently re-activated tenant converges when
-  // the teardown deletes the tenants themselves.
+  // Accepted TOCTOU: a teardown can claim the record after the guard above
+  // passed; the transiently re-activated tenant converges when it is deleted.
   try {
     const orgId = await resolveOrgIdFromSubscription(userId);
     if (orgId) {

@@ -451,6 +451,13 @@ async function reconcileDeletedCustomer(params: {
     };
   }
 
+  // Deliberately only a local close-out, unlike the webhook, which starts a
+  // full teardown: this is a daily sweep over every org and a bug here would
+  // mass-delete. The teardown is left for an operator to start.
+  console.warn(
+    '[usage-worker] Stripe customer is deleted but the account is still live — a customer.deleted webhook was likely missed; NO account teardown was started',
+    { orgId, userId, stripeCustomerId },
+  );
   const { outcomes, billingCanceled } = await closeOutDeletedCustomer({ userId, orgId });
   const failed = outcomes.filter((o) => o.outcome === 'error');
   if (failed.length > 0) {
@@ -465,11 +472,9 @@ async function reconcileDeletedCustomer(params: {
   }
 
   if (!billingCanceled) {
-    // The regions synced, but the FIL-112 deletion guard rejected the billing
-    // cancel (record absent or org mid-teardown): the account-deletion flow
-    // owns the record now, so this run did NOT reconcile it — the log and
-    // audit row must not claim otherwise. Not out of sync in the retry
-    // sense: the teardown finishes the job.
+    // Regions synced but the guard rejected the billing cancel: this run did
+    // NOT reconcile the record, so the audit row must not claim it did. Not
+    // outOfSync — the teardown that owns the record finishes the job.
     console.warn(
       '[usage-worker] Deleted-customer cleanup skipped the billing cancel (record missing or org mid-deletion)',
       {

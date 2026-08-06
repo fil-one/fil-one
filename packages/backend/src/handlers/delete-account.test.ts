@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
+  BatchGetItemCommand,
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
@@ -108,20 +109,47 @@ function makeEvent(body?: Record<string, unknown>) {
   return event;
 }
 
+/**
+ * Rows the snapshots' BatchGetItem reads resolve against, keyed `table|pk`.
+ * Absent keys are simply omitted from the response, as DynamoDB does.
+ */
+const batchGetRows = new Map<string, Record<string, unknown>>();
+
+function putBatchGetRow(table: string, item: Record<string, unknown>) {
+  batchGetRows.set(`${table}|${item.pk as string}`, item);
+}
+
+function stubBatchGet() {
+  type RequestItems = Record<string, { Keys: Record<string, { S: string }>[] }>;
+  ddbMock.on(BatchGetItemCommand).callsFake((input: { RequestItems: RequestItems }) => ({
+    Responses: Object.fromEntries(
+      Object.entries(input.RequestItems).map(([table, { Keys }]) => [
+        table,
+        Keys.map((key) => batchGetRows.get(`${table}|${key.pk.S}`))
+          .filter((row) => row !== undefined)
+          .map((row) => marshall(row)),
+      ]),
+    ),
+  }));
+}
+
 function setupHappyMocks() {
   ddbMock.reset();
   lambdaMock.reset();
+  batchGetRows.clear();
   mockGetOrgProfile.mockResolvedValue(fullyProvisionedProfile());
   mockVerifyChallenge.mockResolvedValue('ok');
   ddbMock
     .on(GetItemCommand, { Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: `MEMBER#${USER_ID}` } } })
     .resolves({ Item: marshall({ role: OrgRole.Admin }) });
-  ddbMock
-    .on(GetItemCommand, { Key: { pk: { S: `USER#${USER_ID}` }, sk: { S: 'PROFILE' } } })
-    .resolves({ Item: marshall({ sub: SUB }) });
-  ddbMock
-    .on(GetItemCommand, { Key: { pk: { S: `CUSTOMER#${USER_ID}` }, sk: { S: 'SUBSCRIPTION' } } })
-    .resolves({ Item: marshall({ stripeCustomerId: 'cus_1', subscriptionId: 'sub_1' }) });
+  putBatchGetRow('UserInfoTable', { pk: `USER#${USER_ID}`, sk: 'PROFILE', sub: SUB });
+  putBatchGetRow('BillingTable', {
+    pk: `CUSTOMER#${USER_ID}`,
+    sk: 'SUBSCRIPTION',
+    stripeCustomerId: 'cus_1',
+    subscriptionId: 'sub_1',
+  });
+  stubBatchGet();
   ddbMock.on(QueryCommand).resolves({
     Items: [marshall({ pk: `ORG#${ORG_ID}`, sk: `MEMBER#${USER_ID}` })],
   });
@@ -188,7 +216,9 @@ describe('delete-account baseHandler', () => {
     expect(put.ConditionExpression).toBe('attribute_not_exists(pk)');
     expect(put.Item!.sk.S).toBe('DELETION');
     expect(put.Item!.status.S).toBe('PENDING');
-    expect(put.Item!.subscriptionId?.S).toBe('sub_1');
+    expect(unmarshall(put.Item!).billingCustomers).toEqual([
+      { stripeCustomerId: 'cus_1', subscriptionId: 'sub_1' },
+    ]);
 
     // Region-generic tenant snapshot: EVERY orchestrator provisioned for the
     // org must appear in the written tenantIds map, keyed by orchestrator id —
@@ -268,12 +298,7 @@ describe('delete-account baseHandler', () => {
         LastEvaluatedKey: marshall({ pk: `ORG#${ORG_ID}`, sk: `MEMBER#${USER_ID}` }),
       })
       .resolves({ Items: [marshall({ pk: `ORG#${ORG_ID}`, sk: 'MEMBER#user-2' })] });
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: 'USER#user-2' }, sk: { S: 'PROFILE' } } })
-      .resolves({ Item: marshall({ sub: 'auth0|sub-2' }) });
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: 'CUSTOMER#user-2' }, sk: { S: 'SUBSCRIPTION' } } })
-      .resolves({});
+    putBatchGetRow('UserInfoTable', { pk: 'USER#user-2', sk: 'PROFILE', sub: 'auth0|sub-2' });
 
     const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
 
@@ -307,30 +332,27 @@ describe('delete-account baseHandler', () => {
         marshall({ pk: `ORG#${ORG_ID}`, sk: 'MEMBER#user-2' }),
       ],
     });
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: 'USER#user-2' }, sk: { S: 'PROFILE' } } })
-      .resolves({ Item: marshall({ sub: 'auth0|sub-2' }) });
-    ddbMock
-      .on(GetItemCommand, { Key: { pk: { S: 'CUSTOMER#user-2' }, sk: { S: 'SUBSCRIPTION' } } })
-      .resolves({ Item: marshall({ stripeCustomerId: 'cus_2', subscriptionId: 'sub_2' }) });
+    putBatchGetRow('UserInfoTable', { pk: 'USER#user-2', sk: 'PROFILE', sub: 'auth0|sub-2' });
+    putBatchGetRow('BillingTable', {
+      pk: 'CUSTOMER#user-2',
+      sk: 'SUBSCRIPTION',
+      stripeCustomerId: 'cus_2',
+      subscriptionId: 'sub_2',
+    });
 
     const result = (await baseHandler(makeEvent())) as APIGatewayProxyStructuredResultV2;
 
     expect(result.statusCode).toBe(200);
     const put = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
     const written = unmarshall(put.Item!) as {
-      stripeCustomerId?: string;
-      subscriptionId?: string;
       billingCustomers?: { stripeCustomerId?: string; subscriptionId?: string }[];
     };
-    // Every member's Stripe pointers are captured, so teardown can cancel and
-    // redact each; the legacy single fields keep carrying the first entry.
+    // Every member's Stripe pointers are captured, in members order, so
+    // teardown can cancel and redact each of them.
     expect(written.billingCustomers).toEqual([
       { stripeCustomerId: 'cus_1', subscriptionId: 'sub_1' },
       { stripeCustomerId: 'cus_2', subscriptionId: 'sub_2' },
     ]);
-    expect(written.stripeCustomerId).toBe('cus_1');
-    expect(written.subscriptionId).toBe('sub_1');
   });
 
   it('degrades gracefully on a re-confirm after teardown purged the org profile (400 name mismatch)', async () => {

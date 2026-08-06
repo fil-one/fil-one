@@ -12,10 +12,7 @@ export const DeleteAccountSchema = z.object({
       new RegExp(`^\\d{${DELETION_CODE_LENGTH}}$`),
       `Enter the ${DELETION_CODE_LENGTH}-digit verification code`,
     ),
-  /**
-   * The org name the user typed to confirm. Validated server-side against the
-   * stored org profile name — the client-side gating alone is not trusted.
-   */
+  /** Typed-to-confirm org name; re-validated server-side against the org profile. */
   orgName: z.string().min(1, 'Organization name is required'),
 });
 

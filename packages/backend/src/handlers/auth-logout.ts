@@ -3,6 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { CSRF_COOKIE_NAME } from '@filone/shared';
 import { getAuthSecrets } from '../lib/auth-secrets.js';
+import { revokeRefreshToken } from '../lib/auth0-revoke.js';
 import { COOKIE_NAMES, makeClearAuthCookies } from '../lib/response-builder.js';
 import { parseCookies } from '../lib/cookies.js';
 import { errorHandlerMiddleware } from '../middleware/error-handler.js';
@@ -13,26 +14,8 @@ async function baseHandler(
   const domain = process.env.AUTH0_DOMAIN!;
   const secrets = getAuthSecrets();
 
-  // Revoke the refresh token at Auth0 before clearing cookies so it cannot
-  // be reused after logout. Fire-and-forget: a revocation failure must not
-  // block the user from logging out.
-  const cookies = parseCookies(event.cookies);
-  const refreshToken = cookies[COOKIE_NAMES.REFRESH_TOKEN];
-  if (refreshToken) {
-    try {
-      await fetch(`https://${domain}/oauth/revoke`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: secrets.AUTH0_CLIENT_ID,
-          client_secret: secrets.AUTH0_CLIENT_SECRET,
-          token: refreshToken,
-        }).toString(),
-      });
-    } catch (err) {
-      console.warn('[logout] Refresh token revocation failed', { error: err });
-    }
-  }
+  // Revoke before clearing cookies so the token cannot be reused after logout.
+  await revokeRefreshToken(parseCookies(event.cookies)[COOKIE_NAMES.REFRESH_TOKEN], '[logout]');
 
   const clearCookies = makeClearAuthCookies(CSRF_COOKIE_NAME);
 

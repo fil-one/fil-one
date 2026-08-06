@@ -11,18 +11,13 @@ import { normalizeEmailForEntitlement } from './email-normalization.js';
 import { TrialEntitlementError } from './errors.js';
 
 /**
- * FIL-112 deletion race: the auth middleware's tombstone gate runs earlier in
- * the request on an eventually-consistent read, and a deletion can be
- * confirmed at any moment after it. This consistent re-read of the identity
- * row gates every entitlement side effect — without it, a login racing
- * account deletion could (a) claim the EMAIL_NORM# key (which survives
- * deletion by design, FIL-422) without a trial ever being granted, locking
- * the email out of future trials, and (b) mint a Stripe trial subscription
- * after the teardown's billing snapshot, which teardown would then never
- * cancel. The confirm handler sets `deleted` synchronously before returning
- * 200, so this check closes the race to the sub-second window between the
- * read and the Stripe call; even that residue is bounded — the trial
- * subscription self-cancels at trial end (missing_payment_method: 'cancel').
+ * FIL-112 deletion race: the middleware's tombstone gate ran earlier on an
+ * eventually-consistent read, so re-read consistently before any entitlement
+ * side effect. Without it a login racing deletion could (a) claim the
+ * EMAIL_NORM# key (retained by design, FIL-422) with no trial granted, locking
+ * the email out of future trials, or (b) mint a Stripe trial after teardown's
+ * billing snapshot, which teardown would never cancel. Residual window is the
+ * read→Stripe gap; that trial self-cancels (missing_payment_method: 'cancel').
  */
 async function isIdentityLive(sub: string): Promise<boolean> {
   const identity = await getDynamoClient().send(
@@ -132,8 +127,8 @@ export async function ensureTrialEntitlement({
   }
 
   // Optimization only: skip the re-check on future requests. Conditioned on a
-  // live identity row (FIL-112): an in-flight request racing account deletion
-  // must not upsert a ghost SUB# row or decorate the deletion tombstone.
+  // live identity row so a request racing deletion (FIL-112) can't upsert a
+  // ghost SUB# row or decorate the tombstone.
   try {
     await getDynamoClient().send(
       new UpdateItemCommand({
