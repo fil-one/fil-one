@@ -54,15 +54,11 @@ export function isFoundationEmail(email: string | undefined): boolean {
 }
 
 /**
- * Regions available to users. `eu-west-1` and `us-east-1` are generally
- * available in every stage; `eu-central-3` (Forge) is not yet GA and is only
- * offered on non-production stages. Pass the deployment `stage`; only
- * `production` returns the GA-only set.
- * The per-region S3 endpoints still vary by stage — see {@link getS3Endpoint}.
+ * Regions available to users. `eu-central-3` (Forge) is not yet GA, so it is
+ * offered on non-production stages only.
  *
- * Note to developers: do not remove stage argument from this function, even if
- * unused. It causes considerable churn and it is likely in the future that we
- * will want staging only regions temporarily.
+ * Keep the `stage` argument even when a release makes it unused: dropping and
+ * re-adding it churns every call site, and stage-limited regions recur.
  */
 export function getAvailableRegions(stage: Stage | string): S3Region[] {
   const regions: S3Region[] = [S3Region.EuWest1, S3Region.UsEast1];
@@ -73,14 +69,8 @@ export function getAvailableRegions(stage: Stage | string): S3Region[] {
 }
 
 /**
- * Checks if the region is one Fil One supports for the given stage. Provides
- * type-narrowing information to TypeScript, changing `region` from `string` to
- * `S3Region` when the function returns `true`. Pass `stage` so non-GA regions
- * (e.g. `eu-central-3`) validate on non-production stages.
- *
- * Note to developers: do not remove stage argument from this function, even if
- * unused. It causes considerable churn and it is likely in the future that we
- * will want staging only regions temporarily.
+ * Type-narrowing {@link getAvailableRegions} membership check: narrows `region`
+ * from `string` to `S3Region`. Keep `stage` — see {@link getAvailableRegions}.
  */
 export function isSupportedRegion(region: string, stage: Stage | string): region is S3Region {
   return getAvailableRegions(stage).includes(region as S3Region);
@@ -139,10 +129,9 @@ export function getStageFromHostname(hostname: string): Stage {
 }
 
 /**
- * Product email sender ("from") address. Production sends from the bare
- * address; every other stage uses the +staging subaddress so misdirected
- * non-production email is identifiable. Shared by the Auth0 email-provider
- * setup and direct SendGrid sends (e.g. account-deletion codes).
+ * Product email "from" address. Non-production uses the +staging subaddress so
+ * misdirected mail is identifiable. Shared by the Auth0 email-provider setup
+ * and direct SendGrid sends.
  */
 export function senderAddress(isProduction: boolean): string {
   return isProduction ? 'no-reply@filone.ai' : 'no-reply+staging@filone.ai';

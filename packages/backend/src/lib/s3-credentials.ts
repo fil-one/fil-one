@@ -69,10 +69,8 @@ export function consoleS3CredentialsSsmPath(args: GetConsoleS3CredentialsArgs): 
 }
 
 /**
- * Deletes a tenant's console S3 credentials from SSM (account deletion).
  * Idempotent — an already-deleted parameter is success. Also evicts the
- * warm-container cache entry so a stale credential can't be served after
- * the parameter is gone.
+ * warm-container cache entry.
  */
 export async function deleteConsoleS3Credentials(args: GetConsoleS3CredentialsArgs): Promise<void> {
   ssmCache.delete(`${args.stage}/${args.orchestratorId}/${args.tenantId}`);

@@ -94,10 +94,9 @@ export const auroraOrchestrator = {
   },
 
   async deleteTenant(tenantId: string): Promise<void> {
-    // Aurora's Backoffice/Portal APIs expose no tenant-deletion endpoint, so
-    // this performs the strongest teardown available remotely: force the
-    // tenant to `disabled`, revoke the console S3 key upstream, and delete
-    // the FilOne-held credentials from SSM.
+    // Aurora exposes no tenant DELETE, so this is disable + secret-shred only
+    // and customer data survives. See
+    // docs/architectural-decisions/2026-08-tenant-deletion-semantics.md.
     const probe = await auroraOrchestrator.getTenantStatus(tenantId);
     if (probe.kind === 'error') {
       throw new Error(`Aurora status probe failed while deleting tenant ${tenantId}`, {
@@ -109,16 +108,13 @@ export const auroraOrchestrator = {
       await auroraOrchestrator.updateTenantStatus(tenantId, 'disabled');
     }
 
-    // Revoke the console S3 key upstream BEFORE deleting the SSM copies:
-    // reaching the Portal requires the portal API key still held in SSM, so
-    // once the SSM records are gone automated revocation is impossible.
+    // Must precede the SSM deletes below: reaching the Portal needs the portal
+    // API key still in SSM, so afterwards revocation is impossible.
     if (probe.kind === 'ok') {
       await revokeConsoleS3AccessKey(tenantId);
     }
 
     const stage = getStage();
-    // Deletes the SSM copy AND evicts aurora-portal's warm-container cache —
-    // otherwise a warm Lambda keeps serving the deleted portal API key.
     await deleteAuroraPortalApiKey(stage, tenantId);
     await deleteConsoleS3Credentials({
       orchestratorId: auroraOrchestrator.id,
@@ -126,8 +122,7 @@ export const auroraOrchestrator = {
       tenantId,
     });
 
-    // Emitted only on the run that actually disabled the tenant (not on
-    // idempotent re-runs), after the work it reports has executed.
+    // Only on the run that actually disabled the tenant, not on re-runs.
     if (didDisable) {
       console.warn(
         '[aurora-orchestrator] Aurora has no remote tenant-deletion API; the tenant was ' +
@@ -348,15 +343,11 @@ export const auroraOrchestrator = {
 // createAndStoreS3AccessKey in aurora-tenant-setup.ts.
 const AURORA_CONSOLE_KEY_NAME = 'filone-console';
 
-// Revokes the console S3 access key upstream (account deletion). Aurora's
-// delete endpoint takes the Portal-internal key id — not the accessKeyId
-// stashed in SSM — so resolve it by the well-known key name. Tolerates:
-//   - an already-revoked key (listing no longer contains the name);
-//   - a portal API key already removed from SSM (idempotent re-run whose
-//     first pass got past revocation before cleaning SSM);
-//   - a key deleted concurrently (deleteAuroraAccessKey treats 404 as done).
-// Any other failure propagates so the caller retries BEFORE the SSM copies
-// are deleted — after that, automated revocation is impossible.
+// Aurora's delete endpoint takes the Portal-internal key id — not the
+// accessKeyId stashed in SSM — so resolve it by the well-known key name.
+// Idempotent: an already-revoked key, or a portal API key SSM already lost to
+// an earlier pass, is success. Anything else propagates so the caller retries
+// while the SSM copies (and thus automated revocation) still exist.
 async function revokeConsoleS3AccessKey(tenantId: string): Promise<void> {
   let key: Awaited<ReturnType<typeof findAuroraAccessKeyByName>>;
   try {
