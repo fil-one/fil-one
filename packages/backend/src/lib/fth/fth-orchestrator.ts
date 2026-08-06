@@ -110,17 +110,21 @@ export const fthOrchestrator = {
   },
 
   async deleteTenant(tenantId: string): Promise<void> {
-    // FTH requires the client to be `disabled` before deletion; a missing
-    // client at any step means it is already gone (idempotent success).
+    // FTH requires the client to be `disabled` before deletion. Idempotency
+    // comes from FTH itself, not from tolerating errors: a deleted client's
+    // ref still resolves, so a re-run repeats PATCH 204 → DELETE 204 and
+    // converges. A 404 at either step therefore means the ref did not resolve
+    // — a config or scope fault, never proof of deletion — and must fail
+    // before the SSM credentials below are destroyed.
     await disableFthTenantForDeletion(tenantId);
     try {
-      await deleteFthClientToleratingNotFound(tenantId);
+      await deleteFthClient(tenantId);
     } catch (err) {
       if (!(err instanceof FthConflictError)) throw err;
       // 409: the disable hadn't taken effect yet — disable again, retry once.
       await disableFthTenantForDeletion(tenantId);
       try {
-        await deleteFthClientToleratingNotFound(tenantId);
+        await deleteFthClient(tenantId);
       } catch (retryErr) {
         if (retryErr instanceof FthConflictError) {
           // Persistent 409: wrap it like the shared orchestrator does so
@@ -370,42 +374,33 @@ export const fthOrchestrator = {
   },
 } satisfies ServiceOrchestrator;
 
-// Pre-deletion disable (FTH 409s a delete of a non-disabled client). A
-// missing client means it is already deleted — success for our caller.
+// Pre-deletion disable (FTH 409s a delete of a non-disabled client). A 404 is
+// NOT tolerated here — see deleteFthClient for why, and note that FTH answers
+// 204 to this PATCH even for an already-deleted client, so tolerating 404
+// would buy no idempotency it does not already have.
 async function disableFthTenantForDeletion(tenantId: string): Promise<void> {
   try {
     await client.updateClientStatus(tenantId, { status: 'disabled' });
   } catch (err) {
-    if (err instanceof FthNotFoundError) return;
     throw new Error(`Failed to disable FTH tenant ${tenantId} before deletion`, { cause: err });
   }
 }
 
-// DELETE the FTH client, treating 404 as already-deleted success. Conflicts
-// (409, not disabled) propagate as FthConflictError for the caller to handle.
-async function deleteFthClientToleratingNotFound(tenantId: string): Promise<void> {
+// DELETE the FTH client. Conflicts (409, not disabled) propagate as
+// FthConflictError for the caller to retry; everything else — 404 included —
+// wraps into one uniform failure.
+//
+// A 404 is deliberately NOT treated as already-deleted. Probing the live API
+// showed a deleted client's ref keeps resolving on every verb (GET 200,
+// PATCH 204, DELETE 204), so deletion is idempotent without any 404 tolerance,
+// and the only way to produce a 404 is a ref that never resolved at all. That
+// is what a misrouted baseUrl, a wrong-scope token, or a gateway answering for
+// the wrong service produces for *every* id — and reading it as success would
+// delete the SSM credentials of a client that is still live upstream.
+async function deleteFthClient(tenantId: string): Promise<void> {
   try {
     await client.deleteClient(tenantId);
   } catch (err) {
-    if (err instanceof FthNotFoundError) {
-      // Tolerated as already-gone, but loudly: the Management API contract
-      // defines idempotent deletion via 204 and never documents a 404 for
-      // the tenant DELETE. A 404 can equally be a misrouted baseUrl or
-      // gateway answering for the wrong service — in which case the SSM
-      // credentials deleted next would orphan a client that lives on
-      // upstream.
-      console.warn(
-        `[fth] DELETE for tenant ${tenantId} returned 404 — treating as already deleted, ` +
-          'but idempotent deletion is contractually a 204; a 404 may indicate a misrouted ' +
-          'baseUrl/gateway rather than actual deletion',
-        {
-          orchestratorId: fthOrchestrator.id,
-          tenantId,
-          baseUrl: process.env.FTH_MANAGEMENT_API_URL,
-        },
-      );
-      return;
-    }
     if (err instanceof FthConflictError) throw err;
     throw new Error(`Failed to delete FTH tenant ${tenantId}`, { cause: err });
   }
