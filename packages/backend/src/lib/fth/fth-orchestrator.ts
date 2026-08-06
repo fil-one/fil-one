@@ -69,6 +69,17 @@ const FTH_CONSOLE_USER_CODE = 'filone-console';
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
+// Deletion requires the client to be `disabled`, and FTH 409s the DELETE
+// otherwise. A 409 is NOT a disable that hasn't landed yet: the PATCH and the
+// DELETE are both synchronous, and 15 zero-delay probe sequences against the
+// live API never produced one. It means a competing writer set the client back
+// to `active` between our two calls — today that is the trial lock enforcer in
+// usage-reporting-worker, whose scan is not fenced by the deletion guard. Each
+// attempt re-disables, so the retry budget is what lets us outlast that write.
+// Retrying the pair also covers a 5xx partway through cleanup, which the
+// orchestrator contract says leaves the tenant deletable on retry.
+const TENANT_DELETE_RETRY = { retries: 3 } as const;
+
 const consoleStorageUserCache = new QuickLRU<string, string>({ maxSize: 500 });
 const client = createInstrumentedFthClient();
 
@@ -116,24 +127,19 @@ export const fthOrchestrator = {
     // converges. A 404 at either step therefore means the ref did not resolve
     // — a config or scope fault, never proof of deletion — and must fail
     // before the SSM credentials below are destroyed.
-    await disableFthTenantForDeletion(tenantId);
     try {
-      await deleteFthClient(tenantId);
-    } catch (err) {
-      if (!(err instanceof FthConflictError)) throw err;
-      // 409: the disable hadn't taken effect yet — disable again, retry once.
-      await disableFthTenantForDeletion(tenantId);
-      try {
+      await pRetry(async () => {
+        await disableFthTenantForDeletion(tenantId);
         await deleteFthClient(tenantId);
-      } catch (retryErr) {
-        if (retryErr instanceof FthConflictError) {
-          // Persistent 409: wrap it like the shared orchestrator does so
-          // callers get a uniform "Failed to delete" error instead of the
-          // raw transport-level conflict.
-          throw new Error(`Failed to delete FTH tenant ${tenantId}`, { cause: retryErr });
-        }
-        throw retryErr;
+      }, TENANT_DELETE_RETRY);
+    } catch (err) {
+      if (err instanceof FthConflictError) {
+        // Conflict that outlived the retry budget: wrap it like the shared
+        // orchestrator does so callers get a uniform "Failed to delete" error
+        // instead of the raw transport-level conflict.
+        throw new Error(`Failed to delete FTH tenant ${tenantId}`, { cause: err });
       }
+      throw err;
     }
     await deleteConsoleS3Credentials({
       orchestratorId: fthOrchestrator.id,
