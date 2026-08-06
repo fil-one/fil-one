@@ -151,11 +151,8 @@ async function cancelSubscriptionAndDisableTenant(
   assertRegionSyncSucceeded(
     await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled'),
   );
-  // Transition DynamoDB status to canceled. The scan filtered out records
-  // with deletionRequestedAt, but an account teardown can claim (or purge)
-  // the record mid-sweep — an unconditional write here would upsert a zombie
-  // {pk, sk, canceled} record after the purge, so route it through the
-  // deletion guard and skip the follow-on logging when it rejects.
+  // A teardown can claim (or purge) the record after the scan filtered it in;
+  // an unconditional write would then upsert a zombie {pk, sk, canceled} row.
   const applied = await sendGuardedBillingUpdate(
     {
       TableName: billingTableName,

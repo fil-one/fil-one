@@ -169,14 +169,10 @@ function getCustomerIdString(customer: string | Stripe.Customer | Stripe.Deleted
 }
 
 /**
- * Webhook writers are deletion-guarded no-ops on a missing record (see
- * lib/deletion-guard.ts) — they never create one — but a stored record can
- * still lack an orgId (records predating the field), and such a record is
- * invisible to every lifecycle job (usage reporting, drift checking, grace
- * enforcement all skip records lacking one). Backfill it from Stripe metadata
- * whenever it is in hand — if_not_exists so a known-good stored value is never
- * clobbered. Returns the SET clause fragment and its value, empty when the
- * metadata carries no orgId.
+ * Records predating the orgId field are invisible to every lifecycle job (usage
+ * reporting, drift checking, grace enforcement all skip records lacking one).
+ * Backfill from Stripe metadata whenever it is in hand — if_not_exists so a
+ * known-good stored value is never clobbered.
  */
 function orgIdBackfill(orgId: string | undefined): {
   clause: string;
@@ -521,10 +517,8 @@ async function handlePaymentSucceeded(tableName: string, invoice: Stripe.Invoice
   // Best-effort: re-enable the tenant on every orchestrator if recovering from
   // PastDue/GracePeriod. If this fails, the tenant may remain locked until
   // manual intervention.
-  // Accepted TOCTOU with account deletion (FIL-112): the guard above passed
-  // on then-current state, but a teardown can claim the record before this
-  // 'active' sync lands. The transiently re-activated tenant converges when
-  // the teardown deletes the tenants themselves.
+  // Accepted TOCTOU: a teardown can claim the record after the guard above
+  // passed; the transiently re-activated tenant converges when it is deleted.
   try {
     const orgId = await resolveOrgIdFromSubscription(userId);
     if (orgId) {
