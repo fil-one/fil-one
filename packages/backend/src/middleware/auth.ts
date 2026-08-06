@@ -6,7 +6,7 @@ import type {
   Context,
 } from 'aws-lambda';
 import { GetItemCommand, TransactWriteItemsCommand } from '@aws-sdk/client-dynamodb';
-import { jwtVerify, type createRemoteJWKSet } from 'jose';
+import { jwtVerify } from 'jose';
 import { Resource } from 'sst';
 import type { UserInfo } from '../lib/user-context.js';
 import { ApiErrorCode, OrgRole } from '@filone/shared';
@@ -25,7 +25,12 @@ import { OrgSetupStatus } from '../lib/org-setup-status.js';
 import { getDynamoClient } from '../lib/ddb-client.js';
 import { deriveOrgName } from '../lib/suggest-org-name.js';
 import { ensureTrialEntitlement } from '../lib/trial-entitlement.js';
-import { exchangeAndVerifyRefreshToken, getJWKS, type NewTokens } from '../lib/token-refresh.js';
+import {
+  exchangeAndVerifyRefreshToken,
+  getJWKS,
+  type JWKS,
+  type NewTokens,
+} from '../lib/token-refresh.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -147,7 +152,7 @@ async function extractIdTokenClaims({
   issuer,
 }: {
   idToken: string | undefined;
-  jwks: ReturnType<typeof createRemoteJWKSet>;
+  jwks: JWKS;
   clientId: string;
   issuer: string;
 }): Promise<IdTokenClaims> {
@@ -391,7 +396,7 @@ async function tryValidateAccessToken({
   request: AuthMiddlewareRequest;
   accessToken: string;
   idToken: string | undefined;
-  jwks: ReturnType<typeof createRemoteJWKSet>;
+  jwks: JWKS;
   audience: string;
   issuer: string;
   clientId: string;
