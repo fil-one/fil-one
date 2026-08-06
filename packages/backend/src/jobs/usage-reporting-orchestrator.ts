@@ -90,8 +90,14 @@ async function scanActiveSubscriptionRecords(
     const result = await dynamo.send(
       new ScanCommand({
         TableName: billingTableName,
+        // Records with deletionRequestedAt belong to the account-deletion
+        // worker (FIL-112); trial lock enforcement must not re-activate a
+        // tenant it is trying to delete. Nothing else drops a deleting org
+        // from this sweep: the guard blocks the webhook that would move
+        // subscriptionStatus off :canceled, and the record is only purged
+        // once the teardown has fully succeeded.
         FilterExpression:
-          'sk = :sk AND subscriptionStatus <> :canceled AND attribute_exists(subscriptionId)',
+          'sk = :sk AND subscriptionStatus <> :canceled AND attribute_exists(subscriptionId) AND attribute_not_exists(deletionRequestedAt)',
         ExpressionAttributeValues: {
           ':sk': { S: 'SUBSCRIPTION' },
           ':canceled': { S: 'canceled' },
