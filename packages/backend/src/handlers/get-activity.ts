@@ -3,10 +3,10 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { ActivityResponse, RecentActivity, UsageDataPoint } from '@filone/shared';
+import type { RecentActivity, RecentActivityResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.js';
-import type { ServiceOrchestrator, StorageUsageSample } from '../lib/service-orchestrator.js';
+import type { ServiceOrchestrator } from '../lib/service-orchestrator.js';
 import { ResponseBuilder } from '../lib/response-builder.js';
 import type { AuthenticatedEvent } from '../lib/user-context.js';
 import { getUserInfo } from '../lib/user-context.js';
@@ -65,12 +65,6 @@ async function timed<T>(
   }
 }
 
-function endOfDay(d: Date): Date {
-  const eod = new Date(d);
-  eod.setUTCHours(23, 59, 59, 999);
-  return eod;
-}
-
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -80,8 +74,6 @@ export async function baseHandler(
     Math.max(parseInt(event.queryStringParameters?.limit ?? '10', 10) || 10, 1),
     50,
   );
-  const period = event.queryStringParameters?.period === '30d' ? 30 : 7;
-
   // The dashboard aggregates activity across every region the org is provisioned
   // in, so resolve the ready tenant on each available orchestrator.
   const { result: regions, durationMs: resolveRegionsMs } = await timed('resolveRegions', () =>
@@ -91,11 +83,9 @@ export async function baseHandler(
   const [
     { result: bucketActivities, durationMs: bucketActivitiesMs },
     { result: keyActivities, durationMs: keyActivitiesMs },
-    { result: trends, durationMs: trendsMs },
   ] = await Promise.all([
     timed('fetchBucketActivities', () => fetchBucketActivities(orgId, regions)),
     timed('fetchAccessKeyActivities', () => fetchAccessKeyActivities(orgId)),
-    timed('buildTimeSeries', () => buildTimeSeries(regions, period)),
   ]);
 
   // TODO: Re-add object activities once we have an event system with Aurora.
@@ -105,9 +95,8 @@ export async function baseHandler(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
 
-  const response: ActivityResponse = {
+  const response: RecentActivityResponse = {
     activities: activities.slice(0, limit),
-    trends,
   };
 
   const totalMs = performance.now() - handlerStart;
@@ -126,7 +115,6 @@ export async function baseHandler(
       resolveRegions: Math.round(resolveRegionsMs),
       fetchBucketActivities: Math.round(bucketActivitiesMs),
       fetchAccessKeyActivities: Math.round(keyActivitiesMs),
-      buildTimeSeries: Math.round(trendsMs),
     },
   });
 
@@ -216,89 +204,6 @@ async function fetchAccessKeyActivities(orgId: string): Promise<RecentActivity[]
       timestamp: key.createdAt,
     };
   });
-}
-
-async function buildTimeSeries(
-  regions: ProvisionedRegion[],
-  period: number,
-): Promise<ActivityResponse['trends']> {
-  const now = new Date();
-  const from = new Date(now);
-  from.setUTCDate(from.getUTCDate() - period + 1);
-  from.setUTCHours(0, 0, 0, 0);
-
-  // Fetch each region's storage series and index it by end-of-day, then sum
-  // across regions per day for the org-wide trend.
-  const perRegionByDate = await Promise.all(
-    regions.map(({ orchestrator, tenantId }) =>
-      fetchStorageByDate(orchestrator, tenantId, from, now),
-    ),
-  );
-
-  // Build full date range with gap-filling, summing all regions for each day.
-  const storage: UsageDataPoint[] = [];
-  const objects: UsageDataPoint[] = [];
-  for (const d = new Date(from); d <= now; d.setUTCDate(d.getUTCDate() + 1)) {
-    const date = endOfDay(d).toISOString();
-    let bytesUsed = 0;
-    let objectCount = 0;
-    for (const byDate of perRegionByDate) {
-      const sample = byDate.get(date);
-      bytesUsed += sample?.bytesUsed ?? 0;
-      objectCount += sample?.objectCount ?? 0;
-    }
-    storage.push({ date, value: bytesUsed });
-    objects.push({ date, value: objectCount });
-  }
-
-  return { storage, objects };
-}
-
-async function fetchStorageByDate(
-  orchestrator: ServiceOrchestrator,
-  tenantId: string,
-  from: Date,
-  to: Date,
-): Promise<Map<string, StorageUsageSample>> {
-  // Request 1d granularity: one point per day, which is the resolution this trend
-  // renders at. The end-of-day key still collapses each day to a single reading,
-  // and since upstream ordering isn't guaranteed we keep the sample with the
-  // greatest timestamp per day rather than relying on insertion order. Swallow
-  // errors so one region's outage still renders the rest.
-  const start = performance.now();
-  try {
-    const { storage } = await orchestrator.getTenantUsageMetrics(tenantId, {
-      from: from.toISOString(),
-      to: to.toISOString(),
-      interval: '1d',
-    });
-    const durationMs = performance.now() - start;
-    reportDuration('GetTenantUsageMetricsDuration', { region: orchestrator.region }, durationMs);
-    console.log('[get-activity] fetched usage metrics', {
-      tenantId,
-      region: orchestrator.region,
-      sampleCount: storage.length,
-      durationMs: Math.round(durationMs),
-    });
-    const byDate = new Map<string, StorageUsageSample>();
-    for (const s of storage) {
-      const key = endOfDay(new Date(s.timestamp)).toISOString();
-      const existing = byDate.get(key);
-      // Sample timestamps are canonical ISO-8601 UTC (normalized by the
-      // orchestrator), so lexicographic order matches chronological order.
-      if (!existing || s.timestamp > existing.timestamp) {
-        byDate.set(key, s);
-      }
-    }
-    return byDate;
-  } catch (err) {
-    console.error('[get-activity] Failed to fetch usage metrics', {
-      tenantId,
-      region: orchestrator.region,
-      err,
-    });
-    return new Map();
-  }
 }
 
 export const handler = middy(baseHandler)

@@ -5,7 +5,7 @@ import { SubscriptionStatus } from '@filone/shared';
 import { SidebarNav } from './SidebarNav';
 import { Banner } from './Banner';
 import { getUsage, getBilling, getMe, logout } from '../lib/api';
-import { queryKeys } from '../lib/query-client.js';
+import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { daysUntil } from '../lib/time.js';
 
 function MobileUserMenu() {
@@ -88,7 +88,11 @@ export function AppShell({ children }: AppShellProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
   const drawerId = useId();
 
-  const { data: usage } = useQuery({ queryKey: queryKeys.usage, queryFn: getUsage });
+  const { data: usage } = useQuery({
+    queryKey: queryKeys.usage,
+    queryFn: getUsage,
+    staleTime: USAGE_STALE_TIME,
+  });
   const { data: billing } = useQuery({ queryKey: queryKeys.billing, queryFn: getBilling });
 
   const tenantStatus = usage?.tenantStatus;
