@@ -152,7 +152,12 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
 
     async deleteTenant(tenantId: string): Promise<void> {
       // The contract requires the tenant to be `disabled` before deletion
-      // (409 otherwise) and makes DELETE idempotent (204 when already gone).
+      // (409 otherwise) and makes DELETE idempotent (204 when already gone),
+      // so idempotency needs no error tolerance: a re-run just repeats the
+      // 204s. A 404 is not a documented outcome of either call, so it means
+      // the ref did not resolve — a misrouted baseUrl or a gateway answering
+      // for the wrong service — and must fail before the SSM credentials
+      // below are destroyed for a tenant that is still live upstream.
       await disableTenantForDeletion(client, config.id, tenantId);
       let result = await deleteTenantsByTenantId({
         client,
@@ -164,9 +169,7 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
         await disableTenantForDeletion(client, config.id, tenantId);
         result = await deleteTenantsByTenantId({ client, path: { tenantId }, throwOnError: false });
       }
-      if (result.error && result.response?.status === 404) {
-        warnUndocumentedDeleteNotFound(config, tenantId);
-      } else if (result.error) {
+      if (result.error) {
         throw new Error(`Failed to delete ${config.id} tenant ${tenantId}`, {
           cause: result.error,
         });
@@ -207,40 +210,22 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
   } satisfies ServiceOrchestrator;
 }
 
-// A 404 from DELETE /tenants/{tenantId} is tolerated as already-gone, but
-// loudly: the contract defines idempotent deletion via 204
-// (management-openapi.yaml) and never documents a 404 for that DELETE. A 404
-// can equally be a misrouted baseUrl or gateway answering for the wrong
-// service — in which case the SSM credentials deleted next would orphan a
-// tenant that lives on upstream.
-function warnUndocumentedDeleteNotFound(config: FilOneOrchestratorConfig, tenantId: string): void {
-  console.warn(
-    `[${config.id}] DELETE /tenants/${tenantId} returned 404 — treating as already ` +
-      'deleted, but the contract defines idempotent deletion via 204; a 404 may indicate ' +
-      'a misrouted baseUrl/gateway rather than actual deletion',
-    {
-      orchestratorId: config.id,
-      tenantId,
-      ...('baseUrl' in config.api ? { baseUrl: config.api.baseUrl } : {}),
-    },
-  );
-}
-
 // Pre-deletion disable: the contract mandates `disabled` before
-// DELETE /tenants/{tenantId}. A 404 means the tenant is already gone — the
-// subsequent DELETE is then an idempotent 204 no-op.
+// DELETE /tenants/{tenantId}. A 404 is not tolerated, for the same reason it
+// is not tolerated on the DELETE itself — the contract documents neither, so a
+// 404 signals an unresolvable ref rather than an already-gone tenant.
 async function disableTenantForDeletion(
   client: Client,
   orchestratorId: string,
   tenantId: string,
 ): Promise<void> {
-  const { error, response } = await postTenantsByTenantIdStatus({
+  const { error } = await postTenantsByTenantIdStatus({
     client,
     path: { tenantId },
     body: { status: 'disabled' },
     throwOnError: false,
   });
-  if (error && response?.status !== 404) {
+  if (error) {
     throw new Error(`Failed to disable ${orchestratorId} tenant ${tenantId} before deletion`, {
       cause: error,
     });
